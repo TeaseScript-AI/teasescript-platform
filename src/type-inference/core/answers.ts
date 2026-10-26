@@ -192,6 +192,12 @@ export interface ReadWork {
   readonly allowance: number;
 }
 
+/** A value's answer at a path below it (`Answers.valueAt`). */
+export interface ValueAnswer {
+  readonly items: readonly Item[];
+  readonly properties: ReadonlySet<string>;
+}
+
 export interface Answers {
   readonly outcome: CoreOutcome;
   /** One per cell outcome: an error, or a warning with its one obligation (§4). */
@@ -222,6 +228,11 @@ export interface Answers {
   properties(node: FlowNode): ReadonlyMap<string, readonly Item[]>;
   /** The names of a place's known properties at a path, as `properties` finds a value's from its key. */
   placeProperties(id: PlaceId, path?: readonly string[]): ReadonlySet<string>;
+  /**
+   * The occurrence answer at a path below a value (`project` over several steps) with the names of the properties the
+   * value is known to have there (`properties` at that path).
+   */
+  valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   view(node: FlowNode): CoreView;
 }
 
@@ -469,6 +480,10 @@ class StoppedAnswers implements Answers {
     throw new BudgetExhausted(this.#limit);
   }
 
+  public valueAt(): ValueAnswer {
+    throw new BudgetExhausted(this.#limit);
+  }
+
   public view(): CoreView {
     throw new BudgetExhausted(this.#limit);
   }
@@ -697,6 +712,15 @@ class CoreAnswers implements Answers {
 
   public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
     return this.#propertyNames({ key: keyOf(id, path) });
+  }
+
+  public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {
+    const value = this.#valueOf(node);
+    if (value === null) return { items: [], properties: new Set() };
+    return {
+      items: this.#run(this.#pass.values.valueItems(value, node, path)),
+      properties: this.#propertyNames({ value, path }),
+    };
   }
 
   /**

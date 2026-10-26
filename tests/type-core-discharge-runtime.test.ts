@@ -886,6 +886,79 @@ test("a typed parse's known value is the one its run gets: a known bad count is 
   assert.deepEqual(ran(runWith(candidatePlan(repaired), null)).said, ["AFTER"]);
 });
 
+test("a typed parse's or load's expected type is the core's own answer at the call, which its store's check holds, in three layers, in both orders (S7 review r3 B1, B2, B3)", () => {
+  // a `null` element of the default is one of its values (ADR 0021 2.6), on both lowerings
+  for (const files of ["", ", files: false"]) {
+    const source = `let out = fromJson(hostValue, default: [null, 1]${files})\nsay out[0]\nsay "AFTER"\nexit\n`;
+    const parse = at(source, `fromJson(hostValue, default: [null, 1]${files})`);
+    assert.ok(
+      decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
+      source,
+    );
+    const plan = candidatePlan(source);
+    assert.deepEqual(checkedStores(plan), ["'out' list<integer|null>"], source);
+    assert.ok(
+      contentOf(plan).some((entry) => entry.endsWith(`@${parse} list<integer|null>`)),
+      JSON.stringify(contentOf(plan)),
+    );
+    assert.deepEqual(
+      ran(runWith(plan, '["bad", 2]')),
+      halted(["null", "AFTER"], [`TSW020@${parse}`]),
+      source,
+    );
+    assert.deepEqual(ran(runWith(plan, "[3, 2]")), halted(["3", "AFTER"]), source);
+  }
+  // the load reads its stored value as the same type
+  const load = 'let out = load("k", default: [null, 1])\nsay out[0]\nsay "AFTER"\nexit\n';
+  const loaded = candidatePlan(load);
+  assert.deepEqual(checkedStores(loaded), ["'out' list<integer|null>"]);
+  const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items,
+  });
+  assert.deepEqual(
+    ran(runWith(loaded, null, [{ key: "k", value: list("bad", 2) }])),
+    halted(["null", "AFTER"], [`TSW016@${at(load, 'load("k", default: [null, 1])')}`]),
+  );
+  assert.deepEqual(
+    ran(runWith(loaded, null, [{ key: "k", value: list(3, 2) }])),
+    halted(["3", "AFTER"]),
+  );
+  // the records of a list default settle one family: a field's numbers read as numbers
+  const records =
+    'let out = fromJson(hostValue, default: [{n: 1}, {n: 1.5}], files: false)\nsay out[0].n\nsay "AFTER"\nexit\n';
+  const parse = at(records, "fromJson(hostValue, default: [{n: 1}, {n: 1.5}], files: false)");
+  const read = candidatePlan(records);
+  assert.deepEqual(checkedStores(read), ["'out' list<{n: number}>"]);
+  assert.deepEqual(contentOf(read), [`expected call@${parse} list<{n: number}>`]);
+  assert.deepEqual(ran(runWith(read, '[{"n": 2.5}]')), halted(["2.5", "AFTER"]));
+  assert.deepEqual(ran(runWith(read, '[{"n": "x"}]')), halted(["1", "AFTER"], [`TSW020@${parse}`]));
+  // a record as deep as the slice follows repairs its leaf; deeper, and fields some records of a list lack, which no
+  // default supplies there, leave the slice rather than check less than the core decided
+  const deep = (depth: number): string =>
+    `let d = ${"{f: ".repeat(depth)}0${"}".repeat(depth)}\nlet out = fromJson(hostValue, default: d, files: false)\n` +
+    `say out${".f".repeat(depth)}\nsay "AFTER"\nexit\n`;
+  const followed = deep(128);
+  assert.deepEqual(
+    ran(runWith(candidatePlan(followed), `${'{"f":'.repeat(128)}"bad"${"}".repeat(128)}`)),
+    halted(
+      ["0", "AFTER"],
+      [`TSW020@${at(followed, "fromJson(hostValue, default: d, files: false)")}`],
+    ),
+  );
+  for (const source of [
+    deep(255),
+    'let out = fromJson(hostValue, default: [{n: 1}, {m: 2}], files: false)\nsay "AFTER"\nexit\n',
+  ])
+    assert.throws(
+      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === "a value whose structure the slice does not follow",
+      source.slice(0, 80),
+    );
+});
+
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads

@@ -77,7 +77,8 @@ function isRecordValue(value: SerializableRuntimeValue, json: boolean): boolean 
  * `value` read whole as `type`, or `undefined` where it does not fit. A stored value fits as the runtime type checks
  * take it (`matchesValueType`). JSON is read as the type: a dict where the type is an object becomes an object of the
  * type's properties, each of which it must have, its other keys left out, and lists, sets and dicts are read element by
- * element; a union reads a value that fits it as it is, and otherwise as its first object member.
+ * element; a union reads a value that fits it as it is, and otherwise as its object member (the core's expected types
+ * have one at most at each level).
  */
 function readWhole(
   value: SerializableRuntimeValue,

@@ -34,11 +34,13 @@ import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
+import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   companions,
   derive,
+  derivedText,
   evaluate,
   syntaxOf,
   Underivable,
@@ -377,7 +379,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
           runs += 1;
         }
       }
-      // each discharge classified by the runs: a store's at its value, the runtime's at its use
+      // each discharge classified by the runs: a store's at its value, the runtime's at its use, each by its own check
       for (const discharge of discharges) {
         if (discharge.by === "native" && discharge.what === "representable") {
           classes.set(
@@ -390,16 +392,25 @@ test("every positive-list record the candidate route reaches plans and runs as i
           discharge.by === "store"
             ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
             : discharge.site;
-        const key = `${record.name}#${named}`;
+        // a store's and a fallback's check fails with TSR058, a typed reading gives its default, the runtime's own
+        // checks fail with their codes: a discharge is not classified by another's check at the same site
+        const own = (code: string | null): boolean =>
+          discharge.by === "store" || discharge.what === "fallback"
+            ? code === "TSR058"
+            : discharge.what === "typed-ingress"
+              ? code === null
+              : code !== null && code !== "TSR058";
+        const key = `${record.name}#${discharge.by === "store" ? "store" : discharge.what}@${named}`;
         if (classOf.has(key)) continue;
-        const at = `@${named}`;
-        const verdict = observed.some(({ run: ran }) => ran.failure?.endsWith(at) === true)
+        const ownAt = (event: CheckEvent): boolean => event.site === named && own(event.code);
+        const verdict = observed.some(({ run: ran }) => {
+          const [code, at] = ran.failure?.split("@") ?? [];
+          return at === named && own(code ?? null);
+        })
           ? "violable"
-          : observed.some(({ events }) =>
-                events.some((event) => event.site === named && !event.fits),
-              )
+          : observed.some(({ events }) => events.some((event) => ownAt(event) && !event.fits))
             ? "preempted"
-            : observed.some(({ events }) => events.some((event) => event.site === named))
+            : observed.some(({ events }) => events.some(ownAt))
               ? "not violable"
               : "unreachable";
         classOf.set(key, verdict);
@@ -431,8 +442,16 @@ test("every positive-list record the candidate route reaches plans and runs as i
     ["cp9-cells/r46/m3/two-ingress-targets", "59:63", "violable"],
     ["cp9-cells/r46/m3/two-ingress-targets", "80:84", "violable"],
   ];
-  for (const [name, at, verdict] of verdicts)
-    assert.equal(classOf.get(`${name}#${at}`), verdict, `${name} at ${at}`);
+  for (const [name, at, verdict] of verdicts) {
+    const found = [...classOf].filter(
+      ([key]) => key.startsWith(`${name}#`) && key.endsWith(`@${at}`),
+    );
+    assert.deepEqual(
+      found.map(([, found]) => found),
+      [verdict],
+      `${name} at ${at}: ${JSON.stringify(found)}`,
+    );
+  }
   for (const [name, failure] of [
     ["cp9-cells/X5/outside-definition", "TSR043@28:29"],
     ["cp9-cells/r46/m3/two-ingress-targets", "TSR058@80:84"],
@@ -605,9 +624,10 @@ test("the S7 oracle derives object admissions and default structures from their 
       "null|number",
     ],
     [
+      // where the parse reads it, the default holds `null` there: unknown (ADR 0021 2.6), as the core answers it
       "let d = {n: 0}\nd.n = null\nlet p = fromJson(hostValue, default: d, files: false)\nsay p.n\nexit\n",
       "expected",
-      "{n: integer|null}",
+      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}}`,
     ],
     [
       "let d = {n: 0}\nd = fromJson(hostValue, default: d, files: false)\nsay d.n\nexit\n",

@@ -39,7 +39,7 @@ import type {
 import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
-import type { Item, ItemTag } from "./items.js";
+import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
 import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
 
@@ -95,6 +95,10 @@ export class SliceIndex {
   readonly #getOfIndex = new Map<Expression, CallExpression>();
   /** The expression each expression is an operand of, within its statement. */
   readonly #parent = new Map<Expression, Expression>();
+  /** The name of the property each value of an object literal gives. */
+  readonly #propertyOf = new Map<Expression, string>();
+  /** Where each property name is first written, in a literal or as a store's target: its file and offset. */
+  readonly #written = new Map<string, readonly [number, number]>();
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
@@ -135,6 +139,7 @@ export class SliceIndex {
               pending.push({ expression: statement.value, store: statement, whole: true });
               // a property store reads its receiver, which a member check at the store reads (C5c)
               if (statement.target.kind === "propertyAccessExpression") {
+                this.#write(statement.target.property.name, file, statement.target.property.span);
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
                 pending.push({ expression: statement.target.object, store: null, whole: false });
@@ -199,13 +204,12 @@ export class SliceIndex {
             break;
           }
           case "objectLiteral":
-            for (let at = expression.properties.length - 1; at >= 0; at -= 1)
-              pending.push({
-                expression: expression.properties[at]!.value,
-                store,
-                whole,
-                parent: expression,
-              });
+            for (let at = expression.properties.length - 1; at >= 0; at -= 1) {
+              const property = expression.properties[at]!;
+              this.#propertyOf.set(property.value, property.name.name);
+              this.#write(property.name.name, file, property.name.span);
+              pending.push({ expression: property.value, store, whole, parent: expression });
+            }
             break;
           case "propertyAccessExpression":
             this.properties.push(expression);
@@ -322,6 +326,36 @@ export class SliceIndex {
   /** The expression `expression` is an operand of, or `undefined` for a statement's own expression. */
   public parentOf(expression: Expression): Expression | undefined {
     return this.#parent.get(expression);
+  }
+
+  #write(name: string, file: number, span: SourceSpan): void {
+    const known = this.#written.get(name);
+    if (
+      known === undefined ||
+      file < known[0] ||
+      (file === known[0] && span.start.offset < known[1])
+    )
+      this.#written.set(name, [file, span.start.offset]);
+  }
+
+  /**
+   * Property names in the order the program first writes them, in a literal or as a store's target, so that a record's
+   * fields keep the order its source gives them (a repair's warnings, a parsed record's fields); others after them, by
+   * name.
+   */
+  public inWrittenOrder(names: Iterable<string>): string[] {
+    const at = (name: string): readonly [number, number] =>
+      this.#written.get(name) ?? [Infinity, Infinity];
+    return [...names].sort((a, b) => {
+      const [fileA, offsetA] = at(a);
+      const [fileB, offsetB] = at(b);
+      return fileA - fileB || offsetA - offsetB || (a < b ? -1 : a > b ? 1 : 0);
+    });
+  }
+
+  /** The name of the property whose value `expression` is in an object literal, or `undefined`. */
+  public propertyOf(expression: Expression): string | undefined {
+    return this.#propertyOf.get(expression);
   }
 
   public site(node: Statement | Expression): SourceSite {
@@ -759,21 +793,10 @@ function kindPlan(kind: ValueKind): TypePlan {
 }
 
 /**
- * Every value: the plan of a property whose type nothing settles (a `null` in an object default, F18), which a record
- * must still have, so that a missing one takes the default's.
+ * Every value: the plan of a level below a typed parse's or load's value whose type nothing settles (an unknown, or a
+ * `null` in its default, ADR 0021 2.6), which a record must still have, so that a missing field takes the default's.
  */
 const ANY_VALUE: TypePlan = { kind: "union", members: VALUE_KIND_NAMES.map(kindPlan) };
-
-/** A plan without its `null` member, or `null` when nothing else is left. */
-function withoutNull(plan: TypePlan | null): TypePlan | null {
-  if (plan === null || plan.kind !== "union") return plan?.kind === "null" ? null : plan;
-  const members = plan.members.filter((member) => member.kind !== "null");
-  return members.length === 0
-    ? null
-    : members.length === 1
-      ? members[0]!
-      : { kind: "union", members };
-}
 
 function unwrap(expression: Expression): Expression {
   let current = expression;
@@ -782,13 +805,13 @@ function unwrap(expression: Expression): Expression {
 }
 
 /**
- * A default whose structure the slice does not follow yet (`valuePlanTask`): an object or a collection that is neither a
- * literal nor a read of a place, such as the result of an `otherwise`. The candidate route rejects its program.
+ * A value whose contract is deeper than the slice follows (`SLICE_DEPTH`): a store's or a typed parse's or load's. The
+ * candidate route rejects its program rather than check less than the core decided.
  */
-export class UnfollowedDefault extends Error {
+export class UnfollowedStructure extends Error {
   public constructor(readonly expression: Expression) {
-    super("The slice does not follow the structure of this default yet.");
-    this.name = "UnfollowedDefault";
+    super("The slice does not follow the structure of this value.");
+    this.name = "UnfollowedStructure";
   }
 }
 
@@ -799,15 +822,14 @@ interface Landing {
 }
 
 /**
- * The contracts the plan content of one program carries, each from the core's answers once (S3 §4, F18, C9, C10): a
- * place's contract at a path, objects with their decided properties; where a value lands; the type a typed parse or
- * load reads its value as. Memoized and built on one task stack, so nested values and defaults neither repeat work nor
- * deepen the native stack.
+ * The contracts the plan content of one program carries, each read from the core's answers, never rebuilt from the
+ * source (S3 §4, F18, C9, C10): a place's contract at a path, objects with their decided properties; the type a typed
+ * parse or load reads its value as, the core's own answer at the call; where a fallback lands, for C10's `null`. Built
+ * on one task stack, so deep values do not deepen the native stack.
  */
 class Contracts {
   readonly #landings = new Map<Expression, Landing | null>();
   readonly #contracts = new Map<string, TypePlan | null>();
-  readonly #expected = new Map<CallExpression | LoadExpression, TypePlan | null>();
 
   public constructor(
     private readonly answers: Answers,
@@ -825,7 +847,13 @@ class Contracts {
         ? typePlan(typeFromAnnotation(declaration.typeAnnotation))
         : place === null
           ? null
-          : runCompileTask(this.#contractTask(place.id, place.path));
+          : runCompileTask(
+              this.#contractTask(
+                place.id,
+                place.path,
+                store.kind === "letStatement" ? store.initializer : store.value,
+              ),
+            );
     if (type === null) return null;
     const name = [
       declaration.name.name,
@@ -834,9 +862,14 @@ class Contracts {
     return { type, place: `'${name}'` };
   }
 
-  /** The type a typed load or `fromJson` reads its value as (`#expectedTask`). */
+  /**
+   * The type a typed load or `fromJson` reads its value as (F18, S3 §3): the core's own answer at the call, level by
+   * level (`#answerTask`); `null` where the call's kinds hold an unknown or only `null` (F19), or a load's key is
+   * computed.
+   */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
-    return runCompileTask(this.#expectedTask(call));
+    if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
+    return runCompileTask(this.#answerTask(nodeOf(this.answers, this.index, call), call, []));
   }
 
   /**
@@ -876,7 +909,7 @@ class Contracts {
         this.#landings.set(node, base);
         break;
       }
-      const step = landingStep(parent, node);
+      const step = landingStep(parent, node, this.index);
       if (step === null) {
         this.#landings.set(node, null);
         break;
@@ -896,48 +929,56 @@ class Contracts {
   /**
    * A place's contract at a path: its admitted type (`admittedType`) with each object the place decided given the
    * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object` and an
-   * undecided one stay open.
+   * undecided one stay open. A contract deeper than the slice follows makes the program, stored by `at`, leave the
+   * slice.
    */
-  *#contractTask(id: PlaceId, path: readonly string[]): CompileTask<TypePlan | null> {
+  *#contractTask(
+    id: PlaceId,
+    path: readonly string[],
+    at: Expression,
+  ): CompileTask<TypePlan | null> {
     const key = `${id}|${path.join(".")}`;
     const known = this.#contracts.get(key);
     if (known !== undefined) return known;
     const admitted = typePlan(admittedType(this.answers, id, path));
-    const plan = admitted === null ? null : yield* compileChild(this.#fillTask(id, path, admitted));
+    const plan =
+      admitted === null ? null : yield* compileChild(this.#fillTask(id, path, admitted, at));
     this.#contracts.set(key, plan);
     return plan;
   }
 
-  *#fillTask(id: PlaceId, path: readonly string[], plan: TypePlan): CompileTask<TypePlan> {
+  *#fillTask(
+    id: PlaceId,
+    path: readonly string[],
+    plan: TypePlan,
+    at: Expression,
+  ): CompileTask<TypePlan> {
     switch (plan.kind) {
       case "union": {
         const members: TypePlan[] = [];
         for (const member of plan.members)
-          members.push(yield* compileChild(this.#fillTask(id, path, member)));
+          members.push(yield* compileChild(this.#fillTask(id, path, member, at)));
         return { kind: "union", members };
       }
       case "list":
       case "set":
       case "dict":
-        return plan.element === null || path.length + 1 >= SLICE_DEPTH
-          ? plan
-          : {
-              kind: plan.kind,
-              element: yield* compileChild(this.#fillTask(id, [...path, "element"], plan.element)),
-            };
+        if (plan.element === null) return plan;
+        if (path.length + 1 >= SLICE_DEPTH) throw new UnfollowedStructure(at);
+        return {
+          kind: plan.kind,
+          element: yield* compileChild(this.#fillTask(id, [...path, "element"], plan.element, at)),
+        };
       case "object": {
-        if (
-          plan.properties.length > 0 ||
-          path.length + 1 >= SLICE_DEPTH ||
-          this.answers.place(id, path).admitted.by !== "decided"
-        )
+        if (plan.properties.length > 0 || this.answers.place(id, path).admitted.by !== "decided")
           return plan;
+        if (path.length + 1 >= SLICE_DEPTH) throw new UnfollowedStructure(at);
         const properties: TypePropertyPlan[] = [];
-        for (const name of [...this.answers.placeProperties(id, path)].sort()) {
-          const at = [...path, propertyStep(name)];
-          if (this.answers.place(id, at).admitted.by === "undecided") continue;
-          const below = yield* compileChild(this.#contractTask(id, at));
-          if (below !== null) properties.push({ name, type: below });
+        for (const name of this.index.inWrittenOrder(this.answers.placeProperties(id, path))) {
+          const below = [...path, propertyStep(name)];
+          if (this.answers.place(id, below).admitted.by === "undecided") continue;
+          const type = yield* compileChild(this.#contractTask(id, below, at));
+          if (type !== null) properties.push({ name, type });
         }
         return { kind: "object", properties };
       }
@@ -947,129 +988,47 @@ class Contracts {
   }
 
   /**
-   * What a place holds at a path, as F18 reads a default's kinds and as they reach the parse's result: a written level's
-   * written kinds, else the kinds its values bring (its contract), integers among numbers as numbers (the decided
-   * family, ADR 0021 1.2); a collection's elements and an object's properties (`Answers.placeProperties`) below, each by
-   * the same rule; `null` where a level holds an unknown or nothing.
+   * The core's answer at `path` below a call's value as a plan: its kinds (a written target's, else the default's,
+   * F18), integers among numbers as numbers (the decided family, ADR 0021 1.2), a collection's elements and an object's
+   * properties below by the same rule. At the call itself an unknown or only `null` gives no plan; below it such a level
+   * takes every value (ADR 0021 2.6: `null` leaves a value unknown). A record's field that some of its sources lack
+   * (`missing`) has the kinds the others give, and a missing one is the default's; inside a collection, where no default
+   * supplies it, and deeper than the slice follows, the program leaves the slice.
    */
-  *#holdsTask(id: PlaceId, path: readonly string[]): CompileTask<TypePlan | null> {
-    const place = this.answers.place(id, path);
-    const held = new Set(place.contract.kinds.map((item) => item.tag));
+  *#answerTask(
+    node: FlowNode,
+    call: Expression,
+    path: readonly string[],
+  ): CompileTask<TypePlan | null> {
+    const answer = this.answers.valueAt(node, path);
+    const held = new Set<ItemTag>();
+    let lacking = false;
+    for (const item of answer.items)
+      if (item.tag === "unknown" && item.reasons === REASON.missing) lacking = true;
+      else if (item.tag !== "empty") held.add(item.tag);
     if (held.has("number")) held.delete("integer");
-    const tags = place.admitted.by === "written" ? [...place.admitted.kinds] : [...held];
-    if (tags.includes("unknown") || tags.length === 0 || path.length + 1 >= SLICE_DEPTH)
-      return null;
+    if (held.has("unknown") || ![...held].some((tag) => tag !== "null"))
+      return path.length === 0 ? null : ANY_VALUE;
+    if (path.length + 1 >= SLICE_DEPTH || (lacking && path.includes("element")))
+      throw new UnfollowedStructure(call);
     const members: TypePlan[] = [];
-    for (const tag of tags)
-      if (tag === "list" || tag === "set" || tag === "dict")
-        members.push({
-          kind: tag,
-          element: yield* compileChild(this.#holdsTask(id, [...path, "element"])),
-        });
-      else if (tag === "object") {
+    for (const tag of VALUE_KIND_NAMES.filter((kind) => held.has(kind)))
+      if (tag === "list" || tag === "set" || tag === "dict") {
+        const element = yield* compileChild(this.#answerTask(node, call, [...path, "element"]));
+        // elements that take every value leave the collection open, as a store's check has it
+        members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
+      } else if (tag === "object") {
         const properties: TypePropertyPlan[] = [];
-        if (place.admitted.by !== "written")
-          for (const name of [...this.answers.placeProperties(id, path)].sort()) {
-            const below = yield* compileChild(this.#holdsTask(id, [...path, propertyStep(name)]));
-            properties.push({ name, type: below ?? ANY_VALUE });
-          }
-        members.push({ kind: "object", properties });
-      } else if (tag !== "empty" && tag !== "unknown") members.push(kindPlan(tag));
-    return members.length === 0 ? null : unionOf(members);
-  }
-
-  /**
-   * The type a typed load or `fromJson` reads its value as (F18, S3 §3): where it lands directly in a written place
-   * (a written type, or a copy of one, ADR 0021 1.3), that place's contract there, nullable as written; else its
-   * default's (`#valueTask`) without `null`; `null` where the result's kinds hold an unknown or only `null` (F19), or a
-   * load's key is computed.
-   */
-  *#expectedTask(call: CallExpression | LoadExpression): CompileTask<TypePlan | null> {
-    const known = this.#expected.get(call);
-    if (known !== undefined) return known;
-    let plan: TypePlan | null = null;
-    const tags = (this.answers.at(nodeOf(this.answers, this.index, call))?.items ?? []).map(
-      (item) => item.tag,
-    );
-    const landing = this.#landing(call);
-    const fallback =
-      call.kind === "loadExpression"
-        ? call.defaultValue
-        : (call.arguments.find(
-            (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
-          )?.value ?? null);
-    if (
-      (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") ||
-      tags.includes("unknown") ||
-      !tags.some((tag) => tag !== "null" && tag !== "empty")
-    )
-      plan = null;
-    else if (
-      landing !== null &&
-      this.answers.place(landing.id, landing.path).admitted.by === "written"
-    )
-      plan = yield* compileChild(this.#contractTask(landing.id, landing.path));
-    else if (fallback !== null)
-      plan = withoutNull(yield* compileChild(this.#valueTask(fallback, true)));
-    this.#expected.set(call, plan);
-    return plan;
-  }
-
-  /**
-   * The plan of a value's kinds as the core answers them: a literal's parts by their own answers, a read of a place by
-   * what the place holds (`#holdsTask`), a typed parse or load by its own type; a property that only `null` or an
-   * unknown gives is `ANY_VALUE` (`top` false), the whole value `null` then. Any other object or collection throws
-   * `UnfollowedDefault`.
-   */
-  *#valueTask(expression: Expression, top: boolean): CompileTask<TypePlan | null> {
-    const node = selectedLiteral(expression) ?? unwrap(expression);
-    const answer = this.answers.at(nodeOf(this.answers, this.index, node));
-    const tags = [...new Set((answer?.items ?? []).map((item) => item.tag))].filter(
-      (tag) => tag !== "empty",
-    );
-    if (tags.includes("unknown") || !tags.some((tag) => tag !== "null"))
-      return top ? null : ANY_VALUE;
-    if (
-      node.kind === "loadExpression" ||
-      (node.kind === "callExpression" &&
-        node.callee.kind === "identifier" &&
-        node.callee.name === "fromJson")
-    ) {
-      const typed = yield* compileChild(this.#expectedTask(node));
-      return typed ?? (top ? null : ANY_VALUE);
-    }
-    const literal =
-      node.kind === "objectLiteral" || node.kind === "listLiteral" || node.kind === "setLiteral";
-    const place = answer?.place ?? null;
-    if (!literal && place !== null) {
-      const plan = yield* compileChild(this.#holdsTask(place.id, place.path));
-      return plan ?? (top ? null : ANY_VALUE);
-    }
-    const members: TypePlan[] = [];
-    for (const tag of tags)
-      if (tag === "object") {
-        if (node.kind !== "objectLiteral") throw new UnfollowedDefault(node);
-        const properties: TypePropertyPlan[] = [];
-        for (const property of node.properties)
+        for (const name of this.index.inWrittenOrder(answer.properties))
           properties.push({
-            name: property.name.name,
-            type: (yield* compileChild(this.#valueTask(property.value, false)))!,
+            name,
+            // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
+            type: (yield* compileChild(
+              this.#answerTask(node, call, [...path, propertyStep(name)]),
+            ))!,
           });
         members.push({ kind: "object", properties });
-      } else if (tag === "list" || tag === "set" || tag === "dict") {
-        if (node.kind !== "listLiteral" && node.kind !== "setLiteral")
-          throw new UnfollowedDefault(node);
-        const elements: TypePlan[] = [];
-        for (const item of node.elements) {
-          const plan = yield* compileChild(this.#valueTask(item, true));
-          if (plan === null) {
-            elements.length = 0;
-            break;
-          }
-          elements.push(plan);
-        }
-        members.push({ kind: tag, element: elements.length === 0 ? null : unionOf(elements) });
-      } else if (tag !== "unknown") members.push(kindPlan(tag));
+      } else members.push(kindPlan(tag));
     return unionOf(members);
   }
 }
@@ -1078,7 +1037,11 @@ class Contracts {
  * The steps a value adds below its parent where it lands where the parent does (`Contracts.#landing`): none through
  * parentheses, `otherwise` and a `default:`, an element, a property; `null` where it lands nowhere.
  */
-function landingStep(parent: Expression, node: Expression): readonly string[] | null {
+function landingStep(
+  parent: Expression,
+  node: Expression,
+  index: SliceIndex,
+): readonly string[] | null {
   switch (parent.kind) {
     case "parenthesizedExpression":
       return [];
@@ -1088,8 +1051,8 @@ function landingStep(parent: Expression, node: Expression): readonly string[] | 
     case "setLiteral":
       return ["element"];
     case "objectLiteral": {
-      const property = parent.properties.find((candidate) => candidate.value === node);
-      return property === undefined ? null : [propertyStep(property.name.name)];
+      const name = index.propertyOf(node);
+      return name === undefined ? null : [propertyStep(name)];
     }
     case "callExpression":
       return lazyDefaultArgument(parent)?.argument.value === node ? [] : null;

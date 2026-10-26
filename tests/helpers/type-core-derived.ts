@@ -516,13 +516,19 @@ function literalType(
       return null;
     case "listLiteral":
     case "setLiteral": {
-      const elements = at.elements.map((item) => literalType(item, statements, seen));
+      // ADR 0021 2.6: `[]` leaves the element type open, a `null` element is one of its values; the elements settle one
+      // family as a place's stores do
+      const elements = at.elements.map((item) =>
+        unwrap(item).kind === "nullLiteral"
+          ? ({ kind: "kinds", kinds: ["null"] } as const)
+          : literalType(item, statements, seen),
+      );
       return {
         kind: at.kind === "listLiteral" ? "list" : "set",
         element:
           elements.length === 0 || elements.some((item) => item === null)
             ? null
-            : unionTypes(elements.filter((item) => item !== null)),
+            : admittedShape(elements),
       };
     }
     case "objectLiteral":
@@ -537,6 +543,7 @@ function literalType(
         })),
       };
     case "identifier":
+      return heldShape(at, statements, seen);
     case "propertyAccessExpression":
     case "indexExpression":
       return sourceShape(at, statements, seen);
@@ -549,6 +556,90 @@ function literalType(
     default:
       return null;
   }
+}
+
+/**
+ * What a named default holds where it is read (F18 takes the default's kinds there): a written variable's written type;
+ * else its last whole store before the read's statement, each later property store replacing its path, a `null` there
+ * leaving the property unknown (ADR 0021 2.6). A store inside a branch or a loop before the read, or a read inside one,
+ * is outside these straight-line rules.
+ */
+function heldShape(
+  read: Extract<Expression, { kind: "identifier" }>,
+  statements: readonly Statement[],
+  seen: Set<string>,
+): DerivedType | null {
+  if (seen.has(read.name)) return null;
+  const next = new Set([...seen, read.name]);
+  const written = statements.find(
+    (statement) =>
+      statement.kind === "letStatement" &&
+      statement.name.name === read.name &&
+      statement.typeAnnotation !== null,
+  );
+  if (written?.kind === "letStatement" && written.typeAnnotation !== null)
+    return writtenType(written.typeAnnotation);
+  const blocks = statements.filter(
+    (statement) => statement.kind === "repeatStatement" || statement.kind === "ifStatement",
+  );
+  const nested = (node: { readonly span: Expression["span"] }): boolean =>
+    blocks.some(
+      (block) =>
+        block.span.start.offset < node.span.start.offset &&
+        node.span.end.offset <= block.span.end.offset,
+    );
+  const before = statements.filter((statement) => {
+    const store = storeOf(statement);
+    return (
+      store !== null &&
+      (store.name === read.name || store.name.startsWith(`${read.name}.`)) &&
+      statement.span.end.offset <= read.span.start.offset
+    );
+  });
+  if (nested(read) || before.some(nested))
+    throw new Underivable("a named default stored or read in a branch or a loop");
+  let shape: DerivedType | null = null;
+  for (const statement of before) {
+    const store = storeOf(statement)!;
+    const value = unwrap(store.value);
+    const held: DerivedType | null =
+      value.kind === "nullLiteral"
+        ? { kind: "kinds", kinds: ["null"] }
+        : literalType(value, statements, next);
+    if (store.name === read.name) shape = held;
+    else
+      shape = replacedShape(
+        shape,
+        store.name.slice(read.name.length + 1).split("."),
+        held === null || (held.kind === "kinds" && held.kinds.every((kind) => kind === "null"))
+          ? { kind: "kinds", kinds: VALUE_KIND_NAMES }
+          : held,
+      );
+  }
+  return shape;
+}
+
+/** `type` with the property at `path` replaced by `value`, or added where the object lacks it. */
+function replacedShape(
+  type: DerivedType | null,
+  path: readonly string[],
+  value: DerivedType,
+): DerivedType | null {
+  if (path.length === 0) return value;
+  if (type?.kind !== "object") return type;
+  const [name, ...rest] = path;
+  const found = type.properties.some((property) => property.name === name);
+  return {
+    kind: "object",
+    properties: [
+      ...type.properties.map((property) =>
+        property.name === name
+          ? { name, type: replacedShape(property.type, rest, value) ?? value }
+          : property,
+      ),
+      ...(found || rest.length > 0 ? [] : [{ name: name!, type: value }]),
+    ],
+  };
 }
 
 function unionTypes(types: readonly DerivedType[]): DerivedType {
@@ -696,8 +787,9 @@ function holdsNull(type: DerivedType): boolean {
 }
 
 /**
- * The written type at `path` below the owner where the owner lands directly in a `let` or variable with a written type,
- * through list and set elements and `otherwise`; `undefined` where it lands in none.
+ * The written type at `path` below the owner where the owner lands directly in a `let` or variable with a written type
+ * (ADR 0021 7.3), through list and set elements, `otherwise` and the `default:` of a call or a load, which lands where
+ * its result does; `undefined` where it lands in none.
  */
 function writtenLanding(
   owner: Expression,
@@ -718,6 +810,9 @@ function writtenLanding(
     } else if (at.kind === "binaryExpression" && at.operator === "otherwise") {
       const left = landsIn(at.left, type);
       return left !== undefined ? left : landsIn(at.right, type);
+    } else if (at.kind === "callExpression" || at.kind === "loadExpression") {
+      const fallback = fallbackOf(at);
+      if (fallback !== null) return landsIn(fallback, type);
     }
     return undefined;
   };
@@ -1135,6 +1230,8 @@ export interface PredictedRun {
 /** One check a run evaluates: its discharge's site, whether the value fits, and the host globals the value came from. */
 export interface CheckEvent {
   readonly site: string;
+  /** The code the check fails with, or `null` for a typed parse's or load's reading, which gives its default. */
+  readonly code: string | null;
   readonly fits: boolean;
   readonly from: ReadonlySet<string>;
 }
@@ -1331,7 +1428,7 @@ export function evaluate(
     from: ReadonlySet<string>,
     fits: boolean,
   ): void => {
-    events.push({ site: `${start}:${end}`, fits, from });
+    events.push({ site: `${start}:${end}`, code, fits, from });
     if (fits) return;
     const failure = `${code}@${start}:${end}`;
     first ??= failure;
@@ -1360,6 +1457,7 @@ export function evaluate(
     if (type !== null && type !== undefined)
       events.push({
         site: site(expression),
+        code: null,
         fits: result.v === null || fitsType(result.v, type),
         from: result.from,
       });
