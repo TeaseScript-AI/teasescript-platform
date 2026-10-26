@@ -90,6 +90,104 @@ test("the core gives the expected record for every rule-function record, in both
   }
 });
 
+/**
+ * AD-3 (TABLE r4.52; ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read keeps its
+ * contract's one known kind, so an intrinsic violation of a known type is the error its live form is, at the same
+ * text; a dead call's argument meets its written parameter (F22) as a live one does. The flow facts stay dropped there
+ * (X1): a kind only the read's reaching definition decides gives the `dead-code` warning, never the live form's error.
+ */
+test("dead code keeps its intrinsic type errors and drops its flow facts, in both orders (AD-3)", () => {
+  const run = (request: NonNullable<ReturnType<typeof coreRequest>>, reversed: boolean) =>
+    reversed
+      ? withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => compactAnalysis(request),
+          ),
+        )
+      : compactAnalysis(request);
+  const differing: string[] = [];
+  const dead = records.filter((record) => record.name.startsWith("cp9-cells/s4/s6b/dead-code/"));
+  assert.equal(dead.length, 6);
+  for (const record of dead)
+    for (const reversed of [false, true]) {
+      const request = coreRequest(record.files);
+      assert.ok(request !== null, record.name);
+      const differences = recordDifferences(record.expected, run(request, reversed));
+      if (differences.length > 0)
+        differing.push(`${record.name}${reversed ? " reversed" : ""}: ${differences.join("; ")}`);
+    }
+  // a record by the text at its sites, so a live form and its dead one compare where their offsets differ
+  const analysed = (source: string, reversed: boolean): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const record = run(request, reversed);
+    const text = (site: CompactSite): string => source.slice(site.offset, site.end);
+    return [
+      record.outcome,
+      ...record.diagnostics
+        .map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} '${text(d.site)}'`)
+        .sort(),
+      ...record.checks
+        .map(
+          (c) =>
+            `${c.kind} ${c.target} [${c.against.join(", ")}]${c.boundary ? " B" : ""} '${text(c.site)}'`,
+        )
+        .sort(),
+    ];
+  };
+  // per dead shape: the program with `before` live and `body` dead
+  const shapes: readonly (readonly [string, (before: string, body: string) => string])[] = [
+    ["after exit", (before, body) => `${before}\nexit\n${body}\n`],
+    [
+      "a branch on a literal false",
+      (before, body) => `${before}\nif false {\n  ${body}\n}\nexit\n`,
+    ],
+    [
+      "a handler never registered",
+      (before, body) =>
+        `${before}\nif false {\n  showPermanentButton "Never" {\n    ${body}\n  }\n}\nexit\n`,
+    ],
+    ["a label nothing enters", (before, body) => `${before}\nexit\nlabel never\n${body}\nend\n`],
+  ];
+  const takesInteger = "function take(count: integer) {\n  say count\n}\ntake(1)";
+  // an intrinsic violation of a known type: the live form's error (C2 twice, C5b, C7 at the root and an element)
+  const violations: readonly (readonly [string, string, string])[] = [
+    ["a count that is text", 'let n = "bad"', "repeat n {}"],
+    ["an index that is text", 'let xs = [1, 2]\nlet i = "first"', "say xs[i]"],
+    ["a member of a whole number", "let n = 5", "say n.length"],
+    ["an argument of text for a whole number", `${takesInteger}\nlet s = "bad"`, "take(s)"],
+    [
+      "an argument's element of text for whole numbers",
+      'function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])\nlet s = ["bad"]',
+      "takeAll(s)",
+    ],
+  ];
+  // a kind only the reaching definition decides: the live form's error, a warning in dead code
+  const flowOnly: readonly (readonly [string, string, string])[] = [
+    ["a count stored a number last", "let n = 1\nn = 2.5", "repeat n {}"],
+    ["an argument stored a number last", `${takesInteger}\nlet n = 1\nn = 2.5`, "take(n)"],
+  ];
+  for (const reversed of [false, true]) {
+    const order = reversed ? " reversed" : "";
+    for (const [what, before, body] of [...violations, ...flowOnly]) {
+      const live = analysed(`${before}\n${body}\nexit\n`, reversed);
+      if (live[0] !== "compile-error") differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        const flow = flowOnly.some(([name]) => name === what);
+        const expected = flow
+          ? found[0] === "warning-runtime-check" &&
+            found.slice(1).every((line) => !line.includes("compile-error")) &&
+            found.some((line) => line.includes(" dead-code "))
+          : JSON.stringify(found) === JSON.stringify(live);
+        if (!expected) differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
+      }
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
 test("the comparison fails a record whose second boundary check is replaced by a copy of its first", () => {
   // the negative control of the port plan's §3.1: one ingress's boundary check lost beside a surviving one must show
   const record = asserted.find(
