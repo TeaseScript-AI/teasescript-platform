@@ -1076,6 +1076,31 @@ test("a known `null` reads as the `null` type, an unknown stays open, and each r
   );
 });
 
+test("a literal wider than a native call takes compiles and keeps its checks, in three layers (S7 review r7 B1, r8 B1)", () => {
+  // more elements than one call passes as spread arguments: the contracts collect them one at a time; one order only,
+  // as the width is the defect's cause and each compile of it is costly
+  const source = `let p = [hostValue, ${Array.from({ length: 131_071 }, () => "0").join(", ")}]\nsay p[0]\nsay "AFTER"\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  // the core's boundary at the host value, against the elements' integer (C9)
+  const hostValue = `${source.indexOf("hostValue")}:${source.indexOf("hostValue") + 9}`;
+  assert.ok(
+    compactAnalysis(request).checks.some(
+      (check) =>
+        check.boundary &&
+        check.target === "p.element" &&
+        `${check.site.offset}:${check.site.end}` === hostValue &&
+        check.against.join() === "integer",
+    ),
+  );
+  const plan = compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan;
+  assert.ok(plan !== null);
+  assert.deepEqual(validateInstructionPlan(plan).errors, []);
+  assert.deepEqual(checkedStores(plan), ["'p' list<integer>"]);
+  assert.deepEqual(ran(runWith(plan, 1)), halted(["1", "AFTER"]));
+  assert.deepEqual(ran(runWith(plan, "bad")), failed(`TSR058@8:${source.indexOf("\n")}`));
+});
+
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads
