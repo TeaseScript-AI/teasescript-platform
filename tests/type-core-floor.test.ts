@@ -9,13 +9,16 @@ import type { CompactCheck } from "./helpers/type-core-records.js";
 /*
  * The carrier floor (S6-CARRIERS revision 5, §6): Astra's independent 184 shapes of round 4 (`matrix/REPORT.md`,
  * `comparison.md`), transcribed as their 46 placement and endpoint classes, each named and inline, without and with a
- * later store, in both orders. Each shape's C9 records are compared exactly with the boundaries §3.3's rule places:
+ * later store, in both orders. Each shape's C9 records, and the C1 and C10 records of every place but the destination
+ * `out` (an own read's family check, a loop variable's check), are compared exactly with the rule function (§3.3,
+ * §5.1, TABLE r4.63):
  * - inline host data owes one store boundary at the host value's own span, its target the store's place with the
  *   contribution path up to the first object property step, against the type admitted there;
- * - named data owes its source's own boundary, `parcel [unknown]` at its ingress, and no store boundary.
- * The classes whose data stands in an operation's own read (a `get`'s or `otherwise`'s default, a `load`'s or
- * `fromJson`'s), and the loop variable's, are held: §5.1's rows for them are the lead's open question, so they are only
- * run in both orders here.
+ * - named data owes its source's own boundary, `parcel [unknown]` at its ingress, and no store boundary;
+ * - a `get`'s or an `otherwise`'s default owes C10's family check at the default and its own read's `[unknown]`
+ *   boundary; a `load`'s or `fromJson`'s typed default neither, the boundary at the call validating the loaded value;
+ * - a loop variable owes the boundary against its own contract, C1 beside it, and `[unknown]` only where it has no
+ *   other contract (a loop over external data).
  */
 
 type Endpoint = "scalar" | "collection";
@@ -201,22 +204,11 @@ const CLASSES: readonly FloorClass[] = [
   },
 ];
 
-/** The classes whose data stands in an operation's own read, or reaches `out` through a loop variable. */
-const HELD: ReadonlySet<string> = new Set([
-  "otherwise/whole fallback",
-  "get/whole default",
-  "load default/literal default",
-  "load default/whole default",
-  "parse default/literal default",
-  "parse default/whole default",
-  "iteration/literal",
-  "iteration/whole operand",
-]);
-
 /**
- * The shapes whose C9 records differ from the rule at this head: the round-4 review's witnesses (B-M2's boundaries at a
- * carrier's span instead of the host value's, B-M1's missing selected-text boundaries), which §9 step 4's cutover
- * repairs. The list must be empty at the pull request's head.
+ * The shapes whose records differ from the rule at this head, which §9 step 4's cutover repairs: the round-4 review's
+ * witnesses (B-M2's boundaries at a carrier's span instead of the host value's, B-M1's missing selected-text
+ * boundaries), and r4.63's (an `otherwise` default without its family check, a typed default's own read, a loop
+ * variable's boundary against `[unknown]` or at the collection). The list must be empty at the pull request's head.
  */
 const UNTIL_CUTOVER: ReadonlySet<string> = new Set([
   "copy/whole receiver/scalar/inline/no-later",
@@ -235,14 +227,97 @@ const UNTIL_CUTOVER: ReadonlySet<string> = new Set([
   "otherwise/whole operand/collection/inline/later",
   "choice/list selected text/scalar/inline/no-later",
   "choice/derived selected text/scalar/inline/no-later",
+  // r4.63 (3): an `otherwise` default's C10 family check
+  "otherwise/whole fallback/collection/inline/later",
+  "otherwise/whole fallback/collection/inline/no-later",
+  "otherwise/whole fallback/collection/named/later",
+  "otherwise/whole fallback/collection/named/no-later",
+  "otherwise/whole fallback/scalar/inline/later",
+  "otherwise/whole fallback/scalar/inline/no-later",
+  "otherwise/whole fallback/scalar/named/later",
+  "otherwise/whole fallback/scalar/named/no-later",
+  // r4.63 (3): a typed default owes no own read beside the call's boundary
+  "load default/whole default/collection/inline/later",
+  "load default/whole default/collection/inline/no-later",
+  "load default/whole default/collection/named/later",
+  "load default/whole default/collection/named/no-later",
+  "load default/whole default/scalar/inline/later",
+  "load default/whole default/scalar/named/later",
+  "parse default/whole default/collection/inline/later",
+  "parse default/whole default/collection/inline/no-later",
+  "parse default/whole default/collection/named/later",
+  "parse default/whole default/collection/named/no-later",
+  "parse default/whole default/scalar/inline/later",
+  "parse default/whole default/scalar/named/later",
+  // r4.63 (4): a loop variable's boundary against its own contract, at the host value
+  "iteration/literal/collection/inline/later",
+  "iteration/literal/collection/inline/no-later",
+  "iteration/literal/scalar/inline/later",
+  "iteration/literal/scalar/inline/no-later",
+  "iteration/whole operand/collection/inline/later",
+  "iteration/whole operand/collection/inline/no-later",
+  "iteration/whole operand/scalar/inline/later",
+  "iteration/whole operand/scalar/inline/no-later",
 ]);
 
 interface Shape {
   readonly name: string;
-  readonly held: boolean;
   readonly source: string;
-  /** The C9 records §3.3's rule places, each `target [against] start:end`. */
+  /** The records the rule function owes, each `B` (a boundary) or `C` (a check), `target [against] start:end`. */
   readonly expected: readonly string[];
+}
+
+/** The span of the parenthesised call that starts at `start`: to its matching closing parenthesis. */
+function callSpan(source: string, start: number): string {
+  let depth = 0;
+  for (let at = source.indexOf("(", start); at < source.length; at += 1) {
+    if (source[at] === "(") depth += 1;
+    else if (source[at] === ")" && (depth -= 1) === 0) return `${start}:${at + 1}`;
+  }
+  throw new Error(`no call at ${start}`);
+}
+
+/** The records `floor`'s shape owes by the rule function (§3.3, §5.1, TABLE r4.63). */
+function owed(floor: FloorClass, endpoint: Endpoint, named: boolean, source: string): string[] {
+  const at = (start: number, length: number): string => `${start}:${start + length}`;
+  const ingress = source.indexOf("hostValue");
+  const ing = at(ingress, "hostValue".length);
+  const host = named ? "parcel" : "hostValue";
+  const read = named ? source.indexOf("parcel", source.indexOf("\n")) : ingress;
+  const kind = floor.kind ?? "integer";
+  const place = `${floor.carrier}/${floor.placement}`;
+  const own = `B ${host} [unknown] ${ing}`;
+  if (place === "get/whole default" || place === "otherwise/whole fallback")
+    return [
+      own,
+      endpoint === "scalar"
+        ? `C ${host} [integer|number] ${at(read, host.length)}`
+        : `C [${host}].element [integer|number] ${at(read - 1, host.length + 2)}`,
+    ];
+  if (floor.carrier === "load default" || floor.carrier === "parse default") {
+    const call = source.indexOf(floor.carrier === "load default" ? "load(" : "fromJson(");
+    return [`B out [${endpoint === "scalar" ? "integer" : "list"}] ${callSpan(source, call)}`];
+  }
+  if (place === "iteration/literal") {
+    const target = endpoint === "scalar" ? "entry" : "entry.element";
+    const collection = source.indexOf("[", source.indexOf("for entry in"));
+    const end = source.indexOf(" {", collection);
+    return named
+      ? [
+          own,
+          `C ${target} [integer] ${endpoint === "scalar" ? at(read, host.length) : `${collection}:${end}`}`,
+        ]
+      : [`B ${target} [integer] ${ing}`, `C ${target} [integer] ${ing}`];
+  }
+  if (place === "iteration/whole operand") return named ? [own] : [`B entry [unknown] ${ing}`];
+  if (named) return [own];
+  if (endpoint === "scalar") return [`B out [${kind}] ${ing}`];
+  // (a collection's host data stands in a literal's cell, at the element, or whole, at the list itself)
+  return [
+    source.slice(0, ingress).trimEnd().endsWith("[")
+      ? `B out.element [integer] ${ing}`
+      : `B out [list] ${ing}`,
+  ];
 }
 
 function shapes(): Shape[] {
@@ -261,16 +336,6 @@ function shapes(): Shape[] {
               ? `for entry in ${floor.placement === "literal" ? value : host} {\n`
               : "";
           const source = `${named ? "let parcel = hostValue\n" : ""}${head}${body}\n${floor.loop === true ? "}\n" : ""}exit`;
-          const ingress = source.indexOf("hostValue");
-          const span = `${ingress}:${ingress + "hostValue".length}`;
-          const kind = floor.kind ?? "integer";
-          // (a collection's host data stands in a literal's cell, at the element, or whole, at the list itself)
-          const inCell = source.slice(0, ingress).trimEnd().endsWith("[");
-          const expected = named
-            ? [`parcel [unknown] ${span}`]
-            : endpoint === "scalar"
-              ? [`out [${kind}] ${span}`]
-              : [inCell ? `out.element [integer] ${span}` : `out [list] ${span}`];
           out.push({
             name: [
               floor.carrier,
@@ -279,24 +344,33 @@ function shapes(): Shape[] {
               named ? "named" : "inline",
               later ? "later" : "no-later",
             ].join("/"),
-            held: HELD.has(`${floor.carrier}/${floor.placement}`),
             source,
-            expected,
+            expected: owed(floor, endpoint, named, source),
           });
         }
   return out;
 }
 
-/** A shape's C9 records in both orders: each `target [against] start:end`, sorted; the two orders equal. */
-function boundaries(source: string): string[] {
+/**
+ * A shape's compared records in both orders: its C9 boundaries, and its `copy-type` checks of any place but `out`, each
+ * `B` or `C`, `target [against] start:end`, sorted; the two orders equal.
+ */
+function records(source: string): string[] {
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request !== null, source);
   const of = (checks: readonly CompactCheck[]): string[] =>
     checks
-      .filter((check) => check.boundary)
+      .filter(
+        (check) =>
+          check.boundary ||
+          (check.kind === "copy-type" &&
+            check.target !== "out" &&
+            !check.target.startsWith("out.")),
+      )
       .map(
         (check) =>
-          `${check.target} [${check.against.join("|")}] ${check.site.offset}:${check.site.end}`,
+          `${check.boundary ? "B" : "C"} ${check.target} [${check.against.join("|")}] ` +
+          `${check.site.offset}:${check.site.end}`,
       )
       .sort();
   const forward = of(compactAnalysis(request).checks);
@@ -310,27 +384,22 @@ function boundaries(source: string): string[] {
   return forward;
 }
 
-test("the carrier floor's C9 records are exactly the boundaries §3.3 places, in both orders (§6)", (t) => {
+test("the carrier floor's records are exactly what the rule function owes, in both orders (§6, §5.1, r4.63)", (t) => {
   const all = shapes();
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);
   const differing: string[] = [];
-  let compared = 0;
   for (const shape of all) {
-    const actual = boundaries(shape.source);
-    if (shape.held) continue;
-    compared += 1;
+    const actual = records(shape.source);
     if (JSON.stringify(actual) !== JSON.stringify([...shape.expected].sort()))
       differing.push(
         `${shape.name}: expected ${shape.expected.join(", ")}, got ${actual.join(", ") || "none"}`,
       );
   }
   t.diagnostic(
-    `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} classes: ` +
-      `${compared} compared exactly, ` +
-      `${all.length - compared} held (own reads and loop variables); ${differing.length} differ until the cutover`,
+    `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} ` +
+      `classes compared exactly; ${differing.length} differ until the cutover`,
   );
-  assert.equal(compared, 120);
   assert.deepEqual(
     differing.map((entry) => entry.split(":")[0]).sort(),
     [...UNTIL_CUTOVER].sort(),
