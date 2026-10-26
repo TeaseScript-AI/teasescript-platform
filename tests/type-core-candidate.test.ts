@@ -35,7 +35,18 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import {
+  companions,
+  derive,
+  derivedText,
+  evaluate,
+  Underivable,
+  type CheckEvent,
+  type DerivedStore,
+  type PredictedRun,
+} from "./helpers/type-core-derived.js";
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+import { recordDifferences } from "./helpers/type-core-records.js";
 
 // The coarse core on the test-only candidate route (the port plan's S5): source, candidate compile, plan, runtime.
 
@@ -145,20 +156,6 @@ function typeChecks(
   return out;
 }
 
-/** A checked type's kinds at a path below it (an element step, a property's name), `[]` where it checks nothing there. */
-function kindsAt(type: TypePlan | null, path: readonly string[]): string[] {
-  if (type === null) return [];
-  if (type.kind === "union")
-    return [...new Set(type.members.flatMap((member) => kindsAt(member, path)))];
-  if (path.length === 0) return [type.kind];
-  const [step, ...rest] = path;
-  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
-    return step === "element" ? kindsAt(type.element, rest) : [];
-  if (type.kind === "object")
-    return kindsAt(type.properties.find((property) => property.name === step)?.type ?? null, rest);
-  return [];
-}
-
 /** A checked type in full, as these tests compare it: `integer`, `list<list<integer>>`, `{name: string}`, `a|b`. */
 function typeText(type: TypePlan | null): string {
   if (type === null) return "any";
@@ -175,31 +172,88 @@ function checksOf(plan: InstructionPlan): string[] {
   return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
 }
 
-/** Whether a runtime scalar is of a kind a check names (the scalars this file's tests run with). */
-function fitsKind(value: SerializableRuntimeValue, kind: string): boolean {
-  if (value === null) return kind === "null";
-  if (typeof value === "string") return kind === "string";
-  if (typeof value === "boolean") return kind === "boolean";
-  if (typeof value === "number")
-    return kind === "number" || (kind === "integer" && Number.isInteger(value));
-  return false;
+/** A run of `plan` to its end with the host globals' values: its status, its failure and what it said, with offsets. */
+function runGlobals(
+  plan: InstructionPlan,
+  globals: Readonly<Record<string, SerializableRuntimeValue>>,
+): PredictedRun {
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+  const failure = result.events.find((event) => event.kind === "runtimeFailure");
+  return {
+    status: result.snapshot.status === "halted" ? "halted" : "failed",
+    failure:
+      failure?.kind === "runtimeFailure"
+        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+        : null,
+    said: result.events.flatMap((event) =>
+      event.kind === "say" ? [{ text: event.text, at: event.span.start.offset }] : [],
+    ),
+  };
+}
+
+/** A checked type in full, its unions' members sorted: the plan's side of `derivedText`. */
+function planText(type: TypePlan | null): string {
+  if (type === null) return "any";
+  if (type.kind === "union") return type.members.map(planText).sort().join("|");
+  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
+    return `${type.kind}<${planText(type.element)}>`;
+  if (type.kind === "object")
+    return `{${type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`).join(", ")}}`;
+  return type.kind;
+}
+
+/** A plan's checked stores as `derive` gives them: target, statement span, value span, whole type. */
+function plannedStores(plan: InstructionPlan): string[] {
+  return plan.instructions.flatMap((instruction) =>
+    (instruction.kind === "declareBinding" || instruction.kind === "assign") &&
+    instruction.typeCheck !== undefined
+      ? [
+          `${instruction.kind === "declareBinding" ? instruction.name : instruction.target.kind === "identifier" ? instruction.target.name : "?"} ` +
+            `${instruction.span.so}:${instruction.span.eo} ${instruction.value.span.so}:${instruction.value.span.eo} ` +
+            planText(instruction.typeCheck.type),
+        ]
+      : [],
+  );
+}
+
+function derivedStores(stores: readonly DerivedStore[]): string[] {
+  return stores.map(
+    (store) =>
+      `${store.target} ${store.so}:${store.eo} ${store.valueSo}:${store.valueEo} ${derivedText(store.type)}`,
+  );
+}
+
+/** The host values a run's inputs take (§5.2's derived domain): a whole number, text, a truth value, a fraction, null. */
+const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null];
+
+/** Every assignment of the domain's values to the globals. */
+function assignments(
+  globals: readonly string[],
+): Readonly<Record<string, SerializableRuntimeValue>>[] {
+  return globals.reduce<Record<string, SerializableRuntimeValue>[]>(
+    (partial, name) =>
+      partial.flatMap((assigned) => DOMAIN.map((value) => ({ ...assigned, [name]: value }))),
+    [{}],
+  );
 }
 
 /**
- * The owner's rule (TABLE r4.59): a record whose checks the candidate route lowers proves them in the plan and in a run,
- * not only in the answers. Every record of the positive list (the cells test's: all but those `heldBack` names) is
- * tried on the candidate route in both orders. A record the route accepts compiles as it expects: its
- * C1 and C2 diagnostics at its sites, a plan exactly where it is not a compile error, and in the plan exactly the checks
- * a store's `typeCheck` discharges (S3 §4: C1's and C9's `copy-type` checks against a kind, at the store that holds
- * their site, of the kinds their target's path requires; C2's checks, and a boundary against `unknown`, are the
- * runtime's own checks at the use and of representable external data, no plan content); a record reading host data
- * runs with a host value of no kind its first checked store's checks require at the value's position, which stops with
- * TSR058 at that store's value in the failed state, nothing said after the store, and with one of a kind every check
- * requires there, where one exists, which halts at the end. A record the route rejects (`CandidateOutsideSlice`) is
- * counted in one class, outside the candidate slice until S7–S9b widen it, by its first construct outside the slice;
- * nobody lists records, so each record the slice grows to reach is checked.
+ * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; TABLE r4.59; the lead's answer 3). Every
+ * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
+ * orders. A record the route accepts is checked in four layers, each derived from the record and its source alone:
+ * - **records:** its C1 and C2 diagnostics at their whole sites, its obligations exactly (the cells test's comparison),
+ *   and a plan exactly where it is not a compile error, alike on the one-file route;
+ * - **discharges:** each obligation discharged by one rule (`derive`), a checked store or the runtime;
+ * - **checked stores:** the plan's are exactly the derived ones, target, spans and whole type;
+ * - **runs:** the original as written, each host input at the value that fits the earliest check it feeds, and every
+ *   companion whose plan checks the same stores, under every assignment of the domain to its host inputs, each
+ *   predicted by the rules and run on the engine. A companion that is a compile error or checks differently is a
+ *   different program, counted and not run as this record's.
+ * Each discharge is then classified by the runs: violable (a run fails there), preempted (a value that violates it
+ * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
+ * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
  */
-test("every positive-list record the candidate route reaches lowers and runs exactly its checks, in both orders (r4.59)", (t) => {
+test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
   const kinds: Readonly<Record<string, string>> = {
     TSV041: "written-target",
     TSV011: "integer-use",
@@ -207,11 +261,14 @@ test("every positive-list record the candidate route reaches lowers and runs exa
   };
   const accepted: string[] = [];
   const outside = new Map<string, number>();
-  const unfit: string[] = [];
+  const skipped = new Map<string, number>();
+  const classes = new Map<string, number>();
+  const originals = new Map<string, string | null>();
+  const classOf = new Map<string, string>();
+  const companionRuns = new Map<string, PredictedRun[]>();
   let positive = 0;
-  let checked = 0;
-  let refusedRuns = 0;
-  let fittingRuns = 0;
+  let plans = 0;
+  let runs = 0;
   for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
@@ -225,113 +282,182 @@ test("every positive-list record the candidate route reaches lowers and runs exa
       continue;
     }
     accepted.push(record.name);
-    // C1 (`written-target`) under TSV041 and C2 (`integer-use`) under TSV011 for a count and TSV043 for a list index,
-    // each an error or a runtime-checked warning (D3 (a)), at the record's sites
-    assert.deepEqual(
-      result.diagnostics
+    assert.equal(record.files.length, 1, `${record.name}: one file`);
+    const source = record.files[0]!.source;
+    // records: the diagnostics at their whole sites, the obligations exactly, alike on the one-file route
+    const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
+      compiled.diagnostics
         .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
         .map(
           (diagnostic) =>
-            `${diagnostic.severity} ${kinds[diagnostic.code]} ${diagnostic.path}@${diagnostic.span.start.offset}`,
+            `${diagnostic.severity} ${kinds[diagnostic.code]} ` +
+            `${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
         )
-        .sort(),
+        .sort();
+    assert.deepEqual(
+      diagnosed(result),
       record.expected.diagnostics
         .map(
           (diagnostic) =>
             `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
-            `${diagnostic.site.file}@${diagnostic.site.offset}`,
+            `${diagnostic.site.offset}:${diagnostic.site.end}`,
         )
         .sort(),
       record.name,
     );
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, record.name);
+    assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
     assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
+    const single = inBothOrders(() => candidate(source));
+    assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
     if (result.plan === null) continue;
-    // the plan's checks: per checked store, the kinds each owed check's target path requires there, and no store
-    // checked without an owed check
-    const stores = typeChecks(result.plan);
-    const owed = new Map<string, (readonly string[])[]>();
-    for (const check of record.expected.checks) {
-      if (check.kind !== "copy-type" || check.against.every((tag) => tag === "unknown")) continue;
-      const store = stores
-        .filter(
-          ({ file, so, eo }) =>
-            file === check.site.file && so <= check.site.offset && check.site.offset < eo,
-        )
-        .sort((a, b) => a.eo - a.so - (b.eo - b.so))[0];
-      assert.ok(
-        store !== undefined,
-        `${record.name}: a checked store holds ${check.target}'s check`,
-      );
-      const path = check.target.split(".").slice(1);
-      assert.deepEqual(
-        kindsAt(store.type, path).sort(),
-        [...new Set(check.against)].sort(),
-        `${record.name}: ${check.target}'s kinds in the plan`,
-      );
-      const key = `${store.file}:${store.so}:${store.eo}`;
-      owed.set(key, [...(owed.get(key) ?? []), check.against]);
-    }
+    plans += 1;
+    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named)
+    const derived = (() => {
+      try {
+        return derive(source, record.expected);
+      } catch (error) {
+        if (error instanceof Underivable)
+          throw new Error(`${record.name}: underivable: ${error.message}`);
+        throw error;
+      }
+    })();
+    const { stores, discharges } = derived;
     assert.deepEqual(
-      stores.map(({ file, so, eo }) => `${file}:${so}:${eo}`).sort(),
-      [...owed.keys()].sort(),
+      plannedStores(result.plan),
+      derivedStores(stores),
       `${record.name}: the checked stores`,
     );
-    checked += 1;
-    // the runs: the host value is the value each owed check reads at its target's path, so it is chosen by the kinds
-    // those checks require there. One of no kind the first checked store's checks require stops at that store's value
-    // with TSR058, nothing said after the store before it; one of a kind every check requires reaches the end.
-    if (!record.files.some((file) => file.source.includes("hostValue")) || stores.length === 0)
-      continue;
-    // (a run's messages carry offsets, not files)
-    assert.equal(record.files.length, 1, `${record.name}: one file to compare offsets in`);
-    const values: readonly SerializableRuntimeValue[] = ["text", 2.5, 2, true, null];
-    const first = stores[0]!;
-    const firstKinds = owed.get(`${first.file}:${first.so}:${first.eo}`)!;
-    const refused = values.find((value) =>
-      firstKinds.every((kinds) => !kinds.some((kind) => fitsKind(value, kind))),
-    );
-    assert.ok(refused !== undefined, `${record.name}: a value the first checked store refuses`);
-    // (the check's failure spans the stored value: the store after its `=`)
-    const equals = /=\s*/.exec(record.files[0]!.source.slice(first.so, first.eo))!;
-    const value = first.so + equals.index + equals[0].length;
-    const stopped = runSited(result.plan, refused);
     assert.deepEqual(
-      {
-        status: stopped.status,
-        failure: stopped.failure,
-        saidAfter: stopped.said.filter(({ at }) => at >= first.so),
-      },
-      { status: "failed", failure: `TSR058@${value}:${first.eo}`, saidAfter: [] },
-      `${record.name} with ${JSON.stringify(refused)}`,
+      plannedStores(single.plan!),
+      derivedStores(stores),
+      `${record.name}: the one-file route's`,
     );
-    refusedRuns += 1;
-    const fitting = values.find((value) =>
-      [...owed.values()].flat().every((kinds) => kinds.some((kind) => fitsKind(value, kind))),
+    // runs: the original, as written, each input at the value fitting the earliest check it feeds
+    const fitting =
+      DOMAIN.find((value) => {
+        const fed = evaluate(source, stores, { hostValue: value }, true).events.find((event) =>
+          event.from.has("hostValue"),
+        );
+        return fed === undefined || fed.fits;
+      }) ?? DOMAIN[0]!;
+    const original = runGlobals(result.plan, { hostValue: fitting });
+    assert.deepEqual(
+      original,
+      evaluate(source, stores, { hostValue: fitting }).run,
+      `${record.name}: the original`,
     );
-    if (fitting === undefined) {
-      unfit.push(record.name);
-      continue;
+    originals.set(record.name, original.failure);
+    runs += 1;
+    // the companions with the same checked stores, under every assignment of their inputs
+    const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [
+      { run: original, events: evaluate(source, stores, { hostValue: fitting }, true).events },
+    ];
+    for (const companion of companions(source)) {
+      const compiled = insideSlice(() =>
+        inBothOrders(() =>
+          compileSourceWithBackend(
+            companion.source,
+            { globals: [...companion.globals] },
+            CORE_BACKEND,
+          ),
+        ),
+      );
+      const why =
+        compiled === null
+          ? "outside the slice"
+          : compiled.plan === null
+            ? "a compile error"
+            : JSON.stringify(plannedStores(compiled.plan)) !== JSON.stringify(derivedStores(stores))
+              ? "checks other stores"
+              : null;
+      if (why !== null) {
+        skipped.set(why, (skipped.get(why) ?? 0) + 1);
+        continue;
+      }
+      for (const inputs of assignments(companion.globals)) {
+        const ran = runGlobals(compiled!.plan!, inputs);
+        assert.deepEqual(
+          ran,
+          evaluate(companion.source, stores, inputs).run,
+          `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
+        );
+        observed.push({
+          run: ran,
+          events: evaluate(companion.source, stores, inputs, true).events,
+        });
+        companionRuns.set(record.name, [...(companionRuns.get(record.name) ?? []), ran]);
+        runs += 1;
+      }
     }
-    const finished = runWith(result.plan, fitting);
-    assert.deepEqual(
-      { status: finished.status, failure: finished.failure },
-      { status: "halted", failure: null },
-      `${record.name} with ${JSON.stringify(fitting)}`,
-    );
-    fittingRuns += 1;
+    // each discharge classified by the runs: a store's at its value, the runtime's at its use
+    for (const discharge of discharges) {
+      if (discharge.by === "native" && discharge.what === "representable") {
+        classes.set(
+          "not violable (representable)",
+          (classes.get("not violable (representable)") ?? 0) + 1,
+        );
+        continue;
+      }
+      const named =
+        discharge.by === "store"
+          ? `${discharge.store.valueSo}:${discharge.store.valueEo}`
+          : discharge.site;
+      const key = `${record.name}#${named}`;
+      if (classOf.has(key)) continue;
+      const at = `@${named}`;
+      const verdict = observed.some(({ run: ran }) => ran.failure?.endsWith(at) === true)
+        ? "violable"
+        : observed.some(({ events }) => events.some((event) => event.site === named && !event.fits))
+          ? "preempted"
+          : observed.some(({ events }) => events.some((event) => event.site === named))
+            ? "not violable"
+            : "unreachable";
+      classOf.set(key, verdict);
+      classes.set(verdict, (classes.get(verdict) ?? 0) + 1);
+    }
   }
   const counted = [...outside.values()].reduce((sum, count) => sum + count, 0);
+  const listed = (map: ReadonlyMap<string, number>): string =>
+    [...map]
+      .sort((a, b) => b[1] - a[1])
+      .map(([what, count]) => `${what} ${count}`)
+      .join(", ");
   t.diagnostic(
-    `${positive} positive-list records: ${accepted.length} on the candidate route, ${checked} with a plan; of those ` +
-      `reading host data, ${refusedRuns} stop a refused value at their first checked store and ${fittingRuns} finish ` +
-      `with a fitting one (no one value fits every check of ${unfit.join(", ") || "none"}); ${counted} outside the ` +
-      "candidate slice until S7–S9b: " +
-      [...outside]
-        .sort((a, b) => b[1] - a[1])
-        .map(([what, count]) => `${what} ${count}`)
-        .join(", "),
+    `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
+      `runs predicted and run; discharges: ${listed(classes)}; companions not run as their record's: ` +
+      `${listed(skipped) || "none"}; outside the candidate slice until S7–S9b: ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
+  // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
+  const verdicts: readonly (readonly [string, string, string])[] = [
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "38:43", "preempted"],
+    ["cp9-cells/r6-bugs/admission/use-before-overwrite", "12:30", "violable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "42:47", "unreachable"],
+    ["cp9-cells/s4/s6/owner/ingress/dead-consumer", "9:23", "violable"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", "7:18", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "59:63", "violable"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "80:84", "violable"],
+  ];
+  for (const [name, at, verdict] of verdicts)
+    assert.equal(classOf.get(`${name}#${at}`), verdict, `${name} at ${at}`);
+  for (const [name, failure] of [
+    ["cp9-cells/X5/outside-definition", "TSR043@28:29"],
+    ["cp9-cells/r46/m3/two-ingress-targets", "TSR058@80:84"],
+    ["cp9-cells/review/list-position-absent", "TSR025@33:34"],
+    ["cp9-cells/r46/m3/empty-index", "TSR025@30:31"],
+    ["cp9-cells/s4/followup/fit/literal-mixed-repeat", null],
+  ] as const)
+    assert.equal(originals.get(name), failure, `${name}: the original`);
+  // a companion gives what the original cannot: X5's integer writer and two-ingress-targets' independent inputs halt
+  for (const name of ["cp9-cells/X5/outside-definition", "cp9-cells/r46/m3/two-ingress-targets"])
+    assert.ok(
+      companionRuns
+        .get(name)
+        ?.some((ran) => ran.status === "halted" && ran.said.at(-1)?.text === "AFTER"),
+      `${name}: a fitting companion says AFTER and halts`,
+    );
   // a record of the set for each cell of the slice (the pull request lists every record inside it; stage 3b's
   // `r7-bugs/m2/host-local` waits with S10)
   for (const name of [
