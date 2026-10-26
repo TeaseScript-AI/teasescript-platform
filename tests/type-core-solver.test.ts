@@ -6,7 +6,7 @@ import { analyseCore, solveDemands } from "../src/type-inference/core/answers.js
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import {
-  ingressStores,
+  ingressLeaves,
   itemsSignature,
   makeItem,
   mergeItems,
@@ -82,7 +82,7 @@ test("every record has one result in the source order, the reverse order and two
 function answer(items: readonly Item[]): string {
   const stores = items
     .map((item) =>
-      item.ingress === undefined ? "" : ingressStores(item.ingress).map(writerKey).join(","),
+      item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join(","),
     )
     .sort();
   return `${itemsSignature(items, itemScope())} ${stores.join(";")}`;

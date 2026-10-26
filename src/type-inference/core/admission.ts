@@ -15,7 +15,14 @@ import {
 } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
-import { REASON, writerKey, type IngressNode, type Item, type ItemTag } from "./items.js";
+import {
+  REASON,
+  writerKey,
+  type IngressNode,
+  type Item,
+  type ItemTag,
+  type Writer,
+} from "./items.js";
 import { conversionCategory, dictList } from "./method-categories.js";
 import { propertyStep } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
@@ -2131,11 +2138,21 @@ export class Admission {
       if (seen.has(current)) continue;
       seen.add(current);
       this.pass.program.work.charge("checks");
-      if ("store" in current) tokens.add(writerKey(current.store));
-      else if ("parts" in current) for (const part of current.parts) pending.push(part);
+      if ("ingress" in current) {
+        const token = this.#storeToken(current.ingress);
+        if (token !== null) tokens.add(token);
+      } else if ("parts" in current) for (const part of current.parts) pending.push(part);
       else if (current.contents !== null) pending.push(current.contents);
     }
     return tokens;
+  }
+
+  /** The token of the store or the own read that brought a leaf's ingress in (the ingress index's), or `null`. */
+  #storeToken(leaf: Writer): string | null {
+    const { definitions } = this.pass;
+    const value = definitions.ingressAt.get(writerKey(leaf));
+    const token = value === undefined ? undefined : definitions.ingressStore.get(value);
+    return token === undefined ? null : writerKey(token);
   }
 
   /** C9: the boundary check of an ingress store, once, against its destination's admitted type when it is published. */
@@ -2179,10 +2196,10 @@ export class Admission {
         this.#walked.add(node);
         program.work.charge("checks");
         if ("parts" in node) for (const part of node.parts) pending.push(part);
-        else if (!("store" in node)) {
+        else if (!("ingress" in node)) {
           if (node.contents !== null) pending.push(node.contents);
         } else {
-          const token = writerKey(node.store);
+          const token = this.#storeToken(node.ingress) ?? "";
           const d = definitions.storeByToken.get(token);
           if (d !== undefined) this.boundaryAt(d);
           else {

@@ -162,6 +162,8 @@ export class DefinitionIndex {
   readonly fallbackOf = new Map<PlaceId, PlaceId>();
   /** C9: the values external data enters by, and the store that brought each in (its ingress store). */
   readonly ingress = new Set<PlaceId>();
+  /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
+  readonly ingressAt = new Map<string, PlaceId>();
   readonly ingressStore = new Map<PlaceId, Writer>();
   /**
    * Per ingress store's token (`writerKey`): its store, the path below its destination, the distinct paths below it
@@ -500,6 +502,11 @@ export class DefinitionIndex {
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)
       if (program.isHost(binding)) this.ingress.add(occurrence);
+    for (const value of this.ingress) {
+      const site = program.places[value]?.site;
+      if (site !== null && site !== undefined)
+        this.ingressAt.set(writerKey(ingressLeaf(program, site)), value);
+    }
     // the carrier table's operands, upwards: each value to the carrier that holds it and how (`carriers.ts`), an own read
     // (a fallback's or a default's, C10) where the walk stops; an iteration and a length hold no copy of their operand
     const ownOperand = new Set<PlaceId>();
@@ -1084,4 +1091,9 @@ export class DefinitionLists {
     this.#singleSite.set(fn, single);
     return single;
   }
+}
+
+/** The writer an ingress's leaf names (C9, S6-CARRIERS §3.1): the ingress's own expression. */
+export function ingressLeaf(program: CoreProgram, site: SourceSite): Writer {
+  return program.writer("ingress", site);
 }

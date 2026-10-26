@@ -10,6 +10,7 @@ import type {
 import type { CorePass } from "./answers.js";
 import type { ReadRoute } from "./values.js";
 import {
+  ingressLeaf,
   keyOf,
   keyPath,
   keyPlace,
@@ -1823,14 +1824,11 @@ export class Contract {
       const id = entryId(e);
       const w = e.w !== undefined ? e.w : f.w;
       const value = e.elem ?? e.value;
-      const store =
+      const leaf =
         (value !== undefined && e.at === undefined) || e.elem !== undefined
-          ? definitions.ingressStore.get(value!)
+          ? this.#ingressLeaf(value!)
           : undefined;
-      const ingress =
-        store === undefined
-          ? e.ingress
-          : program.scope.ingress.union(e.ingress, program.scope.ingress.leaf(store));
+      const ingress = leaf === undefined ? e.ingress : program.scope.ingress.union(e.ingress, leaf);
       const index = f.seen.get(id);
       if (index === undefined) {
         f.seen.set(id, f.out.length);
@@ -2615,16 +2613,28 @@ export class Contract {
     return entry.guarded || this.#marksAt(entry.holder, rest) ? marked(annotated) : annotated;
   }
 
-  /** C9: external data that entered by a load, `fromJson` or a host read names its ingress store. */
+  /** C9: external data that entered by a load, `fromJson` or a host read names its ingress. */
   public entered(value: PlaceId, items: readonly Item[]): readonly Item[] {
-    const store = this.pass.definitions.ingressStore.get(value);
-    if (store === undefined) return items;
+    const leaf = this.#ingressLeaf(value);
+    if (leaf === undefined) return items;
     const ingress = this.pass.program.scope.ingress;
     return items.map((item) =>
       item.tag === "unknown" && (item.reasons & REASON.external) !== 0
-        ? { ...item, ingress: ingress.union(item.ingress, ingress.leaf(store))! }
+        ? { ...item, ingress: ingress.union(item.ingress, leaf)! }
         : item,
     );
+  }
+
+  /**
+   * The leaf naming an ingress value (S6-CARRIERS §3.1), where an ingress store or an own read brought it in; else
+   * `undefined`, its external data loose.
+   */
+  #ingressLeaf(value: PlaceId): IngressNode | undefined {
+    const { definitions, program } = this.pass;
+    const site = program.places[value]?.site;
+    if (!definitions.ingressStore.has(value) || site === null || site === undefined)
+      return undefined;
+    return program.scope.ingress.leaf(ingressLeaf(program, site));
   }
 
   // ---------------------------------------------------------------------------------------- the literal index (§8)
@@ -2716,7 +2726,7 @@ export class Contract {
         const id = `${path}|${source.id}`;
         // one snapshot: one key read here
         const exactId = `${path}|${guards.guardedRead(value) ? "g" : ""}${this.copiedKey(value)}`;
-        const store = definitions.ingressStore.get(value);
+        const leaf = this.#ingressLeaf(value);
         const read = reads.get(id);
         if (read === undefined) {
           this.facts.literalEntries += 1;
@@ -2725,18 +2735,14 @@ export class Contract {
             value,
             guarded: source.guarded,
             holder: source.holder,
-            ingress: store === undefined ? undefined : program.scope.ingress.leaf(store),
+            ingress: leaf,
           };
           reads.set(id, entry);
           put(index.reads, path, entry);
         } else {
           program.work.charge("invSteps");
           if (source.guarded) read.guarded = true;
-          if (store !== undefined)
-            read.ingress = program.scope.ingress.union(
-              read.ingress,
-              program.scope.ingress.leaf(store),
-            );
+          if (leaf !== undefined) read.ingress = program.scope.ingress.union(read.ingress, leaf);
         }
         if (!seen.has(`x${exactId}`)) {
           seen.add(`x${exactId}`);

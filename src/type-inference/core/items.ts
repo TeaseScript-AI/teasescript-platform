@@ -52,12 +52,13 @@ export interface Writer extends SourceSite {
 }
 
 /**
- * The ingress stores of external data that an item holds (C9), as a shared graph: a leaf names one store, a union two
- * parts, and a cell what one member of a fixpoint brought, which grows in place as the member runs again, so every value
- * that holds the cell sees the growth. Merging items unites their nodes and never copies the stores.
+ * The ingresses of external data that an item holds (C9), as a shared graph: a leaf names one ingress, by its own
+ * expression's writer (S6-CARRIERS §3.1: the store that brought it is a fact of admission's walk, not the value side's),
+ * a union two parts, and a cell what one member of a fixpoint brought, which grows in place as the member runs again, so
+ * every value that holds the cell sees the growth. Merging items unites their nodes and never copies the leaves.
  */
 export type IngressNode =
-  | { readonly id: number; readonly store: Writer }
+  | { readonly id: number; readonly ingress: Writer }
   | { readonly id: number; readonly parts: readonly [IngressNode, IngressNode] }
   | IngressCell;
 
@@ -161,16 +162,16 @@ export function firstWriter(a: Writer | null, b: Writer | null): Writer | null {
   return compareWriters(b, a) < 0 ? b : a;
 }
 
-/** The ingress graph of one analysis: one leaf per store and one union per pair of nodes, each made once. */
+/** The ingress graph of one analysis: one leaf per ingress and one union per pair of nodes, each made once. */
 export class IngressGraph {
   readonly #leaves = new Map<string, IngressNode>();
   readonly #unions = new Map<string, IngressNode>();
   #next = 0;
 
-  public leaf(store: Writer): IngressNode {
-    const key = writerKey(store);
+  public leaf(ingress: Writer): IngressNode {
+    const key = writerKey(ingress);
     let node = this.#leaves.get(key);
-    if (node === undefined) this.#leaves.set(key, (node = { id: this.#next++, store }));
+    if (node === undefined) this.#leaves.set(key, (node = { id: this.#next++, ingress }));
     return node;
   }
 
@@ -188,20 +189,20 @@ export class IngressGraph {
   }
 }
 
-/** Every store below `node`, each node visited once, in source order. */
-export function ingressStores(node: IngressNode): Writer[] {
-  const stores = new Map<string, Writer>();
+/** Every ingress below `node`, each node visited once, in source order. */
+export function ingressLeaves(node: IngressNode): Writer[] {
+  const leaves = new Map<string, Writer>();
   const seen = new Set<IngressNode>();
   const pending = [node];
   while (pending.length > 0) {
     const current = pending.pop()!;
     if (seen.has(current)) continue;
     seen.add(current);
-    if ("store" in current) stores.set(writerKey(current.store), current.store);
+    if ("ingress" in current) leaves.set(writerKey(current.ingress), current.ingress);
     else if ("parts" in current) pending.push(...current.parts);
     else if (current.contents !== null) pending.push(current.contents);
   }
-  return [...stores.values()].sort(compareWriters);
+  return [...leaves.values()].sort(compareWriters);
 }
 
 /** What the item operations of one analysis share: its ledger and its ingress graph. */
