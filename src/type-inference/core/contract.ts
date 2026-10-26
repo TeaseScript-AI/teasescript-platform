@@ -969,7 +969,7 @@ export class Contract {
     const others: PrefixEntry[] = [];
     const base: LevelGroup[] = [];
     for (const entry of stores.list) {
-      this.pass.program.work.charge("invSteps");
+      this.pass.program.work.charge("structureSteps");
       const member = this.#levelMember(entry);
       if (member === null) others.push(entry);
       else base.push(member);
@@ -1003,7 +1003,7 @@ export class Contract {
       // (a property or an index selects what its owner holds there; a selection, a length, a dict's lists and the
       // temporal members answer otherwise)
       if (projection === undefined || !plainStep(projection.step)) return null;
-      program.work.charge("invSteps");
+      program.work.charge("structureSteps");
       steps.push(stepName(projection.step));
       value = projection.owner;
     }
@@ -1042,7 +1042,7 @@ export class Contract {
     for (const group of path.length === 0
       ? base
       : this.#groupsAt(prefix, base, path.slice(0, -1))) {
-      program.work.charge("invSteps");
+      program.work.charge("structureSteps");
       const levels = this.#levelsOf(group.literal);
       const full = [...group.at, ...path];
       // (what stands at each step above the path: entries read below it, objects lacking the next step, a
@@ -1108,7 +1108,7 @@ export class Contract {
         paths.add(path.slice(0, cut));
     const at = new Map<string, string>();
     for (const path of paths) {
-      program.work.charge("invSteps");
+      program.work.charge("structureSteps");
       const parts = [
         [...(index.terms.get(path)?.keys() ?? [])].sort().join(","),
         ...[...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])].map((entry) =>
@@ -1135,7 +1135,7 @@ export class Contract {
     }
     const depth = (path: string): number => (path === "" ? 0 : path.split(".").length);
     for (const path of [...paths].sort((a, b) => depth(b) - depth(a))) {
-      program.work.charge("invSteps");
+      program.work.charge("structureSteps");
       const under = (children.get(path) ?? [])
         .map((child) => `${child}=${below.get(child)}`)
         .sort()
@@ -2000,7 +2000,7 @@ export class Contract {
   *#structureWork(value: PlaceId): IdentityWork {
     if (this.#structures.has(value)) return;
     const { program, definitions } = this.pass;
-    program.work.charge("invSteps");
+    program.work.charge("structureSteps");
     let id = `v${value}`;
     if (this.copiedKey(value) !== null || this.resultKey(value) !== null) {
       // (a read under a test of its path is marked, §3.2)
@@ -2020,7 +2020,7 @@ export class Contract {
         ...index.objects.keys(),
       ]);
       for (const path of [...paths].sort()) {
-        program.work.charge("invSteps");
+        program.work.charge("structureSteps");
         parts.push(`${path}:${[...(index.terms.get(path)?.keys() ?? [])].sort().join(",")}`);
         for (const entry of [...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])]) {
           const part = yield* this.#needStructure(entry.value);
