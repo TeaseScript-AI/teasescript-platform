@@ -342,6 +342,7 @@ test("every alias member answers as its class does at every decided path, in bot
       ...W44_VARIANTS,
       ...W45_VARIANTS,
       ...ADMISSION_FAMILIES,
+      ...ADMISSION_SAME_SOURCES,
     ])
       for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
     for (const { name, files } of ORACLE_PROGRAMS) run(name, files, reversed);
@@ -388,6 +389,7 @@ test("resolving chains of copies changes no published record or writer, in both 
       ...W44_VARIANTS,
       ...W45_VARIANTS,
       ...ADMISSION_FAMILIES,
+      ...ADMISSION_SAME_SOURCES,
     ])
       for (const k of [2, 3, 5]) compare(`${family.name} at ${k}`, family.program(k), reversed);
   for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])

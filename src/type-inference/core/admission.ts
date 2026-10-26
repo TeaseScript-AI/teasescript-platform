@@ -199,6 +199,11 @@ interface ChainEnd {
   readonly written: string;
 }
 
+/** The path below an add's added value for a path below its list (an `addAll`'s value stands for the list's elements). */
+function addRest(d: Definition, rest: readonly string[]): readonly string[] {
+  return d.how === "elements" ? rest : rest.slice(1);
+}
+
 /** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
 function aliasKeyAt(alias: Alias, rest: readonly string[]): Key | null {
   if (rest.length < alias.at.length || alias.at.some((step, index) => rest[index] !== step))
@@ -292,6 +297,8 @@ interface Stops {
 /** A store's stops at one key (`#keyStops`): the selected ones in evaluation order, its sitings and named data. */
 interface KeyStops {
   readonly selected: readonly Stop[];
+  /** The selected ones, each snapshot once (`#distinct`). */
+  readonly distinct: () => readonly Stop[];
   readonly sitings: () => readonly Siting[];
   /** Of the sitings, the named data's (`ingress` null, no member of host data). */
   readonly namedSitings: () => readonly Siting[];
@@ -903,32 +910,35 @@ export class Admission {
       marked(this.valueAt(d, rest))
         .map((item) => itemText(item, writers))
         .sort();
-    for (const { key: prefix, rest } of prefixes)
-      for (const representative of this.#wholeOf(prefix, false)) {
-        const members = this.#members.get(representative);
-        if (members === undefined || !this.#covers(representative, rest)) continue;
-        for (const member of members) {
-          const writers =
-            this.#aliases.get(representative)!.chained !== true &&
-            this.#aliases.get(member)!.chained !== true;
-          const theirs = answer(representative, rest, writers);
-          const own = answer(member, rest, writers);
-          // (each with its own guard: a guarded one's answer is the other's marked)
-          const expected =
-            own.guard === theirs.guard || !own.guard
-              ? theirs.items
-              : marks(representative, rest, writers);
-          const actual =
-            own.guard !== theirs.guard && theirs.guard ? marks(member, rest, writers) : own.items;
-          report(
-            own.domain === theirs.domain && JSON.stringify(expected) === JSON.stringify(actual)
-              ? null
-              : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} ` +
-                  `(written ${own.domain}) at ${rest.join(".")}, its class at ${representative.site.start} ` +
-                  `${JSON.stringify(expected)} (written ${theirs.domain})`,
-          );
+    // (a prefix's whole stores' classes and, below an element step, its adds', §4.5)
+    for (const { key: prefix, rest: below } of prefixes)
+      for (const add of below[0] === "element" ? [false, true] : [false])
+        for (const representative of this.#wholeOf(prefix, add)) {
+          const members = this.#members.get(representative);
+          const rest = add ? addRest(representative, below) : below;
+          if (members === undefined || !this.#covers(representative, rest)) continue;
+          for (const member of members) {
+            const writers =
+              this.#aliases.get(representative)!.chained !== true &&
+              this.#aliases.get(member)!.chained !== true;
+            const theirs = answer(representative, rest, writers);
+            const own = answer(member, rest, writers);
+            // (each with its own guard: a guarded one's answer is the other's marked)
+            const expected =
+              own.guard === theirs.guard || !own.guard
+                ? theirs.items
+                : marks(representative, rest, writers);
+            const actual =
+              own.guard !== theirs.guard && theirs.guard ? marks(member, rest, writers) : own.items;
+            report(
+              own.domain === theirs.domain && JSON.stringify(expected) === JSON.stringify(actual)
+                ? null
+                : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} ` +
+                    `(written ${own.domain}) at ${rest.join(".")}, its class at ${representative.site.start} ` +
+                    `${JSON.stringify(expected)} (written ${theirs.domain})`,
+            );
+          }
         }
-      }
   }
 
   /**
@@ -1008,11 +1018,8 @@ export class Admission {
       scans.push({ ds: this.#eligibleOf(prefix, rest), at: () => rest });
     for (const { key: prefix, rest } of prefixes)
       if (rest[0] === "element") {
-        const adds = this.#wholeOf(prefix, true);
-        scans.push({
-          ds: adds,
-          at: (index) => (adds[index]!.how !== "elements" ? rest.slice(1) : rest),
-        });
+        const adds = this.#eligibleOf(prefix, rest, true);
+        scans.push({ ds: adds, at: (index) => addRest(adds[index]!, rest) });
       }
     const positions = scans.map(() => 0);
     let sawNull = false;
@@ -1185,7 +1192,7 @@ export class Admission {
       );
       program.work.charge("checks", sortCost(list.length));
       list.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
-      if (!add) list = this.#grouped(list);
+      list = this.#grouped(list);
       this.#whole.set(memoKey, list);
     }
     return list;
@@ -1196,12 +1203,13 @@ export class Admission {
    * and where a guard of the path holds it, its class's earliest eligible member too, which stands where it is in source
    * order and decides with its own answer (a guard marks a read possible, so it decides nothing).
    */
-  #eligibleOf(prefix: Key, rest: readonly string[]): Definition[] {
-    const list = this.#wholeOf(prefix, false);
+  #eligibleOf(prefix: Key, below: readonly string[], add = false): Definition[] {
+    const list = this.#wholeOf(prefix, add);
     let out: Definition[] | null = null;
     for (const [index, representative] of list.entries()) {
       const members = this.#members.get(representative);
       if (members === undefined) continue;
+      const rest = add ? addRest(representative, below) : below;
       if (!this.#covers(representative, rest)) {
         // (beside or above a literal's alias cell each member stands by itself)
         out ??= list.slice(0, index);
@@ -1257,8 +1265,18 @@ export class Admission {
     const { guards } = this.pass;
     const alias = this.#aliases.get(representative)!;
     const children = new Map<string, Set<string>>([["", new Set()]]);
-    for (const rest of this.#demandsOf(prefix)) {
-      const at = aliasKeyAt(alias, rest);
+    for (const demanded of this.#demandsOf(prefix)) {
+      // (an add's class answers below its added value: a demand below the list's element)
+      if (
+        representative.kind === "add" &&
+        representative.how !== "elements" &&
+        demanded[0] !== "element"
+      )
+        continue;
+      const at = aliasKeyAt(
+        alias,
+        representative.kind === "add" ? addRest(representative, demanded) : demanded,
+      );
       if (at === null) continue;
       const full = recordKey(at);
       let parent = "";
@@ -1422,9 +1440,9 @@ export class Admission {
   }
 
   /**
-   * §8, S6-CARRIERS §4.1: a key's whole stores by alias class (`#aliasKey`), once per pass, in the key's own list (`#wholeOf`):
-   * their earliest as the representative, the later ones its members (`#members`); a scan or a check reads the
-   * representative, and a member only where it owes something.
+   * §8, S6-CARRIERS §4.1, §4.5: a key's whole stores, or its adds, by alias class (`#aliasKey`), once per pass, in the
+   * key's own list (`#wholeOf`): their earliest as the representative, the later ones its members (`#members`); a scan
+   * or a check reads the representative, and a member only where it owes something.
    */
   #grouped(list: readonly Definition[]): Definition[] {
     const out: Definition[] = [];
@@ -1455,7 +1473,7 @@ export class Admission {
     const seen = new Set<Definition>();
     for (const d of list) {
       this.pass.program.work.charge("indexSteps");
-      if (d.kind === "whole") this.#wholeOf(d.key, false);
+      if (d.kind === "whole" || d.kind === "add") this.#wholeOf(d.key, d.kind === "add");
       const representative = this.#representative.get(d) ?? d;
       if (seen.has(representative)) continue;
       seen.add(representative);
@@ -1465,16 +1483,17 @@ export class Admission {
   }
 
   /**
-   * S6-CARRIERS §4.1: the class a whole store's value is an alias in: where it is a stable source path (`#stablePath`),
-   * or a literal whose one read cell is one and whose other cells are terms, at that cell's path, the literal's identity
-   * beside it (r4.17: no guard in it). The path, with the read's exact-path signature (`aliasSignature`), the
-   * handlers' facts at its node and the written type A4 decides the copy by: stores of one class bring equal answers
-   * below the path, their own guards apart (a literal's only below its cell, `#covers`); `null` for any other store (an
-   * own entry).
+   * S6-CARRIERS §4.1: the class a whole store's value, or an add's added value (§4.5: its class by its mode, an element
+   * or an `addAll`'s elements), is an alias in: where it is a stable source path (`#stablePath`), or a literal whose one
+   * read cell is one and whose other cells are terms, at that cell's path, the literal's identity beside it (r4.17: no
+   * guard in it). The path, with the read's exact-path signature (`aliasSignature`), the handlers' facts at its node and
+   * the written type A4 decides the copy by: stores of one class bring equal answers below the path, their own guards
+   * apart (a literal's only below its cell, `#covers`); `null` for any other store (an own entry).
    */
   #aliasKey(d: Definition): string | null {
     const { program, lists, handlers, contract } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined || !sharing()) return null;
+    if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined || !sharing())
+      return null;
     program.work.charge("aliasSteps");
     let alias: Alias | null = null;
     let shape = "";
@@ -1531,6 +1550,8 @@ export class Admission {
     if (end !== null) alias.chained = true;
     const read = end ?? { ...alias, written };
     return [
+      // (an add's class stands below its added value, element by element or as its elements, §4.5)
+      d.kind === "add" ? `add:${d.how === "elements" ? "elements" : "element"}` : "",
       shape,
       end === null || this.#untested(alias.source) ? "" : alias.source,
       read.source,
@@ -1681,7 +1702,11 @@ export class Admission {
         if (d.kind === "whole") wholes.push(d);
         else if (d.kind === "add") adds.push(d);
     wholes.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
-    return (known[index] = { wholes: this.#representatives(wholes), adds });
+    adds.sort((a, b) => this.sourceOrder(a) - this.sourceOrder(b));
+    return (known[index] = {
+      wholes: this.#representatives(wholes),
+      adds: this.#representatives(adds),
+    });
   }
 
   /** Whether a value is a read of a host value: external data, with no kind and no `null` at any path. */
@@ -2475,7 +2500,7 @@ export class Admission {
   #distinct(list: readonly Stop[]): Stop[] {
     if (!sharing()) return [...list];
     const { program, contract } = this.pass;
-    const seen = new Map<readonly Via[], Set<string>>();
+    const seen = new Set<string>();
     const out: Stop[] = [];
     for (const stop of list) {
       program.work.charge("checks");
@@ -2483,11 +2508,9 @@ export class Admission {
         contract.readSnapshot(stop.value) ??
         (contract.resultKey(stop.value) === null ? null : `c${contract.identityOf(stop.value).id}`);
       if (read !== null) {
-        const snapshot = `${stop.strip.join(".")}|${stop.deep}|${stop.single}|${read}`;
-        let reads = seen.get(stop.via);
-        if (reads === undefined) seen.set(stop.via, (reads = new Set()));
-        if (reads.has(snapshot)) continue;
-        reads.add(snapshot);
+        const snapshot = `${this.#viaSignature(stop.via)}|${stop.strip.join(".")}|${stop.deep}|${stop.single}|${read}`;
+        if (seen.has(snapshot)) continue;
+        seen.add(snapshot);
       }
       out.push(stop);
     }
@@ -2569,7 +2592,8 @@ export class Admission {
   /**
    * A store's contributions at `at`, in evaluation order: the stops of the one walk (`#stopsOf`, the carrier table's)
    * standing at the path or above it, each with the rest of the path to read into it, the ones its operations may give
-   * (S: `#chosen`, a live read). The obligations come from these, as the decider does (invariant O).
+   * (S: `#chosen`, a live read), each snapshot once (`#distinct`, S6-CARRIERS §4.5). The obligations come from these,
+   * as the decider does (invariant O).
    */
   #contributions(
     d: Definition,
@@ -2578,7 +2602,7 @@ export class Admission {
     if (d.value === undefined) return [];
     const out: { stop: Stop; rest: readonly string[] }[] = [];
     for (let length = 0; length <= at.length; length += 1)
-      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).selected) {
+      for (const stop of this.#keyStops(d, at.slice(0, length).join(".")).distinct()) {
         this.pass.program.work.charge("checks");
         out.push({ stop, rest: at.slice(length) });
       }
@@ -2681,9 +2705,11 @@ export class Admission {
     };
     let sitings: readonly Siting[] | null = null;
     let namedSitings: readonly Siting[] | null = null;
+    let distinct: readonly Stop[] | null = null;
     let named: readonly Stop[] | null = null;
     const entry: KeyStops = {
       selected,
+      distinct: () => (distinct ??= this.#distinct(selected)),
       // an operation's own read is no contribution C1 is sited at (C10); named data below a combining operation or a
       // member of named data is sited at its own expression (`ingress` null), an ingress where it is read
       sitings: () => {
@@ -2796,6 +2822,7 @@ export class Admission {
   public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
     const { contract, values } = this.pass;
     const { inline } = this.#storeIngresses(d);
+    // (each snapshot once: equal reads of one source through one chain hold equal named data, S6-CARRIERS §4.5)
     for (const { stop, rest } of this.#contributions(d, at)) {
       const source = this.#sourceOf(stop.value);
       if (source === null || inline.has(stop.value)) continue;

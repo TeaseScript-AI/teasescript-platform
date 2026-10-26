@@ -2255,6 +2255,48 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
         ),
       ),
   },
+  // Astra r5 B2: the same with a root of unknown-bearing fields, whose adds and options admission reads at every field:
+  // an add's class and a choice's options of one snapshot read once (S6-CARRIERS §4.5)
+  {
+    name: "A5-same-source-adds-unknown",
+    measures:
+      "§4.5, A5: k `xs.add(root)` of one k-field record of host data, every field of `xs[0]` read",
+    // 321,487 / 1,168,594 units at k = 64, 128 in both orders (3.6498; 456,577 / 1,733,444 before the add classes): the
+    // value side's reaching-definition walk, as on `main` (1,120,428 at k = 128), the excess over `main` linear;
+    // admission's counters at most 2.20 (`eligibility`)
+    measured: 3.65,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add(root)"),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-same-source-choices-unknown",
+    measures:
+      "§4.5, A8: a choice of k options whose value is one k-field record of host data, every field read",
+    // 196,485 / 672,007 units at k = 64, 128 in both orders (3.4341; 244,419 / 866,181 before the option stops were
+    // shared): the choice's items, one per option at each field read, as on `main` (528,234 at k = 128), which the A5
+    // candidates' test of the choice's own entry at each field reads a second time (the excess over `main` 3.37 per
+    // doubling, the inherited product's own, S6c's); admission's counters at most 2.04 (`checks`)
+    measured: 3.44,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "a${i}", value: root}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**
