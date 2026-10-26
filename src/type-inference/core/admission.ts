@@ -293,6 +293,14 @@ interface KeyStops {
   readonly named: () => readonly Stop[];
 }
 
+/** A store's landing stops by ingress (`#storeIngresses`): held whole, brought as members, each one's first stop. */
+interface StoreIngresses {
+  readonly inline: ReadonlySet<PlaceId>;
+  readonly members: ReadonlySet<PlaceId>;
+  /** The index of an ingress's first stop in the store's list (`LandingIndex.byStore`). */
+  readonly first: ReadonlyMap<PlaceId, number>;
+}
+
 /** A contribution C1 may be sited at (`ingressSiteOf`): the ingress it reads, or `null` for named data sited by itself. */
 interface Siting {
   readonly stop: Stop;
@@ -428,6 +436,8 @@ export class Admission {
   readonly #someOwn = new Map<number, Map<IngressNode, boolean>>();
   readonly #wholeItems = new Map<number, Map<IngressNode, boolean>>();
   readonly #firstStops = new Map<number, Map<IngressNode, IngressStop | null>>();
+  /** Per store, its landing stops by ingress (`#storeIngresses`). */
+  readonly #byIngress = new Map<number, StoreIngresses>();
   /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
   readonly #snapshotLists = new WeakMap<readonly Stop[], (readonly Stop[] | undefined)[]>();
   readonly #resolved = new Map<IngressNode, boolean>();
@@ -2427,6 +2437,7 @@ export class Admission {
     return out;
   }
 
+
   /**
    * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
    * definitely in its own value there.
@@ -2618,11 +2629,7 @@ export class Admission {
       // named external data outside every ingress the store holds whole and every own read (`#namedBeside`)
       named: () => {
         if (named !== null) return named;
-        const inline = new Set(
-          (this.#landingIndex().byStore.get(d) ?? [])
-            .filter((stop) => stop.whole)
-            .map((stop) => stop.ingress),
-        );
+        const { inline } = this.#storeIngresses(d);
         const out: Stop[] = [];
         for (const stop of selected) {
           program.work.charge("checks");
@@ -2703,11 +2710,7 @@ export class Admission {
    */
   public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
     const { contract, values } = this.pass;
-    const inline = new Set(
-      (this.#landingIndex().byStore.get(d) ?? [])
-        .filter((stop) => stop.whole)
-        .map((stop) => stop.ingress),
-    );
+    const { inline } = this.#storeIngresses(d);
     for (const { stop, rest } of this.#contributions(d, at)) {
       const source = this.#sourceOf(stop.value);
       if (source === null || inline.has(stop.value)) continue;
@@ -3282,13 +3285,17 @@ export class Admission {
     const stops = this.#landingIndex().byStore.get(d);
     if (stops === undefined) return false;
     const ingresses = this.#leafIngresses(item.ingress);
-    // (whether the store holds the item's data whole and nowhere as a member reads no path: once per provenance node)
+    // (whether the store holds the item's data whole and nowhere as a member reads no path: once per provenance node,
+    // its leaves asked of the store's index)
     const whole = this.#perNode(this.#wholeItems, d, item.ingress, () => {
-      this.pass.program.work.charge("checks", stops.length);
-      return (
-        stops.some((stop) => stop.whole && ingresses.has(stop.ingress)) &&
-        !stops.some((stop) => !stop.whole && ingresses.has(stop.ingress))
-      );
+      const { inline, members } = this.#storeIngresses(d);
+      let held = false;
+      for (const ingress of ingresses) {
+        this.pass.program.work.charge("checks");
+        if (members.has(ingress)) return false;
+        if (inline.has(ingress)) held = true;
+      }
+      return held;
     });
     return whole && !this.#meet(ingresses, this.#namedBeside(d, at));
   }
@@ -3354,12 +3361,35 @@ export class Admission {
     if (stops === undefined) return null;
     const ingresses = this.#leafIngresses(item.ingress);
     return this.#perNode(this.#firstStops, d, item.ingress, () => {
-      for (const stop of stops) {
+      const { first } = this.#storeIngresses(d);
+      let earliest = -1;
+      for (const ingress of ingresses) {
         this.pass.program.work.charge("checks");
-        if (ingresses.has(stop.ingress)) return stop;
+        const index = first.get(ingress);
+        if (index !== undefined && (earliest < 0 || index < earliest)) earliest = index;
       }
-      return null;
+      return earliest < 0 ? null : stops[earliest]!;
     });
+  }
+
+  /**
+   * A store's landing stops by ingress, once per store (Codex r24 F1: an item's leaves ask it, never the store's list
+   * again): the ingresses it holds whole, those it brings as members, and each ingress's first stop.
+   */
+  #storeIngresses(d: Definition): StoreIngresses {
+    const known = this.#byIngress.get(d.uid);
+    if (known !== undefined) return known;
+    const inline = new Set<PlaceId>();
+    const members = new Set<PlaceId>();
+    const first = new Map<PlaceId, number>();
+    (this.#landingIndex().byStore.get(d) ?? []).forEach((stop, index) => {
+      this.pass.program.work.charge("checks");
+      (stop.whole ? inline : members).add(stop.ingress);
+      if (!first.has(stop.ingress)) first.set(stop.ingress, index);
+    });
+    const out: StoreIngresses = { inline, members, first };
+    this.#byIngress.set(d.uid, out);
+    return out;
   }
 
   /** C9: the boundary check of an ingress store, once, against its destination's admitted type when it is published. */

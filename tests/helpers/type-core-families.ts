@@ -2110,6 +2110,20 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       );
     },
   })),
+  // Codex r24 F1: k distinct ingresses at k fields, each its own provenance node, asked of the store's index
+  {
+    name: "A2-wide-ingress-fields",
+    measures: "§3.1: `let out = {f_i: hostValue}` at k, decided at k fields, each read (Codex r24 F1)",
+    program: (k) =>
+      main(
+        lines(
+          `let out = {${fields(k, () => "hostValue")}}`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**
