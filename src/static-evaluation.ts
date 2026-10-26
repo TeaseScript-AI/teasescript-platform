@@ -468,6 +468,8 @@ export const KNOWN_VALUE_WORK = 10_000_000;
 export class KnownValues {
   readonly #values = new Map<Expression, KnownValue | undefined>();
   readonly #initializer: (identifier: Identifier) => Expression | undefined;
+  /** The expressions whose value the plan decides beyond what the fold sees, such as a typed `fromJson`: never known. */
+  readonly #opaque: (expression: Expression) => boolean;
   /** The work left (see `KNOWN_VALUE_WORK`), which regex searches also use up. */
   readonly #work = { remaining: KNOWN_VALUE_WORK };
   /** The work each list, set, dict, regex, or date and time value takes (see `knownSize`), once it was measured. */
@@ -475,8 +477,10 @@ export class KnownValues {
 
   public constructor(
     initializer: (identifier: Identifier) => Expression | undefined = () => undefined,
+    opaque: (expression: Expression) => boolean = () => false,
   ) {
     this.#initializer = initializer;
+    this.#opaque = opaque;
   }
 
   /**
@@ -507,6 +511,11 @@ export class KnownValues {
     while (pending.length > 0) {
       const current = pending.at(-1)!;
       if (this.#values.has(current)) {
+        pending.pop();
+        continue;
+      }
+      if (this.#opaque(current)) {
+        this.#values.set(current, undefined);
         pending.pop();
         continue;
       }

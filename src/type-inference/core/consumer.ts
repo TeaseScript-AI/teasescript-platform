@@ -445,12 +445,17 @@ export function coreCheckResult(
     sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
     diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, answers, index, request));
   }
-  const values = new KnownValues((identifier) => {
-    const initializer = answers.initializers.get(
-      siteKey(index.fileOf(identifier), identifier.span),
-    );
-    return initializer === undefined ? undefined : index.expressionAt(initializer);
-  });
+  const { checks, core } = runtimeChecks(answers, index, request);
+  // a `fromJson` that reads its JSON as an expected type gives what the plan decides, which the fold does not see
+  const values = new KnownValues(
+    (identifier) => {
+      const initializer = answers.initializers.get(
+        siteKey(index.fileOf(identifier), identifier.span),
+      );
+      return initializer === undefined ? undefined : index.expressionAt(initializer);
+    },
+    (expression) => expression.kind === "callExpression" && core.expected.has(expression),
+  );
   const known = (expression: Expression) => values.known(expression);
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
@@ -480,7 +485,6 @@ export function coreCheckResult(
     } else if (statement.kind === "sayStatement")
       diagnostics[index.fileOf(statement)]!.push(...messageColorDiagnostics(statement.value));
   for (const list of diagnostics) list.sort((a, b) => a.span.start.offset - b.span.start.offset);
-  const { checks, core } = runtimeChecks(answers, index, request);
   return {
     diagnostics,
     runtimeChecks: checks,
@@ -521,22 +525,25 @@ function runtimeChecks(
     repairs: new Set<LoadExpression>(),
   };
   const owed: Obligation[] = [];
+  const fallbacks = new Map<
+    BinaryExpression | CallExpression,
+    { readonly fallback: Expression; readonly depths: FallbackDepth[] }
+  >();
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.class !== "warning-runtime-check") continue;
     const expression = index.expressionAt(diagnostic.site);
     switch (diagnostic.kind) {
       case "written-target": {
-        // C10's obligation names the fallback's own text as its target, C1's a place (S6's departure 6)
-        const owner =
-          diagnostic.obligation.target === textOf(expression)
-            ? index.fallbackOf(expression)
-            : undefined;
+        // C10's obligation names the fallback's own text as its target, with the element steps of a nested literal's
+        // depth, C1's a place (S6's departure 6)
+        const steps = fallbackSteps(diagnostic.obligation.target, textOf(expression));
+        const owner = steps === null ? undefined : index.fallbackOf(expression);
         if (owner === undefined) owed.push(diagnostic.obligation);
-        // C10: a load's default is checked as the load's result; any other where it is selected
-        else if (owner.kind !== "loadExpression" && !core.fallbackChecks.has(owner)) {
-          const type = kindsPlan(diagnostic.obligation.against);
-          if (type !== null)
-            core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
+        // C10: a load's default is checked as the load's result; any other where it is selected, all its depths at once
+        else if (owner.kind !== "loadExpression") {
+          const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
+          found.depths.push({ steps: steps!, against: diagnostic.obligation.against });
+          fallbacks.set(owner, found);
         }
         break;
       }
@@ -555,6 +562,11 @@ function runtimeChecks(
       case "operator":
         break;
     }
+  }
+  for (const [owner, { fallback, depths }] of fallbacks) {
+    const type = fallbackPlan(fallback, depths);
+    if (type !== null)
+      core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
   owed.push(...answers.checks.filter((check) => check.boundary));
   // the types a typed load and a `fromJson` read their value as (F18)
@@ -588,6 +600,90 @@ function runtimeChecks(
     if (type !== null) checks.set(store, type);
   }
   return { checks, core };
+}
+
+/** C10's obligation at one depth of a fallback: its element steps below the fallback, and the kinds it requires there. */
+interface FallbackDepth {
+  readonly steps: readonly string[];
+  readonly against: readonly RequiredKind[];
+}
+
+/** The element steps of a C10 target below the fallback whose text is `text`, or `null` for another target (a C1's). */
+function fallbackSteps(target: string, text: string): string[] | null {
+  if (target === text) return [];
+  if (!target.startsWith(`${text}.`)) return null;
+  const steps = target.slice(text.length + 1).split(".");
+  return steps.every((step) => step === "element" || step === "entry") ? steps : null;
+}
+
+/**
+ * The check of a selected fallback from C10's obligations at its depths (ADR 0021 7.2, nested literals by their
+ * elements): at each depth the kinds required there, the collection below it as the fallback's literal is one, else a
+ * list or a set for an element and a dict for an entry; `null` where no depth requires a kind.
+ */
+function fallbackPlan(fallback: Expression, depths: readonly FallbackDepth[]): TypePlan | null {
+  const deepest = Math.max(...depths.map((depth) => depth.steps.length));
+  // the literal the fallback's value is at each depth, as far as a literal holds it
+  const literals: (Expression | null)[] = [];
+  for (
+    let at: Expression | null = selectedLiteral(fallback), depth = 0;
+    depth <= deepest;
+    depth += 1
+  ) {
+    literals.push(at);
+    at =
+      at !== null &&
+      (at.kind === "listLiteral" || at.kind === "setLiteral") &&
+      at.elements.length > 0
+        ? selectedLiteral(at.elements[0]!)
+        : null;
+  }
+  let below: TypePlan | null = null;
+  for (let depth = deepest; depth >= 0; depth -= 1) {
+    const here = depths.filter((entry) => entry.steps.length === depth);
+    const kinds = here.flatMap((entry) => entry.against);
+    const step = depths.find((entry) => entry.steps.length > depth)?.steps[depth];
+    const literal = literals[depth] ?? null;
+    const collections: TypePlan[] =
+      below === null || step === undefined
+        ? []
+        : step === "entry"
+          ? [{ kind: "dict", element: below }]
+          : literal?.kind === "listLiteral"
+            ? [{ kind: "list", element: below }]
+            : literal?.kind === "setLiteral"
+              ? [{ kind: "set", element: below }]
+              : [
+                  { kind: "list", element: below },
+                  { kind: "set", element: below },
+                ];
+    const others = kindsPlan(
+      collections.length === 0
+        ? kinds
+        : kinds.filter((kind) => kind !== "list" && kind !== "set" && kind !== "dict"),
+    );
+    const parts = [...collections, ...(others === null ? [] : [others])];
+    below = parts.length === 0 ? null : unionOf(parts);
+  }
+  return below;
+}
+
+/** The literal a value is, through parentheses and constant indexes of list literals, or `null`. */
+function selectedLiteral(expression: Expression): Expression | null {
+  let at = unwrap(expression);
+  while (at.kind === "indexExpression") {
+    const list = unwrap(at.object);
+    const index = unwrap(at.index);
+    const element =
+      list.kind === "listLiteral" && index.kind === "numberLiteral"
+        ? list.elements[index.value]
+        : undefined;
+    if (element === undefined) return null;
+    at = unwrap(element);
+  }
+  return at.kind === "listLiteral" || at.kind === "setLiteral" || at.kind === "dictLiteral"
+    ? at
+    : null;
 }
 
 /** The check of a store: the destination's written type, or else its admitted type at the stored path (A1–A9). */
