@@ -390,16 +390,25 @@ test("every alias member answers as its class does at every decided path, in bot
       ],
     }));
   });
-  // a list cell beside a term of its literal's own at its path, plain and guarded: no alias (Codex r22 F5)
-  const beside = ["box = [root, 2.0]", "if root != null {\n  box = [root, 2.0]\n}"].map((copy) => ({
-    name: `a list cell beside its literal's own term: ${copy}`,
-    files: [
-      {
-        path: "main.tease",
-        source: `let root = 1\nlet box = [root, 2.0]\n${copy}\nrepeat box[0] {}\nexit`,
-      },
-    ],
-  }));
+  // a cell beside a term of its literal's own at its path, or below an object of it without the cell's property (its
+  // `missing` there), plain and guarded: no alias (Codex r22 F5, r23 F2)
+  const beside = (
+    [
+      ["[root, 2.0]", "[0]"],
+      ["[{f: root}, {g: 1}]", "[0].f"],
+      ["dict{a: {f: root}, b: {g: 1}}", '["a"].f'],
+    ] as const
+  ).flatMap(([literal, read]) =>
+    [`box = ${literal}`, `if root != null {\n  box = ${literal}\n}`].map((copy) => ({
+      name: `a cell beside its literal's own contribution: ${copy}`,
+      files: [
+        {
+          path: "main.tease",
+          source: `let root = 1\nlet box = ${literal}\n${copy}\nrepeat box${read} {}\nexit`,
+        },
+      ],
+    })),
+  );
   for (const reversed of [false, true]) {
     for (const family of [
       ...WORK_FAMILIES,

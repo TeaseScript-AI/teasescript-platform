@@ -1436,20 +1436,23 @@ export class Admission {
         }
       // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not; and the
       // read the only contribution at and below its path, no term, object or empty collection of the literal's own
-      // there beside it, Codex r22 F5)
+      // there beside it, Codex r22 F5, nor an object on the way to it without its next step, whose `missing` stands
+      // there too, Codex r23 F2)
       if (cell === null || [...index.exact.values()].flat().length !== 1) return null;
       const at = cell.path;
       const beside = (path: string): boolean => path === at || path.startsWith(`${at}.`);
-      for (const paths of [
-        index.terms.keys(),
-        index.objects.keys(),
-        index.empty.keys(),
-        index.lacking.keys(),
-      ])
+      for (const paths of [index.terms.keys(), index.objects.keys(), index.empty.keys()])
         for (const path of paths) {
           program.work.charge("aliasSteps");
           if (beside(path)) return null;
         }
+      const steps = at === "" ? [] : at.split(".");
+      for (let length = 0; length < steps.length; length += 1) {
+        program.work.charge("aliasSteps");
+        const objects = index.objects.get(steps.slice(0, length).join("."));
+        if (objects !== undefined && (objects.count.get(steps[length]!) ?? 0) < objects.list.length)
+          return null;
+      }
       const read = this.#stablePath(cell.value, d.node);
       if (read === null) return null;
       alias = {
