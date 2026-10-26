@@ -1740,6 +1740,81 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // S6-CARRIERS §4.1, §4.7: whole copies of a stable source path (R5-F1's projected copies), alias members of one class
+  // where no event below the path separates them, and the conditional-write variants (Astra's fourth round M1, the
+  // orchestrator's condition (a)): a conditional store below the path before or between the copies
+  ...(
+    [
+      ["A2-projected-wide-copies", "root.nested", false, "none"],
+      ["A2-projected-stable-copies", "stable", false, "none"],
+      ["A2-projected-mutable-source", "root.nested", false, "store"],
+      ["A2-projected-conditional-before", "root.nested", true, "before"],
+      ["A2-projected-conditional-between", "root.nested", true, "between"],
+    ] as const
+  ).map(([name, copied, nulls, event]): WorkFamily => ({
+    name,
+    measures: `§4.1, A2: k + 1 whole copies of \`${copied}\`, a k-field record of named host data, every field read${event === "none" ? "" : event === "store" ? ", a store below it between the copies" : `, a conditional store below it ${event} the copies`}`,
+    program: (k) => {
+      const half = k >> 1;
+      const copies = (count: number): string => rows(count, () => `box = ${copied}`);
+      const write =
+        event === "store" ? "root.nested.f0 = 1" : "if raw != null { root.nested.f0 = 1 }";
+      return main(
+        lines(
+          "let raw = hostValue",
+          `let root = {nested: {${fields(k, () => "[1, raw][1]")}}}`,
+          ...(copied === "stable" ? ["let stable = root.nested"] : []),
+          nulls ? `let box = {${fields(k, () => "null")}}` : `let box = ${copied}`,
+          ...(event === "before" ? [write] : []),
+          ...(event === "between" || event === "store"
+            ? [copies(half), write, copies(k - half)]
+            : [copies(k)]),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  })),
+  {
+    name: "A2-published-wide-copies-conditional",
+    measures:
+      "§4.1, A2, C9 r4.12: A2-published-wide-copies with a conditional store into the record before the copies (M1)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let box = root",
+          "if raw != null { root.f0 = 1 }",
+          rows(k, () => "box = root"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...(["one region", "k regions"] as const).map((variant): WorkFamily => ({
+    name: `A2-guarded-quiet-copies-${variant.replace(" ", "-")}`,
+    measures: `§4.3, A2: k copies of a k-field record guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read and fitting`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let box = root",
+          variant === "one region"
+            ? lines(
+                "if root != null {",
+                rows(k, () => "  box = root"),
+                "}",
+              )
+            : lines(
+                rows(k, () => "if root != null { box = root }"),
+                "box = root",
+              ),
+          rows(k, (i) => `let n${i}: integer = box.f${i}`),
+          "exit",
+        ),
+      ),
+  })),
   {
     name: "A8-added-presets",
     measures:

@@ -15,7 +15,9 @@ import {
 } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
+import { marked } from "./guards.js";
 import {
+  ingressLeaves,
   REASON,
   writerKey,
   type IngressNode,
@@ -24,7 +26,7 @@ import {
   type Writer,
 } from "./items.js";
 import { conversionCategory, dictList, measuresLength } from "./method-categories.js";
-import { propertyStep } from "./program.js";
+import { propertyStep, stepName } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import type { Work } from "./solver.js";
 import { getProof } from "./values.js";
@@ -113,6 +115,37 @@ const COMBINING_ROLES: ReadonlySet<CarrierRole> = new Set([
   "concatenation/operand",
   "removal/receiver",
 ]);
+
+/**
+ * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), for the tests: while `withMemberOracle`
+ * runs, every decided path compares each alias member's own answer with its class representative's, each with its own
+ * guard applied (`marked` where a test of the read's path holds its node), and reports every difference and every
+ * comparison made.
+ */
+let memberOracle: { readonly report: (difference: string | null) => void } | null = null;
+
+export function withMemberOracle<T>(
+  report: (difference: string | null) => void,
+  callback: () => T,
+): T {
+  if (memberOracle !== null) throw new Error("The member-answer oracle is already active.");
+  memberOracle = { report };
+  try {
+    return callback();
+  } finally {
+    memberOracle = null;
+  }
+}
+
+/** An item as the oracle compares it: every field, its leaves by their ingresses. */
+function itemText(item: Item): string {
+  const { ingress, ...rest } = item;
+  return JSON.stringify({
+    ...rest,
+    writer: item.writer === null ? null : writerKey(item.writer),
+    leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey),
+  });
+}
 
 /** The kinds whose length is built in (F14): a text's, a collection's. */
 const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
@@ -226,7 +259,7 @@ interface Structure {
 export interface Candidate {
   readonly d: Definition;
   readonly at: readonly string[];
-  /** The later stores that bring the same value whole (`#copyKey`): checked only where `d` owes something (§8). */
+  /** The later stores of `d`'s alias class (`#aliasKey`): checked only where `d` owes something (§8, S6-CARRIERS §4.1). */
   readonly members?: readonly Definition[];
 }
 
@@ -294,8 +327,9 @@ export class Admission {
    * (`#representative`), and the bindings defined by one whole store.
    */
   readonly #members = new Map<Definition, Definition[]>();
+  /** An alias's source path and the node it is read at (`#aliasKey`). */
+  readonly #aliases = new Map<Definition, { readonly source: Key; readonly read: FlowNode }>();
   readonly #representative = new Map<Definition, Definition>();
-  #definedOnce: Set<PlaceId> | null = null;
   /** The expected types of typed ingresses by identity, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
@@ -565,6 +599,7 @@ export class Admission {
     const inputs = this.#inputs(root, path);
     if (inputs === null) return null;
     const { direct, prefixes } = inputs;
+    if (memberOracle !== null) this.#compareMembers(root, path, prefixes);
     const key = keyOf(root, path);
     const written = writtenOf(place.kind);
     const term = written === null ? null : termAt(written, path);
@@ -727,6 +762,43 @@ export class Admission {
       candidates: ordered,
       published,
     };
+  }
+
+  /** The member-answer oracle at a decided path (`withMemberOracle`): every class at each prefix, at its rest. */
+  #compareMembers(
+    root: PlaceId,
+    path: readonly string[],
+    prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
+  ): void {
+    const { guards } = this.pass;
+    const report = memberOracle!.report;
+    const answer = (d: Definition, rest: readonly string[]): string[] => {
+      const alias = this.#aliases.get(d)!;
+      const items = this.valueAt(d, rest);
+      const key = keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]);
+      return [guards.narrowed(key, alias.read) ? "g" : "", ...items.map(itemText).sort()];
+    };
+    const marks = (d: Definition, rest: readonly string[]): string[] =>
+      marked(this.valueAt(d, rest)).map(itemText).sort();
+    for (const { key: prefix, rest } of prefixes)
+      for (const representative of this.#wholeOf(prefix, false)) {
+        const members = this.#members.get(representative);
+        if (members === undefined) continue;
+        const [first, ...items] = answer(representative, rest);
+        for (const member of members) {
+          const [own, ...theirs] = answer(member, rest);
+          // (each with its own guard: a guarded one's answer is the other's marked)
+          const expected =
+            own === first ? items : own === "g" ? marks(representative, rest) : items;
+          const actual = own !== first && first === "g" ? marks(member, rest) : theirs;
+          report(
+            JSON.stringify(expected) === JSON.stringify(actual)
+              ? null
+              : `${keyOf(root, path)}: the member at ${member.site.start} answers ${JSON.stringify(actual)} at ` +
+                  `${rest.join(".")}, its class at ${representative.site.start} ${JSON.stringify(expected)}`,
+          );
+        }
+      }
   }
 
   /**
@@ -990,7 +1062,7 @@ export class Admission {
   }
 
   /**
-   * §8: the stores of one value whole (`#copyKey`), once per pass: their earliest as the representative, the later ones
+   * §8: the stores of one alias class (`#aliasKey`), once per pass: their earliest as the representative, the later ones
    * its members (`#members`); a scan or a check reads the representative, and a member only where it owes something. A
    * store meets the same group in every list of its key that holds it, so it is recorded once, the first time; one
    * another list grouped under another representative stays its own store here.
@@ -1000,7 +1072,7 @@ export class Admission {
     const first = new Map<string, Definition>();
     for (const d of list) {
       this.pass.program.work.charge("indexSteps");
-      const key = this.#copyKey(d);
+      const key = this.#aliasKey(d);
       const representative = key === null ? undefined : first.get(key);
       if (representative === undefined) {
         if (key !== null) first.set(key, d);
@@ -1022,30 +1094,36 @@ export class Admission {
   }
 
   /**
-   * The value a whole store brings, where every store of it brings the same (§8): a plain read of a binding whose only
-   * definition is one whole store, so that each read sees that store's value; `null` for any other store.
+   * S6-CARRIERS §4.1: the class a whole store's value is an alias in, where it is a stable source path, a read of a
+   * binding (no host global) followed by property steps, read at its occurrence's node: the path, with the read's
+   * exact-path signature (`aliasSignature`) and the handlers' facts at the node. Stores of one class bring equal answers
+   * at every path below the path, their own guards apart; `null` for any other store (an own entry).
    */
-  #copyKey(d: Definition): string | null {
-    const { program, definitions } = this.pass;
+  #aliasKey(d: Definition): string | null {
+    const { program, lists, handlers } = this.pass;
     if (d.kind !== "whole" || d.value === undefined) return null;
-    const binding = program.occurrenceOf.get(d.value);
-    if (binding === undefined || program.isHost(binding)) return null;
-    if (this.#definedOnce === null) {
-      const counts = new Map<PlaceId, number>();
-      const whole = new Set<PlaceId>();
-      for (const store of [...definitions.storeDefs, ...definitions.transferDefs]) {
-        program.work.charge("indexSteps");
-        const place = keyPlace(store.key);
-        counts.set(place, (counts.get(place) ?? 0) + 1);
-        if (store.kind === "whole" && keyPath(store.key).length === 0) whole.add(place);
-      }
-      this.#definedOnce = new Set(
-        [...counts]
-          .filter(([place, count]) => count === 1 && whole.has(place))
-          .map(([place]) => place),
-      );
+    program.work.charge("aliasSteps");
+    const steps: string[] = [];
+    let value = d.value;
+    let node = d.node;
+    for (let projection = program.projOf.get(value); projection !== undefined;) {
+      program.work.charge("aliasSteps");
+      if (!propertyOnly(projection.step)) return null;
+      steps.push(stepName(projection.step));
+      node = projection.node ?? node;
+      value = projection.owner;
+      projection = program.projOf.get(value);
     }
-    return this.#definedOnce.has(binding) ? `c${binding}` : null;
+    const binding = program.occurrenceOf.get(value);
+    if (binding === undefined || program.isHost(binding)) return null;
+    const read = program.occNode.get(value) ?? node;
+    const source = keyOf(binding, steps.reverse());
+    this.#aliases.set(d, { source, read });
+    return [
+      source,
+      lists.aliasSignature(source, read),
+      handlers.afterSomeCreation(read) ? "h" : "",
+    ].join("|");
   }
 
   /**
@@ -2728,6 +2806,18 @@ export class Admission {
       else list.push(check);
     }
   }
+}
+
+/** Whether a projection's step is a plain property step, a stable source path's (S6-CARRIERS §4.1). */
+function propertyOnly(step: string): boolean {
+  return (
+    step !== "iteration" &&
+    step !== "index" &&
+    step !== "entry" &&
+    stepName(step) === step &&
+    !measuresLength(step) &&
+    dictList(step) === undefined
+  );
 }
 
 /** A path below a store's destination: an `addAll`'s literal's elements are the destination's own elements. */

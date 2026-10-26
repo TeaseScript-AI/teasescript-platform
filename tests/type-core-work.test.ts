@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withMemberOracle } from "../src/type-inference/core/admission.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
@@ -16,6 +17,7 @@ import {
   WORK_FAMILIES,
   type WorkFamily,
 } from "./helpers/type-core-families.js";
+import { readFixture } from "./helpers/type-core-fixture.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -264,4 +266,67 @@ test("the analysis stops above 256 levels of nested blocks, an `else if` one lev
   assert.equal(outcome(nested(257)), "budget-error");
   assert.equal(outcome(chained(255)), "valid");
   assert.equal(outcome(chained(257)), "budget-error");
+});
+
+/**
+ * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), as a generated family: at every decided
+ * path, each alias member's own answer equals its class representative's, each with its own guard applied, its items
+ * compared whole (tags, certainty, reasons, context words, writers, leaves, marks). It runs over every work family at
+ * small sizes and Astra's two M1 witnesses (a conditional store below the copied path before and between the copies)
+ * in both orders, and over the fixture's records.
+ */
+test("every alias member answers as its class does at every decided path, in both orders (§4.1, condition (a))", (t) => {
+  const differences: string[] = [];
+  let compared = 0;
+  const report = (difference: string | null): void => {
+    compared += 1;
+    if (difference !== null) differences.push(difference);
+  };
+  const run = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
+    const request = coreRequest(files);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    withMemberOracle(report, () =>
+      reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
+          )
+        : analyseCore(request),
+    );
+  };
+  const witnesses = ["before", "between"].map((at) => ({
+    name: `M1, the conditional store ${at} the copies`,
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          "let raw = hostValue",
+          "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}",
+          "let box = {f0: null, f1: null}",
+          ...(at === "before"
+            ? ["if raw != null { root.nested.f0 = 1 }", "box = root.nested", "box = root.nested"]
+            : ["box = root.nested", "if raw != null { root.nested.f0 = 1 }", "box = root.nested"]),
+          "repeat box.f0 {}",
+          "repeat box.f1 {}",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  }));
+  for (const reversed of [false, true]) {
+    for (const family of [
+      ...WORK_FAMILIES,
+      ...W34_VARIANTS,
+      ...W44_VARIANTS,
+      ...W45_VARIANTS,
+      ...ADMISSION_FAMILIES,
+    ])
+      for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
+    for (const { name, files } of witnesses) run(name, files, reversed);
+  }
+  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+    if (coreRequest(record.files) !== null) run(record.name, record.files, false);
+  t.diagnostic(`${compared} member answers compared with their classes'`);
+  assert.deepEqual(differences, []);
+  assert.ok(compared > 1_000, `${compared} member answers compared`);
 });
