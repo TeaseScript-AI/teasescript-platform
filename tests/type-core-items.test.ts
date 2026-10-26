@@ -5,7 +5,7 @@ import {
   alternatives,
   CONTEXT_WORDS,
   EMPTY,
-  ingressStores,
+  ingressLeaves,
   itemsSignature,
   makeItem,
   mergeItems,
@@ -34,7 +34,7 @@ const writerRank = (writer: Writer | null): number =>
 const contextRank = (context: ContextWord | null): number =>
   context === null ? CONTEXT_WORDS.length : CONTEXT_WORDS.indexOf(context);
 const storesOf = (item: Item): string[] =>
-  item.ingress === undefined ? [] : ingressStores(item.ingress).map(writerKey);
+  item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey);
 const byTag = (items: readonly Item[], tag: ItemTag): Item | undefined =>
   items.find((item) => item.tag === tag);
 

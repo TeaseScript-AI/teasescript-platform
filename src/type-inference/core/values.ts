@@ -49,7 +49,7 @@ import {
   type ItemTag,
 } from "./items.js";
 import { operationItems } from "./operator-table.js";
-import { stepName, type ValueConstraint } from "./program.js";
+import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import type { Work } from "./solver.js";
 
 /*
@@ -109,6 +109,7 @@ export class Values {
             key,
             node,
             loop ? "loop" : "fail" in answer ? answer.fail : "loop",
+            loop || ("fail" in answer && answer.later === true),
           );
     route("def" in answer && !loop ? exact.defRoute(answer.def, answer.rest) : "contract");
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
@@ -442,7 +443,11 @@ export class Values {
     let out: Item[] = [];
     if (c.kind === "fallback") {
       const left = yield* this.valueItems(c.left, at, rest);
-      const kept = left.filter((item) => rest.length > 0 || item.tag !== "null");
+      // (a left operand that is only null gives nothing, at its path or below it: the fallback is the value)
+      const value = rest.length === 0 ? left : yield* this.valueItems(c.left, at, []);
+      const kept = value.some((item) => item.tag !== "null")
+        ? left.filter((item) => rest.length > 0 || item.tag !== "null")
+        : [];
       // F17a: K = (K(a) \ {null}) ∪ K(b), the fallback's kinds kept even where the graph never evaluates it; the
       // fallback runs where a is null, so its own known items without a word take that null's (§3.4)
       const rightSite = program.places[c.right]?.site ?? c.site;
@@ -472,12 +477,7 @@ export class Values {
         yield* this.valueItems(c.receiver, at, ["element", ...rest]),
         rest,
       );
-      const fallbackAt = program.exprAt(program.places[c.fallback]?.site ?? c.site);
-      // P7, F17b: only the graph's literal proof (a `get` on a list literal with a literal index: the default is dead)
-      // makes the element certain; else the element may be absent and its kinds are possible
-      const reached = fallbackAt !== null && !fallbackAt.dead;
-      // (and the proof that the literal has no element there makes the default the only value, F17b)
-      const only = reached && at?.kind === "default-accepted" && at.predecessors.length === 1;
+      const { fallbackAt, reached, only } = getProof(program, c, at);
       out = [
         ...(reached && only ? [] : reached ? weaken(receiver, "member") : receiver),
         ...(reached
@@ -742,4 +742,21 @@ export class Values {
   public static pathOf(key: Key): readonly string[] {
     return keyPath(key);
   }
+}
+
+/**
+ * P7, F17b: what the graph's literal proof says of a `get` at its node `at`: its default is reached where its node is
+ * live (`reached`), and only a `get` on a list literal with a literal index is certain: the default dead, the element
+ * the value; the literal with no element there, the default the only value (`only`), its receiver's element given
+ * nowhere. Elsewhere the element may be absent and both are possible.
+ */
+export function getProof(
+  program: CoreProgram,
+  c: Extract<ValueConstraint, { readonly kind: "get" }>,
+  at: FlowNode | null,
+): { readonly fallbackAt: FlowNode | null; readonly reached: boolean; readonly only: boolean } {
+  const fallbackAt = program.exprAt(program.places[c.fallback]?.site ?? c.site);
+  const reached = fallbackAt !== null && !fallbackAt.dead;
+  const only = reached && at?.kind === "default-accepted" && at.predecessors.length === 1;
+  return { fallbackAt, reached, only };
 }

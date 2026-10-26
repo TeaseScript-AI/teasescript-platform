@@ -29,7 +29,9 @@ import {
   compactRecord,
   readCompactRecord,
   recordDifferences,
+  type CompactCheck,
   type CompactRecord,
+  type CompactSite,
 } from "./helpers/type-core-records.js";
 
 // The core's structured result (TABLE §3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
@@ -165,7 +167,7 @@ const RECORDS: readonly {
         {
           kind: "integer-use",
           class: "compile-error",
-          site: { file: "main.tease", offset: 52 },
+          site: { file: "main.tease", offset: 52, end: 53 },
           context: null,
         },
       ],
@@ -203,7 +205,7 @@ const RECORDS: readonly {
         {
           kind: "member-read",
           class: "warning-runtime-check",
-          site: { file: "main.tease", offset: 20 },
+          site: { file: "main.tease", offset: 20, end: 28 },
           context: "unknown",
         },
       ],
@@ -213,14 +215,14 @@ const RECORDS: readonly {
           target: "value",
           against: ["non-null"],
           boundary: false,
-          site: { file: "main.tease", offset: 20 },
+          site: { file: "main.tease", offset: 20, end: 28 },
         },
         {
           kind: "copy-type",
           target: "value",
           against: ["unknown"],
           boundary: true,
-          site: { file: "main.tease", offset: 10 },
+          site: { file: "main.tease", offset: 10, end: 19 },
         },
       ],
     },
@@ -248,7 +250,7 @@ const RECORDS: readonly {
         {
           kind: "integer-use",
           class: "warning-runtime-check",
-          site: { file: "part.tease", offset: 7 },
+          site: { file: "part.tease", offset: 7, end: 8 },
           context: "call",
         },
       ],
@@ -258,7 +260,7 @@ const RECORDS: readonly {
           target: "n",
           against: ["integer"],
           boundary: false,
-          site: { file: "part.tease", offset: 7 },
+          site: { file: "part.tease", offset: 7, end: 8 },
         },
       ],
     },
@@ -357,13 +359,13 @@ test("two warnings owing alike list their obligation twice, and a check alike to
   );
 });
 
-test("the comparison counts each check and asserts only the contexts the set names", () => {
+test("the comparison counts each check, compares whole sites, and asserts only the contexts the set names", () => {
   const ingress = (offset: number) => ({
     kind: "copy-type" as const,
     target: "meter",
     against: ["integer", "null"],
     boundary: true,
-    site: { file: "main.tease", offset },
+    site: { file: "main.tease", offset, end: offset + 5 },
   });
   const expected: CompactRecord = {
     outcome: "warning-runtime-check",
@@ -371,7 +373,7 @@ test("the comparison counts each check and asserts only the contexts the set nam
       {
         kind: "written-target",
         class: "warning-runtime-check",
-        site: { file: "main.tease", offset: 40 },
+        site: { file: "main.tease", offset: 40, end: 52 },
         context: null,
       },
     ],
@@ -384,14 +386,14 @@ test("the comparison counts each check and asserts only the contexts the set nam
   // an unasserted context matches any word, an asserted one only its own
   assert.deepEqual(recordDifferences(expected, actual), []);
   assert.deepEqual(recordDifferences(actual, expected), [
-    "missing context written-target warning-runtime-check main.tease:40 later ×1",
+    "missing context written-target warning-runtime-check main.tease:40-52 later ×1",
   ]);
   // the second ingress check replaced by a copy of the first (the port plan's negative control) differs
   assert.deepEqual(
     recordDifferences(expected, { ...expected, checks: [ingress(12), ingress(12)] }),
     [
-      "missing check copy-type meter [integer|null] boundary main.tease:30 ×1",
-      "extra check copy-type meter [integer|null] boundary main.tease:12 ×1",
+      "missing check copy-type meter [integer|null] boundary main.tease:30-35 ×1",
+      "extra check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
     ],
   );
   assert.deepEqual(
@@ -402,6 +404,100 @@ test("the comparison counts each check and asserts only the contexts the set nam
   assert.throws(
     () => readCompactRecord({ ...expected, checks: [{ ...ingress(12), boundary: "yes" }] }),
     /record\.checks\[0\]\.boundary/u,
+  );
+  // a site is compared whole: a different end differs, and a site without its end, or ending before its start, is
+  // malformed
+  assert.deepEqual(
+    recordDifferences(expected, {
+      ...expected,
+      checks: [ingress(12), { ...ingress(30), site: { file: "main.tease", offset: 30, end: 36 } }],
+    }),
+    [
+      "missing check copy-type meter [integer|null] boundary main.tease:30-35 ×1",
+      "extra check copy-type meter [integer|null] boundary main.tease:30-36 ×1",
+    ],
+  );
+  // a member read's diagnostic and the null-check at its site compare by their start (`startOnly`), anything else whole
+  const member: CompactRecord = {
+    outcome: "warning-runtime-check",
+    diagnostics: [
+      {
+        kind: "member-read",
+        class: "warning-runtime-check",
+        site: { file: "main.tease", offset: 20, end: 28 },
+        context: null,
+      },
+    ],
+    checks: [
+      {
+        kind: "null-check",
+        target: "value",
+        against: ["non-null"],
+        boundary: false,
+        site: { file: "main.tease", offset: 20, end: 28 },
+      },
+      ingress(12),
+    ],
+  };
+  const receiver = <T extends { readonly site: CompactSite }>(entry: T): T => ({
+    ...entry,
+    site: { ...entry.site, end: entry.site.offset === 20 ? 25 : entry.site.end + 1 },
+  });
+  assert.deepEqual(
+    recordDifferences(member, {
+      ...member,
+      diagnostics: member.diagnostics.map(receiver),
+      checks: member.checks.slice(0, 1).map(receiver).concat(member.checks.slice(1)),
+    }),
+    [],
+  );
+  assert.deepEqual(recordDifferences(member, { ...member, checks: member.checks.map(receiver) }), [
+    "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
+    "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
+  ]);
+  // only C5's null-check: a destination's own null-check at the member read's start (C1's) compares whole (Codex r20 H3)
+  const destination: CompactCheck = {
+    kind: "null-check",
+    target: "n",
+    against: ["integer"],
+    boundary: false,
+    site: { file: "main.tease", offset: 20, end: 40 },
+  };
+  const both: CompactRecord = { ...member, checks: [...member.checks, destination] };
+  assert.deepEqual(
+    recordDifferences(both, {
+      ...both,
+      checks: [...member.checks, { ...destination, site: { ...destination.site, end: 41 } }],
+    }),
+    [
+      "missing check null-check n [integer] main.tease:20-40 ×1",
+      "extra check null-check n [integer] main.tease:20-41 ×1",
+    ],
+  );
+  assert.deepEqual(
+    recordDifferences(both, { ...both, checks: [...member.checks.map(receiver), destination] }),
+    [
+      "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
+      "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
+    ],
+  );
+  assert.throws(
+    () =>
+      readCompactRecord({
+        ...expected,
+        checks: [{ ...ingress(12), site: { file: "main.tease", offset: 12 } }],
+      }),
+    /record\.checks\[0\]\.site\.end/u,
+  );
+  assert.throws(
+    () =>
+      readCompactRecord({
+        ...expected,
+        diagnostics: [
+          { ...expected.diagnostics[0]!, site: { file: "main.tease", offset: 40, end: 39 } },
+        ],
+      }),
+    /record\.diagnostics\[0\]\.site\.end/u,
   );
 });
 

@@ -17,7 +17,7 @@ export interface FixtureRecord {
   readonly expected: CompactRecord;
 }
 
-const FIXTURE = new URL("../../../tests/fixtures/type-core/cells.jsonl", import.meta.url);
+const FIXTURES = new URL("../../../tests/fixtures/type-core/", import.meta.url);
 
 function fields(value: unknown, where: string): Readonly<Record<string, unknown>> {
   assert.ok(
@@ -36,9 +36,29 @@ function texts(value: unknown, where: string): string[] {
   });
 }
 
-/** The fixture's records, each line checked, so a malformed line fails where it is. */
-export function readFixture(): FixtureRecord[] {
-  return readFileSync(FIXTURE, "utf8")
+/**
+ * Why a record is held back from the positive list, named by its cell or by its name, or `null` for an asserted record:
+ * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
+ */
+export function heldBack(record: FixtureRecord): string | null {
+  // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
+  if (record.owner === "adapter") return "the adapters' records (S9b)";
+  // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
+  // with them S0(c)'s class of expectations that rest on the null and written-union deviation, enter with S10
+  if (record.cells.some((cell) => /^N\d/.test(cell))) return "stage 3b's cells (S10)";
+  // TABLE r4.60 (F15): a member of unknown data copied into a decided place owes the destination's own C1 check beside
+  // C5's obligation on the receiver; the record, derived under r4.33, lacks it
+  if (record.name === "cp9-cells/r8/get-dispatch/unknown")
+    return "r4.60: the destination's C1 check, record corrected in the set, refreshed at S6b";
+  return null;
+}
+
+/**
+ * A fixture file's records, each line checked, so a malformed line fails where it is: `cells.jsonl`, or
+ * `cells-rule-function.jsonl`, the rule function's records of a later set revision (its `MANIFEST.md`).
+ */
+export function readFixture(file = "cells.jsonl"): FixtureRecord[] {
+  return readFileSync(new URL(file, FIXTURES), "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line, index) => {

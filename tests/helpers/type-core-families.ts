@@ -18,6 +18,7 @@ const rows = (k: number, row: (index: number) => string): string =>
 const lines = (...parts: readonly string[]): string => parts.join("\n");
 const fields = (k: number, value: (index: number) => string, name = "f"): string =>
   Array.from({ length: k }, (_, index) => `${name}${index}: ${value(index)}`).join(", ");
+const cells = (k: number, cell: string): string => Array.from({ length: k }, () => cell).join(", ");
 
 /** A file that reads the boolean host flag declares it from an interaction first. */
 function file(path: string, source: string): SourceFile {
@@ -1482,3 +1483,959 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
 ];
+
+/**
+ * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
+ * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
+ * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
+ * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
+ * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
+ * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
+ * it, added to a list); each at size k, linear.
+ */
+export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "A2-empty-snapshot",
+    measures: "A2, F9: k copies of empty lists, each decided by its own later add",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = []\nlet b${i} = a${i}\nb${i}.add(${i})\na${i}.add("t${i}")`),
+          rows(k, (i) => `let s${i}: integer = b${i}.first`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-populated-snapshot",
+    measures: "A2, A6: k copies of populated lists, each given an element of another kind",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = [${i}]\nlet b${i} = a${i}\nb${i}.add("x${i}")`),
+          rows(k, (i) => `repeat a${i}.first {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-later-mutation",
+    measures: "A2, F9: k copies taken before their sources change kind",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = [${i}]\nlet b${i} = a${i}\na${i}.add(1.5)\nb${i}.add(2)`),
+          rows(k, (i) => `repeat b${i}.first {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-destinations",
+    measures:
+      "A2, A5: k destinations of one record's fields, decided by different kinds, then stored",
+    program: (k) =>
+      main(
+        lines(
+          `let source = {n: 1, s: "a", f: 1.5}`,
+          rows(k, (i) => `let d${i} = source.${["n", "s", "f"][i % 3]}`),
+          rows(k, (i) => `d${i} = ${["2", '"b"', "2.5"][i % 3]}`),
+          rows(k, (i) => `if flagHost { d${i} = ${['"x"', "3", "true"][i % 3]} }`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A6-rejected-destination",
+    measures: "A6, F9: k destinations rejected at a field, their sources intact",
+    program: (k) =>
+      main(
+        lines(
+          rows(
+            k,
+            (i) => `let source${i} = {n: ${i}}\nlet copy${i} = source${i}\ncopy${i}.n = "bad"`,
+          ),
+          rows(k, (i) => `repeat source${i}.n {}\nrepeat copy${i}.n {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-presets",
+    measures:
+      "A5: k presets each giving one field of a k-field record another kind, all stored whole, every field read",
+    program: (k) =>
+      main(
+        lines(
+          `let state = {${fields(k, () => "0")}}`,
+          rows(k, (i) => `let preset${i} = {${fields(k, (j) => (i === j ? '"t"' : "0"))}}`),
+          rows(k, (i) => `if flagHost { state = preset${i} }`),
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-presets-copied",
+    measures: "A5: the same with each preset a copy of one seed changed at its own field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "0")}}`,
+          "let state = seed",
+          rows(k, (i) => `let preset${i} = seed\npreset${i}.f${i} = "t"`),
+          rows(k, (i) => `if flagHost { state = preset${i} }`),
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-external-scan",
+    measures:
+      "A2: a k-field record replaced k times by external data before a literal decides it, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let state = hostValue",
+          rows(k, () => "if flagHost { state = hostValue }"),
+          `state = {${fields(k, () => "0")}}`,
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A7-copied-wholes",
+    measures:
+      "A7: a list of k copies of one record replaced by external data, each of its k fields stored and read",
+    program: (k) =>
+      main(
+        lines(
+          `let source = {${fields(k, () => "1")}}`,
+          "source = hostValue",
+          `let xs = [${Array.from({ length: k }, () => "source").join(", ")}]`,
+          rows(k, (i) => `xs[0].f${i} = 1\nlet shown${i}: integer = xs[0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-shared-presets",
+    measures:
+      "A2, A5: a k-field record replaced k times by copies of one record, then by external data, every field read",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "0")}}`,
+          "let state = seed",
+          rows(k, () => "if flagHost { state = seed }"),
+          "state = hostValue",
+          rows(k, (i) => `let shown${i}: integer = state.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-wide-copies",
+    measures:
+      "A4, §8 width: one record of k fields, each a copy of one written binding, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let box = {${fields(k, () => "typed", "key")}}`,
+          rows(k, (i) => `let result${i}: integer = box.key${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-wide-elements",
+    measures: "A8, §8 width: a literal of two k-field records, each field's type one, a field read",
+    program: (k) =>
+      main(
+        lines(
+          `let rows = [{${fields(k, () => "0")}}, {${fields(k, () => "1")}}]`,
+          "let shown: integer = rows.first.f0",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A6-wide-misfits",
+    measures: "A6, r4.35, §8 width: a k-field record replaced by one whose every field misfits",
+    program: (k) =>
+      main(
+        lines(
+          `let box = {${fields(k, () => "0")}}`,
+          `box = {${fields(k, () => '"bad"')}}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "C9-merged-ingresses",
+    measures:
+      "C9: k places each merging two external ingresses with an opaque source, every boundary check kept",
+    program: (k) =>
+      main(
+        lines(
+          "speaker vera { custom: 1 }",
+          rows(
+            k,
+            (i) =>
+              `let v${i} = hostValue\nif flagHost { v${i} = fromJson("${i}", default: null, files: false) }\nif flagHost { v${i} = vera.custom }\nlet w${i}: integer = v${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "C9-literal-cells",
+    measures:
+      "C9 r4.29, r4.35: k records each holding k external cells, one boundary each at its first cell",
+    program: (k) =>
+      main(
+        lines(
+          rows(
+            k,
+            (i) =>
+              `let r${i} = {${fields(4, () => "hostValue")}}\nlet n${i}: integer = r${i}.f${i % 4}`,
+          ),
+          `let wide = [${Array.from({ length: k }, () => "hostValue").join(", ")}]`,
+          "let first: integer = wide.first",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-projected-copies",
+    measures:
+      "F2, A8: k projections of a k-field record's lists named in one literal, an element read (round 10 B3)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "[1]")}}`,
+          rows(k, (i) => `let copy${i} = seed.f${i}`),
+          `let xs = [${Array.from({ length: k }, (_, i) => `copy${i}`).join(", ")}]`,
+          "repeat xs[0][0] {}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-published-wide-copies",
+    measures:
+      "§8, A2, C9 r4.12: k whole copies of one record of k fields published beside named host data, every field read (Codex r17 B2)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let box = root",
+          rows(k, () => "box = root"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  // S6-CARRIERS §4.1, §4.7: whole copies of a stable source path (R5-F1's projected copies), alias members of one class
+  // where no event below the path separates them, and the conditional-write variants (Astra's fourth round M1, the
+  // orchestrator's condition (a)): a conditional store below the path before or between the copies
+  ...(
+    [
+      ["A2-projected-wide-copies", "root.nested", false, "none"],
+      ["A2-projected-stable-copies", "stable", false, "none"],
+      ["A2-projected-mutable-source", "root.nested", false, "store"],
+      ["A2-projected-conditional-before", "root.nested", true, "before"],
+      ["A2-projected-conditional-between", "root.nested", true, "between"],
+    ] as const
+  ).map(([name, copied, nulls, event]): WorkFamily => ({
+    name,
+    measures: `§4.1, A2: k + 1 whole copies of \`${copied}\`, a k-field record of named host data, every field read${event === "none" ? "" : event === "store" ? ", a store below it between the copies" : `, a conditional store below it ${event} the copies`}`,
+    program: (k) => {
+      const half = k >> 1;
+      const copies = (count: number): string => rows(count, () => `box = ${copied}`);
+      const write =
+        event === "store" ? "root.nested.f0 = 1" : "if raw != null { root.nested.f0 = 1 }";
+      return main(
+        lines(
+          "let raw = hostValue",
+          `let root = {nested: {${fields(k, () => "[1, raw][1]")}}}`,
+          ...(copied === "stable" ? ["let stable = root.nested"] : []),
+          nulls ? `let box = {${fields(k, () => "null")}}` : `let box = ${copied}`,
+          ...(event === "before" ? [write] : []),
+          ...(event === "between" || event === "store"
+            ? [copies(half), write, copies(k - half)]
+            : [copies(k)]),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  })),
+  {
+    name: "A2-published-wide-copies-conditional",
+    measures:
+      "§4.1, A2, C9 r4.12: A2-published-wide-copies with a conditional store into the record before the copies (M1)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let box = root",
+          "if raw != null { root.f0 = 1 }",
+          rows(k, () => "box = root"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...(["one region", "k regions"] as const).map((variant): WorkFamily => ({
+    name: `A2-guarded-quiet-copies-${variant.replace(" ", "-")}`,
+    measures: `§4.3, A2: k copies of a k-field record of named host data guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read`,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let box = root",
+          variant === "one region"
+            ? lines(
+                "if root != null {",
+                rows(k, () => "  box = root"),
+                "}",
+              )
+            : lines(
+                rows(k, () => "if root != null { box = root }"),
+                "box = root",
+              ),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "A8-added-presets",
+    measures:
+      "F2, A8: k literals of one k-field record's copies added to one list, every field read (round 10 B4)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed, seed])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-wrapped-presets",
+    measures:
+      "F2, A8: k literals of records wrapping one k-field record, added to one list, every field read (round 11)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add([{data: seed}, {data: seed}])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].data.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-carried-presets",
+    measures:
+      "F2, A8: k literals of one k-field record that `otherwise` carries, added to one list, every field read (round 11 B4)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed otherwise seed, seed otherwise seed])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-distinct-records",
+    measures: "F2, A8: k records of distinct fields named in one literal (round 13 B2)",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let a${i} = {f${i}: 1}`),
+          `let xs = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-call-presets",
+    measures:
+      "F2, A8: k literals of one function's k-field result, added to one list, every field read (round 12 B3)",
+    program: (k) =>
+      main(
+        lines(
+          `function seed {\n  return {${fields(k, () => "1")}}\n}`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed(), seed()])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-chained-presets",
+    measures:
+      "F2, A8: k literals of the end of a chain of k copies of one record, added to one list (round 12 B3)",
+    program: (k) =>
+      main(
+        lines(
+          "let a0 = {n: 1}",
+          rows(k, (i) => `let a${i + 1} = a${i}`),
+          "let xs = []",
+          rows(k, () => `xs.add([a${k}, a${k}])`),
+          "let shown: integer = xs[0][0].n",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-added-taken-presets",
+    measures:
+      "F2, A8: k literals of `take`s of a list of one k-field record, added to one list, every field read (round 11 B4)",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = [{${fields(k, () => "1")}}]`,
+          "let xs = []",
+          rows(k, () => "xs.add([seed.take(1), seed.take(1)])"),
+          rows(k, (i) => `let shown${i}: integer = xs[0][0][0].f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  // S6-CARRIERS §4.6, §4.7 (C9-fresh-wrappers) with Codex r20 B2 and B3: k stores of a wrapper holding a fresh host
+  // value beside one k-field record, every field read; the level at the record's path holds it once
+  ...(
+    [
+      ["payload", "{noise: hostValue otherwise null, data: root}", "data.", "box.noise"],
+      ["get", "{tag: 0, slot: {data: xs.get(hostValue, default: root)}}", "slot.data.", null],
+      ["projected", "({noise: hostValue otherwise null, data: root}).data", "", null],
+      [
+        "projected-get",
+        "({noise: hostValue otherwise null, data: [root].get(0, default: root)}).data",
+        "",
+        null,
+      ],
+    ] as const
+  ).map(([variant, wrapper, at, payload]): WorkFamily => ({
+    name: `C9-fresh-wrappers-${variant}`,
+    measures: `§4.6, C9: k stores of \`${wrapper}\`, every field of the record read`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          `let box = ${wrapper}`,
+          rows(k - 1, () => `box = ${wrapper}`),
+          ...(payload === null ? [] : [`let n: integer = ${payload}`]),
+          rows(k, (i) => `repeat box.${at}f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "C9-fresh-wrappers-distinct",
+    measures:
+      "§4.6, C9: k wrappers of k distinct records, the last stored k times more, one field read (Codex r20 B3)",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let r${i} = {n: hostValue}`),
+          "let box = {noise: hostValue otherwise null, data: r0}",
+          rows(k - 1, (i) => `box = {noise: hostValue otherwise null, data: r${i + 1}}`),
+          rows(k, () => `box = {noise: hostValue otherwise null, data: r${k - 1}}`),
+          "say box.data.n",
+          "exit",
+        ),
+      ),
+  },
+  // S6-CARRIERS §3.2, §3.4 with Codex r20 B4 and B5: k nested own defaults, each walked once as a landing; k merged
+  // host stores met by k consumers, each provenance node resolved once
+  ...(
+    [
+      ["otherwise", (inner: string) => `null otherwise (${inner})`],
+      ["get", (inner: string) => `[1].get(7, default: ${inner})`],
+      ["load", (inner: string, i: number) => `load("k${i}", default: ${inner})`],
+    ] as const
+  ).map(([variant, wrap]): WorkFamily => ({
+    name: `C9-nested-own-${variant}`,
+    measures: `§3.2, C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
+    program: (k) => {
+      let value = "hostValue";
+      for (let i = k - 1; i >= 0; i -= 1) value = wrap(value, i);
+      return main(lines(`let out = ${value}`, "repeat out {}", "exit"));
+    },
+  })),
+  ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
+    name: `C9-merged-leaves-${variant}`,
+    measures: `§3.4: k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
+    program: (k) =>
+      main(
+        lines(
+          'let flag = askBoolean "F"',
+          "let pool = hostValue",
+          rows(k, () => "if flag { pool = hostValue }"),
+          rows(k, (i) => (variant === "reads" ? "repeat pool {}" : `let out${i}: integer = pool`)),
+          "exit",
+        ),
+      ),
+  })),
+  // S6-CARRIERS §4.1: k stores of a literal whose one cell reads a k-field record of named host data, and k copies of a
+  // literal index of one, every field read; each a class below its cell or path, never k candidates at every field
+  ...(
+    [
+      ["cell", "{data: root}", ".data", ""],
+      ["list-cell", "[root]", "[0]", ""],
+      ["literal-index", "holder.items[0]", "", "let holder = {items: [root]}"],
+    ] as const
+  ).map(([variant, value, at, holder]): WorkFamily => ({
+    name: `A2-alias-${variant}-copies`,
+    measures: `§4.1, C1: k stores of \`${value}\` over a k-field record of named host data, every field read`,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          ...(holder === "" ? [] : [holder]),
+          `let box = ${value}`,
+          rows(k, () => `box = ${value}`),
+          rows(k, (i) => `repeat box${at}.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  // S6-CARRIERS §4.1's chains: k copies `let a(i + 1) = a(i)` of a k-field record of named host data, each copied into
+  // one place, every field read; each link's read stands for the chain's end, one class
+  {
+    name: "A2-alias-chain-heads",
+    measures:
+      "§4.1, C1: k links of a chain of copies of a k-field record of named host data, each stored, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let a0 = {${fields(k, () => "[1, raw][1]")}}`,
+          rows(k, (i) => `let a${i + 1} = a${i}`),
+          "let box = a0",
+          rows(k, (i) => `box = a${i + 1}`),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  // S6-CARRIERS §4.1's chains under a guard (Codex r22 F4): k copies of one snapshot whose definition is read under k
+  // tests of the source's fields, every field read; the definition read's guards found once, whatever asks
+  {
+    name: "A2-alias-guarded-snapshot-copies",
+    measures:
+      "§4.1, §3.2: k copies of one snapshot read under k field tests of its source, every field read (Codex r22 F4)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `if ${Array.from({ length: k }, (_, i) => `root.f${i} != null`).join(" and ")} {`,
+          "  let stable = root",
+          "  let box = stable",
+          rows(k - 1, () => "  box = stable"),
+          rows(k, (i) => `  repeat box.f${i} {}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
+  // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
+  // from each tested field in turn
+  ...(
+    [
+      ["wrapped", "{data: [root].get(0, default: root)}", "data."],
+      ["direct", "[root].get(0, default: root)", ""],
+    ] as const
+  ).map(([variant, value, at]): WorkFamily => ({
+    name: `A2-guarded-computed-children-${variant}`,
+    measures: `§3.2, §4.6: k stores of \`${value}\`, each under a test of another field, one field read (Codex r21 B1)`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "2.0")}}`,
+          `let box = ${value}`,
+          rows(k, (i) => `if root.f${i} != null { box = ${value} }`),
+          `repeat box.${at}f0 {}`,
+          "exit",
+        ),
+      ),
+  })),
+  // S6-CARRIERS §3.1 (Codex r23 F1): k reads of one host global in one literal, its element stored and decided at k
+  // fields, each read; through an own read (a fallback's, a default's), inline, beside named data, as named data: each
+  // occurrence its own leaf, the reads one entry of the literal, each path's decider and C1 site from its prefixes' stops
+  ...(
+    [
+      ["own", "null otherwise [W][0]"],
+      ["default", "[].get(7, default: [W][0])"],
+      ["inline", "[W][0]"],
+      ["mixed", "[raw, W][0]"],
+      ["named", "null otherwise data"],
+    ] as const
+  ).map(([variant, value]): WorkFamily => ({
+    name: `A2-wide-ingresses-${variant}`,
+    measures: `§3.1: \`let out = ${value}\`, W k reads of \`hostValue\`, decided at k fields, each read (Codex r23 F1)`,
+    program: (k) => {
+      const wide = Array.from({ length: k }, () => "hostValue").join(", ");
+      return main(
+        lines(
+          "let raw = hostValue",
+          variant === "named" ? `let data = [${wide}][0]` : "",
+          `let out = ${value.replace("W", wide)}`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  })),
+  // Codex r24 F1, F2 and their neighbours: k distinct ingresses at k fields, each its own provenance node, asked of the
+  // store's index; and k host reads a call that stores nothing separates, one snapshot (r4.68 (1)), with the calls'
+  // results one entry as k calls of one function are (r4.15), inline and beside named data
+  ...(
+    [
+      ["fields", (k: number) => `{${fields(k, () => "hostValue")}}`],
+      ["idle-index", (k: number) => `[${cells(k, "hostValue[idle()]")}][0]`],
+      ["idle-cells", (k: number) => `[${cells(k, "hostValue, idle()")}][0]`],
+      ["idle-cells-mixed", (k: number) => `[raw, [${cells(k, "hostValue, idle()")}][0]][1]`],
+    ] as const
+  ).map(([variant, value]): WorkFamily => ({
+    name: `A2-wide-ingress-${variant}`,
+    measures: `§3.1, r4.68 (1): \`let out = ${value(2)}\` at k, decided at k fields, each read (Codex r24 F1, F2)`,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          "function idle { return 0 }",
+          `let out = ${value(k)}`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+];
+
+/**
+ * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
+ * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: TABLE §8's
+ * passes × stores, each pass charged. A gated known limit by the owner's decision (TABLE r4.49, option A): its doubling
+ * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
+ * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
+ * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
+ * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71).
+ */
+export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "A6-chain",
+    measures: "A6: a chain of k rejections, every copy taken after its source's misfit",
+    // 552,834 / 2,133,218 units at k = 64, 128, k + 2 passes (3.9139, the allowance reached at k = 487), each pass also
+    // following the structure its stores copy through the values projections and operations carry (F2, the carrier
+    // walk); 557,189 / 2,150,117 before that walk (3.9141, k = 485); at the measurement 526,905 / 2,032,217 (3.9120),
+    // each pass charging its index of the previous pass's rejections (3.908 before, 452,803 / 1,744,803) and its
+    // literals' contributions by path (3.9103 before, 496,487 / 1,914,055)
+    measured: 3.92,
+    program: (k) =>
+      main(
+        lines(
+          "let v0 = 0",
+          'v0 = "x"',
+          rows(k, (i) => `let v${i + 1} = v${i}\nv${i + 1} = "x"`),
+          `let final: integer = v${k}`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-interleaved-conditional-copies",
+    measures:
+      "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
+    // A gated known limit by the owner's decision (TABLE r4.69 (1), option A): each copy sees one more conditional
+    // store below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
+    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at
+    // k = 64, 128 in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 before TABLE r4.67); the allowance
+    // reached at k = 618; at k = 1,024 82,410,069 units under a raised test allowance, 274.7 % of its 30,000,000 (the
+    // analysis itself stops at the allowance with the budget error)
+    measured: 3.63,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {nested: {${fields(k, () => "[1, raw][1]")}}}`,
+          `let box = {${fields(k, () => "null")}}`,
+          rows(k, () => "if raw != null {\n  root.nested.f0 = 1\n}\nbox = root.nested"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A2-copies-separated-by-storing-calls",
+    measures:
+      "§4.1, condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
+    // A gated known limit by the owner's decision (TABLE r4.71, option A): each copy reads the global after one more
+    // call that stores it, so each has its own snapshot (r4.68 (1)), k entries of the literal, each read at each of the k
+    // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
+    // beyond the class rule, or S6c's normalization, merges them). 132,548 / 453,830 units at k = 64, 128 in both orders
+    // (3.4742; `main` 1.99, the output linear); at k = 1,024 24,755,020 units, 82.5 % of its 30,000,000; the allowance
+    // reached at k = 1,129
+    measured: 3.48,
+    program: (k) =>
+      main(
+        lines(
+          "global g = hostValue",
+          "function bump {\n  g = 2.0\n  return 0\n}",
+          `let out = [${cells(k, "g, bump()")}][0]`,
+          `out = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `repeat out.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * S6-CARRIERS §4.5, §4.7: k adds of one record to one list, and a choice of k options of one record, every field read.
+ * The value side's add chain and choice items are inherited products (on `main` too); admission's own counters are gated
+ * as linear, each total's 64 → 128 step only as a regression check at its measured doubling (r4.45's form).
+ */
+export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
+  {
+    name: "A5-same-source-adds",
+    measures: "§4.5, A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
+    // 29,769 / 60,236 units at k = 64, 128 in both orders (2.0309); admission's counters at most 2.04 (`checks`), the
+    // value side's reaching-definition walk 2.32 (`rdWalk`, as on `main`)
+    measured: 2.04,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add(root)"),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-same-source-choices",
+    measures: "§4.5, A8: a choice of k options whose value is one k-field record, every field read",
+    // 43,657 / 128,266 units at k = 64, 128 in both orders (2.9488): the value side's choice items, one per option at
+    // each field read (`mergeItems` 3.87, `eventSteps` 3.70, as on `main`); admission's counters at most 2.07 (`checks`)
+    measured: 2.97,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "a${i}", value: root}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  // Astra r5 B2: the same with a root of unknown-bearing fields, whose adds and options admission reads at every field:
+  // an add's class and a choice's options of one snapshot read once (S6-CARRIERS §4.5)
+  {
+    name: "A5-same-source-adds-unknown",
+    measures:
+      "§4.5, A5: k `xs.add(root)` of one k-field record of host data, every field of `xs[0]` read",
+    // 321,487 / 1,168,594 units at k = 64, 128 in both orders (3.6498; 456,577 / 1,733,444 before the add classes): the
+    // value side's reaching-definition walk, as on `main` (1,120,428 at k = 128), the excess over `main` linear;
+    // admission's counters at most 2.20 (`eligibility`)
+    measured: 3.65,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          "let xs = []",
+          rows(k, () => "xs.add(root)"),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A8-same-source-choices-unknown",
+    measures:
+      "§4.5, A8: a choice of k options whose value is one k-field record of host data, every field read",
+    // 172,165 / 574,215 units at k = 64, 128 in both orders (3.3489; 244,419 / 866,181 before the option stops were
+    // shared, 196,485 / 672,007 while A5's test of the choice's own entry read its items again at each field): the
+    // choice's items, one per option at each field read, as on `main` (528,234 at k = 128), read once per choice and
+    // path whatever asks (Astra r6 B2), the excess over `main` linear; admission's counters at most 2.04 (`checks`)
+    measured: 3.35,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "a${i}", value: root}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
+ * added to one list, every field read. The solver's demands are S4's product, as on `main` (each literal holding an
+ * ingress its own identity, TABLE §8 r4.15: k contract entries for each of the k reads), so the total is not gated as
+ * linear; admission's own counters are (Astra r2 D-W1: the literals' conflict discovery is shared by their typed
+ * defaults' class).
+ */
+export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
+  ["A8-added-load-presets", 'load("k", default: seed)'],
+  ["A8-added-parse-presets", 'fromJson("{}", default: seed)'],
+].map(([name, ingress]) => ({
+  name: name!,
+  measures: `§8, A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12, Astra r2 D-W1)`,
+  program: (k: number) =>
+    main(
+      lines(
+        `let seed = {${fields(k, () => "1")}}`,
+        "let xs = []",
+        rows(k, () => `xs.add([${ingress}, ${ingress}])`),
+        rows(k, (i) => `let shown${i}: integer = xs[0][0].f${i}`),
+        "exit",
+      ),
+    ),
+}));
+
+/**
+ * The member-answer oracle's own programs (S6-CARRIERS §4.1, condition (a)): Astra's two M1 witnesses (a conditional
+ * store below the copied path before and between the copies), every alias form (a copy, a literal's cell, a list's, a
+ * nested one, a literal index, a chain's link) beside the events its class answers through (a conditional store before
+ * or between the copies, a copy under a test of its source or of a field, a store between them), literal cells beside
+ * their literal's own contribution, which no alias may hold, and Astra's round-5 B1 shape (a written copy of a source
+ * beside an unwritten one, at depths one and two, either first: two classes by their written types, TABLE r4.72). The
+ * work test's oracle and the sharing differential run them.
+ */
+export const ORACLE_PROGRAMS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (() => {
+  const witnesses = ["before", "between"].map((at) => ({
+    name: `M1, the conditional store ${at} the copies`,
+    files: [
+      {
+        path: "main.tease",
+        source: [
+          "let raw = hostValue",
+          "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}",
+          "let box = {f0: null, f1: null}",
+          ...(at === "before"
+            ? ["if raw != null { root.nested.f0 = 1 }", "box = root.nested", "box = root.nested"]
+            : ["box = root.nested", "if raw != null { root.nested.f0 = 1 }", "box = root.nested"]),
+          "repeat box.f0 {}",
+          "repeat box.f1 {}",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  }));
+  // every alias form (a copy, a literal's cell, a list's, a nested one, a literal index, a chain's link) beside the
+  // events its class answers through: a conditional store before or between the copies, a copy under a test of its
+  // source or of a field, a store between them
+  const forms = [
+    ["a copy", "root.nested", "", "root.nested"],
+    ["a cell", "{data: root.nested}", ".data", "root.nested"],
+    ["a list cell", "[root.nested]", "[0]", "root.nested"],
+    ["a nested cell", "{a: {b: root.nested}}", ".a.b", "root.nested"],
+    ["a literal index", "root.items[0]", "", "root.items[0]"],
+    ["a chain's link", "link", "", "root.nested"],
+  ] as const;
+  const aliases = forms.flatMap(([form, value, at, source]) => {
+    const copy = `box = ${value}`;
+    const situations: readonly (readonly [string, readonly string[]])[] = [
+      ["a conditional store before", [`if raw != null { ${source}.f0 = 1 }`, copy, copy]],
+      ["a conditional store between", [copy, `if raw != null { ${source}.f0 = 1 }`, copy]],
+      ["a guarded copy", [copy, `if ${source} != null { ${copy} }`, copy]],
+      ["a field-guarded copy", [`if ${source}.f0 != null { ${copy} }`, copy]],
+      ["a store between", [copy, `${source}.f1 = 2`, copy]],
+    ];
+    return situations.map(([situation, steps]) => ({
+      name: `${form}, ${situation}`,
+      files: [
+        {
+          path: "main.tease",
+          source: [
+            "let raw = hostValue",
+            "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}, items: [{f0: 1, f1: [1, raw][1]}]}",
+            "let link = root.nested",
+            at === "" ? "let box = {f0: null, f1: null}" : `let box = ${value}`,
+            ...steps,
+            `repeat box${at}.f0 {}`,
+            `repeat box${at}.f1 {}`,
+            "exit",
+          ].join("\n"),
+        },
+      ],
+    }));
+  });
+  // a cell beside a term of its literal's own at its path, or below an object of it without the cell's property (its
+  // `missing` there), plain and guarded: no alias (Codex r22 F5, r23 F2)
+  const beside = (
+    [
+      ["[root, 2.0]", "[0]"],
+      ["[{f: root}, {g: 1}]", "[0].f"],
+      ["dict{a: {f: root}, b: {g: 1}}", '["a"].f'],
+    ] as const
+  ).flatMap(([literal, read]) =>
+    [`box = ${literal}`, `if root != null {\n  box = ${literal}\n}`].map((copy) => ({
+      name: `a cell beside its literal's own contribution: ${copy}`,
+      files: [
+        {
+          path: "main.tease",
+          source: `let root = 1\nlet box = ${literal}\n${copy}\nrepeat box${read} {}\nexit`,
+        },
+      ],
+    })),
+  );
+  const written = [false, true].flatMap((nested) =>
+    [
+      ["a", "b"],
+      ["b", "a"],
+    ].map(([first, second]) => ({
+      name: `a written copy beside a copy of its source, ${nested ? "depth two" : "depth one"}, ${first} first`,
+      files: [
+        {
+          path: "main.tease",
+          source: [
+            `let raw = [${nested ? "[hostValue]" : "hostValue"}]`,
+            "let a = raw",
+            `let b: integer[]${nested ? "[]" : ""} = raw`,
+            `let out = ${first}`,
+            `out = ${second}`,
+            `out = [${nested ? "[hostValue]" : "hostValue"}]`,
+            'say "AFTER"',
+            "exit",
+          ].join("\n"),
+        },
+      ],
+    })),
+  );
+  return [...witnesses, ...aliases, ...beside, ...written];
+})();

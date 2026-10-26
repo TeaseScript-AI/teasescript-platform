@@ -100,8 +100,9 @@ test("a value that holds no object has no properties, and a deep chain of operat
   for (const [source, text] of [
     ["for item in dict {key: {value: 2}} { say item }", "item"],
     ["let xs = [{value: 2}]\nlet gone = xs.remove({value: 2})\nsay gone", "gone"],
-    // a receiver that may be a reference has the runtime's members (F19a; #1027 review r4)
-    ["let d = dict {k: {value: 2}}\nd = player\nsay d.values.first", "d.values.first"],
+    // a receiver that may be a reference has the runtime's members (F19a; #1027 review r4); a written union keeps the
+    // reference, where a store of one into the dict's place would be admission's error and be ignored (A6)
+    ["let d: object dict | speaker = dict {k: {value: 2}}\nsay d.values.first", "d.values.first"],
   ] as const) {
     const held = analysed(source);
     assert.deepEqual([...held.answers.properties(held.node(text)).keys()], [], text);
@@ -221,10 +222,10 @@ test("a property named as an internal step keeps its name in the answers (Astra 
     answers.project(box, { property: "iteration" }).map((item) => item.tag),
     ["string"],
   );
-  // a store's member checks name the property as written
+  // a store's member checks name the property as written (the receiver's boundary check beside them is C9's)
   const stored = analysed("let box = hostValue\nbox.element = 1\nexit").answers;
   assert.deepEqual(
-    stored.checks.map((check) => check.on),
+    stored.checks.filter((check) => !check.boundary).map((check) => check.on),
     ["check that box is a object with a store of .element before the store"],
   );
 });
@@ -262,6 +263,8 @@ test("a receiver that may be a reference answers by F19a before its exact value 
   const vera = "speaker vera { length: 2 }\n";
   const opaque =
     "unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  const maybeVera =
+    "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\n";
   assert.deepEqual(
     [
       // a written union with text or a list, and a late store of the speaker
@@ -273,12 +276,14 @@ test("a receiver that may be a reference answers by F19a before its exact value 
         `${vera}let alias: integer[]|speaker = [1]\nrepeat alias.length {}\nexit`,
         "alias.length",
       ),
-      read(`${vera}let alias = [1]\nrepeat alias.length {}\nalias = vera\nexit`, "alias.length"),
-      // a function's result that may be the speaker or a list: no integer beside the member
+      // (a late store that may be the speaker: a definite one would be admission's error and be ignored, A6)
       read(
-        `${vera}function h(flag: boolean) {\n  if flag { return vera }\n  return [1]\n}\nrepeat h(true).length {}\nexit`,
-        "h(true).length",
+        `${vera}${maybeVera}let alias = [1]\nrepeat alias.length {}\nalias = h(true)\nexit`,
+        "alias.length",
       ),
+      // a function's result that may be the speaker or a list: no integer beside the member (a written result: two
+      // returns of different kinds would be admission's error, ADR 0021 1.5)
+      read(`${vera}${maybeVera}repeat h(true).length {}\nexit`, "h(true).length"),
       // the pure reference, and a method of a written union
       read(`${vera}let alias = vera\nrepeat alias.length {}\nexit`, "alias.length"),
       read(
@@ -289,7 +294,8 @@ test("a receiver that may be a reference answers by F19a before its exact value 
     [
       `contract: ${opaque}`,
       `contract: ${opaque}`,
-      `contract: ${opaque}`,
+      // the late store's own check against the list the place is decided by (C1)
+      "contract: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check",
       `value: ${opaque}`,
       `contract: ${opaque}`,
       "value: unknown; member-read warning-runtime-check; null-check",
@@ -321,17 +327,163 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
     });
   const opaque =
     "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check; integer-check, null-check";
+  // a late store that may be the speaker owes its own check against the list the place is decided by (C1); a definite
+  // speaker there would be admission's error and be ignored (A6)
+  const late =
+    "value: unknown; integer-use warning-runtime-check, member-read warning-runtime-check, written-target warning-runtime-check; copy-type, integer-check, null-check";
   const got: string[] = [];
-  for (const [setup, after] of [
-    ["let alias: integer[]|speaker = [1]", ""],
-    ["let alias = [1]", "alias = vera\n"],
-    ["let alias = vera", ""],
+  const want: string[] = [];
+  for (const [setup, after, expected] of [
+    ["let alias: integer[]|speaker = [1]", "", opaque],
+    [
+      "function h(flag: boolean): integer[]|speaker {\n  if flag { return vera }\n  return [1]\n}\nlet alias = [1]",
+      "alias = h(true)\n",
+      late,
+    ],
+    ["let alias = vera", "", opaque],
   ] as const)
-    for (const call of ['alias.get(0, default: "bad")', "alias.get(0)"])
+    for (const call of ['alias.get(0, default: "bad")', "alias.get(0)"]) {
       got.push(...read(setup, call, after));
+      want.push(expected, expected);
+    }
   // three receivers, with and without a default, in both orders
-  assert.deepEqual(
-    got,
-    Array.from({ length: 12 }, () => opaque),
-  );
+  assert.deepEqual(got, want);
+});
+
+/**
+ * S3 §1 (review: Astra's D2, round 2's D1): a decided place's admitted answer names the site of the contribution that
+ * decided it (A2's earliest definite one, a literal's earliest element, A4's copy), also where A3 settled the path
+ * without a scan, for the deciding line S8's sentences name; a written place has none. Both orders.
+ */
+test("a decided place publishes the site of the contribution that decided it", () => {
+  for (const [source, statement, path, decider] of [
+    ["let n = 3\nn = hostValue\nexit", "let n = 3", [], "3"],
+    [
+      "let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nexit",
+      "let xs = [2.5, whole]",
+      ["element"],
+      "2.5",
+    ],
+    ["let typed: integer = 1\nlet copy = typed\ncopy = 2\nexit", "let copy = typed", [], "typed"],
+    // (paths A3 settles without a scan: a plain scalar root, a settled family below a literal; Astra r2 D1)
+    ["let n = 6\nexit", "let n = 6", [], "6"],
+    ["let n = 6\nn = 7.5\nexit", "let n = 6", [], "6"],
+    ["let xs = [6]\nexit", "let xs = [6]", ["element"], "6"],
+    ["let r = {nested: {n: 6}}\nexit", "let r = {nested: {n: 6}}", ["nested", "n"], "6"],
+  ] as const)
+    for (const reversed of [false, true]) {
+      const run = (): ReturnType<typeof analysed> =>
+        withSolverSeam({ reverseWorklist: reversed }, () => analysed(source));
+      const { answers, node } = reversed
+        ? withConsumerOrder((list) => [...list].reverse(), run)
+        : run();
+      const place = answers.at(node(statement, "statement"))?.place;
+      assert.ok(place, `${source}: its place`);
+      const admitted = answers.place(place.id, path).admitted;
+      assert.ok(admitted.by === "decided", `${source}: decided`);
+      const at = source.indexOf(decider, source.indexOf(statement));
+      assert.deepEqual(
+        admitted.decider === null
+          ? null
+          : { start: admitted.decider.start, end: admitted.decider.end },
+        { start: at, end: at + decider.length },
+        `${source}${reversed ? " reversed" : ""}`,
+      );
+    }
+  const { answers, node } = analysed("let w: integer = 1\nexit");
+  const place = answers.at(node("let w: integer = 1", "statement"))?.place;
+  assert.ok(place);
+  assert.deepEqual(answers.place(place.id).admitted, { by: "written", kinds: ["integer"] });
+});
+
+test("a value an add or an addAll inserts has its properties, never the collection itself (N1)", () => {
+  // per program the read and its property names, each answered as its projection, in both orders
+  const added = "let xs = []\nxs.add({value: 2})\n";
+  const programs: readonly (readonly [string, string, string, readonly string[]])[] = [
+    ["a list's add", `${added}say xs.first`, "xs.first", ["value"]],
+    [
+      "a set's add",
+      "let xs = set[]\nxs.add({value: 2})\nfor entry in xs {\n  say entry.value\n}",
+      "entry",
+      ["value"],
+    ],
+    [
+      "a named record added",
+      "let r = {value: 2}\nlet xs = []\nxs.add(r)\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a literal's addAll",
+      "let xs = []\nxs.addAll([{value: 2}])\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a named list's addAll",
+      "let ys = [{value: 2}]\nlet xs = []\nxs.addAll(ys)\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "an add in a loop",
+      "let xs = []\nfor i in [1, 2] {\n  xs.add({value: i})\n}\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    ["a copied collection", `${added}let ys = xs\nsay ys.first`, "ys.first", ["value"]],
+    [
+      "a returned collection",
+      "function make {\n  let xs = []\n  xs.add({value: 2})\n  return xs\n}\nlet ys = make()\nsay ys.first",
+      "ys.first",
+      ["value"],
+    ],
+    [
+      "a handler's add",
+      "let xs = []\ntimer async hidden 1 s { xs.add({value: 2}) }\nsay xs.first",
+      "xs.first",
+      ["value"],
+    ],
+    [
+      "a nested collection",
+      "let xss = []\nxss.add([{value: 2}])\nsay xss.first.first",
+      "xss.first.first",
+      ["value"],
+    ],
+    [
+      "a nested record",
+      "let xs = []\nxs.add({inner: {value: 2}})\nsay xs.first.inner",
+      "xs.first.inner",
+      ["value"],
+    ],
+    ["a removed record", `${added}let r = xs.removeFirst()\nsay r`, "r", ["value"]],
+    // the controls: a literal's element; the collections themselves and scalar elements have none
+    ["a literal's element", "let xs = [{value: 2}]\nsay xs.first", "xs.first", ["value"]],
+    ["the collection", `${added}say xs`, "xs", []],
+    ["a scalar added", "let xs = []\nxs.add(2)\nsay xs.first", "xs.first", []],
+    ["the inner collection", "let xss = []\nxss.add([{value: 2}])\nsay xss.first", "xss.first", []],
+    ["the collection of an addAll", "let xs = []\nxs.addAll([{value: 2}])\nsay xs", "xs", []],
+    [
+      "a record holding a collection added to",
+      "let box = {list: []}\nbox.list.add({value: 2})\nsay box",
+      "box",
+      ["list"],
+    ],
+  ];
+  for (const [name, body, text, names] of programs) {
+    const answered = (): string => {
+      const { answers, node } = analysed(`${body}\nexit`);
+      const properties = answers.properties(node(text));
+      assert.deepEqual([...properties.keys()], names, name);
+      for (const [property, items] of properties)
+        assert.deepEqual(items, answers.project(node(text), { property }), `${name}: ${property}`);
+      return JSON.stringify(
+        [...properties].map(([property, items]) => [property, items.map((item) => item.tag)]),
+      );
+    };
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), answered),
+    );
+    assert.equal(reversed, answered(), name);
+  }
 });

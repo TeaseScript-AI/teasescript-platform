@@ -1,0 +1,306 @@
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+
+/*
+ * S6-CARRIERS §6's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
+ * test compares them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
+ */
+export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] = (() => {
+  const nested = "let raw = hostValue\nlet root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}\n";
+  const copies = `
+    D written-target warning 49:52 unknown
+    D written-target warning 66:69 unknown
+    C copy-type root.nested.f0 [integer] 49:52
+    C copy-type root.nested.f1 [integer] 66:69
+    B copy-type raw [unknown] 10:19`;
+  const conditional = `outcome warning-runtime-check
+    D written-target warning 31:75 later
+    D written-target warning 66:69 unknown
+    D integer-use warning 190:196 unknown
+    D integer-use warning 207:213 unknown
+    C copy-type root.nested.f0 [integer] 31:75
+    C copy-type root.nested.f1 [integer] 66:69
+    C integer-check box.f0 [integer] 190:196
+    C integer-check box.f1 [integer] 207:213
+    B copy-type raw [unknown] 10:19`;
+  const use = "function use(r) {\n  let n: integer = r.f\n  return true\n}\n";
+  const choices = (call: string): string =>
+    `let root = {f: 1}\nfunction bump {\n  root.f = null\n}\nlet a = askChoice {text: "a", value: root.f}\n${call}` +
+    'let b = askChoice {text: "b", value: root.f}\nrepeat a {}\nrepeat b {}\n';
+  return [
+    [
+      "the across-function copy",
+      "let raw = hostValue\nraw = 1\nlet root = {f: raw}\nlet box = {f: 0}\nbox = root\nfunction copy {\n  box = root\n}\ncopy()\nrepeat box.f {}\n",
+      `outcome warning-runtime-check
+      D written-target warning 10:19 later
+      D written-target warning 100:104 unknown
+      D integer-use warning 121:126 unknown
+      C copy-type raw [integer] 10:19
+      C copy-type box.f [integer] 100:104
+      C integer-check box.f [integer] 121:126
+      B copy-type raw [integer] 10:19`,
+    ],
+    [
+      "the reversed copy",
+      'let raw = hostValue\nraw = 1\nlet root = {f: raw}\nlet box = {f: null}\nfunction copy {\n  box = root\n}\ncopy()\nbox = root\nbox.f = "word"\nrepeat box.f {}\n',
+      `outcome compile-error
+      D written-target warning 10:19 later
+      D written-target warning 92:96 later
+      D written-target error 125:131 -
+      C copy-type raw [integer] 10:19
+      C copy-type box.f [integer] 92:96
+      B copy-type raw [integer] 10:19`,
+    ],
+    [
+      "a concatenation's host operand",
+      'let out = ([1] + hostValue)[1]\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 17:26 unknown
+      D operator warning 17:26 unknown
+      C copy-type out [integer] 17:26
+      C operand hostValue [list] 17:26
+      B copy-type out [integer] 17:26`,
+    ],
+    [
+      "a concatenation's host operand, a later store",
+      'let out = ([1] + hostValue)[1]\nout = 1\nsay "AFTER"\n',
+      `outcome warning-runtime-check
+      D written-target warning 17:26 later
+      D operator warning 17:26 unknown
+      C copy-type out [integer] 17:26
+      C operand hostValue [list] 17:26
+      B copy-type out [integer] 17:26`,
+    ],
+    [
+      "an otherwise's host operand",
+      'let out = hostValue otherwise 1\nsay "AFTER"\n',
+      "outcome valid\nB copy-type out [integer] 10:19",
+    ],
+    [
+      "a choice's host option",
+      'let out = askChoice 1, hostValue\nsay "AFTER"\n',
+      "outcome valid\nB copy-type out [integer] 23:32",
+    ],
+    [
+      "repeated projected copies",
+      `${nested}let box = root.nested\nbox = root.nested\nbox = root.nested\nrepeat box.f0 {}\nrepeat box.f1 {}\n`,
+      `outcome warning-runtime-check${copies}
+      D integer-use warning 141:147 unknown
+      D integer-use warning 158:164 unknown
+      C integer-check box.f0 [integer] 141:147
+      C integer-check box.f1 [integer] 158:164`,
+    ],
+    [
+      "once-bound projected copies",
+      `${nested}let stable = root.nested\nlet box = stable\nbox = stable\nbox = stable\nrepeat box.f0 {}\nrepeat box.f1 {}\n`,
+      `outcome warning-runtime-check${copies}
+      D integer-use warning 151:157 unknown
+      D integer-use warning 168:174 unknown
+      C integer-check box.f0 [integer] 151:157
+      C integer-check box.f1 [integer] 168:174`,
+    ],
+    [
+      "projected copies around a store below them",
+      `${nested}let box = root.nested\nbox = root.nested\nroot.nested.f0 = 1\nbox = root.nested\nrepeat box.f0 {}\nrepeat box.f1 {}\n`,
+      `outcome warning-runtime-check
+      D written-target warning 31:75 later
+      D written-target warning 66:69 unknown
+      D written-target warning 86:97 later
+      D written-target warning 104:115 later
+      D integer-use warning 177:183 unknown
+      C copy-type root.nested.f0 [integer] 31:75
+      C copy-type root.nested.f1 [integer] 66:69
+      C copy-type box.f0 [integer] 86:97
+      C copy-type box.f0 [integer] 104:115
+      C integer-check box.f1 [integer] 177:183
+      B copy-type raw [unknown] 10:19`,
+    ],
+    [
+      "M1, the conditional store before the copies",
+      `${nested}let box = {f0: null, f1: null}\nif raw != null {\n  root.nested.f0 = 1\n}\nbox = root.nested\nbox = root.nested\nrepeat box.f0 {}\nrepeat box.f1 {}\n`,
+      conditional,
+    ],
+    [
+      "M1, the conditional store between the copies",
+      `${nested}let box = {f0: null, f1: null}\nbox = root.nested\nif raw != null {\n  root.nested.f0 = 1\n}\nbox = root.nested\nrepeat box.f0 {}\nrepeat box.f1 {}\n`,
+      conditional,
+    ],
+    [
+      "F3, two choice reads around an effectful call",
+      choices("bump()\n"),
+      "outcome warning-runtime-check\nD integer-use warning 168:169 call\nC null-check b [integer] 168:169",
+    ],
+    ["F3, two choice reads, no call between", choices(""), "outcome valid"],
+    [
+      "F3, an argument under its operand's guard",
+      `let root = {f: 2.5}\n${use}if root != null and use(root) {\n  say "yes"\n}\n`,
+      "outcome warning-runtime-check\nD written-target warning 57:60 branch\nC copy-type n [integer] 57:60",
+    ],
+    [
+      "F3, an argument under no guard",
+      `let root = {f: 2.5}\n${use}if use(root) {\n  say "yes"\n}\n`,
+      "outcome compile-error\nD written-target error 57:60 -",
+    ],
+    [
+      "a named key read before and after a call storing to it, in one literal (TABLE r4.68 (1))",
+      "global root = 1\nfunction bump {\n  root = 2.0\n  return 0\n}\nlet box = [root, bump(), root]\nrepeat box[2] {}\n",
+      `outcome warning-runtime-check
+      D integer-use warning 96:102 call
+      C integer-check box.element [integer] 96:102`,
+    ],
+    [
+      "a read after a call registering a handler that stores the key, in one literal (Codex r25 F1)",
+      'let n = 1\nfunction register {\n  showPermanentButton "Change" { n = 1.5 }\n  return 0\n}\nlet xs = [n, register(), n]\nrepeat xs[2] {}\n',
+      `outcome warning-runtime-check
+      D integer-use warning 121:126 member
+      C integer-check xs.element [integer] 121:126`,
+    ],
+    [
+      "both reads after the registration (Codex r25 F1's control)",
+      'let n = 1\nfunction register {\n  showPermanentButton "Change" { n = 1.5 }\n  return 0\n}\nregister()\nlet xs = [n, 0, n]\nrepeat xs[2] {}\n',
+      `outcome warning-runtime-check
+      D integer-use warning 123:128 member
+      C integer-check xs.element [integer] 123:128`,
+    ],
+  ];
+})();
+
+/** One source of `WRITTEN_COPY_MATRIX`: its place, the domain per level and the host values that fit and misfit. */
+export interface WrittenCopyCase {
+  readonly name: string;
+  readonly source: string;
+  /** The binding the host value lands in: the written one itself, or its copy. */
+  readonly place: string;
+  /** The written domain at each level from the place's root down, `null` included where written. */
+  readonly levels: readonly (readonly string[])[];
+  /** The checked type of the store bringing the host value, as written. */
+  readonly checked: string;
+  /** The store bringing the host value: its statement's span, and its value's (where a bad value stops). */
+  readonly store: string;
+  readonly value: string;
+  readonly fits: readonly SerializableRuntimeValue[];
+  readonly misfits: readonly SerializableRuntimeValue[];
+}
+
+/**
+ * External round 7 B1's matrix (the lead's ruling: a place a written type decides, directly or through a copy, admits
+ * the written domain at every collection level, `null` included; the kinds stored never narrow it): four scalar kinds
+ * × list depths 0–3 × the innermost element nullable or not × the place written, an early copy of a written binding or
+ * a later one × the host value direct, named or held at an index (288 sources), beside an empty original, optional
+ * inner lists and their optional elements. Each expectation is the declared type's.
+ */
+export const WRITTEN_COPY_MATRIX: readonly WrittenCopyCase[] = (() => {
+  const kinds = {
+    integer: { literal: "1", fits: 2, misfits: [2.5, "text"] },
+    number: { literal: "1.5", fits: 2.5, misfits: ["text"] },
+    string: { literal: '"a"', fits: "b", misfits: [2] },
+    boolean: { literal: "true", fits: false, misfits: ["text"] },
+  } as const;
+  const wrap = (text: string, depth: number): string =>
+    "[".repeat(depth) + text + "]".repeat(depth);
+  const out: WrittenCopyCase[] = [];
+  const add = (
+    name: string,
+    lines: readonly string[],
+    place: string,
+    hostLine: string,
+    value: string,
+    levels: readonly (readonly string[])[],
+    checked: string,
+    fits: readonly SerializableRuntimeValue[],
+    misfits: readonly SerializableRuntimeValue[],
+  ): void => {
+    const source = `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`;
+    const start = source.indexOf(`${hostLine}\n`);
+    const end = start + hostLine.length;
+    out.push({
+      name,
+      source,
+      place,
+      levels,
+      checked,
+      store: `${start}:${end}`,
+      value: `${end - value.length}:${end}`,
+      fits,
+      misfits,
+    });
+  };
+  for (const [kind, { literal, fits, misfits }] of Object.entries(kinds))
+    for (const depth of [0, 1, 2, 3])
+      for (const nullable of [true, false])
+        for (const decision of ["written", "early copy", "later copy"] as const)
+          for (const host of ["direct", "named", "index-held"] as const) {
+            const type = `${kind}${nullable ? "?" : ""}${"[]".repeat(depth)}`;
+            const value = wrap(
+              host === "direct" ? "hostValue" : host === "named" ? "h" : "[hostValue][0]",
+              depth,
+            );
+            const lines = [
+              ...(host === "named" ? ["let h = hostValue"] : []),
+              `let typed: ${type} = ${wrap(literal, depth)}`,
+            ];
+            const hostLine =
+              decision === "written"
+                ? `typed = ${value}`
+                : decision === "early copy"
+                  ? `copy = ${value}`
+                  : `let copy = ${value}`;
+            if (decision === "written") lines.push(hostLine);
+            else if (decision === "early copy") lines.push("let copy = typed", hostLine);
+            else lines.push(hostLine, "copy = typed");
+            const scalar = nullable ? [kind, "null"] : [kind];
+            add(
+              `${type}, ${decision}, ${host}`,
+              lines,
+              decision === "written" ? "typed" : "copy",
+              hostLine,
+              value,
+              [...Array.from({ length: depth }, () => ["list"]), scalar],
+              `${"list<".repeat(depth)}${scalar.join("|")}${">".repeat(depth)}`,
+              nullable ? [null, fits] : [fits],
+              nullable ? misfits : [null, ...misfits],
+            );
+          }
+  const list = (items: readonly SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [...items],
+  });
+  for (const [order, lines] of [
+    ["early copy", ["let copy = typed", "copy = [hostValue]"]],
+    ["later copy", ["let copy = [hostValue]", "copy = typed"]],
+  ] as const) {
+    add(
+      `integer?[] from an empty original, ${order}`,
+      ["let typed: integer?[] = []", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["integer", "null"]],
+      "list<integer|null>",
+      [null, 2],
+      [2.5, "text"],
+    );
+    add(
+      `integer[]?[], an optional inner list, ${order}`,
+      ["let typed: integer[]?[] = [[1]]", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["list", "null"], ["integer"]],
+      "list<list<integer>|null>",
+      [null, list([2])],
+      [list([null]), list(["text"]), 2],
+    );
+    add(
+      `integer?[]?[], optional elements of an optional inner list, ${order}`,
+      ["let typed: integer?[]?[] = [[1]]", ...lines],
+      "copy",
+      lines[order === "early copy" ? 1 : 0],
+      "[hostValue]",
+      [["list"], ["list", "null"], ["integer", "null"]],
+      "list<list<integer|null>|null>",
+      [null, list([2]), list([null])],
+      [list(["text"]), 2],
+    );
+  }
+  return out;
+})();

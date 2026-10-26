@@ -1,8 +1,80 @@
-# The core's compact fixture (M4 step S0)
+# The core's compact fixture (M4 steps S0 and S6)
 
 Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fable/m4/s0-brief.md`, lead Fable): the
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
+
+## End offsets (M4 step S6, `S6-CARRIERS.md` revision 5, §9 step 0)
+
+Opus, 2026-10-26, builder for M4 step S6 (lead Fable; the lead's answer 4, option B). Both files are regenerated from
+the same pinned set revision `1de3570831c7bc4b…` (deferred `79a837a06da38169…`) with Sol's extended tooling, so every
+compact site now carries its exclusive `end`. The tooling is `convert.py` `ba04601abfc9e012…` and `verify.py`
+`9a5b8e73c7bd46f9…`, and the method and command are in the research `MANIFEST.md` (`4991fb45a36d40ef…`, "To
+regenerate S6's committed fixture").
+- `verify.py --preservation` passes for both files, against the set's own records: every diagnostic, check and N10
+  writer span, starts and ends.
+- Removing only the new `end` of each diagnostic and check site gives back the previous bytes, record for record:
+  1,913 of 1,913 gate records (`b9ddd0fd…`) and 9 of 9 deferred records (`f6db26a8…`). The N10 writer spans carried
+  their ends before.
+- The converter rewrote the same 197 gate records (193 prefixed files and the four collection records) and the same 2
+  deferred records.
+
+## The rule-function records (M4 step S6, TABLE r4.63–r4.66)
+
+Opus, 2026-10-26, builder for M4 step S6 (lead Fable, who approved the file). `cells-rule-function.jsonl` holds the ten
+records `cp9-cells/s6/rule-function/…` of the set's corrected revision `81b3a0c419ed542b…` (1,981 gate records;
+deferred `77b11b86eae67cf7…`, 9), which pin the lead's rule function for C1, C9 and C10:
+- `carrier/selecting`, `carrier/combining` (r4.63 (2));
+- `defaults/get`, `defaults/otherwise`, `defaults/otherwise-family`, `defaults/load`, `defaults/fromJson` (r4.63 (3),
+  r4.65 (1));
+- `loop/decided`, `loop/unknown-control`, `loop/unknown-read` (r4.63 (4), r4.64, r4.65 (2), r4.66 (1): the loop
+  variable meets a real consumer, `repeat entry {}`).
+
+`cells.jsonl` and its pin `1de3570831c7bc4b…` are untouched; S6b's refresh folds these records into it and removes this
+file. The file was made with the same tooling, `convert.py` `ba04601abfc9e012…` and `verify.py` `9a5b8e73c7bd46f9…`,
+from the whole revision, the ten lines kept byte for byte:
+
+```sh
+F=/home/peter/notes/teasescript/reports/type-inference-research-2026-10-17/evidence/3a-newcore/fixture
+S=$F/../expected-cp9-cells
+work=$(mktemp -d /tmp/agent-work/o4-m4-s6/fixture-rule-function-XXXXXX)
+mkdir "$work/set" "$work/out"
+cp "$S/cases.jsonl" "$S/cases-deferred.jsonl" "$work/set/"
+python3 -I "$F/convert.py" --set "$work/set" --out "$work/out"
+python3 -I "$F/verify.py" --preservation "$work/set/cases.jsonl" "$work/out/cells.jsonl"
+grep '^{"name":"cp9-cells/s6/rule-function/' "$work/out/cells.jsonl" > tests/fixtures/type-core/cells-rule-function.jsonl
+```
+
+`verify.py --preservation` passes for the revision, 1,981 of 1,981. The file's SHA-256 is `987bc86d2f0ac5bb…`.
+
+## Refresh (M4 step S6)
+
+Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
+`1de3570831c7bc4b…` (1,913 gate records, 9 deferred; TABLE r4.50) by the same tooling, unchanged: `convert.py`
+(`eef78c11…`) with `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below.
+197 records are rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
+Against the set's previous revision `60751a0f17a0f8cf…` (1,888 records) it adds the 25 records
+`cp9-cells/s4/s6/owner/…` (`ingress/`, `bound/` and `default/`: the owner's review of 2026-10-25); the other 1,888
+compact records are byte-identical. The 25 were compared with the core in both orders before the refresh: 25 of 25 the
+same. The set's revision `6f102107b71f3dde…` before it differs only in the 25 records' reason citations and pins (TABLE
+r4.50 states the owner's three readings); both convert to the same bytes.
+
+`60751a0f…` against its previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in
+five reason texts only) added the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`. The exit
+condition, rerun for it on the laptop worker with the reference model round 19d (`points14.mjs` `2edb329e…`) on a
+compiler build of `main` `6187eb145`, in both demand orders:
+- zero skipped records;
+- preservation equality (`verify.py`'s invariance check, every record's model output moved through the remapping
+  against its output on the rewritten record): 1,888 of 1,888;
+- the fixture against the model's compacted records on the rewritten set: 1,850 the same, the 9 adapter records apart,
+  and 29 different, records round 19d predates: the 23 `cp9-cells/s4/followup/…` records of TABLE r4.47 and 6 of the
+  14 `cp9-cells/s4/s6/…` records of r4.48 (the research folder's later model, `d0d44513…`, differs in those 6 only);
+- boundary checks and ingress stores one to one in 1,874 records, 4 more consumed in place, 3 more with a store owing
+  none, and 7 different, follow-up records (clock reads, r4.47 (5)).
+
+The sections below are S0's record of the method; the file table names the refreshed fixture.
+
+## S0
 
 **Status: complete.** (a) and (b) are done:
 - 193 gate records and 2 deferred records read `hostFlag` or `hostText`, and are rewritten;
@@ -15,11 +87,11 @@ rerun on it: zero skips and zero differences in both orders.
 
 | file | SHA-256 | content |
 |---|---|---|
-| `cells.jsonl` | `cea67bb69bbe1ffaeb8fdd2240c87b2358797fb32782410727bcd93c525eb6b9` | the 1,782 gate records, 961,032 bytes |
-| `cells-deferred.jsonl` | `f6db26a8f33612c5f57d2506cc322b0e925318a7e943e6cd18426fabd52d8e4e` | the 9 deferred-syntax records, never in the gate |
-| `convert.py` | `eef78c1122233e97806cf3423a13bbbe65347131624faae19cdce1ef0eec7ba8` | the converter: deterministic (two runs byte-identical), one record per line, fixed key order |
+| `cells.jsonl` | `d8cf041ad77e7a9a2fcaa410ffe318532e1311351a08bea74cfdeef0a2ba488a` | the 1,913 gate records with site ends, 1,042,965 bytes (S6's refresh without ends `b9ddd0fd…`; S0's snapshot `cea67bb6…`, 1,782 records) |
+| `cells-deferred.jsonl` | `c4836620dc65f17a4915816e920ab91dd340589abc60e2257a77e640c61323e4` | the 9 deferred-syntax records with site ends, never in the gate (without ends `f6db26a8…`) |
+| `convert.py` | `ba04601abfc9e012cc466bc084d92bf3f7289ae4731428d95a32e2e8046c7464` | the converter: deterministic, one record per line, fixed key order, full compact spans (earlier S6 refresh: `eef78c11…`) |
 | `collection-rewrites.json` | `981e40ee4a1490609eb4e78f9a3095d514edc256acfe580dc77e628ab03970c2` | the four collection rewrites, all `confirmed: true` |
-| `verify.py` | `8062a453a4ee8c6d7f90203f349148dfc30e5695427972e26f9691467d4694bb` | the exit condition's own checks, beside the lead's comparator |
+| `verify.py` | `9a5b8e73c7bd46f9f647f33e597829b503b1634df0d40d4055a95a3e0fd5eeb5` | the exit condition's own checks, beside the lead's comparator, and span preservation (`--preservation`) (earlier: `8062a453…`) |
 | `check/results.txt` | | every run's counts, the negative controls, the reader check |
 | `check/run-batch.sh`, `check/read-check.mjs` | | the laptop batch (shards through `sx-queue`) and the reader check |
 
@@ -41,10 +113,11 @@ One JSON object per line, keys in this order:
 
 ```
 {"name", "cells", "owner", "files": [{"path", "source"}], "outcome",
- "diagnostics": [{"kind", "class", "site": {"file", "offset"}, "context", "requiredCheck"}],
- "checks": [{"kind", "target", "against", "boundary", "site": {"file", "offset"}}]}
+ "diagnostics": [{"kind", "class", "site": {"file", "offset", "end"}, "context", "requiredCheck"}],
+ "checks": [{"kind", "target", "against", "boundary", "site": {"file", "offset", "end"}}]}
 ```
 
+- Every site is the half-open span `[offset, end)` in its rewritten file (S6's end offsets, above).
 - `outcome`, the diagnostics' `kind`, `class`, `site` and `context`, and the checks' fields are exactly
   `CompactRecord` (`readCompactRecord` accepts every line of both files: `check/read-check.mjs`).
 - `class` is the set's `status`. In every record, `status` equals `class` and `at` equals `site`.
@@ -175,7 +248,8 @@ unconfirmed state.
   as a separate multiset, so it never asserts which check a warning owes. Also `offendingKind` (216 diagnostics, 148
   checks), `resultStatus` and `operationStatus` (179 each), a check's `reason` (`external-data` on all 197 boundary
   checks: implied by `boundary`) and the `on` texts.
-- **Spans.** Every site is a start offset. Span ends and the separate `expression` span are dropped, as §3.1 intends.
+- **Spans.** S0's sites were start offsets only; S6's regeneration added each site's exclusive `end` (above). The
+  separate `expression` span is dropped, as §3.1 intends.
 - **Writer evidence.** `expect.writerSites` (32 records), `provenance.writers` (27 diagnostics), and the record-level
   `writerAssertions` (23), `requiredCheckMetadata` (20), `writerCandidates` (4), `ingressIdentities`,
   `rejectedStores`, `unserializedWriterEvidence` (1 each) and `consumerSite` (2). The lead's comparator does not

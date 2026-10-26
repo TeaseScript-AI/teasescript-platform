@@ -4,15 +4,7 @@ import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } fr
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { BudgetExhausted } from "./budget.js";
-import {
-  coreCheckResult,
-  coreFacts,
-  declarations,
-  nodeOf,
-  SLICE_DEPTH,
-  SliceIndex,
-} from "./consumer.js";
-import { withoutEmpty } from "./exact-path.js";
+import { coreCheckResult, coreFacts, nodeOf, SLICE_DEPTH, SliceIndex } from "./consumer.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 
 /*
@@ -25,12 +17,11 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable, `if` and `else`, `repeat` with a count, `say`
  * of plain text, and `exit`; number, boolean, null and plain text literals, variables, host values, list literals,
- * index reads and parentheses. Its consumers are C1 (a store into a written place) and C2 (a repeat count, an index);
- * its ingress is a host value stored into a written place, with C9's boundary check there. Rejected after the
- * analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required check, S10), a
- * variable without a written type whose kinds are no settled family or that copies a variable with one (admission,
- * S6), a host value read anywhere else or stored as a whole collection (S6's boundaries), lists nested `SLICE_DEPTH`
- * deep, and the work allowance (S8).
+ * index reads and parentheses. Its consumers are C1 (a store into a place with a written or decided type, A1–A9, with
+ * A6's rejections and a literal's elements of one type) and C2 (a repeat count, an index); its ingress is a host value,
+ * with C9's boundary check where it enters (the store's destination's admitted type) or where it is read. Rejected
+ * after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required check,
+ * S10), lists nested `SLICE_DEPTH` deep, and the work allowance (S8).
  */
 
 /** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
@@ -65,7 +56,7 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     );
     const answers = analyseCore(core);
     try {
-      const after = outsideAnswers(answers, index, core.files, globals);
+      const after = outsideAnswers(answers, index, core.files);
       if (after !== null) throw outsideSlice(core, after);
       const checked = coreCheckResult(answers, index, core);
       // computed here, so that a question past the allowance rejects the program instead of failing a later caller
@@ -244,12 +235,6 @@ function letNames(program: Program): Set<string> {
 
 // ------------------------------------------------------------------------------------------------- the answers
 
-/** The integer and number family (A3): one kind, or `integer` with `number`, with or without `null`. */
-function settledFamily(tags: readonly string[]): boolean {
-  const kinds = new Set(tags.filter((tag) => tag !== "null"));
-  return kinds.size <= 1 || (kinds.size === 2 && kinds.has("integer") && kinds.has("number"));
-}
-
 /** A program whose analysis crossed the work allowance (S8's fallback). */
 function overAllowance(files: readonly CoreFile[]): Outside {
   return {
@@ -264,7 +249,6 @@ function outsideAnswers(
   answers: Answers,
   index: SliceIndex,
   files: readonly CoreFile[],
-  globals: ReadonlySet<string>,
 ): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
     index.spanAt(site);
@@ -283,50 +267,13 @@ function outsideAnswers(
         what: "a value that may be null here",
       };
   }
-  // admission (S6): a variable without a written type that copies a variable with a written type, or a part of one, is
-  // decided by that type (A4), which the slice does not carry; such a copy is outside it
-  const lets = declarations(answers, index);
-  for (const statement of index.statements) {
-    if (statement.kind !== "letStatement" && statement.kind !== "assignmentStatement") continue;
-    const destination = answers.at(nodeOf(answers, index, statement))?.place;
-    const declaration =
-      destination === null || destination === undefined ? undefined : lets.get(destination.id);
-    if (declaration === undefined || declaration.typeAnnotation !== null) continue;
-    // the reads whose value the store carries: through parentheses, list elements and the lists an index reads
-    const pending: Expression[] = [
-      statement.kind === "letStatement" ? statement.initializer : statement.value,
-    ];
-    for (let value = pending.pop(); value !== undefined; value = pending.pop())
-      if (value.kind === "parenthesizedExpression") pending.push(value.expression);
-      else if (value.kind === "indexExpression") pending.push(value.object);
-      else if (value.kind === "listLiteral")
-        for (const element of value.elements) pending.push(element);
-      else if (value.kind === "identifier") {
-        const read = answers.at(nodeOf(answers, index, value))?.place;
-        const source = read === null || read === undefined ? undefined : lets.get(read.id);
-        if (source !== undefined && source.typeAnnotation !== null)
-          return {
-            file: index.fileOf(value),
-            span: value.span,
-            what: `this copy of '${value.name}', which has a written type, into '${declaration.name.name}', which has none`,
-          };
-      }
-  }
-  // admission (S6): a variable without a written type takes one settled family, without external data, at every depth
-  // (A3)
+  // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
       if (place === null || place === undefined) continue;
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
-        const kinds = withoutEmpty([...answers.place(place.id, path).contract.kinds]);
-        const tags = kinds.map((item) => item.tag);
-        if (tags.includes("unknown") || !settledFamily(tags))
-          return {
-            file: index.fileOf(statement),
-            span: statement.name.span,
-            what: `the variable '${statement.name.name}', whose stores do not settle one type`,
-          };
+        const tags = answers.place(place.id, path).contract.kinds.map((item) => item.tag);
         if (!tags.includes("list")) break;
         if (path.length + 1 >= SLICE_DEPTH)
           return {
@@ -336,53 +283,5 @@ function outsideAnswers(
           };
       }
     }
-  // A8 (S6): a list literal that no store brings whole into a written place holds one settled family
-  for (const list of index.lists)
-    if (!storedIntoWritten(answers, index, list)) {
-      const tags = withoutEmpty([...answers.project(nodeOf(answers, index, list), "element")])
-        .map((item) => item.tag)
-        .filter((tag) => tag !== "unknown");
-      if (!settledFamily(tags))
-        return {
-          file: index.fileOf(list),
-          span: list.span,
-          what: "a list whose elements do not settle one type",
-        };
-    }
-  // C9 (S6): a host value is read only where a store brings it into a written place, which checks it there; stored
-  // whole as a collection, what its elements owe beside the boundary check is admission's
-  const boundaries = new Set<string>();
-  for (const check of answers.checks)
-    if (check.boundary) {
-      if (check.against.some((kind) => kind === "list" || kind === "set" || kind === "dict"))
-        return {
-          file: check.site.file,
-          span: index.spanAt(check.site),
-          what: "external data stored as a whole collection",
-        };
-      boundaries.add(`${check.site.file}:${check.site.start}:${check.site.end}`);
-    }
-  for (const read of index.reads)
-    if (globals.has(read.name)) {
-      const file = index.fileOf(read);
-      if (!boundaries.has(`${file}:${read.span.start.offset}:${read.span.end.offset}`))
-        return {
-          file,
-          span: read.span,
-          what: "a host value read outside a store into a typed variable",
-        };
-    }
   return null;
-}
-
-/** Whether a store brings `expression` whole into a variable with a written type, whose C1 checks it (A1, A8). */
-function storedIntoWritten(answers: Answers, index: SliceIndex, expression: Expression): boolean {
-  const store = index.storeOf(expression);
-  if (store === undefined || !index.storedWhole(expression)) return false;
-  const place = answers.at(nodeOf(answers, index, store))?.place;
-  return (
-    place !== null &&
-    place !== undefined &&
-    answers.place(place.id, place.path).admitted.by === "written"
-  );
 }

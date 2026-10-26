@@ -52,12 +52,13 @@ export interface Writer extends SourceSite {
 }
 
 /**
- * The ingress stores of external data that an item holds (C9), as a shared graph: a leaf names one store, a union two
- * parts, and a cell what one member of a fixpoint brought, which grows in place as the member runs again, so every value
- * that holds the cell sees the growth. Merging items unites their nodes and never copies the stores.
+ * The ingresses of external data that an item holds (C9), as a shared graph: a leaf names one ingress, by its own
+ * expression's writer (S6-CARRIERS §3.1: the store that brought it is a fact of admission's walk, not the value side's),
+ * a union two parts, and a cell what one member of a fixpoint brought, which grows in place as the member runs again, so
+ * every value that holds the cell sees the growth. Merging items unites their nodes and never copies the leaves.
  */
 export type IngressNode =
-  | { readonly id: number; readonly store: Writer }
+  | { readonly id: number; readonly ingress: Writer }
   | { readonly id: number; readonly parts: readonly [IngressNode, IngressNode] }
   | IngressCell;
 
@@ -82,6 +83,11 @@ export interface Item {
   readonly guarded?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
   readonly fan?: string;
+  /**
+   * An operation's result kind that every combination giving it holds external data in: possible solely through
+   * external data, so no internal contribution admits it (A2, A3 r4.36, r4.37).
+   */
+  readonly extOnly?: true;
 }
 
 /** The fields of an item that `makeItem` lets a caller set. */
@@ -156,16 +162,16 @@ export function firstWriter(a: Writer | null, b: Writer | null): Writer | null {
   return compareWriters(b, a) < 0 ? b : a;
 }
 
-/** The ingress graph of one analysis: one leaf per store and one union per pair of nodes, each made once. */
+/** The ingress graph of one analysis: one leaf per ingress and one union per pair of nodes, each made once. */
 export class IngressGraph {
   readonly #leaves = new Map<string, IngressNode>();
   readonly #unions = new Map<string, IngressNode>();
   #next = 0;
 
-  public leaf(store: Writer): IngressNode {
-    const key = writerKey(store);
+  public leaf(ingress: Writer): IngressNode {
+    const key = writerKey(ingress);
     let node = this.#leaves.get(key);
-    if (node === undefined) this.#leaves.set(key, (node = { id: this.#next++, store }));
+    if (node === undefined) this.#leaves.set(key, (node = { id: this.#next++, ingress }));
     return node;
   }
 
@@ -183,20 +189,20 @@ export class IngressGraph {
   }
 }
 
-/** Every store below `node`, each node visited once, in source order. */
-export function ingressStores(node: IngressNode): Writer[] {
-  const stores = new Map<string, Writer>();
+/** Every ingress below `node`, each node visited once, in source order. */
+export function ingressLeaves(node: IngressNode): Writer[] {
+  const leaves = new Map<string, Writer>();
   const seen = new Set<IngressNode>();
   const pending = [node];
   while (pending.length > 0) {
     const current = pending.pop()!;
     if (seen.has(current)) continue;
     seen.add(current);
-    if ("store" in current) stores.set(writerKey(current.store), current.store);
+    if ("ingress" in current) leaves.set(writerKey(current.ingress), current.ingress);
     else if ("parts" in current) pending.push(...current.parts);
     else if (current.contents !== null) pending.push(current.contents);
   }
-  return [...stores.values()].sort(compareWriters);
+  return [...leaves.values()].sort(compareWriters);
 }
 
 /** What the item operations of one analysis share: its ledger and its ingress graph. */
@@ -224,8 +230,9 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
       ? (firstContext(first.word, other.word) ?? undefined)
       : undefined;
   const loose = first.loose === true || (node !== undefined && (isLoose(first) || isLoose(other)));
-  // Still the rows of one unknown only when both are.
+  // Still the rows of one unknown only when both are; still possible solely through external data only when both are.
   const fan = first.fan !== undefined && first.fan === other.fan ? first.fan : undefined;
+  const extOnly = first.extOnly === true && other.extOnly === true;
   return {
     tag: first.tag,
     cert: !guarded && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
@@ -237,6 +244,7 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
     ...(loose ? { loose: true } : {}),
     ...(guarded ? { guarded: true } : {}),
     ...(fan === undefined ? {} : { fan }),
+    ...(extOnly ? { extOnly: true } : {}),
   };
 }
 
@@ -305,7 +313,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.writer === null ? "" : writerKey(item.writer),
         item.context ?? "",
         item.word ?? "",
-        `${item.guarded === true ? "g" : ""}${item.loose === true ? "l" : ""}`,
+        `${item.guarded === true ? "g" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
         item.fan ?? "",
       ].join("|"),
     )

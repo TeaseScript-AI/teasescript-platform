@@ -1,4 +1,5 @@
 import type { Expression } from "../../ast.js";
+import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import type { ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
 import * as collections from "../adapters/collections.js";
@@ -6,34 +7,40 @@ import * as handles from "../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../adapters/relation.js";
 import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
-import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
+import type { Constraint, PlaceId, SourceSite } from "../graph.js";
+import {
+  Admission,
+  concrete,
+  contributes,
+  deciding,
+  fits,
+  isExternal,
+  isOpaque,
+  requiredKind,
+} from "./admission.js";
 import type { CorePass } from "./answers.js";
 import {
-  choiceLabels,
+  defaultOf,
   heldReference,
   MEMBER_KINDS,
   OWN_SELECTION,
   REFERENCE,
   termAt,
   typeTags,
-  writtenOf,
 } from "./contract.js";
-import {
-  keyOf,
-  keyPath,
-  keyPlace,
-  prefixesOf,
-  sortCost,
-  type Definition,
-  type Key,
-} from "./definitions.js";
+import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
-import { dictList, interactionCategory, selectsElement } from "./method-categories.js";
+import {
+  builtinResult,
+  conversionCategory,
+  dictList,
+  selectsElement,
+} from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
-import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
+import { propertyName, siteKey, stepName, type ValueConstraint } from "./program.js";
 import {
   elementStep,
   explainingItem,
@@ -54,9 +61,9 @@ import type { Work } from "./solver.js";
  * items. The quiet path answers first: a consumer that every kind of the contract fits, with no `unknown`, asks
  * nothing more (§3.3). Otherwise: all items definite and none fits is an error; some item does not fit, or an
  * `unknown` is present, a warning with one obligation per offending kind (§4); all fit, quiet. Here: C2 to C6, C11,
- * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, C1 and C7 against written types
- * (A1, A9), and C9's boundary check where external data a store brings enters a written place. Decided types, the other
- * boundary checks, C8 and C10 are admission's.
+ * C12, the iterable of a `for`, F19a's speaker accesses, ADR 1.5's null default, C1 and C7 against a place's written or
+ * decided type (A1–A9, with admission's decisions and rejections), C10's fallbacks and defaults, and where each consumer
+ * meets external data, admission's boundary check of its ingress (C9). Saves (C8) are the storage module's.
  */
 
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
@@ -131,25 +138,6 @@ function hasProperty(kind: ItemTag, name: string): boolean {
   );
 }
 
-/** The kinds that fit a destination of kind `ref` (C1, ADR 1.2): a whole number a number; an unknown anything. */
-function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
-  return (
-    tag === ref ||
-    (tag === "integer" && ref === "number") ||
-    (!written && tag === "number" && ref === "integer") ||
-    tag === "unknown"
-  );
-}
-
-const concrete = (item: Item): boolean =>
-  item.tag !== "null" && item.tag !== "unknown" && item.tag !== "empty";
-const isOpaque = (item: Item): boolean =>
-  item.tag === "unknown" && (item.reasons & (REASON.opaque | REASON.missing | REASON.budget)) !== 0;
-const isExternal = (item: Item): boolean =>
-  item.tag === "unknown" && (item.reasons & REASON.external) !== 0;
-/** A value a store contributes to a place: an opaque or external unknown, never a source's missing field. */
-const contributes = (item: Item): boolean =>
-  (isOpaque(item) || isExternal(item)) && item.reasons !== REASON.missing;
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
 
@@ -178,22 +166,14 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
-/** What C1's site walk reads of a value: a path step, or a choice's options and an option's selected value. */
-type ReadStep = string | typeof OPTIONS | typeof SELECT;
-
-/** The walk's step into a choice's options (no path step: a step name is never a symbol). */
-const OPTIONS: unique symbol = Symbol("options");
-
-/** The walk's step from a choice's option to its selected value (V30 §19). */
-const SELECT: unique symbol = Symbol("select");
-
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
-  /** The boundary checks of external data (C9), by the key they enter: here those a store into a written place owes. */
-  readonly boundaries = new Map<Key, Obligation[]>();
-  readonly #boundarySites = new Set<string>();
+  /** Admission's decisions, rejections and boundary checks (§5, C9). */
+  readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
   readonly quiet = new Set<PlaceId>();
+  /** The class sides whose members' values a quiet proof has already marked quiet (§4.4). */
+  readonly #quietSides = new Set<string>();
   /** Each consumer read's demand and the work it was the first to compute (S3 §5: a counter only here). */
   readonly reads: ReadWork[] = [];
   #reading: FlowNode | null = null;
@@ -207,8 +187,13 @@ export class Consumers {
   >();
   readonly #defaults = new Map<string, { readonly key: Key; readonly at: FlowNode } | null>();
 
-  public constructor(readonly pass: CorePass) {
+  public constructor(
+    readonly pass: CorePass,
+    rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map(),
+    cycling: ReadonlySet<number> = new Set(),
+  ) {
     this.#order = consumerOrder ?? ((list) => [...list]);
+    this.admission = new Admission(pass, { run: (work) => this.#run(work) }, rejected, cycling);
     const program = pass.program;
     for (const c of program.constraints) {
       if (c.kind === "get") this.#getOf.set(c.result, c.receiver);
@@ -254,11 +239,14 @@ export class Consumers {
 
   /** Every consumer of the program, once. */
   public check(): void {
-    this.#writtenStores();
+    this.#admittedStores();
+    this.admission.ingressStores();
+    this.admission.literalElements(this.#order, (site) => this.#error("written-target", site));
     this.#operations();
     this.#uses();
     this.#receivers();
     this.#speakers();
+    this.admission.publish();
   }
 
   // ----------------------------------------------------------------------------------------- diagnostics
@@ -305,29 +293,6 @@ export class Consumers {
         `validate the stored value of ${label} against ${against.join("|")}`,
       ),
     );
-  }
-
-  /**
-   * C9: the boundary check of external data where it enters, one per ingress expression and destination, against the
-   * destination's own kinds (r4.29: inside a literal too).
-   */
-  #boundary(key: Key, site: SourceSite, label: string, against: readonly ItemTag[]): void {
-    const at = `${siteKey(site)}|${key}`;
-    if (this.#boundarySites.has(at)) return;
-    this.#boundarySites.add(at);
-    const list = this.boundaries.get(key);
-    const check: Obligation = {
-      ...this.#obligation(
-        "copy-type",
-        site,
-        label,
-        against.map((tag) => requiredKind(tag)),
-        `validate external data entering ${label} against ${against.join("|")}`,
-      ),
-      boundary: true,
-    };
-    if (list === undefined) this.boundaries.set(key, [check]);
-    else list.push(check);
   }
 
   /** S4: a possible null owes a null-check at every consumer, against what the place needs. */
@@ -418,22 +383,6 @@ export class Consumers {
     return false;
   }
 
-  /** A place's path in the same vocabulary: an element step below a dict is its `entry`. */
-  #pathLabel(place: PlaceId, path: readonly string[]): string {
-    const { program, contract } = this.pass;
-    let label = program.place(place).label;
-    path.forEach((step, index) => {
-      if (step !== "element") label = `${label}.${step}`;
-      else {
-        const kinds = withoutEmpty(
-          this.#run(contract.contractOf(keyOf(place, path.slice(0, index)))),
-        );
-        label = `${label}.${elementStep(kinds.map((item) => item.tag))}`;
-      }
-    });
-    return label;
-  }
-
   /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */
   #quietKinds(value: PlaceId | undefined, rest: readonly string[] = []): ItemTag[] | null {
     if (value === undefined) return null;
@@ -461,199 +410,140 @@ export class Consumers {
       : kinds;
   }
 
-  // ------------------------------------------------------------------------------ C1, C7 against written types
+  // -------------------------------------------------------------------- C1, C7 against admitted types
 
   /**
-   * C1, C7 against a written type (A1, A9): every store into a place with a written type at the path, every argument
-   * of a written parameter and every return of a written result is checked against that type, the store's value at its
-   * node by §3. A definite element of a collection literal none of whose kinds fits is an error at that element (A8); a
-   * value none of whose kinds fits is an error even when every item is possible (ADR 1.7), at the innermost offending
-   * expression inside literals (r4.35), never under a guard; otherwise one `copy-type` per offending kind, whatever its
-   * certainty, and a `null-check` for a possible null.
+   * C1, C7 against a place's admitted type (A1–A9): every candidate store admission names is checked against the
+   * decided type, the store's value at its node by §3. A definite contribution that does not fit, where no kind of the
+   * value fits, is an error at the innermost offending expression and the store is rejected (A6, r4.35); a store of a
+   * rejection cycle a warning; a definite element of a collection literal none of whose kinds fits a written element
+   * type an error at that element (A8); a value none of whose kinds fits a written type or one decided earlier in the
+   * source an error even when every item is possible (ADR 1.7), never under a guard; otherwise one `copy-type` per
+   * offending kind, whatever its certainty, a copy made before its decider with context `later` (A7), and a
+   * `null-check` for a possible null. The store's external data brings its boundary checks (C9).
    */
-  #writtenStores(): void {
-    const { program, definitions, lists, contract } = this.pass;
-    const work = program.work;
-    const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
-    for (const c of program.constraints)
-      if (c.kind === "project") {
-        const target = program.targetRoot(c.into);
-        if (!program.cellOwner.has(target.root) && !program.hasOf.has(target.root))
-          tracked.add(keyOf(target.root, target.path));
-      }
-    for (const [, binding] of program.occurrenceOf) tracked.add(keyOf(binding, []));
-    const stores = new Map<Key, number>();
-    for (const d of definitions.storeDefs)
-      if (d.kind === "whole" || d.kind === "add")
-        for (const key of [d.key, ...prefixesOf(d.key)]) {
-          work.charge("indexSteps");
-          stores.set(key, (stores.get(key) ?? 0) + 1);
-        }
-    // a literal's structure where another store or add reaches the place or below it
-    for (const d of definitions.storeDefs)
-      if ((d.kind === "whole" || d.kind === "add") && (stores.get(d.key) ?? 0) > 1)
-        for (const path of this.#literalPaths(d.value!))
-          tracked.add(
-            keyOf(d.place, [
-              ...d.path,
-              ...(d.kind === "add" && d.how !== "elements" ? ["element"] : []),
-              ...path,
-            ]),
-          );
-    for (const key of [...tracked])
-      for (const prefix of prefixesOf(key)) {
-        work.charge("indexSteps");
-        tracked.add(prefix);
-      }
-    work.charge(
-      "checks",
-      tracked.size +
-        program.places.length +
-        program.constraints.length +
-        definitions.storeDefs.length,
-    );
-    const roots = new Map<PlaceId, Set<string>>();
-    for (const key of tracked) {
-      let paths = roots.get(keyPlace(key));
-      if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
-      paths.add(keyPath(key).join("."));
-    }
-    // A1, A8: a written collection's elements at every depth
-    for (const place of program.places) {
-      const written = writtenOf(place.kind);
-      const paths = roots.get(place.id);
-      if (written === null || paths === undefined) continue;
-      for (let path = ["element"]; termAt(written, path) !== null; path = [...path, "element"])
-        paths.add(path.join("."));
-    }
-    const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
-    for (const [root, paths] of roots)
-      for (const path of paths) groups.push({ root, path: path === "" ? [] : path.split(".") });
-    for (const { root, path } of this.#order(groups)) {
-      const place = program.place(root);
-      if (
-        place.kind.kind === "cell" ||
-        place.kind.kind === "property" ||
-        program.cellOwner.has(root) ||
-        program.hasOf.has(root)
-      )
-        continue;
-      const written = writtenOf(place.kind);
-      const term = written === null ? null : termAt(written, path);
-      if (term === null) continue;
-      const direct = definitions.candidates.get(keyOf(root, path)) ?? [];
-      const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
-      for (let length = 0; length < path.length; length += 1) {
-        work.charge("checks");
-        const prefix = keyOf(root, path.slice(0, length));
-        if (
-          (definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add")
-        )
-          prefixes.push({ key: prefix, rest: path.slice(length) });
-      }
-      if (direct.length === 0 && prefixes.length === 0) continue;
-      // F19a: below a reference nothing is admitted
-      if (path.length > 0 && this.#run(contract.refReceiver(keyOf(root, path)))) {
-        work.charge("checksSkipped");
+  #admittedStores(): void {
+    const { program, definitions } = this.pass;
+    const admission = this.admission;
+    for (const { root, path } of this.#order(admission.groups())) {
+      const decision = admission.decide(root, path);
+      if (decision === null) continue;
+      const { label, tags, nullable, decider } = decision;
+      const written = decision.written;
+      const nullableTags = written && nullable ? [...tags, "null" as const] : tags;
+      const fitsAny = (item: Item): boolean =>
+        item.tag === "unknown" ||
+        (item.tag === "null" ? nullable : tags.some((tag) => fits(item.tag, tag, written)));
+      const fitting = (item: Item): boolean =>
+        item.tag === "unknown" ||
+        (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
+      // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
+      // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
+      // an opaque value C5's obligation at its access (A7)
+      if (decision.published) {
+        for (const candidate of decision.candidates)
+          // (its members by reference, read one by one only while each owes: no per-path member list, Codex r22 F1)
+          for (let index = 0; index <= (candidate.members?.length ?? 0); index += 1) {
+            const d = index === 0 ? candidate.d : candidate.members![index - 1]!;
+            const { at } = candidate;
+            this.#reading = d.node;
+            // (S6-CARRIERS §4.4: the representative's site is its class's proof, each member a visit)
+            program.work.charge(index === 0 ? "quietProofs" : "c1Visits");
+            const site = admission.namedExternalSite(d, at);
+            // (an equivalent copy holds what its representative holds: none of them owes it)
+            if (site === null) break;
+            const named = admission
+              .valueAt(d, at)
+              .filter((item) => isExternal(item) && !admission.ownIngress(item, d, at));
+            const against = admission.admitted(root, path);
+            for (const { item } of offendingKinds(named))
+              this.#storeWarning(site, label, item, against);
+            // C9: the named data's own ingress keeps its boundary, as at a decided store
+            for (const item of named)
+              admission.boundaryFor(
+                item,
+                this.#obligation(
+                  "copy-type",
+                  site,
+                  label,
+                  against.map(requiredKind),
+                  `validate ${label} against ${against.join("|")}`,
+                ),
+              );
+          }
         continue;
       }
-      const label = this.#pathLabel(root, path);
-      // A9, C7: every argument and return into a written parameter or result is a candidate
-      const transfer = place.kind.kind === "parameter" || place.kind.kind === "result";
-      const writtenTags = typeTags(term);
-      const nullable = writtenTags.includes("null");
-      const tags = writtenTags.filter((tag) => tag !== "null");
-      const offends = (items: readonly Item[]): boolean =>
-        items.some((item) =>
-          item.tag === "null"
-            ? !nullable
-            : item.tag === "unknown"
-              ? contributes(item)
-              : item.tag !== "empty" && !tags.some((tag) => fits(item.tag, tag, true)),
-        );
-      const candidates = new Map<
-        string,
-        { readonly d: Definition; readonly at: readonly string[] }
-      >();
-      for (const candidate of direct)
-        if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
-          candidates.set(`${candidate.d.uid}|${candidate.at.join(".")}`, candidate);
-      if (transfer && path.length > 0)
-        for (const d of definitions.byKey.get(keyOf(root, [])) ?? [])
-          if (lists.live(d) && d.kind === "whole")
-            candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
-      for (const { key, rest } of prefixes) {
-        const stored = contract.prefixStores(key);
-        const take = (list: Iterable<Definition | null>): void => {
-          for (const d of list)
-            if (
-              d !== null &&
-              lists.live(d) &&
-              (d.kind === "whole" || (d.kind === "add" && rest[0] === "element")) &&
-              d.how !== "parameter default" &&
-              d.how !== "return" &&
-              (d.how !== "argument" || lists.singleSite(d.fn))
-            ) {
-              const at = d.kind === "add" && d.how !== "elements" ? rest.slice(1) : rest;
-              candidates.set(`${d.uid}|${at.join(".")}`, { d, at });
-            }
-        };
-        for (const entry of stored.list)
-          if (offends(this.#run(contract.entryAt(entry, rest)))) take(entry.ds);
-        for (const sub of contract.relevantSubs(stored, rest))
-          if (offends(this.#run(contract.subAt(sub.key, rest)))) take(sub.defs);
-      }
-      const ordered = [...candidates.values()].sort(
-        (a, b) => this.#sourceOrder(a.d) - this.#sourceOrder(b.d),
-      );
-      work.charge("checks", ordered.length + sortCost(ordered.length));
-      for (const { d, at } of ordered) {
+      // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
+      const visit = (d: Definition, at: readonly string[]): void => {
+        if (d === decider && at.length === 0) return;
         this.#reading = d.node;
-        // §3.3: a candidate the written type accepts whatever its value
+        // §3.3: a candidate the admitted type accepts whatever its value
         if (at.length === 0) {
           const quiet = this.#quietKinds(d.value);
           if (
             quiet !== null &&
             quiet.every((tag) =>
-              tag === "null" ? nullable : tags.some((ref) => fits(tag, ref, true)),
+              tag === "null" ? nullable : tags.some((ref) => fits(tag, ref, written)),
             )
           ) {
             this.#skip(d.value);
-            continue;
+            return;
           }
         }
-        const items = this.#valueAt(d, at);
-        // C9 at a written destination (A1): each external value the store brings owes its boundary check where it enters,
-        // whatever the store's own outcome; a value read from another variable entered by that variable's store (S6)
-        if (items.some(isExternal))
-          for (const { site, lands } of this.#ingressSites(d, at))
-            if (lands)
-              this.#boundary(keyOf(root, path), site, label, nullable ? [...tags, "null"] : tags);
+        const items = admission.valueAt(d, at);
+        const before =
+          decider !== null && admission.sourceOrder(d) < admission.sourceOrder(decider);
+        const bad = deciding(items).filter(
+          (item) => !tags.some((tag) => fits(item.tag, tag, written)),
+        );
         const nulls = items.filter((item) => item.tag === "null");
+        // A6: a store of a rejection cycle is a possibility
+        if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
+          this.#storeWarning(d.site, label, { ...bad[0]!, cert: "pos" }, tags);
+          return;
+        }
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
-        // definite element none of whose kinds fits is an error at that element
+        // definite element none of whose kinds fits is A6's error at that element, the store rejected
         const wrong =
-          at.includes("element") && d.kind === "whole"
-            ? this.#offendingAt(
+          written &&
+          at.includes("element") &&
+          d.kind === "whole" &&
+          d !== decider &&
+          !admission.cycling.has(d.uid)
+            ? admission.offendingAt(
                 d,
                 at,
                 (elements) =>
                   elements.length > 0 &&
                   elements.every((item) => item.cert === "def" && concrete(item)) &&
-                  !elements.some((item) => tags.some((tag) => fits(item.tag, tag, true))),
+                  !elements.some((item) => tags.some((tag) => fits(item.tag, tag, written))),
               )
             : null;
         if (wrong !== null) {
           this.#error("written-target", program.place(wrong.value!).site ?? d.site);
-          continue;
+          admission.reject(d, root, path);
+          return;
         }
-        const fitsAny = (item: Item): boolean =>
-          item.tag === "unknown" ||
-          (item.tag === "null" ? nullable : tags.some((tag) => fits(item.tag, tag, true)));
-        // C1, ADR 1.7: a value none of whose kinds fits errs, not under a guard (§3.2), and not where the collection
-        // may be empty (no element: the empty list fits)
+        // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
+        // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
+        if (bad.length > 0 && d !== decider && !items.some(fitting)) {
+          this.#error(
+            "written-target",
+            admission.siteAt(d, at, (elements) =>
+              deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
+            ),
+          );
+          admission.reject(d, root, path);
+          return;
+        }
+        // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
+        // earlier in the source for a store into the place itself; never against a later decider (A7), never under a
+        // guard (§3.2), and not where the collection may be empty (no element: the empty list fits); the store is
+        // rejected (A6), whether its kinds are definite or possible: none of them fits
         if (
+          !before &&
           items.length > 0 &&
+          (written || at.length === 0) &&
           !(
             at.length > 0 &&
             d.kind !== "const" &&
@@ -666,140 +556,163 @@ export class Consumers {
         ) {
           this.#error(
             "written-target",
-            this.#siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
+            admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
           );
-          continue;
+          admission.reject(d, root, path);
+          return;
         }
-        // some kind fits: every concrete kind that does not, definite or possible, owes its check (TABLE §4, r4.46: two
-        // definite answers, one fitting, warn)
+        // A7: a copy made before the decider is checked against it with context `later`
+        const later = (item: Item): Item => (before ? { ...item, context: "later" } : item);
+        // A7's whole-store exception (r4.9): below a value the store holds whole from an external ingress, external data
+        // is that record's, which its boundary check validates, so only an opaque value warns there; a whole copy of
+        // internal data keeps A7 per descendant (an `addAll`'s first element step is its inserted value's own
+        // destination, no descendant: C9)
+        const inserted = d.kind === "add" && d.how === "elements" ? 1 : 0;
+        const whole =
+          written || at.length <= inserted || d.kind === "const"
+            ? null
+            : admission.wholeBelow(d.value!, at);
+        // (a `load` or `fromJson` typed by its default alone validates the loaded value by the default's own kinds: host
+        // data the default holds leaves the path's kind open, its contribution C1's, TABLE r4.66 (3))
+        const record =
+          whole !== null && definitions.ingress.has(whole) && !admission.typedByDefault(whole);
+        const wholeKinds =
+          whole === null || definitions.ingress.has(whole)
+            ? []
+            : withoutEmpty(this.#run(this.pass.values.valueItems(whole, d.node, [])));
+        const below =
+          whole !== null &&
+          (record || (wholeKinds.length > 0 && wholeKinds.every((item) => isExternal(item))));
+        // every concrete kind that does not fit, definite or possible, owes its check (TABLE §4, r4.46)
         const offending = items
           .filter(
             (item) =>
-              (concrete(item) && !tags.some((tag) => fits(item.tag, tag, true))) ||
+              (concrete(item) && !tags.some((tag) => fits(item.tag, tag, written))) ||
               (item.tag === "unknown" &&
-                (at.length === 0 ? isOpaque(item) || isExternal(item) : contributes(item))),
+                (at.length === 0
+                  ? isOpaque(item) || isExternal(item)
+                  : // (an own read's data is no record's: its boundary checks nothing against the destination,
+                    // TABLE r4.67 (2))
+                    below && !admission.ownReadItem(item, d)
+                    ? isOpaque(item) && item.reasons !== REASON.missing
+                    : contributes(item))),
           )
           .sort((a, b) => writerRank(a.writer) - writerRank(b.writer));
-        // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's
-        // required kinds, a written optional type's null among them
+        // one copy-type diagnostic per offending kind, its earliest writer (§4, F28); against the destination's required
+        // kinds, a written optional type's null among them (a decided type's admitted null is C9's)
         for (const { item } of offendingKinds(offending))
           this.#storeWarning(
-            isExternal(item) ? this.#ingressSite(d, at) : d.site,
+            !isExternal(item)
+              ? d.site
+              : d.kind === "whole"
+                ? admission.ingressSiteOf(d, at, item)
+                : admission.contributionSited(d.site, item, d),
             label,
-            item,
-            nullable ? [...tags, "null"] : tags,
+            later(item),
+            nullableTags,
           );
-        // S4: a possible null owes a null-check, a definite one an error
-        if (!nullable) {
-          const external = items.some(isExternal);
+        // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
+        // a typed default holds keeps its own boundary (TABLE r4.66 (2))
+        if (
+          d.value !== undefined &&
+          definitions.ingress.has(d.value) &&
+          (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
+        )
+          admission.boundaryAt(d);
+        for (const item of items)
+          admission.boundaryFor(
+            item,
+            this.#obligation(
+              "copy-type",
+              admission.cellSited(d.site, item, d),
+              label,
+              tags.map(requiredKind),
+              `validate ${label} against ${tags.join("|")}`,
+            ),
+          );
+        // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
+        // null into a non-nullable type a null-check, a definite one an error
+        const external = items.some(isExternal);
+        if (
+          (!nullable && (at.length === 0 || written) && !before) ||
+          (external && !admission.admitted(root, path).includes("null"))
+        )
           for (const item of nulls)
-            if (item.cert === "def" && !external)
+            if (item.cert === "def" && !external) {
               this.#error(
                 "written-target",
-                this.#siteAt(d, at, (elements) =>
+                admission.siteAt(d, at, (elements) =>
                   elements.some((element) => element.tag === "null" && element.cert === "def"),
                 ),
               );
-            else
+              admission.reject(d, root, path);
+            } else
               this.#nullWarning(
                 "written-target",
                 d.site,
-                item,
+                later(item),
                 `check that the value is not null before ${label} holds it`,
                 label,
-                tags.map((tag) => requiredKind(tag)),
+                tags.map(requiredKind),
               );
+      };
+      // S6-CARRIERS §4.4: a class's quiet proofs, one per side of the decider, each its side's first member but the
+      // decider's own store; a proof that emits nothing (no diagnostic, rejection or check) proves its side quiet, else
+      // each member of the side is visited. The class in source order (its representative, then its members by
+      // reference), each side a range of it found by a binary search: no per-path member list (Codex r22 F1)
+      const emitted = (): number =>
+        this.diagnostics.length + admission.rejections + admission.readChecks.length;
+      const order = decider === null ? null : admission.sourceOrder(decider);
+      for (const { d, at, members } of decision.candidates) {
+        if (members === undefined) {
+          visit(d, at);
+          continue;
+        }
+        const member = (index: number): Definition => (index === 0 ? d : members[index - 1]!);
+        const size = members.length + 1;
+        let split = 0;
+        if (order !== null) {
+          let high = size;
+          while (split < high) {
+            const middle = (split + high) >> 1;
+            program.work.charge("quietProofs");
+            if (admission.sourceOrder(member(middle)) < order) split = middle + 1;
+            else high = middle;
+          }
+        }
+        for (const [low, high] of [
+          [0, split],
+          [split, size],
+        ] as const) {
+          let proof = low;
+          if (proof < high && member(proof) === decider && at.length === 0) proof += 1;
+          if (proof >= high) continue;
+          program.work.charge("quietProofs");
+          const was = emitted();
+          visit(member(proof), at);
+          const value = member(proof).value;
+          if (emitted() === was) {
+            // (equivalent values are quiet alike, §3.3: each side's once)
+            const side = `${d.uid}|${low}|${high}`;
+            if (value !== undefined && this.quiet.has(value) && !this.#quietSides.has(side)) {
+              this.#quietSides.add(side);
+              program.work.charge("checksSkipped");
+              for (let index = low; index < high; index += 1) {
+                program.work.charge("checksSkipped");
+                const skipped = member(index).value;
+                if (index !== proof && skipped !== undefined) this.quiet.add(skipped);
+              }
+            }
+            continue;
+          }
+          for (let index = low; index < high; index += 1) {
+            if (index === proof) continue;
+            program.work.charge("c1Visits");
+            visit(member(index), at);
+          }
         }
       }
     }
-  }
-
-  /** ADR 1.6: a start value comes first; a single-site parameter's is its argument (F21). */
-  #sourceOrder(d: Definition): number {
-    return d.how === "argument" && this.pass.lists.singleSite(d.fn)
-      ? -1
-      : d.site.file * 1e9 + d.site.start;
-  }
-
-  #valueAt(d: Definition, at: readonly string[]): Item[] {
-    this.pass.program.work.charge("checks");
-    if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
-    return withoutEmpty(this.#run(this.pass.values.valueItems(d.value!, d.node, at)));
-  }
-
-  /** The paths a literal's structure contributes: its objects' fields and its collections' elements, at every depth. */
-  #literalPaths(value: PlaceId): string[][] {
-    const { program, definitions } = this.pass;
-    const out: string[][] = [];
-    const pending: [PlaceId, string[]][] = [[value, []]];
-    while (pending.length > 0) {
-      const [current, path] = pending.pop()!;
-      for (const has of program.hasOf.get(current) ?? [])
-        for (const [name, term] of fieldsOf(has.type)) {
-          program.work.charge("indexSteps");
-          const below = [...path, name];
-          out.push(below);
-          if (term.kind === "ref" && below.length < 256)
-            for (const d of definitions.cellDefs.get(term.place) ?? [])
-              pending.push([d.value!, below]);
-        }
-    }
-    return out;
-  }
-
-  /** A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element. */
-  #literalChildren(value: PlaceId, step: string): Definition[] {
-    const { program, definitions } = this.pass;
-    const out: Definition[] = [];
-    for (const has of program.hasOf.get(value) ?? []) {
-      const term =
-        has.type.kind === "object"
-          ? (has.type.properties ?? []).find((property) => propertyStep(property.name) === step)
-              ?.type
-          : step === "element" &&
-              (has.type.kind === "list" || has.type.kind === "set" || has.type.kind === "dict")
-            ? has.type.element
-            : undefined;
-      if (term?.kind === "ref") out.push(...(definitions.cellDefs.get(term.place) ?? []));
-    }
-    program.work.charge("checks", sortCost(out.length));
-    return out.sort(
-      (a, b) =>
-        (program.places[a.value!]?.site?.start ?? 0) - (program.places[b.value!]?.site?.start ?? 0),
-    );
-  }
-
-  /**
-   * r4.35: an error for a contribution inside literals sits at the innermost offending expression: the stored value
-   * walked along the path through record fields, collection elements and dict values, in evaluation order, to the first
-   * value at the path's end whose own items offend.
-   */
-  #offendingAt(
-    d: Definition,
-    at: readonly string[],
-    leaf: (items: readonly Item[]) => boolean,
-  ): Definition | null {
-    const pending: [PlaceId, FlowNode, number][] = [[d.value!, d.node, 0]];
-    while (pending.length > 0) {
-      const [value, node, index] = pending.pop()!;
-      const children = this.#literalChildren(value, at[index]!);
-      if (index + 1 === at.length) {
-        for (const child of children) {
-          this.pass.program.work.charge("checks");
-          if (
-            leaf(
-              withoutEmpty(
-                this.#run(this.pass.values.valueItems(child.value!, child.node ?? node, [])),
-              ),
-            )
-          )
-            return child;
-        }
-      } else
-        for (let position = children.length - 1; position >= 0; position -= 1)
-          pending.push([children[position]!.value!, children[position]!.node ?? node, index + 1]);
-    }
-    return null;
   }
 
   /**
@@ -812,95 +725,20 @@ export class Consumers {
    * whatever remains. A variable read stops it: the store, as for a copy of a variable (r4.43's bound options). The first
    * in source order.
    */
-  #ingressSite(d: Definition, at: readonly string[]): SourceSite {
-    return this.#ingressSites(d, at)[0]?.site ?? d.site;
-  }
-
-  /**
-   * Every external value's own expression that `#ingressSite`'s walk reaches, in source order, and whether the value, or
-   * what the store reads of it, lands at `at` itself: a value the store brings whole into a place above `at` (`pool`
-   * for `pool.element` in `let pool: integer[] = hostValue`) enters there, so its boundary check is that place's (C9).
-   */
-  #ingressSites(
-    d: Definition,
-    at: readonly string[],
-  ): { readonly site: SourceSite; readonly lands: boolean }[] {
-    const { program, definitions } = this.pass;
-    if (d.kind !== "whole" || d.value === undefined) return [];
-    const found: { readonly site: SourceSite; readonly lands: boolean }[] = [];
-    // a value, what remains to read of it (path steps, `OPTIONS`: the value holds a choice's options, `SELECT`: the value
-    // is an option, its selected value), and how many of the remaining steps are steps of `at` the literals have not
-    // taken yet: a projection's or a choice's steps go before them
-    const pending: (readonly [PlaceId, readonly ReadStep[], number])[] = [[d.value, at, at.length]];
-    while (pending.length > 0) {
-      const [value, steps, below] = pending.pop()!;
-      program.work.charge("checks");
-      if (definitions.ingress.has(value)) {
-        const site = program.place(value).site;
-        if (site !== null) found.push({ site, lands: below === 0 });
-        continue;
-      }
-      const [step, ...rest] = steps;
-      const left = Math.min(below, rest.length);
-      const next: (readonly [PlaceId, readonly ReadStep[], number])[] = [];
-      if (program.hasOf.has(value) || program.cellOwner.has(value)) {
-        if (step === OPTIONS) {
-          const elements = this.#literalChildren(value, "element");
-          if (elements.length === 0) next.push([value, [SELECT, ...rest], left]);
-          for (const child of elements) next.push([child.value!, [SELECT, ...rest], left]);
-        } else if (step === SELECT) {
-          const valued = this.#literalChildren(value, "value");
-          const selected = valued.length > 0 ? valued : this.#literalChildren(value, "text");
-          if (selected.length === 0) next.push([value, rest, left]);
-          for (const child of selected) next.push([child.value!, rest, left]);
-        } else if (step !== undefined)
-          for (const child of this.#literalChildren(value, step))
-            next.push([child.value!, rest, left]);
-      } else if (program.projOf.has(value)) {
-        const projection = program.projOf.get(value)!;
-        if (projection.step !== "iteration")
-          next.push([projection.owner, [stepName(projection.step), ...steps], below]);
-        // r4.46 (2): an element of a dict's `values` is one of its values, and so is each option they give a choice
-        if (dictList(projection.step) === "values" && (step === "element" || step === OPTIONS))
-          next.push([
-            projection.owner,
-            step === "element" ? steps : ["element", SELECT, ...rest],
-            below,
-          ]);
-      } else {
-        const c = program.opOf.get(value);
-        if (
-          c?.kind === "operation" &&
-          c.contract.family === "interaction" &&
-          interactionCategory(c.contract.name)?.kind === "options"
-        ) {
-          const labels = choiceLabels(c);
-          for (const [index, argument] of c.arguments.entries())
-            if (labels[index] === undefined) next.push([argument, [OPTIONS, ...steps], below]);
-        }
-      }
-      for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
-    }
-    return found;
-  }
-
-  #siteAt(
-    d: Definition,
-    at: readonly string[],
-    leaf: (items: readonly Item[]) => boolean,
-  ): SourceSite {
-    const found = at.length > 0 && d.kind === "whole" ? this.#offendingAt(d, at, leaf) : null;
-    return found === null ? d.site : (this.pass.program.place(found.value!).site ?? d.site);
-  }
-
   // ----------------------------------------------------------------------------------------- operations
 
   /** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */
   #operations(): void {
     const { program } = this.pass;
+    const { values, contract } = this.pass;
     const finals = this.#order(
       program.constraints.filter(
-        (c) => c.kind === "operation" || c.kind === "project" || c.kind === "get",
+        (c) =>
+          c.kind === "operation" ||
+          c.kind === "project" ||
+          c.kind === "get" ||
+          c.kind === "fallback" ||
+          c.kind === "load",
       ),
     );
     for (const c of finals) {
@@ -912,7 +750,76 @@ export class Consumers {
         this.#methodReceiver(c.site, node, c.receiver, "get");
         if (c.key !== null)
           this.#indexUse(c.receiver, c.key, node, c.site, "the index of get", true);
+        this.#fallbackFits(
+          c,
+          node,
+          (rest) =>
+            withoutEmpty(this.#run(values.valueItems(c.receiver, node, ["element", ...rest]))),
+          c.fallback,
+        );
         continue;
+      }
+      if (c.kind === "fallback") {
+        this.#fallbackFits(
+          c,
+          node,
+          (rest) => withoutEmpty(this.#run(values.valueItems(c.left, node, rest))),
+          c.right,
+        );
+        continue;
+      }
+      const parses =
+        c.kind === "operation" &&
+        c.contract.family === "conversion" &&
+        conversionCategory(c.contract.name)?.kind === "parses";
+      if (c.kind === "load" || parses) {
+        // C10: the default against the expected type (V30 §12)
+        const written = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
+        const fallback = c.kind === "load" ? c.fallback : defaultOf(c);
+        if (written !== null && fallback !== null && fallback !== undefined)
+          this.#fallbackFits(
+            c,
+            node,
+            (rest) => {
+              const term = termAt(written, rest);
+              return term === null
+                ? []
+                : typeTags(term)
+                    .filter((tag) => tag !== "unknown")
+                    .map((tag) => makeItem(tag));
+            },
+            fallback,
+            true,
+          );
+        if (c.kind === "load") continue;
+      }
+      if (c.kind === "operation" && c.contract.family === "conversion") {
+        // C10: a conversion's default against its result
+        const category = conversionCategory(c.contract.name);
+        const fallback = defaultOf(c);
+        if (category?.kind === "converts" && fallback !== undefined)
+          this.#fallbackFits(
+            c,
+            node,
+            (rest) => (rest.length === 0 ? [makeItem(category.result)] : []),
+            fallback,
+          );
+      }
+      if (
+        c.kind === "operation" &&
+        c.contract.family === "builtin" &&
+        lazyDefaultOperation(c.contract.name, false) !== null
+      ) {
+        // C10: the default `fileFromBase64`, `decryptText` and `decryptFile` select (ADR 0021 7.2) against their result
+        const fallback = defaultOf(c);
+        const result = builtinResult(c.contract.name);
+        if (fallback !== undefined)
+          this.#fallbackFits(
+            c,
+            node,
+            (rest) => (rest.length === 0 ? [makeItem(result)] : []),
+            fallback,
+          );
       }
       if (c.kind === "operation") {
         this.#operation(c, node);
@@ -920,6 +827,167 @@ export class Consumers {
       }
       if (c.kind === "project") this.#projection(c, node);
     }
+  }
+
+  /**
+   * C10: a fallback or a default is `null`, or has the direct value's family without its `null` (whole numbers with
+   * numbers; a conversion's result; nested list, set and dict literals by their elements), or a load's or `fromJson`'s
+   * written expected type's kinds at every depth (ADR 1.2, 7: a whole number fits a written number, a fraction never a
+   * written integer, the owner's F3), or the value lands directly in a written place whose union holds both; a direct
+   * value that is only `null` or unsettled imposes none. Both definite and incompatible: an error at the fallback, below
+   * it at the innermost offending element (r4.35); possible: a warning with its `copy-type`; an unknown the fallback may
+   * hold: a warning against those kinds, its host data meeting its boundary.
+   */
+  #fallbackFits(
+    c: ValueConstraint,
+    node: FlowNode,
+    directAt: (rest: readonly string[]) => readonly Item[],
+    value: PlaceId,
+    written = false,
+  ): void {
+    // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
+    // key path at the depth, a dict's value its `entry` (§10.5)
+    const { contract, program } = this.pass;
+    let label = this.#keyLabel(value);
+    for (
+      let rest: readonly string[] = [];
+      this.#fallbackFitsAt(c, node, directAt, value, rest, written, label);
+      rest = [...rest, "element"]
+    ) {
+      program.work.charge("checks");
+      label = `${label}.${elementStep(
+        withoutEmpty(this.#run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
+      )}`;
+    }
+  }
+
+  /** C10 at one path of the fallback: whether its elements are checked too. */
+  #fallbackFitsAt(
+    c: ValueConstraint,
+    node: FlowNode,
+    directAt: (rest: readonly string[]) => readonly Item[],
+    value: PlaceId,
+    rest: readonly string[],
+    written: boolean,
+    label: string,
+  ): boolean {
+    const { program, values, contract } = this.pass;
+    const site = program.places[value]?.site;
+    if (site === null || site === undefined || !("result" in c)) return false;
+    const direct = directAt(rest);
+    const into = contract.landsIn(c.result, rest);
+    const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
+    const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
+    if (directTags.length === 0) return false;
+    const directFamilies = new Set(directTags.map(family));
+    // one domain for the quiet path, the error, the warning and the check: a written type's own kinds, else the family
+    const admits = (tag: ItemTag, refs: readonly ItemTag[]): boolean =>
+      refs.some((ref) =>
+        written ? tag !== "unknown" && fits(tag, ref, true) : family(tag) === family(ref),
+      );
+    // the written union the value lands in directly, where it holds the direct kinds: a fallback of its kinds fits too
+    const intoTags = into === null ? [] : typeTags(into);
+    const union = into === null ? null : new Set(intoTags.map(family));
+    const unionHolds = union !== null && directTags.every((tag) => admits(tag, intoTags));
+    const fitsKind = (tag: ItemTag): boolean =>
+      tag === "null"
+        ? !(rest.length > 0 && into !== null && !intoTags.includes("null"))
+        : admits(tag, directTags) || (unionHolds && admits(tag, intoTags));
+    // the family the fallback is checked against: the direct value's (whole numbers with numbers), a load's or
+    // `fromJson`'s written type itself (its `null` C10's exception, never listed), and the receiving union's kinds
+    const against: ItemTag[] = [
+      ...new Set([
+        ...(written
+          ? direct.filter(concrete).map((item) => item.tag)
+          : [...directFamilies].flatMap((found): ItemTag[] =>
+              found === "number" ? ["integer", "number"] : [found],
+            )),
+        ...(unionHolds ? typeTags(into!).filter((tag) => tag !== "null" && tag !== "unknown") : []),
+      ]),
+    ];
+    // §3.3: a fallback whose contract every kind of fits asks nothing more at this path
+    const quiet = this.#quietKinds(value, rest);
+    const fallback =
+      quiet !== null && quiet.every(fitsKind)
+        ? []
+        : withoutEmpty(this.#run(values.valueItems(value, node, rest)));
+    const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));
+    const what = c.kind === "fallback" ? "the fallback" : "the default";
+    // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written
+    // destination admits `unknown`; its host data meets its boundary
+    const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
+    if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
+      for (const { item } of offendingKinds(unknowns))
+        this.#storeWarning(site, label, item, against);
+      this.admission.boundariesAt(
+        fallback,
+        this.#obligation(
+          "copy-type",
+          site,
+          label,
+          against.map(requiredKind),
+          `check ${what} ${label}`,
+        ),
+      );
+    }
+    if (off.length === 0) {
+      // nested literals by their elements
+      const kinds = quiet ?? fallback.map((item) => item.tag);
+      return (["list", "set", "dict"] as const).some(
+        (kind) => directFamilies.has(kind) && kinds.includes(kind),
+      );
+    }
+    if (union !== null && union.has("unknown")) return false;
+    // below the fallback, a definite element of its literals none of whose kinds fits: an error at that element (A8,
+    // r4.35); else both definite and incompatible, no kind of the fallback fitting (r4.46): an error at the fallback;
+    // possible: one warning and check per offending kind
+    const element = this.#offendingElement(value, node, rest, fitsKind);
+    if (element !== null) this.#error("written-target", element);
+    else if (
+      direct.filter(concrete).every((item) => item.cert === "def") &&
+      off.every((item) => item.cert === "def") &&
+      !fallback.some((item) => concrete(item) && fitsKind(item.tag))
+    )
+      this.#error("written-target", site);
+    else for (const { item } of offendingKinds(off)) this.#storeWarning(site, label, item, against);
+    return false;
+  }
+
+  /**
+   * A8, r4.35: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
+   * order; `null` at the fallback itself or where no literal holds one.
+   */
+  #offendingElement(
+    value: PlaceId,
+    node: FlowNode,
+    rest: readonly string[],
+    fitsKind: (tag: ItemTag) => boolean,
+  ): SourceSite | null {
+    const { program, values } = this.pass;
+    const pending: [PlaceId, FlowNode, number][] = rest.length === 0 ? [] : [[value, node, 0]];
+    while (pending.length > 0) {
+      const [current, at, index] = pending.pop()!;
+      const children = this.admission.literalChildren(current, rest[index]!);
+      for (let position = children.length - 1; position >= 0; position -= 1) {
+        program.work.charge("checks");
+        const child = children[position]!;
+        if (index + 1 < rest.length) pending.push([child.value!, child.node ?? at, index + 1]);
+      }
+      if (index + 1 < rest.length) continue;
+      for (const child of children) {
+        program.work.charge("checks");
+        const items = withoutEmpty(
+          this.#run(values.valueItems(child.value!, child.node ?? at, [])),
+        );
+        if (
+          items.length > 0 &&
+          items.every((item) => item.cert === "def" && concrete(item)) &&
+          !items.some((item) => fitsKind(item.tag))
+        )
+          return program.place(child.value!).site;
+      }
+    }
+    return null;
   }
 
   #operation(c: Extract<ValueConstraint, { kind: "operation" }>, node: FlowNode): void {
@@ -1031,6 +1099,13 @@ export class Consumers {
     // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
     const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
     const operandText = (index: number): string => program.textAt(operandSite(index));
+    // C9: external data at an operand is validated where it came in (host data at the operand)
+    operands.forEach((items, index) =>
+      this.admission.boundariesAt(
+        items,
+        this.#obligation("copy-type", operandSite(index), operandText(index), ["unknown"], ""),
+      ),
+    );
     let combinations: Item[][] = [[]];
     for (const items of operands)
       combinations = combinations.flatMap((done) =>
@@ -1188,6 +1263,17 @@ export class Consumers {
       )
     )
       this.#selection(c.owner, node, c.site, `.${property}`);
+    // C9: the receiver's external data brings its boundary checks, whichever member check follows
+    this.admission.boundariesAt(
+      owners,
+      this.#obligation(
+        "null-check",
+        this.#own(c.owner, c.site),
+        label,
+        ["non-null"],
+        `check that ${label} is not null and has .${property}`,
+      ),
+    );
     // C5a, C5b, F19a, F15; C5c: a property some source lacks, its own obligation (an error where no known source has it)
     const objects = owners.some((item) => item.tag === "object");
     const extra: Offending[] = [];
@@ -1240,10 +1326,22 @@ export class Consumers {
       return;
     }
     const kinds = this.#receiverKinds(receiver, node);
+    const label = this.#keyLabel(receiver);
+    // C9: the receiver's external data brings its boundary checks, whichever member check follows
+    this.admission.boundariesAt(
+      kinds,
+      this.#obligation(
+        "null-check",
+        this.#own(receiver, site),
+        label,
+        ["non-null"],
+        `check that ${label} is a value with .${name} before the call`,
+      ),
+    );
     this.#defaultNull(receiver, node, site);
     this.#memberChecks(
       this.#own(receiver, site),
-      this.#keyLabel(receiver),
+      label,
       kinds,
       (tag) => hasMethod(tag, name),
       `.${name}()`,
@@ -1414,6 +1512,11 @@ export class Consumers {
     else
       for (const { item } of offendingKinds(bad.filter((item) => item.tag !== "null")))
         owe(item, obligationKind);
+    // C9: the operand's external data brings its boundary checks
+    this.admission.boundariesAt(
+      items,
+      this.#obligation(obligationKind, at, label, required, on(obligationKind)),
+    );
   }
 
   /** C2: a whole number; a null here is never silent (`soft` as for `#consume`). */
@@ -1472,6 +1575,17 @@ export class Consumers {
     else
       for (const { item } of offendingKinds(offending.filter((found) => found.tag !== "null")))
         owe(item, "integer-check", "a whole number");
+    // C9: the count's or index's external data brings its boundary checks
+    this.admission.boundariesAt(
+      items,
+      this.#obligation(
+        "integer-check",
+        at,
+        target,
+        ["integer"],
+        `check that the ${what} is a whole number when it runs`,
+      ),
+    );
   }
 
   /**
@@ -1552,7 +1666,7 @@ export class Consumers {
         // the copy's value at the rest of the path, through its literal's fields
         let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
         for (const part of copy ? reaching.rest : []) {
-          const children = value === undefined ? [] : this.#literalStores(value, part);
+          const children = value === undefined ? [] : this.admission.storesAt(value, part);
           value = children.length === 1 ? children[0]!.value : undefined;
           if (value === undefined) break;
         }
@@ -1563,16 +1677,6 @@ export class Consumers {
     }
     for (const memoKey of visited) this.#defaults.set(memoKey, found);
     return found;
-  }
-
-  /** A literal value's stores at one step: a property's one store, a collection's every element. */
-  #literalStores(value: PlaceId, step: string): readonly Definition[] {
-    const { program, definitions } = this.pass;
-    for (const has of program.hasOf.get(value) ?? []) {
-      const at = termPlace(has.type, step);
-      if (at !== null) return definitions.cellDefs.get(at) ?? [];
-    }
-    return [];
   }
 
   #defaultNull(owner: PlaceId, node: FlowNode, site: SourceSite): void {
@@ -1734,6 +1838,17 @@ export class Consumers {
           ? this.#keyLabel(owner)
           : program.place(d.place).label +
             (recvPath.length > 0 ? `.${recvPath.map(propertyName).join(".")}` : "");
+      // C9: the receiver's external data brings its boundary checks, whichever member check follows
+      this.admission.boundariesAt(
+        receiver,
+        this.#obligation(
+          "null-check",
+          at,
+          label,
+          ["non-null"],
+          `check that ${label} accepts the store`,
+        ),
+      );
       // what the store needs of its receiver: a property store an object, an element store a list or a dict, an add
       // its method (C5b: `x.missing = 2` with x a whole number fails at runtime)
       const property = d.kind === "whole" ? (d.path.at(-1) ?? null) : null;
@@ -1820,32 +1935,4 @@ export class Consumers {
       );
     }
   }
-}
-
-/** A required kind as an obligation names it. */
-function requiredKind(tag: ItemTag): RequiredKind {
-  if (tag === "empty") throw new Error("The emptiness mark is no kind a check requires.");
-  return tag;
-}
-
-/** The fields of a literal's type: an object's properties, a collection's element. */
-function fieldsOf(term: TypeTerm): readonly (readonly [string, TypeTerm])[] {
-  if (term.kind === "object")
-    return (term.properties ?? []).map(
-      (property) => [propertyStep(property.name), property.type] as const,
-    );
-  if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
-    return [["element", term.element]];
-  return [];
-}
-
-/** The cell or property place of a literal type at one step, or `null`. */
-function termPlace(term: TypeTerm, step: string): PlaceId | null {
-  const at =
-    term.kind === "object"
-      ? (term.properties ?? []).find((property) => propertyStep(property.name) === step)?.type
-      : step === "element" && (term.kind === "list" || term.kind === "set" || term.kind === "dict")
-        ? term.element
-        : undefined;
-  return at?.kind === "ref" ? at.place : null;
 }

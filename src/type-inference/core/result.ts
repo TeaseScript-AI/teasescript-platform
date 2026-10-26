@@ -81,10 +81,12 @@ export function outcomeOf(diagnostics: readonly CoreDiagnostic[]): CoreOutcome {
 }
 
 /**
- * The context word of a warning about `item` (§3.4): an unknown's reasons' word (`reasonContext`); any other item's
- * own word, a null's ingress word, or `unknown`.
+ * The context word of a warning about `item` (§3.4): A7's `later` for a copy checked against a later decider, whatever
+ * word its item carries (r4.10); else an unknown's reasons' word (`reasonContext`); any other item's own word, a null's
+ * ingress word, or `unknown`.
  */
 export function contextOf(item: Item): ContextWord {
+  if (item.context === "later") return "later";
   return ownContext(item) ?? item.word ?? "unknown";
 }
 

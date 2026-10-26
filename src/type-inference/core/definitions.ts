@@ -1,7 +1,7 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
-import { makeItem, type ContextWord, type Item, type Writer } from "./items.js";
+import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
 import { conversionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
 
@@ -159,9 +159,10 @@ export class DefinitionIndex {
   readonly byValue = new Map<PlaceId, Definition[]>();
   /** The operation a fallback operand or a default belongs to: it lands where the operation's result lands. */
   readonly fallbackOf = new Map<PlaceId, PlaceId>();
-  /** C9: the values external data enters by, and the store that brought each in (its ingress store). */
+  /** C9: the values external data enters by (a syntactic set: where each lands is admission's landing index). */
   readonly ingress = new Set<PlaceId>();
-  readonly ingressStore = new Map<PlaceId, Writer>();
+  /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
+  readonly ingressAt = new Map<string, PlaceId>();
   /** The keys below each key that have definitions (X6's own events, X7's keys below). */
   readonly #keysBelow = new Map<Key, Key[]>();
   readonly #foreignAt = new Set<Key>();
@@ -468,13 +469,7 @@ export class DefinitionIndex {
     }
   }
 
-  /**
-   * C9: the values external data enters by (a load, `fromJson`, a read of a host global; an `askChoice` only through an
-   * option that is one, r4.43) and each one's
-   * ingress store: the whole store of the value, or of the value that carries it there (the outermost literal holding
-   * it, a property or element read of it, the fallback whose direct value it is). A fallback or default carries
-   * nothing to its operation's store (C10): data there names its own read.
-   */
+  /** C9: the values external data enters by: a load, `fromJson`, a read of a host global; each by its leaf's key. */
   #ingress(): void {
     const program = this.program;
     for (const constraint of program.constraints)
@@ -487,60 +482,10 @@ export class DefinitionIndex {
         this.ingress.add(constraint.result);
     for (const [occurrence, binding] of program.occurrenceOf)
       if (program.isHost(binding)) this.ingress.add(occurrence);
-    const ownOperand = new Set<PlaceId>();
-    const readOfValue = new Map<PlaceId, PlaceId>();
-    for (const constraint of program.constraints) {
-      for (const operand of [
-        constraint.kind === "fallback" ? constraint.right : undefined,
-        constraint.kind === "get" || constraint.kind === "load" ? constraint.fallback : undefined,
-        "named" in constraint
-          ? constraint.named.find((argument) => argument.name === "default")?.value
-          : undefined,
-      ])
-        if (typeof operand === "number") ownOperand.add(operand);
-      if (constraint.kind === "project" && constraint.step !== "iteration")
-        readOfValue.set(constraint.owner, constraint.into);
-      else if (constraint.kind === "get" && typeof constraint.receiver === "number")
-        readOfValue.set(constraint.receiver, constraint.result);
-    }
-    const storeOfValue = new Map<PlaceId, Definition>();
-    for (const d of [...this.storeDefs, ...this.transferDefs])
-      if (
-        (d.kind === "whole" || d.kind === "add") &&
-        d.value !== undefined &&
-        !storeOfValue.has(d.value)
-      )
-        storeOfValue.set(d.value, d);
-    const cellOfValue = new Map<PlaceId, PlaceId>();
-    for (const [cell, definitions] of this.cellDefs)
-      for (const d of definitions) if (d.value !== undefined) cellOfValue.set(d.value, cell);
-    const carrierOf = (value: PlaceId): PlaceId | undefined => {
-      const cell = cellOfValue.get(value);
-      if (cell !== undefined) return program.cellOwner.get(cell)!.owner;
-      return readOfValue.get(value) ?? this.fallbackOf.get(value);
-    };
     for (const value of this.ingress) {
-      let current = value;
-      for (
-        let depth = 0;
-        depth < 256 &&
-        !storeOfValue.has(current) &&
-        !ownOperand.has(current) &&
-        carrierOf(current) !== undefined;
-        depth += 1
-      ) {
-        program.work.charge("indexSteps");
-        current = carrierOf(current)!;
-      }
-      // a host read there, or a load or `fromJson` call: its own read, so the consumers it reaches stay linked to it
-      if (ownOperand.has(current)) {
-        const site = program.places[value]?.site;
-        if (site !== null && site !== undefined)
-          this.ingressStore.set(value, program.writer("read", site));
-        continue;
-      }
-      const store = storeOfValue.get(current);
-      if (store !== undefined) this.ingressStore.set(value, program.writer(store.how, store.site));
+      const site = program.places[value]?.site;
+      if (site !== null && site !== undefined)
+        this.ingressAt.set(writerKey(ingressLeaf(program, site)), value);
     }
   }
 
@@ -756,6 +701,7 @@ export interface Reaching {
  */
 export class DefinitionLists {
   readonly #sorted = new Map<Key, SortedDefinitions>();
+  readonly #below = new Map<Key, SortedDefinitions>();
   readonly #events = new Map<Key, number[]>();
   readonly #certain = new Map<Definition, boolean>();
   readonly #singleSite = new Map<number, boolean>();
@@ -778,10 +724,17 @@ export class DefinitionLists {
   public definitionsOf(key: Key): SortedDefinitions {
     const known = this.#sorted.get(key);
     if (known !== undefined) return known;
+    const mine = [...(this.index.byKey.get(key) ?? []), ...(this.index.loopAdds.get(key) ?? [])];
+    this.#program.work.charge("defScan", mine.length);
+    const sorted = this.#sort(mine);
+    this.#sorted.set(key, sorted);
+    return sorted;
+  }
+
+  /** Definitions as X2 reads them: the live ones, in dominator order, with their parents and a lifting table. */
+  #sort(mine: readonly Definition[]): SortedDefinitions {
     const program = this.#program;
     const work = program.work;
-    const mine = [...(this.index.byKey.get(key) ?? []), ...(this.index.loopAdds.get(key) ?? [])];
-    work.charge("defScan", mine.length);
     const list = mine.filter(
       (d) =>
         this.live(d.orig ?? d) &&
@@ -810,7 +763,7 @@ export class DefinitionLists {
       up.push(previous.map((index) => (index < 0 ? -1 : previous[index]!)));
       work.charge("parentStackSteps", list.length);
     }
-    const sorted: SortedDefinitions = {
+    return {
       list,
       positions: list.map((d) => program.position(d.node)),
       up,
@@ -818,8 +771,74 @@ export class DefinitionLists {
         .filter((d) => !program.inBlockCode(d.node) && d.orig === undefined)
         .map((d) => program.position(d.node)),
     };
-    this.#sorted.set(key, sorted);
+  }
+
+  /** The definitions of every key strictly below `key`, sorted as one list (S6-CARRIERS §4.1's subtree list). */
+  #subtree(key: Key): SortedDefinitions {
+    const known = this.#below.get(key);
+    if (known !== undefined) return known;
+    const mine: Definition[] = [];
+    for (const below of this.index.keysBelow(key)) {
+      this.#program.work.charge("defScan");
+      // (one by one: a key's definitions grow with the source, past one call's arguments, external review r6 F1)
+      for (const d of this.index.byKey.get(below) ?? []) mine.push(d);
+      for (const d of this.index.loopAdds.get(below) ?? []) mine.push(d);
+    }
+    this.#program.work.charge("defScan", mine.length);
+    const sorted = this.#sort(mine);
+    this.#below.set(key, sorted);
     return sorted;
+  }
+
+  /**
+   * S6-CARRIERS §4.1: what X1–X7 read about a read of `source` at `node`, for every key at or below it at once, as one
+   * key: two reads with equal signatures have equal exact answers at every path below the source. The reaching
+   * definition over the source and its prefixes (D) and the nearest dominating definition below it (e*), whose
+   * dominating chain gives the reaching definition at any path below; the node's boundary, loops, liveness, block
+   * reachability and whether the source's declaration dominates it (X1, X4, X5, X7, P3); and, in each list X6 reads
+   * for any of those keys (the source's own events with its descendants', each prefix's, the call sites), where the
+   * node's subtree begins and ends among its positions, which fixes the events of any span the node ends. The handlers'
+   * facts are the caller's. Without `calls` the call sites are left out: a read's snapshot of a key no other callable
+   * stores (`readSignature`).
+   */
+  public aliasSignature(source: Key, node: FlowNode, calls = true): string {
+    const program = this.#program;
+    const work = program.work;
+    work.charge("exactQueries");
+    const reaching = this.reachingDef(source, node);
+    const star = this.#nearest(this.#subtree(source), node, false);
+    const place = keyPlace(source);
+    const declaration = this.index.declOf.get(place);
+    const begin = program.position(node);
+    const end = program.positionEnd(node) + 1;
+    const cut = (positions: readonly number[]): string => {
+      work.charge("eventSteps", 2);
+      return `${lowerBound(positions, begin)},${lowerBound(positions, end)}`;
+    };
+    const lists = calls
+      ? [this.#eventList(source), this.index.sitePositions]
+      : [this.#eventList(source)];
+    for (const prefix of prefixesOf(source)) lists.push(this.definitionsOf(prefix).eventPositions);
+    return [
+      reaching === null ? "-" : `${reaching.def.uid}:${reaching.rest.join(".")}`,
+      star === null ? "-" : star.uid,
+      program.live(node) ? "l" : "",
+      node.dead ? "d" : "",
+      program.dom.edom(node)?.id ?? "-",
+      node.loops.map((loop) => loop.id).join(","),
+      program.blockReachable(node) ? "b" : "",
+      declaration !== undefined && program.dom.dominates(declaration.node, node) ? "p" : "",
+      lists.map(cut).join(";"),
+    ].join("|");
+  }
+
+  /**
+   * A read's snapshot signature (TABLE r4.68 (1)): `aliasSignature`, the call sites in it only where another callable
+   * stores the source, a key below it or a prefix (`ownedAway`, X6's owner rule): elsewhere no call is an event of any
+   * key at or below the source, so reads a call separates read the same (Codex r24 F2).
+   */
+  public readSignature(source: Key, node: FlowNode): string {
+    return this.aliasSignature(source, node, this.index.ownedAway(source));
   }
 
   /** The nearest definition of the list dominating `node`; `before`: one at `node` itself does not count. */
@@ -953,7 +972,9 @@ export class DefinitionLists {
     readonly calls: readonly number[];
   } {
     const stores = [...this.#eventList(key)];
-    for (const prefix of prefixesOf(key)) stores.push(...this.definitionsOf(prefix).eventPositions);
+    // (one by one: a prefix's events grow with the source, past one call's arguments, Astra r6 N1)
+    for (const prefix of prefixesOf(key))
+      for (const position of this.definitionsOf(prefix).eventPositions) stores.push(position);
     this.#program.work.charge("eventSteps", sortCost(stores.length));
     stores.sort((a, b) => a - b);
     return {
@@ -996,4 +1017,9 @@ export class DefinitionLists {
     this.#singleSite.set(fn, single);
     return single;
   }
+}
+
+/** The writer an ingress's leaf names (C9, S6-CARRIERS §3.1): the ingress's own expression. */
+export function ingressLeaf(program: CoreProgram, site: SourceSite): Writer {
+  return program.writer("ingress", site);
 }

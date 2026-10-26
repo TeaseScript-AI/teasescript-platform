@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
+import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
+  ADMISSION_FAMILIES,
+  ADMISSION_INGRESS_PRESETS,
+  ADMISSION_KNOWN_PRODUCTS,
+  ADMISSION_SAME_SOURCES,
+  ORACLE_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -13,6 +20,7 @@ import {
   WORK_FAMILIES,
   type WorkFamily,
 } from "./helpers/type-core-families.js";
+import { readFixture } from "./helpers/type-core-fixture.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -66,9 +74,10 @@ test("every sampled family's work grows with its program, not with a product of 
  */
 const COUNTER_DOUBLING = 2.35;
 
-test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
+/** The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order. */
+function steepCounters(families: readonly WorkFamily[]): string[] {
   const steep: string[] = [];
-  for (const family of [...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS])
+  for (const family of families)
     for (const reversed of [false, true]) {
       const small = analysed(family, 64, reversed).budget;
       const large = analysed(family, 128, reversed).budget;
@@ -88,7 +97,145 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
             `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
           );
     }
+  return steep;
+}
+
+test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
+  assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
+ * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is
+ * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
+ * at its measured doubling, not a bound at larger sizes; a change to admission's passes re-measures and proposes the
+ * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
+ * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too (TABLE r4.69 (1)), and so
+ * are copies separated by calls storing their source (r4.71).
+ */
+test("every admission family's work and each of its counters grow with the program in either order", () => {
+  assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
+  const steep: string[] = [];
+  for (const family of ADMISSION_KNOWN_PRODUCTS)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * Product (c) of W34's class (`ADMISSION_INGRESS_PRESETS`): the solver's demands are S4's product, ungated here as on
+ * `main`; admission's own counters, its checks and its index steps, grow with the program in either order (they grew
+ * 3.23 and 2.65 per doubling while each literal's conflict discovery asked its own ingresses' contracts at every path).
+ */
+test("admission's work on literals of typed ingresses of one default grows with the program in either order", () => {
+  const steep: string[] = [];
+  for (const family of ADMISSION_INGRESS_PRESETS)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      for (const counter of ["checks", "indexSteps"] as const) {
+        const doubling =
+          (2 * ((large.counts.get(counter) ?? 0) / Math.max(1, small.counts.get(counter) ?? 0))) /
+          scale;
+        if (doubling > COUNTER_DOUBLING)
+          steep.push(
+            `${family.name}${reversed ? " reversed" : ""} ${counter}: ${doubling.toFixed(3)}`,
+          );
+      }
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * S6-CARRIERS §4.7 (`ADMISSION_SAME_SOURCES`): admission's own counters on same-source adds and choices grow with the
+ * program in either order; each total's 64 → 128 step, the value side's inherited product included, is a regression
+ * check at its measured doubling, not a bound at larger sizes.
+ */
+test("admission's work on same-source adds and choices grows with the program in either order", () => {
+  const steep: string[] = [];
+  for (const family of ADMISSION_SAME_SOURCES)
+    for (const reversed of [false, true]) {
+      const small = analysed(family, 64, reversed).budget;
+      const large = analysed(family, 128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      if (doubling(small.total, large.total) > family.measured)
+        steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
+      for (const counter of [
+        "checks",
+        "checksSkipped",
+        "aliasSteps",
+        "eligibility",
+        "quietProofs",
+        "c1Visits",
+      ] as const) {
+        const after = large.counts.get(counter) ?? 0;
+        if (after >= 200 && doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING)
+          steep.push(
+            `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
+          );
+      }
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
+ * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
+ */
+/**
+ * A search the ledger does not see (round 13 B2, round 14 H1): over a literal of k records of distinct fields, the
+ * analysis's `indexOf` searches inspect entries in proportion to k, never k² (each identity's first element is found in
+ * one pass). The count wraps the built-in for this analysis only.
+ */
+test("a literal of 4,096 distinct records is searched in linear time", () => {
+  const k = 4_096;
+  const source = `${Array.from({ length: k }, (_, i) => `let a${i} = {f${i}: 1}`).join("\n")}\nlet xs = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const original = Array.prototype.indexOf;
+  let inspected = 0;
+  Array.prototype.indexOf = function (this: unknown[], ...args: Parameters<typeof original>) {
+    if (this.length >= k) inspected += this.length;
+    return original.apply(this, args);
+  };
+  try {
+    assert.equal(analyseCore(request).outcome, "valid");
+  } finally {
+    Array.prototype.indexOf = original;
+  }
+  assert.ok(inspected <= 64 * k, `${inspected} entries inspected`);
+});
+
+test("a chain of records over shared inputs is identified in linear space (round 13 B3)", () => {
+  const levels = Array.from(
+    { length: 32 },
+    (_, index) => `let a${index + 1} = {left: a${index}, right: a${index}}`,
+  );
+  const source = `let a0 = {n: 1}\n${levels.join("\n")}\nlet xs = [a32, a32]\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  assert.equal(analyseCore(request).outcome, "valid");
+});
+
+test("a chain of carriers over shared inputs is identified in linear space", () => {
+  const levels = Array.from(
+    { length: 32 },
+    (_, index) => `let a${index + 1} = a${index} otherwise a${index}`,
+  );
+  const source = `let a0 = {n: 1}\n${levels.join("\n")}\nlet xs = [a32, a32]\nlet n: integer = xs[0].n\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  assert.equal(analyseCore(request).outcome, "valid");
 });
 
 /**
@@ -124,4 +271,129 @@ test("the analysis stops above 256 levels of nested blocks, an `else if` one lev
   assert.equal(outcome(nested(257)), "budget-error");
   assert.equal(outcome(chained(255)), "valid");
   assert.equal(outcome(chained(257)), "budget-error");
+});
+
+/** A program's published record in one order, as the oracle's analysis gives it, which the chain control reuses. */
+const resolvedRecords = new Map<string, string>();
+
+const recordKey = (files: readonly SourceFile[], reversed: boolean): string =>
+  `${reversed}|${JSON.stringify(files)}`;
+
+function publishedRecord(answers: Answers, files: readonly SourceFile[]): string {
+  return JSON.stringify(
+    coreRecord(
+      coreResult(answers),
+      files.map((file) => file.path),
+    ),
+  );
+}
+
+/**
+ * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), as a generated family: at every decided
+ * path, each alias member's own answer equals its class representative's, each with its own guard applied, its items
+ * compared whole (tags, certainty, reasons, context words, writers, leaves, marks). It runs over every work family at
+ * small sizes, Astra's two M1 witnesses (a conditional store below the copied path before and between the copies) and
+ * every alias form beside the events its class answers through, in both orders, and over the fixture's records.
+ */
+test("every alias member answers as its class does at every decided path, in both orders (§4.1, condition (a))", (t) => {
+  const differences: string[] = [];
+  let compared = 0;
+  const report = (difference: string | null): void => {
+    compared += 1;
+    if (difference !== null) differences.push(difference);
+  };
+  const run = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
+    const request = coreRequest(files);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    const answers = withMemberOracle(report, () =>
+      reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
+          )
+        : analyseCore(request),
+    );
+    resolvedRecords.set(recordKey(files, reversed), publishedRecord(answers, files));
+  };
+
+  for (const reversed of [false, true]) {
+    for (const family of [
+      ...WORK_FAMILIES,
+      ...W34_VARIANTS,
+      ...W44_VARIANTS,
+      ...W45_VARIANTS,
+      ...ADMISSION_FAMILIES,
+      ...ADMISSION_SAME_SOURCES,
+    ])
+      for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
+    for (const { name, files } of ORACLE_PROGRAMS) run(name, files, reversed);
+  }
+  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+    if (coreRequest(record.files) !== null) run(record.name, record.files, false);
+  t.diagnostic(`${compared} member answers compared with their classes'`);
+  assert.deepEqual(differences, []);
+  assert.ok(compared > 1_000, `${compared} member answers compared`);
+});
+
+/**
+ * S6-CARRIERS §4.1's chains: a member read through a chain of copies keeps its own links' writers, which the oracle
+ * sets aside, so this guards what they are for: every published record, its diagnostics' F28 writers included, is the
+ * same with every chain resolved and with none (`withoutChains`), over every work family at small sizes in both orders
+ * and over the fixture's records. The resolved side is the oracle's analysis of the same program where it ran.
+ */
+test("resolving chains of copies changes no published record or writer, in both orders (§4.1)", () => {
+  const differing: string[] = [];
+  const compare = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
+    const request = coreRequest(files);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    const run = (): string => {
+      const analysed = (): Answers => analyseCore(request);
+      const answers = reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, analysed),
+          )
+        : analysed();
+      return publishedRecord(answers, files);
+    };
+    const resolved = resolvedRecords.get(recordKey(files, reversed)) ?? run();
+    if (resolved !== withoutChains(run)) differing.push(`${name}${reversed ? " reversed" : ""}`);
+  };
+  for (const reversed of [false, true])
+    for (const family of [
+      ...WORK_FAMILIES,
+      ...W34_VARIANTS,
+      ...W44_VARIANTS,
+      ...W45_VARIANTS,
+      ...ADMISSION_FAMILIES,
+      ...ADMISSION_SAME_SOURCES,
+    ])
+      for (const k of [2, 3, 5]) compare(`${family.name} at ${k}`, family.program(k), reversed);
+  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+    if (coreRequest(record.files) !== null) compare(record.name, record.files, false);
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * S6-CARRIERS §4.4: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
+ * emits, so the visits are bounded by the output: per pass, at most the diagnostics, the checks and the decided paths.
+ */
+test("every family's member visits are bounded by its output and its decided paths (§4.4)", () => {
+  const over: string[] = [];
+  for (const family of [
+    ...WORK_FAMILIES,
+    ...W34_VARIANTS,
+    ...W44_VARIANTS,
+    ...W45_VARIANTS,
+    ...ADMISSION_FAMILIES,
+  ]) {
+    const answers = analysed(family, 32);
+    const counts = answers.budget.counts;
+    const visits = counts.get("c1Visits") ?? 0;
+    const bound =
+      (1 + (counts.get("rejectPasses") ?? 0)) *
+      (answers.diagnostics.length + answers.checks.length + answers.budget.facts.decidedPaths);
+    if (visits > bound) over.push(`${family.name}: ${visits} visits, ${bound} the bound`);
+  }
+  assert.deepEqual(over, []);
 });

@@ -1,31 +1,26 @@
 import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../static-types.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
-import type { DynamicWhy, PlaceId, SourceSite } from "../graph.js";
+import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
 import { Consumers } from "./consumers.js";
+import { carried, type Dispatch } from "./carriers.js";
 import {
-  choiceLabels,
   Contract,
-  defaultOf,
-  REFERENCE,
+  heldReference,
   typeTags,
   termAt,
   writtenOf,
   type ContractFacts,
 } from "./contract.js";
-import {
-  conversionCategory,
-  dictList,
-  interactionCategory,
-  methodCategory,
-} from "./method-categories.js";
+import { dictList } from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
   keyOf,
   keyPath,
   keyPlace,
+  recordPath,
   type Definition,
   type Key,
 } from "./definitions.js";
@@ -58,9 +53,10 @@ import { Values } from "./values.js";
  * compile and publishes, after its last pass, the frozen surface the consumer, the extracted checks, storage and the
  * backend read: per source occurrence its items, route, place and obligations; per place its admitted type, contract,
  * ingresses and definitions; the projections and properties of a value; the bridge to the adapters' operand views;
- * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. Here admission is one
- * pass: decided types, the boundary checks of external data (C9) other than those of a store into a written place, and
- * narrowing (§13) join in their steps, and the fields they own say so.
+ * and the whole program's diagnostics, checks, graph, budget counters and deferred bindings. The analysis runs in
+ * admission's passes (A6): each pass is a fresh analysis with the stores the previous pass rejected left out, until the
+ * rejected set is stable; a set that repeats is a cycle, whose changing stores stay possibilities. Narrowing (§13) joins
+ * in its step, and the field it owns says so.
  */
 
 /** The parts of one pass of the analysis: each reads the others through it. */
@@ -76,8 +72,11 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
-function createPass(program: CoreProgram): CorePass {
-  program.index();
+/** One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6). */
+function createPass(
+  program: CoreProgram,
+  rejected: ReadonlyMap<number, unknown> = new Map(),
+): CorePass {
   const definitions = new DefinitionIndex(program);
   const parts: {
     program: CoreProgram;
@@ -89,8 +88,8 @@ function createPass(program: CoreProgram): CorePass {
   } = {
     program,
     definitions,
-    // admission's rejections take effect in a later pass (A6); one pass rejects nothing
-    lists: new DefinitionLists(definitions, () => true),
+    // admission's rejections take effect in the next pass (A6)
+    lists: new DefinitionLists(definitions, (d) => !rejected.has(d.uid)),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
@@ -127,9 +126,21 @@ export interface OccurrenceAnswer {
   readonly narrowing: null;
 }
 
-/** A place's admitted type (A1–A9): its written type here; decided types are admission's (S6). */
+/**
+ * A place's admitted type (A1–A9): its written type; else the kinds admission decided it by, or its contract's kinds
+ * where admission found nothing to check (one family, A3), with the site of the contribution that decided (S3 §1: A2's
+ * earliest definite one, A4's copy; `null` where no store decides), `null` among the kinds where a `null` contribution
+ * is admitted (C9 r4.12): the type its boundary checks are against; `undecided` where it has no kind (an unknown only,
+ * or no store).
+ */
 export type AdmittedType =
-  { readonly by: "written"; readonly kinds: readonly ItemTag[] } | { readonly by: "undecided" };
+  | { readonly by: "written"; readonly kinds: readonly ItemTag[] }
+  | {
+      readonly by: "decided";
+      readonly kinds: readonly ItemTag[];
+      readonly decider: SourceSite | null;
+    }
+  | { readonly by: "undecided" };
 
 export interface PlaceAnswer {
   readonly admitted: AdmittedType;
@@ -139,7 +150,7 @@ export interface PlaceAnswer {
     readonly elements: readonly Item[];
     readonly emptiness: "held" | "open";
   };
-  /** The boundary checks of the ingress stores into the place (C9): here those of a written place (A1). */
+  /** The boundary checks of the ingress stores into the place (C9), against its admitted type. */
   readonly ingresses: readonly Obligation[];
   /**
    * The definitions the exact path uses (X2–X7): the live list in region order, F5a's loop-exit adds among them; the
@@ -218,9 +229,39 @@ export function analyseCore(request: CoreAnalysisRequest): Answers {
   try {
     // the nesting limit stops the analysis before any of it (TABLE §8; S3 §5's third stop)
     checkNesting(program.nesting);
-    const pass = createPass(program);
-    analysed = { pass, consumers: new Consumers(pass) };
-    analysed.consumers.check();
+    program.index();
+    // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
+    // whose changing stores stay possibilities
+    let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
+    let cycling: ReadonlySet<number> = new Set();
+    const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
+    for (let last = false; ;) {
+      const pass = createPass(program, rejected);
+      const consumers = new Consumers(pass, rejected, cycling);
+      analysed = null;
+      consumers.check();
+      analysed = { pass, consumers };
+      const now = consumers.admission.newlyRejected;
+      if (last || sameSet(now, rejected)) break;
+      program.work.charge("rejectPasses");
+      const repeated = sets.findIndex((set) => sameSet(set, now));
+      if (repeated >= 0) {
+        // the stores every set of the cycle rejects stay rejected, the others are its possibilities
+        const cycle = sets.slice(repeated);
+        const every = new Map<number, ReadonlySet<Key>>();
+        const some = new Set<number>();
+        for (const set of cycle)
+          for (const [uid, keys] of set)
+            if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
+            else some.add(uid);
+        rejected = every;
+        cycling = some;
+        last = true;
+        continue;
+      }
+      rejected = now;
+      sets.push(rejected);
+    }
   } catch (error) {
     if (!(error instanceof BudgetExhausted)) throw error;
     exhausted = error.limit;
@@ -248,7 +289,9 @@ export function solveDemands(
   request: CoreAnalysisRequest,
   keys: readonly string[],
 ): (readonly Item[])[] {
-  const pass = createPass(new CoreProgram(request));
+  const program = new CoreProgram(request);
+  program.index();
+  const pass = createPass(program);
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
     // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
@@ -311,6 +354,11 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     default:
       throw new Error(`No demand is written '${key}'.`);
   }
+}
+
+/** Whether two passes reject the same stores. */
+function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown>): boolean {
+  return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
 }
 
 function definitionByUid(pass: CorePass, uid: number): Definition {
@@ -390,6 +438,7 @@ class StoppedAnswers implements Answers {
         markNodes: 0,
         markVisits: 0,
         selectionVisits: 0,
+        decidedPaths: 0,
       },
     };
   }
@@ -451,7 +500,11 @@ class CoreAnswers implements Answers {
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
-    if (exhausted === null) for (const list of consumers.boundaries.values()) checks.push(...list);
+    if (exhausted === null) {
+      for (const list of consumers.admission.boundaries.values())
+        for (const check of list) checks.push(check);
+      for (const check of consumers.admission.readChecks) checks.push(check);
+    }
     this.checks = checks;
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
@@ -544,12 +597,15 @@ class CoreAnswers implements Answers {
     };
   }
 
-  /** The store a statement makes, by its node: its first live store definition there. */
+  /** The store a statement makes, by its node: its first live store definition there, else its first rejected one (A6). */
   #storeAt(node: FlowNode): Definition | null {
     if (this.#stores === null) {
       this.#stores = new Map();
-      for (const d of this.#pass.definitions.storeDefs)
-        if (!this.#stores.has(d.node) && this.#pass.lists.live(d)) this.#stores.set(d.node, d);
+      const { definitions, lists } = this.#pass;
+      for (const d of definitions.storeDefs)
+        if (!this.#stores.has(d.node) && lists.live(d)) this.#stores.set(d.node, d);
+      for (const d of definitions.storeDefs)
+        if (!this.#stores.has(d.node)) this.#stores.set(d.node, d);
     }
     return this.#stores.get(node) ?? null;
   }
@@ -564,13 +620,13 @@ class CoreAnswers implements Answers {
       ? this.#run(contract.contractOf(keyOf(id, [...path, "element"])))
       : [];
     return {
-      admitted: term === null ? { by: "undecided" } : { by: "written", kinds: typeTags(term) },
+      admitted: this.#admitted(id, path, term),
       contract: {
         kinds: withoutEmpty(kinds),
         elements: withoutEmpty(elements),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      ingresses: this.#consumers.boundaries.get(keyOf(id, path)) ?? [],
+      ingresses: this.#consumers.admission.boundaries.get(keyOf(id, path)) ?? [],
       // the exact service's list, not the raw stores (Astra B8)
       definitions: {
         list: lists.definitionsOf(key).list,
@@ -579,6 +635,22 @@ class CoreAnswers implements Answers {
         events: lists.ownEvents(key),
       },
     };
+  }
+
+  #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
+    if (term !== null) return { by: "written", kinds: typeTags(term) };
+    const { admission } = this.#consumers;
+    const kinds = admission.admitted(id, path);
+    // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
+    return kinds.length === 0
+      ? { by: "undecided" }
+      : {
+          by: "decided",
+          kinds,
+          get decider(): SourceSite | null {
+            return admission.deciderAt(id, path);
+          },
+        };
   }
 
   public project(
@@ -603,7 +675,7 @@ class CoreAnswers implements Answers {
 
   /**
    * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
-   * its literals have at its path. One worklist of sources, each once: a value read further at a path is followed
+   * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
    * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
    * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
    * reads and calls standing at its path or above it.
@@ -617,8 +689,10 @@ class CoreAnswers implements Answers {
       | { readonly literal: PlaceId; readonly path: readonly string[] };
     const pending: Task[] = [{ value, path: [] }];
     const seen = new Set<string>();
-    const kinds = (of: PlaceId): ReadonlySet<ItemTag> =>
-      new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag));
+    const dispatch: Dispatch = {
+      kinds: (of) => new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag)),
+      reference: (receiver) => heldReference(this.#run(contract.valueReceiver(receiver))),
+    };
     while (pending.length > 0) {
       const task = pending.pop()!;
       const id =
@@ -634,79 +708,19 @@ class CoreAnswers implements Answers {
         const at = task.value;
         const source = contract.copiedKey(at) ?? contract.resultKey(at);
         // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
+        // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
         if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
-          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...path]) });
+          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...recordPath(path)]) });
           continue;
         }
         if (program.hasOf.has(at)) {
-          pending.push({ literal: at, path });
+          pending.push({ literal: at, path: recordPath(path) });
           continue;
         }
-        const projection = program.projOf.get(at);
-        if (projection !== undefined) {
-          // F27: a loop visits a list's or a set's elements (a dict's keys and a range's numbers hold none); F11: an
-          // object's own `length` is its property
-          if (projection.step === "iteration") {
-            const of = kinds(projection.owner);
-            if (of.has("list") || of.has("set"))
-              pending.push({ value: projection.owner, path: ["element", ...path] });
-          } else if (dictList(projection.step) !== undefined) {
-            // r4.46 (2): a dict's `values` holds its values (its `keys` text); an object's own property of the name;
-            // a receiver that may be a reference has the runtime's members, none known (F19a)
-            const of = kinds(projection.owner);
-            if ([...of].some((tag) => REFERENCE.has(tag))) continue;
-            if (of.has("object"))
-              pending.push({ value: projection.owner, path: [projection.step, ...path] });
-            if (of.has("dict") && dictList(projection.step) === "values" && path[0] === "element")
-              pending.push({ value: projection.owner, path });
-          } else
-            pending.push({ value: projection.owner, path: [stepName(projection.step), ...path] });
-          continue;
-        }
-        const c = program.opOf.get(at);
-        if (c === undefined) continue;
-        if (c.kind === "fallback") {
-          pending.push({ value: c.left, path }, { value: c.right, path });
-        } else if (c.kind === "get") {
-          pending.push(
-            { value: c.receiver, path: ["element", ...path] },
-            { value: c.fallback, path },
-          );
-        } else if (c.kind === "load") {
-          if (c.fallback !== null) pending.push({ value: c.fallback, path });
-        } else if (c.kind === "operation") {
-          const { family, name } = c.contract;
-          const fallback = defaultOf(c);
-          if (
-            family === "conversion" &&
-            conversionCategory(name)?.kind === "parses" &&
-            fallback !== undefined
-          )
-            pending.push({ value: fallback, path });
-          else if (family === "method" && c.receiver !== null) {
-            // F10: a copy's elements; F7: a removal's element (from a dict its value, a list's may give `null`)
-            const gives = methodCategory(name)?.gives;
-            if (gives?.kind === "copy" && path[0] === "element")
-              pending.push({ value: c.receiver, path });
-            else if (
-              gives?.kind === "removed" &&
-              (gives.fromList === "element" || kinds(c.receiver).has("dict"))
-            )
-              pending.push({ value: c.receiver, path: ["element", ...path] });
-          } else if (family === "operator" && name === "+" && path[0] === "element")
-            for (const argument of c.arguments) pending.push({ value: argument, path });
-          else if (family === "interaction" && interactionCategory(name)?.kind === "options") {
-            // V30 §19: `askChoice`'s answer is a button's value: a whole choice object's or an element's (a label
-            // is text or a number)
-            const labels = choiceLabels(c);
-            for (const [index, argument] of c.arguments.entries())
-              if (labels[index] === undefined)
-                pending.push(
-                  { value: argument, path: ["value", ...path] },
-                  { value: argument, path: ["element", "value", ...path] },
-                );
-          }
-        }
+        // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, r4.46 (2), F17b,
+        // C10, F10, F7, a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
+        for (const [operand, rest] of carried(program, at, path, dispatch))
+          pending.push({ value: operand, path: rest });
         continue;
       }
       if ("literal" in task) {
@@ -751,6 +765,10 @@ class CoreAnswers implements Answers {
           if (entry.key !== undefined)
             pending.push({ key: keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...at]) });
           else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
+          // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
+          // at the collection itself
+          else if (entry.elem !== undefined && rest[0] === "element")
+            pending.push({ value: entry.elem, path: [...(entry.at ?? []), ...rest.slice(1)] });
         }
       }
     }

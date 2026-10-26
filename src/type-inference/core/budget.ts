@@ -72,9 +72,17 @@ export type WorkCounter =
   | "mergeItems"
   | "sigItems"
   | "operatorSteps"
-  // the checks of consumers and admission, evaluated and skipped by the quiet path
+  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6)
   | "checks"
   | "checksSkipped"
+  | "rejectPasses"
+  // admission's copies (S6-CARRIERS §4): alias keys, signatures and groups; the eligibility index; the quiet proofs of a
+  // class; the member visits a proof that is not quiet makes; the structure levels
+  | "aliasSteps"
+  | "eligibility"
+  | "quietProofs"
+  | "c1Visits"
+  | "structureSteps"
   // the writers the result names
   | "evidence";
 
