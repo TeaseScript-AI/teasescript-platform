@@ -76,6 +76,8 @@ export class GuardIndex {
   readonly belowTested = new Set<Key>();
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
   readonly #testedUnder = new Map<Key, Key[]>();
+  /** Per read, the tested paths below it whose regions hold it (`guardedBelowRead`). */
+  readonly #belowReads = new Map<PlaceId, readonly string[]>();
   readonly #nests = new Map<
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
@@ -174,8 +176,19 @@ export class GuardIndex {
     return out.sort();
   }
 
-  /** `guardedBelow` at a value's read below its property and element projections (as `guardedRead`). */
+  /**
+   * `guardedBelow` at a value's read below its property and element projections (as `guardedRead`), once per read and
+   * pass: every caller asking of one read shares its answer (Codex r22 F4).
+   */
   public guardedBelowRead(value: PlaceId): readonly string[] {
+    const known = this.#belowReads.get(value);
+    if (known !== undefined) return known;
+    const answer = this.#guardedBelowRead(value);
+    this.#belowReads.set(value, answer);
+    return answer;
+  }
+
+  #guardedBelowRead(value: PlaceId): readonly string[] {
     const program = this.program;
     const steps: string[] = [];
     let current = value;

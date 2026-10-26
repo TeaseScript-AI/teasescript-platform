@@ -2039,6 +2039,27 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // S6-CARRIERS §4.1's chains under a guard (Codex r22 F4): k copies of one snapshot whose definition is read under k
+  // tests of the source's fields, every field read; the definition read's guards found once, whatever asks
+  {
+    name: "A2-alias-guarded-snapshot-copies",
+    measures:
+      "§4.1, §3.2: k copies of one snapshot read under k field tests of its source, every field read (Codex r22 F4)",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `if ${Array.from({ length: k }, (_, i) => `root.f${i} != null`).join(" and ")} {`,
+          "  let stable = root",
+          "  let box = stable",
+          rows(k - 1, () => "  box = stable"),
+          rows(k, (i) => `  repeat box.f${i} {}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
   // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
   // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
   // from each tested field in turn
