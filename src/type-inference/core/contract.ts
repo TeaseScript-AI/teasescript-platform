@@ -1293,9 +1293,25 @@ export class Contract {
     if (program.hasOf.has(value) || program.cellOwner.has(value))
       return yield* this.contractOfLiteral(value, rest);
     const operation = program.opOf.get(value);
-    if (operation !== undefined)
-      return this.entered(value, yield* this.#contractOfOp(operation, rest));
-    return [unknownItem(REASON.opaque)];
+    if (operation === undefined) return [unknownItem(REASON.opaque)];
+    // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
+    // the choice's own entry read it alike (S6-CARRIERS §4.5, Astra r6 B2), as `contractOfValue` reads an operation
+    if (
+      operation.kind === "operation" &&
+      operation.contract.family === "interaction" &&
+      interactionCategory(operation.contract.name)?.kind === "options"
+    ) {
+      const site = program.places[value]?.site ?? operation.site;
+      const demand: Demand = {
+        key: rest.length === 0 ? `cop|${value}` : `cop|${value}|${rest.join(".")}`,
+        kind: "contract",
+        file: site.file,
+        offset: site.start,
+        make: () => this.#contractOfOp(operation, rest),
+      };
+      return this.entered(value, yield demand);
+    }
+    return this.entered(value, yield* this.#contractOfOp(operation, rest));
   }
 
   /** The kinds a value can have at any point, mirroring the value side's dispatch. */

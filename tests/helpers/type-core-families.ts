@@ -2225,7 +2225,7 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
   {
     name: "A5-same-source-adds",
     measures: "§4.5, A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
-    // 29,571 / 59,846 units at k = 64, 128 in both orders (2.0312); admission's counters at most 2.05 (`checks`), the
+    // 29,769 / 60,236 units at k = 64, 128 in both orders (2.0309); admission's counters at most 2.04 (`checks`), the
     // value side's reaching-definition walk 2.32 (`rdWalk`, as on `main`)
     measured: 2.04,
     program: (k) =>
@@ -2242,8 +2242,8 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
   {
     name: "A8-same-source-choices",
     measures: "§4.5, A8: a choice of k options whose value is one k-field record, every field read",
-    // 42,947 / 126,852 units at k = 64, 128 in both orders (2.9645): the value side's choice items, one per option at
-    // each field read (`mergeItems` 3.87, `eventSteps` 3.72, as on `main`); admission's counters at most 2.08 (`checks`)
+    // 43,657 / 128,266 units at k = 64, 128 in both orders (2.9488): the value side's choice items, one per option at
+    // each field read (`mergeItems` 3.87, `eventSteps` 3.70, as on `main`); admission's counters at most 2.07 (`checks`)
     measured: 2.97,
     program: (k) =>
       main(
@@ -2281,11 +2281,11 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
     name: "A8-same-source-choices-unknown",
     measures:
       "§4.5, A8: a choice of k options whose value is one k-field record of host data, every field read",
-    // 196,485 / 672,007 units at k = 64, 128 in both orders (3.4341; 244,419 / 866,181 before the option stops were
-    // shared): the choice's items, one per option at each field read, as on `main` (528,234 at k = 128), which the A5
-    // candidates' test of the choice's own entry at each field reads a second time (the excess over `main` 3.37 per
-    // doubling, the inherited product's own, S6c's); admission's counters at most 2.04 (`checks`)
-    measured: 3.44,
+    // 172,165 / 574,215 units at k = 64, 128 in both orders (3.3489; 244,419 / 866,181 before the option stops were
+    // shared, 196,485 / 672,007 while A5's test of the choice's own entry read its items again at each field): the
+    // choice's items, one per option at each field read, as on `main` (528,234 at k = 128), read once per choice and
+    // path whatever asks (Astra r6 B2), the excess over `main` linear; admission's counters at most 2.04 (`checks`)
+    measured: 3.35,
     program: (k) =>
       main(
         lines(
