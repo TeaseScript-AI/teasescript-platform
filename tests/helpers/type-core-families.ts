@@ -1843,6 +1843,52 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // S6-CARRIERS §4.6, §4.7 (C9-fresh-wrappers) with Codex r20 B2 and B3: k stores of a wrapper holding a fresh host
+  // value beside one k-field record, every field read; the level at the record's path holds it once
+  ...(
+    [
+      ["payload", "{noise: hostValue otherwise null, data: root}", "data.", "box.noise"],
+      ["get", "{tag: 0, slot: {data: xs.get(hostValue, default: root)}}", "slot.data.", null],
+      ["projected", "({noise: hostValue otherwise null, data: root}).data", "", null],
+      [
+        "projected-get",
+        "({noise: hostValue otherwise null, data: [root].get(0, default: root)}).data",
+        "",
+        null,
+      ],
+    ] as const
+  ).map(([variant, wrapper, at, payload]): WorkFamily => ({
+    name: `C9-fresh-wrappers-${variant}`,
+    measures: `§4.6, C9: k stores of \`${wrapper}\`, every field of the record read`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          `let box = ${wrapper}`,
+          rows(k - 1, () => `box = ${wrapper}`),
+          ...(payload === null ? [] : [`let n: integer = ${payload}`]),
+          rows(k, (i) => `repeat box.${at}f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "C9-fresh-wrappers-distinct",
+    measures:
+      "§4.6, C9: k wrappers of k distinct records, the last stored k times more, one field read (Codex r20 B3)",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let r${i} = {n: hostValue}`),
+          "let box = {noise: hostValue otherwise null, data: r0}",
+          rows(k - 1, (i) => `box = {noise: hostValue otherwise null, data: r${i + 1}}`),
+          rows(k, () => `box = {noise: hostValue otherwise null, data: r${k - 1}}`),
+          "say box.data.n",
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**

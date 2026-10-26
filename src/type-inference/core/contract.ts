@@ -311,10 +311,18 @@ interface PrefixEntry {
  */
 interface LevelGroup {
   readonly literal: PlaceId;
+  /** The steps into the literal its member stands at: none for a literal stored whole, a projection's otherwise. */
+  readonly at: readonly string[];
   readonly w: Writer | null;
   readonly holder: Holder | null;
   readonly guarded: boolean;
   readonly ingress: IngressNode | undefined;
+}
+
+/** A prefix's entries as its levels read them (§4.6): the levels' members, and the entries that answer by themselves. */
+interface PrefixLevels {
+  readonly others: readonly PrefixEntry[];
+  readonly base: readonly LevelGroup[];
 }
 
 /**
@@ -526,6 +534,7 @@ export class Contract {
   >();
   /** A prefix's literal entries grouped at each path below it (`#groupsAt`), per prefix and path. */
   readonly #levelGroups = new Map<string, readonly LevelGroup[]>();
+  readonly #levelBases = new Map<Key, PrefixLevels>();
   readonly #groups = new WeakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
@@ -853,22 +862,26 @@ export class Contract {
       const rest = path.slice(length);
       if (rest.length > 0) {
         // a prefix's whole stores, shared by every property below it; its literals by level (§4.6), each group of the
-        // same structure below the path once
+        // same structure below the path once (with a selection step, every entry by itself)
         const stores = this.prefixStores(prefix);
-        const selecting = rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT);
-        let literals = false;
-        for (const entry of stores.list)
-          if (!selecting && this.#levelled(entry)) literals = true;
-          else out.push(...(yield* this.entryAt(entry, rest)));
-        if (literals)
-          for (const group of this.#groupsAt(prefix, stores, rest))
-            out.push(
-              ...this.#annotated(
-                group,
-                rest,
-                withWriter(yield* this.contractOfValueAt(group.literal, rest), group.w),
-              ),
-            );
+        if (rest.some((step) => step === SELECTED_VALUE || step === SELECTED_TEXT))
+          for (const entry of stores.list) out.push(...(yield* this.entryAt(entry, rest)));
+        else {
+          const levels = this.#prefixLevels(prefix, stores);
+          for (const entry of levels.others) out.push(...(yield* this.entryAt(entry, rest)));
+          if (levels.base.length > 0)
+            for (const group of this.#groupsAt(prefix, levels.base, rest))
+              out.push(
+                ...this.#annotated(
+                  group,
+                  rest,
+                  withWriter(
+                    yield* this.contractOfValueAt(group.literal, [...group.at, ...rest]),
+                    group.w,
+                  ),
+                ),
+              );
+        }
         // a replaced source's own stores below the prefix, only where they lie, marked as its copies' entries are
         // (§3.2: a guarded read of a copy of it is a mark of its holder)
         for (const sub of this.relevantSubs(stores, rest)) {
@@ -942,78 +955,119 @@ export class Contract {
     );
   }
 
-  /** Whether a prefix entry is a literal stored whole, which its prefix's levels group (§4.6). */
-  #levelled(entry: PrefixEntry): boolean {
-    return (
-      entry.value !== undefined &&
-      entry.at === undefined &&
-      entry.key === undefined &&
-      entry.elem === undefined &&
-      this.pass.program.hasOf.has(entry.value)
-    );
+  /**
+   * A prefix's entries as its levels read them (§4.6), once per prefix: each entry a level's member (`#levelMember`)
+   * starts the levels, every other entry answers each path by itself.
+   */
+  #prefixLevels(prefix: Key, stores: PrefixStores): PrefixLevels {
+    const known = this.#levelBases.get(prefix);
+    if (known !== undefined) return known;
+    const others: PrefixEntry[] = [];
+    const base: LevelGroup[] = [];
+    for (const entry of stores.list) {
+      this.pass.program.work.charge("invSteps");
+      const member = this.#levelMember(entry);
+      if (member === null) others.push(entry);
+      else base.push(member);
+    }
+    const levels = { others, base };
+    this.#levelBases.set(prefix, levels);
+    return levels;
   }
 
   /**
-   * S6-CARRIERS §4.6: a prefix's literal entries grouped at a path below it, built from the groups one step up: groups
-   * that hold the same structure below the path (`#levelsOf`) and the same facts at every step above it merge, the
-   * earliest standing for the group and the annotations united; a group whose marks may depend on steps past the path
-   * stays its own. Once per prefix and path, so k literals that differ only beside the path are one group there, never k at every path below.
+   * A prefix entry as a level's member (§4.6): a literal stored whole, or a projection of one by property or index
+   * steps, the selected prefix normalized to the literal and the steps into it, so the k projections
+   * `({noise: hostValue otherwise null, data: root}).data` are the literals at `data`, whose level holds the read of
+   * `root` once; `null` for any other entry, which answers each path itself.
    */
-  #groupsAt(prefix: Key, stores: PrefixStores, path: readonly string[]): readonly LevelGroup[] {
+  #levelMember(entry: PrefixEntry): LevelGroup | null {
+    if (
+      entry.value === undefined ||
+      entry.at !== undefined ||
+      entry.key !== undefined ||
+      entry.elem !== undefined
+    )
+      return null;
+    const { program } = this.pass;
+    const steps: string[] = [];
+    let value = entry.value;
+    while (!program.hasOf.has(value)) {
+      const projection = program.projOf.get(value);
+      // (a property or an index selects what its owner holds there; a selection, a length, a dict's lists and the
+      // temporal members answer otherwise)
+      if (projection === undefined || !plainStep(projection.step)) return null;
+      program.work.charge("invSteps");
+      steps.push(stepName(projection.step));
+      value = projection.owner;
+    }
+    return {
+      literal: value,
+      at: steps.reverse(),
+      w: entry.w,
+      holder: entry.holder,
+      guarded: entry.guarded,
+      ingress: entry.ingress,
+    };
+  }
+
+  /**
+   * S6-CARRIERS §4.6: a prefix's level members grouped at a path below it, built from the groups one step up: groups
+   * that hold the same structure below the path (`#levelsOf`, at the member's steps into its literal) and the same
+   * facts at every step above it merge, the earliest standing for the group and the annotations united; a group whose
+   * marks may depend on steps past the path stays its own. Once per prefix and path, so k literals that differ only
+   * beside the path are one group there, never k at every path below.
+   */
+  #groupsAt(
+    prefix: Key,
+    base: readonly LevelGroup[],
+    path: readonly string[],
+  ): readonly LevelGroup[] {
     const memoKey = `${prefix}|${path.join(".")}`;
     const known = this.#levelGroups.get(memoKey);
     if (known !== undefined) return known;
     const { program } = this.pass;
-    let groups: LevelGroup[];
-    if (path.length === 0)
-      groups = stores.list
-        .filter((entry) => this.#levelled(entry))
-        .map((entry) => ({
-          literal: entry.value!,
-          w: entry.w,
-          holder: entry.holder,
-          guarded: entry.guarded,
-          ingress: entry.ingress,
-        }));
-    else {
-      this.#collectMarks();
-      const at = path.join(".");
-      const merged = new Map<string, LevelGroup>();
-      groups = [];
-      for (const group of this.#groupsAt(prefix, stores, path.slice(0, -1))) {
-        program.work.charge("invSteps");
-        const levels = this.#levelsOf(group.literal);
-        // (what stands at each step above the path: entries read below it, objects lacking the next step, a
-        // reference, an empty collection; and whether the literal is a cell, every path then below an element)
-        const above = Array.from(
-          { length: path.length },
-          (_, length) => levels.at.get(path.slice(0, length).join(".")) ?? "",
-        ).join("|");
-        const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
-        // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
-        const marks =
-          group.holder === null
-            ? ""
-            : this.#depthOf(group.holder) <= path.length
-              ? String(this.#marksAt(group.holder, path))
-              : group.holder.id;
-        const key = `${levels.below.get(at) ?? ""}|${above}|${cell}|${marks}`;
-        const into = merged.get(key);
-        if (into === undefined) {
-          merged.set(key, group);
-          groups.push(group);
-          continue;
-        }
-        const united: LevelGroup = {
-          literal: into.literal,
-          w: firstWriter(into.w, group.w),
-          holder: into.holder,
-          guarded: into.guarded || group.guarded,
-          ingress: program.scope.ingress.union(into.ingress, group.ingress),
-        };
-        merged.set(key, united);
-        groups[groups.indexOf(into)] = united;
+    this.#collectMarks();
+    // each group's key, to its position in the list; the members themselves at the prefix (a projection's literal at
+    // its steps into it)
+    const merged = new Map<string, number>();
+    const groups: LevelGroup[] = [];
+    for (const group of path.length === 0
+      ? base
+      : this.#groupsAt(prefix, base, path.slice(0, -1))) {
+      program.work.charge("invSteps");
+      const levels = this.#levelsOf(group.literal);
+      const full = [...group.at, ...path];
+      // (what stands at each step above the path: entries read below it, objects lacking the next step, a
+      // reference, an empty collection; and whether the literal is a cell, every path then below an element)
+      const above = Array.from(
+        { length: full.length },
+        (_, length) => levels.at.get(full.slice(0, length).join(".")) ?? "",
+      ).join("|");
+      const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";
+      // (its marks: alike where they cannot depend on steps past the path, else its own, §3.2 r4.23)
+      const marks =
+        group.holder === null
+          ? ""
+          : this.#depthOf(group.holder) <= path.length
+            ? String(this.#marksAt(group.holder, path))
+            : group.holder.id;
+      const key = `${levels.below.get(full.join(".")) ?? ""}|${above}|${cell}|${marks}`;
+      const position = merged.get(key);
+      if (position === undefined) {
+        merged.set(key, groups.length);
+        groups.push(group);
+        continue;
       }
+      const into = groups[position]!;
+      groups[position] = {
+        literal: into.literal,
+        at: into.at,
+        w: firstWriter(into.w, group.w),
+        holder: into.holder,
+        guarded: into.guarded || group.guarded,
+        ingress: program.scope.ingress.union(into.ingress, group.ingress),
+      };
     }
     this.#levelGroups.set(memoKey, groups);
     return groups;
@@ -1032,7 +1086,9 @@ export class Contract {
     if (known !== undefined) return known;
     const { program } = this.pass;
     const index = this.literalIndex(literal);
+    // (the literal's own path too: its whole structure is a member's key at the prefix)
     const paths = new Set<string>([
+      "",
       ...index.terms.keys(),
       ...index.reads.keys(),
       ...index.others.keys(),
@@ -3487,6 +3543,22 @@ function withoutMissing(items: readonly Item[]): Item[] {
       : item.reasons === REASON.missing
         ? []
         : [{ ...item, reasons: item.reasons & ~REASON.missing }],
+  );
+}
+
+/**
+ * Whether a projection's step selects what its owner holds at the step's path, so the projection's contract below it is
+ * its owner's there (§4.6's normalization): a property or an index; never an iteration, a list's selection, a length,
+ * a dict's lists or a temporal member, which answer by themselves.
+ */
+function plainStep(step: string): boolean {
+  if (step === "index") return true;
+  return (
+    step !== "iteration" &&
+    stepName(step) === step &&
+    !measuresLength(step) &&
+    dictList(step) === undefined &&
+    memberStep([step], 0) < 0
   );
 }
 
