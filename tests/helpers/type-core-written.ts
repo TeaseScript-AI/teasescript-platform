@@ -1134,9 +1134,10 @@ function suggestionOf(pair: readonly Form[]): string | null {
  * (`string[]`, `string set`, `string dict`, `list`, `set`, `dict`; not the same name twice) × the members in both orders
  * × the place it is written: a variable, a global, a parameter, a result, a type test, a case's type test, and at a
  * variable inside a list, a set, a dict, an optional and a list of lists. Each is one compile error at the written type,
- * naming the union, with V30's suggestion for `h`'s form (`suggestionOf`). Valid controls: each whole collection beside
- * `null`, its optional form, in both orders at the same places, with no diagnostic. A union inside a collection and the
- * other valid forms are `V30_TYPE_MATRIX`'s.
+ * naming the union, with V30's suggestion for `h`'s form (`suggestionOf`). Valid controls, with no diagnostic, at the
+ * same places: each whole collection beside `null`, its optional form, in both orders, and beside itself, also with
+ * `null` between (one type written twice). A union inside a collection and the other valid forms are
+ * `V30_TYPE_MATRIX`'s.
  */
 export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
   const integer = name("integer");
@@ -1192,6 +1193,9 @@ export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
         ),
         { pair: [whole, name("null")], valid: true },
         { pair: [name("null"), whole], valid: true },
+        // (the same collection twice is one type, also beside `null`)
+        { pair: [whole, whole], valid: true },
+        { pair: [whole, name("null"), whole], valid: true },
       ];
       for (const { pair, valid } of pairs) {
         const type = formText(around(union(...pair)));

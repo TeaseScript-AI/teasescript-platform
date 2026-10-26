@@ -72,38 +72,74 @@ export function writtenTypeErrors(programs: readonly Program[]): WrittenTypeErro
   return errors;
 }
 
-/** The error of one written type: its first union in source order that holds a whole collection beside another type. */
+/** A position of a written type: its outermost union, and its members through its unions and `?` besides `null`. */
+interface Level {
+  readonly position: TypeAnnotation;
+  readonly union: UnionType | null;
+  readonly members: readonly (NamedType | CollectionType)[];
+  /** Whether `null` is a member: written, or by a `?` (`T?` is `T | null`). */
+  readonly nullable: boolean;
+}
+
+function levelOf(position: TypeAnnotation): Level {
+  let union: UnionType | null = null;
+  let nullable = false;
+  const members: (NamedType | CollectionType)[] = [];
+  const pending: TypeAnnotation[] = [position];
+  for (let member = pending.pop(); member !== undefined; member = pending.pop())
+    switch (member.kind) {
+      case "unionType":
+        union ??= member;
+        for (const inner of member.members) pending.push(inner);
+        break;
+      case "optionalType":
+        nullable = true;
+        pending.push(member.value);
+        break;
+      case "namedType":
+        if (member.name === "null") nullable = true;
+        else members.push(member);
+        break;
+      default:
+        members.push(member);
+    }
+  return { position, union, members, nullable };
+}
+
+/**
+ * The error of one written type: its first union in source order that holds a whole collection beside another type.
+ * The same type written twice is one type, so `integer[] | integer[]` and `integer[]? | integer[]` hold one collection.
+ */
 function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null {
+  // the positions of the type, each before its parts: the whole type, and the element type of each collection in it
+  const levels: Level[] = [];
+  const pending: TypeAnnotation[] = [type];
+  for (let position = pending.pop(); position !== undefined; position = pending.pop()) {
+    const level = levelOf(position);
+    levels.push(level);
+    for (const member of level.members)
+      if (member.kind !== "namedType") pending.push(member.element);
+  }
+  // each position's type as a number, its parts' first: one per distinct text of its members' sorted keys and `null`,
+  // where a collection's key holds its element's number, so a key stays as short as its level
+  const types = new Map<string, number>();
+  const typeOf = new Map<TypeAnnotation, number>();
   let first: UnionType | null = null;
-  // the positions of the type: the whole type, and the element type of each collection in it
-  const positions: TypeAnnotation[] = [type];
-  for (let position = positions.pop(); position !== undefined; position = positions.pop()) {
-    // the position's members through its unions and optionals (`T?` is `T | null`), and its outermost union
-    let union: UnionType | null = null;
-    let collections = 0;
-    let others = 0;
-    const members: TypeAnnotation[] = [position];
-    for (let member = members.pop(); member !== undefined; member = members.pop())
-      switch (member.kind) {
-        case "unionType":
-          union ??= member;
-          for (const inner of member.members) members.push(inner);
-          break;
-        case "optionalType":
-          members.push(member.value);
-          break;
-        case "namedType":
-          if (COLLECTION_NAMES.has(member.name)) collections += 1;
-          else if (member.name !== "null") others += 1;
-          break;
-        default:
-          collections += 1;
-          positions.push(member.element);
-      }
+  for (let at = levels.length - 1; at >= 0; at -= 1) {
+    const { position, union, members, nullable } = levels[at]!;
+    const distinct = new Set(
+      members.map((member) =>
+        member.kind === "namedType" ? member.name : `${member.kind} ${typeOf.get(member.element)}`,
+      ),
+    );
+    const text = [...distinct, ...(nullable ? ["null"] : [])].sort().join(" | ");
+    let known = types.get(text);
+    if (known === undefined) types.set(text, (known = types.size));
+    typeOf.set(position, known);
     if (
       union !== null &&
-      collections > 0 &&
-      collections + others > 1 &&
+      distinct.size > 1 &&
+      members.some((member) => member.kind !== "namedType" || COLLECTION_NAMES.has(member.name)) &&
       (first === null || union.span.start.offset < first.span.start.offset)
     )
       first = union;

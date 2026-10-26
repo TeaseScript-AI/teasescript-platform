@@ -490,9 +490,22 @@ const V30_UNION_EXAMPLES: readonly (readonly [string, string?, string?, (string 
   ],
 ];
 
-test("V30 §13's union examples: f–p one compile error at the written type naming the union, h's form with its suggestion, a–e valid (r4.75 (3))", () => {
+/**
+ * One type written twice is one type, not another type beside it (§13; ADR 0021 3.2, `T?` is `T | null`), also when
+ * spelled two ways; two list types are two types (Sol's r1 B1).
+ */
+const SAME_TYPE_UNIONS: readonly (readonly [string, string?, string?, (string | null)?])[] = [
+  ["let a: integer[] | integer[] = []"],
+  ["let b: list | list = []"],
+  ["let c: integer[]? | integer[] = []"],
+  ["let d: integer[] | (integer[] | null) = []"],
+  ["let e: integer?[] | (integer | null)[] = []"],
+  ["let f: integer?[] | integer[] = []", "integer?[] | integer[]", "integer?[] | integer[]", null],
+];
+
+test("V30 §13's union examples: f–p one compile error at the written type naming the union, h's form with its suggestion, a–e and a type written twice valid (r4.75 (3))", () => {
   const wrong: string[] = [];
-  for (const [line, type, unionText, suggestion] of V30_UNION_EXAMPLES)
+  for (const [line, type, unionText, suggestion] of [...V30_UNION_EXAMPLES, ...SAME_TYPE_UNIONS])
     // (also in code that never runs: the rule reads the written type alone)
     for (const source of [`${line}\nexit\n`, `exit\n${line}\n`]) {
       const request = requestOf(source);
