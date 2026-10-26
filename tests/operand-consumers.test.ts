@@ -91,11 +91,13 @@ test("a computed choice object's text that cannot be shown is an error", () => {
   // of a known type that cannot be shown fails whether it is there or missing.
   for (const source of SOURCES.slice(1).map((wrap) =>
     wrap("{ text: [1], value: 1 }", "let answer = askChoice @"),
-  ))
+  )) {
+    const found = errors(source);
     assert.ok(
-      errors(source).some(([code]) => code === "TSV040"),
-      `${source}\n${JSON.stringify(errors(source))}`,
+      found.some(([code]) => code === "TSV040"),
+      `${source}\n${JSON.stringify(found)}`,
     );
+  }
   assert.deepEqual(
     errors("let options = [{ text: [1], value: 1 }]\nlet answer = askChoice options\nexit").map(
       ([code]) => code,

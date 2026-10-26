@@ -417,5 +417,7 @@ test("validating nested asking prefills takes work in proportion to the plan", (
     });
   };
   // A scoped regression oracle for the indexed checks: doubling the nesting at most about doubles the steps.
-  assert.ok(work(400) <= 2.2 * work(200), `${work(400)} steps for 400 asks, ${work(200)} for 200`);
+  const large = work(400);
+  const small = work(200);
+  assert.ok(large <= 2.2 * small, `${large} steps for 400 asks, ${small} for 200`);
 });

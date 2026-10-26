@@ -210,12 +210,14 @@ const NOT_JSON = [
 ];
 
 test("fromJson gives its default for every text that is not JSON, and for a value that is not text", () => {
-  for (const text of NOT_JSON)
-    assert.equal(
-      variables(`let read = fromJson(${literal(text)}, default: "fallback")`).get("read"),
-      "fallback",
-      JSON.stringify(text),
-    );
+  // One script reads each text into a variable of its own.
+  const reads = variables(
+    NOT_JSON.map(
+      (text, index) => `let read${index} = fromJson(${literal(text)}, default: "fallback")`,
+    ).join("\n"),
+  );
+  for (const [index, text] of NOT_JSON.entries())
+    assert.equal(reads.get(`read${index}`), "fallback", JSON.stringify(text));
   // A value the compiler cannot know may turn out not to be text; reading it gives the default as well.
   const read = variables(
     'function read(value) {\n  return fromJson(value, default: [])\n}\nlet fromNumber = read(5)\nlet nothing = read(null)\nlet listed = read(["[1]"])',
@@ -312,7 +314,7 @@ test("toBase64 encodes text as UTF-8 in standard Base64 with padding, and fromBa
 });
 
 test("fromBase64 gives its default for text that is not Base64, bytes that are not UTF-8, and a value that is not text", () => {
-  for (const text of [
+  const texts = [
     "abc$",
     "Q",
     "QQ=",
@@ -328,12 +330,15 @@ test("fromBase64 gives its default for text that is not Base64, bytes that are n
     "wIA=",
     "7aCA",
     "4oI=",
-  ])
-    assert.equal(
-      variables(`let read = fromBase64(${literal(text)}, default: "fallback")`).get("read"),
-      "fallback",
-      JSON.stringify(text),
-    );
+  ];
+  // One script reads each text into a variable of its own.
+  const reads = variables(
+    texts
+      .map((text, index) => `let read${index} = fromBase64(${literal(text)}, default: "fallback")`)
+      .join("\n"),
+  );
+  for (const [index, text] of texts.entries())
+    assert.equal(reads.get(`read${index}`), "fallback", JSON.stringify(text));
   const read = variables(
     'function read(value) {\n  return fromBase64(value, default: null)\n}\nlet fromNumber = read(5)\nlet listed = read(["TWE="])',
   );

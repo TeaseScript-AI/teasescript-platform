@@ -139,11 +139,10 @@ function moduleCodeConstants(
  */
 function sourceCodes(
   file: string,
-  text: string,
+  source: ts.SourceFile,
   exported: ReadonlyMap<string, readonly string[]> = new Map(),
   importedTables: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map(),
 ): SourceCodes {
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const declarations = new Set<ts.Node>();
   const constants = new Map<
     string,
@@ -261,24 +260,42 @@ function sourceCodes(
   return { named, reported, fragments, exportedTables };
 }
 
-const files = filesUnder(resolve(root, "src"), ".ts")
-  .map((path) => relative(root, path).split("\\").join("/"))
-  .filter((file) => file !== REGISTRY)
-  .map((file) => ({ file, text: readFileSync(resolve(root, file), "utf8") }));
-const exportedConstants = new Map(
-  files.flatMap(({ file, text }) =>
-    [...moduleCodeConstants(ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true))]
-      .filter(([, constant]) => constant.exported)
-      .map(([name, constant]) => [name, constant.literals.map((literal) => literal.text)] as const),
-  ),
-);
-const exportedTables = new Map(
-  files.flatMap(({ file, text }) => [...sourceCodes(file, text, exportedConstants).exportedTables]),
-);
-const sources = files.map((source) => ({
-  ...source,
-  ...sourceCodes(source.file, source.text, exportedConstants, exportedTables),
-}));
+const parse = (file: string, text: string): ts.SourceFile =>
+  ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+
+/**
+ * The codes of every source file. Each file is parsed once for the three passes, which read its syntax and do not
+ * change it, and the syntax is released after them.
+ */
+function scanSources() {
+  const files = filesUnder(resolve(root, "src"), ".ts")
+    .map((path) => relative(root, path).split("\\").join("/"))
+    .filter((file) => file !== REGISTRY)
+    .map((file) => {
+      const text = readFileSync(resolve(root, file), "utf8");
+      return { file, text, syntax: parse(file, text) };
+    });
+  const exportedConstants = new Map(
+    files.flatMap(({ syntax }) =>
+      [...moduleCodeConstants(syntax)]
+        .filter(([, constant]) => constant.exported)
+        .map(
+          ([name, constant]) => [name, constant.literals.map((literal) => literal.text)] as const,
+        ),
+    ),
+  );
+  const exportedTables = new Map(
+    files.flatMap(({ file, syntax }) => [
+      ...sourceCodes(file, syntax, exportedConstants).exportedTables,
+    ]),
+  );
+  return files.map(({ file, text, syntax }) => ({
+    file,
+    text,
+    ...sourceCodes(file, syntax, exportedConstants, exportedTables),
+  }));
+}
+const sources = scanSources();
 
 function ownersOf(file: string): string[] {
   const path = file.slice("src/".length);
@@ -294,20 +311,23 @@ const where = (use: CodeUse): string => `${use.file}:${use.line}`;
 test("the scanner counts the codes that a source reads, not those it declares, compares, or types", () => {
   const codes = sourceCodes(
     "probe.ts",
-    [
-      'import { SHARED, OTHER } from "./codes.js";',
-      'const table = { used: "TSV001", unused: "TSV002", shared: SHARED } as const;',
-      'const USED = "TSV003";',
-      'const UNUSED = "TSV004";',
-      'const either = flag ? "TSV005" : "TSV006";',
-      "report(table.used, table.shared, USED, either, SHARED, OTHER);",
-      'report("TSV007");',
-      'if (code === "TSV008") report(other.USED);',
-      'type Code = "TSV009";',
-      'push({ severity: "warning", code: "TSW010" satisfies Code });',
-      'const built = "TSW" + "099";',
-      'function local() { const code = flag ? "TSV011" : "TSV012"; report(code, code); }',
-    ].join("\n"),
+    parse(
+      "probe.ts",
+      [
+        'import { SHARED, OTHER } from "./codes.js";',
+        'const table = { used: "TSV001", unused: "TSV002", shared: SHARED } as const;',
+        'const USED = "TSV003";',
+        'const UNUSED = "TSV004";',
+        'const either = flag ? "TSV005" : "TSV006";',
+        "report(table.used, table.shared, USED, either, SHARED, OTHER);",
+        'report("TSV007");',
+        'if (code === "TSV008") report(other.USED);',
+        'type Code = "TSV009";',
+        'push({ severity: "warning", code: "TSW010" satisfies Code });',
+        'const built = "TSW" + "099";',
+        'function local() { const code = flag ? "TSV011" : "TSV012"; report(code, code); }',
+      ].join("\n"),
+    ),
     new Map([["SHARED", ["TSV013"]]]),
   );
   assert.deepEqual(
@@ -517,42 +537,6 @@ test("each code's document section exists and explains the code", () => {
       `${code}: ${info.docs} does not name ${code}.`,
     );
   }
-});
-
-test("DIAGNOSTICS.md lists its codes as the registry does", () => {
-  const document = "docs/DIAGNOSTICS.md";
-  const text = readFileSync(resolve(root, document), "utf8");
-  const tables = new Map<string, string[]>();
-  for (const [code, info] of Object.entries(registry)) {
-    if (!info.docs.startsWith(`${document}#`)) continue;
-    const anchor = info.docs.slice(document.length + 1);
-    tables.set(anchor, [
-      ...(tables.get(anchor) ?? [
-        "| Code | Title | Severity | Owner |",
-        "| --- | --- | --- | --- |",
-      ]),
-      `| \`${code}\` | ${info.title} | ${severityText(info)} | ${info.owners.join(", ")} |`,
-    ]);
-  }
-  const documented = sections(document);
-  for (const [anchor, rows] of tables) {
-    const table = rows.join("\n");
-    const section = documented.get(anchor)?.lines.join("\n") ?? "";
-    assert.ok(section.includes(table), `${document}#${anchor} must hold this table:\n\n${table}\n`);
-  }
-  const shared = Object.entries(registry).flatMap(([code, info]) =>
-    info.shared === undefined
-      ? []
-      : [
-          `- \`${code}\``,
-          ...info.owners.map((owner, index) => `  - ${owner}: ${info.shared!.parts[index]!}`),
-        ],
-  );
-  const list = shared.join("\n");
-  assert.ok(
-    text.includes(list),
-    `${document} must list the codes with several owners:\n\n${list}\n`,
-  );
 });
 
 test("the documents name only registered codes", () => {

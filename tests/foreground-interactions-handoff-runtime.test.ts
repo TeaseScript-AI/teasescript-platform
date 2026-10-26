@@ -65,11 +65,8 @@ function interactionPlan(
     index === waitIndex ? interaction : instruction,
   );
   const plan = { ...base, temporaryCount: interactionKind === "button" ? 0 : 1, instructions };
-  assert.equal(
-    validateInstructionPlan(plan).valid,
-    true,
-    JSON.stringify(validateInstructionPlan(plan).errors),
-  );
+  const validation = validateInstructionPlan(plan);
+  assert.equal(validation.valid, true, JSON.stringify(validation.errors));
   return plan;
 }
 

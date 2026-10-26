@@ -621,8 +621,9 @@ test("a recording that stopped early still reports the actual failure, and its i
 
 test("a wide list a script saved is checked and replays", async () => {
   const recorder = new DebugRecorder();
+  // JSON builds the same list of 150,000 zeros in one step, where a loop takes 150,000.
   let session = createPlayerRuntimeSession(
-    'let many = []\nrepeat 150000 { many.add(0) }\nsave many as "wide"\nexit',
+    'let many = fromJson("[" + "0,".repeat(149999) + "0]", default: [])\nsave many as "wide"\nexit',
     { recorder, persistentScriptStorage: true, scriptStorage: [] },
   );
   session = completePlayerRuntimeStorageWrite(
