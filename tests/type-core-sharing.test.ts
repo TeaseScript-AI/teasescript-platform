@@ -36,6 +36,15 @@ import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
  * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
  * sets `CI`) the fixtures' records run in the source order only, every other program in both; a local `npm run check`
  * runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26).
+ *
+ * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
+ * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
+ * known: one store's reads of one key share their guard regions (a branch, the code after a leaving one, and an
+ * `and`/`or` right operand, whose value is a boolean and carries no read), and the 30 via-only stop collisions of this
+ * corpus (an `otherwise`'s operand and fallback reading one record, `A8-added-*-presets`) pair reads of one snapshot at
+ * one depth, whose items and sites are the same; 226 probes built for the two (an operand beside its fallback, a
+ * receiver beside its default, guarded beside unguarded copies and returns) publish the same without either. The D1
+ * witness differs in its via and its depth together.
  */
 
 interface Program {
