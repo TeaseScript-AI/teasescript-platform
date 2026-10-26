@@ -1,0 +1,199 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import test from "node:test";
+
+/*
+ * The core makes every path and key through the helpers of `budget.ts` and `definitions.ts`: a kept one (`keptText`,
+ * `keptKey`, `keptSteps`, …) where a structure keeps what it makes, which charges its size to the literal work first
+ * (TABLE r4.58), and its plain twin (`pathText`, `keyOf`, `joinSteps`, …) where a step only looks it up or passes it on.
+ * A literal's depth, breadth and names make these long and many, and each one kept uncharged let a deep or long-named
+ * literal reach the heap before the allowance (the deep-literal reviews' B1 and R2-B1), so a path or key made past the
+ * helpers is a choice no one made. This scan finds them by form: a path's text (`.join(".")`), its steps
+ * (`.split(".")`), a composite key (`a|b`), a text one step longer (`a.b`), and an array spread of a path, known by the
+ * core's names for one (`at`, `path`, `rest`, …; a path under another name escapes this form). Each must be one listed
+ * below with the reason it needs no helper; a new one fails until it goes through the helpers or is listed.
+ */
+
+const CORE = new URL("../../src/type-inference/core/", import.meta.url);
+
+/** The core's names for a path, its steps or its text, by which the scan knows a spread of one. */
+const PATH_NAMES = new Set([
+  ...["at", "path", "paths", "rest", "below", "before", "after", "strip", "steps", "prefix", "key"],
+  ...[
+    "projection",
+    "shift",
+    "along",
+    "collection",
+    "within",
+    "base",
+    "full",
+    "source",
+    "label",
+    "stand",
+  ],
+]);
+
+/** The forms of a construction found per line, by name. */
+const FORMS: readonly (readonly [string, RegExp])[] = [
+  ["join", /\.join\("\."\)/g],
+  ["split", /\.split\("\."\)/g],
+  ["composite", /\$\{[^`]*?\}\||\|\$\{/g],
+  ["step", /\}\.\$\{/g],
+];
+
+/** The constructions outside the helpers, by file, member and form: how many, and why they need no charge. */
+const LISTED: Readonly<Record<string, readonly [number, string]>> = {
+  "admission.ts #collect spread": [
+    1,
+    "the list of the paths collected, each made by a kept helper",
+  ],
+  "admission.ts literalElements spread": [1, "a list of paths, each made by a kept helper"],
+  "backend.ts outsideAnswers spread": [2, "the candidate's element paths, cut at SLICE_DEPTH"],
+  "consumer.ts admittedType spread": [2, "the candidate's element paths, cut at SLICE_DEPTH"],
+  "consumer.ts coreFacts spread": [1, "the candidate's element path, cut at SLICE_DEPTH"],
+  "consumer.ts placeType spread": [2, "the candidate's element paths, cut at SLICE_DEPTH"],
+  "contract.ts #carried step": [1, "a method's name, two identifiers"],
+  "contract.ts #groupsAt composite": [3, "an entry's text, charged by `#kept` before it is kept"],
+  "contract.ts #indexWork composite": [5, "an entry's text, charged by `#kept` before it is kept"],
+  "contract.ts #keyContract spread": [2, "items, no path"],
+  "contract.ts #levelsOf spread": [2, "a copy of a set of path ids, charged by `#keep`"],
+  "contract.ts #pathAt step": [1, "the interner's text, charged by `#keepText` before it is made"],
+  "contract.ts typeAtPath spread": [
+    1,
+    "the steps below one level of a written type, one copy per level",
+  ],
+  "definitions.ts keyBelow join": [2, "a helper itself"],
+  "definitions.ts keyBelow step": [1, "a helper itself"],
+  "definitions.ts keyOf composite": [1, "a helper itself"],
+  "definitions.ts keyOf join": [1, "a helper itself"],
+  "definitions.ts keyOfText composite": [1, "a helper itself"],
+  "definitions.ts keyPath split": [1, "a helper itself"],
+  "exact-path.ts #defVal spread": [1, "items, no path"],
+  "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
+  "items.ts union composite": [2, "two item ids"],
+  "operator-table.ts DURATIONS composite": [2, "the operator table's constant text"],
+  "result.ts targetName join": [1, "a target's name, made by the tests alone"],
+  "result.ts targetName spread": [1, "a target's name, made by the tests alone"],
+};
+
+/** `text` without its comments, each character of one a space (its lines kept), strings skipped whole. */
+function withoutComments(text: string): string {
+  let out = "";
+  for (let index = 0; index < text.length;) {
+    const end = (from: number): number => (from < 0 ? text.length : from);
+    if (text.startsWith("//", index)) {
+      const stop = end(text.indexOf("\n", index));
+      out += " ".repeat(stop - index);
+      index = stop;
+    } else if (text.startsWith("/*", index)) {
+      const stop = end(text.indexOf("*/", index)) + 2;
+      out += text.slice(index, stop).replace(/[^\n]/g, " ");
+      index = stop;
+    } else if (text[index] === '"' || text[index] === "'") {
+      let stop = index + 1;
+      while (stop < text.length && text[stop] !== text[index]) stop += text[stop] === "\\" ? 2 : 1;
+      out += text.slice(index, stop + 1);
+      index = stop + 1;
+    } else out += text[index++];
+  }
+  return out;
+}
+
+/** The offsets of the spreads of a path inside an array literal (`[...at, "element"]`, `[step, ...rest]`). */
+function pathSpreads(text: string): number[] {
+  const out: number[] = [];
+  for (const match of text.matchAll(
+    /\.\.\.\(?\s*((?:this\.)?#?[A-Za-z_]\w*(?:\??\.#?[A-Za-z_]\w*)*)/g,
+  )) {
+    const parts = match[1]!.split(".").map((part) => part.replace(/[?#]/g, ""));
+    // a call: the path it is called on (`path.slice(…)`); else the value read (`e.at`, `rest`)
+    const name = text[match.index + match[0].length] === "(" ? parts[0]! : parts.at(-1)!;
+    if (!PATH_NAMES.has(name)) continue;
+    let depth = 0;
+    for (let at = match.index - 1; at >= 0; at -= 1) {
+      const char = text[at]!;
+      if (")]}".includes(char)) depth += 1;
+      else if ("([{".includes(char) && depth-- === 0) {
+        if (char === "[") out.push(match.index);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** A line that declares a function or a class member, and its name. */
+const DECLARATION =
+  /^(?:export )?(?:function\*? (\w+)|(?:const|let) (\w+) =)|^ {2}(?:public |private |protected |static |readonly |get |set |async )*\*?(#?\w+)\s*(?:<[^>]*>)?\(/;
+
+/** The constructions of one file, by member and form, with the lines they are on. */
+function constructions(file: string, source: string): Map<string, string[]> {
+  const lines = withoutComments(source).split("\n");
+  const members: string[] = [];
+  let member = "(top)";
+  for (const line of lines) {
+    const declared = DECLARATION.exec(line);
+    // (an indented call statement is no member: `  keep(work, units);`)
+    if (
+      declared?.[3] === undefined ||
+      !/^\s+(if|for|while|return|switch|catch)\b|[;,]\s*$/.test(line)
+    )
+      member = declared?.[1] ?? declared?.[2] ?? declared?.[3] ?? member;
+    members.push(member);
+  }
+  const found = new Map<string, string[]>();
+  const add = (index: number, form: string): void => {
+    const key = `${file} ${members[index]} ${form}`;
+    found.set(key, [...(found.get(key) ?? []), `${file}:${index + 1}: ${lines[index]!.trim()}`]);
+  };
+  for (const [index, line] of lines.entries())
+    for (const [form, pattern] of FORMS) for (const _ of line.matchAll(pattern)) add(index, form);
+  const text = lines.join("\n");
+  for (const offset of pathSpreads(text))
+    add(text.slice(0, offset).split("\n").length - 1, "spread");
+  return found;
+}
+
+test("the core makes no path or key past its helpers but the listed ones", () => {
+  const found = new Map<string, string[]>();
+  for (const file of readdirSync(CORE)
+    .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
+    .sort())
+    for (const [key, lines] of constructions(file, readFileSync(new URL(file, CORE), "utf8")))
+      found.set(key, lines);
+  const differences = [...new Set([...found.keys(), ...Object.keys(LISTED)])]
+    .sort()
+    .filter((key) => (found.get(key)?.length ?? 0) !== (LISTED[key]?.[0] ?? 0))
+    .map(
+      (key) =>
+        `${key}: ${found.get(key)?.length ?? 0} found, ${LISTED[key]?.[0] ?? 0} listed\n  ${(found.get(key) ?? []).join("\n  ")}`,
+    );
+  assert.deepEqual(
+    differences,
+    [],
+    "a path or key made past the helpers: make it with a kept one or its plain twin, or list it with the reason",
+  );
+});
+
+test("the scan finds each form of construction", () => {
+  const source = [
+    "export function walk(path: string[], rest: string[]) {",
+    '  const text = path.join(".");',
+    '  const steps = text.split(".");',
+    "  const key = keyOf(1, steps);",
+    "  const memo = `${key}|${text}`;",
+    "  const below = `${text}.${rest[0]}`;",
+    '  return [...path, "element", ...(rest ?? [])];',
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    [...constructions("probe.ts", source)].map(([key, lines]) => `${key} ${lines.length}`),
+    [
+      "probe.ts walk join 1",
+      "probe.ts walk split 1",
+      "probe.ts walk composite 1",
+      "probe.ts walk step 1",
+      "probe.ts walk spread 2",
+    ],
+  );
+});
