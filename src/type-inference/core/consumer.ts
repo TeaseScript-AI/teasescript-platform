@@ -874,13 +874,34 @@ class Contracts {
         fallback,
         "a typed parse's or load's default that reads a variable",
       );
+    const landing = this.#landing(call);
+    // a copy of a written type is F18's receiving context (A4, TABLE r4.75 (1), (1a)), but the core answers the call by
+    // its default there while its later facts follow that answer: the lowering cannot widen it alone
+    if (landing !== null && this.#copiesWrittenType(landing))
+      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
     return runCompileTask(
-      this.#answerTask(
-        { node: nodeOf(this.answers, this.index, call), call, landing: this.#landing(call) },
-        [],
-        [call],
-      ),
+      this.#answerTask({ node: nodeOf(this.answers, this.index, call), call, landing }, [], [call]),
     );
+  }
+
+  /**
+   * Whether a place holds a written type's domain at a path through copies, not by its own written type: its admitted
+   * domain decided by a copy, followed through the copies' sources to a written one (A4, TABLE r4.75 (1)).
+   */
+  #copiesWrittenType(start: Landing): boolean {
+    const seen = new Set<string>();
+    for (let at: Landing = start; ;) {
+      const key = `${at.id}|${at.path.join(".")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const admitted = this.answers.place(at.id, at.path).admitted;
+      if (admitted.by === "written") return at !== start;
+      if (admitted.by !== "decided" || admitted.decider === null) return false;
+      const read = this.answers.graph.expressionAt(admitted.decider);
+      const source = read === undefined ? null : (this.answers.at(read)?.place ?? null);
+      if (source === null) return false;
+      at = { id: source.id, path: source.path };
+    }
   }
 
   /**

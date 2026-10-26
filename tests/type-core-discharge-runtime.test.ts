@@ -1101,6 +1101,35 @@ test("a literal wider than a native call takes compiles and keeps its checks, in
   assert.deepEqual(ran(runWith(plan, "bad")), failed(`TSR058@8:${source.indexOf("\n")}`));
 });
 
+test("a typed parse or load into a copy of a written type leaves the slice until the core's F18 takes the copied domain (the lead's ruling 2)", () => {
+  // the copied written domain is F18's receiving context (A4, TABLE r4.75 (1), (1a)); the core answers the call by its
+  // default there and its later facts follow that answer (no check at a later `let n: integer = b`), so the lowering
+  // cannot widen the expected type alone
+  for (const source of [
+    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nexit\n",
+    "let a: number = 0\nlet b = a\nb = fromJson(hostValue, default: 0)\nsay b\nexit\n",
+    "let a: number = 0\nlet b = a\nlet c = b\nc = fromJson(hostValue, default: 0, files: false)\nsay c\nexit\n",
+    'let a: number = 0\nlet b = a\nb = load("k", default: 0)\nsay b\nexit\n',
+    "let a: number[] = [0]\nlet b = a\nb = fromJson(hostValue, default: [0], files: false)\nsay b[0]\nexit\n",
+  ])
+    assert.throws(
+      () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === "a typed parse or load into a copy of a written type",
+      source,
+    );
+  // a place its own store decides, not a copy of a written type: F18 reads the default's kinds, in three layers
+  const decided =
+    'let b = 1.5\nb = fromJson(hostValue, default: 0, files: false)\nsay b\nsay "AFTER"\nexit\n';
+  const parse = at(decided, "fromJson(hostValue, default: 0, files: false)");
+  assert.ok(decision(decided).checks.some((check) => check.endsWith(`boundary @${parse}`)));
+  const plan = candidatePlan(decided);
+  assert.deepEqual(contentOf(plan), [`expected call@${parse} integer`]);
+  assert.deepEqual(ran(runWith(plan, "3")), halted(["3", "AFTER"]));
+  assert.deepEqual(ran(runWith(plan, "1.5")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
+});
+
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads
