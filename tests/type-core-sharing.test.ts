@@ -5,9 +5,10 @@ import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
+import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
@@ -32,13 +33,19 @@ import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
  * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) is an optimization, so it is output-neutral: for
  * every program below, in both orders, the published diagnostics, the owed checks, every binding's admitted type at its
  * root and its element (the decider's site with it) and the candidate route's lowered plan (or its rejection) are
- * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test.
+ * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
+ * sets `CI`) the fixtures' records run in the source order only, every other program in both; a local `npm run check`
+ * runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26).
  */
 
 interface Program {
   readonly name: string;
   readonly files: readonly SourceFile[];
+  /** A fixture's record, in the source order only on CI. */
+  readonly fixture?: true;
 }
+
+const FIXTURE_ORDERS = process.env["CI"] === "true" ? [false] : [false, true];
 
 const one = (name: string, source: string): Program => ({
   name,
@@ -75,13 +82,30 @@ function programs(): Program[] {
     ),
   );
   for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
-    out.push({ name: record.name, files: record.files });
+    out.push({ name: record.name, files: record.files, fixture: true });
   return out;
 }
 
+const GLOBALS = ["hostValue"];
+
+/** A program's request and its bindings, built once for its four analyses. */
+interface Prepared {
+  readonly program: Program;
+  readonly request: CoreAnalysisRequest;
+  readonly bindings: readonly PlaceId[];
+}
+
+function prepared(program: Program): Prepared {
+  const request = coreRequest(program.files, GLOBALS);
+  assert.ok(request !== null, `${program.name}: its files parse and resolve`);
+  const bindings = new CoreProgram(request).places
+    .filter(({ kind }) => kind.kind === "binding")
+    .map((place) => place.id);
+  return { program, request, bindings };
+}
+
 /** What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection. */
-function published(program: Program, reversed: boolean): string {
-  const globals = ["hostValue"];
+function published({ program, request, bindings }: Prepared, reversed: boolean): string {
   const ordered = <T>(callback: () => T): T =>
     reversed
       ? withConsumerOrder(
@@ -89,20 +113,16 @@ function published(program: Program, reversed: boolean): string {
           () => withSolverSeam({ reverseWorklist: true }, callback),
         )
       : callback();
-  const request = coreRequest(program.files, globals);
-  assert.ok(request !== null, `${program.name}: its files parse and resolve`);
   const answers = ordered(() => analyseCore(request));
-  const admitted = new CoreProgram(request).places
-    .filter(({ kind }) => kind.kind === "binding")
-    .map((place) => [
-      place.id,
-      answers.place(place.id, []).admitted,
-      answers.place(place.id, ["element"]).admitted,
-    ]);
+  const admitted = bindings.map((place) => [
+    place,
+    answers.place(place, []).admitted,
+    answers.place(place, ["element"]).admitted,
+  ]);
   const lowered = (() => {
     try {
       const result = ordered(() =>
-        compileProjectWithBackend(program.files, { globals }, CORE_BACKEND),
+        compileProjectWithBackend(program.files, { globals: GLOBALS }, CORE_BACKEND),
       );
       return { plan: result.plan, diagnostics: result.diagnostics };
     } catch (error) {
@@ -122,11 +142,19 @@ function published(program: Program, reversed: boolean): string {
 test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders (TABLE r4.72)", (t) => {
   const all = programs();
   const differing: string[] = [];
-  for (const program of all)
-    for (const reversed of [false, true])
-      if (published(program, reversed) !== withoutSharing(() => published(program, reversed)))
+  let runs = 0;
+  for (const program of all) {
+    const ready = prepared(program);
+    for (const reversed of program.fixture === true ? FIXTURE_ORDERS : [false, true]) {
+      runs += 1;
+      if (published(ready, reversed) !== withoutSharing(() => published(ready, reversed)))
         differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
-  t.diagnostic(`${all.length} programs, each in both orders, with the sharing on and off`);
+    }
+  }
+  t.diagnostic(
+    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' in ${FIXTURE_ORDERS.length}), ` +
+      "with the sharing on and off",
+  );
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });

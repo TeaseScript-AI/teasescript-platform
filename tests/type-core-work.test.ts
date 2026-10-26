@@ -327,6 +327,21 @@ test("the analysis stops above 256 levels of nested blocks, an `else if` one lev
   assert.equal(outcome(chained(257)), "budget-error");
 });
 
+/** A program's published record in one order, as the oracle's analysis gives it, which the chain control reuses. */
+const resolvedRecords = new Map<string, string>();
+
+const recordKey = (files: readonly SourceFile[], reversed: boolean): string =>
+  `${reversed}|${JSON.stringify(files)}`;
+
+function publishedRecord(answers: Answers, files: readonly SourceFile[]): string {
+  return JSON.stringify(
+    coreRecord(
+      coreResult(answers),
+      files.map((file) => file.path),
+    ),
+  );
+}
+
 /**
  * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), as a generated family: at every decided
  * path, each alias member's own answer equals its class representative's, each with its own guard applied, its items
@@ -344,7 +359,7 @@ test("every alias member answers as its class does at every decided path, in bot
   const run = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
     const request = coreRequest(files);
     assert.ok(request !== null, `${name}: its files parse and resolve`);
-    withMemberOracle(report, () =>
+    const answers = withMemberOracle(report, () =>
       reversed
         ? withConsumerOrder(
             (list) => [...list].reverse(),
@@ -352,6 +367,7 @@ test("every alias member answers as its class does at every decided path, in bot
           )
         : analyseCore(request),
     );
+    resolvedRecords.set(recordKey(files, reversed), publishedRecord(answers, files));
   };
 
   for (const reversed of [false, true]) {
@@ -377,7 +393,7 @@ test("every alias member answers as its class does at every decided path, in bot
  * S6-CARRIERS §4.1's chains: a member read through a chain of copies keeps its own links' writers, which the oracle
  * sets aside, so this guards what they are for: every published record, its diagnostics' F28 writers included, is the
  * same with every chain resolved and with none (`withoutChains`), over every work family at small sizes in both orders
- * and over the fixture's records.
+ * and over the fixture's records. The resolved side is the oracle's analysis of the same program where it ran.
  */
 test("resolving chains of copies changes no published record or writer, in both orders (§4.1)", () => {
   const differing: string[] = [];
@@ -392,14 +408,10 @@ test("resolving chains of copies changes no published record or writer, in both 
             () => withSolverSeam({ reverseWorklist: true }, analysed),
           )
         : analysed();
-      return JSON.stringify(
-        coreRecord(
-          coreResult(answers),
-          files.map((file) => file.path),
-        ),
-      );
+      return publishedRecord(answers, files);
     };
-    if (run() !== withoutChains(run)) differing.push(`${name}${reversed ? " reversed" : ""}`);
+    const resolved = resolvedRecords.get(recordKey(files, reversed)) ?? run();
+    if (resolved !== withoutChains(run)) differing.push(`${name}${reversed ? " reversed" : ""}`);
   };
   for (const reversed of [false, true])
     for (const family of [
