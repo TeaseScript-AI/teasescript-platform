@@ -1329,98 +1329,110 @@ export class Contract {
 
   /** The kinds at a path of a value, by the value's kind. */
   *#valueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
-    if (rest.length === 0) return yield* this.contractOfValue(value);
-    const { program, guards } = this.pass;
-    program.work.charge("invSteps");
-    if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined) {
-      const items = this.entered(value, yield* this.contractOf(keyOf(binding, rest)));
-      // §3.2: the mark travels with the value (r4.6)
-      return guards.guardedRead(value, rest) ? marked(items) : items;
+    this.pass.solver.enterRead();
+    try {
+      if (rest.length === 0) return yield* this.contractOfValue(value);
+      const { program, guards } = this.pass;
+      program.work.charge("invSteps");
+      if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
+      const binding = program.occurrenceOf.get(value);
+      if (binding !== undefined) {
+        const items = this.entered(value, yield* this.contractOf(keyOf(binding, rest)));
+        // §3.2: the mark travels with the value (r4.6)
+        return guards.guardedRead(value, rest) ? marked(items) : items;
+      }
+      const projection = program.projOf.get(value);
+      if (projection !== undefined) {
+        if (projection.step === "iteration")
+          return yield* this.#contractIteration(projection.owner, rest);
+        if (measuresLength(projection.step))
+          return yield* this.#contractLength(projection.owner, projection.step, rest);
+        const elements = yield* this.contractOfValueAt(
+          projection.owner,
+          joinSteps([stepName(projection.step)], rest),
+        );
+        if (!selectsElement(projection.step)) return elements;
+        const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
+        return withOwnSelection(elements, owners, this.pass);
+      }
+      if (program.callOutOf.has(value))
+        return yield* this.contractOf(keyOf(this.#resultOf(value), rest));
+      if (program.hasOf.has(value) || program.cellOwner.has(value))
+        return yield* this.contractOfLiteral(value, rest);
+      const operation = program.opOf.get(value);
+      if (operation === undefined) return [unknownItem(REASON.opaque)];
+      // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
+      // the choice's own entry read it alike (S6-CARRIERS §4.5, Astra r6 B2), as `contractOfValue` reads an operation
+      if (
+        operation.kind === "operation" &&
+        operation.contract.family === "interaction" &&
+        interactionCategory(operation.contract.name)?.kind === "options"
+      ) {
+        const site = program.places[value]?.site ?? operation.site;
+        const demand: Demand = {
+          key: rest.length === 0 ? joinParts("cop", value) : joinParts("cop", value, rest),
+          kind: "contract",
+          file: site.file,
+          offset: site.start,
+          make: () => this.#contractOfOp(operation, rest),
+        };
+        return this.entered(value, yield demand);
+      }
+      return this.entered(value, yield* this.#contractOfOp(operation, rest));
+    } finally {
+      this.pass.solver.leaveRead();
     }
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
-      if (projection.step === "iteration")
-        return yield* this.#contractIteration(projection.owner, rest);
-      if (measuresLength(projection.step))
-        return yield* this.#contractLength(projection.owner, projection.step, rest);
-      const elements = yield* this.contractOfValueAt(
-        projection.owner,
-        joinSteps([stepName(projection.step)], rest),
-      );
-      if (!selectsElement(projection.step)) return elements;
-      const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
-      return withOwnSelection(elements, owners, this.pass);
-    }
-    if (program.callOutOf.has(value))
-      return yield* this.contractOf(keyOf(this.#resultOf(value), rest));
-    if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* this.contractOfLiteral(value, rest);
-    const operation = program.opOf.get(value);
-    if (operation === undefined) return [unknownItem(REASON.opaque)];
-    // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
-    // the choice's own entry read it alike (S6-CARRIERS §4.5, Astra r6 B2), as `contractOfValue` reads an operation
-    if (
-      operation.kind === "operation" &&
-      operation.contract.family === "interaction" &&
-      interactionCategory(operation.contract.name)?.kind === "options"
-    ) {
-      const site = program.places[value]?.site ?? operation.site;
-      const demand: Demand = {
-        key: rest.length === 0 ? joinParts("cop", value) : joinParts("cop", value, rest),
-        kind: "contract",
-        file: site.file,
-        offset: site.start,
-        make: () => this.#contractOfOp(operation, rest),
-      };
-      return this.entered(value, yield demand);
-    }
-    return this.entered(value, yield* this.#contractOfOp(operation, rest));
   }
 
   /** The kinds a value can have at any point, mirroring the value side's dispatch. */
   public *contractOfValue(value: PlaceId): Work<readonly Item[]> {
-    const { program, guards } = this.pass;
-    program.work.charge("invSteps");
-    if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined) {
-      const items = this.entered(value, yield* this.contractOf(keyOf(binding, [])));
-      // §3.2: the mark travels with the value (r4.6)
-      return guards.guardedRead(value) ? marked(items) : items;
+    this.pass.solver.enterRead();
+    try {
+      const { program, guards } = this.pass;
+      program.work.charge("invSteps");
+      if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
+      const binding = program.occurrenceOf.get(value);
+      if (binding !== undefined) {
+        const items = this.entered(value, yield* this.contractOf(keyOf(binding, [])));
+        // §3.2: the mark travels with the value (r4.6)
+        return guards.guardedRead(value) ? marked(items) : items;
+      }
+      const projection = program.projOf.get(value);
+      if (projection !== undefined) {
+        // a property read, a loop's visit, a length
+        if (projection.step === "iteration")
+          return yield* this.#contractIteration(projection.owner, []);
+        if (measuresLength(projection.step))
+          return yield* this.#contractLength(projection.owner, projection.step, []);
+        const elements = yield* this.contractOfValueAt(projection.owner, [
+          stepName(projection.step),
+        ]);
+        if (!selectsElement(projection.step)) return elements;
+        const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
+        return withOwnSelection(elements, owners, this.pass);
+      }
+      if (program.callOutOf.has(value))
+        return yield* this.contractOf(keyOf(this.#resultOf(value), []));
+      const operation = program.opOf.get(value);
+      // once per operation, whatever asks
+      if (operation !== undefined) {
+        const site = program.places[value]?.site ?? operation.site;
+        const demand: Demand = {
+          key: joinParts("cop", value),
+          kind: "contract",
+          file: site.file,
+          offset: site.start,
+          make: () => this.#contractOfOp(operation, []),
+        };
+        return this.entered(value, yield demand);
+      }
+      if (program.hasOf.has(value) || program.cellOwner.has(value))
+        return yield* this.contractOfLiteral(value, []);
+      if (program.isHost(value)) return [unknownItem(REASON.external)];
+      return yield* this.contractOf(keyOf(value, []));
+    } finally {
+      this.pass.solver.leaveRead();
     }
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
-      // a property read, a loop's visit, a length
-      if (projection.step === "iteration")
-        return yield* this.#contractIteration(projection.owner, []);
-      if (measuresLength(projection.step))
-        return yield* this.#contractLength(projection.owner, projection.step, []);
-      const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
-      if (!selectsElement(projection.step)) return elements;
-      const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
-      return withOwnSelection(elements, owners, this.pass);
-    }
-    if (program.callOutOf.has(value))
-      return yield* this.contractOf(keyOf(this.#resultOf(value), []));
-    const operation = program.opOf.get(value);
-    // once per operation, whatever asks
-    if (operation !== undefined) {
-      const site = program.places[value]?.site ?? operation.site;
-      const demand: Demand = {
-        key: joinParts("cop", value),
-        kind: "contract",
-        file: site.file,
-        offset: site.start,
-        make: () => this.#contractOfOp(operation, []),
-      };
-      return this.entered(value, yield demand);
-    }
-    if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* this.contractOfLiteral(value, []);
-    if (program.isHost(value)) return [unknownItem(REASON.external)];
-    return yield* this.contractOf(keyOf(value, []));
   }
 
   /** The result place of a call's value (F20). */

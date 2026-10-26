@@ -192,13 +192,22 @@ export function keptSteps<T>(work: WorkLedger, ...parts: readonly (readonly T[])
   return joinSteps(...parts);
 }
 
-/** Which limit an analysis reached: the work allowance or the nesting limit. */
-export type BudgetLimit = "work" | "nesting";
+/** Which limit an analysis reached: the work allowance, the statement nesting or the read depth. */
+export type BudgetLimit = "work" | "nesting" | "read-depth";
 
-/** Thrown by `charge` at the unit that exceeds the allowance, and by `checkNesting` past the nesting limit. */
+const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
+  work: "work allowance",
+  nesting: "nesting limit",
+  "read-depth": "read-depth limit",
+};
+
+/**
+ * Thrown by `charge` at the unit that exceeds the allowance, by `checkNesting` past the nesting limit and by
+ * `checkReadDepth` past the read-depth limit.
+ */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
-    super(`The analysis exceeded its ${limit === "work" ? "work allowance" : "nesting limit"}.`);
+    super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
     this.name = "BudgetExhausted";
   }
 }
@@ -233,6 +242,23 @@ export class WorkLedger {
 /** Throws `BudgetExhausted` when `depth` nested statements exceed the nesting limit. */
 export function checkNesting(depth: number): void {
   if (depth > NESTING_LIMIT) throw new BudgetExhausted("nesting");
+}
+
+/**
+ * The levels of a read chain the analysis follows in one run of native calls: a read's projections and operations
+ * (`value[0][0]…`, `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s
+ * `contractOfValue` and `#valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack. Past it the
+ * analysis stops with `read-depth` instead of overflowing that stack. A technical bound, not a language limit: on Node
+ * 24.18.0's default stack (984 KiB) such a chain overflowed at 2,552 levels, alike on the laptop worker and the agent
+ * host, for index, property, `.first`, deep-literal and untyped reads; 1,024 is about 40 % of that, leaving the stack
+ * a compile is called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it
+ * (`compiler.core-read-depth`).
+ */
+const READ_DEPTH_LIMIT = 1_024;
+
+/** Throws `BudgetExhausted` when a read chain `depth` levels deep exceeds the read-depth limit. */
+export function checkReadDepth(depth: number): void {
+  if (depth > READ_DEPTH_LIMIT) throw new BudgetExhausted("read-depth");
 }
 
 /** The allowance a test imposes on every analysis started inside `withTestAllowance`, or `null`. */

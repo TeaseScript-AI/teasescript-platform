@@ -279,46 +279,51 @@ export class Values {
 
   /** The value of a place at a node at a path, by the place's kind. */
   *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
-    const { program, contract } = this.pass;
-    if (program.speakerPlaces.has(value))
-      return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined)
-      return contract.entered(
-        value,
-        yield* this.keyItems(keyOf(binding, rest), program.occNode.get(value) ?? node),
-      );
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
-      const at = projection.node ?? node;
-      if (projection.step === "iteration")
-        return yield* this.#iteration(projection.owner, at, rest);
-      if (measuresLength(projection.step))
-        return yield* this.#length(projection.owner, at, projection.step, rest);
-      const elements = yield* this.valueItems(
-        projection.owner,
-        at,
-        joinSteps([stepName(projection.step)], rest),
-      );
-      if (!selectsElement(projection.step)) return elements;
-      const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
-      return withOwnSelection(elements, owners, this.pass);
-    }
-    if (program.callOutOf.has(value)) {
-      const call = program.opOf.get(value);
-      if (call?.kind === "call")
-        return yield* this.keyItems(
-          keyOf(program.functionOf(call.fn).result, rest),
-          program.callOutOf.get(value) ?? node,
+    this.pass.solver.enterRead();
+    try {
+      const { program, contract } = this.pass;
+      if (program.speakerPlaces.has(value))
+        return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
+      const binding = program.occurrenceOf.get(value);
+      if (binding !== undefined)
+        return contract.entered(
+          value,
+          yield* this.keyItems(keyOf(binding, rest), program.occNode.get(value) ?? node),
         );
+      const projection = program.projOf.get(value);
+      if (projection !== undefined) {
+        const at = projection.node ?? node;
+        if (projection.step === "iteration")
+          return yield* this.#iteration(projection.owner, at, rest);
+        if (measuresLength(projection.step))
+          return yield* this.#length(projection.owner, at, projection.step, rest);
+        const elements = yield* this.valueItems(
+          projection.owner,
+          at,
+          joinSteps([stepName(projection.step)], rest),
+        );
+        if (!selectsElement(projection.step)) return elements;
+        const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
+        return withOwnSelection(elements, owners, this.pass);
+      }
+      if (program.callOutOf.has(value)) {
+        const call = program.opOf.get(value);
+        if (call?.kind === "call")
+          return yield* this.keyItems(
+            keyOf(program.functionOf(call.fn).result, rest),
+            program.callOutOf.get(value) ?? node,
+          );
+      }
+      const operation = program.opOf.get(value);
+      if (operation !== undefined)
+        return contract.entered(value, yield* this.#operationItems(operation, node, rest));
+      if (program.hasOf.has(value) || program.cellOwner.has(value))
+        return yield* this.#literalItems(value, rest, node);
+      if (program.isHost(value)) return [unknownItem(REASON.external)];
+      return yield* this.keyItems(keyOf(value, rest), node);
+    } finally {
+      this.pass.solver.leaveRead();
     }
-    const operation = program.opOf.get(value);
-    if (operation !== undefined)
-      return contract.entered(value, yield* this.#operationItems(operation, node, rest));
-    if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* this.#literalItems(value, rest, node);
-    if (program.isHost(value)) return [unknownItem(REASON.external)];
-    return yield* this.keyItems(keyOf(value, rest), node);
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */

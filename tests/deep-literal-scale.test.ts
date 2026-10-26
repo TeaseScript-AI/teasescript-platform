@@ -153,3 +153,40 @@ test("typed copies of a list nested 4,096 deep with 16,384 references stop withi
   for (const line of lines)
     assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
 });
+
+/**
+ * A read 3,000 and 4,097 index steps deep of a one-element list (`value[0][0]…`): each step is read by a generator inside
+ * the one before, and the native stack overflowed (`RangeError`) at about 2,550 levels. The core's read-depth guard
+ * stops it cleanly; on the candidate route and in the core, in a child with the same heap, it must end with a result.
+ */
+test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing the native stack", () => {
+  const depths = [3_000, 4_097];
+  const script = `
+    import {compileSourceWithBackend} from ${url("../src/compiler.js")};
+    import {CandidateOutsideSlice, CORE_BACKEND} from ${url("../src/type-inference/core/backend.js")};
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    for (const depth of ${JSON.stringify(depths)}) {
+      const source = "let value = [1]\\nlet n: integer = value" + "[0]".repeat(depth) + "\\nexit\\n";
+      let candidate;
+      try {
+        candidate = compileSourceWithBackend(source, {}, CORE_BACKEND).plan === null ? "no plan" : "plan";
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        candidate = "outside: " + error.what;
+      }
+      console.log(depth + "\\t" + candidate + "\\t" + analyseCore(coreRequest([{path: "main.tease", source}])).outcome);
+    }
+  `;
+  const lines = childLines("deep read", script);
+  assert.deepEqual(
+    lines.map((line) => Number(line.split("\t")[0])),
+    depths,
+  );
+  for (const line of lines)
+    assert.match(
+      line,
+      /^\d+\t(plan|no plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error|budget-error)$/,
+      line,
+    );
+});

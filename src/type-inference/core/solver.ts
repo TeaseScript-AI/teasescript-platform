@@ -1,4 +1,4 @@
-import { joinParts, keepText, type WorkLedger } from "./budget.js";
+import { checkReadDepth, joinParts, keepText, type WorkLedger } from "./budget.js";
 import { itemsSignature, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
@@ -80,6 +80,8 @@ interface Frame {
   readonly started: number;
   /** A member's run again: the solving that takes its result. */
   readonly rerun: Rerun | null;
+  /** The read chain its generators are inside (`enterRead`): its native depth when it runs again. */
+  readDepth: number;
 }
 
 interface Rerun {
@@ -222,6 +224,8 @@ export class Solver {
   readonly #units: DemandWork[] = [];
   #counter = 0;
   #running = false;
+  /** The read chain the running frame's generators are inside: the levels of native calls a resumption runs through. */
+  #readDepth = 0;
 
   public constructor(scope: ItemScope) {
     this.#scope = scope;
@@ -254,6 +258,20 @@ export class Solver {
     return results[0]!;
   }
 
+  /**
+   * A read chain one level deeper in the running frame (`checkReadDepth`): a frame runs from the solver's loop, so its
+   * native calls are its own chain's, and a demand it yields starts a new frame at none.
+   */
+  public enterRead(): void {
+    this.#readDepth += 1;
+    checkReadDepth(this.#readDepth);
+  }
+
+  /** The read chain one level shallower again. */
+  public leaveRead(): void {
+    this.#readDepth -= 1;
+  }
+
   /** The answer of a finished demand, if it has one. */
   public answer(key: string): readonly Item[] | undefined {
     return this.#memo.get(key);
@@ -281,6 +299,7 @@ export class Solver {
       selfRead: false,
       started: this.#work.total,
       rerun,
+      readDepth: 0,
     };
   }
 
@@ -295,7 +314,9 @@ export class Solver {
         continue;
       }
       const frame = frames.at(-1)!;
+      this.#readDepth = frame.readDepth;
       const step = frame.work.next(frame.pending ?? []);
+      frame.readDepth = this.#readDepth;
       frame.pending = undefined;
       this.#work.charge("yields");
       if (!step.done) {
