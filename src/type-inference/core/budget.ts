@@ -89,6 +89,22 @@ export type WorkCounter =
   // the writers the result names
   | "evidence";
 
+/**
+ * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
+ * two and one per eight code units, so a short key costs about what an entry does and a long path or signature its
+ * length.
+ */
+export function textUnits(length: number): number {
+  return (length + 23) >> 3;
+}
+
+/** The length of a path's text, its steps joined by dots, before it is made. */
+export function pathTextLength(path: readonly string[]): number {
+  let length = Math.max(0, path.length - 1);
+  for (const step of path) length += step.length;
+  return length;
+}
+
 /** Which limit an analysis reached: the work allowance or the nesting limit. */
 export type BudgetLimit = "work" | "nesting";
 

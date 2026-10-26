@@ -1,7 +1,7 @@
 import { unwrap } from "../../expression-children.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import type { WorkLedger } from "./budget.js";
+import { pathTextLength, textUnits, type WorkLedger } from "./budget.js";
 import { carried, keepsOwn, operandsOf, type CarrierRole, type Dispatch } from "./carriers.js";
 import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
@@ -928,14 +928,16 @@ export class Admission {
       if ((stores.get(d.key) ?? 0) > 1) {
         const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
         const structure = this.#valueStructure(d.value!);
-        for (const path of structure.paths) tracked.add(keyOf(d.place, [...base, ...path]));
+        for (const path of structure.paths) tracked.add(this.#keyText(d.place, [...base, ...path]));
         for (const { below, key } of structure.sources) {
           work.charge("indexSteps");
-          const landing = keyOf(d.place, [...base, ...below]);
+          const landing = this.#keyText(d.place, [...base, ...below]);
           const depth = this.#depthOf(key);
           if (depth <= (deepest.get(landing) ?? 0)) continue;
           deepest.set(landing, depth);
-          tracked.add(keyOf(d.place, [...base, ...below, ...Array<string>(depth).fill("element")]));
+          tracked.add(
+            this.#keyText(d.place, [...base, ...below, ...Array<string>(depth).fill("element")]),
+          );
         }
       }
     // a literal holding a named value (a copy, a call, what an operation carries of either) decides the paths its own
@@ -948,7 +950,7 @@ export class Admission {
         const base = [...d.path, ...(d.kind === "add" && d.how !== "elements" ? ["element"] : [])];
         for (const path of structure.paths) {
           work.charge("indexSteps");
-          tracked.add(keyOf(d.place, [...base, ...path]));
+          tracked.add(this.#keyText(d.place, [...base, ...path]));
         }
       }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
@@ -957,10 +959,10 @@ export class Admission {
       for (const stop of stops) {
         work.charge("indexSteps");
         const below = elementsBelow(d, stop.path);
-        if (below.length > 0) tracked.add(keyOf(d.place, [...this.#destPath(d), ...below]));
+        if (below.length > 0) tracked.add(this.#keyText(d.place, [...this.#destPath(d), ...below]));
       }
     for (const key of [...tracked])
-      for (const prefix of prefixesOf(key)) {
+      for (const prefix of this.#prefixesOf(key)) {
         work.charge("indexSteps");
         tracked.add(prefix);
       }
@@ -975,6 +977,7 @@ export class Admission {
     for (const key of tracked) {
       let paths = roots.get(keyPlace(key));
       if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
+      work.charge("indexSteps", textUnits(key.length));
       paths.add(keyPath(key).join("."));
     }
     // A1, A8: a written collection's elements at every depth; A4: a copied written type's paths, where the copy lands
@@ -1061,7 +1064,10 @@ export class Admission {
     }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
-      for (const path of paths) groups.push({ root, path: path === "" ? [] : path.split(".") });
+      for (const path of paths) {
+        work.charge("indexSteps", textUnits(path.length));
+        groups.push({ root, path: path === "" ? [] : path.split(".") });
+      }
     this.#groups = groups;
     return groups;
   }
@@ -2262,8 +2268,11 @@ export class Admission {
     const { program, definitions } = this.pass;
     const paths = new Map<string, readonly string[]>();
     const sources = new Map<string, { readonly below: readonly string[]; readonly key: Key }>();
+    // (each path's text charged by its size before it is made, TABLE r4.58)
     const path = (at: readonly string[]): void => {
-      if (at.length > 0 && !paths.has(at.join("."))) paths.set(at.join("."), at);
+      if (at.length === 0) return;
+      const text = this.#pathText(at);
+      if (!paths.has(text)) paths.set(text, at);
     };
     for (const at of levels)
       for (let length = 1; length <= at.length; length += 1) path(at.slice(0, length));
@@ -2282,7 +2291,8 @@ export class Admission {
           // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
           const room = Math.max(0, this.#longestKey() - keyPath(source).length);
           const key = keyOf(keyPlace(source), [...keyPath(source), ...strip.slice(0, room)]);
-          sources.set(`${at.join(".")}|${key}`, { below: at, key });
+          program.work.charge("indexSteps", textUnits(key.length));
+          sources.set(`${this.#pathText(at)}|${key}`, { below: at, key });
           continue;
         }
         const carried = this.#carriersOf(current, strip);
@@ -2311,6 +2321,37 @@ export class Admission {
       }
     }
     return { paths: [...paths.values()], sources: [...sources.values()] };
+  }
+
+  /**
+   * A path's text, which admission keeps as a key: charged by its size before it is made (TABLE r4.58), so a literal's
+   * long or deep paths reach the work allowance before the heap.
+   */
+  #pathText(path: readonly string[]): string {
+    this.pass.program.work.charge("indexSteps", textUnits(pathTextLength(path)));
+    return path.join(".");
+  }
+
+  /** A key admission keeps, charged by its text's size before it is made (`#pathText`). */
+  #keyText(place: PlaceId, path: readonly string[]): Key {
+    this.pass.program.work.charge(
+      "indexSteps",
+      textUnits(String(place).length + 1 + pathTextLength(path)),
+    );
+    return keyOf(place, path);
+  }
+
+  /** A key's prefixes (`prefixesOf`), their texts charged by their sizes before they are made (`#pathText`). */
+  #prefixesOf(key: Key): Key[] {
+    const path = keyPath(key);
+    let units = 0;
+    for (let length = path.length - 1, size = key.length; length >= 0; length -= 1) {
+      // (a prefix is its key without its last step and the dot before it)
+      size -= path[length]!.length + (length > 0 ? 1 : 0);
+      units += textUnits(size);
+    }
+    this.pass.program.work.charge("indexSteps", units);
+    return prefixesOf(key);
   }
 
   /** The longest path of a key with stores or of a read's or a call's projections in the program. */
@@ -2785,7 +2826,7 @@ export class Admission {
         }
       }
       const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
-      const pathKey = path.join(".");
+      const pathKey = this.#pathText(path);
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
       // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
       // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1)
@@ -2796,6 +2837,7 @@ export class Admission {
         this.#sourceOf(current) !== null
       ) {
         const identity = `${pathKey}|${strip.join(".")}|${this.#viaSignature(via)}|${deep}|${single}|${contract.identityOf(current).id}|${contract.readSnapshot(current) ?? ""}`;
+        program.work.charge("indexSteps", textUnits(identity.length));
         if (sources.has(identity)) continue;
         sources.add(identity);
       }

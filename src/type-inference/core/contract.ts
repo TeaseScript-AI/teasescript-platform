@@ -8,6 +8,7 @@ import type {
   TypeTerm,
 } from "../graph.js";
 import type { CorePass } from "./answers.js";
+import { textUnits } from "./budget.js";
 import type { ReadRoute } from "./values.js";
 import {
   ingressLeaf,
@@ -464,15 +465,6 @@ export interface LiteralIndex {
 }
 
 const NESTING = 256;
-
-/**
- * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
- * two and one per eight code units, so a short key costs about what an entry does and a long path or signature its
- * length.
- */
-function textUnits(length: number): number {
-  return (length + 23) >> 3;
-}
 
 /** The kinds that may have a member an unknown receiver is asked for (A7 r4.10). */
 export const MEMBER_KINDS: readonly ValueKind[] = [
