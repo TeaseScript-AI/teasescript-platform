@@ -73,12 +73,28 @@ function isRecordValue(value: SerializableRuntimeValue, json: boolean): boolean 
   return isObject(value) || (json && isDict(value));
 }
 
+/** The member of a union that reads `part` by its kind (`readWhole`), or `undefined`. */
+function memberFor(
+  part: SerializableRuntimeValue,
+  members: readonly TypePlan[],
+): TypePlan | undefined {
+  if (isList(part)) return members.find((member) => member.kind === "list");
+  if (isSet(part)) return members.find((member) => member.kind === "set");
+  if (isRecordValue(part, true))
+    return (
+      members.find((member) => member.kind === "object") ??
+      (isDict(part) ? members.find((member) => member.kind === "dict") : undefined)
+    );
+  return undefined;
+}
+
 /**
  * `value` read whole as `type`, or `undefined` where it does not fit. A stored value fits as the runtime type checks
  * take it (`matchesValueType`). JSON is read as the type: a dict where the type is an object becomes an object of the
  * type's properties, each of which it must have, its other keys left out, and lists, sets and dicts are read element by
- * element; a union reads a value that fits it as it is, and otherwise as its object member (the core's expected types
- * have one at most at each level).
+ * element; a union reads a value that fits it as it is, and otherwise as its member of the value's own kind: a record
+ * as its object member (else its dict member), a list as its list member, a set as its set member (the core's expected
+ * types have one member of each kind at most at each level).
  */
 function readWhole(
   value: SerializableRuntimeValue,
@@ -99,8 +115,10 @@ function readWhole(
     of: TypePlan,
   ): Frame | { readonly result: SerializableRuntimeValue | undefined } => {
     if (matchesValueType(part, of)) return { result: part };
-    const object = of.kind === "union" ? of.members.find((member) => member.kind === "object") : of;
-    if (object?.kind === "object") {
+    const member = of.kind === "union" ? memberFor(part, of.members) : of;
+    if (member === undefined) return { result: undefined };
+    if (member.kind === "object") {
+      const object = member;
       if (!isRecordValue(part, true)) return { result: undefined };
       const parts: (readonly [SerializableRuntimeValue, TypePlan])[] = [];
       const fieldOf = fieldsOf(part, true);
@@ -121,19 +139,25 @@ function readWhole(
         results: [],
       };
     }
-    if ((of.kind === "list" || of.kind === "set") && of.element !== null) {
+    if ((member.kind === "list" || member.kind === "set") && member.element !== null) {
       const items =
-        of.kind === "list" ? (isList(part) ? part.items : null) : isSet(part) ? part.items : null;
+        member.kind === "list"
+          ? isList(part)
+            ? part.items
+            : null
+          : isSet(part)
+            ? part.items
+            : null;
       if (items === null) return { result: undefined };
-      const { kind, element } = of;
+      const { kind, element } = member;
       return {
         parts: items.map((item) => [item, element] as const),
         build: (read) => ({ kind, items: [...read] }),
         results: [],
       };
     }
-    if (of.kind === "dict" && of.element !== null && isDict(part)) {
-      const { element } = of;
+    if (member.kind === "dict" && member.element !== null && isDict(part)) {
+      const { element } = member;
       return {
         parts: part.entries.map((entry) => [entry.value, element] as const),
         build: (read) => ({

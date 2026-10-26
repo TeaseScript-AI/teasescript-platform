@@ -1130,6 +1130,64 @@ test("a typed parse or load into a copy of a written type leaves the slice until
   assert.deepEqual(ran(runWith(plan, "1.5")), halted(["0", "AFTER"], [`TSW020@${parse}`]));
 });
 
+/** A list value as the runtime holds it. */
+const listOf = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
+  kind: "list",
+  items,
+});
+
+/** The value `name` is bound to where a run of the main program ends. */
+function bound(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
+  const found = snapshot.frames[0]?.bindings.find((item) => item.name === name);
+  assert.ok(found !== undefined, `binding ${name}`);
+  return found.value;
+}
+
+test("JSON fitting a nullable collection's level reads whole, at every nesting, on both lowerings, in three layers, in both orders (Astra B1)", () => {
+  // kind × nullability × nesting: each default, the expected type the core gives it, JSON that fits (also with its
+  // nulls) read as that type, and JSON that does not, which gives the default with TSW020
+  const n = (value: number): SerializableRuntimeValue => object({ n: value });
+  for (const [fallback, type, fitting] of [
+    [
+      "[null, [{n: 0}]]",
+      "list<list<{n: integer}>|null>",
+      [
+        ['[[{"n": 7}]]', listOf(listOf(n(7)))],
+        ['[null, [{"n": 7}], []]', listOf(null, listOf(n(7)), listOf())],
+      ],
+    ],
+    ["[null, [1]]", "list<list<integer>|null>", [["[[2], null]", listOf(listOf(2), null)]]],
+    [
+      "{items: [null, [1]]}",
+      "{items: list<list<integer>|null>}",
+      [['{"items": [[2], null], "extra": 1}', object({ items: listOf(listOf(2), null) })]],
+    ],
+    // the controls: a nullable record, and a nested list without null
+    ["[null, {n: 0}]", "list<{n: integer}|null>", [['[{"n": 7}, null]', listOf(n(7), null)]]],
+    ["[[{n: 0}]]", "list<list<{n: integer}>>", [['[[{"n": 7}]]', listOf(listOf(n(7)))]]],
+  ] as const)
+    for (const files of ["", ", files: false"]) {
+      const source = `let out = fromJson(hostValue, default: ${fallback}${files})\nsay "AFTER"\nexit\n`;
+      const parse = at(source, `fromJson(hostValue, default: ${fallback}${files})`);
+      assert.ok(
+        decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
+        source,
+      );
+      const plan = candidatePlan(source);
+      assert.ok(
+        contentOf(plan).some((entry) => entry.endsWith(`@${parse} ${type}`)),
+        `${source}: ${JSON.stringify(contentOf(plan))}`,
+      );
+      for (const [json, value] of fitting) {
+        const result = runWith(plan, json);
+        assert.deepEqual(ran(result), halted(["AFTER"]), `${source} with ${json}`);
+        assert.deepEqual(bound(result.snapshot, "out"), value, `${source} with ${json}`);
+      }
+      const violating = runWith(plan, '[[{"n": "x"}], 1]');
+      assert.deepEqual(ran(violating), halted(["AFTER"], [`TSW020@${parse}`]), source);
+    }
+});
+
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads
