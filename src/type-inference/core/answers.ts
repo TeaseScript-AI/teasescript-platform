@@ -717,9 +717,13 @@ class CoreAnswers implements Answers {
   public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {
     const value = this.#valueOf(node);
     if (value === null) return { items: [], properties: new Set() };
+    const items = this.#run(this.#pass.values.valueItems(value, node, path));
+    // only an object has properties to find
     return {
-      items: this.#run(this.#pass.values.valueItems(value, node, path)),
-      properties: this.#propertyNames({ value, path }),
+      items,
+      properties: items.some((item) => item.tag === "object")
+        ? this.#propertyNames({ value, path })
+        : new Set(),
     };
   }
 

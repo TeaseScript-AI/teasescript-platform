@@ -832,6 +832,7 @@ interface Landing {
  */
 class Contracts {
   readonly #landings = new Map<Expression, Landing | null>();
+  readonly #literals = new Map<Expression, Expression | null>();
   readonly #contracts = new Map<string, TypePlan | null>();
 
   public constructor(
@@ -881,6 +882,32 @@ class Contracts {
       ),
     );
   }
+
+  /**
+   * The literal data a value is at its level, whose records give a record's fields their order (`fieldOrder`): itself,
+   * through parentheses and a typed parse's or load's default, each typed call's once (a chain of nested defaults is
+   * followed once), `null` for a typed one without a default.
+   */
+  readonly #literalOf = (value: Expression): Expression | null => {
+    const chain: Expression[] = [];
+    let found: Expression | null = null;
+    for (let node: Expression | null = unwrap(value); node !== null;) {
+      const known = this.#literals.get(node);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      const inner = typedDefault(node);
+      if (inner === undefined) {
+        found = node;
+        break;
+      }
+      chain.push(node);
+      node = inner === null ? null : unwrap(inner);
+    }
+    for (const call of chain) this.#literals.set(call, found);
+    return found;
+  };
 
   /**
    * Whether an element of a fallback at `steps` below it may be `null` (C10): unless the fallback lands directly in a
@@ -989,7 +1016,7 @@ class Contracts {
               [...path, "element"],
               plan.element,
               at,
-              recordsBelow(records).elements,
+              recordsBelow(records, this.#literalOf).elements,
             ),
           ),
         };
@@ -999,7 +1026,7 @@ class Contracts {
         if (path.length + 1 >= SLICE_DEPTH)
           throw new OutsideContract(at, "a value whose structure the slice does not follow");
         const properties: TypePropertyPlan[] = [];
-        const below = recordsBelow(records);
+        const below = recordsBelow(records, this.#literalOf);
         for (const name of fieldOrder(this.answers.placeProperties(id, path), below, this.index)) {
           const step = [...path, propertyStep(name)];
           if (this.answers.place(id, step).admitted.by === "undecided") continue;
@@ -1058,22 +1085,24 @@ class Contracts {
     if (path.length + 1 >= SLICE_DEPTH)
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     const members: TypePlan[] = [];
-    const below = recordsBelow(records);
+    const structured =
+      held.has("list") || held.has("set") || held.has("dict") || held.has("object");
+    const below = structured ? recordsBelow(records, this.#literalOf) : null;
     for (const tag of VALUE_KIND_NAMES.filter((kind) => held.has(kind)))
       if (tag === "list" || tag === "set" || tag === "dict") {
         const element = yield* compileChild(
-          this.#answerTask(at, [...path, "element"], below.elements),
+          this.#answerTask(at, [...path, "element"], below?.elements ?? []),
         );
         // elements that take every value leave the collection open, as a store's check has it
         members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
       } else if (tag === "object") {
         const properties: TypePropertyPlan[] = [];
-        for (const name of fieldOrder(answer.properties, below, this.index))
+        for (const name of fieldOrder(answer.properties, below ?? NO_RECORDS, this.index))
           properties.push({
             name,
             // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
             type: (yield* compileChild(
-              this.#answerTask(at, [...path, propertyStep(name)], below.fields.get(name) ?? []),
+              this.#answerTask(at, [...path, propertyStep(name)], below?.fields.get(name) ?? []),
             ))!,
           });
         members.push({ kind: "object", properties });
@@ -1090,26 +1119,16 @@ interface AnsweredCall {
 }
 
 /**
- * The literal data a value is at its level: itself, through parentheses and a typed parse's or load's default (whose
- * records give a record's fields their order, `fieldOrder`).
+ * A typed parse's or load's default, which its value is where it gives one: `null` for a typed one without a default,
+ * `undefined` for any other expression.
  */
-function literalsAt(values: readonly Expression[]): Expression[] {
-  const found: Expression[] = [];
-  const pending = [...values].reverse();
-  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-    const node = unwrap(at);
-    const inner =
-      node.kind === "loadExpression"
-        ? node.defaultValue
-        : node.kind === "callExpression" &&
-            node.callee.kind === "identifier" &&
-            node.callee.name === "fromJson"
-          ? defaultOf(node)
-          : undefined;
-    if (inner === undefined) found.push(node);
-    else if (inner !== null) pending.push(inner);
-  }
-  return found;
+function typedDefault(node: Expression): Expression | null | undefined {
+  if (node.kind === "loadExpression") return node.defaultValue;
+  return node.kind === "callExpression" &&
+    node.callee.kind === "identifier" &&
+    node.callee.name === "fromJson"
+    ? defaultOf(node)
+    : undefined;
 }
 
 /**
@@ -1121,11 +1140,19 @@ interface RecordsBelow {
   readonly fields: ReadonlyMap<string, readonly Expression[]>;
 }
 
-function recordsBelow(values: readonly Expression[]): RecordsBelow {
+/** No literal data below a level. */
+const NO_RECORDS: RecordsBelow = { elements: [], fields: new Map() };
+
+function recordsBelow(
+  values: readonly Expression[],
+  literalOf: (value: Expression) => Expression | null,
+): RecordsBelow {
   const elements: Expression[] = [];
   const fields = new Map<string, Expression[]>();
   // element by element: a literal has as many as its source writes, more than a call takes as arguments
-  for (const node of literalsAt(values))
+  for (const value of values) {
+    const node = literalOf(value);
+    if (node === null) continue;
     if (node.kind === "listLiteral" || node.kind === "setLiteral")
       for (const element of node.elements) elements.push(element);
     else if (node.kind === "objectLiteral")
@@ -1134,6 +1161,7 @@ function recordsBelow(values: readonly Expression[]): RecordsBelow {
         if (found === undefined) fields.set(property.name.name, [property.value]);
         else found.push(property.value);
       }
+  }
   return { elements, fields };
 }
 
@@ -1160,9 +1188,9 @@ function defaultOf(call: CallExpression): Expression | null {
 
 /**
  * Whether a default reads anything but literal data: a variable, a property or an element of one, or any operation but
- * a typed parse or load of literal data. Where the core answers a call by such a default, its answer follows the stores
- * that reach the read while the result's place keeps the type the program settled (a question for the core's F18), so
- * the slice leaves it out.
+ * a typed parse or load, whose own default is checked as its own call's. Where the core answers a call by such a
+ * default, its answer follows the stores that reach the read while the result's place keeps the type the program
+ * settled (S9b's F18 completion), so the slice leaves it out.
  */
 function readsPlace(fallback: Expression): boolean {
   const pending = [fallback];
@@ -1185,16 +1213,17 @@ function readsPlace(fallback: Expression): boolean {
       case "objectLiteral":
         for (const property of at.properties) pending.push(property.value);
         break;
+      // a typed parse or load inside the default is checked as its own call
       case "loadExpression":
-        if (at.defaultValue !== null) pending.push(at.defaultValue);
         break;
-      case "callExpression": {
-        const inner = defaultOf(at);
-        if (at.callee.kind !== "identifier" || at.callee.name !== "fromJson" || inner === null)
+      case "callExpression":
+        if (
+          at.callee.kind !== "identifier" ||
+          at.callee.name !== "fromJson" ||
+          defaultOf(at) === null
+        )
           return true;
-        pending.push(inner);
         break;
-      }
       default:
         return true;
     }
