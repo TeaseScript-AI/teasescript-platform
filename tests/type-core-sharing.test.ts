@@ -154,17 +154,25 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   const all = programs();
   const differing: string[] = [];
   let runs = 0;
+  // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
+  const changed = new Map<string, boolean>();
   for (const program of all) {
-    const ready = prepared(program);
+    let ready: Prepared | undefined;
     for (const reversed of program.fixture === true ? FIXTURE_ORDERS : [false, true]) {
-      runs += 1;
-      if (published(ready, reversed) !== withoutSharing(() => published(ready, reversed)))
-        differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+      const input = `${reversed}|${JSON.stringify(program.files)}`;
+      let differs = changed.get(input);
+      if (differs === undefined) {
+        runs += 1;
+        const once = (ready ??= prepared(program));
+        differs = published(once, reversed) !== withoutSharing(() => published(once, reversed));
+        changed.set(input, differs);
+      }
+      if (differs) differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
   }
   t.diagnostic(
-    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' in ${FIXTURE_ORDERS.length}), ` +
-      "with the sharing on and off",
+    `${all.length} programs in ${runs} runs (each in both orders, the fixtures' in ${FIXTURE_ORDERS.length}; one ` +
+      "run per exact input and order), with the sharing on and off",
   );
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);

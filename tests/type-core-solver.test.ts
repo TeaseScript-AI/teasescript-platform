@@ -34,11 +34,21 @@ import { readFixture } from "./helpers/type-core-fixture.js";
  * ingress stores its external items name.
  */
 
-const requests = readFixture().map((record) => {
-  const request = coreRequest(record.files);
-  assert.ok(request !== null, `${record.name}: its files parse and resolve`);
-  return { name: record.name, request };
-});
+/** The set's requests, one per exact input (its files in order), each with the names of the records that give it. */
+const requests = (() => {
+  const byInput = new Map<string, { names: string[]; request: CoreAnalysisRequest }>();
+  for (const record of readFixture()) {
+    const input = JSON.stringify(record.files);
+    const known = byInput.get(input);
+    if (known !== undefined) known.names.push(record.name);
+    else {
+      const request = coreRequest(record.files);
+      assert.ok(request !== null, `${record.name}: its files parse and resolve`);
+      byInput.set(input, { names: [record.name], request });
+    }
+  }
+  return [...byInput.values()];
+})();
 
 /** A seeded shuffle, for a consumer order no source order gives. */
 function shuffled(seed: number): <T>(list: readonly T[]) => T[] {
@@ -69,11 +79,11 @@ test("every record has one result in the source order, the reverse order and two
     ["seed 2", shuffled(2)],
   ];
   const differing: string[] = [];
-  for (const { name, request } of requests) {
+  for (const { names, request } of requests) {
     const forward = canonical(compactAnalysis(request));
     for (const [order, visit] of orders)
       if (canonical(withConsumerOrder(visit, () => compactAnalysis(request))) !== forward)
-        differing.push(`${name} (${order})`);
+        differing.push(...names.map((name) => `${name} (${order})`));
   }
   assert.deepEqual(differing, []);
 });
@@ -121,8 +131,8 @@ function componentDifferences(
 test("every component is solved alike from each member as the entry and in either order", () => {
   let components = 0;
   const differing: string[] = [];
-  for (const { name, request } of requests) {
-    const found = componentDifferences(name, request);
+  for (const { names, request } of requests) {
+    const found = componentDifferences(names.join(", "), request);
     components += found.components;
     differing.push(...found.differing);
   }

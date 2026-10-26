@@ -40,6 +40,7 @@ import {
   companions,
   derive,
   evaluate,
+  syntaxOf,
   Underivable,
   type CheckEvent,
   type PredictedRun,
@@ -48,7 +49,6 @@ import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
 import {
   assignments,
   derivedStores,
-  DOMAIN,
   plannedStores,
   runGlobals,
 } from "./helpers/type-core-route.js";
@@ -83,12 +83,24 @@ function sited(result: Pick<CompilationResult, "diagnostics">): string[] {
 
 /** `run` in the source order and with the consumers' and the solver's orders reversed: the two results, equal. */
 function inBothOrders<T>(run: () => T): T {
+  return inBothOrdersAs(run, (result) => result)[0];
+}
+
+/**
+ * `inBothOrders` with the two results compared as `project` gives them: the forward result whole, and its projection.
+ * A test that runs the forward plan compiles no third time: each run starts from a fresh snapshot.
+ */
+function inBothOrdersAs<R, T>(run: () => R, project: (result: R) => T): readonly [R, T] {
   const forward = run();
+  const projected = project(forward);
   const reversed = withSolverSeam({ reverseWorklist: true }, () =>
-    withConsumerOrder((list) => [...list].reverse(), run),
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => project(run()),
+    ),
   );
-  assert.deepEqual(reversed, forward);
-  return forward;
+  assert.deepEqual(reversed, projected);
+  return [forward, projected];
 }
 
 /** A run of `plan` to its end without reading pauses, with `hostValue`: its status, messages and failure. */
@@ -211,6 +223,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let positive = 0;
   let plans = 0;
   let runs = 0;
+  let compared = 0;
   for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
@@ -255,17 +268,18 @@ test("every positive-list record the candidate route reaches plans and runs as i
     assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
     if (result.plan === null) continue;
     plans += 1;
-    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named)
-    const derived = (() => {
+    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
+    // serves every evaluation of it below
+    const [syntax, { stores, discharges }] = (() => {
       try {
-        return derive(source, record.expected);
+        const syntax = syntaxOf(source);
+        return [syntax, derive(syntax, record.expected)] as const;
       } catch (error) {
         if (error instanceof Underivable)
           throw new Error(`${record.name}: underivable: ${error.message}`);
         throw error;
       }
     })();
-    const { stores, discharges } = derived;
     assert.deepEqual(
       plannedStores(result.plan),
       derivedStores(stores),
@@ -276,36 +290,39 @@ test("every positive-list record the candidate route reaches plans and runs as i
       derivedStores(stores),
       `${record.name}: the one-file route's`,
     );
-    // runs: the original, as written, each input at the value fitting the earliest check it feeds
-    const fitting =
-      DOMAIN.find((value) => {
-        const fed = evaluate(source, stores, { hostValue: value }, true).events.find((event) =>
-          event.from.has("hostValue"),
-        );
+    // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
+    // stopping at its first failing check and evaluated through every check (for the discharges)
+    const plan = result.plan;
+    const own = assignments(["hostValue"]).map((inputs) => ({
+      inputs,
+      ran: runGlobals(plan, inputs),
+      predicted: evaluate(syntax, stores, inputs).run,
+      events: evaluate(syntax, stores, inputs, true).events,
+    }));
+    // the original, as written: each input at the value fitting the earliest check it feeds
+    const original =
+      own.find(({ events }) => {
+        const fed = events.find((event) => event.from.has("hostValue"));
         return fed === undefined || fed.fits;
-      }) ?? DOMAIN[0]!;
-    const original = runGlobals(result.plan, { hostValue: fitting });
-    assert.deepEqual(
-      original,
-      evaluate(source, stores, { hostValue: fitting }).run,
-      `${record.name}: the original`,
-    );
-    originals.set(record.name, original.failure);
-    runs += 1;
-    // the companions with the same checked stores, under every assignment of their inputs
+      }) ?? own[0]!;
+    assert.deepEqual(original.ran, original.predicted, `${record.name}: the original`);
+    originals.set(record.name, original.ran.failure);
+    compared += 1;
+    // under every assignment: a violating value stops at its check, as derived
     const observed: { run: PredictedRun; events: readonly CheckEvent[] }[] = [];
-    // the original under every assignment of its host input too: a violating value stops at its check, as derived
-    for (const inputs of assignments(["hostValue"])) {
-      const ran = runGlobals(result.plan, inputs);
+    for (const { inputs, ran, predicted, events } of own) {
       assert.deepEqual(
         ran,
-        evaluate(source, stores, inputs).run,
+        predicted,
         `${record.name}, the original with ${JSON.stringify(inputs)}`,
       );
-      observed.push({ run: ran, events: evaluate(source, stores, inputs, true).events });
+      observed.push({ run: ran, events });
       runs += 1;
+      compared += 1;
     }
-    for (const companion of companions(source)) {
+    // the companions with the same checked stores, under every assignment of their inputs
+    const ranCompanions = companionRuns.get(record.name) ?? [];
+    for (const companion of companions(syntax)) {
       const compiled = insideSlice(() =>
         inBothOrders(() =>
           compileSourceWithBackend(
@@ -323,21 +340,21 @@ test("every positive-list record the candidate route reaches plans and runs as i
         derivedStores(stores),
         `${at}: the checked stores`,
       );
+      const companionSyntax = syntaxOf(companion.source);
       for (const inputs of assignments(companion.globals)) {
         const ran = runGlobals(compiled.plan, inputs);
         assert.deepEqual(
           ran,
-          evaluate(companion.source, stores, inputs).run,
+          evaluate(companionSyntax, stores, inputs).run,
           `${record.name}, companion ${companion.label}, with ${JSON.stringify(inputs)}`,
         );
-        observed.push({
-          run: ran,
-          events: evaluate(companion.source, stores, inputs, true).events,
-        });
-        companionRuns.set(record.name, [...(companionRuns.get(record.name) ?? []), ran]);
+        observed.push({ run: ran, events: evaluate(companionSyntax, stores, inputs, true).events });
+        ranCompanions.push(ran);
         runs += 1;
+        compared += 1;
       }
     }
+    if (ranCompanions.length > 0) companionRuns.set(record.name, ranCompanions);
     // each discharge classified by the runs: a store's at its value, the runtime's at its use
     for (const discharge of discharges) {
       if (discharge.by === "native" && discharge.what === "representable") {
@@ -373,8 +390,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       .join(", ");
   t.diagnostic(
     `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
-      `runs predicted and run; discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ` +
-      listed(outside),
+      `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
+      `discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
@@ -614,16 +631,15 @@ test("admission's decided types and C9's boundary checks compile and run on the 
       ],
     ],
   ] as const) {
-    const compiled = inBothOrders(() => {
-      const result = candidate(source);
-      return {
+    const [{ plan }, compiled] = inBothOrdersAs(
+      () => candidate(source),
+      (result) => ({
         diagnostics: sited(result),
         checked: result.plan === null ? null : checksOf(result.plan),
-      };
-    });
+      }),
+    );
     assert.deepEqual(compiled.diagnostics.sort(), [...diagnostics].sort(), source);
     assert.deepEqual(compiled.checked, checked, source);
-    const plan = candidate(source).plan;
     if (runs.length > 0) {
       assert.ok(plan !== null, source);
       // (its programs say each message once, in order)
@@ -635,7 +651,8 @@ test("admission's decided types and C9's boundary checks compile and run on the 
 
 test("external data a literal carries is warned and checked at its store before any later effect, read or not (the owner's F1)", () => {
   // per program C1's warning at the host expression, the store checks and, per host value, the run's messages and
-  // failure: no consumer reads the list
+  // failure: no consumer reads the list (the first and the third program are also r4.59's sample cells, its decided list
+  // element and decided nested list element inline, checked here with its fraction too)
   for (const [source, warnings, checked, runs] of [
     [
       'let xs = [1, hostValue]\nsay "AFTER"\nexit\n',
@@ -644,6 +661,7 @@ test("external data a literal carries is warned and checked at its store before 
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:23"],
+        [2.5, [], "TSR058@9:23"],
       ],
     ],
     [
@@ -662,6 +680,7 @@ test("external data a literal carries is warned and checked at its store before 
       [
         [2, ["AFTER"], null],
         ["bad", [], "TSR058@9:27"],
+        [2.5, [], "TSR058@9:27"],
       ],
     ],
     [
@@ -686,15 +705,14 @@ test("external data a literal carries is warned and checked at its store before 
     // host data alone admits no type: nothing to check it against
     ['let xs = [hostValue, hostValue]\nsay "AFTER"\nexit\n', [], [], [["bad", ["AFTER"], null]]],
   ] as const) {
-    const compiled = inBothOrders(() => {
-      const result = candidate(source);
-      return {
+    const [{ plan }, compiled] = inBothOrdersAs(
+      () => candidate(source),
+      (result) => ({
         diagnostics: sited(result),
         checked: result.plan === null ? null : checksOf(result.plan),
-      };
-    });
+      }),
+    );
     assert.deepEqual(compiled, { diagnostics: warnings, checked }, source);
-    const plan = candidate(source).plan;
     assert.ok(plan !== null, source);
     for (const [value, says, failure] of runs)
       assert.deepEqual(
@@ -936,13 +954,14 @@ test("the derived evaluator sites a parenthesised value's failure at its content
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const { stores } = derive(source, compactAnalysis(request));
+    const syntax = syntaxOf(source);
+    const { stores } = derive(syntax, compactAnalysis(request));
     const compiled = inBothOrders(() => candidate(source));
     assert.ok(compiled.plan !== null, source);
     assert.deepEqual(plannedStores(compiled.plan), derivedStores(stores), source);
     const ran = runGlobals(compiled.plan, { hostValue });
     assert.equal(ran.failure, failure, source);
-    assert.deepEqual(ran, evaluate(source, stores, { hostValue }).run, source);
+    assert.deepEqual(ran, evaluate(syntax, stores, { hostValue }).run, source);
   }
 });
 
@@ -966,18 +985,17 @@ test("a projection of a literal carries its elements' types and host data on the
       source,
     );
   const host = 'let a = [hostValue]\nlet xs = [[[1]][0], [a][0]]\nsay "AFTER"\nexit\n';
-  const compiled = inBothOrders(() => {
-    const result = candidate(host);
-    return {
+  const [{ plan }, compiled] = inBothOrdersAs(
+    () => candidate(host),
+    (result) => ({
       diagnostics: sited(result),
       checked: result.plan === null ? null : checksOf(result.plan),
-    };
-  });
+    }),
+  );
   assert.deepEqual(compiled, {
     diagnostics: ["warning TSV041@29"],
     checked: ["20:47 list<list<integer>>"],
   });
-  const plan = candidate(host).plan;
   assert.ok(plan !== null);
   assert.deepEqual(runWith(plan, 2), { status: "halted", says: ["AFTER"], failure: null });
   assert.deepEqual(runWith(plan, "bad"), { status: "failed", says: [], failure: "TSR058@29:47" });
@@ -985,30 +1003,24 @@ test("a projection of a literal carries its elements' types and host data on the
 
 test("a projected written integer list stays strict on the candidate route (A4, round 15 B3)", () => {
   const source = 'let typed: integer[] = [1]\nlet xs = [typed][0]\nxs = [2.5]\nsay "AFTER"\nexit\n';
-  assert.deepEqual(
-    inBothOrders(() => sited(candidate(source))),
-    [`error TSV041@${source.indexOf("2.5")}`],
-  );
-  assert.equal(candidate(source).plan, null);
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.indexOf("2.5")}`]);
+  assert.equal(compiled.plan, null);
 });
 
 test("a projection of a written nested list stays strict on the candidate route (A4, F12, Astra r2 B2)", () => {
   const source =
     'let source: integer[][] = [[4]]\nlet result = source[0]\nresult = [3.5]\nsay "AFTER"\nexit\n';
-  assert.deepEqual(
-    inBothOrders(() => sited(candidate(source))),
-    [`error TSV041@${source.indexOf("3.5")}`],
-  );
-  assert.equal(candidate(source).plan, null);
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.indexOf("3.5")}`]);
+  assert.equal(compiled.plan, null);
 });
 
 test("a written scalar a singleton literal gives stays strict on the candidate route (A4, Codex r16 B1)", () => {
   const source = 'let typed: integer = 1\nlet xs = [typed][0]\nxs = 2.5\nsay "AFTER"\nexit\n';
-  assert.deepEqual(
-    inBothOrders(() => sited(candidate(source))),
-    [`error TSV041@${source.lastIndexOf("2.5")}`],
-  );
-  assert.equal(candidate(source).plan, null);
+  const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+  assert.deepEqual(diagnostics, [`error TSV041@${source.lastIndexOf("2.5")}`]);
+  assert.equal(compiled.plan, null);
 });
 
 /** The admitted type of the binding `name` at `path`: its kinds and its decider's offset. */
@@ -1067,13 +1079,13 @@ test("a place published with a kind checks the external data stored into it, nam
           const end = source.indexOf("\n", declaration);
           const data = named ? source.indexOf("raw", declaration) : source.indexOf("hostValue");
           const warned = named ? (later ? value : data) : later ? data : null;
-          const compiled = inBothOrders(() => {
-            const result = candidate(source);
-            return {
+          const [{ plan }, compiled] = inBothOrdersAs(
+            () => candidate(source),
+            (result) => ({
               diagnostics: sited(result),
               checks: result.plan === null ? null : checksOf(result.plan),
-            };
-          });
+            }),
+          );
           assert.deepEqual(
             compiled,
             {
@@ -1082,7 +1094,6 @@ test("a place published with a kind checks the external data stored into it, nam
             },
             source,
           );
-          const plan = candidate(source).plan;
           assert.ok(plan !== null, source);
           assert.deepEqual(
             runWith(plan, good),
@@ -1104,12 +1115,8 @@ test("a place published with a kind checks the external data stored into it, nam
     ['let out = [1, 2][1]\nsay "AFTER"\nexit\n', "decided integer@10"],
   ] as const) {
     assert.equal(admittedOf(source, "out"), admitted, source);
-    assert.deepEqual(
-      inBothOrders(() => sited(candidate(source))),
-      [],
-      source,
-    );
-    const plan = candidate(source).plan;
+    const [{ plan }, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+    assert.deepEqual(diagnostics, [], source);
     assert.ok(plan !== null, source);
     assert.deepEqual(checksOf(plan), [], source);
     assert.deepEqual(
@@ -1339,23 +1346,27 @@ test("every carrier kind leaves an obligation for the external data it gives a p
               name,
             );
             shapes += 1;
-            let compiled: { readonly checks: readonly string[] | null } | null = null;
+            let compiled: readonly [
+              CompilationResult,
+              { readonly checks: readonly string[] | null },
+            ];
             try {
-              compiled = inBothOrders(() => {
-                const result = candidate(source);
-                return { checks: result.plan === null ? null : checksOf(result.plan) };
-              });
+              compiled = inBothOrdersAs(
+                () => candidate(source),
+                (result) => ({ checks: result.plan === null ? null : checksOf(result.plan) }),
+              );
             } catch (error) {
               if (!(error instanceof CandidateOutsideSlice)) throw error;
               outside.set(`${kind} (${placed})`, error.what.replace(/^this /, ""));
               continue;
             }
+            const [result, { checks }] = compiled;
             assert.deepEqual(
-              compiled.checks,
+              checks,
               [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
               name,
             );
-            const plan = candidate(source).plan!;
+            const plan = result.plan!;
             const host = (
               scalar: SerializableRuntimeValue,
               depth = wrap,
@@ -1758,14 +1769,6 @@ test("a sample of the slice's cells checks host data in the plan and stops a bad
       [2.5],
     ],
     [
-      "decided list element, inline",
-      "let xs = [1, hostValue]",
-      "",
-      "list<integer>",
-      2,
-      ["bad", 2.5],
-    ],
-    [
       "decided list element, named",
       "let raw = hostValue\nlet xs = [1, raw]",
       "let xs",
@@ -1773,14 +1776,8 @@ test("a sample of the slice's cells checks host data in the plan and stops a bad
       2,
       ["bad", 2.5],
     ],
-    [
-      "decided nested list element, inline",
-      "let xs = [[1], [hostValue]]",
-      "",
-      "list<list<integer>>",
-      2,
-      ["bad", 2.5],
-    ],
+    // (the decided list element and the decided nested list element, inline, are the owner's F1 test's first and third
+    // programs, checked there with these values)
     ["decided scalar, a later store", "let n = hostValue\nn = 1", "", "integer", 2, ["bad", 2.5]],
     ["published scalar, inline", "let n = [1, hostValue][1]", "", "integer", 2, ["bad", 2.5]],
     [
@@ -1814,15 +1811,12 @@ test("a sample of the slice's cells checks host data in the plan and stops a bad
     const start = source.indexOf(store);
     const end = source.indexOf("\n", start);
     const value = source.indexOf("=", start) + 2;
-    assert.deepEqual(
-      inBothOrders(() => {
-        const result = candidate(source);
-        return result.plan === null ? null : checksOf(result.plan);
-      }),
-      [`${start}:${end} ${type}`],
-      name,
+    const [result, checks] = inBothOrdersAs(
+      () => candidate(source),
+      (compiled) => (compiled.plan === null ? null : checksOf(compiled.plan)),
     );
-    const plan = candidate(source).plan!;
+    assert.deepEqual(checks, [`${start}:${end} ${type}`], name);
+    const plan = result.plan!;
     assert.deepEqual(
       runWith(plan, good),
       { status: "halted", says: ["AFTER"], failure: null },

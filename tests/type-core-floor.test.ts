@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { roleClasses } from "./helpers/type-core-roles.js";
 import { BOTH, records, SCALAR, shapesOf, type RuleClass } from "./helpers/type-core-rule.js";
 
 /*
  * The carrier floor (S6-CARRIERS revision 5, §6): Astra's independent 184 shapes of round 4 (`matrix/REPORT.md`,
  * `comparison.md`), transcribed as their 46 placement and endpoint classes, each named and inline, without and with a
  * later store, in both orders, each shape's complete C1, C9 and C10 records compared exactly with the rule function
- * (`tests/helpers/type-core-rule.ts`).
+ * (`tests/helpers/type-core-rule.ts`): here, or by the role test for the shapes the role matrix holds as they are.
  */
 
 const CLASSES: readonly RuleClass[] = [
@@ -227,12 +228,31 @@ const CLASSES: readonly RuleClass[] = [
   },
 ];
 
+/**
+ * The floor's classes whose shapes the role matrix holds as they are, each the same source owing the same records (the
+ * projection owner's literal and whole operand): the role test compares them, once in the suite, and this test checks
+ * that they are still the role matrix's.
+ */
+const COMPARED_BY_ROLES: ReadonlySet<string> = new Set([
+  "projection/literal",
+  "projection/unknown receiver",
+]);
+
 test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1, r4.60, r4.63–r4.66)", (t) => {
   const all = shapesOf(CLASSES);
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);
+  const roles = new Map(
+    shapesOf(roleClasses().classes).map((shape) => [shape.source, shape.expected]),
+  );
   const wrong: string[] = [];
+  let shared = 0;
   for (const shape of all) {
+    if (COMPARED_BY_ROLES.has(shape.name.split("/").slice(0, 2).join("/"))) {
+      assert.deepEqual(roles.get(shape.source), shape.expected, `${shape.name}: the role matrix's`);
+      shared += 1;
+      continue;
+    }
     const actual = records(shape.source);
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
       wrong.push(
@@ -241,7 +261,7 @@ test("the carrier floor's complete C1, C9 and C10 records are what the rule func
   }
   t.diagnostic(
     `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} ` +
-      "classes compared exactly",
+      `classes compared exactly, ${shared} of them by the role test (the same source owing the same records)`,
   );
   assert.deepEqual(wrong, [], wrong.join("\n"));
 });

@@ -138,18 +138,14 @@ test("an analysis stopped anywhere, its setup included, publishes its stop", () 
     },
     ...Array.from({ length: 6 }, (_, i) => ({ path: `parts/f${i}.tease`, source: part })),
   ];
-  const request = (): NonNullable<ReturnType<typeof coreRequest>> => {
-    const made = coreRequest(files);
-    assert.ok(made !== null);
-    return made;
-  };
-  const total = analyseCore(request()).budget.total;
+  // (prepared once: each analysis of it is a fresh one)
+  const request = coreRequest(files);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
   const stops: string[] = [];
   let inSetup = 0;
   for (let step = 1; step < 32; step += 1) {
-    const stopped = withTestAllowance(Math.floor((total * step) / 32), () =>
-      analyseCore(request()),
-    );
+    const stopped = withTestAllowance(Math.floor((total * step) / 32), () => analyseCore(request));
     stops.push(`${stopped.outcome} ${stopped.budget.exhausted} ${stopped.diagnostics.length}`);
     if (!stopped.budget.counts.has("frames")) inSetup += 1;
   }
@@ -158,7 +154,7 @@ test("an analysis stopped anywhere, its setup included, publishes its stop", () 
     Array.from({ length: 31 }, () => "budget-error work 0"),
   );
   assert.ok(inSetup > 0, "some stop falls in the setup");
-  assert.equal(withTestAllowance(total, () => analyseCore(request())).outcome, "valid");
+  assert.equal(withTestAllowance(total, () => analyseCore(request)).outcome, "valid");
 });
 
 /**
