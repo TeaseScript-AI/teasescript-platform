@@ -53,6 +53,28 @@ test("the core gives the expected record for every record of the cells it comple
   assert.deepEqual(failures, []);
 });
 
+/**
+ * TABLE r4.63–r4.65's rule function as the set pins it (`cells-rule-function.jsonl`, the set's revision `24ea519a…`):
+ * its ten records, each compared whole in both orders, as the set's are, but those `heldBack` names.
+ */
+test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.65)", () => {
+  const records = readFixture("cells-rule-function.jsonl");
+  assert.equal(records.length, 10);
+  for (const record of records) {
+    if (heldBack(record) !== null) continue;
+    const request = coreRequest(record.files);
+    assert.ok(request !== null, `${record.name}: its files parse and resolve`);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
+    assert.deepEqual(recordDifferences(record.expected, reversed), [], `${record.name} reversed`);
+  }
+});
+
 test("the comparison fails a record whose second boundary check is replaced by a copy of its first", () => {
   // the negative control of the port plan's §3.1: one ingress's boundary check lost beside a surviving one must show
   const record = asserted.find(

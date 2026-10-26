@@ -17,7 +17,7 @@ export interface FixtureRecord {
   readonly expected: CompactRecord;
 }
 
-const FIXTURE = new URL("../../../tests/fixtures/type-core/cells.jsonl", import.meta.url);
+const FIXTURES = new URL("../../../tests/fixtures/type-core/", import.meta.url);
 
 function fields(value: unknown, where: string): Readonly<Record<string, unknown>> {
   assert.ok(
@@ -50,12 +50,19 @@ export function heldBack(record: FixtureRecord): string | null {
   // C5's obligation on the receiver; the record, derived under r4.33, lacks it
   if (record.name === "cp9-cells/r8/get-dispatch/unknown")
     return "r4.60: the destination's C1 check, record corrected in the set, refreshed at S6b";
+  // TABLE r4.64 (C9 r4.10): whether a `say`, which requires no kind, is a consumer that reaches external data and so
+  // owes its boundary; the core's consumers that require none do not (`let x = hostValue`, `say x`: no check either)
+  if (record.name === "cp9-cells/s6/rule-function/loop/unknown-read")
+    return "r4.64: a say as C9's consumer reach, held for the lead";
   return null;
 }
 
-/** The fixture's records, each line checked, so a malformed line fails where it is. */
-export function readFixture(): FixtureRecord[] {
-  return readFileSync(FIXTURE, "utf8")
+/**
+ * A fixture file's records, each line checked, so a malformed line fails where it is: `cells.jsonl`, or
+ * `cells-rule-function.jsonl`, the rule function's records of a later set revision (its `MANIFEST.md`).
+ */
+export function readFixture(file = "cells.jsonl"): FixtureRecord[] {
+  return readFileSync(new URL(file, FIXTURES), "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line, index) => {

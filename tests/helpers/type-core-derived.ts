@@ -85,6 +85,20 @@ function unwrap(expression: Expression): Expression {
   return expression.kind === "parenthesizedExpression" ? unwrap(expression.expression) : expression;
 }
 
+/** A value as its literal structure stands: a constant index of a list literal is the element it selects. */
+function selected(expression: Expression | null): Expression | null {
+  let at = expression === null ? null : unwrap(expression);
+  while (at?.kind === "indexExpression") {
+    const list = unwrap(at.object);
+    const index = unwrap(at.index);
+    if (list.kind !== "listLiteral" || index.kind !== "numberLiteral") break;
+    const element = list.elements[index.value];
+    if (element === undefined) break;
+    at = unwrap(element);
+  }
+  return at;
+}
+
 /** The collection a value's literal structure, or its written type, has at a path's element step. */
 function collectionAt(
   statement: Statement,
@@ -92,7 +106,7 @@ function collectionAt(
   path: readonly string[],
 ): "list" | "set" | "dict" {
   let annotation = statement.kind === "letStatement" ? statement.typeAnnotation : null;
-  let literal: Expression | null = value === null ? null : unwrap(value);
+  let literal: Expression | null = selected(value);
   for (const step of path) {
     if (step !== "element") throw new Underivable("a property step");
     annotation =
@@ -101,7 +115,7 @@ function collectionAt(
         : null;
     literal =
       literal !== null && (literal.kind === "listLiteral" || literal.kind === "setLiteral")
-        ? (literal.elements[0] ?? null)
+        ? selected(literal.elements[0] ?? null)
         : null;
   }
   if (

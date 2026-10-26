@@ -19,6 +19,33 @@ regenerate S6's committed fixture").
 - The converter rewrote the same 197 gate records (193 prefixed files and the four collection records) and the same 2
   deferred records.
 
+## The rule-function records (M4 step S6, TABLE r4.63–r4.65)
+
+Opus, 2026-10-26, builder for M4 step S6 (lead Fable, who approved the file). `cells-rule-function.jsonl` holds the ten
+records `cp9-cells/s6/rule-function/…` of the set's corrected revision `24ea519a7229febf…` (1,981 gate records;
+deferred `77b11b86eae67cf7…`, 9), which pin the lead's rule function for C1, C9 and C10:
+- `carrier/selecting`, `carrier/combining` (r4.63 (2));
+- `defaults/get`, `defaults/otherwise`, `defaults/otherwise-family`, `defaults/load`, `defaults/fromJson` (r4.63 (3),
+  r4.65 (1));
+- `loop/decided`, `loop/unknown-control`, `loop/unknown-read` (r4.63 (4), r4.64, r4.65 (2)).
+
+`cells.jsonl` and its pin `1de3570831c7bc4b…` are untouched; S6b's refresh folds these records into it and removes this
+file. The file was made with the same tooling, `convert.py` `ba04601abfc9e012…` and `verify.py` `9a5b8e73c7bd46f9…`,
+from the whole revision, the ten lines kept byte for byte:
+
+```sh
+F=/home/peter/notes/teasescript/reports/type-inference-research-2026-10-17/evidence/3a-newcore/fixture
+S=$F/../expected-cp9-cells
+work=$(mktemp -d /tmp/agent-work/o4-m4-s6/fixture-rule-function-XXXXXX)
+mkdir "$work/set" "$work/out"
+cp "$S/cases.jsonl" "$S/cases-deferred.jsonl" "$work/set/"
+python3 -I "$F/convert.py" --set "$work/set" --out "$work/out"
+python3 -I "$F/verify.py" --preservation "$work/set/cases.jsonl" "$work/out/cells.jsonl"
+grep '^{"name":"cp9-cells/s6/rule-function/' "$work/out/cells.jsonl" > tests/fixtures/type-core/cells-rule-function.jsonl
+```
+
+`verify.py --preservation` passes for the revision, 1,981 of 1,981. The file's SHA-256 is `d530a1b670d362d8…`.
+
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
