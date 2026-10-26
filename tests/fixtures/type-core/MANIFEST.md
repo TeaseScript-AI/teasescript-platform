@@ -1,4 +1,4 @@
-# The core's compact fixture (M4 steps S0 and S6)
+# The core's compact fixture (M4 steps S0, S6 and S6b)
 
 Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fable/m4/s0-brief.md`, lead Fable): the
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
@@ -19,33 +19,36 @@ regenerate S6's committed fixture").
 - The converter rewrote the same 197 gate records (193 prefixed files and the four collection records) and the same 2
   deferred records.
 
-## The rule-function records (M4 step S6, TABLE r4.63–r4.66)
+## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 
-Opus, 2026-10-26, builder for M4 step S6 (lead Fable, who approved the file). `cells-rule-function.jsonl` holds the ten
-records `cp9-cells/s6/rule-function/…` of the set's corrected revision `81b3a0c419ed542b…` (1,981 gate records;
-deferred `77b11b86eae67cf7…`, 9), which pin the lead's rule function for C1, C9 and C10:
-- `carrier/selecting`, `carrier/combining` (r4.63 (2));
-- `defaults/get`, `defaults/otherwise`, `defaults/otherwise-family`, `defaults/load`, `defaults/fromJson` (r4.63 (3),
-  r4.65 (1));
-- `loop/decided`, `loop/unknown-control`, `loop/unknown-read` (r4.63 (4), r4.64, r4.65 (2), r4.66 (1): the loop
-  variable meets a real consumer, `repeat entry {}`).
-
-`cells.jsonl` and its pin `1de3570831c7bc4b…` are untouched; S6b's refresh folds these records into it and removes this
-file. The file was made with the same tooling, `convert.py` `ba04601abfc9e012…` and `verify.py` `9a5b8e73c7bd46f9…`,
-from the whole revision, the ten lines kept byte for byte:
+Opus, builder for M4 step S6b (lead Fable). Both files are regenerated from the set's revision
+`81b3a0c419ed542b…` (1,981 gate records) and its deferred records `77b11b86eae67cf7…` (9) with the tooling unchanged:
+`convert.py` `ba04601abfc9e012…`, `verify.py` `9a5b8e73c7bd46f9…`, `collection-rewrites.json` `981e40ee…`.
 
 ```sh
 F=/home/peter/notes/teasescript/reports/type-inference-research-2026-10-17/evidence/3a-newcore/fixture
 S=$F/../expected-cp9-cells
-work=$(mktemp -d /tmp/agent-work/o4-m4-s6/fixture-rule-function-XXXXXX)
+work=$(mktemp -d /tmp/agent-work/o4-m4-s6b/fixture-XXXXXX)
 mkdir "$work/set" "$work/out"
 cp "$S/cases.jsonl" "$S/cases-deferred.jsonl" "$work/set/"
 python3 -I "$F/convert.py" --set "$work/set" --out "$work/out"
 python3 -I "$F/verify.py" --preservation "$work/set/cases.jsonl" "$work/out/cells.jsonl"
-grep '^{"name":"cp9-cells/s6/rule-function/' "$work/out/cells.jsonl" > tests/fixtures/type-core/cells-rule-function.jsonl
+python3 -I "$F/verify.py" --preservation "$work/set/cases-deferred.jsonl" "$work/out/cells-deferred.jsonl"
+cp "$work/out/cells.jsonl" "$work/out/cells-deferred.jsonl" tests/fixtures/type-core/
 ```
 
-`verify.py --preservation` passes for the revision, 1,981 of 1,981. The file's SHA-256 is `987bc86d2f0ac5bb…`.
+- `verify.py --preservation`: 1,981 of 1,981 gate records and 9 of 9 deferred records the same, every diagnostic,
+  expression, obligation, check and N10 writer span. The converter rewrote 199 gate records (195 prefixed files and the
+  four collection records) and the same 2 deferred records.
+- Against `1de35708…`, 68 records are added, 114 changed and none removed. Added: the 40 presence records
+  `cp9-cells/s4/presence/…`; the ten rule-function records `cp9-cells/s6/rule-function/…` (TABLE r4.63–r4.66), the
+  same bytes as S6's separate `cells-rule-function.jsonl` (`987bc86d…`), which this refresh removes; and TABLE r4.52's
+  18: AD-3's six `cp9-cells/s4/s6b/dead-code/…`, AD-2's five `cp9-cells/s4/s7/load-field-repair/…` and AD-1's seven.
+  Changed: AD-1's 92 re-derived expectations, r4.62's 21 member-read and operator site ends, and r4.60's corrected
+  `cp9-cells/r8/get-dispatch/unknown`. AD-1's 55 metadata re-derivations leave their compact records as they were. In
+  the deferred file AD-1 re-derives `cp9-cells/3b/review-late/json/constant`.
+- Every AD-1 record cites a cell of stage 3b (N1–N10), so that class holds it until S10; the tests name the held
+  classes and their counts (`heldBack`, `tests/helpers/type-core-fixture.ts`).
 
 ## Refresh (M4 step S6)
 
@@ -87,8 +90,8 @@ rerun on it: zero skips and zero differences in both orders.
 
 | file | SHA-256 | content |
 |---|---|---|
-| `cells.jsonl` | `d8cf041ad77e7a9a2fcaa410ffe318532e1311351a08bea74cfdeef0a2ba488a` | the 1,913 gate records with site ends, 1,042,965 bytes (S6's refresh without ends `b9ddd0fd…`; S0's snapshot `cea67bb6…`, 1,782 records) |
-| `cells-deferred.jsonl` | `c4836620dc65f17a4915816e920ab91dd340589abc60e2257a77e640c61323e4` | the 9 deferred-syntax records with site ends, never in the gate (without ends `f6db26a8…`) |
+| `cells.jsonl` | `157de4ba7df82208bce73d13eaab0566588203f705a307c3eb8be5ae1eace5ff` | the 1,981 gate records with site ends, 1,075,165 bytes (S6's `d8cf041a…`, 1,913 records; S0's snapshot `cea67bb6…`, 1,782 records) |
+| `cells-deferred.jsonl` | `ec01c689673fd084dab9bd1d0182dda838804880adf0b35e473d030ba86245a8` | the 9 deferred-syntax records with site ends, never in the gate (S6's `c4836620…`) |
 | `convert.py` | `ba04601abfc9e012cc466bc084d92bf3f7289ae4731428d95a32e2e8046c7464` | the converter: deterministic, one record per line, fixed key order, full compact spans (earlier S6 refresh: `eef78c11…`) |
 | `collection-rewrites.json` | `981e40ee4a1490609eb4e78f9a3095d514edc256acfe580dc77e628ab03970c2` | the four collection rewrites, all `confirmed: true` |
 | `verify.py` | `9a5b8e73c7bd46f9f647f33e597829b503b1634df0d40d4055a95a3e0fd5eeb5` | the exit condition's own checks, beside the lead's comparator, and span preservation (`--preservation`) (earlier: `8062a453…`) |

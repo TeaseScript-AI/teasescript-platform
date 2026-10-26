@@ -211,7 +211,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let positive = 0;
   let plans = 0;
   let runs = 0;
-  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")]) {
+  for (const record of readFixture()) {
     if (heldBack(record) !== null) continue;
     positive += 1;
     let result: ReturnType<typeof compileProjectWithBackend>;
@@ -1575,6 +1575,143 @@ test("a copy of a written collection admits its written domain at every level, n
   }
   t.diagnostic(
     `${WRITTEN_COPY_MATRIX.length} sources, each in both orders with the sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+/**
+ * AD-3 (TABLE r4.52; X1 drops flow facts, never a written type): host data stored into a written place in dead code (a
+ * function nothing calls, after `exit`, a branch on `false`) is checked against the written domain, as in live code,
+ * never against `unknown`. Per place and dead shape, the dead program and its live form (the function called; the
+ * statements live), in both orders: the admitted domain at each collection level, the one boundary against the written
+ * element kind at the host read, and, where the candidate route takes the program, the one checked store, the host
+ * value's, with the whole written type.
+ */
+test("a dead store of host data into a written place is checked against its written domain, as live (AD-3)", (t) => {
+  const sorted = (kinds: readonly string[]): string[] => [...kinds].sort();
+  // per place: its name, the statements, its written kinds per level, and the store bringing the host value with the
+  // whole type the plan checks there
+  const places: readonly (readonly [
+    what: string,
+    name: string,
+    body: string,
+    levels: readonly (readonly string[])[],
+    store: string,
+    checked: string,
+  ])[] = [
+    [
+      "a written scalar",
+      "out",
+      "let out: integer = 1\nout = hostValue",
+      [["integer"]],
+      "out = hostValue",
+      "integer",
+    ],
+    [
+      "a written list",
+      "out",
+      "let out: integer[] = [1]\nout = [hostValue]",
+      [["list"], ["integer"]],
+      "out = [hostValue]",
+      "list<integer>",
+    ],
+    [
+      "a written list of lists",
+      "out",
+      "let out: integer[][] = [[1]]\nout = [[hostValue]]",
+      [["list"], ["list"], ["integer"]],
+      "out = [[hostValue]]",
+      "list<list<integer>>",
+    ],
+    [
+      "a copy of a written list",
+      "copy",
+      "let typed: integer[] = [1]\nlet copy = typed\ncopy = [hostValue]",
+      [["list"], ["integer"]],
+      "copy = [hostValue]",
+      "list<integer>",
+    ],
+  ];
+  const indented = (body: string): string =>
+    body
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
+  // per dead shape: the program with `body` dead, its live form, and whether the candidate route takes them (a function
+  // is outside its slice)
+  const shapes: readonly (readonly [
+    string,
+    (body: string) => string,
+    (body: string) => string,
+    boolean,
+  ])[] = [
+    [
+      "a function nothing calls",
+      (body) => `function use(x) {\n${indented(body)}\n}\nexit\n`,
+      (body) => `function use(x) {\n${indented(body)}\n}\nuse(1)\nexit\n`,
+      false,
+    ],
+    ["after exit", (body) => `exit\n${body}\n`, (body) => `${body}\nexit\n`, true],
+    [
+      "a branch on a literal false",
+      (body) => `if false {\n${indented(body)}\n}\nexit\n`,
+      (body) => `${body}\nexit\n`,
+      true,
+    ],
+  ];
+  const observe = (source: string, name: string, levels: number) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === name,
+    )!;
+    const text = (start: number, end: number): string => `'${source.slice(start, end)}'`;
+    return inBothOrders(() => {
+      const answers = analyseCore(request);
+      const plan = insideSlice(() => candidate(source))?.plan ?? null;
+      return {
+        levels: Array.from({ length: levels }, (_, level) => {
+          const admitted = answers.place(place.id, Array<string>(level).fill("element")).admitted;
+          return admitted.by === "undecided" ? ["undecided"] : sorted(admitted.kinds);
+        }),
+        boundaries: answers.checks
+          .filter((check) => check.boundary)
+          .map(
+            (check) =>
+              `${check.target} [${sorted(check.against).join(", ")}] ${text(check.site.start, check.site.end)}`,
+          )
+          .sort(),
+        plan:
+          plan === null
+            ? null
+            : typeChecks(plan).map(({ so, eo, type }) => `${text(so, eo)} ${typeText(type)}`),
+      };
+    });
+  };
+  const wrong: string[] = [];
+  let plans = 0;
+  for (const [what, name, body, levels, store, checked] of places)
+    for (const [where, dead, live, planned] of shapes) {
+      const element = levels.at(-1)!;
+      const expected = {
+        levels: levels.map(sorted),
+        boundaries: [
+          `${[name, ...Array<string>(levels.length - 1).fill("element")].join(".")} [${sorted(element).join(", ")}] 'hostValue'`,
+        ],
+        plan: planned ? [`'${store}' ${checked}`] : null,
+      };
+      if (planned) plans += 2;
+      for (const [form, source] of [
+        ["dead", dead(body)],
+        ["live", live(body)],
+      ] as const) {
+        const found = observe(source, name, levels.length);
+        if (JSON.stringify(found) !== JSON.stringify(expected))
+          wrong.push(`${what}, ${where}, ${form}: ${JSON.stringify(found)}`);
+      }
+    }
+  t.diagnostic(
+    `${places.length * shapes.length * 2} programs, ${plans} planned on the candidate route`,
   );
   assert.deepEqual(wrong, []);
 });

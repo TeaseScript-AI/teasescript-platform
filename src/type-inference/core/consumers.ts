@@ -491,6 +491,14 @@ export class Consumers {
           }
         }
         const items = admission.valueAt(d, at);
+        // a dead call's argument holding a kind that came through a call may lack the marks that call's binding would
+        // give (F21, `called`): it stays unchecked, as every dead call's argument was before AD-3
+        if (
+          d.how === "argument" &&
+          !program.live(d.node) &&
+          items.some((item) => item.called === true)
+        )
+          return;
         const before =
           decider !== null && admission.sourceOrder(d) < admission.sourceOrder(decider);
         const bad = deciding(items).filter(

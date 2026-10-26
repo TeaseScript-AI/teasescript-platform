@@ -823,7 +823,10 @@ export class Admission {
       if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
         candidates.set(`${candidate.d.uid}|${candidate.at.join(".")}`, candidate);
     if (transfer && path.length > 0)
-      for (const d of definitions.byKey.get(keyOf(root, [])) ?? [])
+      for (const d of [
+        ...(definitions.byKey.get(keyOf(root, [])) ?? []),
+        ...(definitions.deadArguments.get(keyOf(root, [])) ?? []),
+      ])
         if (lists.live(d) && d.kind === "whole")
           candidates.set(`${d.uid}|${path.join(".")}`, { d, at: path });
     for (const { key: prefix, rest } of prefixes) {
@@ -978,7 +981,10 @@ export class Admission {
     for (let length = 0; length < path.length; length += 1) {
       program.work.charge("checks");
       const prefix = keyOf(root, path.slice(0, length));
-      if ((definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add"))
+      if (
+        (definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add") ||
+        definitions.deadArguments.has(prefix)
+      )
         prefixes.push({ key: prefix, rest: path.slice(length) });
     }
     return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
@@ -3103,9 +3109,11 @@ export class Admission {
   // ------------------------------------------------------------------------------------------- the landing index
 
   /**
-   * S6-CARRIERS §3.2: every live store, add and transfer landing walked once (`#stopsOf`, the walk admission's deciders
-   * and C1's contributions read), then every operation's own read, as its own landing; each ingress stop recorded by
-   * the store that brings it, or as an own read. Built once per pass, at its first use.
+   * S6-CARRIERS §3.2: every store, add and transfer landing that admission does not reject walked once (`#stopsOf`, the
+   * walk admission's deciders and C1's contributions read), then every operation's own read, as its own landing; each
+   * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
+   * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
+   * destination's admitted type, as in live code (AD-3: a written type is no flow fact).
    */
   #landingIndex(): LandingIndex {
     if (this.#landings !== null) return this.#landings;
@@ -3184,9 +3192,13 @@ export class Admission {
             else found(stop, ingress, own);
           }
     };
-    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+    for (const d of [
+      ...definitions.storeDefs,
+      ...definitions.transferDefs,
+      ...[...definitions.deadArguments.values()].flat(),
+    ]) {
       if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
-      if (!lists.live(d) || !program.live(d.node)) continue;
+      if (!lists.live(d)) continue;
       walk(d.value, d.node, (stop, ingress, own) => {
         if (own) {
           entry(ingress).own = true;

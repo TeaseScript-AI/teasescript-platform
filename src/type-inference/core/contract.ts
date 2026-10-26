@@ -46,6 +46,7 @@ import {
   firstContext,
   firstWriter,
   makeItem,
+  marksOf,
   mergeItems,
   reasonContext,
   REASON,
@@ -94,10 +95,11 @@ export function unknownItem(reasons: number, writer: Writer | null = null): Item
  * result, F10's conversion, F14's length, F27's key) is guarded, and possible, where one of them is.
  */
 export function carried(item: Item, from: readonly Item[]): Item {
+  const marks = marksOf(from);
   const guard = from.find((each) => each.guarded === true);
   return guard === undefined
-    ? item
-    : { ...item, cert: "pos", guarded: true, context: item.context ?? guard.context };
+    ? { ...item, ...marks }
+    : { ...item, ...marks, cert: "pos", context: item.context ?? guard.context };
 }
 
 /** A typeless load's `default: null` beside its external data: the null carries the ingress's word (§3.4 r4.11). */
@@ -186,7 +188,7 @@ function belowUnknown(item: Item): Item {
     context: item.context,
     ...(item.ingress === undefined ? {} : { ingress: item.ingress }),
     ...(item.loose === true ? { loose: true } : {}),
-    ...(item.guarded === true ? { guarded: true } : {}),
+    ...marksOf([item]),
   });
 }
 
@@ -586,7 +588,11 @@ export class Contract {
     if (program.isHost(place)) return [unknownItem(REASON.external)];
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
     // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
-    return yield* this.#keyThrough(key, 0);
+    const items = yield* this.#keyThrough(key, 0);
+    // a parameter's and a result's kinds come through their calls (F20–F22): marked so, as the guard mark travels
+    return found.kind.kind === "parameter" || found.kind.kind === "result"
+      ? items.map((item) => (item.tag === "empty" ? item : { ...item, called: true }))
+      : items;
   }
 
   /**
@@ -627,9 +633,9 @@ export class Contract {
       const at = termAt(written, path);
       if (at !== null) {
         const stored = yield* this.#contractAlong(place, path, 0, receiver.floor);
-        const guarded = stored.some((item) => item.guarded === true);
+        const marks = marksOf(stored);
         const tags = typeTags(at).map((tag) =>
-          makeItem(tag, null, guarded ? { cert: "pos", guarded: true } : {}),
+          makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
         );
         return path.at(-1) === "element" && stored.some((item) => item.tag === "empty")
           ? [...tags, EMPTY]
@@ -741,18 +747,22 @@ export class Contract {
     const path = keyPath(key);
     const found = program.place(place);
     const declaration = definitions.declOf.get(place);
-    // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read, the read live
+    // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
+    // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
+    // is the error it is in live code (AD-3), unless the kind came through a call (a parameter's, a result's, a copy of
+    // one: `called`), whose marks a dead call's binding would give and does not (F21): that one stays possible
     let definite =
       kinds.length === 1 &&
       kinds[0]!.tag !== "unknown" &&
       kinds[0]!.guarded !== true &&
-      !node.dead &&
-      (found.kind.kind === "parameter" ||
-        found.kind.kind === "result" ||
-        (declaration !== undefined &&
-          lists.live(declaration) &&
-          program.reached(declaration.node) &&
-          program.dom.dominates(declaration.node, node)));
+      (program.live(node)
+        ? found.kind.kind === "parameter" ||
+          found.kind.kind === "result" ||
+          (declaration !== undefined &&
+            lists.live(declaration) &&
+            program.reached(declaration.node) &&
+            program.dom.dominates(declaration.node, node))
+        : declaration !== undefined && kinds[0]!.called !== true);
     // every selection on the way holds an element
     for (let length = 1; length <= path.length && definite; length += 1)
       if (path[length - 1] === "element") {

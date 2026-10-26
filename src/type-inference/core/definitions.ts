@@ -151,6 +151,8 @@ export class DefinitionIndex {
   /** The stores and adds into places; and the returns, arguments and parameter defaults (C9's transfers). */
   readonly storeDefs: Definition[] = [];
   readonly transferDefs: Definition[] = [];
+  /** A dead call's arguments for written parameters, by the parameter's key: candidates, never definitions (F22). */
+  readonly deadArguments = new Map<Key, Definition[]>();
   /** A binding's declaration: its initializer or its loop binding. */
   readonly declOf = new Map<PlaceId, Definition>();
   /** F5a: a loop's exit definition per collection key. */
@@ -376,36 +378,41 @@ export class DefinitionIndex {
     this.transferDefs.push(d);
   }
 
-  /** F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. */
+  /**
+   * F21, F22: each argument is a whole store into its parameter at the parameter's binding node in the callee. A dead
+   * call binds nothing (F21), but its argument for a written parameter is still checked against that type (F22, AD-3):
+   * a candidate at the dead call, and no definition, so no contract, exact path or event of the parameter holds it.
+   */
   #arguments(constraint: Extract<CoreProgram["constraints"][number], { kind: "call" }>): void {
     const program = this.program;
-    // F21: a dead call binds nothing
     const call = program.exprAt(constraint.site);
-    if (call !== null && !program.live(call)) return;
+    const dead = call !== null && !program.live(call) ? call : null;
     const fn = program.functionOf(constraint.fn);
     const region = program.functionRegion(constraint.fn);
     const bind = (parameter: PlaceId | undefined, argument: PlaceId): void => {
       if (parameter === undefined || region === undefined) return;
       const place = program.places[parameter];
-      if (place?.kind.kind !== "parameter") return;
-      const node = region.parameters.get(place.kind.name) ?? region.entry;
-      const d = this.#add({
+      if (place?.kind.kind !== "parameter" || (dead !== null && place.kind.written === null))
+        return;
+      const binding: Omit<Definition, "uid"> = {
         kind: "whole",
         weak: false,
         key: keyOf(parameter, []),
         place: parameter,
         path: [],
         value: argument,
-        node,
+        node: dead ?? region.parameters.get(place.kind.name) ?? region.entry,
         how: "argument",
         // r4.10: its diagnostics sit on the argument
         site: program.places[argument]?.site ?? constraint.site,
         fn: constraint.fn,
         recv: null,
         prep: null,
-      });
+      };
+      const d = dead === null ? this.#add(binding) : { uid: this.#serial++, ...binding };
       this.#candidate(d, d.key);
-      this.transferDefs.push(d);
+      if (dead === null) this.transferDefs.push(d);
+      else append(this.deadArguments, d.key, d);
     };
     constraint.arguments.forEach((argument, index) => bind(fn.parameters[index], argument));
     for (const named of constraint.named)

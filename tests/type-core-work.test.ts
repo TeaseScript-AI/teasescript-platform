@@ -328,7 +328,7 @@ test("every alias member answers as its class does at every decided path, in bot
       for (const k of [2, 3, 5]) run(`${family.name} at ${k}`, family.program(k), reversed);
     for (const { name, files } of ORACLE_PROGRAMS) run(name, files, reversed);
   }
-  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+  for (const record of readFixture())
     if (coreRequest(record.files) !== null) run(record.name, record.files, false);
   t.diagnostic(`${compared} member answers compared with their classes'`);
   assert.deepEqual(differences, []);
@@ -369,7 +369,7 @@ test("resolving chains of copies changes no published record or writer, in both 
       ...ADMISSION_SAME_SOURCES,
     ])
       for (const k of [2, 3, 5]) compare(`${family.name} at ${k}`, family.program(k), reversed);
-  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+  for (const record of readFixture())
     if (coreRequest(record.files) !== null) compare(record.name, record.files, false);
   assert.deepEqual(differing, []);
 });

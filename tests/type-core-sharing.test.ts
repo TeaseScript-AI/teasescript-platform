@@ -92,7 +92,7 @@ function programs(): Program[] {
       'let raw = hostValue\nraw = 1\nlet out = [[raw].get(9, default: null), raw, "tail"]\nrepeat out[0] {}\nexit\n',
     ),
   );
-  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+  for (const record of readFixture())
     out.push({ name: record.name, files: record.files, fixture: true });
   return out;
 }
