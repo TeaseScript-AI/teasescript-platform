@@ -2119,9 +2119,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
     // PROPOSED, not accepted (the owner decides it with the merge request): each copy sees one more conditional store
     // below the copied path, so each has its own signature, k classes, each answered at each of the k fields read
-    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 373,733 / 1,349,677 units at
-    // k = 64, 128 in both orders (3.6236); the allowance reached at k = 619; at k = 1,024 82,341,445 units, 274.5 % of
-    // its 30,000,000 (the budget error)
+    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 374,057 / 1,350,321 units at
+    // k = 64, 128 in both orders (3.6222; 3.6236 before TABLE r4.67); the allowance reached at k = 619; at k = 1,024
+    // 82,346,569 units, 274.5 % of its 30,000,000 (the budget error)
     measured: 3.63,
     program: (k) =>
       main(
