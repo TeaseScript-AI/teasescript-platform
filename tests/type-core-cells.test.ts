@@ -6,7 +6,7 @@ import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.j
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
-import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
 import {
@@ -93,8 +93,9 @@ test("the core gives the expected record for every rule-function record, in both
 /**
  * AD-3 (TABLE r4.52; ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read keeps its
  * contract's one known kind, so an intrinsic violation of a known type is the error its live form is, at the same
- * text; a dead call's argument meets its written parameter (F22) as a live one does. The flow facts stay dropped there
- * (X1): a kind only the read's reaching definition decides gives the `dead-code` warning, never the live form's error.
+ * text; a dead call's argument meets its written parameter (F22) as a live one does, and is no definition of it. The
+ * flow facts stay dropped there (X1): a kind only the read's reaching definition decides gives the `dead-code` warning,
+ * never the live form's error.
  */
 test("dead code keeps its intrinsic type errors and drops its flow facts, in both orders (AD-3)", () => {
   const run = (request: NonNullable<ReturnType<typeof coreRequest>>, reversed: boolean) =>
@@ -117,21 +118,23 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       if (differences.length > 0)
         differing.push(`${record.name}${reversed ? " reversed" : ""}: ${differences.join("; ")}`);
     }
-  // a record by the text at its sites, so a live form and its dead one compare where their offsets differ
-  const analysed = (source: string, reversed: boolean): string[] => {
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null, source);
+  // a record by the file and text at its sites, so a live form and its dead one compare where their offsets differ
+  const analysed = (program: string | readonly SourceFile[], reversed: boolean): string[] => {
+    const files = typeof program === "string" ? [{ path: "main.tease", source: program }] : program;
+    const request = coreRequest(files);
+    assert.ok(request !== null, files.map((file) => file.source).join("\n"));
     const record = run(request, reversed);
-    const text = (site: CompactSite): string => source.slice(site.offset, site.end);
+    const text = (site: CompactSite): string =>
+      `${site.file}:'${files.find((file) => file.path === site.file)!.source.slice(site.offset, site.end)}'`;
     return [
       record.outcome,
       ...record.diagnostics
-        .map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} '${text(d.site)}'`)
+        .map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} ${text(d.site)}`)
         .sort(),
       ...record.checks
         .map(
           (c) =>
-            `${c.kind} ${c.target} [${c.against.join(", ")}]${c.boundary ? " B" : ""} '${text(c.site)}'`,
+            `${c.kind} ${c.target} [${c.against.join(", ")}]${c.boundary ? " B" : ""} ${text(c.site)}`,
         )
         .sort(),
     ];
@@ -183,6 +186,54 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
           : JSON.stringify(found) === JSON.stringify(live);
         if (!expected) differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
       }
+    }
+  }
+  // a global is set up at the session's start wherever it is declared (V30 §12): a dead read before its declaration
+  // or in another file is the live form's error too
+  const global = 'global n: string = "bad"';
+  const caller = { path: "main.tease", source: `${global}\ncall "other.tease"\nexit\n` };
+  const globals: readonly (readonly [string, readonly SourceFile[], readonly SourceFile[]])[] = [
+    [
+      "a global declared after its dead read",
+      [{ path: "main.tease", source: `exit\nrepeat n {}\n${global}\n` }],
+      [{ path: "main.tease", source: `repeat n {}\n${global}\nexit\n` }],
+    ],
+    [
+      "a global read in dead code of another file",
+      [caller, { path: "other.tease", source: "exit\nrepeat n {}\n" }],
+      [caller, { path: "other.tease", source: "repeat n {}\n" }],
+    ],
+  ];
+  // a dead call is no definition of its parameter: a guarded argument there leaves a live call's result as it was
+  const results: readonly (readonly [string, string, readonly string[]])[] = [
+    [
+      "a number returned into a whole number",
+      "global n = 2.0\nfunction f(x: number) {\n  return x\n}\nlet out: integer = f(2.5)",
+      ["if n is integer { f(n) }", "if n is integer { f(x: n) }"],
+    ],
+    [
+      "numbers returned into whole numbers",
+      "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet out: integer[] = f([2.5])",
+      ["if n is integer { f([n]) }"],
+    ],
+  ];
+  for (const reversed of [false, true]) {
+    const order = reversed ? " reversed" : "";
+    for (const [what, dead, live] of globals) {
+      const expected = analysed(live, reversed);
+      const found = analysed(dead, reversed);
+      if (expected[0] !== "compile-error" || JSON.stringify(found) !== JSON.stringify(expected))
+        differing.push(`${what}${order}: ${found.join("; ")}, live ${expected.join("; ")}`);
+    }
+    for (const [what, before, calls] of results) {
+      const live = analysed(`${before}\nexit\n`, reversed);
+      if (live[0] !== "compile-error") differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      for (const call of calls)
+        for (const [where, shape] of shapes) {
+          const found = analysed(shape(before, call), reversed);
+          if (JSON.stringify(found) !== JSON.stringify(live))
+            differing.push(`${what}, ${call}, ${where}${order}: ${found.join("; ")}`);
+        }
     }
   }
   assert.deepEqual(differing, []);
