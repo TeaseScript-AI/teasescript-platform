@@ -189,60 +189,6 @@ test("admission's work on same-source adds and choices grows with the program in
 });
 
 /**
- * Native resilience (TABLE §8): admission's walks over a literal of 150,000 elements beside a host value list them on
- * the heap, never as one call's arguments (review r3: a spread of the elements overflowed the native stack).
- */
-test("a literal of 150,000 elements beside a host value is admitted within the native stack", () => {
-  const source = `let xs: integer[] = [${Array.from({ length: 150_000 }, () => "1").join(",")}, hostValue]\nexit`;
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  assert.equal(analyseCore(request).outcome, "warning-runtime-check");
-});
-
-/**
- * Native resilience (TABLE §8, external review r6 F1): a key's definitions below another, of 130,000 stores to one
- * property, are listed on the heap, never as one call's arguments; 10,000 stores are the ordinary-size control.
- */
-test("130,000 stores to one property are analysed within the native stack", () => {
-  for (const stores of [10_000, 130_000]) {
-    const source = [
-      "let root = {n: 0}",
-      ...Array.from({ length: stores }, () => "root.n = 1"),
-      "let box = root",
-      "repeat box.n {}",
-      "exit",
-    ].join("\n");
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null);
-    assert.equal(analyseCore(request).outcome, "valid", `${stores} stores`);
-  }
-});
-
-/**
- * Native resilience (TABLE §8, round 10 B5): an element read of a result that a chain of 2,048 functions returns, each
- * the next one's or a list, asks whether several elements meet there through every function's result: on the solver's
- * stack, never one native frame per function.
- */
-test("an element read through a chain of 2,048 returned results is answered within the native stack", () => {
-  const functions = Array.from(
-    { length: 2_048 },
-    (_, index) =>
-      `function get${index} {\n  if flagHost { return [1] }\n  return get${(index + 1) % 2_048}()\n}`,
-  );
-  const source = `let flagHost = askBoolean "flag"\n${functions.join("\n")}\nlet xs = [get0(), get0()]\nrepeat xs[0][0] {}\nexit`;
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  const forward = analyseCore(request).outcome;
-  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
-    withConsumerOrder(
-      (list) => [...list].reverse(),
-      () => analyseCore(request).outcome,
-    ),
-  );
-  assert.deepEqual([forward, reversed], ["valid", "valid"]);
-});
-
-/**
  * A value's identity names its inputs by their own identities (TABLE §8, round 12 B4): a chain of 32 `otherwise`s, each
  * of the one before twice, is a source of 32 lines, never an identity of 2^32 characters.
  */

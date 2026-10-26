@@ -972,7 +972,9 @@ export class DefinitionLists {
     readonly calls: readonly number[];
   } {
     const stores = [...this.#eventList(key)];
-    for (const prefix of prefixesOf(key)) stores.push(...this.definitionsOf(prefix).eventPositions);
+    // (one by one: a prefix's events grow with the source, past one call's arguments, Astra r6 N1)
+    for (const prefix of prefixesOf(key))
+      for (const position of this.definitionsOf(prefix).eventPositions) stores.push(position);
     this.#program.work.charge("eventSteps", sortCost(stores.length));
     stores.sort((a, b) => a - b);
     return {

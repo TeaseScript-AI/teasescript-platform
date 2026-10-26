@@ -490,7 +490,8 @@ export class ExactPath {
       if (!links.has(uid)) {
         const list = tops.get(anchor.place);
         if (list === undefined) tops.set(anchor.place, [...anchor.copies]);
-        else list.push(...anchor.copies);
+        // (one by one: a source's copies grow with the source, past one call's arguments, Astra r6 N1)
+        else for (const copy of anchor.copies) list.push(copy);
       }
     const loose = new Map<PlaceId, CopyLink[]>();
     for (const root of roots)
