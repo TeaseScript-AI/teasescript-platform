@@ -97,8 +97,8 @@ export class SliceIndex {
   readonly #parent = new Map<Expression, Expression>();
   /** The name of the property each value of an object literal gives. */
   readonly #propertyOf = new Map<Expression, string>();
-  /** Where each property name is written, in a literal or as a store's target: its files and offsets. */
-  readonly #written = new Map<string, (readonly [number, number])[]>();
+  /** Where each property name is first written, in a literal or as a store's target: its file and offset. */
+  readonly #written = new Map<string, readonly [number, number]>();
   readonly #file = new Map<object, number>();
   readonly #bySite = new Map<string, Expression>();
   readonly #statementsBySite = new Map<string, Statement>();
@@ -330,38 +330,24 @@ export class SliceIndex {
 
   #write(name: string, file: number, span: SourceSpan): void {
     const known = this.#written.get(name);
-    if (known === undefined) this.#written.set(name, [[file, span.start.offset]]);
-    else known.push([file, span.start.offset]);
+    if (
+      known === undefined ||
+      file < known[0] ||
+      (file === known[0] && span.start.offset < known[1])
+    )
+      this.#written.set(name, [file, span.start.offset]);
   }
 
-  /**
-   * Property names in the order `source` writes them, in its literals or as its stores' targets, so that a record's
-   * fields keep the order its own source gives them (a repair's warnings, a parsed record's fields); names it does not
-   * write follow, in the order the program first writes them, then by name.
-   */
-  public inWrittenOrder(names: Iterable<string>, source: Expression): string[] {
-    const file = this.fileOf(source);
-    const { start, end } = { start: source.span.start.offset, end: source.span.end.offset };
-    const at = (name: string): readonly [number, number, number] => {
-      let inside = Infinity;
-      let first: readonly [number, number] = [Infinity, Infinity];
-      for (const written of this.#written.get(name) ?? []) {
-        if (written[0] === file && written[1] >= start && written[1] < end)
-          inside = Math.min(inside, written[1]);
-        if (written[0] < first[0] || (written[0] === first[0] && written[1] < first[1]))
-          first = written;
-      }
-      return [inside, ...first];
-    };
+  /** Property names in the order the program first writes them, in a literal or as a store's target, then by name. */
+  public inWrittenOrder(names: Iterable<string>): string[] {
+    const at = (name: string): readonly [number, number] =>
+      this.#written.get(name) ?? [Infinity, Infinity];
     const compare = <T>(a: T, b: T): number => (a === b ? 0 : a < b ? -1 : 1);
     return [...names]
       .map((name) => ({ name, key: at(name) }))
       .sort(
         (a, b) =>
-          compare(a.key[0], b.key[0]) ||
-          compare(a.key[1], b.key[1]) ||
-          compare(a.key[2], b.key[2]) ||
-          compare(a.name, b.name),
+          compare(a.key[0], b.key[0]) || compare(a.key[1], b.key[1]) || compare(a.name, b.name),
       )
       .map(({ name }) => name);
   }
@@ -857,6 +843,7 @@ class Contracts {
   /** The check of a store: the destination's written type, or else its contract at the stored path (A1–A9). */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
+    const value = store.kind === "letStatement" ? store.initializer : store.value;
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const type =
@@ -864,13 +851,7 @@ class Contracts {
         ? typePlan(typeFromAnnotation(declaration.typeAnnotation))
         : place === null
           ? null
-          : runCompileTask(
-              this.#contractTask(
-                place.id,
-                place.path,
-                store.kind === "letStatement" ? store.initializer : store.value,
-              ),
-            );
+          : runCompileTask(this.#contractTask(place.id, place.path, value, [value]));
     if (type === null) return null;
     const name = [
       declaration.name.name,
@@ -894,13 +875,9 @@ class Contracts {
       );
     return runCompileTask(
       this.#answerTask(
-        {
-          node: nodeOf(this.answers, this.index, call),
-          call,
-          source: fallback ?? call,
-          landing: this.#landing(call),
-        },
+        { node: nodeOf(this.answers, this.index, call), call, landing: this.#landing(call) },
         [],
+        [call],
       ),
     );
   }
@@ -962,20 +939,24 @@ class Contracts {
   /**
    * A place's contract at a path: its admitted type (`admittedType`) with each object the place decided given the
    * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object` and an
-   * undecided one stay open. A contract deeper than the slice follows makes the program, stored by `at`, leave the
-   * slice.
+   * undecided one stay open, the fields in the order of the stored value's records at their level (`fieldOrder`; a
+   * place's contract is its first checked store's). A contract deeper than the slice follows makes the program, stored by
+   * `at`, leave the slice.
    */
   *#contractTask(
     id: PlaceId,
     path: readonly string[],
     at: Expression,
+    records: readonly Expression[],
   ): CompileTask<TypePlan | null> {
     const key = `${id}|${path.join(".")}`;
     const known = this.#contracts.get(key);
     if (known !== undefined) return known;
     const admitted = typePlan(admittedType(this.answers, id, path));
     const plan =
-      admitted === null ? null : yield* compileChild(this.#fillTask(id, path, admitted, at));
+      admitted === null
+        ? null
+        : yield* compileChild(this.#fillTask(id, path, admitted, at, records));
     this.#contracts.set(key, plan);
     return plan;
   }
@@ -985,12 +966,13 @@ class Contracts {
     path: readonly string[],
     plan: TypePlan,
     at: Expression,
+    records: readonly Expression[],
   ): CompileTask<TypePlan> {
     switch (plan.kind) {
       case "union": {
         const members: TypePlan[] = [];
         for (const member of plan.members)
-          members.push(yield* compileChild(this.#fillTask(id, path, member, at)));
+          members.push(yield* compileChild(this.#fillTask(id, path, member, at, records)));
         return { kind: "union", members };
       }
       case "list":
@@ -1001,7 +983,15 @@ class Contracts {
           throw new OutsideContract(at, "a value whose structure the slice does not follow");
         return {
           kind: plan.kind,
-          element: yield* compileChild(this.#fillTask(id, [...path, "element"], plan.element, at)),
+          element: yield* compileChild(
+            this.#fillTask(
+              id,
+              [...path, "element"],
+              plan.element,
+              at,
+              literalsBelow(records, "element"),
+            ),
+          ),
         };
       case "object": {
         if (plan.properties.length > 0 || this.answers.place(id, path).admitted.by !== "decided")
@@ -1009,10 +999,17 @@ class Contracts {
         if (path.length + 1 >= SLICE_DEPTH)
           throw new OutsideContract(at, "a value whose structure the slice does not follow");
         const properties: TypePropertyPlan[] = [];
-        for (const name of this.index.inWrittenOrder(this.answers.placeProperties(id, path), at)) {
-          const below = [...path, propertyStep(name)];
+        for (const name of fieldOrder(
+          this.answers.placeProperties(id, path),
+          records,
+          this.index,
+        )) {
+          const step = propertyStep(name);
+          const below = [...path, step];
           if (this.answers.place(id, below).admitted.by === "undecided") continue;
-          const type = yield* compileChild(this.#contractTask(id, below, at));
+          const type = yield* compileChild(
+            this.#contractTask(id, below, at, literalsBelow(records, step)),
+          );
           if (type !== null) properties.push({ name, type });
         }
         return { kind: "object", properties };
@@ -1032,7 +1029,11 @@ class Contracts {
    * call lands in types such an open level (the core answers the call and the place differently there), where records
    * of a list lack fields no default supplies, and deeper than the slice follows.
    */
-  *#answerTask(at: AnsweredCall, path: readonly string[]): CompileTask<TypePlan | null> {
+  *#answerTask(
+    at: AnsweredCall,
+    path: readonly string[],
+    records: readonly Expression[],
+  ): CompileTask<TypePlan | null> {
     const answer = this.answers.valueAt(at.node, path);
     const held = new Set<ItemTag>();
     let lacking = false;
@@ -1045,7 +1046,8 @@ class Contracts {
     if (lacking && path.includes("element"))
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     if (held.has("number")) held.delete("integer");
-    if (held.has("unknown") || ![...held].some((tag) => tag !== "null")) {
+    // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type
+    if (held.has("unknown") || held.size === 0) {
       if (path.length === 0) return null;
       if (
         at.landing !== null &&
@@ -1062,30 +1064,95 @@ class Contracts {
     const members: TypePlan[] = [];
     for (const tag of VALUE_KIND_NAMES.filter((kind) => held.has(kind)))
       if (tag === "list" || tag === "set" || tag === "dict") {
-        const element = yield* compileChild(this.#answerTask(at, [...path, "element"]));
+        const element = yield* compileChild(
+          this.#answerTask(at, [...path, "element"], literalsBelow(records, "element")),
+        );
         // elements that take every value leave the collection open, as a store's check has it
         members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
       } else if (tag === "object") {
         const properties: TypePropertyPlan[] = [];
-        for (const name of this.index.inWrittenOrder(answer.properties, at.source))
+        for (const name of fieldOrder(answer.properties, records, this.index)) {
+          const step = propertyStep(name);
           properties.push({
             name,
             // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
-            type: (yield* compileChild(this.#answerTask(at, [...path, propertyStep(name)])))!,
+            type: (yield* compileChild(
+              this.#answerTask(at, [...path, step], literalsBelow(records, step)),
+            ))!,
           });
+        }
         members.push({ kind: "object", properties });
       } else members.push(kindPlan(tag));
     return unionOf(members);
   }
 }
 
-/** A typed parse or load whose expected type `Contracts.#answerTask` reads: its node, its default, where it lands. */
+/** A typed parse or load whose expected type `Contracts.#answerTask` reads: its node, where it lands. */
 interface AnsweredCall {
   readonly node: FlowNode;
   readonly call: Expression;
-  /** The source of its record's fields' order: its default, or the call. */
-  readonly source: Expression;
   readonly landing: Landing | null;
+}
+
+/**
+ * The literal data a value is at its level: itself, through parentheses and a typed parse's or load's default (whose
+ * records give a record's fields their order, `fieldOrder`).
+ */
+function literalsAt(values: readonly Expression[]): Expression[] {
+  const found: Expression[] = [];
+  const pending = [...values].reverse();
+  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
+    const node = unwrap(at);
+    const inner =
+      node.kind === "loadExpression"
+        ? node.defaultValue
+        : node.kind === "callExpression" &&
+            node.callee.kind === "identifier" &&
+            node.callee.name === "fromJson"
+          ? defaultOf(node)
+          : undefined;
+    if (inner === undefined) found.push(node);
+    else if (inner !== null) pending.push(inner);
+  }
+  return found;
+}
+
+/** The literal data one step below `values`: a record's field of that name, a list's or set's elements. */
+function literalsBelow(values: readonly Expression[], step: string): Expression[] {
+  return literalsAt(values).flatMap((node) =>
+    step === "element"
+      ? node.kind === "listLiteral" || node.kind === "setLiteral"
+        ? node.elements
+        : []
+      : node.kind === "objectLiteral"
+        ? node.properties
+            .filter((property) => propertyStep(property.name.name) === step)
+            .map((property) => property.value)
+        : [],
+  );
+}
+
+/**
+ * A record's field names in the order its own literal records at this level write them, so that a repair's warnings and
+ * a parsed record's fields follow its source; names they do not write follow, as the program first writes them.
+ */
+function fieldOrder(
+  names: Iterable<string>,
+  records: readonly Expression[],
+  index: SliceIndex,
+): string[] {
+  const order = new Map<string, number>();
+  for (const node of literalsAt(records))
+    if (node.kind === "objectLiteral")
+      for (const property of node.properties)
+        if (!order.has(property.name.name)) order.set(property.name.name, order.size);
+  const all = [...names];
+  return [
+    ...all
+      .filter((name) => order.has(name))
+      .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0)),
+    ...index.inWrittenOrder(all.filter((name) => !order.has(name))),
+  ];
 }
 
 /** The `default:` a call's value falls back on, or `null`. */

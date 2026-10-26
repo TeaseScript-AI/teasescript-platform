@@ -1021,6 +1021,61 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
   ]);
 });
 
+test("a known `null` reads as the `null` type, an unknown stays open, and each record keeps its own fields' order, in three layers, in both orders (S7 review r5 B1, N1)", () => {
+  // a written `null` target, at the root and as a list's elements, on both lowerings
+  for (const files of ["", ", files: false"])
+    for (const [written, fallback, expected, fitting, said] of [
+      ["null", "null", "null", "null", "null"],
+      ["null[]", "[null]", "list<null>", "[null]", "null"],
+    ] as const) {
+      const source = `let p: ${written} = fromJson(hostValue, default: ${fallback}${files})\nsay ${written === "null" ? "p" : "p[0]"}\nsay "AFTER"\nexit\n`;
+      const parse = at(source, `fromJson(hostValue, default: ${fallback}${files})`);
+      assert.ok(
+        decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
+        source,
+      );
+      const plan = candidatePlan(source);
+      assert.ok(
+        contentOf(plan).some((entry) => entry.endsWith(`@${parse} ${expected}`)),
+        `${source}: ${JSON.stringify(contentOf(plan))}`,
+      );
+      assert.deepEqual(ran(runWith(plan, fitting)), halted([said, "AFTER"]), source);
+      assert.deepEqual(
+        ran(runWith(plan, written === "null" ? "3" : "[3]")),
+        halted([said, "AFTER"], [`TSW020@${parse}`]),
+        source,
+      );
+    }
+  // without a written type, a `null` default leaves the value unknown (F19): no expected type
+  assert.deepEqual(
+    contentOf(
+      candidatePlan(
+        'let p = fromJson(hostValue, default: null, files: false)\nsay "AFTER"\nexit\n',
+      ),
+    ),
+    [],
+  );
+  // each record's fields in the order its own literal writes them, not a sibling's or a descendant's
+  const nested =
+    'let p = fromJson(hostValue, default: {r: {b: 0, a: 0}, s: {a: 1, b: 2}}, files: false)\nsay p.s.a\nsay "AFTER"\nexit\n';
+  const parse = at(
+    nested,
+    "fromJson(hostValue, default: {r: {b: 0, a: 0}, s: {a: 1, b: 2}}, files: false)",
+  );
+  const plan = candidatePlan(nested);
+  const type = "{r: {b: integer, a: integer}, s: {a: integer, b: integer}}";
+  assert.deepEqual(contentOf(plan), [`expected call@${parse} ${type}`]);
+  assert.deepEqual(checkedStores(plan), [`'p' ${type}`]);
+  const repaired = runWith(plan, '{"r": {"b": 0, "a": 0}, "s": {"a": "bad", "b": "bad"}}');
+  assert.deepEqual(ran(repaired), halted(["1", "AFTER"], [`TSW020@${parse}`, `TSW020@${parse}`]));
+  assert.deepEqual(
+    repaired.events.flatMap((event) =>
+      event.kind === "developerWarning" ? [/'(s\.[ab])'/.exec(event.message)?.[1]] : [],
+    ),
+    ["s.a", "s.b"],
+  );
+});
+
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads
