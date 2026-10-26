@@ -148,8 +148,10 @@ test("the compiler and runtime reject what a camera view cannot do", () => {
     ["let showCamera = 1\nexit", "TSV001"],
     ["hideCamera(1)\nexit", "TSP035"],
     ["showCamera(1)\nexit", "TSP035"],
-  ] as const)
-    assert.ok(codes(source).includes(code), `${source}: ${codes(source).join(", ")}`);
+  ] as const) {
+    const found = codes(source);
+    assert.ok(found.includes(code), `${source}: ${found.join(", ")}`);
+  }
   // Adding a number, or subtracting, is the operation's type error alone.
   for (const change of ["+= 5", '-= "stage"'])
     assert.deepEqual(codes(`let view = showCamera\nview.placement ${change}\nexit`), ["TSV041"]);
