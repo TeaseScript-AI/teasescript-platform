@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { withMemberOracle } from "../src/type-inference/core/admission.js";
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
+import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -349,15 +350,16 @@ test("every alias member answers as its class does at every decided path, in bot
       },
     ],
   }));
-  // every alias form (a copy, a literal's cell, a list's, a nested one, a literal index) beside the events its class
-  // answers through: a conditional store before or between the copies, a copy under a test of its source or of a field,
-  // a store between them
+  // every alias form (a copy, a literal's cell, a list's, a nested one, a literal index, a chain's link) beside the
+  // events its class answers through: a conditional store before or between the copies, a copy under a test of its
+  // source or of a field, a store between them
   const forms = [
     ["a copy", "root.nested", "", "root.nested"],
     ["a cell", "{data: root.nested}", ".data", "root.nested"],
     ["a list cell", "[root.nested]", "[0]", "root.nested"],
     ["a nested cell", "{a: {b: root.nested}}", ".a.b", "root.nested"],
     ["a literal index", "root.items[0]", "", "root.items[0]"],
+    ["a chain's link", "link", "", "root.nested"],
   ] as const;
   const aliases = forms.flatMap(([form, value, at, source]) => {
     const copy = `box = ${value}`;
@@ -376,6 +378,7 @@ test("every alias member answers as its class does at every decided path, in bot
           source: [
             "let raw = hostValue",
             "let root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}, items: [{f0: 1, f1: [1, raw][1]}]}",
+            "let link = root.nested",
             at === "" ? "let box = {f0: null, f1: null}" : `let box = ${value}`,
             ...steps,
             `repeat box${at}.f0 {}`,
@@ -402,6 +405,48 @@ test("every alias member answers as its class does at every decided path, in bot
   t.diagnostic(`${compared} member answers compared with their classes'`);
   assert.deepEqual(differences, []);
   assert.ok(compared > 1_000, `${compared} member answers compared`);
+});
+
+/**
+ * S6-CARRIERS §4.1's chains: a member read through a chain of copies keeps its own links' writers, which the oracle
+ * sets aside, so this guards what they are for: every published record, its diagnostics' F28 writers included, is the
+ * same with every chain resolved and with none (`withoutChains`), over every work family at small sizes in both orders
+ * and over the fixture's records.
+ */
+test("resolving chains of copies changes no published record or writer, in both orders (§4.1)", () => {
+  const differing: string[] = [];
+  const compare = (name: string, files: readonly SourceFile[], reversed: boolean): void => {
+    const request = coreRequest(files);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    const run = (): string => {
+      const analysed = (): Answers => analyseCore(request);
+      const answers = reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, analysed),
+          )
+        : analysed();
+      return JSON.stringify(
+        coreRecord(
+          coreResult(answers),
+          files.map((file) => file.path),
+        ),
+      );
+    };
+    if (run() !== withoutChains(run)) differing.push(`${name}${reversed ? " reversed" : ""}`);
+  };
+  for (const reversed of [false, true])
+    for (const family of [
+      ...WORK_FAMILIES,
+      ...W34_VARIANTS,
+      ...W44_VARIANTS,
+      ...W45_VARIANTS,
+      ...ADMISSION_FAMILIES,
+    ])
+      for (const k of [2, 3, 5]) compare(`${family.name} at ${k}`, family.program(k), reversed);
+  for (const record of [...readFixture(), ...readFixture("cells-rule-function.jsonl")])
+    if (coreRequest(record.files) !== null) compare(record.name, record.files, false);
+  assert.deepEqual(differing, []);
 });
 
 /**

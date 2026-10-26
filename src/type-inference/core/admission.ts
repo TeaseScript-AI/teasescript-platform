@@ -140,12 +140,28 @@ export function withMemberOracle<T>(
   }
 }
 
+/**
+ * For the tests: while `withoutChains` runs, no chain of copies is resolved (§4.1), so a class is a read's own; the
+ * published records, their F28 writers included, are the same either way (the oracle sets a link's writer aside).
+ */
+let chainsOff = false;
+
+export function withoutChains<T>(callback: () => T): T {
+  const before = chainsOff;
+  chainsOff = true;
+  try {
+    return callback();
+  } finally {
+    chainsOff = before;
+  }
+}
+
 /** An item as the oracle compares it: every field, its leaves by their ingresses. */
-function itemText(item: Item): string {
+function itemText(item: Item, writer = true): string {
   const { ingress, ...rest } = item;
   return JSON.stringify({
     ...rest,
-    writer: item.writer === null ? null : writerKey(item.writer),
+    writer: !writer || item.writer === null ? null : writerKey(item.writer),
     leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey),
   });
 }
@@ -168,12 +184,21 @@ const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
  */
 /**
  * A whole store's alias (S6-CARRIERS §4.1): the stable source path its value reads at `at` below it (the value itself,
- * or a literal's one read cell) and the node it is read at.
+ * or a literal's one read cell) and the node it is read at, its own guard's key and node whatever its class.
  */
 interface Alias {
   readonly source: Key;
   readonly read: FlowNode;
   readonly at: readonly string[];
+  /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
+  chained?: true;
+}
+
+/** A chain of clean copies' end (`#chainEnd`): the read it stands for and that read's path as written. */
+interface ChainEnd {
+  readonly source: Key;
+  readonly read: FlowNode;
+  readonly written: string;
 }
 
 /** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
@@ -351,6 +376,8 @@ export class Admission {
   readonly #members = new Map<Definition, Definition[]>();
   /** An alias's source path and the node it is read at (`#aliasKey`). */
   readonly #aliases = new Map<Definition, Alias>();
+  /** Per read (its source and node), its chain's end (`#chainEnd`), `null` where it is its own. */
+  readonly #chains = new Map<string, ChainEnd | null>();
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly #eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
@@ -805,28 +832,35 @@ export class Admission {
   ): void {
     const { guards } = this.pass;
     const report = memberOracle!.report;
-    const answer = (d: Definition, rest: readonly string[]): string[] => {
+    // (a member read through a chain of copies, or its class's, carries its own links' writers, provenance and not the
+    // answer: that pair's answers are compared with them set aside, the published records' writers guarded apart)
+    const answer = (d: Definition, rest: readonly string[], writers: boolean): string[] => {
       const alias = this.#aliases.get(d)!;
       const items = this.valueAt(d, rest);
       const key = aliasKeyAt(alias, rest);
       return [
         key !== null && guards.narrowed(key, alias.read) ? "g" : "",
-        ...items.map(itemText).sort(),
+        ...items.map((item) => itemText(item, writers)).sort(),
       ];
     };
-    const marks = (d: Definition, rest: readonly string[]): string[] =>
-      marked(this.valueAt(d, rest)).map(itemText).sort();
+    const marks = (d: Definition, rest: readonly string[], writers: boolean): string[] =>
+      marked(this.valueAt(d, rest))
+        .map((item) => itemText(item, writers))
+        .sort();
     for (const { key: prefix, rest } of prefixes)
       for (const representative of this.#wholeOf(prefix, false)) {
         const members = this.#members.get(representative);
         if (members === undefined || !this.#covers(representative, rest)) continue;
-        const [first, ...items] = answer(representative, rest);
         for (const member of members) {
-          const [own, ...theirs] = answer(member, rest);
+          const writers =
+            this.#aliases.get(representative)!.chained !== true &&
+            this.#aliases.get(member)!.chained !== true;
+          const [first, ...items] = answer(representative, rest, writers);
+          const [own, ...theirs] = answer(member, rest, writers);
           // (each with its own guard: a guarded one's answer is the other's marked)
           const expected =
-            own === first ? items : own === "g" ? marks(representative, rest) : items;
-          const actual = own !== first && first === "g" ? marks(member, rest) : theirs;
+            own === first ? items : own === "g" ? marks(representative, rest, writers) : items;
+          const actual = own !== first && first === "g" ? marks(member, rest, writers) : theirs;
           report(
             JSON.stringify(expected) === JSON.stringify(actual)
               ? null
@@ -1412,13 +1446,76 @@ export class Admission {
     }
     if (alias === null) return null;
     this.#aliases.set(d, alias);
+    // (§4.1's chains: the class of the read its clean copy's source is, to the chain's end; a member whose own source a
+    // test touches keeps that source in its class, so one key's tests guard each class's members, §4.3)
+    const end = this.#chainEnd(alias.source, alias.read);
+    if (end !== null) alias.chained = true;
+    const read = end ?? { ...alias, written };
     return [
       shape,
-      alias.source,
-      written,
-      lists.aliasSignature(alias.source, alias.read),
-      handlers.afterSomeCreation(alias.read) ? "h" : "",
+      end === null || this.#untested(alias.source) ? "" : alias.source,
+      read.source,
+      read.written,
+      lists.aliasSignature(read.source, read.read),
+      handlers.afterSomeCreation(read.read) ? "h" : "",
     ].join("|");
+  }
+
+  /**
+   * §4.1's identity and chains: where a read's exact path is clean (X1–X7 pass: its reaching definition reaches every
+   * path below it, with no event between) and that definition's value is itself a stable source path, read where no
+   * test of its keys holds it, the read stands for that read, its rest after it; followed to the chain's end, once per
+   * read and pass, each link charged once. `null` where the read is its own end.
+   */
+  #chainEnd(source: Key, read: FlowNode): ChainEnd | null {
+    if (chainsOff) return null;
+    const first = `${source}|${read.id}`;
+    const known = this.#chains.get(first);
+    if (known !== undefined) return known;
+    const { program, exact, guards } = this.pass;
+    const links = new Set<string>([first]);
+    let end: ChainEnd | null = null;
+    let current = { source, read };
+    for (;;) {
+      program.work.charge("aliasSteps");
+      const answer = exact.exactPath(current.source, current.read);
+      if ("fail" in answer || answer.def.kind !== "whole" || answer.def.value === undefined) break;
+      const value = answer.def.value;
+      const next = this.#stablePath(value, answer.def.node);
+      if (next === null || guards.guardedRead(value) || guards.guardedBelowRead(value).length > 0)
+        break;
+      current = {
+        source: keyOf(keyPlace(next.source), [...keyPath(next.source), ...answer.rest]),
+        read: next.read,
+      };
+      end = {
+        ...current,
+        written: [next.written, ...answer.rest].filter((x) => x !== "").join("."),
+      };
+      const key = `${current.source}|${current.read.id}`;
+      const known = this.#chains.get(key);
+      if (known !== undefined) {
+        end = known ?? end;
+        break;
+      }
+      // (a cycle of copies ends where it closes)
+      if (links.has(key)) break;
+      links.add(key);
+    }
+    for (const key of links) this.#chains.set(key, end);
+    return end;
+  }
+
+  /** Whether no test touches a source key: none of it, of a prefix of it, or of a key below it (§3.2). */
+  #untested(source: Key): boolean {
+    const { guards, program } = this.pass;
+    const key = recordKey(source);
+    if (guards.belowTested.has(key)) return false;
+    for (const each of [key, ...prefixesOf(key)]) {
+      program.work.charge("aliasSteps");
+      if (tested(guards, each)) return false;
+    }
+    return true;
   }
 
   /**

@@ -2020,6 +2020,25 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // S6-CARRIERS §4.1's chains: k copies `let a(i + 1) = a(i)` of a k-field record of named host data, each copied into
+  // one place, every field read; each link's read stands for the chain's end, one class
+  {
+    name: "A2-alias-chain-heads",
+    measures:
+      "§4.1, C1: k links of a chain of copies of a k-field record of named host data, each stored, every field read",
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let a0 = {${fields(k, () => "[1, raw][1]")}}`,
+          rows(k, (i) => `let a${i + 1} = a${i}`),
+          "let box = a0",
+          rows(k, (i) => `box = a${i + 1}`),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
   // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
   // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
   // from each tested field in turn
