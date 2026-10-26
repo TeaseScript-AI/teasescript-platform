@@ -11,7 +11,11 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
-import { WRITTEN_DOMAIN_MATRIX, type WrittenCase } from "./helpers/type-core-written.js";
+import {
+  UNRESTRICTED_COLLECTION_MATRIX,
+  WRITTEN_DOMAIN_MATRIX,
+  type WrittenCase,
+} from "./helpers/type-core-written.js";
 
 /*
  * The written-domain matrices (`type-core-written.ts`; the lead's rulings on the merged S6's B1 and B2: A4, F17b,
@@ -152,6 +156,58 @@ test("a written type or a copy of it admits its written domain at every level, n
   const { wrong, full } = failing(WRITTEN_DOMAIN_MATRIX);
   t.diagnostic(
     `${WRITTEN_DOMAIN_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+test("an unrestricted written collection takes any known contents, owing nothing for its elements (merged S6 B2)", (t) => {
+  const wrong: string[] = [];
+  let full = 0;
+  for (const c of UNRESTRICTED_COLLECTION_MATRIX) {
+    const request = coreRequest([{ path: "main.tease", source: c.source }]);
+    assert.ok(request !== null, `${c.name}: its file parses and resolves`);
+    for (const shared of [true, false]) {
+      const run = () => {
+        const answers = analyseCore(request);
+        let plan: InstructionPlan | null | "outside";
+        try {
+          plan = compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND).plan;
+        } catch (error) {
+          if (!(error instanceof CandidateOutsideSlice)) throw error;
+          plan = "outside";
+        }
+        return {
+          ...decision(answers, request, c.place, c.levels.length),
+          outcome: answers.outcome,
+          diagnostics: answers.diagnostics.length,
+          checks: answers.checks.length,
+          plan:
+            plan === "outside"
+              ? "outside"
+              : plan === null
+                ? "no plan"
+                : {
+                    checks: checksOf(plan),
+                    says: runGlobals(plan, {}).said.map(({ text }) => text),
+                  },
+        };
+      };
+      const observed = inBothOrders(() => (shared ? run() : withoutSharing(run)));
+      if (shared && observed.plan !== "outside") full += 1;
+      const expected = {
+        levels: c.levels.map(sorted),
+        against: [],
+        outcome: "valid",
+        diagnostics: 0,
+        checks: 0,
+        plan: observed.plan === "outside" ? "outside" : { checks: [], says: ["DONE"] },
+      };
+      if (JSON.stringify(observed) !== JSON.stringify(expected))
+        wrong.push(`${c.name}${shared ? "" : " (no sharing)"}: ${JSON.stringify(observed)}`);
+    }
+  }
+  t.diagnostic(
+    `${UNRESTRICTED_COLLECTION_MATRIX.length} sources (${full} planned and run), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
 });

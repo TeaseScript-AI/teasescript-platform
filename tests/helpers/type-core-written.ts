@@ -294,3 +294,61 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
       }
   return out;
 })();
+
+/** One source of `UNRESTRICTED_COLLECTION_MATRIX`: an unrestricted collection's known contents, which every kind fits. */
+interface UnrestrictedCase {
+  readonly name: string;
+  readonly source: string;
+  readonly place: string;
+  readonly levels: readonly (readonly string[])[];
+}
+
+/**
+ * The merged S6's B2 (the reviewer's unrestricted-collection matrix, rebuilt by axes): `list`, `set` and `dict`, plain,
+ * optional or as a list's element (`list[]`) × known contents (an integer, text, a boolean, `null`, a nested list) ×
+ * how they arrive: the initial value, a named value, a later store into an initially empty one, or a copy of the written
+ * collection that then takes them. Nothing is owed: no diagnostic, no check, the run says DONE. The host-fed controls
+ * are `writtenCase`s of the unrestricted names.
+ */
+export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() => {
+  const out: UnrestrictedCase[] = [];
+  const shell = (kind: Collection, inner: string): string =>
+    kind === "list" ? `[${inner}]` : kind === "set" ? `set[${inner}]` : `dict{a: ${inner}}`;
+  const empty = (kind: Collection): string =>
+    kind === "list" ? "[]" : kind === "set" ? "set[]" : "dict{}";
+  for (const kind of ["list", "set", "dict"] as const)
+    for (const shape of ["plain", "optional", "nested"] as const)
+      for (const [content, contentName] of [
+        ["1", "an integer"],
+        ['"text"', "text"],
+        ["true", "a boolean"],
+        ["null", "null"],
+        ["[1]", "a nested list"],
+      ] as const)
+        for (const arrival of ["initial", "named", "later", "copy"] as const) {
+          const type = shape === "plain" ? kind : shape === "optional" ? `${kind}?` : `${kind}[]`;
+          const known = (inner: string): string =>
+            shape === "nested" ? `[${shell(kind, inner)}]` : shell(kind, inner);
+          const blank = shape === "nested" ? "[]" : empty(kind);
+          const place = arrival === "copy" ? "copy" : "out";
+          const lines =
+            arrival === "initial"
+              ? [`let out: ${type} = ${known(content)}`]
+              : arrival === "named"
+                ? [`let v = ${content}`, `let out: ${type} = ${known("v")}`]
+                : arrival === "later"
+                  ? [`let out: ${type} = ${blank}`, `out = ${known(content)}`]
+                  : [`let out: ${type} = ${blank}`, "let copy = out", `copy = ${known(content)}`];
+          const levels: string[][] =
+            shape === "nested"
+              ? [["list"], [kind], ["unknown"]]
+              : [shape === "optional" ? [kind, "null"].sort() : [kind], ["unknown"]];
+          out.push({
+            name: `${type} holding ${contentName}, ${arrival}`,
+            source: `${[...lines, 'say "DONE"', "exit"].join("\n")}\n`,
+            place,
+            levels,
+          });
+        }
+  return out;
+})();

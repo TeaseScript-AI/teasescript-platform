@@ -58,8 +58,31 @@ export function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
     tag === ref ||
     (tag === "integer" && ref === "number") ||
     (!written && tag === "number" && ref === "integer") ||
-    tag === "unknown"
+    tag === "unknown" ||
+    // (an unrestricted destination, a written `list`'s element: every kind fits, V30 §13)
+    ref === "unknown"
   );
+}
+
+/**
+ * The written type a path stands under (V30 §13: `list`, `set`, `dict` and `object` stand for any list, set, dict or
+ * object): its term, or below an unrestricted part (an unwritten element, an `object`'s properties) that part, whose
+ * every kind fits; `null` where the written type does not reach the path (the lead's ruling on the merged S6's B2).
+ */
+function permittedAt(term: TypeTerm, path: readonly string[]): TypeTerm | null {
+  for (let length = 0; length < path.length; length += 1) {
+    const above = termAt(term, path.slice(0, length));
+    if (above === null) return null;
+    if (unrestricted(above)) return above;
+    if (above.kind === "object" && above.properties === null)
+      return { kind: "dynamic", why: "unwritten parts" };
+  }
+  return termAt(term, path);
+}
+
+/** Whether a written part restricts nothing (`typeTags`' `unknown`: an unwritten element, a type the core leaves open). */
+function unrestricted(term: TypeTerm): boolean {
+  return typeTags(term).includes("unknown");
 }
 
 export const concrete = (item: Item): boolean =>
@@ -400,6 +423,8 @@ export class Admission {
    * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
    */
   readonly #permitsNull = new Set<Key>();
+  /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
+  readonly #unrestricted = new Set<Key>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
   readonly #deciderSites = new Map<Key, SourceSite | null>();
   readonly #copies = new Map<
@@ -715,7 +740,7 @@ export class Admission {
     if (memberOracle !== null) this.#compareMembers(root, path, prefixes);
     const key = keyOf(root, path);
     const written = writtenOf(place.kind);
-    const term = written === null ? null : termAt(written, path);
+    const term = written === null ? null : permittedAt(written, path);
     // A9, C7: every argument and return into a written parameter or result is a candidate
     const transfer =
       term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
@@ -794,6 +819,12 @@ export class Admission {
       }
     }
     if (tags === null) return null;
+    // an unrestricted written part, or a copy's, decides nothing: every kind fits there, no store owes it anything
+    if (tags.includes("unknown")) {
+      this.#unrestricted.add(key);
+      work.charge("checksSkipped");
+      return null;
+    }
     // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
     // number possible solely through external data admits nothing (r4.36)
     if (
@@ -1144,8 +1175,10 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
-    const kinds = withoutEmpty(this.#run(contract.contractOf(keyOf(place, path))));
     const key = keyOf(place, path);
+    // (a copy of an unrestricted written part admits every kind, as the part itself: never what is stored)
+    if (this.#unrestricted.has(key)) return ["unknown"];
+    const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
     const decided = this.decided.get(key);
     let tags = [
       ...(decided ?? new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))),
@@ -2436,7 +2469,7 @@ export class Admission {
         // read out of has it alone, and each operation surely gives it)
         if (stop.deep && length === at.length && !(stop.single && this.#selects(stop, true)))
           continue;
-        const term = termAt(stop.term!, [...stop.strip, ...at.slice(length)]);
+        const term = permittedAt(stop.term!, [...stop.strip, ...at.slice(length)]);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
         if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
@@ -3064,7 +3097,7 @@ export class Admission {
             const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {
-                tags: typeTags(copied).filter((tag) => tag !== "null" && tag !== "unknown"),
+                tags: typeTags(copied).filter((tag) => tag !== "null"),
                 written: true,
               });
             else if (kinds.length === 1) first.set(at, { tags: kinds, written: false });
@@ -3650,7 +3683,11 @@ export class Admission {
    * kinds, F18, with their `null`), none for external data alone (`unknown`: the runtime's validation of it).
    */
   #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
-    if (!this.#besideDefault(d)) return this.admitted(d.place, path);
+    if (!this.#besideDefault(d)) {
+      const tags = this.admitted(d.place, path);
+      // (an unrestricted destination, a copy's as the written part's, owes no boundary: every kind fits, V30 §13)
+      return tags.includes("unknown") ? [] : tags;
+    }
     const items = this.valueAt(d, path);
     const tags: ItemTag[] = [
       ...new Set(items.filter((item) => concrete(item)).map((item) => item.tag)),
