@@ -91,11 +91,11 @@ test("the core gives the expected record for every rule-function record, in both
 });
 
 /**
- * AD-3 (TABLE r4.52; ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read keeps its
- * contract's one known kind, so an intrinsic violation of a known type is the error its live form is, at the same
- * text; a dead call's argument meets its written parameter (F22) as a live one does, and is no definition of it. The
- * flow facts stay dropped there (X1): a kind only the read's reaching definition decides gives the `dead-code` warning,
- * never the live form's error.
+ * AD-3 (TABLE r4.52; ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read of a declared
+ * place keeps its contract's one known kind, so an intrinsic violation of a known type is the error its live form is,
+ * at the same text; a dead call's argument meets its written parameter (F22) as a live one does, and is no definition
+ * of it. The flow facts stay dropped there (X1): a kind only the read's reaching definition decides, or a call's result
+ * whose marks would come from the dead call's binding, gives a warning, never an error the live form does not give.
  */
 test("dead code keeps its intrinsic type errors and drops its flow facts, in both orders (AD-3)", () => {
   const run = (request: NonNullable<ReturnType<typeof coreRequest>>, reversed: boolean) =>
@@ -217,8 +217,39 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       ["if n is integer { f([n]) }"],
     ],
   ];
+  // a parameter's and a result's marks come from their calls' bindings, which a dead call does not make: a guarded dead
+  // call's result is no error where its live form warns
+  const guardedResults: readonly (readonly [string, string, string])[] = [
+    [
+      "a written result",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { repeat f(n) {} }",
+    ],
+    [
+      "an inferred result",
+      "global n = 2.0\nfunction f(x: number) {\n  return x\n}",
+      "if n is integer { repeat f(x: n) {} }",
+    ],
+    [
+      "an element of a result",
+      "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet seen = f([1.5])",
+      "if n is integer { repeat f([n]).first {} }",
+    ],
+  ];
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
+    for (const [what, before, body] of guardedResults)
+      for (const program of [
+        `${before}\n${body}\nexit\n`,
+        ...shapes.map(([, shape]) => shape(before, body)),
+      ]) {
+        const found = analysed(program, reversed);
+        if (
+          found[0] !== "warning-runtime-check" ||
+          found.some((line) => line.includes("compile-error"))
+        )
+          differing.push(`${what}${order}: ${program}: ${found.join("; ")}`);
+      }
     for (const [what, dead, live] of globals) {
       const expected = analysed(live, reversed);
       const found = analysed(dead, reversed);
