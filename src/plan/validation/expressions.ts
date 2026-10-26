@@ -397,10 +397,16 @@ function validateExpressionNode(
         (value.indexCheck !== true ||
           !isRecord(value.callee) ||
           value.callee.kind !== "property" ||
-          value.callee.name !== "get")
+          value.callee.name !== "get" ||
+          !Array.isArray(value.arguments) ||
+          !value.arguments.some((argument) => isRecord(argument) && argument.kind === "positional"))
       )
         errors.push(
-          planError("TSC002", "Only a 'get' call checks its index.", `${path}.indexCheck`),
+          planError(
+            "TSC002",
+            "Only a 'get' call with its index checks its index.",
+            `${path}.indexCheck`,
+          ),
         );
       validateOptionalTypeCheck(value, path, errors, "fallbackCheck");
       if (

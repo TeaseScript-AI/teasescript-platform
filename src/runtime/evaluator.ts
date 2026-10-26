@@ -1635,16 +1635,13 @@ export class Evaluator {
       return rangeList(receiver, expression.span);
     }
     if (expression.callee.kind === "property") {
-      // a list `get` that checks its index rejects one that is no whole number before it selects anything
-      if (expression.indexCheck === true && isList(receiver)) {
+      // a list `get` that checks its index rejects one that is no whole number before it selects anything; without an
+      // index, the call's own argument check reports it
+      const indexPlan = expression.arguments.find((argument) => argument.kind === "positional");
+      if (expression.indexCheck === true && isList(receiver) && indexPlan !== undefined) {
         const index = positional[0];
         if (!(typeof index === "number" && Number.isInteger(index)))
-          throw notWholeIndex(
-            this,
-            expression.arguments[0]!.value,
-            index ?? null,
-            expression.arguments[0]!.value.span,
-          );
+          throw notWholeIndex(this, indexPlan.value, index ?? null, indexPlan.value.span);
       }
       return callCollection(
         this,

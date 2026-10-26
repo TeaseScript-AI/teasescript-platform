@@ -285,6 +285,61 @@ test("a list get rejects an index that is no whole number, in three layers, in b
   assert.deepEqual(ran(runWith(legacyPlan(source), 1.5)), halted(["AFTER"]));
 });
 
+/** Every object of a plan, as an external source may edit it. */
+function planNodes(value: unknown): Record<string, unknown>[] {
+  const found: Record<string, unknown>[] = [];
+  const pending = [value];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: invariant: a non-array object of a JSON-safe plan is a record.
+    const record = node as Record<string, unknown>;
+    found.push(record);
+    for (const item of Object.values(record)) pending.push(item);
+  }
+  return found;
+}
+
+test("a checked list get without its index fails the plan's and the checkpoint's validation, and a run of it reports the call's own error (Astra B3)", () => {
+  const source = "let xs = [1]\nlet v = xs.get(hostValue, default: 0)\nsay v\nexit\n";
+  const index = at(source, "hostValue");
+  assert.ok(decision(source).checks.includes(`integer-check hostValue [integer] @${index}`));
+  const plan = candidatePlan(source);
+  assert.deepEqual(contentOf(plan), [
+    `indexCheck call@${at(source, "xs.get(hostValue, default: 0)")}`,
+  ]);
+  assert.deepEqual(ran(runWith(plan, 0)), halted(["1"]));
+  assert.deepEqual(ran(runWith(plan, 0.5)), failed(`TSR024@${index}`));
+  // a plan from outside whose checked call lost its index: the plan's validation and the checkpoint's reject it
+  const indexless = structuredClone(plan);
+  const call = planNodes(indexless).find(
+    (node) => node.kind === "call" && node.indexCheck === true,
+  );
+  assert.ok(call !== undefined);
+  call.arguments = [];
+  assert.ok(
+    JSON.stringify(validateInstructionPlan(indexless).errors).includes(
+      "Only a 'get' call with its index checks its index.",
+    ),
+  );
+  const start = createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue: 0 } });
+  assert.throws(
+    () => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(indexless, start))),
+    (error) => error instanceof Error && !(error instanceof TypeError),
+  );
+  // a run given it validates it first: the same structured error, never a native one
+  assert.throws(
+    () => run(indexless, start),
+    (error) =>
+      error instanceof Error &&
+      !(error instanceof TypeError) &&
+      error.message.includes("Only a 'get' call with its index checks its index."),
+  );
+});
+
 test("an otherwise's selected fallback is checked against the value's family, in three layers, in both orders (C10, S3 §4)", () => {
   // the expression form, and the form whose fallback runs as instructions (a file store)
   const direct =
@@ -849,7 +904,7 @@ test("plan validation rejects S7's fields where they do not belong (S3 §4's ser
         const callee = node["callee"] as Record<string, unknown>;
         callee["name"] = "contains";
       },
-      "Only a 'get' call checks its index.",
+      "Only a 'get' call with its index checks its index.",
     ],
     [
       "fallbackCheck",
