@@ -81,6 +81,12 @@ export interface Item {
   readonly loose?: true;
   /** The guard mark: the value was read under a test of its path, so no consumer errs on it (§3.2). */
   readonly guarded?: true;
+  /**
+   * The value came through a call: a parameter's or a result's (F20–F22), travelling as the guard mark does. A dead call
+   * binds nothing (F21), so in dead code such a kind may lack the marks its call would give: there it is never definite
+   * and no consumer errs on it (AD-3).
+   */
+  readonly called?: true;
   /** The unknown operand, by `fanIdentity`, whose operator rows this item is one of (§4 r4.14). */
   readonly fan?: string;
   /**
@@ -220,6 +226,7 @@ function isLoose(item: Item): boolean {
 
 function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
   const guarded = first.guarded === true || other.guarded === true;
+  const called = first.called === true || other.called === true;
   const node =
     first.ingress === undefined && other.ingress === undefined
       ? undefined
@@ -243,6 +250,7 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
     ...(node === undefined ? {} : { ingress: node }),
     ...(loose ? { loose: true } : {}),
     ...(guarded ? { guarded: true } : {}),
+    ...(called ? { called: true } : {}),
     ...(fan === undefined ? {} : { fan }),
     ...(extOnly ? { extOnly: true } : {}),
   };
@@ -313,7 +321,7 @@ export function itemsSignature(items: readonly Item[], scope: ItemScope): string
         item.writer === null ? "" : writerKey(item.writer),
         item.context ?? "",
         item.word ?? "",
-        `${item.guarded === true ? "g" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
+        `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
         item.fan ?? "",
       ].join("|"),
     )

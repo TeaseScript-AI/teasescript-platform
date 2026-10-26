@@ -185,6 +185,7 @@ export function operationItems(
       context,
       cert: "pos" as const,
       ...(combination.some((item) => item.guarded === true) ? { guarded: true as const } : {}),
+      ...(combination.some((item) => item.called === true) ? { called: true as const } : {}),
     };
     // A2, A3 r4.36: a result kind of a combination holding external data (an external unknown, or an operand item that is
     // itself possible solely through external data)

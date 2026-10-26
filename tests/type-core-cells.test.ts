@@ -152,6 +152,10 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
         `${before}\nif false {\n  showPermanentButton "Never" {\n    ${body}\n  }\n}\nexit\n`,
     ],
     ["a label nothing enters", (before, body) => `${before}\nexit\nlabel never\n${body}\nend\n`],
+    [
+      "a function nothing calls",
+      (before, body) => `${before}\nfunction unused {\n  ${body}\n}\nexit\n`,
+    ],
   ];
   const takesInteger = "function take(count: integer) {\n  say count\n}\ntake(1)";
   // an intrinsic violation of a known type: the live form's error (C2 twice, C5b, C7 at the root and an element)
@@ -254,8 +258,87 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "if n is integer { repeat f([n]).first {} }",
     ],
   ];
+  // a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
+  // result, a field or element of one, or a parameter copied in a callee only a dead call calls, warns as on `main`: the
+  // live form's record, X1's word on the use (review r3 B3's shapes, standing, with an operation, a length and a merge)
+  const transfers: readonly (readonly [string, string, string])[] = [
+    [
+      "a copy",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { let v = f(n)\nrepeat v {} }",
+    ],
+    [
+      "a field",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { let v = {a: f(n)}\nrepeat v.a {} }",
+    ],
+    [
+      "an element",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { let v = [f(n)]\nrepeat v.first {} }",
+    ],
+    [
+      "a parameter copied in its callee",
+      "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
+      "if n is integer { f(n) }",
+    ],
+    [
+      "a nested call's result",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction g(x: number): number {\n  return f(x)\n}",
+      "if n is integer { let v = g(n)\nrepeat v {} }",
+    ],
+    [
+      "an operation on a call's result",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { let v = f(n) * 1\nrepeat v {} }",
+    ],
+    [
+      "a length of a call's result",
+      "global ns = [2.0]\nfunction f(x: number[]): number[] {\n  return x\n}",
+      'if ns != null { let v = f(ns).length\nif v { say "yes" } }',
+    ],
+    [
+      "a place a call's result and a literal both store",
+      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+      "if n is integer { let v = f(n)\nrepeat v {}\nv = 3.5 }",
+    ],
+    [
+      "a recursive call's result",
+      "global n = 2.0\nfunction f(x: number): number {\n  if hostValue { return f(x) }\n  return x\n}",
+      "if n is integer { let v = f(n)\nrepeat v {} }",
+    ],
+  ];
+  // such a copy as a dead call's argument for a written parameter stays unchecked, as every dead argument was on `main`
+  const copiedArgument = [
+    `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\n${takesInteger}`,
+    "if n is integer { let v = f(n)\ntake(v) }",
+  ] as const;
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
+    for (const [what, before, body] of transfers) {
+      const live = analysed(`${before}\n${body}\nexit\n`, reversed);
+      const unordered = ([outcome, ...lines]: readonly string[]): string =>
+        JSON.stringify([outcome, ...[...lines].sort()]);
+      const expected = unordered(
+        live.map((line) =>
+          line.replace(/^(\S+ warning-runtime-check) (call|branch) /, "$1 dead-code "),
+        ),
+      );
+      if (!live.some((line) => /^\S+ warning-runtime-check (call|branch) /.test(line)))
+        differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        if (unordered(found) !== expected)
+          differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
+      }
+    }
+    for (const [where, shape] of shapes) {
+      const found = analysed(shape(...copiedArgument), reversed);
+      if (JSON.stringify(found) !== JSON.stringify(["valid"]))
+        differing.push(
+          `a guarded copy for a written parameter, ${where}${order}: ${found.join("; ")}`,
+        );
+    }
     for (const [what, before, body] of guardedResults)
       for (const program of [
         `${before}\n${body}\nexit\n`,
