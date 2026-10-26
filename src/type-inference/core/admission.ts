@@ -95,6 +95,55 @@ function compareKeys(a: EvaluationKey, b: EvaluationKey): number {
   return a.length - b.length;
 }
 
+/**
+ * The landing index's mechanism (S6-CARRIERS §3.2–§3.4), beside the ingress index until the cutover: `withLandingIndex`
+ * runs an analysis with C9's placement and resolution from the landing index, so the verification script can compare
+ * the two mechanisms' records. Temporary: the cutover removes the ingress index and this seam.
+ */
+let landingMechanism = false;
+
+export function withLandingIndex<T>(callback: () => T): T {
+  if (landingMechanism) throw new Error("The landing index's mechanism is already active.");
+  landingMechanism = true;
+  try {
+    return callback();
+  } finally {
+    landingMechanism = false;
+  }
+}
+
+/** The roles whose operand is its operation's own read (C10: an ingress there is checked at its read). */
+const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
+  "otherwise/fallback",
+  "get/default",
+  "load default/default",
+  "parse default/default",
+]);
+
+/**
+ * An ingress stop of a landing's walk (S6-CARRIERS §3.1): the ingress it is or reads through projections, its store,
+ * its contribution path and its boundary path (the contribution path up to the first object property step), its
+ * evaluation key, the ingress's own span, and whether it is the ingress whole and the operation's own read.
+ */
+interface IngressStop {
+  readonly ingress: PlaceId;
+  readonly d: Definition;
+  readonly path: readonly string[];
+  readonly recordPath: readonly string[];
+  readonly key: EvaluationKey;
+  readonly site: SourceSite;
+  readonly whole: boolean;
+}
+
+/**
+ * The landing index (S6-CARRIERS §3.2), once per pass: per store, its non-own ingress stops in evaluation order; per
+ * ingress, the stores that bring it and whether it is an own read. An ingress neither brought nor own is unreached.
+ */
+interface LandingIndex {
+  readonly byStore: ReadonlyMap<Definition, readonly IngressStop[]>;
+  readonly byIngress: ReadonlyMap<PlaceId, { readonly stores: Set<Definition>; own: boolean }>;
+}
+
 /** A contribution of a stored value at one path (`#stopsOf`): its evaluation key, value and node, its written type. */
 interface Stop {
   readonly key: EvaluationKey;
@@ -255,6 +304,7 @@ export class Admission {
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   #groups: { readonly root: PlaceId; readonly path: readonly string[] }[] | null = null;
+  #landings: LandingIndex | null = null;
 
   public constructor(
     readonly pass: CorePass,
@@ -2091,6 +2141,120 @@ export class Admission {
     return `f18|${by}|${term}|${fallback === undefined ? "" : contract.identityOf(fallback).id}`;
   }
 
+  // ------------------------------------------------------------------------------------------- the landing index
+
+  /**
+   * S6-CARRIERS §3.2: every live store, add and transfer landing walked once (`#stopsOf`, the walk admission's deciders
+   * and C1's contributions read), then every operation's own read, as its own landing; each ingress stop recorded by
+   * the store that brings it, or as an own read. Built once per pass, at its first use.
+   */
+  #landingIndex(): LandingIndex {
+    if (this.#landings !== null) return this.#landings;
+    const { program, definitions, lists } = this.pass;
+    const byStore = new Map<Definition, IngressStop[]>();
+    const byIngress = new Map<PlaceId, { stores: Set<Definition>; own: boolean }>();
+    const entry = (ingress: PlaceId): { stores: Set<Definition>; own: boolean } => {
+      let found = byIngress.get(ingress);
+      if (found === undefined) byIngress.set(ingress, (found = { stores: new Set(), own: false }));
+      return found;
+    };
+    // the ingress a stop is, or reads through projections of it (a member of it)
+    const ingressOf = (value: PlaceId): PlaceId | null => {
+      let at = value;
+      while (!definitions.ingress.has(at)) {
+        program.work.charge("indexSteps");
+        const projection = program.projOf.get(at);
+        if (projection === undefined) return null;
+        at = projection.owner;
+      }
+      return at;
+    };
+    const walk = (
+      value: PlaceId,
+      node: FlowNode,
+      found: (stop: Stop, ingress: PlaceId, own: boolean) => void,
+    ): void => {
+      const stops = this.#stopsOf(value, node);
+      for (const map of [stops.written, stops.values, stops.literals])
+        for (const list of map.values())
+          for (const stop of list) {
+            program.work.charge("indexSteps");
+            const ingress = ingressOf(stop.value);
+            if (ingress !== null)
+              found(
+                stop,
+                ingress,
+                stop.via.some((level) => OWN_ROLES.has(level.role)),
+              );
+          }
+    };
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+      if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
+      if (!lists.live(d) || !program.live(d.node)) continue;
+      walk(d.value, d.node, (stop, ingress, own) => {
+        if (own) {
+          entry(ingress).own = true;
+          return;
+        }
+        const site = program.places[ingress]?.site;
+        if (site === null || site === undefined) return;
+        entry(ingress).stores.add(d);
+        let list = byStore.get(d);
+        if (list === undefined) byStore.set(d, (list = []));
+        const property = stop.path.findIndex((step) => step !== "element");
+        list.push({
+          ingress,
+          d,
+          path: stop.path,
+          recordPath: property < 0 ? stop.path : stop.path.slice(0, property),
+          key: stop.key,
+          site,
+          whole:
+            ingress === stop.value &&
+            stop.strip.every((step) => step === SELECTED_VALUE || step === SELECTED_TEXT),
+        });
+      });
+    }
+    // an operation's own read is an own read wherever it stands, reached by a store's walk or not (C10)
+    for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
+      for (const { operand, own } of operandsOf(program, carrier)) {
+        program.work.charge("indexSteps");
+        const site = own ? program.places[operand]?.site : null;
+        const node = site === null || site === undefined ? null : program.exprAt(site);
+        if (node !== null) walk(operand, node, (_, ingress) => (entry(ingress).own = true));
+      }
+    for (const list of byStore.values()) {
+      program.work.charge("checks", sortCost(list.length));
+      list.sort((a, b) => compareKeys(a.key, b.key));
+    }
+    this.#landings = { byStore, byIngress };
+    return this.#landings;
+  }
+
+  /** The ingress a leaf names (`ingressLeaf`), or `null` for none of the program's. */
+  #leafIngress(leaf: Writer): PlaceId | null {
+    return this.pass.definitions.ingressAt.get(writerKey(leaf)) ?? null;
+  }
+
+  /** The ingresses an item's leaves name. */
+  #leafIngresses(node: IngressNode): Set<PlaceId> {
+    const out = new Set<PlaceId>();
+    const seen = new Set<IngressNode>();
+    const pending = [node];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      this.pass.program.work.charge("checks");
+      if ("ingress" in current) {
+        const ingress = this.#leafIngress(current.ingress);
+        if (ingress !== null) out.add(ingress);
+      } else if ("parts" in current) for (const part of current.parts) pending.push(part);
+      else if (current.contents !== null) pending.push(current.contents);
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------------------------------- C9
 
   /** A store's destination: the stored value's path; an added value's the collection's element (C9 r4.6). */
@@ -2118,11 +2282,23 @@ export class Admission {
    */
   /** Whether an item's external data came in at the store `d` itself (C9: its boundary there checks it). */
   public ownIngress(item: Item, d: Definition): boolean {
-    return item.ingress !== undefined && this.#tokens(item.ingress).has(this.#token(d));
+    if (item.ingress === undefined) return false;
+    if (landingMechanism) {
+      const ingresses = this.#leafIngresses(item.ingress);
+      return (this.#landingIndex().byStore.get(d) ?? []).some(
+        (stop) => stop.whole && ingresses.has(stop.ingress),
+      );
+    }
+    return this.#tokens(item.ingress).has(this.#token(d));
   }
 
   public cellSited(site: SourceSite, item: Item, d: Definition): SourceSite {
     if (item.ingress === undefined) return site;
+    if (landingMechanism) {
+      const stops = this.#landingIndex().byStore.get(d) ?? [];
+      const ingresses = this.#leafIngresses(item.ingress);
+      return stops.some((stop) => ingresses.has(stop.ingress)) ? stops[0]!.site : site;
+    }
     const own = this.#token(d);
     const carried = this.pass.definitions.cellSiteOf.get(own);
     if (carried === undefined) return site;
@@ -2188,7 +2364,19 @@ export class Admission {
   public boundaryFor(item: Item, here: Obligation | null): void {
     if (!isExternal(item)) return;
     const { definitions, program } = this.pass;
-    if (item.ingress !== undefined) {
+    let unreached = false;
+    if (item.ingress !== undefined && landingMechanism) {
+      // the landing index: an ingress's store's boundary, its own read's check, or the consumer's check (r4.10)
+      const index = this.#landingIndex();
+      for (const ingress of this.#leafIngresses(item.ingress)) {
+        const found = index.byIngress.get(ingress);
+        if (found !== undefined && found.stores.size > 0)
+          for (const d of found.stores) this.boundaryAt(d);
+        else if (found?.own === true) this.#boundaryAtRead(ingress);
+        else unreached = true;
+      }
+      if (item.loose !== true && !unreached) return;
+    } else if (item.ingress !== undefined) {
       const pending = [item.ingress];
       while (pending.length > 0) {
         const node = pending.pop()!;
@@ -2357,6 +2545,10 @@ export class Admission {
 
   /** The boundary checks of the ingress stores, published once every place is decided. */
   public publish(): void {
+    if (landingMechanism) {
+      this.#publishLandings();
+      return;
+    }
     for (const d of this.#typed)
       if (this.#againstOf(d, this.#destPath(d)).length > 0) this.boundaryAt(d);
     for (const d of this.#carried) if (this.#owed(d)) this.boundaryAt(d);
@@ -2370,6 +2562,74 @@ export class Admission {
       const key = keyOf(d.place, path);
       const check = boundaryCheck(
         site,
+        label,
+        against,
+        `validate external data entering ${label} against ${against.join("|")}`,
+      );
+      const list = this.boundaries.get(key);
+      if (list === undefined) this.boundaries.set(key, [check]);
+      else list.push(check);
+    }
+  }
+
+  /**
+   * S6-CARRIERS §3.3, from the landing index: one boundary per ingress store, at the record level a whole record is
+   * stored at (the longest common prefix of its non-own ingress stops' boundary paths, an `addAll`'s first element
+   * step dropped), against the admitted type there, at the span of its ingress stop of least evaluation key; owed where
+   * a consumer met one of its ingresses' items, where a typed ingress lands where a type is admitted, or where one of
+   * its ingress stops stands where a type is admitted.
+   */
+  #publishLandings(): void {
+    const { definitions, lists, program } = this.pass;
+    const index = this.#landingIndex();
+    const stores = new Set(definitions.storeDefs);
+    const elements = (d: Definition, path: readonly string[]): readonly string[] =>
+      d.kind === "add" && d.how === "elements" && path[0] === "element" ? path.slice(1) : path;
+    for (const [d, stops] of index.byStore) {
+      program.work.charge("checks");
+      if (stops.length === 0) continue;
+      const destination = this.#destPath(d);
+      // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
+      // one: the typed scheduling, `ingressStores`)
+      const typedIngress = stops.some((stop) => {
+        const operation = program.opOf.get(stop.ingress);
+        return operation !== undefined && this.#f18Kinds(operation) !== null;
+      });
+      const typed =
+        d.kind === "whole" &&
+        ((stores.has(d) || d.how === "parameter default"
+          ? definitions.ingress.has(d.value!)
+          : false) ||
+          (typedIngress &&
+            (stores.has(d) ||
+              d.how === "parameter default" ||
+              d.how === "argument" ||
+              d.how === "return")));
+      const owed =
+        this.#pending.has(d.uid) ||
+        (typed
+          ? this.#againstOf(d, destination).length > 0
+          : lists.live(d) &&
+            stops.some(
+              (stop) => this.#againstOf(d, [...destination, ...elements(d, stop.path)]).length > 0,
+            ));
+      if (!owed) continue;
+      const record = elements(d, stops[0]!.recordPath);
+      let common = record.length;
+      for (const stop of stops) {
+        const other = elements(d, stop.recordPath);
+        let length = 0;
+        while (length < common && length < other.length && other[length] === record[length])
+          length += 1;
+        common = length;
+      }
+      const path = [...destination, ...record.slice(0, common)];
+      const tags = this.#againstOf(d, path);
+      const label = this.pathLabel(d.place, path);
+      const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
+      const key = keyOf(d.place, path);
+      const check = boundaryCheck(
+        stops[0]!.site,
         label,
         against,
         `validate external data entering ${label} against ${against.join("|")}`,

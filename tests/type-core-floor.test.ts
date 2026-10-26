@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { withLandingIndex } from "../src/type-inference/core/admission.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -384,25 +385,57 @@ function records(source: string): string[] {
   return forward;
 }
 
+/** The shapes whose compared records differ from the rule function's, each with what it owes and what it gives. */
+function differing(all: readonly Shape[]): string[] {
+  const out: string[] = [];
+  for (const shape of all) {
+    const actual = records(shape.source);
+    if (JSON.stringify(actual) !== JSON.stringify([...shape.expected].sort()))
+      out.push(
+        `${shape.name}: expected ${shape.expected.join(", ")}, got ${actual.join(", ") || "none"}`,
+      );
+  }
+  return out;
+}
+
+/** The review witnesses among the cutover's shapes (B-M2, B-M1): the landing index's own placement repairs them. */
+const WITNESSES: ReadonlySet<string> = new Set(
+  [...UNTIL_CUTOVER].filter(
+    (name) =>
+      !name.startsWith("otherwise/whole fallback/") &&
+      !name.startsWith("load default/") &&
+      !name.startsWith("parse default/") &&
+      !name.startsWith("iteration/"),
+  ),
+);
+
 test("the carrier floor's records are exactly what the rule function owes, in both orders (§6, §5.1, r4.63)", (t) => {
   const all = shapes();
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);
-  const differing: string[] = [];
-  for (const shape of all) {
-    const actual = records(shape.source);
-    if (JSON.stringify(actual) !== JSON.stringify([...shape.expected].sort()))
-      differing.push(
-        `${shape.name}: expected ${shape.expected.join(", ")}, got ${actual.join(", ") || "none"}`,
-      );
-  }
+  const found = differing(all);
   t.diagnostic(
     `${all.length} shapes in ${new Set(all.map((shape) => shape.name.split("/").slice(0, 3).join("/"))).size} ` +
-      `classes compared exactly; ${differing.length} differ until the cutover`,
+      `classes compared exactly; ${found.length} differ until the cutover`,
   );
   assert.deepEqual(
-    differing.map((entry) => entry.split(":")[0]).sort(),
+    found.map((entry) => entry.split(":")[0]).sort(),
     [...UNTIL_CUTOVER].sort(),
-    differing.join("\n"),
+    found.join("\n"),
+  );
+});
+
+/**
+ * S6-CARRIERS §9 step 3: the landing index beside the ingress index, until the cutover. With C9's placement and
+ * resolution from the landing index, the round-4 witnesses are repaired (each boundary at its host value's span, the
+ * selected-text boundaries there), and only r4.63's shapes still differ.
+ */
+test("the landing index repairs the floor's round-4 witnesses, in both orders (§3.2–§3.4)", () => {
+  assert.equal(WITNESSES.size, 16);
+  const found = withLandingIndex(() => differing(shapes()));
+  assert.deepEqual(
+    found.map((entry) => entry.split(":")[0]).sort(),
+    [...UNTIL_CUTOVER].filter((name) => !WITNESSES.has(name)).sort(),
+    found.join("\n"),
   );
 });
