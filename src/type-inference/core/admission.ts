@@ -1,3 +1,4 @@
+import { unwrap } from "../../expression-children.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import type { WorkLedger } from "./budget.js";
@@ -165,6 +166,23 @@ const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
  * its contribution path and its boundary path (the contribution path up to the first object property step), its
  * evaluation key, the ingress's own span, and whether it is the ingress whole and the operation's own read.
  */
+/**
+ * A whole store's alias (S6-CARRIERS §4.1): the stable source path its value reads at `at` below it (the value itself,
+ * or a literal's one read cell) and the node it is read at.
+ */
+interface Alias {
+  readonly source: Key;
+  readonly read: FlowNode;
+  readonly at: readonly string[];
+}
+
+/** The key an alias's read stands for at `rest` below its store; `null` beside or above its cell, where no read is. */
+function aliasKeyAt(alias: Alias, rest: readonly string[]): Key | null {
+  if (rest.length < alias.at.length || alias.at.some((step, index) => rest[index] !== step))
+    return null;
+  return keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest.slice(alias.at.length)]);
+}
+
 interface IngressStop {
   readonly ingress: PlaceId;
   readonly d: Definition;
@@ -332,7 +350,7 @@ export class Admission {
    */
   readonly #members = new Map<Definition, Definition[]>();
   /** An alias's source path and the node it is read at (`#aliasKey`). */
-  readonly #aliases = new Map<Definition, { readonly source: Key; readonly read: FlowNode }>();
+  readonly #aliases = new Map<Definition, Alias>();
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly #eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
@@ -726,8 +744,12 @@ export class Admission {
         const members = this.#members.get(d);
         candidates.set(
           `${d.uid}|${at.join(".")}`,
-          members === undefined ? { d, at } : { d, at, members },
+          members === undefined || !this.#covers(d, at) ? { d, at } : { d, at, members },
         );
+        // (beside or above a literal's alias cell its members are their own candidates: their own terms stand there)
+        if (members !== undefined && !this.#covers(d, at))
+          for (const member of members)
+            candidates.set(`${member.uid}|${at.join(".")}`, { d: member, at });
       };
       const takeAll = (stores: ReadonlySet<Definition | null>): void => {
         const { wholes, adds } = this.#takeable(stores, byWritten);
@@ -786,15 +808,18 @@ export class Admission {
     const answer = (d: Definition, rest: readonly string[]): string[] => {
       const alias = this.#aliases.get(d)!;
       const items = this.valueAt(d, rest);
-      const key = keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]);
-      return [guards.narrowed(key, alias.read) ? "g" : "", ...items.map(itemText).sort()];
+      const key = aliasKeyAt(alias, rest);
+      return [
+        key !== null && guards.narrowed(key, alias.read) ? "g" : "",
+        ...items.map(itemText).sort(),
+      ];
     };
     const marks = (d: Definition, rest: readonly string[]): string[] =>
       marked(this.valueAt(d, rest)).map(itemText).sort();
     for (const { key: prefix, rest } of prefixes)
       for (const representative of this.#wholeOf(prefix, false)) {
         const members = this.#members.get(representative);
-        if (members === undefined) continue;
+        if (members === undefined || !this.#covers(representative, rest)) continue;
         const [first, ...items] = answer(representative, rest);
         for (const member of members) {
           const [own, ...theirs] = answer(member, rest);
@@ -1081,7 +1106,14 @@ export class Admission {
     const list = this.#wholeOf(prefix, false);
     let out: Definition[] | null = null;
     for (const [index, representative] of list.entries()) {
-      if (this.#members.get(representative) === undefined) continue;
+      const members = this.#members.get(representative);
+      if (members === undefined) continue;
+      if (!this.#covers(representative, rest)) {
+        // (beside or above a literal's alias cell each member stands by itself)
+        out ??= list.slice(0, index);
+        out.push(...members);
+        continue;
+      }
       const eligible = this.#eligibleAt(representative, prefix, rest);
       if (eligible === null || eligible === representative) continue;
       out ??= list.slice(0, index);
@@ -1100,10 +1132,10 @@ export class Admission {
    */
   #eligibleAt(representative: Definition, prefix: Key, rest: readonly string[]): Definition | null {
     const { guards } = this.pass;
-    const alias = this.#aliases.get(representative)!;
-    const full = recordKey(keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]));
+    const at = aliasKeyAt(this.#aliases.get(representative)!, rest);
+    const full = at === null ? null : recordKey(at);
     let deepest = "";
-    for (const key of [full, ...prefixesOf(full)]) {
+    for (const key of full === null ? [] : [full, ...prefixesOf(full)]) {
       this.pass.program.work.charge("eligibility");
       if (tested(guards, key)) {
         deepest = key;
@@ -1132,7 +1164,9 @@ export class Admission {
     const alias = this.#aliases.get(representative)!;
     const children = new Map<string, Set<string>>([["", new Set()]]);
     for (const rest of this.#demandsOf(prefix)) {
-      const full = recordKey(keyOf(keyPlace(alias.source), [...keyPath(alias.source), ...rest]));
+      const at = aliasKeyAt(alias, rest);
+      if (at === null) continue;
+      const full = recordKey(at);
       let parent = "";
       for (const key of [...prefixesOf(full).reverse(), full]) {
         this.pass.program.work.charge("eligibility");
@@ -1337,36 +1371,95 @@ export class Admission {
   }
 
   /**
-   * S6-CARRIERS §4.1: the class a whole store's value is an alias in, where it is a stable source path, a read of a
-   * binding (no host global) followed by property steps, read at its occurrence's node: the path, with the read's
-   * exact-path signature (`aliasSignature`) and the handlers' facts at the node. Stores of one class bring equal answers
-   * at every path below the path, their own guards apart; `null` for any other store (an own entry).
+   * S6-CARRIERS §4.1: the class a whole store's value is an alias in: where it is a stable source path (`#stablePath`),
+   * or a literal whose one read cell is one and whose other cells are terms, at that cell's path, the literal's identity
+   * beside it (r4.17: no guard in it). The path, with the read's exact-path signature (`aliasSignature`) and the
+   * handlers' facts at its node: stores of one class bring equal answers below the path, their own guards apart (a
+   * literal's only below its cell, `#covers`); `null` for any other store (an own entry).
    */
   #aliasKey(d: Definition): string | null {
-    const { program, lists, handlers } = this.pass;
+    const { program, lists, handlers, contract } = this.pass;
     if (d.kind !== "whole" || d.value === undefined) return null;
     program.work.charge("aliasSteps");
-    const steps: string[] = [];
-    let value = d.value;
-    let node = d.node;
-    for (let projection = program.projOf.get(value); projection !== undefined;) {
-      program.work.charge("aliasSteps");
-      if (!propertyOnly(projection.step)) return null;
-      steps.push(stepName(projection.step));
-      node = projection.node ?? node;
-      value = projection.owner;
-      projection = program.projOf.get(value);
+    let alias: Alias | null = null;
+    let shape = "";
+    let written = "";
+    const whole = this.#stablePath(d.value, d.node);
+    if (whole !== null) {
+      alias = { source: whole.source, read: whole.read, at: [] };
+      written = whole.written;
+    } else if (program.hasOf.has(d.value)) {
+      const index = contract.literalIndex(d.value);
+      if (index.others.size > 0 || index.references.size > 0) return null;
+      let cell: { readonly path: string; readonly value: PlaceId } | null = null;
+      for (const [path, list] of index.reads)
+        for (const entry of list) {
+          program.work.charge("aliasSteps");
+          if (cell !== null) return null;
+          cell = { path, value: entry.value };
+        }
+      // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not)
+      if (cell === null || [...index.exact.values()].flat().length !== 1) return null;
+      const read = this.#stablePath(cell.value, d.node);
+      if (read === null) return null;
+      alias = {
+        source: read.source,
+        read: read.read,
+        at: cell.path === "" ? [] : cell.path.split("."),
+      };
+      written = read.written;
+      shape = `${contract.identityOf(d.value).id}@${cell.path}`;
     }
-    const binding = program.occurrenceOf.get(value);
-    if (binding === undefined || program.isHost(binding)) return null;
-    const read = program.occNode.get(value) ?? node;
-    const source = keyOf(binding, steps.reverse());
-    this.#aliases.set(d, { source, read });
+    if (alias === null) return null;
+    this.#aliases.set(d, alias);
     return [
-      source,
-      lists.aliasSignature(source, read),
-      handlers.afterSomeCreation(read) ? "h" : "",
+      shape,
+      alias.source,
+      written,
+      lists.aliasSignature(alias.source, alias.read),
+      handlers.afterSomeCreation(alias.read) ? "h" : "",
     ].join("|");
+  }
+
+  /**
+   * Whether a class answers as one at `rest` below its stores (§4.1): a copy's everywhere, a literal's below its alias
+   * cell only (beside or above it each literal's own terms stand, with their own writers).
+   */
+  #covers(representative: Definition, rest: readonly string[]): boolean {
+    const at = this.#aliases.get(representative)?.at ?? [];
+    return rest.length >= at.length && at.every((step, index) => rest[index] === step);
+  }
+
+  /**
+   * §4.1's stable source path a value reads: a binding (no host global) and property steps or literal indexes, the node
+   * it is read at, and the path as written (distinct literal indexes are distinct paths, one key's `element`).
+   */
+  #stablePath(
+    value: PlaceId,
+    node: FlowNode,
+  ): { readonly source: Key; readonly read: FlowNode; readonly written: string } | null {
+    const { program } = this.pass;
+    const steps: string[] = [];
+    const written: string[] = [];
+    let at = value;
+    let reading = node;
+    for (let projection = program.projOf.get(at); projection !== undefined;) {
+      program.work.charge("aliasSteps");
+      const index = projection.step === "index" ? literalIndex(projection.node) : null;
+      if (!propertyOnly(projection.step) && index === null) return null;
+      steps.push(stepName(projection.step));
+      written.push(index === null ? stepName(projection.step) : `[${index}]`);
+      reading = projection.node ?? reading;
+      at = projection.owner;
+      projection = program.projOf.get(at);
+    }
+    const binding = program.occurrenceOf.get(at);
+    if (binding === undefined || program.isHost(binding)) return null;
+    return {
+      source: keyOf(binding, steps.reverse()),
+      read: program.occNode.get(at) ?? reading,
+      written: written.reverse().join("."),
+    };
   }
 
   /**
@@ -3181,6 +3274,14 @@ class GuardTree {
   public eligible(): number | null {
     return this.#min[1] === 0 && this.#least[1]! >= 0 ? this.#least[1]! : null;
   }
+}
+
+/** The integer literal an index projection's expression selects by (`root.items[0]`), else `null`. */
+function literalIndex(node: FlowNode | null): string | null {
+  const expression = node?.expression;
+  if (expression?.kind !== "indexExpression") return null;
+  const index = unwrap(expression.index);
+  return index.kind === "numberLiteral" && index.numericType === "integer" ? index.raw : null;
 }
 
 /** Whether a projection's step is a plain property step, a stable source path's (S6-CARRIERS §4.1). */

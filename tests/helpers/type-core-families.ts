@@ -1996,6 +1996,30 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // S6-CARRIERS §4.1: k stores of a literal whose one cell reads a k-field record of named host data, and k copies of a
+  // literal index of one, every field read; each a class below its cell or path, never k candidates at every field
+  ...(
+    [
+      ["cell", "{data: root}", ".data", ""],
+      ["list-cell", "[root]", "[0]", ""],
+      ["literal-index", "holder.items[0]", "", "let holder = {items: [root]}"],
+    ] as const
+  ).map(([variant, value, at, holder]): WorkFamily => ({
+    name: `A2-alias-${variant}-copies`,
+    measures: `§4.1, C1: k stores of \`${value}\` over a k-field record of named host data, every field read`,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          ...(holder === "" ? [] : [holder]),
+          `let box = ${value}`,
+          rows(k, () => `box = ${value}`),
+          rows(k, (i) => `repeat box${at}.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
   // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
   // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
   // from each tested field in turn
