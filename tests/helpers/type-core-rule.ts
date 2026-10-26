@@ -63,6 +63,8 @@ export const SCALAR: readonly Endpoint[] = ["scalar"];
 
 export interface Shape {
   readonly name: string;
+  /** Its class's carrier. */
+  readonly carrier: string;
   readonly source: string;
   /** The records the rule function owes, sorted, in `records`' form. */
   readonly expected: readonly string[];
@@ -251,6 +253,7 @@ export function shapesOf(classes: readonly RuleClass[]): Shape[] {
               named ? "named" : "inline",
               later ? "later" : "no-later",
             ].join("/"),
+            carrier: floor.carrier,
             source,
             expected: owed(floor, endpoint, named, later, source),
           });

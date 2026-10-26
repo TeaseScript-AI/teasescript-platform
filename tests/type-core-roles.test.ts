@@ -3,8 +3,13 @@ import test from "node:test";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { CARRIER_ROLES, type CarrierRole } from "../src/type-inference/core/carriers.js";
+import {
+  CARRIER_ROLES,
+  operandsOf,
+  type CarrierRole,
+} from "../src/type-inference/core/carriers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { derive, evaluate } from "./helpers/type-core-derived.js";
@@ -69,22 +74,23 @@ const ROLES: Readonly<Record<CarrierRole, Readonly<Record<Placement, Row | strin
       member: (h) => `${h}.inner.field`,
     },
   },
+  // (a dict list's name read on an object: its own property, r4.46 (2))
   "projection/record field": {
     "literal operand": {
-      form: (k, v) => `[${k}, ({noise: 0, data: [${k}, ${v}][1]}).data][1]`,
+      form: (k, v) => `[${k}, ({noise: 0, values: [${k}, ${v}][1]}).values][1]`,
       endpoints: BOTH,
       data: "cell",
       declares: true,
     },
     "whole operand": {
-      form: (k, v) => `[${k}, ({noise: 0, data: ${v}}).data][1]`,
+      form: (k, v) => `[${k}, ({noise: 0, values: ${v}}).values][1]`,
       endpoints: BOTH,
       data: "cell",
       declares: true,
     },
     "own read": NOT_OWN,
     "member receiver": {
-      form: (k, _, h) => `[${k}, ({noise: 0, data: ${h}.field}).data][1]`,
+      form: (k, _, h) => `[${k}, ({noise: 0, keys: ${h}.field}).keys][1]`,
       endpoints: BOTH,
       data: "member",
       declares: true,
@@ -439,6 +445,17 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
   const outside = new Map<string, number>();
   let routed = 0;
   for (const shape of all) {
+    // (the shape takes its role: a carrier of its program has that operand, Codex r23 F3)
+    const parsed = coreRequest([{ path: "main.tease", source: shape.source }]);
+    assert.ok(parsed !== null, shape.name);
+    const program = new CoreProgram(parsed);
+    program.index();
+    if (
+      ![...program.projOf.keys(), ...program.opOf.keys()].some((value) =>
+        operandsOf(program, value).some((operand) => operand.role === shape.carrier),
+      )
+    )
+      wrong.push(`${shape.name}: no carrier of its program has the role`);
     const actual = records(shape.source);
     if (JSON.stringify(actual) !== JSON.stringify(shape.expected))
       wrong.push(
