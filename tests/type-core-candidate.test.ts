@@ -246,9 +246,9 @@ function assignments(
  * - **discharges:** each obligation discharged by one rule (`derive`), a checked store or the runtime;
  * - **checked stores:** the plan's are exactly the derived ones, target, spans and whole type;
  * - **runs:** the original as written, its outcome with each host input at the value that fits the earliest check it
- *   feeds, and the original and every companion whose plan checks the same stores under every assignment of the
- *   domain to their host inputs, each predicted by the rules and run on the engine. A companion that is a compile error or checks differently is a
- *   different program, counted and not run as this record's.
+ *   feeds, and the original and every companion under every assignment of the domain to their host inputs, each
+ *   predicted by the rules and run on the engine. A companion keeps its record's spans, kinds and decisions, so it
+ *   compiles on the route with the record's derived checked stores, or the test fails (Codex r20 H1).
  * Each discharge is then classified by the runs: violable (a run fails there), preempted (a value that violates it
  * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
  * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
@@ -261,7 +261,6 @@ test("every positive-list record the candidate route reaches plans and runs as i
   };
   const accepted: string[] = [];
   const outside = new Map<string, number>();
-  const skipped = new Map<string, number>();
   const classes = new Map<string, number>();
   const originals = new Map<string, string | null>();
   const classOf = new Map<string, string>();
@@ -373,20 +372,16 @@ test("every positive-list record the candidate route reaches plans and runs as i
           ),
         ),
       );
-      const why =
-        compiled === null
-          ? "outside the slice"
-          : compiled.plan === null
-            ? "a compile error"
-            : JSON.stringify(plannedStores(compiled.plan)) !== JSON.stringify(derivedStores(stores))
-              ? "checks other stores"
-              : null;
-      if (why !== null) {
-        skipped.set(why, (skipped.get(why) ?? 0) + 1);
-        continue;
-      }
+      const at = `${record.name}, companion ${companion.label}`;
+      assert.ok(compiled !== null, `${at}: inside the slice`);
+      assert.ok(compiled.plan !== null, `${at}: a plan`);
+      assert.deepEqual(
+        plannedStores(compiled.plan),
+        derivedStores(stores),
+        `${at}: the checked stores`,
+      );
       for (const inputs of assignments(companion.globals)) {
-        const ran = runGlobals(compiled!.plan!, inputs);
+        const ran = runGlobals(compiled.plan, inputs);
         assert.deepEqual(
           ran,
           evaluate(companion.source, stores, inputs).run,
@@ -435,8 +430,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       .join(", ");
   t.diagnostic(
     `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
-      `runs predicted and run; discharges: ${listed(classes)}; companions not run as their record's: ` +
-      `${listed(skipped) || "none"}; outside the candidate slice until S7–S9b: ${listed(outside)}`,
+      `runs predicted and run; discharges: ${listed(classes)}; outside the candidate slice until S7–S9b: ` +
+      listed(outside),
   );
   assert.equal(accepted.length + counted, positive);
   // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
@@ -984,6 +979,28 @@ test("parentheses answer for their content: a parenthesised count and index read
       [0.5, "TSR024@28:37"],
     ],
   );
+});
+
+/**
+ * §5.2's evaluator against the engine where a value is parenthesised (Codex r20 H4): a count's, an index's and a checked
+ * store's failure is sited at the content, as the engine reports it, and the store's checked value span with it.
+ */
+test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does (§5.2, H4)", () => {
+  for (const [source, hostValue, failure] of [
+    ['repeat (hostValue) {\n  say "RUN"\n}\nexit\n', 2.5, "TSR043@8:17"],
+    ["let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n", 0.5, "TSR024@28:37"],
+    ['let out = ([1, hostValue][1])\nsay "AFTER"\nexit\n', "text", "TSR058@11:28"],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { stores } = derive(source, compactAnalysis(request));
+    const compiled = inBothOrders(() => candidate(source));
+    assert.ok(compiled.plan !== null, source);
+    assert.deepEqual(plannedStores(compiled.plan), derivedStores(stores), source);
+    const ran = runGlobals(compiled.plan, { hostValue });
+    assert.equal(ran.failure, failure, source);
+    assert.deepEqual(ran, evaluate(source, stores, { hostValue }).run, source);
+  }
 });
 
 test("a projection of a literal carries its elements' types and host data on the candidate route (round 11)", () => {

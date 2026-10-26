@@ -29,6 +29,7 @@ import {
   compactRecord,
   readCompactRecord,
   recordDifferences,
+  type CompactCheck,
   type CompactRecord,
   type CompactSite,
 } from "./helpers/type-core-records.js";
@@ -454,6 +455,32 @@ test("the comparison counts each check, compares whole sites, and asserts only t
     "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
     "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
   ]);
+  // only C5's null-check: a destination's own null-check at the member read's start (C1's) compares whole (Codex r20 H3)
+  const destination: CompactCheck = {
+    kind: "null-check",
+    target: "n",
+    against: ["integer"],
+    boundary: false,
+    site: { file: "main.tease", offset: 20, end: 40 },
+  };
+  const both: CompactRecord = { ...member, checks: [...member.checks, destination] };
+  assert.deepEqual(
+    recordDifferences(both, {
+      ...both,
+      checks: [...member.checks, { ...destination, site: { ...destination.site, end: 41 } }],
+    }),
+    [
+      "missing check null-check n [integer] main.tease:20-40 ×1",
+      "extra check null-check n [integer] main.tease:20-41 ×1",
+    ],
+  );
+  assert.deepEqual(
+    recordDifferences(both, { ...both, checks: [...member.checks.map(receiver), destination] }),
+    [
+      "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
+      "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
+    ],
+  );
   assert.throws(
     () =>
       readCompactRecord({

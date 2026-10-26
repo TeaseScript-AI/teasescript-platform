@@ -195,8 +195,9 @@ export function derive(
       target: name,
       so: statement.span.start.offset,
       eo: statement.span.end.offset,
-      valueSo: value.span.start.offset,
-      valueEo: value.span.end.offset,
+      // (the engine reports a value at its content, a parenthesised one without its parentheses: Codex r20 H4)
+      valueSo: unwrap(value).span.start.offset,
+      valueEo: unwrap(value).span.end.offset,
       type: typeOf(statement, value, checks),
     });
   }
@@ -441,8 +442,8 @@ export function evaluate(
         const list = value(expression.object);
         const index = value(expression.index);
         const { start, end } = {
-          start: expression.index.span.start.offset,
-          end: expression.index.span.end.offset,
+          start: unwrap(expression.index).span.start.offset,
+          end: unwrap(expression.index).span.end.offset,
         };
         if (
           typeof list.v !== "object" ||
@@ -488,8 +489,8 @@ export function evaluate(
         const fits = typeof count.v === "number" && Number.isInteger(count.v) && count.v >= 0;
         fail(
           "TSR043",
-          statement.count.span.start.offset,
-          statement.count.span.end.offset,
+          unwrap(statement.count).span.start.offset,
+          unwrap(statement.count).span.end.offset,
           count.from,
           fits,
         );
