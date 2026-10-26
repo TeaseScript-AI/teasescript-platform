@@ -1321,33 +1321,43 @@ hideCamera
 
 ### `save`, `delete`
 
-**Syntax:** `save value as key` · `delete key`
+**Syntax:** `save value as key` · `save value as key, writableBy: ids` · `save value as key, teaseId: id` ·
+`delete key`
 
 - **Takes:** a text key; plain data: text, numbers, booleans, collections, objects, ranges, durations, angles, dates,
-  scripts, regexes, file references.
-- **Gives:** a copy kept for this player and Tease; `save null` or `delete` removes it.
-- **Fails:** speakers and handles. A failed write keeps the old data and warns.
-- **Status:** Implemented · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
+  scripts, regexes, file references. `writableBy:` takes a list of tease ids or `"everyone"`; `teaseId:` names another
+  Tease of this player.
+- **Gives:** a copy kept for this player and Tease; `save null` or `delete` removes it. `writableBy:` lets those other
+  Teases write the key; a later `save` without it makes the key read-only again. `teaseId:` writes that Tease's key.
+- **Fails:** speakers and handles. A failed write keeps the old data and warns, also a `teaseId:` write to a key that
+  is not writable for this Tease.
+- **Status:** Implemented; `writableBy:` and `teaseId:` not built ·
+  [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
 
 ```tease
 save { level: 4 } as "progress"
 delete "progress"
+save points as "punishmentPoints", writableBy: "everyone"
+save 5 as "punishmentPoints", teaseId: "019a…"
 ```
 
 ### `load`
 
-**Syntax:** `load(key, default: v)` · `load key, default: v`
+**Syntax:** `load(key, default: v)` · `load key, default: v` · `load(key, teaseId: id, default: v)` ·
+`load key, teaseId: id, default: v`
 
 - **Gives:** the stored value, or the default (evaluated only then) when the key is missing. For a literal key, a
   stored value of the wrong type also takes the default. With a computed key the compiler cannot know the type; the
-  receiving variable checks the value at runtime, which can fail.
+  receiving variable checks the value at runtime, which can fail. `teaseId:` reads another Tease of this player, and
+  gives the default when that Tease or key does not exist.
 - **Fails:** no default; `default: null` on a literal key without a declared type.
-- **Status:** Implemented. Type rule ahead: an object default fixes wrong fields one by one; today the whole default is
-  used · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
+- **Status:** Implemented; `teaseId:` not built. Type rule ahead: an object default fixes wrong fields one by one;
+  today the whole default is used · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
 
 ```tease
 let score = load("score", default: 0)
 let nickname: string? = load("nickname", default: null)
+let chapter = load "chapterState", teaseId: "019a…", default: {}
 ```
 
 ### JSON and Base64
@@ -1401,12 +1411,32 @@ let file = fileFromBase64("SGVsbG8=", default: null)
 
 ### Data across players and Teases (not built)
 
-`publishToPlayers` · `loadFromPlayers` · `loadFromTease` · `getTeaseMetadata` (with `sessions`) · `askProfileChange` ·
-`getPlayerHistory` · `playerProfile.settings`, `.toys`, `.hardcore`
+`getTeaseMetadata()` · `getTeaseMetadata(teaseId)` · `publishToPlayers(key: k, value: v)` ·
+`publishToPlayers(key: k, update: formula, default: v)` · `loadFromPlayers(key: k)` · `countPlayers(key: k)` ·
+`claimFromPlayers(key: k)` · `removeFromPlayers(key: k)` · `askProfileChange` · `getPlayerHistory` ·
+`playerProfile.settings`, `.toys`, `.hardcore`
 
-**Status:** Not built ·
-[shared data](specifications/accepted-syntaxes-v30.md#script-global-and-cross-script-data),
-[profile changes](specifications/accepted-syntaxes-v30.md#profile-changes)
+- **Takes:** `publishToPlayers` also `playerId:` (another player's entry, or the Tease's own id for its own entry),
+  `expiresIn:` and `tags:`. `loadFromPlayers` takes `order:` (`"newest"`, `"first"`, `"random"`) or `sortBy:` with
+  `descending:`, `limit:`, `excludeCurrentPlayer:`, `playerId:`, and the tag filters `where:`, `all:`, `any:`, `none:`
+  of `findImages`; `countPlayers` and `claimFromPlayers` take its filters, and `claimFromPlayers` its `order:` and
+  `sortBy:` too.
+- **Gives:** `getTeaseMetadata` the session history with `teaseId` and `playerId` (`null` for another Tease). An entry
+  has `playerId`, `playerAlias`, `value`, `publishedAt`, `tags` and `entryNumber`. `publishToPlayers` returns the
+  entry; inside `update:`, `current` is the stored value, and a concurrent change runs the formula again.
+  `loadFromPlayers` gives a list, or with `playerId:` one entry or `null`; `countPlayers` a number; `claimFromPlayers`
+  one entry, used for good, or `null`; `removeFromPlayers` whether there was an entry. Without a connection the
+  Playroom waits.
+- **Fails:** `update:` that asks or changes something; `order:` with `sortBy:`; a `playerId:` outside this Tease.
+- **Status:** Not built ·
+  [shared data](specifications/accepted-syntaxes-v30.md#data-across-players-and-teases),
+  [profile changes](specifications/accepted-syntaxes-v30.md#profile-changes)
+
+```tease
+let mine = publishToPlayers(key: "pushups", value: { score: 23 }, tags: ["cage", "level: 4"])
+let top = loadFromPlayers(key: "pushups", sortBy: "score", descending: true, limit: 10)
+let opponent = claimFromPlayers(key: "pushups", order: "first", any: ["rope", "cuffs"])
+```
 
 ## Popups and links
 

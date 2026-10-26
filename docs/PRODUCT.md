@@ -22,6 +22,7 @@ In product and language documentation:
 
 - **creator** means the person writing a Tease. The script header field remains `author:`.
 - **player** means the person playing a Tease.
+- **user** means anyone with an account; a user can be a creator, a player, or both.
 - **Playroom** means the software that plays Teases: the player plays in the Playroom.
 - **engine** or **runtime** means the deterministic execution system inside the Playroom.
 - **Writer's Den**, or **the Den** after its first mention, means the editor where creators write Teases.
@@ -37,8 +38,9 @@ In product and language documentation:
 - **saved data** means values a script stores with `save` for later sessions. A **checkpoint** is the technical engine
   representation used to resume a session.
 
-The cross-player data API names are `publishToPlayers` and `loadFromPlayers`. A Tease reads another Tease's saved data
-for the same player with `loadFromTease`, and that Tease's run history with `getTeaseMetadata`.
+The cross-player data API names are `publishToPlayers`, `loadFromPlayers`, `countPlayers`, `claimFromPlayers` and
+`removeFromPlayers`. A Tease reads and writes another Tease's saved data for the same player with `load` and `save` with
+`teaseId:`, and reads that Tease's run history with `getTeaseMetadata`.
 
 ## Ideas for later: persistent personalities
 
