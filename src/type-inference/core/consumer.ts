@@ -706,7 +706,7 @@ function fallbackPlan(
   depths: readonly FallbackDepth[],
   takesNull: (steps: readonly string[]) => boolean,
 ): TypePlan | null {
-  const deepest = Math.max(...depths.map((depth) => depth.steps.length));
+  const deepest = depths.reduce((most, depth) => Math.max(most, depth.steps.length), 0);
   // the literal the fallback's value is at each depth, as far as a literal holds it
   const literals: (Expression | null)[] = [];
   for (
@@ -1124,8 +1124,10 @@ interface RecordsBelow {
 function recordsBelow(values: readonly Expression[]): RecordsBelow {
   const elements: Expression[] = [];
   const fields = new Map<string, Expression[]>();
+  // element by element: a literal has as many as its source writes, more than a call takes as arguments
   for (const node of literalsAt(values))
-    if (node.kind === "listLiteral" || node.kind === "setLiteral") elements.push(...node.elements);
+    if (node.kind === "listLiteral" || node.kind === "setLiteral")
+      for (const element of node.elements) elements.push(element);
     else if (node.kind === "objectLiteral")
       for (const property of node.properties) {
         const found = fields.get(property.name.name);
@@ -1178,10 +1180,10 @@ function readsPlace(fallback: Expression): boolean {
         break;
       case "listLiteral":
       case "setLiteral":
-        pending.push(...at.elements);
+        for (const element of at.elements) pending.push(element);
         break;
       case "objectLiteral":
-        pending.push(...at.properties.map((property) => property.value));
+        for (const property of at.properties) pending.push(property.value);
         break;
       case "loadExpression":
         if (at.defaultValue !== null) pending.push(at.defaultValue);
