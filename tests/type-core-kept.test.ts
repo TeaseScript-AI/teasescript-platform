@@ -8,10 +8,12 @@ import test from "node:test";
  * (TABLE r4.58), and its plain twin (`pathText`, `keyOf`, `joinSteps`, …) where a step only looks it up or passes it on.
  * A literal's depth, breadth and names make these long and many, and each one kept uncharged let a deep or long-named
  * literal reach the heap before the allowance (the deep-literal reviews' B1 and R2-B1), so a path or key made past the
- * helpers is a choice no one made. This scan finds them by form: a path's text (`.join(".")`), its steps
- * (`.split(".")`), a composite key (`a|b`), a text one step longer (`a.b`), and an array spread of a path, known by the
- * core's names for one (`at`, `path`, `rest`, …; a path under another name escapes this form). Each must be one listed
- * below with the reason it needs no helper; a new one fails until it goes through the helpers or is listed.
+ * helpers is a choice no one made. This scan is a tripwire for the usual spellings, not a proof: it finds a path's text
+ * (`.join(".")`), its steps (`.split(".")`), a composite key (`a|b`), a text one step longer (`a.b`), an array joined to
+ * another (`.concat(`), and an array spread of a path, known by the core's names for one (`at`, `path`, `rest`, …, also
+ * as a member: `holder.path.slice(1)`). It misses a spread of a path under another name, a copy by `slice`, `map` or
+ * `Array.from`, a path grown by `push`, and a path kept through a plain helper. Each found must be one listed below
+ * with the reason it needs no helper; a new one fails until it goes through the helpers or is listed.
  */
 
 const CORE = new URL("../../src/type-inference/core/", import.meta.url);
@@ -39,6 +41,7 @@ const FORMS: readonly (readonly [string, RegExp])[] = [
   ["split", /\.split\("\."\)/g],
   ["composite", /\$\{[^`]*?\}\||\|\$\{/g],
   ["step", /\}\.\$\{/g],
+  ["concat", /\.concat\(/g],
 ];
 
 /** The constructions outside the helpers, by file, member and form: how many, and why they need no charge. */
@@ -76,12 +79,28 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "result.ts targetName spread": [1, "a target's name, made by the tests alone"],
 };
 
-/** `text` without its comments, each character of one a space (its lines kept), strings skipped whole. */
+/**
+ * `text` without its comments, each character of one a space (its lines kept): strings are skipped whole, and a
+ * template's text is kept as text (a `//` there is no comment) while its interpolations are read as code.
+ */
 function withoutComments(text: string): string {
   let out = "";
+  // per open interpolation, the braces open inside it; in a template's text while `template` holds
+  const braces: number[] = [];
+  let template = false;
   for (let index = 0; index < text.length;) {
+    const char = text[index]!;
     const end = (from: number): number => (from < 0 ? text.length : from);
-    if (text.startsWith("//", index)) {
+    if (template) {
+      const length = char === "\\" || text.startsWith("${", index) ? 2 : 1;
+      if (char === "`") template = false;
+      else if (length === 2 && char === "$") {
+        template = false;
+        braces.push(0);
+      }
+      out += text.slice(index, index + length);
+      index += length;
+    } else if (text.startsWith("//", index)) {
       const stop = end(text.indexOf("\n", index));
       out += " ".repeat(stop - index);
       index = stop;
@@ -89,12 +108,23 @@ function withoutComments(text: string): string {
       const stop = end(text.indexOf("*/", index)) + 2;
       out += text.slice(index, stop).replace(/[^\n]/g, " ");
       index = stop;
-    } else if (text[index] === '"' || text[index] === "'") {
+    } else if (char === '"' || char === "'") {
       let stop = index + 1;
-      while (stop < text.length && text[stop] !== text[index]) stop += text[stop] === "\\" ? 2 : 1;
+      while (stop < text.length && text[stop] !== char) stop += text[stop] === "\\" ? 2 : 1;
       out += text.slice(index, stop + 1);
       index = stop + 1;
-    } else out += text[index++];
+    } else {
+      if (char === "`") template = true;
+      else if (char === "{" && braces.length > 0) braces[braces.length - 1] = braces.at(-1)! + 1;
+      else if (char === "}" && braces.length > 0) {
+        if (braces.at(-1) === 0) {
+          braces.pop();
+          template = true;
+        } else braces[braces.length - 1] = braces.at(-1)! - 1;
+      }
+      out += char;
+      index += 1;
+    }
   }
   return out;
 }
@@ -106,9 +136,10 @@ function pathSpreads(text: string): number[] {
     /\.\.\.\(?\s*((?:this\.)?#?[A-Za-z_]\w*(?:\??\.#?[A-Za-z_]\w*)*)/g,
   )) {
     const parts = match[1]!.split(".").map((part) => part.replace(/[?#]/g, ""));
-    // a call: the path it is called on (`path.slice(…)`); else the value read (`e.at`, `rest`)
-    const name = text[match.index + match[0].length] === "(" ? parts[0]! : parts.at(-1)!;
-    if (!PATH_NAMES.has(name)) continue;
+    // a call: what it is called on (`path.slice(…)`, `holder.path.slice(…)`); else the value read (`e.at`, `rest`)
+    const names =
+      text[match.index + match[0].length] === "(" ? parts.slice(0, -1) : parts.slice(-1);
+    if (!names.some((name) => PATH_NAMES.has(name))) continue;
     let depth = 0;
     for (let at = match.index - 1; at >= 0; at -= 1) {
       const char = text[at]!;
@@ -185,6 +216,10 @@ test("the scan finds each form of construction", () => {
     "  const below = `${text}.${rest[0]}`;",
     '  return [...path, "element", ...(rest ?? [])];',
     "}",
+    "export function hidden(holder: { path: string[] }, path: string[]) {",
+    '  const text = `prefix//${path.join(".")}`;',
+    '  return [[...holder.path.slice(1)], path.concat(["x"]), text];',
+    "}",
   ].join("\n");
   assert.deepEqual(
     [...constructions("probe.ts", source)].map(([key, lines]) => `${key} ${lines.length}`),
@@ -193,7 +228,10 @@ test("the scan finds each form of construction", () => {
       "probe.ts walk split 1",
       "probe.ts walk composite 1",
       "probe.ts walk step 1",
+      "probe.ts hidden join 1",
+      "probe.ts hidden concat 1",
       "probe.ts walk spread 2",
+      "probe.ts hidden spread 1",
     ],
   );
 });
