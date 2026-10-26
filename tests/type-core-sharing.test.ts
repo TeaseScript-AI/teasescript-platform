@@ -26,6 +26,11 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
+import {
+  UNRESTRICTED_COLLECTION_MATRIX,
+  V30_TYPE_MATRIX,
+  WRITTEN_DOMAIN_MATRIX,
+} from "./helpers/type-core-written.js";
 
 /*
  * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
@@ -85,6 +90,13 @@ function programs(): Program[] {
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
+  // the merged S6's written-domain matrices (`type-core-written.ts`)
+  for (const { name, source } of [
+    ...WRITTEN_DOMAIN_MATRIX,
+    ...UNRESTRICTED_COLLECTION_MATRIX,
+    ...V30_TYPE_MATRIX,
+  ])
+    out.push(one(`written domain ${name}`, source));
   // Astra's round-5 D1 witness: a decider beside an unselected read of its source (her B1 shape is the oracle's)
   out.push(
     one(

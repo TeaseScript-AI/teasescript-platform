@@ -16,13 +16,36 @@ type Form =
 
 type Collection = "list" | "set" | "dict";
 
-/** V30 §13's unrestricted type names: `list`, `set`, `dict`, and `object` for any list, set, dict, or object. */
+/** V30 §13's type names: the scalars, `null`, the unrestricted collections and `object`, the program-control names. */
+const SCALAR_NAMES = [
+  "string",
+  "boolean",
+  "integer",
+  "number",
+  "date",
+  "time",
+  "datetime",
+  "absoluteDateTime",
+  "duration",
+  "calendarDuration",
+  "angle",
+] as const;
 const UNRESTRICTED_NAMES = ["list", "set", "dict", "object"] as const;
+const CONTROL_NAMES = [
+  "range",
+  "speaker",
+  "timer",
+  "media",
+  "messageHandle",
+  "script",
+  "regex",
+] as const;
 
 const UNRESTRICTED: ReadonlySet<string> = new Set(UNRESTRICTED_NAMES);
 
 const name = (of: string): Form => ({ kind: "name", name: of });
 const optional = (of: Form): Form => ({ kind: "optional", of });
+const union = (...members: Form[]): Form => ({ kind: "union", members });
 const collection = (kind: Collection, of: Form): Form => ({
   kind: "collection",
   collection: kind,
@@ -268,6 +291,20 @@ function fitsAt(form: Form, whole: boolean, is: readonly string[]): boolean {
   );
 }
 
+/** A form's depth: its collections' nesting. */
+function depthOf(form: Form): number {
+  switch (form.kind) {
+    case "name":
+      return 0;
+    case "optional":
+      return depthOf(form.of);
+    case "union":
+      return Math.max(...form.members.map(depthOf));
+    case "collection":
+      return 1 + depthOf(form.of);
+  }
+}
+
 /**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
@@ -350,5 +387,54 @@ export const UNRESTRICTED_COLLECTION_MATRIX: readonly UnrestrictedCase[] = (() =
             levels,
           });
         }
+  return out;
+})();
+
+/**
+ * The decisions the matrices take. A copy of a copy is not among them: its earliest decider is the unwritten copy, not
+ * the written binding (A4's reach through an unwritten copy, a question for the lead).
+ */
+const DECISIONS: readonly Decision[] = ["written", "early copy", "later copy"];
+
+/**
+ * V30 §13's written-type matrix (the orchestrator's instruction): every type name (the scalars, `null`, the
+ * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
+ * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
+ * three (`T[][]`, `T?[][]`, `T[]?[]`, `T[] set`, `T[] dict`, `T[][][]`; `null?` is `null`), × the place written, an early
+ * or a later copy × the host value direct, named or held at an index. A union holding a whole collection beside another
+ * type is §13's compile error and has no form here: the compiler does not report it yet (with the lead), nor is a copy
+ * of a copy here (`DECISIONS`).
+ */
+export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
+  const out: WrittenCase[] = [];
+  for (const base of [...SCALAR_NAMES, "null", ...UNRESTRICTED_NAMES, ...CONTROL_NAMES]) {
+    const t = name(base);
+    const other = name(base === "string" ? "integer" : "string");
+    const collected = base !== "object" && UNRESTRICTED.has(base);
+    // (`null?` is `null`: the optional forms of `null` are its plain ones)
+    const opt = (of: Form): Form => (base === "null" ? of : optional(of));
+    const forms: Form[] = [
+      t,
+      ...(base === "null" ? [] : [optional(t)]),
+      collection("list", t),
+      collection("set", t),
+      collection("dict", t),
+      ...(base === "null" ? [] : [collection("list", opt(t))]),
+      optional(collection("list", t)),
+      collection("list", collection("list", t)),
+      ...(base === "null" ? [] : [collection("list", collection("list", opt(t)))]),
+      collection("list", optional(collection("list", t))),
+      collection("set", collection("list", t)),
+      collection("dict", collection("list", t)),
+      collection("list", collection("list", collection("list", t))),
+      // a union never holds a whole collection beside another type (§13): unions of the others only
+      ...(collected ? [] : [union(t, other), collection("list", union(t, other))]),
+    ];
+    for (const form of forms) {
+      if (depthOf(form) > 3) continue;
+      for (const decision of DECISIONS)
+        for (const host of HOSTS) out.push(writtenCase(form, decision, host));
+    }
+  }
   return out;
 })();

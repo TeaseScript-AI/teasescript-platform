@@ -13,6 +13,7 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
   UNRESTRICTED_COLLECTION_MATRIX,
+  V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
   type WrittenCase,
 } from "./helpers/type-core-written.js";
@@ -208,6 +209,15 @@ test("an unrestricted written collection takes any known contents, owing nothing
   }
   t.diagnostic(
     `${UNRESTRICTED_COLLECTION_MATRIX.length} sources (${full} planned and run), both orders, sharing on and off`,
+  );
+  assert.deepEqual(wrong, []);
+});
+
+test("V30 §13's written types, each form and copy, admit what they permit in every layer (merged S6 B1, B2)", (t) => {
+  const { wrong, full, decisionOnly } = failing(V30_TYPE_MATRIX);
+  t.diagnostic(
+    `${V30_TYPE_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off; ` +
+      `decision layer only (outside the candidate slice): ${[...decisionOnly].join(", ")}`,
   );
   assert.deepEqual(wrong, []);
 });
