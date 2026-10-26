@@ -9,10 +9,11 @@ import type {
   ObligationKind,
 } from "../../src/type-inference/core/result.js";
 
-/** A site as records are compared: the file's path and the start offset, since full spans differ in convention. */
+/** A site as records are compared: the file's path and the half-open span `[offset, end)` (S6's exact records). */
 export interface CompactSite {
   readonly file: string;
   readonly offset: number;
+  readonly end: number;
 }
 
 export interface CompactDiagnostic {
@@ -48,7 +49,11 @@ export function compactRecord(record: CoreRecord): CompactRecord {
     diagnostics: record.diagnostics.map((diagnostic) => ({
       kind: diagnostic.kind,
       class: diagnostic.class,
-      site: { file: diagnostic.site.file, offset: diagnostic.site.offset },
+      site: {
+        file: diagnostic.site.file,
+        offset: diagnostic.site.offset,
+        end: diagnostic.site.end,
+      },
       context: diagnostic.provenance?.context ?? null,
     })),
     checks: record.runtimeChecks.map((check) => ({
@@ -56,7 +61,7 @@ export function compactRecord(record: CoreRecord): CompactRecord {
       target: check.target,
       against: [...check.against],
       boundary: check.boundary === true,
-      site: { file: check.site.file, offset: check.site.offset },
+      site: { file: check.site.file, offset: check.site.offset, end: check.site.end },
     })),
   };
 }
@@ -119,7 +124,15 @@ function member<T extends string>(
 function site(value: unknown, where: string): CompactSite {
   const fields = object(value, where);
   assert.ok(Number.isSafeInteger(fields["offset"]), `${where}.offset: an offset`);
-  return { file: text(fields["file"], `${where}.file`), offset: Number(fields["offset"]) };
+  assert.ok(
+    Number.isSafeInteger(fields["end"]) && Number(fields["end"]) >= Number(fields["offset"]),
+    `${where}.end: an offset at or after the start`,
+  );
+  return {
+    file: text(fields["file"], `${where}.file`),
+    offset: Number(fields["offset"]),
+    end: Number(fields["end"]),
+  };
 }
 
 /** One fixture line, parsed, as a compact record: every field checked, so a malformed line fails where it is. */
@@ -168,16 +181,44 @@ function excess(more: readonly string[], fewer: readonly string[]): string[] {
 }
 
 /**
+ * The sites a record compares by their start only: a member read's and an operator's diagnostic, and a null-check at a
+ * member read's site (C5's obligation). The set marks a member read's access or its receiver, and an operator's
+ * operand, where the core marks the other span or the whole expression: 82 records at the set's revision `1de35708`,
+ * with equal starts, none of them C1's, C9's or C10's. Their ends are the member read's and operator's own step's.
+ */
+function startOnly(record: CompactRecord): ReadonlySet<string> {
+  const start = (where: CompactSite): string => `${where.file}:${where.offset}`;
+  const members = new Set(
+    record.diagnostics
+      .filter((entry) => entry.kind === "member-read")
+      .map((entry) => start(entry.site)),
+  );
+  return new Set([
+    ...record.diagnostics
+      .filter((entry) => entry.kind === "member-read" || entry.kind === "operator")
+      .map((entry) => `${entry.kind} ${start(entry.site)}`),
+    ...record.checks
+      .filter((entry) => entry.kind === "null-check" && members.has(start(entry.site)))
+      .map((entry) => `${entry.kind} ${start(entry.site)}`),
+  ]);
+}
+
+/**
  * How `actual` differs from `expected`: the outcome; the diagnostics as a multiset of kind, class and site, and each
- * context `expected` asserts at least as often; the checks as a multiset. Order never matters, multiplicity does.
+ * context `expected` asserts at least as often; the checks as a multiset. A site is compared whole, its start and end,
+ * except where `startOnly` says. Order never matters, multiplicity does.
  */
 export function recordDifferences(expected: CompactRecord, actual: CompactRecord): string[] {
-  const at = (where: CompactSite): string => `${where.file}:${where.offset}`;
+  const loose = new Set([...startOnly(expected), ...startOnly(actual)]);
+  const span = (kind: string, where: CompactSite): string =>
+    loose.has(`${kind} ${where.file}:${where.offset}`)
+      ? `${where.file}:${where.offset}`
+      : `${where.file}:${where.offset}-${where.end}`;
   const diagnostic = (entry: CompactDiagnostic): string =>
-    `${entry.kind} ${entry.class} ${at(entry.site)}`;
+    `${entry.kind} ${entry.class} ${span(entry.kind, entry.site)}`;
   const withContext = (entry: CompactDiagnostic): string => `${diagnostic(entry)} ${entry.context}`;
   const check = (entry: CompactCheck): string =>
-    `${entry.kind} ${entry.target} [${entry.against.join("|")}]${entry.boundary ? " boundary" : ""} ${at(entry.site)}`;
+    `${entry.kind} ${entry.target} [${entry.against.join("|")}]${entry.boundary ? " boundary" : ""} ${span(entry.kind, entry.site)}`;
   const differences: string[] = [];
   if (expected.outcome !== actual.outcome)
     differences.push(`outcome ${expected.outcome}, got ${actual.outcome}`);

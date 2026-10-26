@@ -1040,7 +1040,19 @@ test("a choice's written list element reads below the list's element step, as it
   for (const store of ["rec.f = 2.5", 'showPermanentButton "b" { rec.f = 2.5 }']) {
     const head = `let rec = {f: 1}\n${store}\nlet n: integer = `;
     const choice = recordOf(`${head}(askChoice [{text: "A", value: rec}]).f\nexit`);
-    assert.deepEqual(choice, recordOf(`${head}[{text: "A", value: rec}][0].value.f\nexit`));
+    // (the analogue's value expression is longer, so its sites start alike and end later)
+    const starts = (record: CompactRecord): CompactRecord => ({
+      ...record,
+      diagnostics: record.diagnostics.map((d) => ({
+        ...d,
+        site: { ...d.site, end: d.site.offset },
+      })),
+      checks: record.checks.map((c) => ({ ...c, site: { ...c.site, end: c.site.offset } })),
+    });
+    assert.deepEqual(
+      starts(choice),
+      starts(recordOf(`${head}[{text: "A", value: rec}][0].value.f\nexit`)),
+    );
     assert.deepEqual(
       [
         choice.outcome,
