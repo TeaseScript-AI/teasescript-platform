@@ -49,8 +49,12 @@ test("the core gives the expected record for every record of the cells it comple
   assert.equal(asserted.length, 1_314);
   const deviating = new Map<string, number>();
   let shortened = 0;
+  // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
+  const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
-    const actual = analysed(record);
+    const input = JSON.stringify(record.files);
+    const actual = analyses.get(input) ?? analysed(record);
+    analyses.set(input, actual);
     const deviations = endDeviations(record.expected, actual);
     if (deviations.length > 0) shortened += 1;
     for (const kind of deviations) deviating.set(kind, (deviating.get(kind) ?? 0) + 1);
