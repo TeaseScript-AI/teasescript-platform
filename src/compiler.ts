@@ -532,6 +532,7 @@ function checkFlow(
         ),
       );
     }
+    const unstarted = reachability.unstartedFileWarnings(targets);
     const warnings = reachability.warnings(
       files.map((file) =>
         file.result.diagnostics.flatMap((diagnostic): ConstantTest[] =>
@@ -540,8 +541,8 @@ function checkFlow(
             : [],
         ),
       ),
+      (file) => unstarted[file]!.length === 0,
     );
-    const unstarted = reachability.unstartedFileWarnings(targets);
     // In source order, a warning before an error at the same place, as the loop that never ends comes before the
     // missing exit that it causes.
     files.forEach((file, index) =>

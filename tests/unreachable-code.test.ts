@@ -195,10 +195,11 @@ test("the code of a file that no goto or call which can run starts never runs", 
     "skipped.tease": tagged("skipped", 'say "skipped"\nend'),
     "computed.tease": 'say "computed"\nend',
     "helpers.tease": 'global function help {\n    say "help"\n}',
-    // Only code that never runs starts these, and a start value runs at the start of the session.
+    // Only code that never runs starts these, and a start value runs at the start of the session. The file's warning
+    // says why the code after its end never runs too.
     "dead.tease": 'say "dead"\ncall "chained.tease"\nend',
     "chained.tease": 'say "chained"\nend',
-    "never.tease": 'global start = 1\nsay "never ${start}"\nend',
+    "never.tease": 'global start = 1\nsay "never ${start}"\nend\nsay "after"',
   }).map(([path, source]) => ({ path, source }));
   assert.deepEqual(
     compileProject(files).diagnostics.map(
