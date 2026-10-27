@@ -28,6 +28,7 @@ import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import {
   compareProjectPaths,
+  liesIn,
   MAIN_FILE_PATH,
   packagePathProblem,
   type UnreadablePackageFile,
@@ -222,11 +223,14 @@ function compileProjectFiles(
     if (plan !== null) plan = checkFlow(files, plan, trace, checked, hostValues);
   }
   const named = new Set(files.flatMap((file) => [...(file.unreadableNamed ?? [])]));
+  // A missing `main.tease` reports the one it lies in, as an error of the inventory.
+  if (files[0]?.result.path !== MAIN_FILE_PATH)
+    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file.path)) named.add(file.path);
   const packageDiagnostics = [
     ...catalog.diagnostics,
-    // A path or glob that names one reports it there instead, and `main.tease` is an error of the inventory.
+    // A path or glob that names one reports it there instead.
     ...unreadable.flatMap((file) =>
-      file.path === MAIN_FILE_PATH || named.has(file.path)
+      named.has(file.path)
         ? []
         : [packageFileDiagnostic(file.path, DiagnosticSeverity.Warning, "TSC011", file.reason)],
     ),
@@ -291,7 +295,7 @@ function checkProjectFiles(
     }
   }
   if (!byPath.has(MAIN_FILE_PATH)) {
-    const main = unreadable.find((file) => file.path === MAIN_FILE_PATH);
+    const main = unreadable.find((file) => liesIn(MAIN_FILE_PATH, file.path));
     diagnostics.push(
       main === undefined
         ? projectDiagnostic(

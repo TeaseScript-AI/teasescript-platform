@@ -262,5 +262,5 @@ code each.
   - compiler: the same rule with the same text, naming the image, for the keywords of an image
   - type checker: the same rule with the same text for the written tags of `takePhoto(tags: [...])`
 - `TSC011`
-  - name pass: a path or glob written out that names a file the host could not load, as the target of a `goto` or `call`, in `script(...)`, as the `from:` of a tag query, or as the file of `showImage`, `playAudio`, or `playVideo`, with the host's reason as its text
+  - name pass: a path or glob written out that names a file the host could not load, or may name a file in a folder it could not read, as the target of a `goto` or `call`, in `script(...)`, as the `from:` of a tag query, or as the file of `showImage`, `playAudio`, or `playVideo`, with the host's reason as its text
   - compiler: the same rule with the same text for `main.tease`, where every session starts, and as a warning at each other file or folder the host could not load that no such path or glob names

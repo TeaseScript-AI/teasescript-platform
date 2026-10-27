@@ -81,6 +81,25 @@ export function globMatches(pattern: string, paths: Iterable<string>): string[] 
 }
 
 /**
+ * Whether `path`, written out, is `entry`, a package file or folder, or lies in it; `.` stands for the package root
+ * (#595).
+ */
+export function liesIn(path: string, entry: string): boolean {
+  return entry === "." || path === entry || path.startsWith(`${entry}/`);
+}
+
+/** Whether a glob may match `entry`, a package file or folder, or a path in it; `.` stands for the package root. */
+export function globMayReach(pattern: string, entry: string): boolean {
+  if (entry === ".") return true;
+  const segments = pattern.split("/");
+  const parts = entry.split("/");
+  return (
+    parts.length <= segments.length &&
+    parts.every((part, index) => segmentMatches(segments[index]!, part))
+  );
+}
+
+/**
  * Whether one folder or file name matches a glob segment, where `*` stands for any characters. Each `*` resumes from
  * the latest one only, so the work stays proportional to the two lengths' product, without backtracking blowup.
  */

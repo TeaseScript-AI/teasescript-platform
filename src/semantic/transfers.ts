@@ -8,7 +8,9 @@ import type {
 import {
   declarationsOnlyMessage,
   globMatches,
+  globMayReach,
   isPathGlob,
+  liesIn,
   packageGlobProblem,
   packagePathProblem,
 } from "../project-paths.js";
@@ -220,8 +222,8 @@ function validateGlobTarget(validator: SemanticValidator, target: FileTarget): b
 }
 
 /**
- * Reports each file or folder that the host could not load which `path`, written out, names (TSC011, #595), as a glob
- * when `glob`, with the host's reason as the message. Returns whether it named one.
+ * Reports each file or folder that the host could not load which `path`, written out, names, or may name a file in
+ * (TSC011, #595), as a glob when `glob`, with the host's reason as the message. Returns whether it named one.
  */
 export function reportUnreadableFiles(
   validator: SemanticValidator,
@@ -229,14 +231,14 @@ export function reportUnreadableFiles(
   span: SourceSpan,
   glob = isPathGlob(path),
 ): boolean {
-  const unreadable = validator.project.unreadable;
-  if (unreadable.size === 0) return false;
-  const named = glob ? globMatches(path, unreadable.keys()) : unreadable.has(path) ? [path] : [];
-  for (const file of named) {
-    validator.unreadableNamed.add(file);
-    validator.report(semanticCode.unreadableFile, unreadable.get(file)!.reason, span);
+  let named = false;
+  for (const file of validator.project.unreadable) {
+    if (!(glob ? globMayReach(path, file.path) : liesIn(path, file.path))) continue;
+    named = true;
+    validator.unreadableNamed.add(file.path);
+    validator.report(semanticCode.unreadableFile, file.reason, span);
   }
-  return named.length > 0;
+  return named;
 }
 
 /**

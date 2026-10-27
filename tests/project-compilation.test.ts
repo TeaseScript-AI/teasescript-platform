@@ -406,6 +406,10 @@ test("a package file the host could not load is an error where a path written ou
     ['let found = findScripts(from: "scenes/*.tease")\nexit', broken],
     ['showImage "images/locked.jpg"\nexit', locked],
     ['playAudio async "sounds/bell*.mp3"\nexit', bell],
+    // A folder may hold the file that a path or glob names.
+    ['goto "attic/old.tease"', attic],
+    ['call "*/old.tease"\nexit', attic],
+    ['showImage "attic/photos/old.jpg"\nexit', attic],
   ] as const) {
     const result = compile(main);
     assert.equal(result.plan, null, main);
@@ -432,12 +436,16 @@ test("a package file the host could not load is an error where a path written ou
     ),
     unreadableFiles.map(({ path }) => `${path} TSC011`),
   );
-  // Every session starts at main.tease, so a main.tease the host could not load is an error.
-  const main = { path: "main.tease", reason: "The text of 'main.tease' cannot be read." };
-  assert.deepEqual(
-    compileProject([], { unreadableFiles: [main] }).diagnostics.map(
-      ({ path, severity, code, message }) => [path, severity, code, message],
-    ),
-    [["main.tease", "error", "TSC011", main.reason]],
-  );
+  // Every session starts at main.tease, so a main.tease the host could not load is an error, also in a folder it could
+  // not read.
+  for (const main of [
+    { path: "main.tease", reason: "The text of 'main.tease' cannot be read." },
+    { path: ".", reason: "The package folder cannot be opened." },
+  ])
+    assert.deepEqual(
+      compileProject([], { unreadableFiles: [main] }).diagnostics.map(
+        ({ path, severity, code, message }) => [path, severity, code, message],
+      ),
+      [["main.tease", "error", "TSC011", main.reason]],
+    );
 });

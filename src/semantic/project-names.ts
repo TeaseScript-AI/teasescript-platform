@@ -29,8 +29,8 @@ export class ProjectNames {
   /** The files that run nothing on their own: they hold declarations only. */
   readonly declarationsOnly = new Set<string>();
 
-  /** The package files and folders that the host could not load, by path. */
-  readonly unreadable: ReadonlyMap<string, UnreadablePackageFile>;
+  /** The package files and folders that the host could not load. */
+  readonly unreadable: readonly UnreadablePackageFile[];
 
   /** The tags of each file that runs something, by path, when they are known. */
   readonly tags = new Map<string, ReadonlyMap<string, number | null>>();
@@ -110,7 +110,7 @@ export class ProjectNames {
     options: SemanticValidationOptions,
   ) {
     this.diagnostics = files.map(() => []);
-    this.unreadable = new Map((options.unreadableFiles ?? []).map((file) => [file.path, file]));
+    this.unreadable = options.unreadableFiles ?? [];
     for (const { path, program } of files) {
       this.labels.set(
         path,
