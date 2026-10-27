@@ -976,15 +976,18 @@ export class Consumers {
     let question = this.#questions.get(memoKey);
     if (question === undefined) {
       keepText(this.pass.program.work, memoKey.length);
-      const path = keptArray(
-        this.pass.program.work,
-        joinSteps(this.#landingPath(node), ["element"], below),
-      );
+      const path = joinSteps(this.#landingPath(node), ["element"], below);
       const last = path.at(-1);
+      // (only a question kept keeps its path)
       question =
         last === undefined || last === "element" || last === "entry"
           ? null
-          : { path, copiesOnly: this.#copiesOnly(node.place, path), first: undefined, into: null };
+          : {
+              path: keptArray(this.pass.program.work, path),
+              copiesOnly: this.#copiesOnly(node.place, path),
+              first: undefined,
+              into: null,
+            };
       this.#questions.set(memoKey, question);
     }
     return question;
