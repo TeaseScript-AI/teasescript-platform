@@ -1,3 +1,5 @@
+import type { Expression } from "../../ast.js";
+import { parse } from "../../parser.js";
 import type { SourceSite } from "../graph.js";
 import { dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit } from "../../duration.js";
@@ -193,34 +195,53 @@ function path(text: string): boolean {
   return /^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(text);
 }
 
-/** Code without its bracketed and quoted parts: what binds outside them. */
-function unbracketed(code: string): string {
-  let depth = 0;
-  let quoted = false;
-  let plain = "";
-  for (let at = 0; at < code.length; at += 1) {
-    const char = code[at]!;
-    if (quoted) {
-      if (char === "\\") at += 1;
-      else if (char === '"') quoted = false;
-    } else if (char === '"') quoted = true;
-    else if ("([{".includes(char)) depth += 1;
-    else if (")]}".includes(char)) depth -= 1;
-    else if (depth === 0) plain += char;
-  }
-  return plain;
+/** The expressions a member may follow without parentheses. */
+const POSTFIX: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+  "parenthesizedExpression",
+  "stringLiteral",
+  "booleanLiteral",
+  "nullLiteral",
+  "listLiteral",
+  "objectLiteral",
+  "setLiteral",
+  "dictLiteral",
+]);
+
+/** The expressions an operator may stand beside without parentheses: a postfix one, a number, a quantity. */
+const OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
+  ...POSTFIX,
+  "numberLiteral",
+  "durationLiteral",
+  "unitExpression",
+  "angleExpression",
+]);
+
+/** The kind of expression code is, by the language's own parser (its binding, whatever its spacing); `null` if none. */
+function expressionKind(code: string): Expression["kind"] | null {
+  const prefix = "let fix = ";
+  const parsed = parse(`${prefix}${code}\nexit\n`);
+  const statement = parsed.program.statements[0];
+  if (parsed.diagnostics.length > 0 || statement?.kind !== "letStatement") return null;
+  const { span, kind } = statement.initializer;
+  return span.start.offset === prefix.length && span.end.offset === prefix.length + code.length
+    ? kind
+    : null;
 }
 
 /** Code as the receiver of a member a fix writes after it: in parentheses unless it binds tighter (`t`, `f(x)`). */
 function receiverText(code: string): string {
-  return /^[\d-]/.test(code) || /[\s+\-*/%<>=!?]/.test(unbracketed(code)) ? `(${code})` : code;
+  const kind = expressionKind(code);
+  return kind !== null && POSTFIX.has(kind) ? code : `(${code})`;
 }
 
-/** Code as an operand of an operator or `otherwise` a fix writes: in parentheses where an operator binds in it. */
+/** Code as an operand of an operator or `otherwise` a fix writes: in parentheses unless it binds tighter. */
 function operandText(code: string): string {
-  return /\s(?:[-+*/%<>]=?|[!=]=|and|or|otherwise|is)\s|^not\s/.test(unbracketed(code))
-    ? `(${code})`
-    : code;
+  const kind = expressionKind(code);
+  return kind !== null && OPERANDS.has(kind) ? code : `(${code})`;
 }
 
 /**
@@ -646,7 +667,7 @@ function joined(
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
 ): Known[] | null {
-  if (rule.operator !== "+" || fits.length > 0 || rule.chain.length < 2) return null;
+  if (rule.operator !== "+" || fits.length > 0 || rule.operands.length !== 2) return null;
   const own = known(rule.operand ? kinds : rule.pair);
   const other = !rule.operand
     ? own.includes("string")
@@ -665,7 +686,10 @@ function joinRepair(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
   source: MessageSource,
 ): string {
-  return `Put the value in the text instead, as in '${joinedText(rule.chain, source)}'.`;
+  // (the chain's text is written once per chain, `Consumers.#settleChains`)
+  return rule.chain.length === 0
+    ? "Put the value in the text instead."
+    : `Put the value in the text instead, as in '${joinedText(rule.chain, source)}'.`;
 }
 
 /** The kinds `${...}` shows as text. */
@@ -1018,8 +1042,9 @@ function contextSentence(
         detail.receiver?.kinds.find((kind) => REFERENCE.has(kind));
       return reference === undefined || detail.receiver === null
         ? `The type of '${name}' is known only when the script runs.`
-        : `'${detail.receiver.text}' is ${described([reference])}, whose properties are known only when the ` +
-            "script runs.";
+        : // (one reference type of several the receiver may hold: it may be that one)
+          `'${detail.receiver.text}' ${detail.receiver.kinds.every((kind) => kind === reference) ? "is" : "may be"} ` +
+            `${described([reference])}, whose properties are known only when the script runs.`;
     }
   }
 }
