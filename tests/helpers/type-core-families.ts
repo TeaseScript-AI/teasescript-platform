@@ -2360,7 +2360,8 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
 
 /**
  * Read chains through nested literals (S6's PR, "Inherited products"; S6c): a list nested k deep read through k
- * `.first`, and a record nested k deep read through its k properties. Each link reads a key one step longer, so the k
+ * `.first`, the same around a record read through k index steps, and a record nested k deep read through its k
+ * properties. Each link reads a key one step longer, so the k
  * keys' contracts and their texts grow with the chain's depth (TABLE §8: a lookup costs the key's depth): **proposed
  * known products**, gated at their measured 64 → 128 step in r4.45's form, not a bound at larger sizes. On `main` the
  * `.first` chain grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the allowance at
@@ -2377,6 +2378,23 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
         lines(
           `let value = ${"[".repeat(k)}1${"]".repeat(k)}`,
           `let n: integer = value${".first".repeat(k)}`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "F12-index-chain",
+    measures:
+      "F12, §8: a list nested k deep around a 4-field record of host data, each field read through k index steps",
+    // 333,162 / 1,423,306 units at k = 64, 128 in both orders (4.4803; `main` 707,530 / 4,318,378, 6.4008)
+    measured: 4.49,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(4, () => "[1, raw][1]")}}`,
+          `let box = ${"[".repeat(k)}root${"]".repeat(k)}`,
+          rows(4, (i) => `repeat box${"[0]".repeat(k)}.f${i} {}`),
           "exit",
         ),
       ),
@@ -2520,7 +2538,10 @@ export const ORACLE_PROGRAMS: readonly {
  * selection read once per value, programs whose answers would differ were the shared key coarser than the answer:
  * options of two written domains, a storing call or a guard between reads, a read beside its projection, host data,
  * a store or a guard inside a run of adds, a `get`'s default read guarded and unguarded, an ingress identity read at two
- * depths, a host cell beside each typed load, a chain of `.first` with a store between. Each was checked against a
+ * depths, a host cell beside each typed load, a chain of `.first` with a store between; and the check-first list's
+ * shapes: a copy cycle's places, held and empty options, aliases around a conditional child store or a whole reset,
+ * written, optional and null-only domains through parentheses, removals, dict projections and call results beside the
+ * shared values, the path end. Each of the first 49 was checked against a
  * build with that key made coarser (the PR's mutation table). The sharing differential and the member-answer oracle
  * run them in both orders.
  */
@@ -3024,6 +3045,188 @@ export const VALUE_SHARING_PROGRAMS: readonly {
       "let value = [[[1]], [[2.5]]]",
       "let n: integer = value[0].first[0]",
       "let m: integer = value.first[1].first",
+    ],
+    [
+      "choice: options of a copy cycle's places",
+      'let flag = askBoolean "f"',
+      "let a = {f0: 1}",
+      "let b = {f0: 2.5}",
+      "if flag {",
+      "  a = b",
+      "}",
+      "b = a",
+      'let box = askChoice {text: "x", value: a}, {text: "y", value: b}, {text: "z", value: a}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: held options beside a written one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let opt = {text: "a", value: root}',
+      'let box = askChoice opt, opt, {text: "b", value: root}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "choice: options of an empty list",
+      "let xs = []",
+      'let box = askChoice {text: "a", value: xs}, {text: "b", value: xs}',
+      "repeat box[0] {}",
+    ],
+    [
+      "choice: options of a known root",
+      "let root = {f0: 1, f1: 2.5}",
+      'let box = askChoice {text: "a", value: root}, {text: "b", value: root}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "choice: an option without a value beside ones with it",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let box = askChoice {text: "a", value: root}, {text: "b"}, {text: "c", value: root}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: a copy and its source a conditional child store separates",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: 1}",
+      "let copy = root",
+      "if raw != null {",
+      "  root.f0 = 2.5",
+      "}",
+      'let box = askChoice {text: "a", value: copy}, {text: "b", value: root}, {text: "c", value: copy}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "add: copies added around a conditional child store",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let copy = root",
+      "let xs = []",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "if raw != null {",
+      "  copy.f0 = 2.5",
+      "}",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "choice: projected copies a child store separates",
+      "let raw = hostValue",
+      "let root = {inner: {f0: [1, raw][1]}}",
+      'let one = askChoice {text: "a", value: root.inner}, {text: "b", value: root.inner}',
+      "if raw != null {",
+      "  root.inner.f0 = 2.5",
+      "}",
+      'let two = askChoice {text: "a", value: root.inner}, {text: "b", value: root.inner}',
+      "repeat one.f0 {}",
+      "repeat two.f0 {}",
+    ],
+    [
+      "add: a whole reset of the source inside a run",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "root = {f0: 2.5, f1: 2.5}",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "get: defaults a conditional child store separates",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let one = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "if raw != null {",
+      "  root.f0 = 2.5",
+      "}",
+      "let two = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "repeat one[0].f0 {}",
+      "repeat two[0].f0 {}",
+    ],
+    [
+      "get: an optional written default",
+      "let d: integer? = null",
+      "let xs = [1]",
+      "let box = [xs.get(0, default: d), xs.get(0, default: d)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "get: a null-only written default",
+      "let d: null = null",
+      "let xs = [1]",
+      "let box = [xs.get(0, default: d), xs.get(0, default: d)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "otherwise: parenthesized operands at the path end",
+      "let raw = hostValue",
+      "let maybe = [null, raw][1]",
+      "let fill = 1",
+      "let box = [(maybe) otherwise (fill), (maybe) otherwise (fill)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "choice: options of an optional written value",
+      "let w: integer? = null",
+      'let box = askChoice {text: "a", value: w}, {text: "b", value: w}',
+      "let n: integer = box",
+    ],
+    [
+      "choice: options of a null-only written value",
+      "let w: null = null",
+      'let box = askChoice {text: "a", value: (w)}, {text: "b", value: (w)}',
+      "let n: integer = box",
+    ],
+    [
+      "get: removals beside gets",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root, root]",
+      "let box = [xs.get(0, default: root), xs.removeFirst(), xs.get(0, default: root)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: dict projections in a literal",
+      "let raw = hostValue",
+      "let d = dict{a: [1, raw][1], b: 2.5}",
+      "let box = [d.values, d.values]",
+      "repeat box[0][0] {}",
+    ],
+    [
+      "get: call results in a literal",
+      "let raw = hostValue",
+      "function make {",
+      "  return {f0: [1, raw][1]}",
+      "}",
+      "let box = [make(), make()]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "choice: options at the path end",
+      "let raw = hostValue",
+      "let pick = [1, raw][1]",
+      'let box = askChoice {text: "a", value: pick}, {text: "b", value: pick}, {text: "c", value: 2.5}',
+      "let n: integer = box",
+    ],
+    [
+      "preset: loads read at the path end",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'xs.add([load("k", default: seed), load("k", default: seed)])',
+      'xs.add([load("k", default: seed), load("k", default: seed)])',
+      "let whole = xs[0][0]",
+      "whole = {f0: 2.5}",
     ],
   ] as const
 ).map(([name, ...source]) => ({
