@@ -77,7 +77,8 @@ PLAYGROUND_PACKAGES=/path/to/packages npm run playground
 
 Open a package by its folder name: `/player/?package=<name>` plays it, and `/?package=<name>` opens it in the
 playground. All its `.tease` files compile as one project that starts at `main.tease`, with its images as above; a
-package that does not compile lists each diagnostic with its file and line. Edits in the playground stay in the page.
+package that does not compile lists each diagnostic with its file and line. A file or folder the server cannot read, and
+an image whose tags it cannot read, is a diagnostic of that compilation too. Edits in the playground stay in the page.
 Hidden folders and links are not packages. A package's images and its MP3, WAV, Ogg, MP4, and WebM files are served only
 from that package, and the Player plays its audio; browser video playback is not implemented yet.
 

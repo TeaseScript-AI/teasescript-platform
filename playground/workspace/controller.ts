@@ -7,6 +7,7 @@ import {
   type ProjectImageFile,
   type ProjectSourceFile,
   type RuntimeSnapshot,
+  type UnreadablePackageFile,
 } from "../../src/index.js";
 import { runValidatedState, stepValidatedStateToEvent } from "../../src/runtime/engine.js";
 import { completeAction } from "../../src/runtime/operations/complete-action.js";
@@ -183,6 +184,8 @@ export interface WorkspaceCompileOptions {
   readonly wallClockMs?: number;
   /** The package images that tag queries search. */
   readonly images?: readonly ProjectImageFile[];
+  /** The package files and folders that the server could not read, which compiling reports. */
+  readonly unreadableFiles?: readonly UnreadablePackageFile[];
 }
 
 /** Compiles one source as the `main.tease` of a one-file project. */
@@ -199,8 +202,11 @@ export function compileWorkspaceProject(
   files: readonly ProjectSourceFile[],
   options: WorkspaceCompileOptions = {},
 ): WorkspaceResult {
-  const { images, ...snapshotOptions } = options;
-  const compilation = compileProject(files, images === undefined ? {} : { images });
+  const { images, unreadableFiles, ...snapshotOptions } = options;
+  const compilation = compileProject(files, {
+    ...(images === undefined ? {} : { images }),
+    ...(unreadableFiles === undefined ? {} : { unreadableFiles }),
+  });
   if (compilation.plan === null) {
     return freezeResult({
       diagnostics: diagnostics(compilation.diagnostics),

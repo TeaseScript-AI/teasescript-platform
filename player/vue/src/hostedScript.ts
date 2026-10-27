@@ -1,5 +1,4 @@
 import { shallowRef, type ShallowRef } from "vue";
-import type { PackageProblem } from "../../../playground/package-catalog.js";
 import {
   compilePlayerProject,
   createPlayerRuntimeSession,
@@ -12,6 +11,9 @@ import { MAIN_FILE_PATH } from "../../../src/index.js";
 import { lex } from "../../../src/lexer.js";
 import { readScriptHeader } from "../../../src/script-header.js";
 
+/** The code of a package file the host could not load (`docs/DIAGNOSTICS.md`). */
+const UNREADABLE_FILE_CODE = "TSC011";
+
 /** The trusted host of one script: its storage scope, how its references resolve, and how its project loads. */
 export interface ScriptHost {
   readonly storageScope: string;
@@ -20,10 +22,8 @@ export interface ScriptHost {
   /** The person fields of the player's profile that the session starts with (V30 §37), if the host has them. */
   readonly playerProfile?: RuntimePlayerProfileInput;
   resolveAsset(path: string): string | null;
-  load(): Promise<{
-    readonly project: string | PlayerProject;
-    readonly problems: readonly PackageProblem[];
-  }>;
+  /** The script, or the package as a project with the files the host could not load. */
+  load(): Promise<{ readonly project: string | PlayerProject }>;
 }
 
 /** The `title` and `author` of a script's header, each `null` when the header does not give it. */
@@ -47,16 +47,23 @@ export function prepareHostedScript(
   const failure = shallowRef<ScriptFailure | null>(null);
   const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
   void Promise.all([host.load(), player.loadScriptStorage()]).then(
-    ([{ project, problems }]) => {
+    ([{ project }]) => {
       identity.value = scriptIdentity(project);
       // The title names the script where saved data of several scripts is listed.
       if (identity.value.title !== null) player.rememberScriptName(identity.value.title);
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
+        // Warnings are for the creator's tools, not the start page (PLAYER-UI "Session start and user activation").
+        const errors = compilation.diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        );
         failure.value = {
-          title: "This script cannot start",
-          problems: [...compilation.diagnostics, ...problems],
+          title: "This Tease cannot start",
+          summary: errors.some((error) => error.code === UNREADABLE_FILE_CODE)
+            ? "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."
+            : "This Tease contains an error, so the Tease cannot start. The creator of this Tease needs to fix the error.",
+          problems: errors,
         };
         return;
       }
@@ -80,7 +87,8 @@ export function prepareHostedScript(
     (error: unknown) => {
       failure.value = {
         title: "This package cannot be opened",
-        problems: [{ message: error instanceof Error ? error.message : String(error) }],
+        summary: error instanceof Error ? error.message : String(error),
+        problems: [],
       };
     },
   );

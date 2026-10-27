@@ -18,9 +18,16 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
-function compiledPlan(files: readonly ProjectSourceFile[]): InstructionPlan {
+/** The plan of a project whose only diagnostics are the TSV065 warnings of the files in `unstarted`, which nothing starts. */
+function compiledPlan(
+  files: readonly ProjectSourceFile[],
+  unstarted: readonly string[] = [],
+): InstructionPlan {
   const result = compileProject(files);
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    unstarted.map((path) => [path, "TSV065"]),
+  );
   assert.notEqual(result.plan, null);
   return result.plan!;
 }
@@ -41,7 +48,21 @@ const twoFiles = [
 
 test("a project compiles into one plan: main.tease first, then the other files by path", () => {
   const result = compileProject(twoFiles);
-  assert.deepEqual(result.diagnostics, []);
+  // main.tease starts neither other file, so their code never runs.
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.path,
+      diagnostic.span.start.line,
+      diagnostic.code,
+      diagnostic.message,
+    ]),
+    ["intro.tease", "rooms/hall.tease"].map((path) => [
+      path,
+      path === "intro.tease" ? 0 : 1,
+      "TSV065",
+      `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`,
+    ]),
+  );
   assert.deepEqual(
     result.files.map((file) => file.path),
     ["main.tease", "intro.tease", "rooms/hall.tease"],
@@ -108,10 +129,13 @@ test("each diagnostic names its file, and an error in any file leaves no plan", 
 });
 
 test("the session starts in main.tease and never runs into the next file", () => {
-  const plan = compiledPlan([
-    { path: "main.tease", source: 'say "main"\nexit' },
-    { path: "after.tease", source: 'say "after"\nexit' },
-  ]);
+  const plan = compiledPlan(
+    [
+      { path: "main.tease", source: 'say "main"\nexit' },
+      { path: "after.tease", source: 'say "after"\nexit' },
+    ],
+    ["after.tease"],
+  );
   const finished = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
@@ -148,12 +172,12 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "/abs.tease",
         "TSC009",
-        "'/abs.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
+        "'/abs.tease' is not a package file path: the path has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "a//b.tease",
         "TSC009",
-        "'a//b.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
+        "'a//b.tease' is not a package file path: the path has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "../up.tease",
@@ -178,17 +202,17 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "notes.txt",
         "TSC009",
-        "'notes.txt' is not a package file path: it does not name a .tease file.",
+        "'notes.txt' is not a package file path: the path does not name a .tease file.",
       ],
       [
         "rooms/.tease",
         "TSC009",
-        "'rooms/.tease' is not a package file path: it does not name a .tease file.",
+        "'rooms/.tease' is not a package file path: the path does not name a .tease file.",
       ],
       [
         "bad\u0007.tease",
         "TSC009",
-        "'bad\u0007.tease' is not a package file path: it contains a control character.",
+        "'bad\u0007.tease' is not a package file path: the path contains a control character.",
       ],
       ["main.tease", "TSC009", "The project has no main.tease. Every session starts there."],
     ],
@@ -204,7 +228,7 @@ test("the file list needs main.tease and unique package paths", () => {
 });
 
 test("plan validation checks the file table and keeps calls inside their file", () => {
-  const plan = compiledPlan(twoFiles);
+  const plan = compiledPlan(twoFiles, ["intro.tease", "rooms/hall.tease"]);
   const errors = (changed: unknown): string[] =>
     validateInstructionPlan(changed).errors.map((error) => `${error.path} ${error.message}`);
   const files = plan.files;
@@ -257,10 +281,13 @@ function mutableCopy(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot> {
 }
 
 test("a checkpoint runs code of a file only in an activation of that file", () => {
-  const timers = compiledPlan([
-    { path: "main.tease", source: 'timer async 1 s { say "main handler" }\nwait 5 s\nexit' },
-    { path: "other.tease", source: 'timer async 1 s { say "other handler" }\nexit' },
-  ]);
+  const timers = compiledPlan(
+    [
+      { path: "main.tease", source: 'timer async 1 s { say "main handler" }\nwait 5 s\nexit' },
+      { path: "other.tease", source: 'timer async 1 s { say "other handler" }\nexit' },
+    ],
+    ["other.tease"],
+  );
   const otherStart = timers.files[1]!.startInstruction;
   const foreign = timers.functions.find((definition) => definition.entryInstruction >= otherStart)!;
   const waiting = run(timers, createImmediatePacingRuntimeSnapshot(timers)).snapshot;
@@ -292,10 +319,13 @@ test("a checkpoint runs code of a file only in an activation of that file", () =
   assert.equal(validateRuntimeSnapshot(active, timers).valid, false);
 
   // And a message paced in another file while main.tease runs.
-  const says = compiledPlan([
-    { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
-    { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },
-  ]);
+  const says = compiledPlan(
+    [
+      { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
+      { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },
+    ],
+    ["other.tease"],
+  );
   const pacing = run(says, createFreshRuntimeSnapshot(says)).snapshot;
   assert.equal(pacing.status, "waiting");
   const offset = says.files[1]!.startInstruction;
@@ -337,4 +367,85 @@ test("a host stack failure while the finished plan is validated is still TSC007"
     ]),
     [["TSC007", 0, source.length]],
   );
+});
+
+test("a package file the host could not load is an error where a path written out names it, else a warning", () => {
+  const broken = {
+    path: "scenes/broken.tease",
+    reason:
+      "The text of 'scenes/broken.tease' uses a character encoding the Player cannot read. Save the file as UTF-8 in your text editor.",
+  };
+  const locked = { path: "images/locked.jpg", reason: "'images/locked.jpg' cannot be opened." };
+  const bell = {
+    path: "sounds/bell*.mp3",
+    reason: "The name of 'sounds/bell*.mp3' is not usable.",
+  };
+  const attic = { path: "attic", folder: true, reason: "The folder 'attic' cannot be opened." };
+  const unreadableFiles = [broken, locked, bell, attic];
+  const compile = (main: string) =>
+    compileProject([{ path: "main.tease", source: main }], { unreadableFiles });
+  // Where nothing names them, each is a warning at itself, with the host's reason, and the script compiles.
+  const clean = compile("exit");
+  assert.notEqual(clean.plan, null);
+  assert.deepEqual(
+    clean.diagnostics.map(({ path, span, severity, code, message }) => [
+      path,
+      span.start.line,
+      severity,
+      code,
+      message,
+    ]),
+    unreadableFiles.map(({ path, reason }) => [path, 0, "warning", "TSC011", reason]),
+  );
+  // A path or glob written out that names one is an error there instead, also where it never runs.
+  for (const [main, file] of [
+    ['goto "scenes/broken.tease"', broken],
+    ['call "scenes/broken.tease"\nexit', broken],
+    ['let next = script("scenes/broken.tease")\nexit', broken],
+    ['if false {\n    goto "scenes/*.tease"\n}\nexit', broken],
+    ['let found = findScripts(from: "scenes/*.tease")\nexit', broken],
+    ['showImage "images/locked.jpg"\nexit', locked],
+    ['playAudio async "sounds/bell*.mp3"\nexit', bell],
+    // A folder may hold the file that a path or glob names.
+    ['goto "attic/old.tease"', attic],
+    ['call "*/old.tease"\nexit', attic],
+    ['showImage "attic/photos/old.jpg"\nexit', attic],
+  ] as const) {
+    const result = compile(main);
+    assert.equal(result.plan, null, main);
+    assert.deepEqual(
+      result.diagnostics.map(({ path, severity, code, message }) => [
+        path,
+        severity,
+        code,
+        message,
+      ]),
+      [
+        ...unreadableFiles
+          .filter((other) => other !== file)
+          .map(({ path, reason }) => [path, "warning", "TSC011", reason]),
+        ["main.tease", "error", "TSC011", file.reason],
+      ],
+      main,
+    );
+  }
+  // A media path is not a glob, and a glob names only the files it matches.
+  assert.deepEqual(
+    compile('playAudio async "sounds/bell.mp3"\nshowImage "images/*.jpg"\nexit').diagnostics.map(
+      ({ path, code }) => `${path} ${code}`,
+    ),
+    unreadableFiles.map(({ path }) => `${path} TSC011`),
+  );
+  // Every session starts at main.tease, so a main.tease the host could not load is an error, also in a folder it could
+  // not read.
+  for (const main of [
+    { path: "main.tease", reason: "The text of 'main.tease' cannot be read." },
+    { path: ".", folder: true, reason: "The package folder cannot be opened." },
+  ])
+    assert.deepEqual(
+      compileProject([], { unreadableFiles: [main] }).diagnostics.map(
+        ({ path, severity, code, message }) => [path, severity, code, message],
+      ),
+      [["main.tease", "error", "TSC011", main.reason]],
+    );
 });

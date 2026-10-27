@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useElementVisibility } from "@vueuse/core";
-import { ChevronDown, ChevronUp } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 import { playerDebugImageOrigin } from "../../debug-variables.js";
 import type { DebugStageImageStatus } from "../../presentation.js";
 import {
@@ -175,13 +173,10 @@ const imageOrigin = computed(() => {
           </dd>
         </div>
       </dl>
-      <Collapsible v-if="now.calls.length" v-slot="{ open }" class="grid gap-1">
-        <CollapsibleTrigger as-child>
-          <Button variant="ghost" size="xs" class="justify-self-start" data-debug-now-calls-toggle>
-            Call chain ({{ now.calls.length }})
-            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
+      <Collapsible v-if="now.calls.length" class="grid gap-1">
+        <CollapsibleDisclosure class="text-xs" data-debug-now-calls-toggle>
+          Call chain ({{ now.calls.length }})
+        </CollapsibleDisclosure>
         <CollapsibleContent>
           <ol class="grid gap-1 ps-2" data-debug-now-calls>
             <li v-for="(call, index) in now.calls" :key="index" class="min-w-0 break-words">
@@ -224,19 +219,14 @@ const imageOrigin = computed(() => {
         </ul>
       </section>
 
-      <Collapsible v-slot="{ open }" class="grid gap-1">
-        <CollapsibleTrigger as-child>
-          <Button
-            variant="ghost"
-            size="xs"
-            class="justify-self-start"
-            :disabled="!now.timers.length"
-            data-debug-now-timers-toggle
-          >
-            Timers ({{ now.timers.length }})
-            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
+      <Collapsible class="grid gap-1">
+        <CollapsibleDisclosure
+          class="text-xs"
+          :disabled="!now.timers.length"
+          data-debug-now-timers-toggle
+        >
+          Timers ({{ now.timers.length }})
+        </CollapsibleDisclosure>
         <CollapsibleContent>
           <ul class="grid gap-1 ps-2" data-debug-now-timers>
             <li v-for="timer in now.timers" :key="timer.actionId" class="min-w-0 break-words">

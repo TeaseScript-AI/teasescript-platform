@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp, Download } from "@lucide/vue";
+import { Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Switch from "@/components/ui/switch/Switch.vue";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,14 +44,9 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
 
 <template>
   <div class="grid gap-4 p-4 text-xs" data-debug-panel>
-    <Collapsible v-slot="{ open }" class="grid gap-1">
+    <Collapsible class="grid gap-1">
       <div class="flex min-h-9 items-center justify-between gap-2">
-        <CollapsibleTrigger as-child>
-          <Button variant="ghost" size="xs" aria-label="About Debug">
-            Debug
-            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
+        <CollapsibleDisclosure class="text-xs" aria-label="About Debug">Debug</CollapsibleDisclosure>
         <Switch v-model="active" aria-label="Debug" data-debug-active />
       </div>
       <CollapsibleContent class="text-muted-foreground">
@@ -75,14 +70,11 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
     </p>
     <section v-if="time" aria-labelledby="debug-time" class="grid gap-2">
       <h3 id="debug-time" class="font-semibold">Time</h3>
-      <Collapsible v-slot="{ open }" class="grid gap-1">
+      <Collapsible class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
-          <CollapsibleTrigger as-child>
-            <Button variant="ghost" size="xs" aria-label="About auto-skip">
-              Auto-skip
-              <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-            </Button>
-          </CollapsibleTrigger>
+          <CollapsibleDisclosure class="text-xs" aria-label="About auto-skip">
+            Auto-skip
+          </CollapsibleDisclosure>
           <Switch v-model="time.autoSkip.value" aria-label="Auto-skip" />
         </div>
         <CollapsibleContent class="text-muted-foreground">
@@ -90,18 +82,10 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
           time runs normally.
         </CollapsibleContent>
       </Collapsible>
-      <Collapsible v-slot="{ open }" class="grid gap-1">
-        <CollapsibleTrigger as-child>
-          <Button
-            variant="ghost"
-            size="xs"
-            class="justify-self-start"
-            aria-label="About time jumps"
-          >
-            Jumps
-            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
+      <Collapsible class="grid gap-1">
+        <CollapsibleDisclosure class="text-xs" aria-label="About time jumps">
+          Jumps
+        </CollapsibleDisclosure>
         <CollapsibleContent class="text-muted-foreground">
           Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1
           min advance time; messages, waits and timers in the skipped span still happen.
@@ -142,14 +126,11 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
     </section>
     <section v-if="random?.available.value" aria-labelledby="debug-random" class="grid gap-2">
       <h3 id="debug-random" class="font-semibold">Random draws</h3>
-      <Collapsible v-slot="{ open }" class="grid gap-1">
+      <Collapsible class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
-          <CollapsibleTrigger as-child>
-            <Button variant="ghost" size="xs" aria-label="About choosing outcomes">
-              Choose outcomes
-              <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-            </Button>
-          </CollapsibleTrigger>
+          <CollapsibleDisclosure class="text-xs" aria-label="About choosing outcomes">
+            Choose outcomes
+          </CollapsibleDisclosure>
           <Switch
             v-model="random.enabled.value"
             aria-label="Choose outcomes"

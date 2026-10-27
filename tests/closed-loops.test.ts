@@ -192,6 +192,7 @@ test("a timer or media block with a way out silences the warning in every file o
       ...closed,
       "timers.tease": "function limit {\n    timer async 5 s { exit }\n}\nlimit()\nend",
     }),
-    [],
+    // Any block of the project counts (V30 §30), also of a file that nothing starts.
+    ["timers.tease:4 TSV065"],
   );
 });

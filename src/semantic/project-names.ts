@@ -12,6 +12,7 @@ import {
   sessionDeclarations,
   setsDefaultSpeaker,
 } from "../project-globals.js";
+import type { UnreadablePackageFile } from "../project-paths.js";
 import type { ProjectProgram, SemanticValidationOptions } from "../semantic.js";
 import type { SourceSpan } from "../source.js";
 import { PLAYER } from "../speaker-terms.js";
@@ -27,6 +28,9 @@ export class ProjectNames {
 
   /** The files that run nothing on their own: they hold declarations only. */
   readonly declarationsOnly = new Set<string>();
+
+  /** The package files and folders that the host could not load. */
+  readonly unreadable: readonly UnreadablePackageFile[];
 
   /** The tags of each file that runs something, by path, when they are known. */
   readonly tags = new Map<string, ReadonlyMap<string, number | null>>();
@@ -106,6 +110,7 @@ export class ProjectNames {
     options: SemanticValidationOptions,
   ) {
     this.diagnostics = files.map(() => []);
+    this.unreadable = options.unreadableFiles ?? [];
     for (const { path, program } of files) {
       this.labels.set(
         path,

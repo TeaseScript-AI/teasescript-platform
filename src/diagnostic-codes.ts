@@ -433,6 +433,7 @@ export const DIAGNOSTIC_CODES = {
   },
   TST005: entry(["type checker"], "error", "Invalid tag", DOCS.tags),
   TST006: entry(["type checker"], "error", "Invalid `from:` of a tag query", DOCS.tags),
+  TST007: entry(["compiler"], "warning", "Image tags that could not be read", DOCS.tags),
 
   TSC001: entry(["parser"], "error", "Literal that is not finite", DOCS.compiler),
   TSC002: entry(["plan validation"], "error", "Malformed instruction plan", DOCS.compiler),
@@ -452,6 +453,23 @@ export const DIAGNOSTIC_CODES = {
     "Unsupported instruction plan format or version",
     DOCS.compiler,
   ),
+  TSC011: {
+    ...entry(
+      ["name pass", "compiler"],
+      ["error", "warning"],
+      "Package file that could not be loaded",
+      DOCS.compiler,
+    ),
+    shared: {
+      parts: [
+        "a path or glob written out that names a file the host could not load, or may name a file in a folder it " +
+          "could not read, as the target of a `goto` or `call`, in `script(...)`, as the `from:` of a tag query, or " +
+          "as the file of `showImage`, `playAudio`, or `playVideo`, with the host's reason as its text",
+        "the same rule with the same text for `main.tease`, where every session starts, and as a warning at each " +
+          "other file or folder the host could not load that no such path or glob names",
+      ],
+    },
+  },
 
   TSR001: entry(["runtime"], "error", "Declaration set up twice (defect)", DOCS.runtime),
   TSR002: entry(["runtime"], "error", "Assignment without a variable (defect)", DOCS.runtime),

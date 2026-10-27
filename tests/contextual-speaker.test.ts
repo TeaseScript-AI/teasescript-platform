@@ -174,11 +174,15 @@ test("a default speaker set anywhere in the package leaves 'speaker' to the runt
     source: [VERA, setter, 'say "${speaker.title}"', "exit"].join("\n"),
   });
   const elsewhere: readonly (readonly ProjectSourceFile[])[] = [
-    // In another file, in a function, or in a block that may not run.
+    // In another file, which nothing starts here, in a function, or in a block that may not run.
     [main(""), { path: "cast.tease", source: "speaker vera\nend" }],
     [main("function cast {\n    speaker vera\n}")],
     [main("timer async 1 s {\n    speaker vera\n}")],
   ];
   for (const files of elsewhere)
-    assert.deepEqual(compileProject(files).diagnostics, [], JSON.stringify(files));
+    assert.deepEqual(
+      compileProject(files).diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+      files.length > 1 ? [["cast.tease", "TSV065"]] : [],
+      JSON.stringify(files),
+    );
 });

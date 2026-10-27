@@ -38,6 +38,7 @@ export const semanticCode = {
   invalidRegex: "TSV064",
   invalidMediaForm: "TSV069",
   foreignForm: FOREIGN_FORM_CODE,
+  unreadableFile: "TSC011",
 } as const satisfies Record<string, NamePassCode>;
 
 export type NamePassCode = OwnedDiagnosticCode<"name pass", "error">;

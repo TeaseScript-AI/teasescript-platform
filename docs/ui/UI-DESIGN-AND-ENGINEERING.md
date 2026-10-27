@@ -133,6 +133,9 @@ button styles per page. Treat this as the default baseline, not a requirement to
 - use the solid accent family for primary actions, with separate solid hover and pressed roles;
 - use a `2px` accent focus outline with `1px` visible separation from the control as the shared keyboard-focus baseline;
 - keep hover and pressed feedback paint-only unless movement or geometry change communicates real interaction semantics;
+- give a toggle that unfolds text or details the shared disclosure trigger
+  (`player/vue/src/components/ui/collapsible/CollapsibleDisclosure.vue`): left-aligned, with a leading chevron that
+  turns while open, not a full-width outlined button with a trailing chevron, which reads as a select;
 - deviate when the component, workflow, accessibility requirement, or surrounding composition gives a concrete reason,
   rather than creating a second local default by accident.
 

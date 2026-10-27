@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bug, ChevronDown, ChevronUp, Download } from "@lucide/vue";
+import { Bug, Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
@@ -107,17 +107,8 @@ function returnFocus(event: Event) {
         </DialogDescription>
       </DialogHeader>
 
-      <Collapsible v-slot="{ open: expanded }" class="grid gap-2">
-        <CollapsibleTrigger as-child>
-          <Button
-            variant="outline"
-            class="min-h-11 w-full justify-between"
-            data-session-error-technical-toggle
-          >
-            Technical details
-            <component :is="expanded ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
+      <Collapsible class="grid gap-2">
+        <CollapsibleDisclosure data-session-error-technical-toggle>Technical details</CollapsibleDisclosure>
         <CollapsibleContent>
           <div class="grid gap-2 text-xs" data-session-error-technical>
             <p class="break-words" data-session-error-code>

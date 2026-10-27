@@ -27,7 +27,8 @@ import type { DeadWays } from "./way-facts.js";
  * (ADR 0022 §4.3). The checks that follow it: the endings of files and of the session (TSV052, TSV053), an `end` with
  * no file call to return to (TSV070, TSV071), a `call` that can start the running file (TSV072, TSV073), a computed
  * `goto` that can lead to a file of declarations only (TSV057, TSV074), loops with no way out (TSV058), code that never
- * runs (TSV065, TSV066), and the flow of statements that the check of variables at labels follows (TSV054).
+ * runs (TSV065, TSV066), also of a file that nothing starts, and the flow of statements that the check of variables at
+ * labels follows (TSV054).
  */
 
 /**
@@ -74,6 +75,15 @@ const ONWARD_EDGES: ReadonlySet<string> = new Set<FlowEdge["kind"]>([
   "supplied",
   "omitted",
 ]);
+
+/**
+ * The ways of computed targets (see `Reachability.#computedWays`): each target's way into its hub, a node after the
+ * instructions, and each hub's ways into the entries of its files.
+ */
+interface ComputedWays {
+  readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
+  readonly hubs: readonly (readonly number[])[];
+}
 
 /** Which instructions of a plan can run, and how that reads back as the source's statements. */
 export class Reachability {
@@ -256,14 +266,7 @@ export class Reachability {
     const states = solveForward<CallsWaiting, string>(
       {
         nodeCount: count + ways.hubs.length,
-        successors: (node) => {
-          if (node >= count)
-            return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
-          const out = this.#successors(node);
-          const computed = ways.targets.get(node);
-          if (computed !== undefined) out.push(computed);
-          return out;
-        },
+        successors: (node) => this.#computedSuccessors(ways, node),
         join: (left, right) => ({
           none: left.none ?? right.none,
           hidden: left.hidden ?? right.hidden,
@@ -450,22 +453,34 @@ export class Reachability {
     return solve();
   }
 
+  /** The ways on from `node` in the graph of `ways`: its own, from a computed target into its hub, and from a hub. */
+  #computedSuccessors(
+    ways: ComputedWays,
+    node: number,
+  ): { readonly node: number; readonly edge: string }[] {
+    const count = this.plan.instructions.length;
+    if (node >= count)
+      return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+    const out = this.#successors(node);
+    const computed = ways.targets.get(node);
+    if (computed !== undefined) out.push(computed);
+    return out;
+  }
+
   /**
-   * The way of each computed target for the check of waiting calls (see {@link pendingCallDiagnostics}). A
-   * `script(...)` of a path written out names its file, which the check follows like a file target. Any other target
-   * leads to a node of its own after the instructions, a hub, with a way into each file it may start: those of its
-   * tagged pick, or those any reference may name. Targets that may start the same files share one, by the list of files
-   * `picks` shares, so the ways grow with the files, not with the targets times the files. A reference that can name only
-   * one file leads through a hub too: the check does not read the tests that decide its ways, nor whether the target
-   * names an existing file, so an error there could reject code that cannot fail.
+   * The way of each computed target for the checks of waiting calls and of the files that start (see
+   * {@link pendingCallDiagnostics}, {@link unstartedFileWarnings}). A `script(...)` of a path written out names its file,
+   * which the check follows like a file target. Any other target leads to a node of its own after the instructions, a
+   * hub, with a way into each file it may start: those of its tagged pick, or those any reference may name. Targets that
+   * may start the same files share one, by the list of files `picks` shares, so the ways grow with the files, not with
+   * the targets times the files. A reference that can name only one file leads through a hub too: the check does not read
+   * the tests that decide its ways, nor whether the target names an existing file, so an error there could reject code
+   * that cannot fail.
    */
   #computedWays(
     picks: ReadonlyMap<number, readonly number[]>,
     referenced: readonly number[] | null,
-  ): {
-    readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
-    readonly hubs: readonly (readonly number[])[];
-  } {
+  ): ComputedWays {
     const count = this.plan.instructions.length;
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
@@ -693,6 +708,59 @@ export class Reachability {
         : { when: `from the timer on ${where}`, stop: "stop the timer" };
   }
 
+  /**
+   * The code of a file that no `goto` or `call` which can run starts never runs (TSV065, #595): the session starts
+   * `main.tease`, and the ways that can run lead on from there, by a target written out or a glob into each file it
+   * names, and by any other target into each file that `targets` gives it (see {@link #computedWays}). The warning
+   * stands on the file's first statement that runs where it stands; a file of declarations only runs nothing, so it gets
+   * none.
+   */
+  public unstartedFileWarnings(
+    targets: () => {
+      readonly picks: ReadonlyMap<number, readonly number[]>;
+      readonly referenced: readonly number[] | null;
+    },
+  ): Diagnostic[][] {
+    const diagnostics = this.plan.files.map((): Diagnostic[] => []);
+    if (this.plan.files.length < 2) return diagnostics;
+    const count = this.plan.instructions.length;
+    const { picks, referenced } = targets();
+    const ways = this.#computedWays(picks, referenced);
+    const states = solveForward<true, string>(
+      {
+        nodeCount: count + ways.hubs.length,
+        successors: (node) => this.#computedSuccessors(ways, node),
+        join: () => true,
+        equals: () => true,
+        transfer: () => true,
+      },
+      [[this.plan.files[0]!.startInstruction, true]],
+    );
+    this.plan.files.forEach((file, index) => {
+      if (states[file.entryInstruction] !== null || runsNothing(this.plan, index)) return;
+      // A start value stands in its file but runs at the start of the session, with those of `main.tease`.
+      const first = this.programs[index]!.statements.find((statement) => {
+        const range = this.trace.statements.get(statement);
+        return (
+          range !== undefined &&
+          range.start < range.end &&
+          range.start >= file.entryInstruction &&
+          range.end <= file.rootEndInstruction
+        );
+      });
+      if (first === undefined) return;
+      diagnostics[index]!.push(
+        createDiagnostic(
+          DiagnosticSeverity.Warning,
+          "TSV065",
+          `The code of '${file.path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`,
+          first.span,
+        ),
+      );
+    });
+    return diagnostics;
+  }
+
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
   public reachesExit(): boolean {
     return this.plan.instructions.some(
@@ -703,9 +771,13 @@ export class Reachability {
   /**
    * The warnings of each file, in source order: the loops with no way out (TSV058), and each run of statements that
    * never run, on its first statement (TSV065, or TSV066 for an `exit`). `constantTests` holds the TSV046 warnings of
-   * each file, which may already report why a branch never runs.
+   * each file, which may already report why a branch never runs, and `started` whether something starts the file, which
+   * otherwise has a warning that its top level never runs (see {@link unstartedFileWarnings}).
    */
-  public warnings(constantTests: readonly (readonly ConstantTest[])[]): Diagnostic[][] {
+  public warnings(
+    constantTests: readonly (readonly ConstantTest[])[],
+    started: (file: number) => boolean,
+  ): Diagnostic[][] {
     const { diagnostics, closed } = this.#closedLoops();
     this.programs.forEach((program, file) =>
       new UnreachableCode(
@@ -715,6 +787,7 @@ export class Reachability {
         [...(constantTests[file] ?? [])].sort(
           (left, right) => left.span.start.offset - right.span.start.offset,
         ),
+        started(file),
         diagnostics[file]!,
       ).report(program),
     );
@@ -1022,6 +1095,13 @@ type LoopStatement = Extract<
   { kind: "whileStatement" | "repeatStatement" | "forStatement" }
 >;
 
+/** A list of statements to walk, what runs it, and whether it is of the file's top level. */
+interface Work {
+  readonly statements: readonly Statement[];
+  readonly owner: Owner;
+  readonly top: boolean;
+}
+
 /** What runs a list of statements: its function, block, or file, or one way through a statement. */
 type Owner =
   | { readonly kind: "region" }
@@ -1054,15 +1134,15 @@ class UnreachableCode {
     private readonly closed: ReadonlySet<Statement>,
     /** The file's TSV046 warnings, by start. */
     private readonly constantTests: readonly ConstantTest[],
+    /** Whether something starts the file; else a warning on the file already says that its top level never runs. */
+    private readonly started: boolean,
     private readonly diagnostics: Diagnostic[],
   ) {}
 
   public report(program: Program): void {
-    const work: { readonly statements: readonly Statement[]; readonly owner: Owner }[] = [
-      { statements: program.statements, owner: { kind: "region" } },
-    ];
+    const work: Work[] = [{ statements: program.statements, owner: { kind: "region" }, top: true }];
     for (let item = work.pop(); item !== undefined; item = work.pop()) {
-      const { statements, owner } = item;
+      const { statements, owner, top } = item;
       // The last statement before, since the start of the list or a label, that can run, and that label.
       let previous: Statement | null = null;
       let label: Extract<Statement, { kind: "labelStatement" }> | null = null;
@@ -1085,11 +1165,11 @@ class UnreachableCode {
           label = null;
           inRun = false;
           for (const [list, way] of ownedLists(statement))
-            work.push({ statements: list, owner: way });
+            work.push({ statements: list, owner: way, top });
           for (const block of createdBlocks(statement)) this.#region(block, work);
           continue;
         }
-        if (inRun) continue;
+        if (inRun || (top && !this.started)) continue;
         inRun = true;
         const reason =
           previous !== null
@@ -1123,12 +1203,9 @@ class UnreachableCode {
   }
 
   /** Walks the statements of a function or block, unless nothing that can run reaches it. */
-  #region(
-    block: Block,
-    work: { readonly statements: readonly Statement[]; readonly owner: Owner }[],
-  ): void {
+  #region(block: Block, work: Work[]): void {
     if (this.regionRuns(block.statements) !== false)
-      work.push({ statements: block.statements, owner: { kind: "region" } });
+      work.push({ statements: block.statements, owner: { kind: "region" }, top: false });
   }
 
   /** Why the statements after `previous`, which can run but never continues, never run. */

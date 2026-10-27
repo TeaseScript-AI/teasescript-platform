@@ -6,7 +6,7 @@ import {
   type ProjectImageFile,
   type RuntimeSnapshot,
 } from "../src/index.js";
-import { compareProjectPaths } from "../src/project-paths.js";
+import { compareProjectPaths, type UnreadablePackageFile } from "../src/project-paths.js";
 import {
   checkpointStorageKey,
   exampleUrl,
@@ -92,6 +92,8 @@ const packageId = new URLSearchParams(window.location.search).get("package");
  * while the workspace holds one source.
  */
 let packageFiles: Map<string, string> | null = null;
+/** The files and folders of that package that the server could not read, which compiling it reports. */
+let unreadableFiles: readonly UnreadablePackageFile[] = [];
 /** The package file the source editor shows. */
 let activePath = MAIN_FILE_PATH;
 let plan: InstructionPlan | null = null;
@@ -198,6 +200,7 @@ async function openPackage(id: string): Promise<void> {
   );
   replaceSource("", "Package loaded.", label, false);
   packageFiles = new Map(files.map((file) => [file.path, file.source]));
+  unreadableFiles = catalog.unreadable;
   elements.fileSelect.replaceChildren(
     ...files.map((file) => {
       const option = document.createElement("option");
@@ -216,7 +219,7 @@ function showCatalog(catalog: PackageCatalog, source: string): void {
   elements.stagePanel.hidden = false;
   elements.imageCatalogStatus.textContent = [
     `${catalog.images.length} images from ${source}.`,
-    ...catalog.problems.map((problem) => `${problem.path}: ${problem.message}`),
+    ...catalog.unreadable.map((file) => file.reason),
   ].join("\n");
 }
 
@@ -298,7 +301,7 @@ function compileAndReset(): void {
         ? compileWorkspaceSource(elements.source.value, options)
         : compileWorkspaceProject(
             [...packageFiles].map(([path, source]) => ({ path, source })),
-            options,
+            { ...options, unreadableFiles },
           );
     compiledRevision = result.plan === null ? null : sourceRevision;
     applyResult(result, true);

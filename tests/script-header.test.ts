@@ -252,7 +252,14 @@ test("each project file has its own header", () => {
     { path: "rooms/hall.tease", source: '---\ntitle: "Hall"\ntags: "room"\n---\nexit' },
     { path: "rooms/plain.tease", source: "exit" },
   ]);
-  assert.deepEqual(result.diagnostics, []);
+  // Nothing starts the other files.
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [
+      ["rooms/hall.tease", "TSV065"],
+      ["rooms/plain.tease", "TSV065"],
+    ],
+  );
   assert.deepEqual(
     result.files.map((file) => [file.path, file.header?.title ?? null, file.header?.tags ?? []]),
     [

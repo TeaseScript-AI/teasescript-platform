@@ -24,7 +24,7 @@ class FakeModel {
 }
 
 test("each project file gets its own markers and header, and edits replace stale ones", () => {
-  const main = new FakeModel('---\ntitle: "Evening"\n---\nexit');
+  const main = new FakeModel('---\ntitle: "Evening"\n---\ncall "rooms/hall.tease"\nexit');
   const hall = new FakeModel("let answer = askText as\nexit");
   const publications: (readonly ProjectFileView[])[] = [];
   const subscription = watchProjectDiagnostics(

@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ChevronDown } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 
 // What a public key is, for a player who never used a terminal: collapsed under the public key field of the lock dialog.
 // The commands for the owner of the private key are in docs/ENCRYPTION.md, never in the Player.
@@ -14,13 +12,8 @@ defineProps<{
 </script>
 
 <template>
-  <Collapsible>
-    <CollapsibleTrigger as-child>
-      <Button variant="ghost" class="min-h-11 justify-self-start" data-public-key-help>
-        What is a public key?
-        <ChevronDown aria-hidden="true" />
-      </Button>
-    </CollapsibleTrigger>
+  <Collapsible class="grid">
+    <CollapsibleDisclosure data-public-key-help>What is a public key?</CollapsibleDisclosure>
     <CollapsibleContent>
       <div class="grid gap-2 pb-2 text-sm text-muted-foreground" data-public-key-help-text>
         <p>

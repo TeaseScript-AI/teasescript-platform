@@ -43,10 +43,22 @@ function said(
   return outputs(assertRuntimeResumeEquivalent(files, options).events);
 }
 
-function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
+/** The plan of a project whose only diagnostics are the TSV065 warnings of the files in `unstarted`, which nothing starts. */
+function compiled(
+  files: readonly ProjectSourceFile[],
+  unstarted: readonly string[] = [],
+): InstructionPlan {
   const result = compileProject(files);
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    unstarted.map((path) => [path, "TSV065"]),
+  );
   return result.plan!;
+}
+
+/** The TSV065 warning of a file that no `goto` or `call` starts (#595). */
+function unstarted(path: string): string {
+  return `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`;
 }
 
 function diagnostics(files: readonly ProjectSourceFile[]): [string, string, string][] {
@@ -81,6 +93,8 @@ test("a script reference is a value that shows as the call that makes it and com
         ].join("\n"),
         { ...HALL, "rooms/yard.tease": 'say "yard"\nexit' },
       ),
+      // A reference alone starts no file.
+      { warnings: ["TSV065", "TSV065"] },
     ),
     [
       'script("rooms/hall.tease")',
@@ -128,6 +142,7 @@ test("a reference saved in one session starts its file in the next", () => {
   const room = 'say "room"\nexit';
   const writer = compiled(
     project('save script("room.tease") as "next"\nexit', { "room.tease": room }),
+    ["room.tease"],
   );
   const saved = run(writer, createImmediatePacingRuntimeSnapshot(writer)).snapshot.scriptStorage;
   assert.deepEqual(saved, [{ key: "next", value: { kind: "script", path: "room.tease" } }]);
@@ -196,7 +211,10 @@ test("a goto to a reference that can name a file of declarations only warns, or 
   // V30 §29: where the references of the project can name only that file, as for a script(...) of its path.
   assert.deepEqual(
     check('if debugMode { exit }\nlet next = script("helpers.tease")\ngoto (next)'),
-    [["TSV057", runsNothing]],
+    [
+      ["TSV057", runsNothing],
+      ["TSV065", unstarted("rooms/hall.tease")],
+    ],
   );
   // Where they may name another file too, the run decides, and the goto fails if it goes there.
   const rooms = 'let rooms = [script("helpers.tease"), script("rooms/hall.tease")]\n';
@@ -216,7 +234,9 @@ test("a goto to a reference that can name a file of declarations only warns, or 
   ]);
   // A call of such a file runs nothing and returns.
   assert.deepEqual(
-    said(project('let next = script("helpers.tease")\ncall (next)\nsay "back"\nexit', others)),
+    said(project('let next = script("helpers.tease")\ncall (next)\nsay "back"\nexit', others), {
+      warnings: ["TSV065"],
+    }),
     ["back", "exit"],
   );
 });
@@ -234,7 +254,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
   assert.deepEqual(check('let next = script("/rooms/hall.tease")\nexit'), [
     [
       "TSV057",
-      "'/rooms/hall.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
+      "'/rooms/hall.tease' is not a package file path: the path has an empty folder name. Separate folders with a single '/'.",
     ],
   ]);
   assert.deepEqual(check('let next = script("rooms/*.tease")\nexit'), [
@@ -258,7 +278,7 @@ test("a script(...) with literal text is checked like a file target, and a compu
   ]);
   assert.deepEqual(
     check('call script("helpers.tease")\nlet later = script("helpers.tease")\nexit'),
-    [],
+    [["TSV065", unstarted("rooms/hall.tease")]],
   );
   assert.deepEqual(check('let path = "rooms/hall.tease"\ngoto (path)'), [
     [
@@ -293,13 +313,14 @@ test("a script(...) with literal text is checked like a file target, and a compu
   ]);
   assert.deepEqual(
     check('let next = askChoice go: script("rooms/hall.tease"), stay: "Stay"\nexit'),
-    [],
+    [["TSV065", unstarted("rooms/hall.tease")]],
   );
 });
 
 test("a button shows a script reference only when a written value is what it returns", () => {
   const plan = compiled(
     project('let next = askChoice go: script("rooms/hall.tease"), stay: "Stay"\nexit', HALL),
+    ["rooms/hall.tease"],
   );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   const action = waiting.foregroundAction;
@@ -321,7 +342,7 @@ test("a button shows a script reference only when a written value is what it ret
         'let next = load "ne" + "xt", default: null\nlet answer = askChoice next, "stay"\nexit',
         HALL,
       ),
-      { scriptStorage, ending: "failed" },
+      { scriptStorage, ending: "failed", warnings: ["TSV065"] },
     ),
     [
       "failure TSR052: A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",

@@ -1,7 +1,6 @@
 import {
   developmentPackageFileUrl,
   loadDevelopmentPackage,
-  type PackageProblem,
 } from "../../../playground/package-catalog.js";
 import { DEMO_PLAYER_PROFILE } from "../../demo-player-profile.js";
 import type { PlayerProject } from "../../runtime-adapter.js";
@@ -18,17 +17,17 @@ export function developmentPackageHost(id: string) {
     playerProfile: DEMO_PLAYER_PROFILE,
     resolveAsset: (path: string): string | null =>
       files.has(path) ? developmentPackageFileUrl(id, path) : null,
-    /** The package as a project, and what the server could not read of it; rejects when it cannot be opened. */
-    async load(): Promise<{
-      readonly project: PlayerProject;
-      readonly problems: readonly PackageProblem[];
-    }> {
+    /** The package as a project, with what the server could not read of it; rejects when it cannot be opened. */
+    async load(): Promise<{ readonly project: PlayerProject }> {
       const catalog = await loadDevelopmentPackage(id);
       for (const image of catalog.images) files.add(image.path);
       for (const path of catalog.media) files.add(path);
       return {
-        project: { files: catalog.sources, images: catalog.images },
-        problems: catalog.problems,
+        project: {
+          files: catalog.sources,
+          images: catalog.images,
+          unreadableFiles: catalog.unreadable,
+        },
       };
     },
   };

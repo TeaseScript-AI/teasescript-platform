@@ -8,11 +8,14 @@ import type {
 import {
   declarationsOnlyMessage,
   globMatches,
+  globMayReach,
   isPathGlob,
+  liesIn,
   packageGlobProblem,
   packagePathProblem,
 } from "../project-paths.js";
 import type { SemanticValidator } from "../semantic.js";
+import type { SourceSpan } from "../source.js";
 import { staticNumber } from "../static-evaluation.js";
 import { mayMatchTags, tagQueryKey } from "../tag-query.js";
 import { semanticCode } from "./diagnostics.js";
@@ -94,6 +97,7 @@ export function validateTransferTarget(
     return false;
   }
   if (!validator.project.labels.has(target.path)) {
+    if (reportUnreadableFiles(validator, target.path, target.pathSpan)) return false;
     validator.report(
       semanticCode.invalidFileTarget,
       `The project has no file '${target.path}'. Paths start at the package root, such as "rooms/hall.tease".`,
@@ -156,6 +160,13 @@ export function validateScriptReference(
   }
   validator.project.refer([path]);
   const pathProblem = packagePathProblem(path);
+  if (
+    !isPathGlob(path) &&
+    pathProblem === null &&
+    !validator.project.labels.has(path) &&
+    reportUnreadableFiles(validator, path, pathArgument.span)
+  )
+    return;
   const problem = isPathGlob(path)
     ? `A glob cannot be inside script(...). To pick a random file, write ${transfer === "callFileStatement" ? "call" : "goto"} ${JSON.stringify(path)} directly.`
     : pathProblem !== null
@@ -192,6 +203,8 @@ function validateGlobTarget(validator: SemanticValidator, target: FileTarget): b
     );
     return false;
   }
+  // A file the host could not load would be skipped silently.
+  if (reportUnreadableFiles(validator, target.path, target.pathSpan)) return false;
   const matches = globMatches(target.path, validator.project.labels.keys());
   const runnable = matches.filter((path) => !validator.project.declarationsOnly.has(path));
   if (runnable.length > 0) {
@@ -206,6 +219,26 @@ function validateGlobTarget(validator: SemanticValidator, target: FileTarget): b
     target.pathSpan,
   );
   return false;
+}
+
+/**
+ * Reports each file or folder that the host could not load which `path`, written out, names, or may name a file in
+ * (TSC011, #595), as a glob when `glob`, with the host's reason as the message. Returns whether it named one.
+ */
+export function reportUnreadableFiles(
+  validator: SemanticValidator,
+  path: string,
+  span: SourceSpan,
+  glob = isPathGlob(path),
+): boolean {
+  let named = false;
+  for (const file of validator.project.unreadable) {
+    if (!(glob ? globMayReach(path, file) : liesIn(path, file))) continue;
+    named = true;
+    validator.unreadableNamed.add(file.path);
+    validator.report(semanticCode.unreadableFile, file.reason, span);
+  }
+  return named;
 }
 
 /**

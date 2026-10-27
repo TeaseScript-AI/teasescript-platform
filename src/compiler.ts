@@ -1,6 +1,7 @@
 import type { Block, FileTarget, InteractionExpression, Program, Statement } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { dayWaitWarnings } from "./day-waits.js";
+import type { DiagnosticCodeSeverity } from "./diagnostic-codes.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
   compileStableProject,
@@ -25,7 +26,13 @@ import { instructionExpressions } from "./plan/instruction-expressions.js";
 import { expressionPlanChildren } from "./plan/expression-children.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
-import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
+import {
+  compareProjectPaths,
+  liesIn,
+  MAIN_FILE_PATH,
+  packagePathProblem,
+  type UnreadablePackageFile,
+} from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS, PROTECTED_NAME_CODE } from "./language-facts.js";
 import { PlanControlFlow } from "./plan/control-flow.js";
 import {
@@ -127,17 +134,18 @@ function compileSingleSource(
   options: CompileOptions,
   backend?: TypeAnalysisBackend,
 ): CompilationResult {
-  const { result, imageDiagnostics: images } = compileProjectFiles(
+  const { result, packageDiagnostics: others } = compileProjectFiles(
     [{ path: MAIN_FILE_PATH, source }],
     options,
     backend,
   );
   const { path: _path, ...file } = result.files[0]!;
-  // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
+  // The diagnostics of the image catalog and of the files the host could not load name their file; the source's own
+  // follow them, as in the project.
   return Object.freeze({
     ...file,
     diagnostics:
-      images.length === 0 ? file.diagnostics : Object.freeze([...images, ...file.diagnostics]),
+      others.length === 0 ? file.diagnostics : Object.freeze([...others, ...file.diagnostics]),
     plan: result.plan,
   });
 }
@@ -164,8 +172,8 @@ export function compileProjectWithBackend(
 }
 
 /**
- * A project compilation, and the image catalog's share of its diagnostics. The types are analysed by `backend`, else by
- * the production default.
+ * A project compilation, and the share of its diagnostics that the image catalog and the files the host could not load
+ * give. The types are analysed by `backend`, else by the production default.
  */
 function compileProjectFiles(
   sources: readonly ProjectSourceFile[],
@@ -173,9 +181,10 @@ function compileProjectFiles(
   backend?: TypeAnalysisBackend,
 ): {
   readonly result: ProjectCompilationResult;
-  readonly imageDiagnostics: readonly ProjectDiagnostic[];
+  readonly packageDiagnostics: readonly ProjectDiagnostic[];
 } {
-  const inventory = checkProjectFiles(sources);
+  const unreadable = options.unreadableFiles ?? [];
+  const inventory = checkProjectFiles(sources, unreadable);
   const catalog = imageCatalog(options.images ?? []);
   const validationOptions: ProjectCheckOptions = {
     ...options,
@@ -213,19 +222,32 @@ function compileProjectFiles(
     const hostValues = (options.globals?.length ?? 0) > 0 || (options.builtins?.length ?? 0) > 0;
     if (plan !== null) plan = checkFlow(files, plan, trace, checked, hostValues);
   }
+  const named = new Set(files.flatMap((file) => [...(file.unreadableNamed ?? [])]));
+  // A missing `main.tease` reports the one it lies in, as an error of the inventory.
+  if (files[0]?.result.path !== MAIN_FILE_PATH)
+    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file)) named.add(file.path);
+  const packageDiagnostics = [
+    ...catalog.diagnostics,
+    // A path or glob that names one reports it there instead.
+    ...unreadable.flatMap((file) =>
+      named.has(file.path)
+        ? []
+        : [packageFileDiagnostic(file.path, DiagnosticSeverity.Warning, "TSC011", file.reason)],
+    ),
+  ];
   const results = files.map((file) => file.result);
   const result = Object.freeze({
     files: Object.freeze(results),
     diagnostics: Object.freeze([
       ...inventory.diagnostics,
-      ...catalog.diagnostics,
+      ...packageDiagnostics,
       ...results.flatMap((file) =>
         file.diagnostics.map((diagnostic) => Object.freeze({ ...diagnostic, path: file.path })),
       ),
     ]),
     plan,
   });
-  return { result, imageDiagnostics: catalog.diagnostics };
+  return { result, packageDiagnostics };
 }
 
 interface CompiledProjectFile {
@@ -235,12 +257,20 @@ interface CompiledProjectFile {
   readonly parsed: ReturnType<typeof parse> | null;
   /** The files each glob target may pick, once the names are checked. */
   picks?: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The files the host could not load that a path or glob written out in the file names, once the names are checked. */
+  unreadableNamed?: ReadonlySet<string>;
   /** The variables each timer, media, or button block shares with the code that created it. */
   captures?: ReadonlyMap<Block, readonly string[]>;
 }
 
-/** Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main. */
-function checkProjectFiles(sources: readonly ProjectSourceFile[]): {
+/**
+ * Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main: a
+ * `TSC011` with the host's reason when the host could not load it.
+ */
+function checkProjectFiles(
+  sources: readonly ProjectSourceFile[],
+  unreadable: readonly UnreadablePackageFile[],
+): {
   readonly files: readonly ProjectSourceFile[];
   readonly diagnostics: readonly ProjectDiagnostic[];
 } {
@@ -265,11 +295,14 @@ function checkProjectFiles(sources: readonly ProjectSourceFile[]): {
     }
   }
   if (!byPath.has(MAIN_FILE_PATH)) {
+    const main = unreadable.find((file) => liesIn(MAIN_FILE_PATH, file));
     diagnostics.push(
-      projectDiagnostic(
-        MAIN_FILE_PATH,
-        `The project has no ${MAIN_FILE_PATH}. Every session starts there.`,
-      ),
+      main === undefined
+        ? projectDiagnostic(
+            MAIN_FILE_PATH,
+            `The project has no ${MAIN_FILE_PATH}. Every session starts there.`,
+          )
+        : packageFileDiagnostic(MAIN_FILE_PATH, DiagnosticSeverity.Error, "TSC011", main.reason),
     );
   }
   const files = [...byPath.values()].sort((left, right) =>
@@ -279,14 +312,19 @@ function checkProjectFiles(sources: readonly ProjectSourceFile[]): {
 }
 
 function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
+  return packageFileDiagnostic(path, DiagnosticSeverity.Error, "TSC009", message);
+}
+
+/** A diagnostic of a package file as a whole, at its start. */
+function packageFileDiagnostic<C extends "TSC009" | "TSC011">(
+  path: string,
+  severity: DiagnosticCodeSeverity<C>,
+  code: C,
+  message: string,
+): ProjectDiagnostic {
   const start = createSourcePosition(0, 0, 0);
   return Object.freeze({
-    ...createDiagnostic(
-      DiagnosticSeverity.Error,
-      "TSC009",
-      message,
-      createSourceSpan(start, start),
-    ),
+    ...createDiagnostic(severity, code, message, createSourceSpan(start, start)),
     path,
   });
 }
@@ -369,6 +407,7 @@ function checkProject(
         result.diagnostics.filter((diagnostic) => !reported.has(diagnosticKey(diagnostic))),
       );
       files[index]!.picks = result.picks;
+      files[index]!.unreadableNamed = result.unreadableNamed;
       files[index]!.captures = result.captures;
     });
     if (files.some((file) => file.parsed === null || file.result.diagnostics.some(stopsTypeCheck)))
@@ -497,6 +536,7 @@ function checkFlow(
         ),
       );
     }
+    const unstarted = reachability.unstartedFileWarnings(targets);
     const warnings = reachability.warnings(
       files.map((file) =>
         file.result.diagnostics.flatMap((diagnostic): ConstantTest[] =>
@@ -505,6 +545,7 @@ function checkFlow(
             : [],
         ),
       ),
+      (file) => unstarted[file]!.length === 0,
     );
     // In source order, a warning before an error at the same place, as the loop that never ends comes before the
     // missing exit that it causes.
@@ -512,6 +553,7 @@ function checkFlow(
       addSemanticDiagnostics(
         file,
         [
+          ...unstarted[index]!,
           ...warnings[index]!,
           ...transfers[index]!.filter(
             (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,

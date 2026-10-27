@@ -16,18 +16,22 @@ import {
 export interface ProjectImageFile {
   readonly path: string;
   readonly keywords: readonly string[];
+  /** Why the host could not read the image's keywords, which says what to do, when it could not (#595). */
+  readonly tagsProblem?: string;
 }
 
 const imageDiagnosticCode = {
   invalidPath: "TSC009",
   ignoredKeywords: "TST003",
   conflictingTagValue: CONFLICTING_TAG_CODE,
+  unreadableTags: "TST007",
 } as const satisfies Record<string, OwnedDiagnosticCode<"compiler">>;
 
 /**
  * The image catalog of a project: each image once, in path order, with its keywords read as tags (`bedroom`,
- * `punishment: 4`) in name order. A keyword that is not a tag is ignored with a warning. A repeated tag counts once,
- * without a warning, because photo tools often keep `punishment` beside `punishment: 4`; its number wins.
+ * `punishment: 4`) in name order. A keyword that is not a tag is ignored with a warning, and an image whose keywords
+ * the host could not read has a warning too. A repeated tag counts once, without a warning, because photo tools often
+ * keep `punishment` beside `punishment: 4`; its number wins.
  */
 export function imageCatalog(images: readonly ProjectImageFile[]): {
   readonly images: readonly PlanImage[];
@@ -66,6 +70,16 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
           ),
         );
       }
+    }
+    if (image.tagsProblem !== undefined) {
+      diagnostics.push(
+        imageDiagnostic(
+          image.path,
+          DiagnosticSeverity.Warning,
+          imageDiagnosticCode.unreadableTags,
+          `The tags of '${image.path}' could not be read, so 'findImages' and 'showImage tagged' do not find '${image.path}' by its tags. ${image.tagsProblem}`,
+        ),
+      );
     }
     if (ignored.length > 0) {
       diagnostics.push(
