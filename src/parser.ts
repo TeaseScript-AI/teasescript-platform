@@ -228,6 +228,17 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftBrace,
   TokenKind.InterpolationStart,
 ]);
+/** Tokens that start a value but cannot go on from a name before them, as an operator or a call can. */
+const OPERAND_STARTS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.Identifier,
+  TokenKind.NumberLiteral,
+  TokenKind.StringStart,
+  TokenKind.KeywordTrue,
+  TokenKind.KeywordFalse,
+  TokenKind.KeywordNull,
+  TokenKind.KeywordNot,
+  TokenKind.Bang,
+]);
 const CLOSING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.RightParenthesis,
   TokenKind.RightBracket,
@@ -2136,21 +2147,22 @@ export class Parser {
 
   /**
    * The TeaseScript word for the word of another language that comes next, as `function` for the `def` of
-   * `def countTo(n)`, where a name, a number, or text follows it on its line, which no statement takes after a name, or
-   * with `anyNext` whatever follows it (`FOREIGN_FORMS`).
+   * `def countTo(n)` (`FOREIGN_FORMS`). Unless `anyNext`, what follows it on its line must start a value that cannot go
+   * on from a name, as in `elif not done`, or be a group with a block after it, as in `elif (done) {`, so that no
+   * statement that reads the word as a name, such as `fun += 1` or `elif(done)`, changes.
    */
   public foreignStatementWord(anyNext = false): ForeignForm["statement"] {
     const word = this.peek();
-    const next = this.peek(1).kind;
     if (word.kind !== TokenKind.Identifier) return undefined;
-    if (
-      !anyNext &&
-      next !== TokenKind.Identifier &&
-      next !== TokenKind.NumberLiteral &&
-      next !== TokenKind.StringStart
-    )
-      return undefined;
-    return FOREIGN_FORMS.get(word.lexeme)?.statement;
+    const statement = FOREIGN_FORMS.get(word.lexeme)?.statement;
+    if (statement === undefined || anyNext || OPERAND_STARTS.has(this.peek(1).kind))
+      return statement;
+    if (this.peek(1).kind !== TokenKind.LeftParenthesis) return undefined;
+    this.shared.closers ??= delimiterClosers(this.tokens);
+    const closer = this.shared.closers.get(this.current + 1);
+    return closer !== undefined && this.tokens[closer + 1]?.kind === TokenKind.LeftBrace
+      ? statement
+      : undefined;
   }
 
   /** Reports the word of another language that comes next (`foreignStatementWord`). */

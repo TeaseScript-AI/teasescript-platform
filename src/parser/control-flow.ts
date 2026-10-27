@@ -389,8 +389,8 @@ export function* parseRepeatStatement(parser: Parser): ParseTask<RepeatStatement
 
 export function* parseForStatement(parser: Parser): ParseTask<ForStatement | null> {
   const keyword = parser.advance();
-  // The head in parentheses of other languages, as in `for (let i = 0; i < 3; i++)`. The block after it still parses, so
-  // that its statements report nothing more.
+  // The head in parentheses of other languages, as in `for (let i = 0; i < 3; i++)`. The block after it still parses,
+  // also on the next line, so that its statements report nothing more.
   if (parser.check(TokenKind.LeftParenthesis)) {
     parser.skipGroup();
     parser.reportSpan(
@@ -398,8 +398,13 @@ export function* parseForStatement(parser: Parser): ParseTask<ForStatement | nul
       FOREIGN_FORMS.get("for (...)")!.message,
       spanFrom(keyword.span, parser.previous().span),
     );
+    const afterHead = parser.current;
+    parser.skipContinuationNewlines();
     if (parser.check(TokenKind.LeftBrace)) yield* parseChild(parser.parseBlock());
-    else parser.synchronizeStatement();
+    else {
+      parser.current = afterHead;
+      parser.synchronizeStatement();
+    }
     return null;
   }
   // An `in` here is the one after the loop variable, which is missing.

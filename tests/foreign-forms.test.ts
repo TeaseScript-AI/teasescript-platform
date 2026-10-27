@@ -29,15 +29,15 @@ test("each form of another language is one error that names the TeaseScript form
       `${word} count = 1\nsay "\${count}"\nexit`,
       [["TSP037", writes("let", word, "let count = 1"), word]],
     ]),
-    // On the line of the `}`, and on the next line before the condition.
+    // On the line of the `}`, and on the next line before a condition, also one in parentheses.
     ...["elif", "elsif", "elseif"].map((word): [string, [string, string, string][]] => [
       `let a = 1\nif a == 1 { say "one" } ${word} a == 2 { say "two" }\nexit`,
       [["TSP037", writes("else if", word, "if a { ... } else if b { ... }"), word]],
     ]),
-    [
-      'let a = 1\nif a == 1 {\n  say "one"\n}\nelif a == 2 {\n  say "two"\n}\nexit',
+    ...["a == 2", "not done", "(done)"].map((condition): [string, [string, string, string][]] => [
+      `let a = 1\nlet done = false\nif a == 1 {\n  say "one"\n}\nelif ${condition} {\n  say "two"\n}\nexit`,
       [["TSP037", writes("else if", "elif", "if a { ... } else if b { ... }"), "elif"]],
-    ],
+    ]),
     ['print "Hello"\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
     ['print("Hello")\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
     [
@@ -64,9 +64,13 @@ test("each form of another language is one error that names the TeaseScript form
     ["let i = 0\ni++\nexit", [["TSP037", writes("+= 1", "++", "count += 1"), "++"]]],
     ["let i = 0\ni--\nexit", [["TSP037", writes("-= 1", "--", "count -= 1"), "--"]]],
     ['let a = 1;\nsay "${a}"\nexit', [["TSP037", SEMICOLON, ";"]]],
-    // The block after the head still parses.
     [
-      'for (let i = 0; i < 3; i++) {\n  say "x"\n}\nexit',
+      'if true & false { say "x" }\nexit',
+      [["TSP037", writes("and", "&", "if a and b { ... }"), "&"]],
+    ],
+    // The block after the head still parses, also on the next line.
+    [
+      'for (let i = 0; i < 3; i++)\n{\n  say "x"\n}\nexit',
       [
         ["TSP037", SEMICOLON, ";"],
         ["TSP037", SEMICOLON, ";"],
@@ -85,6 +89,8 @@ test("a script that uses such a word as a name compiles as before", () => {
   for (const source of [
     'let var = 1\nvar = 3\nsay "${var}"\nexit',
     'let elif = 1\nif elif == 1 { say "one" }\nelif = 3\nexit',
+    'function elif(done: boolean) { say "x" }\nif true { say "one" }\nelif(true)\nexit',
+    'let fun = 1\nfun += 1\nsay "${fun}"\nexit',
     'let None = 1\nlet nil = None + 1\nsay "${nil}"\nexit',
     'function print(text: string) { say text }\nprint("Hello")\nexit',
     'let i = 1\nlet j = i++i\nsay "${j}"\nexit',
