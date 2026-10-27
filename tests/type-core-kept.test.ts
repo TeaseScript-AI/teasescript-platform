@@ -119,6 +119,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
   "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
   "messages.ts errorSentence step": [4, "a sentence's period before its fix, no path"],
+  "messages.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],
   "messages.ts memberWarningFix step": [1, "a receiver and its property as the fix's code"],
   "messages.ts shownFix step": [1, "an object's code and its first property as the fix's code"],
   "operator-table.ts DURATIONS composite": [2, "the operator table's constant text"],

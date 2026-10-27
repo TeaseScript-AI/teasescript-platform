@@ -65,7 +65,8 @@ test("each context word's cause says why the value may be of another type, on th
       "with an error at this line.",
   ]);
   word("cp9-cells/X6/branch-event", [
-    `${count} 'n' is set inside an 'if' or another branch, so which value reaches this line depends on the choice.`,
+    `${count} 'n' is set inside an 'if' or another branch, so which value reaches this line depends on which ` +
+      "branch runs.",
   ]);
   word("cp9-cells/O13/captured-entry", [
     `${count} 'n' is set outside 'use', before 'use' is called.`,
@@ -94,19 +95,20 @@ test("each context word's cause says why the value may be of another type, on th
       "and any element of the list may be a number.",
   ]);
   word("cp9-cells/r46/m3/astra-m3/external-receiver/index-store", [
-    "W TSV043 'value[0]': 'value' may have no elements that can be set here. If it has none, the Tease stops with " +
-      `an error at this line. ${OUTSIDE("value")}`,
+    // (an element is not set as a property is: no "that can be set", #1195 owner's review)
+    "W TSV043 'value[0]': 'value' may not have elements here. If it does not, the Tease stops with an error at " +
+      `this line. ${OUTSIDE("value")}`,
   ]);
   const speaker = "'player' is a speaker, whose properties are known only when the script runs.";
   // (in source order of their sites: the store's member read first, r4.86 (1))
   word("cp9-cells/F19a/direct", [
     // (a store into a speaker gives it the property: no stop, #1195 rule 3)
-    "W TSV043 'player.n': 'player' may have no property 'n' here. A speaker takes the property when the script runs.",
+    "W TSV043 'player.n': 'player' may not have property 'n' here. A speaker takes the property when the script runs.",
     `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another type here. ${STOPS} Keep 'player.n' ` +
-      "in a variable and check the variable first, as in 'if value is integer { ... }'. The type of 'player.n' is " +
-      "known only when the script runs.",
-    "W TSV043 'player.n': 'player' may have no property 'n' here. If it has none, the Tease stops with an error at " +
-      `this line. Assign the property before this line, as in 'player.n = ...'. ${speaker}`,
+      "in a variable, as in 'let value = player.n', and check it, as in 'if value is integer { ... }'. The type of " +
+      "'player.n' is known only when the script runs.",
+    "W TSV043 'player.n': 'player' may not have property 'n' here. If it does not, the Tease stops with an error " +
+      `at this line. Assign the property before this line, as in 'player.n = ...'. ${speaker}`,
   ]);
 });
 
@@ -226,26 +228,50 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let flagHost = askBoolean "f"\nlet x: speaker | object = player\nif flagHost { x = {m: 1} }\nx.n = 1\nexit\n',
       [
-        "W TSV043 'x.n': 'x' may have no property 'n' here. If it is an object without 'n', the Tease stops with an " +
+        "W TSV043 'x.n': 'x' may not have property 'n' here. If it is an object without 'n', the Tease stops with an " +
           "error at this line. A speaker takes the property. 'x' may be a speaker, whose properties are known only " +
           "when the script runs.",
         `W TSV043 'x.n': 'x' may hold an object without property 'n' here. If it does, the Tease stops with an error ` +
           "at this line.",
       ],
     ],
+    // a method on a value from outside: called, not set; a literal index of it, with no test and no cause of its own
+    // (the owner's review)
+    [
+      'let key = "k"\nlet v = load(key, default: null)\nv.add(2)\nexit\n',
+      [
+        `W TSV043 'v.add(2)': 'v' may be null here. ${STOPS} Check 'v' first, as in 'if v != null { ... }'.`,
+        `W TSV043 'v.add(2)': 'v' may not have method 'add' here. If it does not, the Tease stops with an error at ` +
+          `this line. ${OUTSIDE("v")}`,
+      ],
+    ],
+    [
+      'let key = "k"\nlet value = load(key, default: null)\nsay value.get(0, default: 3)\nexit\n',
+      [
+        `W TSV043 'value.get(0, default: 3)': 'value' may be null here. ${STOPS} Check 'value' first, as in ` +
+          "'if value != null { ... }', or give a fallback, as in 'value otherwise ...'.",
+        "W TSV043 'value.get(0, default: 3)': 'value' may not have method 'get' here. If it does not, the Tease " +
+          `stops with an error at this line. ${OUTSIDE("value")}`,
+        `W TSV043 '0': A list index must be a whole number (integer), but '0' may be a value of another type here. ${STOPS}`,
+        `W TSV043 '0': A dict key is text (string), but '0' may be a value of another type here. ${STOPS}`,
+      ],
+    ],
     // a possible null as an operand of an operator: its fallback in parentheses, as the parser asks of `otherwise`
     [
       "let xs = [7, null]\nsay xs[0] + 1\nexit\n",
       [
-        `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a variable ` +
-          "and check the variable first, as in 'if value != null { ... }', or give a fallback, as in " +
+        `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a variable, ` +
+          "as in 'let value = xs[0]', and check it, as in 'if value != null { ... }', or give a fallback, as in " +
           "'(xs[0] otherwise 0)'. 'xs[0]' is a list element, and any element of the list may be null.",
       ],
     ],
     // C6
     [
       "let xs = []\nsay xs.first\nexit\n",
-      [`W TSV043 'xs.first': 'xs' may be empty here. ${STOPS} Check 'xs.length' first.`],
+      [
+        `W TSV043 'xs.first': 'xs' may be empty here. ${STOPS} Check 'xs.length' first, as in ` +
+          "'if xs.length > 0 { ... }'.",
+      ],
     ],
     // C10
     [
@@ -278,8 +304,9 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       "let d = dict{a: 1}\nsay d[1]\nexit\n",
       [
+        // (a key written as a literal: the sentence alone, Astra r1)
         "E TSV043 '1': A dict key is text (string), but '1' is a whole number (integer). Write a number key as " +
-          "text, as in '\"1\"'.",
+          "text.",
       ],
     ],
     // C13's iterable
@@ -293,30 +320,31 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let a = [1, "x"]\nexit\n',
       [
-        "E TSV044 '\"x\"': This list mixes a number and text (string). A list holds one type. To keep both, " +
-          "declare a union type, as in '(number | string)[]'.",
+        // (the current checker's sentences, the elements' own types, the owner's review)
+        "E TSV044 '\"x\"': This list mixes a whole number (integer) and text (string). A list holds one type. To " +
+          "allow both, declare it as 'let a: (integer | string)[] = ...'.",
       ],
     ],
     [
       'let a = [{n: 1}, {n: "x"}]\nexit\n',
       [
-        "E TSV044 '\"x\"': This list mixes a number and text (string) in 'n' of its elements. A list holds one " +
-          "type. Give 'n' one type in every element.",
+        "E TSV044 '\"x\"': This list mixes objects whose property 'n' holds a whole number (integer) in one and " +
+          "text (string) in another. A list holds one type. Give 'n' one type in every element.",
       ],
     ],
     // the whole path to the mixed part, through a record and through a collection
     [
       'let a = [{a: {n: 1}}, {a: {n: "x"}}]\nexit\n',
       [
-        "E TSV044 '\"x\"': This list mixes a number and text (string) in 'a.n' of its elements. A list holds one " +
-          "type. Give 'n' one type in every element.",
+        "E TSV044 '\"x\"': This list mixes objects whose property 'a.n' holds a whole number (integer) in one " +
+          "and text (string) in another. A list holds one type. Give 'a.n' one type in every element.",
       ],
     ],
     [
       'let a = [{a: [1]}, {a: ["x"]}]\nexit\n',
       [
-        "E TSV044 '\"x\"': This list mixes a number and text (string) in an element of 'a' of its elements. A list " +
-          "holds one type. Use values of one type in it.",
+        "E TSV044 '\"x\"': This list mixes objects whose property 'a' holds a list (integer[]) in one and a list " +
+          "(string[]) in another. A list holds one type. Give 'a' one type in every element.",
       ],
     ],
     // a property named as an internal step stays a property
@@ -330,8 +358,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let a = [{entry: 1}, {entry: "bad"}]\nexit\n',
       [
-        "E TSV044 '\"bad\"': This list mixes a number and text (string) in 'entry' of its elements. A list holds " +
-          "one type. Give 'entry' one type in every element.",
+        "E TSV044 '\"bad\"': This list mixes objects whose property 'entry' holds a whole number (integer) in one " +
+          "and text (string) in another. A list holds one type. Give 'entry' one type in every element.",
       ],
     ],
     // a store into an element names its collection, never an index the source does not have (#1195's decided text)
@@ -427,17 +455,20 @@ test("a word that came with its value from another line names that value's origi
   count(
     "let n = 1\nif hostValue { n = 1.5 }\nrepeat n {}\nexit\n",
     "n",
-    "'n' is set inside an 'if' or another branch, so which value reaches this line depends on the choice.",
+    "'n' is set inside an 'if' or another branch, so which value reaches this line depends on which branch runs.",
   );
   count(
     "let n = 1\nif hostValue { n = 1.5 }\nlet c = n\nrepeat c {}\nexit\n",
     "c",
-    from("c", "an 'if' or another branch, so which value it gets depends on the choice."),
+    from("c", "an 'if' or another branch, so which value it gets depends on which branch runs."),
   );
   count(
     "let n = 1\nif hostValue { n = 1.5 }\nrepeat n + 1 {}\nexit\n",
     "n + 1",
-    from("n + 1", "an 'if' or another branch, so which value it gets depends on the choice."),
+    from(
+      "n + 1",
+      "an 'if' or another branch, so which value it gets depends on which branch runs.",
+    ),
   );
   count(
     "let n = 1\nrepeat 2 {\nrepeat n {}\nn = 1.5\n}\nexit\n",
@@ -495,10 +526,11 @@ test("a word that came with its value from another line names that value's origi
     "c",
     from("c", "a list element or a part of another value."),
   );
+  // (no type test and no cause where the read itself stops: the member warning at that read says it, the owner's review)
   count(
     'let room = {count: 1}\nif hostValue { room = {name: "hall"} }\nrepeat room.count {}\nexit\n',
     "room.count",
-    "'room' may hold an object that has no 'count' property.",
+    STOPS,
   );
   // (every object `c` holds has `ok`: its value is what lacks a property)
   count(
@@ -519,7 +551,7 @@ test("a word that came with its value from another line names that value's origi
   );
   // a reference union: each warning names its own kind, and a speaker's alone gets the speaker's fix
   const member =
-    "'x' may have no property 'n' here. If it has none, the Tease stops with an error at this line.";
+    "'x' may not have property 'n' here. If it does not, the Tease stops with an error at this line.";
   assert.deepEqual(
     reported(
       main("let x: speaker | timer = hostValue\nlet c = x.n\nlet d = c\nrepeat d {}\nexit\n"),

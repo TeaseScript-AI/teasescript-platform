@@ -55,8 +55,18 @@ const form = (...parts: readonly (string | RegExp)[]): RegExp =>
 
 const code = (pattern: string): RegExp => new RegExp(pattern);
 
+/**
+ * Whether a subject is a variable or a property path as written, the only subject a fix's example names (Astra r1); and
+ * whether its own text may stand in code: on one line, without a comment.
+ */
+const path = (text: string): boolean => /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(text);
+const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
+/** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
+const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
+
 const PORTS: readonly Port[] = [
-  // ADR 0021 rules 1.9 and 3.5: the check, of a variable, or of the subject kept in a variable first
+  // ADR 0021 rules 1.9 and 3.5: the check, of a variable, or of the subject kept in a variable first, its `let` shown
+  // where its own text may stand in code (the owner's review)
   {
     from: /^Check it first: if (\S+) != null \{ \.\.\. \}, or give a fallback: \1 otherwise (.+)$/,
     to: ([, name, value]) =>
@@ -73,18 +83,25 @@ const PORTS: readonly Port[] = [
   {
     from: /^Keep it in a variable and check it first, as in: if value != null \{ \.\.\. \}, or give a fallback: value otherwise (.+)$/,
     to: ([, value], { subject }) =>
-      form(
-        `Keep '${subject}' in a variable and check the variable first, as in 'if value != null { ... }', or give a ` +
-          "fallback, as in '",
-        code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
-        "'.",
-      ),
+      ownText(subject)
+        ? form(
+            `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
+              "{ ... }', or give a fallback, as in '",
+            code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
+            "'.",
+          )
+        : exact(
+            `Keep '${subject}' in a variable and check the variable first, as in 'if value != null { ... }'.`,
+          ),
   },
   {
     from: /^Keep it in a variable and check it first, as in: if value (!= null|is .+) \{ \.\.\. \}$/,
     to: ([, test], { subject }) =>
       exact(
-        `Keep '${subject}' in a variable and check the variable first, as in 'if value ${test} { ... }'.`,
+        ownText(subject)
+          ? `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value ${test} ` +
+              "{ ... }'."
+          : `Keep '${subject}' in a variable and check the variable first, as in 'if value ${test} { ... }'.`,
       ),
   },
   // #1195's decided texts
@@ -99,33 +116,61 @@ const PORTS: readonly Port[] = [
   {
     from: /^Show one of its properties instead\.$/,
     to: (_, { subject }) =>
-      form(
-        "Show one of its properties instead, as in '${",
-        subject,
-        code("\\.[A-Za-z_]\\w*"),
-        "}'.",
-      ),
+      path(subject)
+        ? form(
+            "Show one of its properties instead, as in '${",
+            subject,
+            code("\\.[A-Za-z_]\\w*"),
+            "}'.",
+          )
+        : exact("Show one of its properties instead."),
   },
   {
     from: /^Show its elements with 'toList\(\)\.join\(\)' instead\.$/,
-    to: (_, { subject }) => exact(`Show all its elements with '\${${subject}.toList().join()}'.`),
+    to: (_, { subject }) =>
+      exact(
+        path(subject)
+          ? `Show all its elements with '\${${subject}.toList().join()}'.`
+          : "Show its elements with 'toList().join()' instead.",
+      ),
   },
-  // (the sentence alone: an example written from the operands changed what some chains say, so the lead dropped it,
-  // #1195; the current checker's `${value}` placeholder does not compile, docs/DIAGNOSTICS.md "Messages")
+  // (the operand that is not text, as the source writes it, never the chain rebuilt: the owner's review)
   {
     from: /^Put the value in the text instead, as in "(.+)"\.$/,
-    to: () => exact("Put the value in the text instead."),
+    to: (_, { operands }) =>
+      operands.some(ownText)
+        ? form(
+            "Put the value in the text as '${",
+            code(`(?:${operands.filter(ownText).map(escaped).join("|")})`),
+            "}' instead.",
+          )
+        : exact("Put the value in the text instead."),
   },
-  // the current checker's fixes, code in single quotes, the value named
+  // the current checker's fixes, code in single quotes, the value named where it is a variable or a path
   {
     from: /^Select one value with '(.+)', or show every value with '(.+)'\.$/,
-    to: ([text]) => exact(text),
+    to: ([text], { subject }) =>
+      exact(
+        path(subject)
+          ? text
+          : "Select one value with a key, or show every value with 'values.join()'.",
+      ),
   },
   {
     from: /^To allow (both|null), declare (it|the parameter) as '(.+)'\.$/,
     // (a default's or fallback's place named, ADR 0021 rule 7.3)
     to: ([, allow, it, fix]) =>
       form(code(`[Tt]o allow ${allow}, declare (?:${it}|'[^']*') as '`), fix!, "'."),
+  },
+  {
+    from: /^To keep both, declare a union type, as in '(.+)'\.$/,
+    // (TSV044: on the literal's variable, else the type alone, the owner's review)
+    to: ([, fix]) =>
+      exact(
+        fix!.startsWith("let values: ")
+          ? `To allow both, declare it as '${fix!.slice("let values: ".length, -" = ...".length)}'.`
+          : `To allow both, declare it as '${fix}'.`,
+      ),
   },
   {
     from: /^To allow both, give '(.+)' a first value of type (.+), such as a variable declared with that type\.$/,
@@ -136,8 +181,12 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^To show it as text, write "(.+)"\.$/,
-    to: ([, fix], { subject }) =>
-      exact(`To show it as text, write '"${fix === "${value}" ? `\${${subject}}` : fix}"'.`),
+    to: (_, { subject }) =>
+      exact(
+        path(subject)
+          ? `To show it as text, write '"\${${subject}}"'.`
+          : "To show it as text, put it in a text with '${...}'.",
+      ),
   },
   { from: /^Use a separate property for a value of another type\.$/, to: ([text]) => exact(text) },
   { from: /^Its (only property is|properties are) (.+)\.$/, to: ([text]) => exact(text) },
@@ -146,21 +195,39 @@ const PORTS: readonly Port[] = [
     from: /^Write a number key as text, as in "(.+)"\.$/,
     to: (_, { subject }) =>
       exact(
-        `Write a number key as text, as in '"${/^\d+$/.test(subject) ? subject : `\${${subject}}`}"'.`,
+        path(subject)
+          ? `Write a number key as text, as in '"\${${subject}}"'.`
+          : "Write a number key as text.",
       ),
   },
-  { from: /^Check '(.+)' first\.$/, to: ([text]) => exact(text) },
+  {
+    from: /^Check '(.+)\.length' first\.$/,
+    to: ([text, collection]) =>
+      exact(
+        ownText(collection!)
+          ? `Check '${collection}.length' first, as in 'if ${collection}.length > 0 { ... }'.`
+          : text,
+      ),
+  },
   { from: /^Give '(.+)' one type in every element\.$/, to: ([text]) => exact(text) },
-  // members of a kind without them
+  // members of a type without them
   {
     from: /^Convert it to text first with toString\(\.\.\.\)\.$/,
     to: (_, { subject, member }) =>
-      exact(`Convert '${subject}' to text first, as in 'toString(${subject})${member}'.`),
+      exact(
+        path(subject)
+          ? `Convert '${subject}' to text first, as in 'toString(${subject})${member}'.`
+          : `Convert '${subject}' to text first with 'toString(...)'.`,
+      ),
   },
   {
     from: /^Divide it by a unit, as in '.+ \/ 1 (\w+)'\.$/,
     to: ([, unit], { subject }) =>
-      form(`Divide '${subject}' by a unit, as in '`, code(grouped(subject)), ` / 1 ${unit}'.`),
+      exact(
+        path(subject)
+          ? `Divide '${subject}' by a unit, as in '${subject} / 1 ${unit}'.`
+          : `Divide '${subject}' by a unit, such as '1 ${unit}'.`,
+      ),
   },
   { from: /^Use 'contains\(\.\.\.\)' instead\.$/, to: ([text]) => exact(text) },
   {
@@ -182,42 +249,44 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Use one of its properties instead, such as '(.+)'\.$/,
-    to: (_, { subject }) => exact(`Use one of its properties instead, such as '${subject}.title'.`),
+    to: (_, { subject }) =>
+      exact(
+        `Use one of its properties instead, such as '${path(subject) ? `${subject}.` : ""}title'.`,
+      ),
   },
-  // date and time operators and fields, the operands named where the current checker writes `value`
+  // date and time operators and fields: an example where the value it converts is a variable or a path, the other
+  // operand one or a quantity, else the sentence alone
   {
     from: /^Convert it first, as in '(.+)', or use calendar units to keep the clock time\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
-      form(
-        "Convert it first, as in '(",
-        code(grouped(left)),
-        ".toAbsoluteDateTime() ",
-        code("[-+]"),
-        " ",
-        code(grouped(right)),
-        ").toDateTime()', or use calendar units to keep the clock time.",
-      ),
+      path(left) && (path(right) || quantity(right))
+        ? form(
+            `Convert it first, as in '(${left}.toAbsoluteDateTime() `,
+            code("[-+]"),
+            ` ${right}).toDateTime()', or use calendar units to keep the clock time.`,
+          )
+        : exact(
+            "Convert it with 'toAbsoluteDateTime()' first, or use calendar units to keep the clock time.",
+          ),
   },
   {
     from: /^Convert it first, as in '\(.+\)\.toAbsoluteDateTime\(\)'\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
-      form(
-        "Convert it first, as in '(",
-        code(grouped(left)),
-        ".toDateTime() ",
-        code("[-+]"),
-        " ",
-        code(grouped(right)),
-        ").toAbsoluteDateTime()'.",
-      ),
+      path(left) && (path(right) || quantity(right))
+        ? form(
+            `Convert it first, as in '(${left}.toDateTime() `,
+            code("[-+]"),
+            ` ${right}).toAbsoluteDateTime()'.`,
+          )
+        : exact("Convert it with 'toDateTime()' first."),
   },
   {
     from: /^Convert it first, as in '.+\.toDateTime\(\)\.(\w+)'\.$/,
     to: ([, field], { subject }) =>
-      form(
-        `Convert '${subject}' first, as in '`,
-        code(grouped(subject)),
-        `.toDateTime().${field}'.`,
+      exact(
+        path(subject)
+          ? `Convert '${subject}' first, as in '${subject}.toDateTime().${field}'.`
+          : `Convert '${subject}' with 'toDateTime()' first.`,
       ),
   },
   { from: /^Write '(.+)'\.$/, to: ([text]) => exact(text) },
@@ -227,19 +296,23 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Compare its date, as in 'toDate\((.+)\)'\.$/,
-    to: (_, { operands: [, right = ""] }) => exact(`Compare its date, as in 'toDate(${right})'.`),
+    to: (_, { operands: [, right = ""] }) =>
+      exact(
+        path(right)
+          ? `Compare its date, as in 'toDate(${right})'.`
+          : "Compare its date, with 'toDate(...)'.",
+      ),
   },
   {
     from: /^Combine it with a date first, as in '(.+)'\.$/,
-    to: (_, { subject }) =>
-      exact(`Combine it with a date first, as in 'toDateTime(date, ${subject})'.`),
+    to: () => exact("Combine it with a date first, with 'toDateTime(...)'."),
   },
   {
     from: /^Subtract their dates with '(.+)', or convert both with toAbsoluteDateTime\(\) for the elapsed time\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
       exact(
-        `Subtract their dates with 'toDate(${left}) - toDate(${right})', or convert both with ` +
-          "'toAbsoluteDateTime()' for the elapsed time.",
+        `Subtract their dates with ${path(left) && path(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'"}, ` +
+          "or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
       ),
   },
   // ADR 0021 rule 2.2's rounding, as the count's sentence words it (S8c's, #1173)
@@ -317,7 +390,12 @@ function correspondence(message: string, diagnostic: CoreDiagnostic, named: Name
           message.toLowerCase().includes(words.toLowerCase()),
         ),
     );
-  return (subject ? 2 : 0) + (kinds ? 1 : 0);
+  // (a null the current message never names answers another of its diagnostics)
+  const unnamedNull =
+    diagnostic.kind !== "written-type" &&
+    diagnostic.kinds.includes("null") &&
+    !/\bnull\b/.test(message);
+  return (subject ? 2 : 0) + (kinds ? 1 : 0) - (unnamedNull ? 1 : 0);
 }
 
 function pairs(): Pair[] {
@@ -364,12 +442,66 @@ function pairs(): Pair[] {
   return found;
 }
 
-/** Pairs whose fixes differ on purpose, by the rule that makes them differ, and how many. */
+/** The pairs, made once for the tests below. */
+let made: Pair[] | null = null;
+const allPairs = (): Pair[] => (made ??= pairs());
+
+const ROUND = "Round it with floor(...), round(...), or ceil(...) first.";
+
+/**
+ * The type test of a subject (ADR 0021 rule 3.5): of a variable directly, of any other value kept in one first, its
+ * `let` shown where its own text may stand in code.
+ */
+const typeTest = (subject: string, type: string): RegExp =>
+  exact(
+    /^[A-Za-z_]\w*$/.test(subject)
+      ? `Check '${subject}' first, as in 'if ${subject} is ${type} { ... }'.`
+      : ownText(subject)
+        ? `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value is ${type} { ... }'.`
+        : `Keep '${subject}' in a variable and check the variable first, as in 'if value is ${type} { ... }'.`,
+  );
+
+/**
+ * Pairs whose fixes differ on purpose: the rule that makes them differ, which pairs, the exact fix the new checker gives
+ * instead (compared, so a wrong replacement fails), and how many.
+ */
 interface Intended {
   readonly rule: string;
   readonly matches: (pair: Pair) => boolean;
+  readonly replacement: (pair: Pair) => RegExp;
   readonly count: number;
 }
+
+/** The type each rule 3.5 pair's test names: the type its use takes, which the value's written union holds. */
+const UNION_TESTS: ReadonlyMap<string, string> = new Map([
+  ["cp9-cells/r46/obligations/condition/null-and-kind", "boolean"],
+  ["cp9-cells/r46/obligations/not/null-and-kind", "boolean"],
+  ["cp9-cells/r46/obligations/and/null-and-kind", "boolean"],
+  ["cp9-cells/r46/obligations/or/null-and-kind", "boolean"],
+  ["cp9-cells/r46/m3/astra-m3/null-kind/condition/null", "boolean"],
+  ["cp9-cells/r46/m3/astra-m3/null-kind/not/null", "boolean"],
+  ["cp9-cells/r46/m3/astra-m3/null-kind/and/null", "boolean"],
+  ["cp9-cells/r46/m3/astra-m3/null-kind/key/null", "string"],
+  ["cp9-cells/r46/m3/astra-m3/null-kind/plus/null", "integer"],
+  ["cp9-cells/r46/m3/astra-m3/routes/read-null-kind", "string"],
+  ["cp9-cells/s4/followup/temporal/year-string-fallback", "string"],
+]);
+
+/** The type each rule 1.7 pair's test names: the written whole number its value is stored into. */
+const UNKNOWN_TESTS: ReadonlyMap<string, string> = new Map([
+  ["cp9-cells/review/timer-method", "integer"],
+  ["cp9-cells/provenance/external-opaque-merge", "integer"],
+  ["cp9-cells/r44/own-selector/own-random-typed-copy", "integer"],
+]);
+
+/** The fix each rule 3.4 pair gives instead of the current checker's forbidden union. */
+const UNION_RULE_FIXES: ReadonlyMap<string, string> = new Map([
+  ["cp9-cells/s4/s6/owner/bound/list-kind/literal", "Use values of one type in it."],
+  [
+    "cp9-cells/s4/s6/owner/bound/list-kind/insert",
+    "Use a separate list for values of another type.",
+  ],
+]);
 
 const INTENDED: readonly Intended[] = [
   {
@@ -380,6 +512,15 @@ const INTENDED: readonly Intended[] = [
         ((diagnostic.rule.rule === "store" || diagnostic.rule.rule === "fallback") &&
           diagnostic.rule.type.includes("integer") &&
           diagnostic.kinds.includes("number"))),
+    // (its sentences as they stand until S8c: rounding, a whole number, a fallback of the type, an unknown's test)
+    replacement: ({ diagnostic, named }) =>
+      diagnostic.kind !== "written-type" && diagnostic.rule.rule === "fallback"
+        ? exact("Use null or a value of that type instead.")
+        : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("number")
+          ? exact(ROUND)
+          : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("unknown")
+            ? typeTest(named.subject, "integer")
+            : exact("Use a whole number here."),
     count: 177,
   },
   {
@@ -387,42 +528,54 @@ const INTENDED: readonly Intended[] = [
       "ADR 0021 rule 3.5: the value may also be of the type the use takes (its written union, a fallback), so the " +
       "new checker names the type test where the current checker's flow sees one type and gives that type's fix; " +
       "the flow comes with narrowing (#1073)",
-    matches: ({ diagnostic, message }) =>
+    matches: ({ record, diagnostic }) =>
+      UNION_TESTS.has(record) &&
       diagnostic.class === "warning-runtime-check" &&
-      diagnostic.fits.length > 0 &&
-      !diagnostic.kinds.includes("null") &&
-      /'if [^']* is [^']*'/.test(message),
+      diagnostic.fits.length > 0,
+    replacement: ({ record, named }) => typeTest(named.subject, UNION_TESTS.get(record)!),
     count: 11,
   },
   {
     rule:
       "ADR 0021 rule 1.7: a value the new checker does not know (from outside the script, or an operation it does " +
       "not follow) is checked with a type test, where the current checker knows its type",
-    matches: ({ diagnostic, current }) =>
+    matches: ({ record, diagnostic }) =>
+      UNKNOWN_TESTS.has(record) &&
       diagnostic.class === "warning-runtime-check" &&
-      diagnostic.kinds.includes("unknown") &&
-      !/^Speaker /.test(current),
+      diagnostic.kinds.includes("unknown"),
+    replacement: ({ record, named }) => typeTest(named.subject, UNKNOWN_TESTS.get(record)!),
     count: 4,
   },
   {
     rule: "ADR 0021 rule 3.4: the current checker's union holds a whole list beside another type",
-    matches: ({ forms }) => forms.some(({ fix }) => /'[^']*\[\] \|/.test(fix)),
+    matches: ({ record, forms }) =>
+      UNION_RULE_FIXES.has(record) && forms.some(({ fix }) => /'[^']*\[\] \|/.test(fix)),
+    replacement: ({ record }) => exact(UNION_RULE_FIXES.get(record)!),
     count: 2,
   },
   {
     rule:
       "S9b's speaker flow (#1072, unit 6): the fix names the receiver as the source writes it ('people.random.n = " +
       "...'), the current checker the speaker it holds ('player.n = ...')",
-    matches: ({ current, message, named }) =>
-      /^Speaker '[^']+' has no /.test(current) &&
-      !current.startsWith(`Speaker '${named.subject}'`) &&
-      message.includes(`as in '${named.subject}.`),
+    matches: ({ current, named }) =>
+      /^Speaker '[^']+' has no /.test(current) && !current.startsWith(`Speaker '${named.subject}'`),
+    // (a receiver that is no variable or path gets the sentence alone, #1195 after Astra r1)
+    replacement: ({ named }) =>
+      exact(
+        /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(named.subject)
+          ? `Assign the property before this line, as in '${named.subject}${named.member} = ...'.`
+          : "Assign the property before this line.",
+      ),
     count: 5,
   },
 ];
 
+/** The rule that explains a pair that differs, with its replacement, or `undefined`. */
+const intendedOf = (pair: Pair): Intended | undefined =>
+  INTENDED.find((intended) => intended.matches(pair));
+
 test("the new checker keeps every fix the current checker gives, in the new form (#1195)", (t) => {
-  const all = pairs();
+  const all = allPairs();
   const compared = all.filter((pair) => pair.forms.length > 0);
   const differing = compared.filter((pair) => !kept(pair));
   const counts = INTENDED.map(() => 0);
@@ -430,10 +583,11 @@ test("the new checker keeps every fix the current checker gives, in the new form
   let lost = 0;
   for (const pair of differing) {
     if (fixes(pair.message).length === 0) lost += 1;
-    const index = INTENDED.findIndex((intended) => intended.matches(pair));
-    if (index < 0)
+    const intended = intendedOf(pair);
+    // (an intended difference with the exact fix it names)
+    if (intended === undefined || !intended.replacement(pair).test(pair.message))
       unexplained.push(`${pair.record}\n  current: ${pair.current}\n  new:     ${pair.message}\n`);
-    else counts[index]! += 1;
+    else counts[INTENDED.indexOf(intended)]! += 1;
   }
   t.diagnostic(
     `${all.length} pairs, ${compared.length} with a fix, ${compared.length - differing.length} kept, ` +
@@ -447,6 +601,35 @@ test("the new checker keeps every fix the current checker gives, in the new form
   );
 });
 
+test("the comparison rejects a fix changed in a kept or an intended pair (negative control, Astra r1)", () => {
+  // each pattern that explains a pair, then its fix changed: a type test's type swapped (Astra's mutant of the rule
+  // 1.7 fixes, which recommended 'string'), any other sentence replaced
+  let checked = 0;
+  for (const pair of allPairs().filter((found) => found.forms.length > 0)) {
+    const intended = kept(pair) ? undefined : intendedOf(pair);
+    const patterns = kept(pair)
+      ? pair.forms.map(({ form }) => form!)
+      : intended === undefined
+        ? []
+        : [intended.replacement(pair)];
+    for (const pattern of patterns) {
+      const found = pattern.exec(pair.message);
+      if (found === null) continue;
+      const tested = / is (\w+) \{/.exec(found[0]);
+      const changed =
+        tested === null
+          ? "Do something else."
+          : found[0].replace(tested[0], ` is ${tested[1] === "string" ? "integer" : "string"} {`);
+      assert.ok(
+        !pattern.test(pair.message.replace(found[0], changed)),
+        `${pair.record}: ${changed}`,
+      );
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 700, `${checked} fixes changed`);
+});
+
 /**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
  * and structured values, each fix's family once, and for an example of a property shown the lines the repaired source
@@ -455,26 +638,25 @@ test("the new checker keeps every fix the current checker gives, in the new form
 const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   // date and time operators, composed operands grouped, also as a warning
   [
-    'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay ⟦(t + 1 s) + 1 calendar day⟧\nexit\n',
+    'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nlet u = t + 1 s\nsay ⟦u + 1 calendar day⟧\nexit\n',
     /as in '([^']*)'/,
   ],
-  [
-    'let t = toDateTime("2026-01-01T00:00:00")\nsay ⟦(t + 1 calendar day) + 1 s⟧\nexit\n',
-    /as in '([^']*)'/,
-  ],
+  ['let t = toDateTime("2026-01-01T00:00:00")\nsay ⟦t + 1 s⟧\nexit\n', /as in '([^']*)'/],
   ['say toDate("2026-10-23") + ⟦1 day⟧\nexit\n', /Write '([^']*)'/],
-  ['say toDate("2026-10-23") < ⟦toDateTime("2026-10-23T12:00:00")⟧\nexit\n', /as in '([^']*)'/],
   [
-    'say ⟦toDateTime("2026-10-23T12:00:00") - toDateTime("2026-10-22T12:00:00")⟧\nexit\n',
+    'let d = toDateTime("2026-10-23T12:00:00")\nsay toDate("2026-10-23") < ⟦d⟧\nexit\n',
+    /as in '([^']*)'/,
+  ],
+  [
+    'let a = toDateTime("2026-10-23T12:00:00")\nlet b = toDateTime("2026-10-22T12:00:00")\nsay ⟦a - b⟧\nexit\n',
     /dates with '([^']*)'/,
   ],
   // members of a kind without them, on a composed receiver
   [
-    'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay ⟦(t + 1 s).year⟧\nexit\n',
+    'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nlet u = t + 1 s\nsay ⟦u.year⟧\nexit\n',
     /as in '([^']*)'/,
   ],
-  ["say ⟦(1 s + 2 s).seconds⟧\nexit\n", /as in '([^']*)'/],
-  ["say ⟦(1 s+2 s*3).seconds⟧\nexit\n", /as in '([^']*)'/],
+  ["let d = 1 s+2 s\nsay ⟦d.seconds⟧\nexit\n", /as in '([^']*)'/, ["3"]],
   ["let n = 1\nsay ⟦n.length⟧\nexit\n", /as in '([^']*)'/],
   [
     // (the current checker's example property, of a speaker that has it)
@@ -491,11 +673,13 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     ["2"],
   ],
   ['let s = set[1]\nsay "⟦${s}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
+  // (Astra r1's control: a named set, the name its own)
+  ['let value = set[99]\nlet s = set[4, 7]\nsay "⟦${s}⟧"\nexit\n', /with '([^']*)'/, ["4, 7"]],
   // a condition, a key, text
   ['let count = 2\nif ⟦count⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
-  ['let d = dict{"1": 5}\nsay d[⟦1⟧]\nexit\n', /as in '([^']*)'/],
-  ["let caption: string = ⟦1⟧\nexit\n", /write '([^']*)'/],
+  ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
+  ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
   // the null check's fallback, of a kept value and of a composed one
   ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/],
   [
@@ -558,37 +742,92 @@ test("the code each fix suggests compiles where it stands and runs, saying what 
   }
 });
 
-test("a text join gives its fix without an example, and an object shown one without a plain property (#1195)", () => {
+/**
+ * Text joins, `⟦…⟧` around the operand that is not text: the example puts it in `${...}` as the source writes it, and
+ * the source with the operand so written says these lines (the owner's review; r3's and r4's shapes among them).
+ */
+const JOINS: readonly (readonly [string, readonly string[]])[] = [
+  ['let score = 3\nsay "You have " + ⟦score⟧ + " points"\nexit\n', ["You have 3 points"]],
+  [
+    'function f(n) {\nsay "You have " + ⟦n⟧ + " points"\n}\nf(1)\nf(2)\nexit\n',
+    ["You have 1 points", "You have 2 points"],
+  ],
+  [
+    'let prefix = "You have "\nlet n = 1\nsay prefix + ⟦n⟧ + " points"\nexit\n',
+    ["You have 1 points"],
+  ],
+  ['say ⟦1 + 2⟧ + " points"\nexit\n', ["3 points"]],
+  ['let n = 1\nsay "Sum: " + (⟦n + 2⟧)\nexit\n', ["Sum: 3"]],
+  ['let who = "Alice"\nlet n = 1\nsay "$" + "{who}" + ⟦n⟧\nexit\n', ["${who}1"]],
+  ['let box = {n: 2}\nsay "n is " + ⟦box.n⟧\nexit\n', ["n is 2"]],
+  ['let xs = [5]\nsay "First: " + ⟦xs[0]⟧\nexit\n', ["First: 5"]],
+  // (a chain over two lines, its operand on one)
+  ['let n = 1\nsay "Sum: " +\n  ⟦n⟧\nexit\n', ["Sum: 1"]],
+  ['function two { return 2 }\nsay "Two: " + ⟦two()⟧\nexit\n', ["Two: 2"]],
+  ['let d = dict{"a": 1}\nsay "A: " + ⟦d["a"]⟧\nexit\n', ["A: 1"]],
+  ['say "A: " + ⟦dict{"a": 1}["a"]⟧\nexit\n', ["A: 1"]],
+];
+
+test("a text join's example puts the operand that is not text in '${...}', and the result says what the join meant (#1195)", () => {
+  for (const [marked, says] of JOINS) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    const suggested = analyseCore(request)
+      .diagnostics.map(
+        (diagnostic) =>
+          /in the text as '(\$\{[^']*\})' instead/.exec(coreMessage(diagnostic, text))?.[1],
+      )
+      .find((found) => found !== undefined);
+    assert.ok(suggested !== undefined, `an example: ${source}`);
+    const fixed = marked.replace(/⟦[^⟧]*⟧/, `"${suggested}"`);
+    const compiled = compileProject([{ path: "main.tease", source: fixed }]);
+    assert.deepEqual(
+      compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      [],
+      fixed,
+    );
+    assert.ok(compiled.plan !== null, fixed);
+    const events = createFreshRuntimeSession(compiled.plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      says,
+      fixed,
+    );
+  }
+});
+
+test("a fix whose subject is no variable or path, or not on one line, gives its sentence without an example (#1195)", () => {
   const cases: readonly (readonly [string, string])[] = [
-    // the decided chain, a parameter's warning, text in a variable, a numeric prefix, literals that would join into
-    // `${...}`, a sum in parentheses, a text alternative, a chain over lines, text with `${...}`
+    // the text join where the operand that is not text spans lines or holds a comment (the owner's review)
+    ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead."],
+    ['let n = 1\nsay "Sum: " + (n /* two */ + 2)\nexit\n', "Put the value in the text instead."],
+    // a value written as a literal or another expression (Astra r1: never a name of another declaration)
     [
-      'let score = 3\nsay "You have " + score + " points"\nexit\n',
-      "Put the value in the text instead",
+      'let value = set[99]\nsay "${set[4, 7]}"\nexit\n',
+      "Show its elements with 'toList().join()' instead.",
     ],
     [
-      'function f(n) {\nsay "You have " + n + " points"\n}\nf(1)\nf(2)\nexit\n',
-      "Put the value in the text instead",
+      'say "${dict{a: 1}}"\nexit\n',
+      "Select one value with a key, or show every value with 'values.join()'.",
+    ],
+    ['let rec = {names: ["A"]}\nsay "${rec}"\nexit\n', "Show one of its properties instead."],
+    ['let d = dict{"1": 5}\nsay d[1]\nexit\n', "Write a number key as text."],
+    ["let caption: string = 1\nexit\n", "To show it as text, put it in a text with '${...}'."],
+    ["say (1 s + 2 s).seconds\nexit\n", "Divide '1 s + 2 s' by a unit, such as '1 second'."],
+    [
+      'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay (t + 1 s) + 1 calendar day\nexit\n',
+      "Convert it with 'toDateTime()' first.",
     ],
     [
-      'let prefix = "You have "\nlet n = 1\nsay prefix + n + " points"\nexit\n',
-      "Put the value in the text instead",
+      'say toDate("2026-10-23") < toDateTime("2026-10-23T12:00:00")\nexit\n',
+      "Compare its date, with 'toDate(...)'.",
     ],
-    ['say 1 + 2 + " points"\nexit\n', "Put the value in the text instead"],
-    [
-      'let who = "Alice"\nlet n = 1\nsay "$" + "{who}" + n\nexit\n',
-      "Put the value in the text instead",
-    ],
-    ['let n = 1\nsay "Sum: " + (n + 2)\nexit\n', "Put the value in the text instead"],
-    [
-      'let n: integer | string = 1\nsay "Sum: " + (n+2)\nexit\n',
-      "Put the value in the text instead",
-    ],
-    ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead"],
-    ['let n = 1\nsay "Sum: " +\n  n\nexit\n', "Put the value in the text instead"],
-    ['let n = 1\nlet m = 2\nsay "m=${m} " + n\nexit\n', "Put the value in the text instead"],
-    // an object whose only properties are lists
-    ['let rec = {names: ["A"]}\nsay "${rec}"\nexit\n', "Show one of its properties instead"],
   ];
   for (const [source, fix] of cases) {
     const request = coreRequest([{ path: "main.tease", source }]);
@@ -598,8 +837,7 @@ test("a text join gives its fix without an example, and an object shown one with
       coreMessage(diagnostic, text),
     );
     assert.ok(
-      messages.some((message) => message.includes(`${fix}.`)) &&
-        !messages.some((message) => message.includes(`${fix}, as in`)),
+      messages.some((message) => message.includes(fix)),
       `${source}: ${messages.join(" | ")}`,
     );
   }
