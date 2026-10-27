@@ -450,9 +450,6 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
-/** The groups of one class `Contract.#othersAt` keeps apart where their alias writers are incomparable. */
-const CLASS_GROUPS = 4;
-
 /** A read's class (`Contract.readClass`), and the writer of the alias it reads, which its answer takes. */
 interface ReadClass {
   readonly cls: string | null;
@@ -464,11 +461,9 @@ interface ReadClass {
   readonly base: string | null;
 }
 
-/** Computed values of a literal at a path that answer alike (`#othersAt`): the first, and the earliest cell writer. */
+/** A computed value of a literal at a path its class's answer reads (`#othersAt`), with the class's earliest cell writer. */
 interface OtherGroup extends ValueEntry {
   readonly writer: Writer | null;
-  /** The alias writers of its first's reads (`#inputWriters`). */
-  readonly writers: readonly (Writer | null)[];
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
@@ -2165,11 +2160,13 @@ export class Contract {
   /**
    * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
    * once per list and side: values of one class (`contractClass`; on the value side `Values.valueClass`) answer alike at
-   * every path, so the first stands for them, the earliest writer for its kinds (each value's kinds take its cell's
-   * writer, F28). Reads of aliases of one source differ by their alias's writer only (`aliasWriter`), so a group's
-   * first is a value whose reads' alias writers come first; a value whose writers are earlier in some read and later in
-   * another stands for a group of its own (up to four of a class), and any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
-   * contributions (§3.4's several elements) stays the list's.
+   * every path apart from writers, so a class reads one or two of them, the earliest cell writer standing for its kinds
+   * (each value's kinds take its cell's writer, F28); any other value by itself. A class's values differ only by the
+   * alias writers of their reads (`#inputWriters`: a `get`'s receiver and default, an `otherwise`'s two operands), each
+   * read's writer standing for the kinds that read gives (`aliasWriter`), and the merged answer takes each kind's
+   * earliest writer over every value and read: so the value whose first read's alias writes earliest, and the one whose
+   * second's does, merged, answer as all of them, whatever order the writers come in. In order, so the merged answer
+   * keeps its kinds' order; the count of the contributions (§3.4's several elements) stays the list's.
    */
   #othersAt(list: readonly ValueEntry[] | undefined, exact: boolean): readonly OtherGroup[] {
     if (list === undefined) return [];
@@ -2177,8 +2174,14 @@ export class Contract {
     const known = memo.get(list);
     if (known !== undefined) return known;
     const { definitions, program, values } = this.pass;
-    const groups: OtherGroup[] = [];
-    const byClass = new Map<string, number[]>();
+    // per class, in the order of its first value: the cell writers' earliest, and per read the value whose alias writes
+    // earliest there with that writer
+    const classes: {
+      writer: Writer | null;
+      readonly reps: ValueEntry[];
+      readonly writers: (Writer | null)[];
+    }[] = [];
+    const byClass = new Map<string, number>();
     for (const entry of list) {
       program.work.charge("invSteps");
       const writer = entry.g === null ? null : definitions.writerOf(entry.g);
@@ -2190,42 +2193,36 @@ export class Contract {
       // (on the contract side a value without its cell's writer apart from one with it)
       const key =
         cls === null ? null : keptParts(this.#work, cls, exact || writer !== null ? "w" : "");
-      // (a value joins a group of its class whose first's reads' alias writers come no later than its own, or takes the
-      // first's place where its own all come earlier, so a group's first writes first for each kind, `aliasWriter`; a
-      // value that is neither stands for a group of its own, up to `CLASS_GROUPS` of a class)
       const writers = key === null ? [] : this.#inputWriters(entry.value, exact);
-      const notLater = (a: readonly (Writer | null)[], b: readonly (Writer | null)[]): boolean =>
-        a.every(
-          (first, index) =>
-            first === b[index] ||
-            (first !== null && firstWriter(first, b[index] ?? null) === first),
-        );
-      const positions = key === null ? undefined : byClass.get(key);
-      let joined = false;
-      for (const position of positions ?? []) {
+      const at = key === null ? undefined : byClass.get(key);
+      if (at === undefined) {
+        if (key !== null) byClass.set(key, classes.length);
+        this.#keep(3);
+        classes.push({
+          writer,
+          reps: writers.length === 0 ? [entry] : writers.map(() => entry),
+          writers: [...writers],
+        });
+        continue;
+      }
+      const into = classes[at]!;
+      into.writer = firstWriter(into.writer, writer);
+      for (const [index, mine] of writers.entries()) {
         program.work.charge("invSteps");
-        const into = groups[position]!;
-        if (notLater(into.writers, writers))
-          groups[position] = { ...into, writer: firstWriter(into.writer, writer) };
-        else if (notLater(writers, into.writers))
-          groups[position] = {
-            value: entry.value,
-            g: entry.g,
-            writer: firstWriter(into.writer, writer),
-            writers,
-          };
-        else continue;
-        joined = true;
-        break;
+        const best = into.writers[index] ?? null;
+        if (mine !== null && best !== null && mine !== best && firstWriter(mine, best) === mine) {
+          into.writers[index] = mine;
+          into.reps[index] = entry;
+        }
       }
-      if (joined) continue;
-      if (key !== null) {
-        if (positions === undefined) byClass.set(key, [groups.length]);
-        else if (positions.length < CLASS_GROUPS) positions.push(groups.length);
-      }
-      this.#keep(2);
-      groups.push({ value: entry.value, g: entry.g, writer, writers });
     }
+    const groups: OtherGroup[] = [];
+    for (const { writer, reps } of classes)
+      for (const [index, rep] of reps.entries())
+        if (reps.indexOf(rep) === index) {
+          this.#keep(2);
+          groups.push({ value: rep.value, g: rep.g, writer });
+        }
     memo.set(list, groups);
     return groups;
   }
