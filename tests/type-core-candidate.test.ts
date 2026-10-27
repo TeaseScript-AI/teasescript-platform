@@ -510,7 +510,8 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `${prefix}${initializer}\nsay out\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
     const owner = `${prefix.length}:${source.indexOf("\n", prefix.length)}`;
     assert.deepEqual(
       derivedContent(derived.content, source),
@@ -530,7 +531,7 @@ test("the S7 oracle derives receiving written types and observes native discharg
     );
     assert.deepEqual(
       runGlobals(compiled.plan, {}),
-      evaluate(syntaxOf(source), derived.stores, {}, false, derived.content).run,
+      evaluate(syntax, derived.stores, {}, false, derived.content).run,
       source,
     );
   }
@@ -538,12 +539,13 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `say ${operand}\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
     const ingress = derived.discharges.filter(
       (entry) => entry.by === "native" && entry.what === "typed-ingress",
     );
     assert.equal(ingress.length, 1, source);
-    const predicted = evaluate(syntaxOf(source), derived.stores, {}, false, derived.content);
+    const predicted = evaluate(syntax, derived.stores, {}, false, derived.content);
     assert.ok(
       predicted.events.some((event) => event.site === `4:${source.indexOf("\n")}` && event.fits),
       source,
@@ -556,7 +558,8 @@ test("the S7 oracle derives receiving written types and observes native discharg
     const source = `let v = hostValue\nlet out: integer = ${access}\nsay out\nexit\n`;
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const derived = derive(syntaxOf(source), compactAnalysis(request));
+    const syntax = syntaxOf(source);
+    const derived = derive(syntax, compactAnalysis(request));
     const accessSite = `${source.indexOf(access)}:${source.indexOf(access) + access.length}`;
     assert.ok(
       derived.discharges.some(
@@ -580,13 +583,7 @@ test("the S7 oracle derives receiving written types and observes native discharg
       { kind: "set", items: [] },
       { kind: "dict", entries: [] },
     ] satisfies SerializableRuntimeValue[]) {
-      const predicted = evaluate(
-        syntaxOf(source),
-        derived.stores,
-        { hostValue },
-        false,
-        derived.content,
-      );
+      const predicted = evaluate(syntax, derived.stores, { hostValue }, false, derived.content);
       assert.deepEqual(
         runGlobals(compiled.plan, { hostValue }),
         predicted.run,
@@ -671,7 +668,8 @@ test("the S7 oracle derives object admissions and default structures from their 
     try {
       const request = coreRequest([{ path: "main.tease", source }]);
       assert.ok(request !== null);
-      const derived = derive(syntaxOf(source), compactAnalysis(request));
+      const syntax = syntaxOf(source);
+      const derived = derive(syntax, compactAnalysis(request));
       const content = derivedContent(derived.content, source);
       assert.ok(
         (check === "store"
@@ -687,7 +685,7 @@ test("the S7 oracle derives object admissions and default structures from their 
       for (const hostValue of inputs)
         assert.deepEqual(
           runGlobals(compiled.plan, { hostValue }),
-          evaluate(syntaxOf(source), derived.stores, { hostValue }, false, derived.content).run,
+          evaluate(syntax, derived.stores, { hostValue }, false, derived.content).run,
           `${source} with ${JSON.stringify(hostValue)}`,
         );
     } catch (error) {
