@@ -3157,6 +3157,39 @@ test("the copied-property check grows with the program, not with its copies time
   }
 });
 
+test("a mixed literal's landing is walked once for all its conflicts, under however many wrappers (A2)", () => {
+  // k wrappers around a list of k copies (or k lists of two copies): one conflicting copy against k, at one size, so the
+  // deep literal's own checks cancel and the difference is the conflicts' own work
+  const source = (k: number, siblings: boolean, many: boolean): string => {
+    const values = Array.from({ length: k }, (_, i) =>
+      siblings ? (many || i === 0 ? "[a, b]" : "[a, a]") : many || i === 0 ? "b" : "a",
+    ).join(", ");
+    const list = siblings ? `[${values}]` : `[a, ${values}]`;
+    return (
+      `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = ${"{inner: ".repeat(k)}${list}${"}".repeat(k)}\n` +
+      `say xs${".inner".repeat(k)}${siblings ? "[0][0]" : "[0]"}.n\nexit`
+    );
+  };
+  for (const siblings of [false, true]) {
+    const extra = (k: number): { checks: number; nodes: number } => {
+      const counts = [false, true].map((many) => {
+        const request = coreRequest([{ path: "main.tease", source: source(k, siblings, many) }]);
+        assert.ok(request !== null);
+        return analyseCore(request).budget.counts;
+      });
+      return {
+        checks: (counts[1]!.get("checks") ?? 0) - (counts[0]!.get("checks") ?? 0),
+        nodes: counts[1]!.get("syntaxNodes") ?? 0,
+      };
+    };
+    const small = extra(32);
+    const large = extra(64);
+    // the conflicts' checks per doubling of the source, against `type-core-work.test.ts`'s counter criterion
+    const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.35, `${siblings ? "siblings" : "copies"}: ${doubling.toFixed(3)}`);
+  }
+});
+
 test("a written expected type holds a default to its own kinds at every depth, known or possible (C10, the owner's F3)", () => {
   const integer = (call: string): string => `let n: integer = ${call}\nrepeat n {}\nexit`;
   const integers = (call: string): string => `let xs: integer[] = ${call}\nrepeat xs[0] {}\nexit`;

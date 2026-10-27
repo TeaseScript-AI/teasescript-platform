@@ -922,8 +922,11 @@ export class Consumers {
       }
       const owner = d.kind === "whole" ? program.cellOwner.get(d.place) : undefined;
       if (owner === undefined) {
+        // (an added element's path made here is kept with the node; a definition's is its own)
         const path =
-          d.kind === "add" && d.how !== "elements" ? joinSteps(d.path, ["element"]) : d.path;
+          d.kind === "add" && d.how !== "elements"
+            ? keptArray(program.work, joinSteps(d.path, ["element"]))
+            : d.path;
         node = {
           id: this.#landingCount++,
           place: d.place,
@@ -973,7 +976,10 @@ export class Consumers {
     let question = this.#questions.get(memoKey);
     if (question === undefined) {
       keepText(this.pass.program.work, memoKey.length);
-      const path = joinSteps(this.#landingPath(node), ["element"], below);
+      const path = keptArray(
+        this.pass.program.work,
+        joinSteps(this.#landingPath(node), ["element"], below),
+      );
       const last = path.at(-1);
       question =
         last === undefined || last === "element" || last === "entry"
