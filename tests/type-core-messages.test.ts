@@ -256,6 +256,19 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
         `W TSV043 '0': A dict key is text (string), but '0' may be a value of another type here. ${STOPS}`,
       ],
     ],
+    // (a text literal with an escape is a literal too: classified by the parser, Sol r5)
+    [
+      'let key = "k"\nlet value = load(key, default: null)\nsay value.get("a\\"b", default: 3)\nexit\n',
+      [
+        `W TSV043 'value.get("a\\"b", default: 3)': 'value' may be null here. ${STOPS} Check 'value' first, as ` +
+          "in 'if value != null { ... }', or give a fallback, as in 'value otherwise ...'.",
+        `W TSV043 'value.get("a\\"b", default: 3)': 'value' may not have method 'get' here. If it does not, the ` +
+          `Tease stops with an error at this line. ${OUTSIDE("value")}`,
+        `W TSV043 '"a\\"b"': A list index must be a whole number (integer), but '"a\\"b"' may be a value of another ` +
+          `type here. ${STOPS}`,
+        `W TSV043 '"a\\"b"': A dict key is text (string), but '"a\\"b"' may be a value of another type here. ${STOPS}`,
+      ],
+    ],
     // a possible null as an operand of an operator: its fallback in parentheses, as the parser asks of `otherwise`
     [
       "let xs = [7, null]\nsay xs[0] + 1\nexit\n",

@@ -109,7 +109,7 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   // (a member's missing property is its first sentence, and another rule's at that read repeats the member's warning)
   const missing = context === "missing" && (rule.rule === "member" || detail.direct);
   // (a literal subject has no origin of its own: its warning is its receiver's, `0` in `value.get(0, ...)`)
-  const literal = rule.rule !== "member" && LITERAL.test(text);
+  const literal = rule.rule !== "member" && isLiteral(text);
   // (a store into a speaker alone: the first sentence says what happens, which no cause changes)
   const holder = detail.receiver?.kinds ?? kinds;
   const speaker =
@@ -196,16 +196,41 @@ function collectionText(collection: "list" | "set" | "dict", element: string): s
 
 /** The text of a plain variable, which a test narrows (ADR 0021 rule 5), else `null`. */
 function variable(text: string): string | null {
-  return /^[\p{L}_][\p{L}\p{N}_]*$/u.test(text) ? text : null;
+  return expressionKind(text) === "identifier" ? text : null;
 }
 
 /**
- * Whether a text is a variable or a property path as written: the only subject a fix's example names (#1195, the lead
- * after Astra r1). Any other subject, a literal or another expression, gets its fix's sentence alone; a name is never
- * taken from another declaration or from the place's facts.
+ * Whether a text is a variable or a property path as written, on one line: the only subject a fix's example names
+ * (#1195, the lead after Astra r1). Any other subject, a literal or another expression, gets its fix's sentence alone; a
+ * name is never taken from another declaration or from the place's facts.
  */
 function path(text: string): boolean {
-  return /^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(text);
+  const chain = (expression: Expression): boolean =>
+    expression.kind === "identifier" ||
+    (expression.kind === "propertyAccessExpression" && chain(expression.object));
+  const parsed = parsedExpression(text);
+  return parsed !== null && ownText(text) && chain(parsed.expression);
+}
+
+/** The literals whose type is their own: a number (also negated), text, `true`/`false`, null, a quantity, a regex. */
+const LITERALS: ReadonlySet<Expression["kind"]> = new Set([
+  "numberLiteral",
+  "stringLiteral",
+  "booleanLiteral",
+  "nullLiteral",
+  "durationLiteral",
+  "unitExpression",
+  "angleExpression",
+  "regexLiteral",
+]);
+
+/** Whether a text is a literal, by the language's own parser. */
+function isLiteral(text: string): boolean {
+  const expression = parsedExpression(text)?.expression;
+  if (expression === undefined) return false;
+  return expression.kind === "unaryExpression"
+    ? expression.operator === "-" && expression.operand.kind === "numberLiteral"
+    : LITERALS.has(expression.kind);
 }
 
 /** The expressions a member may follow without parentheses. */
@@ -242,6 +267,12 @@ function expressionKind(code: string): Expression["kind"] | null {
 function operandText(code: string): string {
   const kind = expressionKind(code);
   return kind !== null && OPERANDS.has(kind) ? code : `(${code})`;
+}
+
+/** Code as the receiver of a member a fix writes: in parentheses unless a member may follow it. */
+function receiverText(code: string): string {
+  const kind = expressionKind(code);
+  return kind !== null && POSTFIX.has(kind) ? code : `(${code})`;
 }
 
 /**
@@ -882,9 +913,6 @@ const LITERAL_OPERAND: ReadonlySet<Expression["kind"]> = new Set([
   "booleanLiteral",
 ]);
 
-/** A literal's text: a number, text or `true`/`false`. */
-const LITERAL = /^(-?\d[\d.]*|"[^"]*"|true|false)$/;
-
 /** The kinds a rule takes, where a value's own kinds that fit are not known (an unknown value). */
 function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
   switch (rule.rule) {
@@ -935,10 +963,13 @@ function warningFix(
     );
   }
   switch (rule.rule) {
-    case "selection":
-      return ownText(rule.collection)
-        ? `Check '${rule.collection}.length' first, as in 'if ${rule.collection}.length > 0 { ... }'.`
-        : `Check '${rule.collection}.length' first.`;
+    case "selection": {
+      // (an example only for a collection written as a variable or a path; any other is grouped where it stands)
+      const length = `${receiverText(rule.collection)}.length`;
+      return path(rule.collection)
+        ? `Check '${length}' first, as in 'if ${length} > 0 { ... }'.`
+        : `Check '${length}' first.`;
+    }
     case "count":
       if (kinds.includes("number")) return ROUND_COUNT_FIX.trimStart();
       break;
@@ -963,12 +994,12 @@ function warningFix(
   // property an object may lack fails at its read, before any test)
   if (kinds.includes("unknown") && fits.length === 0) {
     const test = typeText(ruleKinds(rule));
-    return test === null || LITERAL.test(text) || context === "missing"
+    return test === null || isLiteral(text) || context === "missing"
       ? ""
       : checkFix(subject, `is ${test}`, null);
   }
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
-  if (LITERAL.test(text) || context === "missing") return "";
+  if (isLiteral(text) || context === "missing") return "";
   const test = typeText(fits);
   if (test !== null) return checkFix(subject, `is ${test}`, null);
   return errorFix(rule, text, kinds).trimStart();

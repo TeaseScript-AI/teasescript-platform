@@ -59,7 +59,9 @@ const code = (pattern: string): RegExp => new RegExp(pattern);
  * Whether a subject is a variable or a property path as written, the only subject a fix's example names (Astra r1); and
  * whether its own text may stand in code: on one line, without a comment.
  */
-const path = (text: string): boolean => /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(text);
+/** A variable or a property path as written; a literal word such as `true` is none. */
+const path = (text: string): boolean =>
+  /^(?!(true|false|null)\b)[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(text);
 const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
@@ -204,7 +206,7 @@ const PORTS: readonly Port[] = [
     from: /^Check '(.+)\.length' first\.$/,
     to: ([text, collection]) =>
       exact(
-        ownText(collection!)
+        path(collection!)
           ? `Check '${collection}.length' first, as in 'if ${collection}.length > 0 { ... }'.`
           : text,
       ),
@@ -819,6 +821,13 @@ test("a fix whose subject is no variable or path, or not on one line, gives its 
     ['let rec = {names: ["A"]}\nsay "${rec}"\nexit\n', "Show one of its properties instead."],
     ['let d = dict{"1": 5}\nsay d[1]\nexit\n', "Write a number key as text."],
     ["let caption: string = 1\nexit\n", "To show it as text, put it in a text with '${...}'."],
+    // (a literal is classified by the parser: `true` is no name, Sol r5)
+    ["let caption: string = true\nexit\n", "To show it as text, put it in a text with '${...}'."],
+    // (a collection that is no variable or path keeps its grouping before `.length`, Sol r5)
+    [
+      "let xs: integer[]? = null\nlet ys: integer[] = []\nsay (xs otherwise ys).first\nexit\n",
+      "Check '(xs otherwise ys).length' first.",
+    ],
     ["say (1 s + 2 s).seconds\nexit\n", "Divide '1 s + 2 s' by a unit, such as '1 second'."],
     [
       'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay (t + 1 s) + 1 calendar day\nexit\n',
