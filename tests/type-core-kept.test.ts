@@ -593,7 +593,7 @@ function plainStores(
 }
 
 test("the core keeps no text a plain twin made uncharged but the listed ones", () => {
-  const sources = readdirSync(CORE)
+  const sources = readdirSync(CORE, { encoding: "utf8", recursive: true })
     .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
     .sort()
     .map((file) => [file, readFileSync(new URL(file, CORE), "utf8")] as const);
@@ -622,7 +622,7 @@ test("the core keeps no text a plain twin made uncharged but the listed ones", (
 
 test("the core makes no path or key past its helpers but the listed ones", () => {
   const found = new Map<string, string[]>();
-  for (const file of readdirSync(CORE)
+  for (const file of readdirSync(CORE, { encoding: "utf8", recursive: true })
     .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
     .sort())
     for (const [key, lines] of constructions(file, readFileSync(new URL(file, CORE), "utf8")))
