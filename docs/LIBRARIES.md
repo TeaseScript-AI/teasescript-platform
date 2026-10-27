@@ -217,7 +217,7 @@ All four helpers support `as speaker` provenance. The speaker identifies who req
 `Say` remains compact official syntax, but ADR 0018 moves pacing policy into a fully lowered Standard Library/compiler composition above typed text output.
 
 Pacing values and their meanings are listed in
-[`say` pacing and skip modifiers](TEASESCRIPT.md#say-pacing-and-skip-modifiers).
+[ADR 0018](decisions/0018-first-standard-library-poc-contract.md#say).
 
 Supported per-message skip modifiers are:
 
@@ -225,6 +225,10 @@ Supported per-message skip modifiers are:
 skippable
 unskippable
 ```
+
+They are modifiers only where the value grammar cannot read them as the complete `say` value, and bare `instant` is the
+zero-duration pacing only when it fills the whole pacing slot, so `say skippable` and `say "a", instant + 1 s` read
+variables of those names.
 
 Without a modifier, `say` uses the effective speaker's `defaultSaySkippable` presentation setting and otherwise platform default `true`.
 

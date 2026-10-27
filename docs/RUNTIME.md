@@ -166,7 +166,8 @@ Completion semantics are:
   arrives later returns `alreadySettled` with that settlement;
 - `showPopup` ([V30 §31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)) is a `popup`
   interaction whose UI holds its message and button text, `OK` without `buttonText:`, both shown text that a computed
-  form evaluates once, in written order, before the popup opens. Used as a value it returns its elapsed waiting time as
+  form evaluates once, in written order, before the popup opens. The call form also takes the message first, without
+  `message:`. Used as a value it returns its elapsed waiting time as
   `showButton` does; used as a statement it has no result. Only `{ kind: "activate" }`, the player closing it,
   completes it: the settlement has no transcript text, and only `actionCompleted` is published;
 - `openUrl` ([V30 §33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references))
