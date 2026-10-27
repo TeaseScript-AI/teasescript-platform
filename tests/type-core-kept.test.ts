@@ -399,10 +399,8 @@ function statementEnd(text: string, from: number): number {
   return text.length;
 }
 
-/** The stores of a plain-made text in one file, by member and name, with the lines they are on. */
-function plainStores(file: string, source: string): Map<string, string[]> {
-  const lines = withoutComments(source).split("\n");
-  // each member's lines, as `constructions` reads them
+/** Each member's lines of a source without its comments, as `constructions` reads them: its name, first and end line. */
+function memberRuns(lines: readonly string[]): (readonly [string, number, number])[] {
   const runs: [string, number, number][] = [];
   let member = "(top)";
   for (const [index, line] of lines.entries()) {
@@ -415,9 +413,103 @@ function plainStores(file: string, source: string): Map<string, string[]> {
     if (runs.at(-1)?.[0] === member) runs.at(-1)![2] = index + 1;
     else runs.push([member, index, index + 1]);
   }
-  const names = [...PATH_NAMES].join("|");
-  const template = new RegExp(`\\$\\{(?:[\\w#?.]*\\.)?(?:${names})\\b`);
-  const slice = new RegExp(`\\b(?:[\\w#]+[?!]?\\.)*(?:${names})[?!]?\\.slice\\(`);
+  return runs;
+}
+
+const PATH_NAMES_PATTERN = [...PATH_NAMES].join("|");
+
+/** A template of a path or key (`` `k${key}` ``), found inside the template. */
+const TEMPLATE = new RegExp(`\\$\\{(?:[\\w#?.]*\\.)?(?:${PATH_NAMES_PATTERN})\\b`);
+
+/** A path's copy by `slice` (`strip.slice(1)`, `task.path.slice(depth)`). */
+const SLICE = new RegExp(`\\b(?:[\\w#]+[?!]?\\.)*(?:${PATH_NAMES_PATTERN})[?!]?\\.slice\\(`);
+
+/**
+ * In one member's text: where in [from, to) a plain twin, a template of a path or a path's slice, or a call of a member
+ * in `returning`, is made as that range's own value outside a kept helper's call.
+ */
+function plainValueAt(
+  text: string,
+  from: number,
+  to: number,
+  returning: ReadonlySet<string>,
+  forms: readonly RegExp[] = [PLAIN_TWIN, TEMPLATE, SLICE],
+): boolean {
+  const calls =
+    returning.size === 0
+      ? null
+      : new RegExp(
+          `(?<![\\w$])(?:${[...returning].map((name) => name.replace("#", "\\#")).join("|")})\\s*\\(`,
+        );
+  return [...forms, ...(calls === null ? [] : [calls])].some((form) =>
+    [...text.slice(from, to).matchAll(new RegExp(form.source, "g"))].some(
+      (match) =>
+        plainAt(text, from + match.index, form === TEMPLATE) &&
+        ownAt(text, from, from + match.index),
+    ),
+  );
+}
+
+/** The locals one member makes plain, each its name and where its value ends: declared or assigned so. */
+function plainLocals(
+  text: string,
+  returning: ReadonlySet<string>,
+  forms?: readonly RegExp[],
+): { readonly local: string; readonly at: number; readonly end: number }[] {
+  const out: { local: string; at: number; end: number }[] = [];
+  // (a declaration or an assignment that starts a statement, `for (let …` none; its value up to the statement's end)
+  for (const made of text.matchAll(
+    /(?:^|[;{}])\s*(?:(?:const|let) )?(\w+)(?::[^=\n;]*)? =(?![=>])/gm,
+  )) {
+    const valueAt = made.index + made[0].length;
+    const end = statementEnd(text, valueAt);
+    const plain =
+      plainValueAt(text, valueAt, end, returning, forms) ||
+      // (a plain local made earlier, as the whole value)
+      out.some(({ local }) => text.slice(valueAt, end).trim() === local);
+    if (plain) out.push({ local: made[1]!, at: made.index, end });
+  }
+  return out;
+}
+
+/**
+ * The members of a source whose return value holds a path's copy by `slice` made as its own value (`return { def, rest:
+ * path.slice(length) }`, a local made so, a call of a member already in `returning`), so a store of what a call of one
+ * returns is found too (`exactPath`'s memo of `reachingDef`'s rest through `#exactPath`); a yield's value is none.
+ */
+function plainReturns(source: string, returning: ReadonlySet<string>): Set<string> {
+  const lines = withoutComments(source).split("\n");
+  const out = new Set<string>();
+  for (const [name, start, end] of memberRuns(lines)) {
+    const text = lines.slice(start, end).join("\n");
+    const locals = plainLocals(text, returning, [SLICE]);
+    for (const back of text.matchAll(/\breturn\b/g)) {
+      const from = back.index + back[0].length;
+      const to = statementEnd(text, from);
+      const value = text.slice(from, to).trim();
+      if (value.startsWith("yield")) continue;
+      // (a kept helper charges what it returns)
+      if (
+        !KEPT_CALLEE.test(name) &&
+        (plainValueAt(text, from, to, returning, [SLICE]) ||
+          locals.some(({ local, at }) => at < back.index && value === local))
+      )
+        out.add(name);
+    }
+  }
+  return out;
+}
+
+/** The stores of a plain-made text in one file, by member and name, with the lines they are on. */
+function plainStores(
+  file: string,
+  source: string,
+  returning: ReadonlySet<string> = new Set(),
+): Map<string, string[]> {
+  const lines = withoutComments(source).split("\n");
+  const runs = memberRuns(lines);
+  const template = TEMPLATE;
+  const slice = SLICE;
   const found = new Map<string, string[]>();
   for (const [name, start, end] of runs) {
     const text = lines.slice(start, end).join("\n");
@@ -437,17 +529,8 @@ function plainStores(file: string, source: string): Map<string, string[]> {
       at: store.index,
       ranges: callArguments(text, store.index + store[0].length - 1),
     }));
-    // (a declaration that starts a statement, `for (let …` none; its value up to the statement's end)
-    for (const made of text.matchAll(/(?:^|[;{}])\s*(?:const|let) (\w+)(?::[^=]*)? =/gm)) {
-      const local = made[1]!;
-      const valueAt = made.index + made[0].length;
-      const valueEnd = statementEnd(text, valueAt);
-      if (
-        !plainMade(valueAt, valueEnd, [PLAIN_TWIN, template, slice]).some((offset) =>
-          ownAt(text, valueAt, offset),
-        )
-      )
-        continue;
+    for (const { local, at: madeAt, end: valueEnd } of plainLocals(text, returning)) {
+      const made = { index: madeAt };
       // (the local as a value, not read through: `rest.length`, `stores[0]`, `frame(…)` keep none of it)
       const reference = new RegExp(`(?<![\\w$#.])${local}(?![\\w$]|\\s*[.[(])`, "g");
       // (up to the next declaration of the name: a later one is another variable)
@@ -485,12 +568,19 @@ function plainStores(file: string, source: string): Map<string, string[]> {
 }
 
 test("the core keeps no text a plain twin made uncharged but the listed ones", () => {
-  const found = new Map<string, string[]>();
-  for (const file of readdirSync(CORE)
+  const sources = readdirSync(CORE)
     .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
-    .sort())
-    for (const [key, lines] of plainStores(file, readFileSync(new URL(file, CORE), "utf8")))
-      found.set(key, lines);
+    .sort()
+    .map((file) => [file, readFileSync(new URL(file, CORE), "utf8")] as const);
+  // the members whose return value is made plain, through the calls between them, to a fixed point
+  let returning = new Set<string>();
+  for (let size = -1; returning.size !== size;) {
+    size = returning.size;
+    returning = new Set(sources.flatMap(([, source]) => [...plainReturns(source, returning)]));
+  }
+  const found = new Map<string, string[]>();
+  for (const [file, source] of sources)
+    for (const [key, lines] of plainStores(file, source, returning)) found.set(key, lines);
   const differences = [...new Set([...found.keys(), ...Object.keys(STORED)])]
     .sort()
     .filter((key) => (found.get(key)?.length ?? 0) !== (STORED[key]?.[0] ?? 0))
@@ -613,6 +703,23 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const copied = strip.slice(1);",
     "    pending.push([1, keptSteps(work, copied, [])]);",
     "  }",
+    "  #rest(path: string[], n: number) {",
+    "    let best = null;",
+    "    best = { def: 1, rest: path.slice(n) };",
+    "    return best;",
+    "  }",
+    "  #answer(path: string[]) {",
+    "    const reaching = this.#rest(path, 1);",
+    "    return reaching;",
+    "  }",
+    "  remember(path: string[]) {",
+    "    let answer = this.#memo.get(1);",
+    "    answer = this.#answer(path);",
+    "    this.#memo.set(1, answer);",
+    "    const charged = this.#answer(path);",
+    "    keptArray(this.#work, charged.rest);",
+    "    this.#memo.set(2, charged);",
+    "  }",
     "  #joined(key: number[]) {",
     "    const longer = joinSteps(key, [1]);",
     "    pending.push({ key: longer });",
@@ -628,8 +735,14 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "  }",
     "}",
   ].join("\n");
+  let returning = new Set<string>();
+  for (let size = -1; returning.size !== size;) {
+    size = returning.size;
+    returning = plainReturns(source, returning);
+  }
+  assert.deepEqual([...returning].sort(), ["#answer", "#rest"]);
   assert.deepEqual(
-    [...plainStores("probe.ts", source)].map(([key, lines]) => `${key} ${lines.length}`),
+    [...plainStores("probe.ts", source, returning)].map(([key, lines]) => `${key} ${lines.length}`),
     [
       "probe.ts #snapshot snapshot 1",
       "probe.ts #distinct text 1",
@@ -642,6 +755,7 @@ test("the scan finds a plain-made text kept uncharged", () => {
       "probe.ts #prefix slice 1",
       "probe.ts #beside slice 3",
       "probe.ts #within tail 2",
+      "probe.ts remember answer 1",
       "probe.ts #joined longer 1",
     ],
   );

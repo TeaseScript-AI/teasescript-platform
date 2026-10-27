@@ -31,6 +31,7 @@ import {
   joinParts,
   joinSteps,
   keepText,
+  keptArray,
   keptParts,
   keptText,
   pathText,
@@ -300,6 +301,8 @@ export class ExactPath {
     if (answer === undefined) {
       answer = this.#exactPath(key, node, before);
       keepText(this.#work, memoKey.length);
+      // (an answer's rest, which `reachingDef` made fresh, kept with it)
+      if ("rest" in answer) keptArray(this.#work, answer.rest);
       this.#memo.set(memoKey, answer);
     }
     return answer;

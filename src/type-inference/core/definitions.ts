@@ -1,6 +1,13 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
-import { keepText, keptText, pathTextLength, type WorkLedger } from "./budget.js";
+import {
+  keepText,
+  keptArray,
+  keptSlice,
+  keptText,
+  pathTextLength,
+  type WorkLedger,
+} from "./budget.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
 import { conversionCategory, methodCategory } from "./method-categories.js";
@@ -370,7 +377,10 @@ export class DefinitionIndex {
         : add && projection.node !== null && projection.node.expression?.kind === "callExpression"
           ? projection.node
           : program.effectNode(constraint.site);
-    const path = add ? target.path.slice(0, -1) : target.path;
+    // (the definition keeps its path: an add's receiver path made here, or the target's, which `targetRoot` made fresh)
+    const path = add
+      ? keptSlice(this.program.work, target.path, 0, target.path.length - 1)
+      : keptArray(this.program.work, target.path);
     const key = keptKey(this.program.work, target.root, path);
     const cell = program.cellOwner.has(target.root) || program.hasOf.has(target.root);
     if (node === null) return;
@@ -484,13 +494,15 @@ export class DefinitionIndex {
     if (node === null || program.cellOwner.has(target.root) || program.hasOf.has(target.root))
       return;
     const key = keptKey(this.program.work, target.root, target.path);
+    // (the definition keeps the target's path, which `targetRoot` made fresh)
+    const path = keptArray(this.program.work, target.path);
     this.storeDefs.push(
       this.#add({
         kind: effect === "clears" ? "clear" : "weaken",
-        weak: target.path.includes("element"),
+        weak: path.includes("element"),
         key,
         place: target.root,
-        path: target.path,
+        path,
         node,
         how: name,
         site,

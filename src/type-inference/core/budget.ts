@@ -203,6 +203,15 @@ export function keptSlice<T>(
   return steps.slice(start, end);
 }
 
+/**
+ * `steps`, made elsewhere (a fresh array a producer returned, which cannot know whether its caller keeps it), charged
+ * as kept here, where a structure keeps it.
+ */
+export function keptArray<T>(work: WorkLedger, steps: readonly T[]): readonly T[] {
+  keepArray(work, steps.length);
+  return steps;
+}
+
 /** Which limit an analysis reached: the work allowance, the statement nesting or the read depth. */
 export type BudgetLimit = "work" | "nesting" | "read-depth";
 
