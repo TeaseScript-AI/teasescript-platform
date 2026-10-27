@@ -171,6 +171,16 @@ Current constraints: [`DATA-AND-API.md`](DATA-AND-API.md),
   isolation.
 - Publishing, signing, versioning, moderation, and legacy importer contracts.
 
+## Main-site frontend
+
+Current constraints: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md),
+[ADR 0001](decisions/0001-browser-first.md), and [ADR 0020](decisions/0020-vue-3-production-browser-ui.md).
+
+- How the trusted Laravel site renders its pages: Blade-first, Inertia + Vue with or without server-side rendering, or
+  a deliberate Blade/Vue split. Options, their conflicts with ADR 0020, and the evidence to collect:
+  [`planning/MAIN-SITE-FRONTEND-OPTIONS.md`](planning/MAIN-SITE-FRONTEND-OPTIONS.md);
+  [#260](https://github.com/TeaseScript-AI/teasescript-platform/issues/260) turns the choice into a Proposed ADR.
+
 ## Expression evaluation
 
 Current proposal sources: [ADR 0004](decisions/0004-expression-engine.md) and

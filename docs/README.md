@@ -76,6 +76,7 @@ progress record plus active, non-implemented planning; entries do not schedule t
 - `planning/CALENDAR-DURATION-FOLLOW-UPS.md` retains calendar-recurrence and year-duration direction for later design.
 - `planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md` retains open camera ownership, capture, media-lifetime, and
   browser/server time-integrity direction.
+- `planning/MAIN-SITE-FRONTEND-OPTIONS.md` compares main-site rendering options and the evidence needed to choose.
 - `planning/MAINTENANCE-CANDIDATES.md` lists optimization and maintenance candidates to revalidate when selected for
   implementation.
 
