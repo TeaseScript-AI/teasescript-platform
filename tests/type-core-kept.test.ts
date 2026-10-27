@@ -227,6 +227,123 @@ function constructions(file: string, source: string): Map<string, string[]> {
   return found;
 }
 
+/**
+ * A text a plain twin makes (`joinParts`, `pathText`, `keyOf`, …), or a template of a path or key (`` `k${key}` ``), is
+ * for a lookup or to pass on; one a structure keeps is charged first: made by a kept helper, or charged where it is
+ * inserted (`keepText(work, memoKey.length)` before a memo stores it). A read's snapshot made by `joinParts` and kept in
+ * a memo, and a stop's kept in a set of distinct ones, passed the scan above, which reads how a text is made, not what
+ * keeps it (the deep-literal review's R3-B1). This scan finds, per member, a local text made so and then stored by
+ * `.set`, `.add` or `.push` with no charge naming it before the store. A tripwire too: it misses a text kept under
+ * another name, returned by a call (`#aliasKey`), or kept in an object.
+ */
+const PLAIN_TWIN = /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText)\(/;
+
+/** A charge or a kept helper: its call before a store, naming the text, charges it (`keepText(work, key.length)`). */
+const CHARGE = /(?:\b(?:kept\w*|keepText|keep)|#kept|#keepText)\(/;
+
+/** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
+const STORED: Readonly<Record<string, readonly [number, string]>> = {
+  "admission.ts #ownLeaves memoKey": [1, "a definition's id and a flag"],
+  "answers.ts #propertyNames id": [
+    1,
+    "a properties query's walk, its texts ending with the query (S9b's, TABLE r4.78 (3))",
+  ],
+  "consumer.ts #contractTask key": [
+    1,
+    "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
+  ],
+  "consumers.ts #admittedStores side": [1, "a definition's id and two positions"],
+  "contract.ts #prefixWork root": [1, "a place's root key, `place|`"],
+  "contract.ts #readGroups groupKey": [
+    1,
+    "its base made by `keptKey`, which charges its size, with two numbers",
+  ],
+  "exact-path.ts #forest id": [1, "a place, a callable and two positions"],
+};
+
+/** The arguments of the call whose `(` is at `open`, split at their top-level commas. */
+function callArguments(text: string, open: number): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let from = open + 1;
+  for (let at = open + 1; at < text.length; at += 1) {
+    const char = text[at]!;
+    if ("([{".includes(char)) depth += 1;
+    else if (")]}".includes(char)) {
+      if (depth === 0) {
+        out.push(text.slice(from, at).trim());
+        return out;
+      }
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      out.push(text.slice(from, at).trim());
+      from = at + 1;
+    }
+  }
+  return out;
+}
+
+/** The stores of a plain-made text in one file, by member and name, with the lines they are on. */
+function plainStores(file: string, source: string): Map<string, string[]> {
+  const lines = withoutComments(source).split("\n");
+  // each member's lines, as `constructions` reads them
+  const runs: [string, number, number][] = [];
+  let member = "(top)";
+  for (const [index, line] of lines.entries()) {
+    const declared = DECLARATION.exec(line);
+    if (
+      declared?.[3] === undefined ||
+      !/^\s+(if|for|while|return|switch|catch)\b|[;,]\s*$/.test(line)
+    )
+      member = declared?.[1] ?? declared?.[2] ?? declared?.[3] ?? member;
+    if (runs.at(-1)?.[0] === member) runs.at(-1)![2] = index + 1;
+    else runs.push([member, index, index + 1]);
+  }
+  const names = [...PATH_NAMES].join("|");
+  const template = new RegExp(`\\$\\{(?:[\\w#?.]*\\.)?(?:${names})\\b`);
+  const found = new Map<string, string[]>();
+  for (const [name, start, end] of runs) {
+    const text = lines.slice(start, end).join("\n");
+    const lineOf = (offset: number): number => start + text.slice(0, offset).split("\n").length - 1;
+    for (const made of text.matchAll(/\b(?:const|let) (\w+)(?::[^=]*)? =\s*([^]*?);\s*\n/g)) {
+      const local = made[1]!;
+      const value = made[2]!;
+      if (CHARGE.test(value) || !(PLAIN_TWIN.test(value) || template.test(value))) continue;
+      for (const store of text.matchAll(/\.(?:set|add|push)\(/g)) {
+        const open = store.index + store[0].length - 1;
+        if (store.index < made.index || !callArguments(text, open).includes(local)) continue;
+        const before = text.slice(made.index + made[0].length, store.index);
+        if (new RegExp(`${CHARGE.source}[^;]*\\b${local}\\b`).test(before)) continue;
+        const key = `${file} ${name} ${local}`;
+        const at = lineOf(store.index);
+        found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
+      }
+    }
+  }
+  return found;
+}
+
+test("the core keeps no text a plain twin made uncharged but the listed ones", () => {
+  const found = new Map<string, string[]>();
+  for (const file of readdirSync(CORE)
+    .filter((name) => name.endsWith(".ts") && name !== "budget.ts")
+    .sort())
+    for (const [key, lines] of plainStores(file, readFileSync(new URL(file, CORE), "utf8")))
+      found.set(key, lines);
+  const differences = [...new Set([...found.keys(), ...Object.keys(STORED)])]
+    .sort()
+    .filter((key) => (found.get(key)?.length ?? 0) !== (STORED[key]?.[0] ?? 0))
+    .map(
+      (key) =>
+        `${key}: ${found.get(key)?.length ?? 0} found, ${STORED[key]?.[0] ?? 0} listed\n  ${(found.get(key) ?? []).join("\n  ")}`,
+    );
+  assert.deepEqual(
+    differences,
+    [],
+    "a text kept as a plain twin made it: make it with a kept helper, charge it where it is inserted, or list it",
+  );
+});
+
 test("the core makes no path or key past its helpers but the listed ones", () => {
   const found = new Map<string, string[]>();
   for (const file of readdirSync(CORE)
@@ -275,5 +392,40 @@ test("the scan finds each form of construction", () => {
       "probe.ts walk spread 2",
       "probe.ts hidden spread 1",
     ],
+  );
+});
+
+test("the scan finds a plain-made text kept uncharged", () => {
+  const source = [
+    "export class Probe {",
+    "  #snapshot(value: number, read: string) {",
+    '    const snapshot = joinParts(read, "-");',
+    "    this.#snapshots.set(value, snapshot);",
+    "  }",
+    "  #distinct(stops: string[]) {",
+    "    const seen = new Set<string>();",
+    "    for (const stop of stops) {",
+    "      const text =",
+    "        joinParts(stop, 1);",
+    "      if (seen.has(text)) continue;",
+    "      seen.add(text);",
+    "    }",
+    "  }",
+    "  #structure(key: string) {",
+    "    const id = `k${key}`;",
+    "    this.#structures.push(id);",
+    "  }",
+    "  #charged(key: string) {",
+    "    const memoKey = joinParts(key, 2);",
+    "    keepText(this.#work, memoKey.length);",
+    "    this.#memo.set(memoKey, 1);",
+    "    const kept = keptParts(this.#work, key, 3);",
+    "    this.#memo.add(kept);",
+    "  }",
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    [...plainStores("probe.ts", source)].map(([key, lines]) => `${key} ${lines.length}`),
+    ["probe.ts #snapshot snapshot 1", "probe.ts #distinct text 1", "probe.ts #structure id 1"],
   );
 });

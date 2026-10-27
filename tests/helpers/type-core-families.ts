@@ -2232,9 +2232,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   // to want evaluation keys that share their prefixes: admission's stop index keeps an evaluation key and a chain of
   // operations per nested operation, each one entry longer than the one around it, now charged as kept, so k nested
   // own defaults keep about k²/2 entries. In both orders at k = 64, 128 (`main` in brackets, the keys uncharged):
-  // `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,584 / 65,299 (3.046; 2.047), `load` 7,147 / 25,164
-  // (3.593; 2.054); at k = 1,024 8.6 %, 10.9 % and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,142
-  // and 4,472
+  // `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,712 / 65,555 (3.040; 2.047), `load` 7,150 / 25,167
+  // (3.592; 2.054), re-measured with the snapshots charged (3.937, 3.046 and 3.593 before); at k = 1,024 8.6 %, 10.9 %
+  // and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,141 and 4,472
   { ...nestedOwn("otherwise", (inner) => `null otherwise (${inner})`), measured: 3.94 },
   { ...nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`), measured: 3.05 },
   { ...nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`), measured: 3.6 },

@@ -1912,7 +1912,10 @@ export class Admission {
       const key = this.#aliasKey(d);
       const representative = key === null ? undefined : first.get(key);
       if (representative === undefined) {
-        if (key !== null) first.set(key, d);
+        if (key !== null) {
+          keepText(this.#work, key.length);
+          first.set(key, d);
+        }
         out.push(d);
         continue;
       }
@@ -2300,6 +2303,7 @@ export class Admission {
       for (const d of definitions.byKey.get(below) ?? []) root(d, at, []);
     }
     const structure = this.#collect(roots, levels, true);
+    keepText(this.#work, id.length);
     this.#structures.set(id, structure);
     return structure;
   }
@@ -3069,6 +3073,7 @@ export class Admission {
           read,
         );
         if (seen.has(snapshot)) continue;
+        keepText(this.#work, snapshot.length);
         seen.add(snapshot);
       }
       out.push(stop);
@@ -3552,6 +3557,7 @@ export class Admission {
             }
             if (kinds.size > 1) kept.push(path);
           }
+          keepText(this.#work, key.length);
           conflicts.set(key, (paths = kept));
         }
         shared = paths;
@@ -4265,12 +4271,11 @@ export class Admission {
       const label = this.pathLabel(d.place, path);
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const key = keptKey(this.#work, d.place, path);
-      const check = boundaryCheck(
-        stops[0]!.site,
-        label,
-        against,
-        `validate external data entering ${label} against ${against.join("|")}`,
-      );
+      const message = `validate external data entering ${label} against ${against.join("|")}`;
+      // (the check keeps its label and its message, each about the path's text)
+      keepText(this.#work, label.length);
+      keepText(this.#work, message.length);
+      const check = boundaryCheck(stops[0]!.site, label, against, message);
       const list = this.boundaries.get(key);
       if (list === undefined) this.boundaries.set(key, [check]);
       else list.push(check);

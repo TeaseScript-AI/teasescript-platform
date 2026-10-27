@@ -1809,8 +1809,9 @@ export class Contract {
     const read = `${guards.guardedRead(value) ? "g" : ""}${copied}`;
     const snapshot =
       node === null
-        ? joinParts(read, "-")
-        : joinParts(
+        ? keptParts(this.#work, read, "-")
+        : keptParts(
+            this.#work,
             read,
             lists.readSignature(copied, node),
             handlers.afterSomeCreation(node) ? "h" : "",

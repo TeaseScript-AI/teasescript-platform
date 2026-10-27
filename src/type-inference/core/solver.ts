@@ -575,7 +575,10 @@ export class Solver {
       if (item.ingress === undefined) return item;
       const key = joinParts(member.demand.key, item.tag);
       let cell = component.cells.get(key);
-      if (cell === undefined) component.cells.set(key, (cell = this.#scope.ingress.cell()));
+      if (cell === undefined) {
+        keepText(this.#work, key.length);
+        component.cells.set(key, (cell = this.#scope.ingress.cell()));
+      }
       if (item.ingress !== cell)
         cell.contents = this.#scope.ingress.union(cell.contents ?? undefined, item.ingress) ?? null;
       return { ...item, ingress: cell };
