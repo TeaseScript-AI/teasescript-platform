@@ -387,6 +387,54 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
 });
 
 /**
+ * The stop oracle itself (Codex r8's T1): a kept store check is kept whole, its place as well as its type. Changes to
+ * the unstopped plan's check stand in for a stop that changed it.
+ */
+test("the stop oracle sees a store check's place, type or presence change", () => {
+  const unstopped = compileSourceWithBackend(
+    "let n: integer = hostValue\nexit\n",
+    OPTIONS,
+    CORE_BACKEND,
+  );
+  assert.ok(unstopped.plan !== null);
+  const changed = (change: (holder: Record<string, unknown>) => void): typeof unstopped => {
+    const plan = structuredClone(unstopped.plan);
+    const pending: unknown[] = [plan];
+    while (pending.length > 0) {
+      const at = pending.pop();
+      if (at === null || typeof at !== "object") continue;
+      const holder = at as Record<string, unknown>;
+      if (holder["typeCheck"] !== undefined) change(holder);
+      pending.push(...Object.values(holder));
+    }
+    return { ...unstopped, plan };
+  };
+  const problems = (stopped: typeof unstopped): string[] =>
+    stopProblems({
+      unstopped,
+      stopped,
+      settled: true,
+      exact: true,
+      deferred: [],
+      fitting: [],
+      violating: [],
+    });
+  assert.deepEqual(problems(unstopped), []);
+  for (const change of [
+    (holder: Record<string, unknown>) => {
+      holder["typeCheck"] = { ...(holder["typeCheck"] as object), place: "wrong target" };
+    },
+    (holder: Record<string, unknown>) => {
+      holder["typeCheck"] = { ...(holder["typeCheck"] as object), type: { kind: "text" } };
+    },
+    (holder: Record<string, unknown>) => {
+      delete holder["typeCheck"];
+    },
+  ])
+    assert.notDeepEqual(problems(changed(change)), []);
+});
+
+/**
  * TABLE r4.99: the finishing path derives a unit's findings as the analysis does. A parameter whose `null` default
  * reaches a member read is an error (#1172's `defaultOf`); a walk stop before that read keeps the error, in both orders.
  * Functions are outside the candidate route: through the analysis.

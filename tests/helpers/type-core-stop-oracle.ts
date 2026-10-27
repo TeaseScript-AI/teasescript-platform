@@ -174,7 +174,17 @@ export function stopProblems(c: StopCase): string[] {
         const typed = (text: string | undefined): Map<string, unknown> | null =>
           text === undefined ? null : partsOf(JSON.parse(text));
         const [want, have] = [typed(value), typed(other)];
-        if (at.startsWith("typeCheck|") && want !== null)
+        // (a stored type may open where the path is undecided; its place and every other field never change)
+        const besides = (parts: Map<string, unknown> | null): string =>
+          JSON.stringify([...(parts ?? [])].filter(([name]) => name !== "type"));
+        if (
+          at.startsWith("typeCheck|") &&
+          want !== null &&
+          have !== null &&
+          besides(want) !== besides(have)
+        )
+          problems.push(`changed ${at} ${value} into ${other}`);
+        else if (at.startsWith("typeCheck|") && want !== null)
           problems.push(
             ...keptType(
               c,
