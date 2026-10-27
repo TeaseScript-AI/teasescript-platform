@@ -49,7 +49,7 @@ import {
 } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
-import { propertyName, siteKey, stepName, type ValueConstraint } from "./program.js";
+import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
 import { codeOf, pathPhrase } from "./messages.js";
 import {
   contextOf,
@@ -144,6 +144,38 @@ const NO_INPUTS: OperationInputs = {
 };
 
 /** C5b: whether a kind has the method, by the compiler's own member rules. */
+/**
+ * What reaches one level of a path below a key or a value (A2, ADR 0021 rule 1.1): the literals standing there, whose
+ * children bring the next level; the whole copies met on the way, this level's included, and the first of them; whether
+ * a value on the way is neither a copy nor a literal (`other`: what it brings is unknown); how many values stand at this
+ * level itself (`here`: at a property's level, its own contributions); the elements a key's adds bring one step below
+ * (`added`); and the levels below, each made once (`Consumers.#below`), from its literals' children indexed by step.
+ */
+interface Reach {
+  readonly literals: readonly PlaceId[];
+  readonly copies: number;
+  readonly copy: PlaceId | null;
+  readonly other: boolean;
+  readonly here: number;
+  readonly added: readonly PlaceId[];
+  readonly next: Map<string, Reach>;
+  children: Map<string, PlaceId[]> | null;
+}
+
+/** A level of a place's paths (A2): what reaches it, its key, and the levels below by step. */
+interface KeyReach {
+  readonly reach: Reach;
+  readonly key: Key;
+  readonly next: Map<string, KeyReach>;
+}
+
+const LITERAL_NODES: ReadonlySet<string> = new Set([
+  "objectLiteral",
+  "listLiteral",
+  "dictLiteral",
+  "setLiteral",
+]);
+
 function hasMethod(kind: ItemTag, name: string): boolean {
   if (kind === "unknown" || kind === "empty") return false;
   return MEMBER_RULES.some(
@@ -661,158 +693,186 @@ export class Consumers {
     return false;
   }
 
-  /**
-   * Whether a store brings what it stores at `path` below its destination through whole copies (`#throughCopies`).
-   */
-  #broughtByCopy(d: Definition, path: readonly string[]): boolean {
-    const inserted = d.kind === "add" && d.how === "element" ? 1 : 0;
-    if (d.value === undefined || (d.kind !== "whole" && inserted === 0)) return false;
-    const rest = path.slice(d.path.length + inserted);
-    if (rest.length === 0 || d.path.some((step, at) => path[at] !== step)) return false;
-    return this.#throughCopies(d.value, rest);
+  /** Whether a value is a literal: a list, set, dict or object literal, whose children stand below it. */
+  #isLiteral(value: PlaceId): boolean {
+    const { program } = this.pass;
+    const kind = program.places[value]?.kind;
+    return program.hasOf.has(value) || (kind?.kind === "value" && LITERAL_NODES.has(kind.node));
   }
 
   /**
-   * Whether what `value` holds at `steps`, the property the last one names, comes through whole copies (A2): the value
-   * a copy, or a literal in which, at some prefix short of the property, only copies stand, through literals alone (a
-   * literal that gives the property itself gives its own field).
+   * A literal's children by step: its element and dict value cells as `element` (the key's step, as `targetRoot` makes
+   * it), its properties by name. Once for the program.
    */
-  #throughCopies(value: PlaceId, steps: readonly string[]): boolean {
-    if (this.#isCopy(value)) return true;
-    for (let length = 1; length < steps.length; length += 1) {
-      const frontier = this.#literalFrontier(value, steps, length);
-      if (frontier === null) return false;
-      if (frontier.literals.length === 0) return true;
-    }
-    return false;
-  }
-
-  /**
-   * The one whole copy that brings what `value` holds at `steps` (A2's related site): the value itself, or the only
-   * copy its literals hold on the way; `null` where several copies bring it.
-   */
-  #oneCopy(value: PlaceId, steps: readonly string[]): PlaceId | null {
-    if (this.#isCopy(value)) return value;
-    let copy: PlaceId | null = null;
-    for (let length = 1; length < steps.length; length += 1) {
-      const frontier = this.#literalFrontier(value, steps, length);
-      if (frontier === null || frontier.copies.length > 1) return null;
-      if (frontier.copies.length === 1) {
-        if (copy !== null) return null;
-        copy = frontier.copies[0]!;
+  #childrenOf(literal: PlaceId): ReadonlyMap<string, readonly PlaceId[]> | undefined {
+    if (this.#literalChildren === null) {
+      const { program, definitions } = this.pass;
+      const index = new Map<PlaceId, Map<string, PlaceId[]>>();
+      for (const place of program.places) {
+        program.work.charge("indexSteps");
+        const kind = place.kind;
+        if (kind.kind !== "cell" && kind.kind !== "property") continue;
+        const step = kind.kind === "cell" ? "element" : propertyStep(kind.name);
+        let byStep = index.get(kind.owner);
+        if (byStep === undefined) index.set(kind.owner, (byStep = new Map()));
+        let values = byStep.get(step);
+        if (values === undefined) byStep.set(step, (values = []));
+        for (const d of definitions.cellDefs.get(place.id) ?? [])
+          if (d.value !== undefined) values.push(d.value);
       }
-      if (frontier.literals.length === 0) return copy;
+      this.#literalChildren = index;
     }
-    return null;
+    return this.#literalChildren.get(literal);
+  }
+
+  #literalChildren: Map<PlaceId, Map<string, PlaceId[]>> | null = null;
+
+  /** The values standing at one level, after `above`: each a whole copy, a literal, or another value. */
+  #reach(values: readonly PlaceId[], above: Reach | null, added: readonly PlaceId[] = []): Reach {
+    const { program } = this.pass;
+    const literals: PlaceId[] = [];
+    let copies = above?.copies ?? 0;
+    let copy = above?.copy ?? null;
+    let other = above?.other ?? false;
+    for (const value of values) {
+      program.work.charge("checks");
+      if (this.#isCopy(value)) {
+        copies += 1;
+        copy ??= value;
+      } else if (this.#isLiteral(value)) literals.push(value);
+      else other = true;
+    }
+    keptArray(program.work, literals);
+    return {
+      literals,
+      copies,
+      copy,
+      other,
+      here: values.length,
+      added,
+      next: new Map(),
+      children: null,
+    };
+  }
+
+  /** The level below `reach` at `step`: its literals' children there, and the elements its key's adds bring. */
+  #below(reach: Reach, step: string): Reach {
+    const known = reach.next.get(step);
+    if (known !== undefined) return known;
+    if (reach.children === null) {
+      // its literals' children indexed by step once, so each step below asks only its own
+      reach.children = new Map();
+      for (const literal of reach.literals)
+        for (const [at, values] of this.#childrenOf(literal) ?? []) {
+          this.pass.program.work.charge("checks", values.length);
+          let list = reach.children.get(at);
+          if (list === undefined) reach.children.set(at, (list = []));
+          for (const value of values) list.push(value);
+        }
+    }
+    const values: PlaceId[] = [];
+    for (const value of reach.children.get(step) ?? []) values.push(value);
+    if (step === "element") for (const value of reach.added) values.push(value);
+    const found = this.#reach(values, reach);
+    reach.next.set(step, found);
+    return found;
   }
 
   /**
-   * What a literal value holds at the first `length` of `steps` (A2's walk through wrappers such as
-   * `{box: {inner: a}}`): the literals there and the copies that stand beside them; `null` where a value there is
-   * neither. Once per value and prefix, each from the prefix above it, so paths that share a prefix share its walk.
+   * What a value brings at `steps` (A2): `brought` where it brings the property the last step names only through whole
+   * copies (a copy, or literals whose children reach copies above the property's level, none giving the property
+   * itself, none of another kind on the way), and `copy` the one copy that does, if one. Once per value and level.
    */
-  #literalFrontier(
+  #valueReach(
     value: PlaceId,
     steps: readonly string[],
-    length: number,
-  ): { readonly literals: readonly PlaceId[]; readonly copies: readonly PlaceId[] } | null {
-    const { program } = this.pass;
-    if (!program.hasOf.has(value)) return null;
-    let frontier: {
-      readonly literals: readonly PlaceId[];
-      readonly copies: readonly PlaceId[];
-    } | null = { literals: [value], copies: [] };
-    for (let at = 1; at <= length && frontier !== null; at += 1) {
-      const memoKey = joinParts(value, steps.slice(0, at));
-      const known = this.#frontiers.get(memoKey);
-      if (known !== undefined) {
-        frontier = known;
-        continue;
-      }
-      const literals: PlaceId[] = [];
-      const copies: PlaceId[] = [];
-      let other = false;
-      for (const literal of frontier.literals) {
-        for (const child of this.admission.literalChildren(literal, steps[at - 1]!)) {
-          if (this.#isCopy(child.value)) copies.push(child.value!);
-          else if (child.value !== undefined && program.hasOf.has(child.value))
-            literals.push(child.value);
-          else other = true;
-        }
-        if (other) break;
-      }
-      keepText(program.work, memoKey.length);
-      frontier = other
-        ? null
-        : { literals: keptArray(program.work, literals), copies: keptArray(program.work, copies) };
-      this.#frontiers.set(memoKey, frontier);
-    }
-    return frontier;
+  ): { readonly brought: boolean; readonly copy: PlaceId | null } {
+    let reach = this.#valueReaches.get(value);
+    if (reach === undefined) this.#valueReaches.set(value, (reach = this.#reach([value], null)));
+    for (let at = 0; at + 1 < steps.length; at += 1) reach = this.#below(reach, steps[at]!);
+    const last = this.#below(reach, steps.at(-1)!);
+    const brought = reach.copies > 0 && last.here === 0 && !last.other;
+    return { brought, copy: brought && reach.copies === 1 ? reach.copy : null };
   }
 
-  readonly #frontiers = new Map<
-    string,
-    { readonly literals: readonly PlaceId[]; readonly copies: readonly PlaceId[] } | null
-  >();
+  readonly #valueReaches = new Map<PlaceId, Reach>();
+
+  /** What a store brings at `path` below its destination's root (`#valueReach`), or `null` where it brings nothing there. */
+  #storeReach(
+    d: Definition,
+    path: readonly string[],
+  ): { readonly brought: boolean; readonly copy: PlaceId | null } | null {
+    if (d.value === undefined || d.path.some((step, at) => path[at] !== step)) return null;
+    const rest = path.slice(d.path.length);
+    if (d.kind === "whole") return rest.length === 0 ? null : this.#valueReach(d.value, rest);
+    if (d.kind !== "add" || rest[0] !== "element") return null;
+    // (an added list brings its elements; an added element stands one step below)
+    if (d.how === "elements") return this.#valueReach(d.value, rest);
+    return rest.length < 2 ? null : this.#valueReach(d.value, rest.slice(1));
+  }
 
   /**
-   * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): every store that
-   * brings it from above, a whole store or an add into a prefix of its path, brings it through a copy; a literal's own
-   * field there is a direct contribution (its stores at the path itself are its direct stores). Once per path; each
-   * prefix's stores sorted once into copies and the others (`#uncopied`), so a path asks the others alone.
+   * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): along its path,
+   * at each key the stores into it and what the keys above bring there, no literal gives the property itself and no
+   * value on the way is of another kind (the stores at the path itself are its direct stores). Each level of a place's
+   * paths is made once, so paths that share a prefix share it.
    */
   #copiesOnly(root: PlaceId, path: readonly string[]): boolean {
-    const memoKey = joinParts(root, path);
-    const known = this.#copied.get(memoKey);
-    if (known !== undefined) return known;
-    let only = true;
-    for (let length = 0; only && length < path.length; length += 1) {
-      const stores = this.#uncopied(keyOf(root, path.slice(0, length)));
-      // (an element an add stores is its own direct contribution, a copy or not)
-      if (stores.adds && length + 1 === path.length) only = false;
-      for (const d of stores.others) {
-        this.pass.program.work.charge("checks");
-        if (!this.#broughtByCopy(d, path)) {
-          only = false;
-          break;
-        }
-      }
+    let level: KeyReach | undefined = this.#keyReaches.get(root);
+    if (level === undefined) {
+      level = this.#keyLevel(root, [], null);
+      this.#keyReaches.set(root, level);
     }
-    keepText(this.pass.program.work, memoKey.length);
-    this.#copied.set(memoKey, only);
-    return only;
+    for (let at = 0; at + 1 < path.length; at += 1) {
+      const step = path[at]!;
+      let next: KeyReach | undefined = level.next.get(step);
+      if (next === undefined) {
+        next = this.#keyLevel(root, path.slice(0, at + 1), level);
+        level.next.set(step, next);
+      }
+      level = next;
+    }
+    const last = this.#below(level.reach, path.at(-1)!);
+    return last.here === 0 && !last.other;
   }
 
-  readonly #copied = new Map<string, boolean>();
+  readonly #keyReaches = new Map<PlaceId, KeyReach>();
 
-  /**
-   * The whole stores and adds into a key that bring what they store below it otherwise than as a whole copy (A2): a
-   * literal (its children decide, `#broughtByCopy`), any other value, an add of no element; and whether an add stores
-   * an element there. Once per key.
-   */
-  #uncopied(key: Key): { readonly others: readonly Definition[]; readonly adds: boolean } {
+  /** A level of a place's paths: what the level above brings at its step, with the stores into its own key. */
+  #keyLevel(root: PlaceId, path: readonly string[], above: KeyReach | null): KeyReach {
     const { program, definitions } = this.pass;
-    let stores = this.#uncopiedOf.get(key);
-    if (stores === undefined) {
-      const others: Definition[] = [];
-      let adds = false;
-      for (const d of definitions.byKey.get(key) ?? []) {
-        program.work.charge("checks");
-        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
-        adds ||= d.kind === "add" && d.how === "element";
-        if ((d.kind === "add" && d.how !== "element") || !this.#isCopy(d.value)) others.push(d);
-      }
-      keepText(program.work, key.length);
-      stores = { others: keptArray(program.work, others), adds };
-      this.#uncopiedOf.set(key, stores);
+    const key = keyOf(root, path);
+    keepText(program.work, key.length);
+    const values: PlaceId[] = [];
+    const added: PlaceId[] = [];
+    for (const d of definitions.byKey.get(key) ?? []) {
+      program.work.charge("checks");
+      if (d.value === undefined) continue;
+      if (d.kind === "whole" || (d.kind === "add" && d.how === "elements")) values.push(d.value);
+      else if (d.kind === "add") added.push(d.value);
     }
-    return stores;
+    const own = this.#reach(values, null, keptArray(program.work, added));
+    if (above === null) return { reach: own, key, next: new Map() };
+    const from = this.#below(above.reach, path.at(-1)!);
+    const literals: PlaceId[] = [];
+    for (const literal of from.literals) literals.push(literal);
+    for (const literal of own.literals) literals.push(literal);
+    keptArray(program.work, literals);
+    return {
+      reach: {
+        literals,
+        copies: from.copies + own.copies,
+        copy: from.copy ?? own.copy,
+        other: from.other || own.other,
+        here: from.here + own.here,
+        added: own.added,
+        next: new Map(),
+        children: null,
+      },
+      key,
+      next: new Map(),
+    };
   }
-
-  readonly #uncopiedOf = new Map<
-    Key,
-    { readonly others: readonly Definition[]; readonly adds: boolean }
-  >();
 
   /**
    * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
@@ -842,16 +902,17 @@ export class Consumers {
         ? undefined
         : this.#literalStores.get(literal);
     if (store !== undefined) {
-      const path = joinSteps(store.path, [step], found.path);
+      // (a key's steps: a dict value is an `element`, as `targetRoot` makes it)
+      const below = found.path.map((at) => (at === "entry" ? "element" : at));
+      const path = joinSteps(store.path, ["element"], below);
+      const reach = found.d.value === undefined ? null : this.#valueReach(found.d.value, below);
       // (the offending element and every other contribution through whole copies)
       const deferred = this.#deferred(
         site,
         store.place,
         path,
-        found.d.value !== undefined &&
-          this.#throughCopies(found.d.value, found.path) &&
-          this.#copiesOnly(store.place, path),
-        () => this.#oneCopy(found.d.value!, found.path),
+        reach !== null && reach.brought && this.#copiesOnly(store.place, path),
+        () => reach?.copy ?? null,
       );
       if (deferred.brought !== null) {
         this.#error(
@@ -1131,21 +1192,15 @@ export class Consumers {
         // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
         // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
         if (bad.length > 0 && d !== decider && !items.some(fitting)) {
+          const reach = !written && d.place === root ? this.#storeReach(d, path) : null;
           const { site, brought } = this.#deferred(
             admission.siteAt(d, at, (elements) =>
               deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
             ),
             root,
             path,
-            !written &&
-              d.place === root &&
-              this.#broughtByCopy(d, path) &&
-              this.#copiesOnly(root, path),
-            () =>
-              this.#oneCopy(
-                d.value!,
-                path.slice(d.path.length + (d.kind === "add" && d.how === "element" ? 1 : 0)),
-              ),
+            reach !== null && reach.brought && this.#copiesOnly(root, path),
+            () => reach?.copy ?? null,
           );
           this.#error(
             "written-target",

@@ -3023,6 +3023,27 @@ test("a property only copies of whole objects bring errs at its first direct rea
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: b}]\nsay xs[0].inner.n\nexit',
       ["xs[0].inner.n (b)"],
     ],
+    // a dict's values, an added list's elements, and a wrapper without the property, like the list's
+    [
+      "dict values wrapping copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = dict{a: {inner: a}, b: {inner: b}}\nsay xs["a"].inner.n\nexit',
+      ['xs["a"].inner.n (b)'],
+    ],
+    [
+      "an added list wrapping a copy",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}]\nxs.addAll([{inner: b}])\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    [
+      "a wrapper without the property beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {}}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    [
+      "a wrapper with the property beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {n: 2}}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["{inner: b}"],
+    ],
     // a literal's own field is its own contribution, whatever it copies
     [
       "a literal's field copied from a property",
@@ -3060,7 +3081,7 @@ test("a property only copies of whole objects bring errs at its first direct rea
 
 test("the copied-property check grows with the program, not with its copies times its fields (A2, ADR 0021 rule 1.1)", () => {
   // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
-  // copies as a list's elements, as stores into one variable, and wrapped in literals
+  // copies as a list's elements, as stores into one variable, and wrapped in literals of both
   const fields = (k: number, value: string): string =>
     Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
   const records = (k: number): string =>
@@ -3080,6 +3101,13 @@ test("the copied-property check grows with the program, not with its copies time
       (k) =>
         `${records(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
         `${reads(k, "c")}\nexit`,
+    ],
+    [
+      "wrapped stores",
+      (k) =>
+        `${records(k)}let c = {box: {inner: good}}\n` +
+        `${Array.from({ length: k }, () => "c = {box: {inner: good}}").join("\n")}\n` +
+        `c = {box: {inner: bad}}\n${reads(k, "c.box.inner")}\nexit`,
     ],
     [
       "wrapped elements",
