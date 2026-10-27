@@ -2858,9 +2858,8 @@ export class Contract {
     if (copied !== null) {
       const source = yield* this.#needKey(copied);
       identity = {
-        // S6-CARRIERS §3.1: an ingress occurrence is fresh, and so is a projection of one, so no identity merge shares it
-        // (its leaf stays its own, #1210)
-        id: this.#ingressOf(value) !== null ? `v${value}` : source.id,
+        // S6-CARRIERS §3.1: an ingress occurrence is fresh, so no identity merge shares it (its leaf stays its own)
+        id: this.pass.definitions.ingress.has(value) ? `v${value}` : source.id,
         key: source.key,
         guarded: source.guarded || this.pass.guards.guardedRead(value),
         holder: source.holder,
@@ -3968,7 +3967,7 @@ export class Contract {
    * The ingress a value is, or the one its projections read (`hostValue.n`, `hostValue[0].n`: its answer is that
    * ingress's data at their steps, so its leaf is the ingress's, #1210); `null` for none.
    */
-  #ingressOf(value: PlaceId): PlaceId | null {
+  public ingressOf(value: PlaceId): PlaceId | null {
     const { definitions, program } = this.pass;
     let at = value;
     while (!definitions.ingress.has(at)) {
@@ -3980,12 +3979,12 @@ export class Contract {
   }
 
   /**
-   * The leaf naming an ingress value or a projection of one (`#ingressOf`, S6-CARRIERS §3.1): every ingress's, where it
+   * The leaf naming an ingress value or a projection of one (`ingressOf`, S6-CARRIERS §3.1): every ingress's, where it
    * lands being admission's; else `undefined`, external data created where no ingress is, loose.
    */
   #ingressLeaf(value: PlaceId): IngressNode | undefined {
     const { program } = this.pass;
-    const ingress = this.#ingressOf(value);
+    const ingress = this.ingressOf(value);
     const site = ingress === null ? null : program.places[ingress]?.site;
     if (site === null || site === undefined) return undefined;
     return program.scope.ingress.leaf(ingressLeaf(program, site));
@@ -4304,7 +4303,9 @@ export class Contract {
       const path = this.#pathTexts[at]!;
       parts.push(this.#kindsPart(at, index.terms.get(path)));
       for (const entry of index.reads.get(path) ?? []) {
-        if (entry.ingress !== undefined) plain = false;
+        // (an ingress occurrence is its own source; a projection of one reads its key, its leaf unioned in the entry)
+        if (entry.ingress !== undefined && this.pass.definitions.ingress.has(entry.value))
+          plain = false;
         parts.push(this.#kept(`r${(yield* this.#needValue(entry.value)).id}`));
       }
       for (const entry of index.others.get(path) ?? []) {
