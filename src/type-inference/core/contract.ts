@@ -277,13 +277,13 @@ export function termAt(term: TypeTerm, path: readonly string[]): TypeTerm | null
   return at !== null && "term" in at ? at.term : null;
 }
 
-/** A source of a mark: one holder per source identity and projection (§8 r4.23). */
 /** A holder's reference to another, seen from `shift` below it. */
 interface HolderReference {
   readonly to: Holder;
   readonly shift: readonly string[];
 }
 
+/** A source of a mark: one holder per source identity and projection (§8 r4.23). */
 interface Holder {
   readonly id: string;
   /** Its own reads: a stored read of a key with a tested key below it, at the path it stands at. */
