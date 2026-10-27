@@ -473,6 +473,8 @@ interface OtherGroup {
   readonly rest: readonly ValueEntry[];
   readonly writer: Writer | null;
   readonly mixed: number;
+  /** Whether the class is one of computed-key loads, which no path below their root changes (`#loadsBelow`). */
+  readonly loads: boolean;
 }
 
 /** A choice's options of one class (`Contract.choiceOptions`): those its answer reads, the others of a mixed class. */
@@ -681,6 +683,8 @@ export class Contract {
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
   ];
+  /** Per class of computed-key loads on either side, their answer below their root (`#loadsBelow`). */
+  readonly #loadsBelowOf = new WeakMap<OtherGroup, readonly Item[]>();
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly #choiceOptions = [
     new Map<PlaceId, readonly ChoiceGroup[]>(),
@@ -2473,13 +2477,21 @@ export class Contract {
     const charge = (): void => program.work.charge("invSteps");
     for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
       let writer: Writer | null = null;
-      for (const member of all) writer = firstWriter(writer, cellWriter(list[member]!));
+      // (a class of F19's loads of a computed key: a value by itself, as every value with the sharing off, is read at
+      // each path)
+      let loads = members[all[0]!]!.cls !== null;
+      for (const member of all) {
+        writer = firstWriter(writer, cellWriter(list[member]!));
+        const c = program.opOf.get(list[member]!.value);
+        loads &&= c?.kind === "load" && c.key === null;
+      }
       this.#keep(2 + read.length + rest.length);
       groups.push({
         read: read.map((member) => list[member]!),
         rest: rest.map((member) => list[member]!),
         writer,
         mixed,
+        loads,
       });
     }
     memo.set(list, groups);
@@ -4375,6 +4387,10 @@ export class Contract {
             ),
           );
         for (const group of this.#othersAt(index.others.get(path), false)) {
+          if (group.loads && length < rest.length) {
+            for (const item of yield* this.#loadsBelow(group, node, after(), false)) out.push(item);
+            continue;
+          }
           const from = out.length;
           for (const entry of group.read)
             out.push(
@@ -4400,6 +4416,10 @@ export class Contract {
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
         for (const group of this.#othersAt(others, true)) {
+          if (group.loads && length < rest.length) {
+            for (const item of yield* this.#loadsBelow(group, node, after(), true)) out.push(item);
+            continue;
+          }
           const from = out.length;
           for (const entry of group.read)
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
@@ -4463,6 +4483,37 @@ export class Contract {
             : { ...item, context: firstContext(item.context, "member") },
         )
       : out;
+  }
+
+  /**
+   * #1203: a class of computed-key loads below its root (`OtherGroup.loads`) on either side, its members' answers merged,
+   * made once per pass at its first read there and taken at every later one for a step: each load's value there is F19's
+   * host data whatever the path and the node (on the value side its one demand below the root, `Values.#operationItems`),
+   * naming its own ingress (C9), so the merge keeps every member's leaf. The root, with a `null` default's `null`, is
+   * read member by member.
+   */
+  *#loadsBelow(
+    group: OtherGroup,
+    node: FlowNode | null,
+    after: readonly string[],
+    exact: boolean,
+  ): Work<readonly Item[]> {
+    const { program, values } = this.pass;
+    program.work.charge("invSteps");
+    const known = this.#loadsBelowOf.get(group);
+    if (known !== undefined) return known;
+    const items: Item[] = [];
+    for (const members of [group.read, group.rest])
+      for (const entry of members) {
+        const answer = exact
+          ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
+          : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
+        for (const item of answer) items.push(item);
+      }
+    const below = mergeItems(items, program.scope);
+    this.#keep(1 + below.length);
+    this.#loadsBelowOf.set(group, below);
+    return below;
   }
 
   /**

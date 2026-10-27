@@ -471,15 +471,19 @@ export class Values {
     return alternatives(yield* contract.indexItems(literal, rest, node, true), program.scope);
   }
 
-  /** An operation's value at a path: a demand per result and path. */
+  /**
+   * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
+   * root, where F19 gives host data whatever the path (`operationValue`; #1203: `Contract.#loadsBelow`).
+   */
   *#operationItems(
     c: ValueConstraint,
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
+    const below = rest.length > 0 && c.kind === "load" && c.key === null;
     return yield {
-      key: joinParts("op", c.result, rest),
+      key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, rest),
       kind: "value",
       file: site.file,
       offset: site.start,
