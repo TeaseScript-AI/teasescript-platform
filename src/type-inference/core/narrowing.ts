@@ -314,6 +314,8 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
  */
 interface Fact {
   readonly tested: Expression;
+  /** Where the test form ends (its `not`s included): the events of the condition after it are G's (N2). */
+  readonly end: number;
   readonly type: TestedType | null;
   readonly holds: boolean;
 }
@@ -348,6 +350,7 @@ function formOf(
  * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
  */
 function testForm(expression: Expression, work: WorkLedger): Fact | null {
+  const end = expression.span.end.offset;
   let shape = shapeOf(expression, work);
   let holds = true;
   while (shape.kind === "not") {
@@ -356,14 +359,14 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
     shape = shapeOf(shape.operand, work);
   }
   if (shape.kind === "null")
-    return { tested: shape.tested, type: null, holds: shape.negated ? !holds : holds };
+    return { tested: shape.tested, end, type: null, holds: shape.negated ? !holds : holds };
   if (shape.kind !== "type") return null;
   const type = testedType(shape.node.type, work);
   const outcome = shape.negated ? !holds : holds;
   // `is null` and `is not null` are the null tests
   if (type.kinds.length === 1 && type.kinds[0] === "null")
-    return { tested: shape.tested, type: null, holds: outcome };
-  return { tested: shape.tested, type, holds: outcome };
+    return { tested: shape.tested, end, type: null, holds: outcome };
+  return { tested: shape.tested, end, type, holds: outcome };
 }
 
 /**
@@ -406,6 +409,11 @@ export interface Narrowing {
    * `null` for a branch's region (the entry's).
    */
   readonly region: OperandSpan | null;
+  /**
+   * A branch's G: the rest of its condition after its test, whose events come between the test and the entry (an
+   * `and`'s or `or`'s later operands, N1, N2); `null` for an operand region's.
+   */
+  readonly window: OperandSpan | null;
   /** The tested operand: G's input is the read there. */
   readonly input: FlowNode;
   readonly form: NarrowingForm;
@@ -566,6 +574,7 @@ export class NarrowingIndex {
       tested: Expression,
       outcome: { readonly form: NarrowingForm; readonly element: TypeAnnotation | null },
       region: OperandSpan | null = null,
+      window: OperandSpan | null = null,
     ): void => {
       if (!program.reached(node)) return;
       const operand = peel(tested, work);
@@ -622,6 +631,7 @@ export class NarrowingIndex {
           collections,
           node,
           region,
+          window,
           input,
           form,
         };
@@ -657,7 +667,12 @@ export class NarrowingIndex {
         if (index > 1) break;
         proven.length = 0;
         facts(use.operand, index === 0, proven, work);
-        for (const fact of proven) define(branch, use.file, fact.tested, formOf(fact, work));
+        for (const fact of proven)
+          define(branch, use.file, fact.tested, formOf(fact, work), null, {
+            file: use.file,
+            start: fact.end,
+            end: use.span.end.offset,
+          });
       }
     // `switch` cases: `case null`, a literal case by its value, `default` and later cases after `case null`
     for (const use of flow.switchUses) {

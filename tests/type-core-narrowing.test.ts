@@ -59,6 +59,7 @@ function check(
 }
 
 const REPEAT = "repeat n {}";
+const WIPE = "function wipe { n = null\n return true }";
 
 test("every N1 form defines its guarded region, and no other condition does (N1, N9)", () => {
   const forms = (
@@ -601,6 +602,80 @@ test("N2's events of ordinary keys: a store, a call where another callable store
         REPEAT,
         7,
         "non-null: call",
+      ],
+      [
+        "a call later in the condition (B1)",
+        [...NULLABLE, WIPE, "if n != null and wipe() { repeat n {} }"],
+        REPEAT,
+        7,
+        "non-null: call",
+      ],
+      [
+        "control: no call",
+        [...NULLABLE, WIPE, "if n != null and flagHost { repeat n {} }"],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
+        "control: the call before the test",
+        [...NULLABLE, WIPE, "if wipe() and n != null { repeat n {} }"],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
+        "an `or`'s false outcome",
+        [...NULLABLE, WIPE, 'if n == null or wipe() { say "x" } else { repeat n {} }'],
+        REPEAT,
+        7,
+        "non-null: call",
+      ],
+      [
+        "control: `or`, no call",
+        [...NULLABLE, WIPE, 'if n == null or flagHost { say "x" } else { repeat n {} }'],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
+        "after a leaving branch",
+        [...NULLABLE, WIPE, "if n == null or wipe() { exit }", REPEAT],
+        REPEAT,
+        7,
+        "non-null: call",
+      ],
+      [
+        "control: leaving, no call",
+        [...NULLABLE, WIPE, "if n == null or flagHost { exit }", REPEAT],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
+        "a `while` condition",
+        [...NULLABLE, WIPE, "while n != null and wipe() { repeat n {}\n break }"],
+        REPEAT,
+        7,
+        "non-null: call",
+      ],
+      [
+        "control: `while`, the call before",
+        [...NULLABLE, WIPE, "while wipe() and n != null { repeat n {}\n break }"],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
+        "a type test, a fraction stored later in the condition",
+        [
+          "let n: number = 2",
+          "function halve { n = 0.5\n return true }",
+          "if n is integer and halve() { repeat n {} }",
+        ],
+        REPEAT,
+        7,
+        "is integer: call",
       ],
       [
         "call, no owner outside",

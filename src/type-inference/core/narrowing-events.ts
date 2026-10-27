@@ -119,7 +119,12 @@ export class NarrowingEvents {
       if (loop === undefined) return "loop";
       if ((yield* this.#first(g, events, this.#inside(loop), kinds)) !== null) return "loop";
     }
-    // X6 with N5: the events strictly after G and not after the read
+    // X6 with N5: the events after the test, in the rest of its condition, then strictly after G and not after the read
+    const window = g.window;
+    // (a call that ends the condition completes before the entry: the window holds its end)
+    const before =
+      window === null ? null : this.#textEvent(g, window.file, window.start, window.end + 1);
+    if (before !== null) return before;
     const word = yield* this.#first(g, events, this.pass.lists.spanBetween(g.node, node), kinds);
     if (word !== null) return word;
     // X7: block code, and the flat veto of a handler store with a registration before the read
@@ -142,6 +147,20 @@ export class NarrowingEvents {
     const boundary = program.dom.edom(node);
     if (program.dom.edom(g.node) !== boundary)
       return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
+    const word = this.#textEvent(g, region.file, region.start, at);
+    if (word !== null) return word;
+    if (program.blockReachable(node)) return "handler";
+    if (this.#touched(g) && this.#registered(node)) return "handler";
+    return null;
+  }
+
+  /**
+   * The word of G's first event completed in [`from`, `to`) of one file's text, or `null`: inside one expression (an
+   * operand region, or a branch's condition after its test) the events are calls, adds, removals and invalidations, in
+   * the order the expression completes them (a call after its arguments); a binary search in each of G's text lists.
+   */
+  #textEvent(g: Narrowing, file: number, from: number, to: number): ContextWord | null {
+    const work = this.#work;
     const lists: (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] = [
       [this.#texts(g.key, true), "branch"],
       ...this.#prefixes(g).map((prefix) => [this.#texts(prefix, false), "branch"] as const),
@@ -154,19 +173,16 @@ export class NarrowingEvents {
     let first = Infinity;
     let word: ContextWord | null = null;
     for (const [byFile, found] of lists) {
-      const offsets = byFile?.get(region.file);
-      program.work.charge("eventSteps");
+      const offsets = byFile?.get(file);
+      work.charge("eventSteps");
       if (offsets === undefined) continue;
-      const index = lowerBound(program.work, offsets, region.start);
-      if (index < offsets.length && offsets[index]! < at && offsets[index]! < first) {
+      const index = lowerBound(work, offsets, from);
+      if (index < offsets.length && offsets[index]! < to && offsets[index]! < first) {
         first = offsets[index]!;
         word = found;
       }
     }
-    if (word !== null) return word;
-    if (program.blockReachable(node)) return "handler";
-    if (this.#touched(g) && this.#registered(node)) return "handler";
-    return null;
+    return word;
   }
 
   /**
