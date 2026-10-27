@@ -239,15 +239,16 @@ export class Values {
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = memberStep(rest, from);
+    // (a read, a projection or a call passes the path on whole: its member steps are scanned where it ends, S6c)
     if (
-      at < 0 ||
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
       program.speakerPlaces.has(value) ||
       (program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call")
     )
       return this.#valueAt(value, node, rest);
+    const at = memberStep(rest, from);
+    if (at < 0) return this.#valueAt(value, node, rest);
     return this.#members(value, node, rest, at, from);
   }
 

@@ -1415,15 +1415,17 @@ export class Contract {
    */
   #through(value: PlaceId, rest: readonly string[], from: number): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = this.#memberStep(rest, from);
+    // (a read, a projection or a call passes the path on whole, so its member steps are scanned where it ends: a chain of
+    // k projections scans its path once, never once per link, S6c)
     if (
-      at < 0 ||
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
       program.speakerPlaces.has(value) ||
       program.callOutOf.has(value)
     )
       return this.#valueAt(value, rest);
+    const at = this.#memberStep(rest, from);
+    if (at < 0) return this.#valueAt(value, rest);
     return this.#listsAt(value, rest, at, from);
   }
 
