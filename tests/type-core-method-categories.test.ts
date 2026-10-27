@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DICT_METHODS, type DictMethod } from "../src/dict-operations.js";
-import { LIST_METHODS, type ListMethod } from "../src/list-methods.js";
+import { changesEntries, DICT_METHODS, type DictMethod } from "../src/dict-operations.js";
+import {
+  changesElements,
+  LIST_METHODS,
+  listMethod,
+  reordersList,
+  type ListMethod,
+} from "../src/list-methods.js";
+import { methodEffects } from "../src/runtime/evaluation/effect-facts.js";
 import { TEXT_METHODS, type TextMethod } from "../src/text-operations.js";
 import { declaredResult, methodCategory } from "../src/type-inference/core/method-categories.js";
 
 /*
- * The coarse core reads what a built-in method does from its category (`method-categories.ts`), whose rows the
- * language's contracts cannot give yet: they say that a method changes its receiver's elements, not whether it adds,
- * removes some or clears them. These checks keep the rows the contracts'. A method that changes a list's, set's or
- * dict's elements without its effect would leave them as written, so the core would answer as if the call never ran;
- * a declared result must be the receiver kind's own (F25).
+ * The coarse core reads what a built-in method does from its category (`method-categories.ts`): what it does to its
+ * receiver's elements from the language's contracts, the one table the compiler and the runtime read too, and the other
+ * methods' results from rows of its own. These checks keep the categories the contracts'. A method that changes a
+ * list's, set's or dict's elements without its effect would leave them as written, so the core would answer as if the
+ * call never ran; a declared result must be the receiver kind's own (F25).
  */
 
 const LISTS: readonly ListMethod[] = Object.values(LIST_METHODS);
@@ -32,10 +39,10 @@ const DECLARED: Readonly<Record<string, string>> = {
 
 test("every method that changes its receiver's elements has its effect in the core's categories", () => {
   const changing = [
-    ...LISTS.filter((method) => method.changes === "elements" && !STORED.has(method.name)).map(
+    ...LISTS.filter((method) => changesElements(method.name) && !STORED.has(method.name)).map(
       (method) => method.name,
     ),
-    ...DICTS.filter((method) => method.changes === "entries").map((method) => method.name),
+    ...DICTS.filter((method) => changesEntries(method.name)).map((method) => method.name),
   ];
   const missing = changing.filter((name) => methodCategory(name)?.receiver === undefined);
   assert.deepEqual(missing, []);
@@ -74,4 +81,62 @@ test("a method's category gives what the contract of each receiver kind that has
   for (const method of TEXTS) check("text", method.name, method.result);
   for (const method of DICTS) check("dict", method.name, method.result);
   assert.deepEqual(wrong, []);
+});
+
+/**
+ * What each method that changes its receiver in place changed in the contracts' coarse table, which #1086 replaced with
+ * the categories: a list's or set's elements or only their order, and a dict's entries. Every other method changed
+ * nothing in place and still changes nothing, as `tests/effect-facts.test.ts` keeps for every method.
+ */
+const COARSE = {
+  list: {
+    add: "elements",
+    addAll: "elements",
+    remove: "elements",
+    removeAt: "elements",
+    removeFirst: "elements",
+    removeLast: "elements",
+    clear: "elements",
+    sort: "order",
+    shuffle: "order",
+    reverse: "order",
+  },
+  dict: { remove: "entries", clear: "entries" },
+} as const;
+
+test("what a method changes in place derives from its category as the coarse table said", () => {
+  const drift = [
+    ...Object.entries(COARSE.list).filter(
+      ([name, change]) =>
+        changesElements(name) !== (change === "elements") ||
+        reordersList(name) !== (change === "order"),
+    ),
+    ...Object.entries(COARSE.dict).filter(
+      ([name, change]) => changesEntries(name) !== (change === "entries"),
+    ),
+  ];
+  assert.deepEqual(drift, []);
+});
+
+test("a list's and a dict's method of one name do the same to their receiver, as the core keys it by name", () => {
+  const differ = DICTS.filter((method) => {
+    const list = listMethod(method.name);
+    return list !== undefined && list.changes !== method.changes;
+  }).map((method) => method.name);
+  assert.deepEqual(differ, []);
+});
+
+test("a new method that removes elements is one row of its contract for the core and the runtime", () => {
+  const table: Record<string, ListMethod> = LIST_METHODS;
+  table.removeWhere = { ...LIST_METHODS.removeFirst, name: "removeWhere" };
+  try {
+    assert.deepEqual(methodCategory("removeWhere"), {
+      receiver: "removes",
+      gives: { kind: "removed", fromList: "element" },
+    });
+    assert.equal(changesElements("removeWhere"), true);
+    assert.equal(methodEffects("removeWhere").changesValue, true);
+  } finally {
+    delete table.removeWhere;
+  }
 });
