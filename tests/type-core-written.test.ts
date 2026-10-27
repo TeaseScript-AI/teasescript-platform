@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
@@ -36,10 +37,11 @@ import {
  * nothing said). The decision layer also holds the outcome and every diagnostic: a runtime-check warning at each store
  * that brings a host value to a decided level, nothing else. Whether the candidate route takes a source is each row's
  * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone.
- * Each exact source is analysed, planned and run once per mode, and every row that holds it is compared with that.
+ * Each exact source is analysed and planned once per mode, the two orders' plans compared whole, and each distinct plan
+ * runs its host values once; every row that holds the source is compared with that.
  * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
- * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads the
- * declarations alone), each placement's first error and valid control in the decision layer too.
+ * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads
+ * the declarations alone), each placement's first error and valid control in the decision layer too.
  */
 
 function inBothOrders<T>(run: () => T): T {
@@ -124,8 +126,8 @@ function lineAt(source: string, offset: number): string {
 const elementsOf = (c: WrittenCase): string[] => Array<string>(c.levels.length - 1).fill("element");
 
 /**
- * Every layer of one source in one order: the decision (its analysis released before the route compiles), and the plan
- * and its runs where the route takes it.
+ * The decision of one source in one order (its analysis released before the route compiles), and its whole plan where
+ * the route takes it.
  */
 function observe(c: WrittenCase) {
   const { request, ids } = prepare(c.source);
@@ -150,29 +152,42 @@ function observe(c: WrittenCase) {
     if (!(error instanceof CandidateOutsideSlice)) throw error;
     plan = "outside";
   }
-  return {
-    ...decided,
-    checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
-    runs:
-      plan === "outside" || plan === null
-        ? []
-        : c.runs.map(([value]) => {
-            const ran = runGlobals(plan, { ...c.globals, hostValue: value });
-            return {
-              status: ran.status,
-              failure: ran.failure,
-              says: ran.said.map(({ text }) => text),
-            };
-          }),
-  };
+  return { ...decided, plan };
 }
 
-/** Each exact input's observation per mode, shared by every row that holds it (Astra's D3). */
-const observations = new Map<string, ReturnType<typeof observe>>();
+/** A plan's run of each host value of `c`, where the route takes the source. */
+function runsOf(c: WrittenCase, plan: InstructionPlan | null | "outside") {
+  return plan === "outside" || plan === null
+    ? []
+    : c.runs.map(([value]) => {
+        const ran = runGlobals(plan, { ...c.globals, hostValue: value });
+        return { status: ran.status, failure: ran.failure, says: ran.said.map(({ text }) => text) };
+      });
+}
 
-function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observe> {
+/**
+ * Every layer of one exact input with the sharing on and off: each mode's decision and checked stores, analysed and
+ * compiled in both orders (`inBothOrders` compares the whole plans), and the runs of each distinct plan, a plan equal
+ * to the sharing's own running nothing again.
+ */
+function observeModes(c: WrittenCase) {
+  const modes = [
+    inBothOrders(() => observe(c)),
+    inBothOrders(() => withoutSharing(() => observe(c))),
+  ];
+  const shared = runsOf(c, modes[0]!.plan);
+  return modes.map(({ plan, ...decided }, index) => ({
+    ...decided,
+    checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
+    runs: index === 0 || isDeepStrictEqual(plan, modes[0]!.plan) ? shared : runsOf(c, plan),
+  }));
+}
+
+/** Each exact input's observations, the sharing on and off, shared by every row that holds it (Astra's D3). */
+const observations = new Map<string, ReturnType<typeof observeModes>>();
+
+function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observeModes>[number] {
   const key = JSON.stringify([
-    shared,
     c.source,
     c.place,
     c.levels.length,
@@ -180,11 +195,8 @@ function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observe> {
     c.globals,
   ]);
   let found = observations.get(key);
-  if (found === undefined) {
-    found = inBothOrders(() => (shared ? observe(c) : withoutSharing(() => observe(c))));
-    observations.set(key, found);
-  }
-  return found;
+  if (found === undefined) observations.set(key, (found = observeModes(c)));
+  return found[shared ? 0 : 1]!;
 }
 
 /**
@@ -266,13 +278,15 @@ test("a written type or a copy of it admits its written domain at every level, n
 
 /**
  * The sources of `cases` where an unrestricted part's contents owe anything (a diagnostic, a check, a boundary) or the
- * place's levels differ, and how many the route planned and ran (each saying DONE, nothing checked).
+ * place's levels differ, and how many the route planned and ran (each saying DONE, nothing checked). Each mode compiles
+ * in both orders, its whole plans compared; a plan equal to the sharing's own runs nothing again.
  */
 function owing(cases: readonly UnrestrictedCase[]): { wrong: string[]; full: number } {
   const wrong: string[] = [];
   let full = 0;
   for (const c of cases) {
     const { request, ids } = prepare(c.source);
+    let ran: { readonly plan: InstructionPlan; readonly says: string[] } | undefined;
     for (const shared of [true, false]) {
       const run = () => {
         const answers = analyseCore(request);
@@ -289,21 +303,20 @@ function owing(cases: readonly UnrestrictedCase[]): { wrong: string[]; full: num
           if (!(error instanceof CandidateOutsideSlice)) throw error;
           plan = "outside";
         }
-        return {
-          levels,
-          ...result,
-          plan:
-            plan === "outside"
-              ? "outside"
-              : plan === null
-                ? "no plan"
-                : {
-                    checks: checksOf(plan),
-                    says: runGlobals(plan, { hostValue: 1 }).said.map(({ text }) => text),
-                  },
-        };
+        return { levels, ...result, plan };
       };
-      const observed = inBothOrders(() => (shared ? run() : withoutSharing(run)));
+      const { plan, ...result } = inBothOrders(() => (shared ? run() : withoutSharing(run)));
+      if (plan !== "outside" && plan !== null && !isDeepStrictEqual(plan, ran?.plan))
+        ran = { plan, says: runGlobals(plan, { hostValue: 1 }).said.map(({ text }) => text) };
+      const observed = {
+        ...result,
+        plan:
+          plan === "outside"
+            ? "outside"
+            : plan === null
+              ? "no plan"
+              : { checks: checksOf(plan), says: ran!.says },
+      };
       if (shared && observed.plan !== "outside") full += 1;
       const expected = {
         levels: c.levels.map(sorted),
@@ -350,7 +363,7 @@ const errorText = (found: WrittenTypeError): string =>
   `written-type ${found.site.start}:${found.site.end} union ${found.union.start}:${found.union.end} ` +
   `suggests ${found.suggestion}`;
 
-/** A request's outcome and every diagnostic, sorted, each `class kind start:end`, a written type's error `errorText`. */
+/** A request's outcome and every diagnostic, sorted, each `class kind start:end`; a written type's `errorText`. */
 function writtenErrors(request: CoreAnalysisRequest) {
   const answers = analyseCore(request);
   return {
