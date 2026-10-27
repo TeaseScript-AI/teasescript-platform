@@ -180,6 +180,21 @@ function compareWriters(a: Writer, b: Writer): number {
   return a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0;
 }
 
+/** A class holding an ingress, whose external data names its own leaf (C9; `Contract.classMixed`). */
+export const MIXED_LEAF = 1;
+/** A class holding an operator's result, which names its unknown operand (`fan`, F16; `Contract.classMixed`). */
+export const MIXED_FAN = 2;
+
+/** Whether an item can differ between values of one class mixed as `mixed` says: by a leaf, by an operand's identity. */
+export function differsIn(item: Item, mixed: number): boolean {
+  return (
+    ((mixed & MIXED_LEAF) !== 0 &&
+      item.tag === "unknown" &&
+      (item.reasons & REASON.external) !== 0) ||
+    ((mixed & MIXED_FAN) !== 0 && item.fan !== undefined)
+  );
+}
+
 /** Of two writers, the earlier in source order; no writer comes last. */
 export function firstWriter(a: Writer | null, b: Writer | null): Writer | null {
   if (a === null) return b;

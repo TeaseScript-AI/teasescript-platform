@@ -564,7 +564,8 @@ export class GuardIndex {
         if (byPlace === undefined) lists.set(keyPlace(key), (byPlace = new Map()));
         const list = byPlace.get(file);
         if (list === undefined) byPlace.set(file, [...regions.list]);
-        else list.push(...regions.list);
+        // (one by one: a place's operand regions grow with the source, past one call's arguments)
+        else for (const region of regions.list) list.push(region);
       }
     const merged = new Map<PlaceId, Map<number, Regions<OperandRegion>>>();
     for (const [place, byFile] of lists) {

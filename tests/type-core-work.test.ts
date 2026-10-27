@@ -13,7 +13,11 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
+  READ_CHAIN_PRODUCTS,
+  VALUE_CLASS_SITES,
+  VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -146,67 +150,53 @@ test("every admission family's work and each of its counters grow with the progr
 });
 
 /**
- * Product (c) of W34's class (`ADMISSION_INGRESS_PRESETS`): the solver's demands are S4's product, ungated here as on
- * `main`; admission's own counters, its checks and its index steps, grow with the program in either order (they grew
- * 3.23 and 2.65 per doubling while each literal's conflict discovery asked its own ingresses' contracts at every path).
+ * S6c (TABLE r4.61, r4.69 (2), r4.85): the value side's inherited products, gated as W34 is: same-source adds, choices
+ * and a literal's `get`s (S6-CARRIERS §4.5, §4.7: `ADMISSION_SAME_SOURCES`), product (c) of W34's class, k literals of
+ * typed ingresses of one default (`ADMISSION_INGRESS_PRESETS`), and each discovery site's class (`VALUE_CLASS_SITES`),
+ * their totals and each counter of at least 200 units in either order (they were gated at their measured doublings,
+ * 2.04 to 3.65, while the value side read each copy at each field).
  */
-test("admission's work on literals of typed ingresses of one default grows with the program in either order", () => {
+test("the value side's work on same sources and typed presets grows with the program in either order", () => {
+  assert.deepEqual(
+    steepCounters([...ADMISSION_SAME_SOURCES, ...ADMISSION_INGRESS_PRESETS, ...VALUE_CLASS_SITES]),
+    [],
+  );
+});
+
+/**
+ * The value side's gated known limits (TABLE r4.83 (2), (5)): read chains through nested literals, each link's key one
+ * step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into one list in turn (`MIXED_ADD_PRODUCTS`); a
+ * regression check on the 64 → 128 step only, each held to its measured doubling in either order. On CI (GitHub
+ * Actions sets `CI`) the mixed adds run in the source order only: their orders differ by at most 0.0001 (TABLE r4.85).
+ */
+test("read chains and mixed-source adds grow no faster than measured", () => {
   const steep: string[] = [];
-  for (const family of ADMISSION_INGRESS_PRESETS) {
+  const mixedOrders = process.env["CI"] === "true" ? [false] : [false, true];
+  for (const family of [...READ_CHAIN_PRODUCTS, ...MIXED_ADD_PRODUCTS]) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
-    for (const reversed of [false, true]) {
+    for (const reversed of MIXED_ADD_PRODUCTS.includes(family) ? mixedOrders : [false, true]) {
       const small = analysed(at64, reversed).budget;
       const large = analysed(at128, reversed).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      for (const counter of ["checks", "indexSteps"] as const) {
-        const doubling =
-          (2 * ((large.counts.get(counter) ?? 0) / Math.max(1, small.counts.get(counter) ?? 0))) /
-          scale;
-        if (doubling > COUNTER_DOUBLING)
-          steep.push(
-            `${family.name}${reversed ? " reversed" : ""} ${counter}: ${doubling.toFixed(3)}`,
-          );
-      }
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
     }
   }
   assert.deepEqual(steep, []);
 });
 
 /**
- * S6-CARRIERS §4.7 (`ADMISSION_SAME_SOURCES`): admission's own counters on same-source adds and choices grow with the
- * program in either order; each total's 64 → 128 step, the value side's inherited product included, is a regression
- * check at its measured doubling, not a bound at larger sizes.
+ * S6c: an element selection reads its owner at its step and whole, so a chain of k `.first` read each link twice per
+ * link below it, 2^k reads in all (`main` reached the allowance from k = 20); its whole answer is read once per value
+ * now, so a list nested 32 deep read through 32 `.first` is answered within the allowance, in either order.
  */
-test("admission's work on same-source adds and choices grows with the program in either order", () => {
-  const steep: string[] = [];
-  for (const family of ADMISSION_SAME_SOURCES) {
-    const [at64, at128] = [sized(family, 64), sized(family, 128)];
-    for (const reversed of [false, true]) {
-      const small = analysed(at64, reversed).budget;
-      const large = analysed(at128, reversed).budget;
-      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      const doubling = (before: number, after: number): number =>
-        (2 * (after / Math.max(1, before))) / scale;
-      const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (doubling(small.total, large.total) > family.measured)
-        steep.push(`${name}: ${doubling(small.total, large.total).toFixed(3)}`);
-      for (const counter of [
-        "checks",
-        "checksSkipped",
-        "aliasSteps",
-        "eligibility",
-        "quietProofs",
-        "c1Visits",
-      ] as const) {
-        const after = large.counts.get(counter) ?? 0;
-        if (after >= 200 && doubling(small.counts.get(counter) ?? 0, after) > COUNTER_DOUBLING)
-          steep.push(
-            `${name} ${counter}: ${doubling(small.counts.get(counter) ?? 0, after).toFixed(3)}`,
-          );
-      }
-    }
-  }
-  assert.deepEqual(steep, []);
+test("a list nested 32 deep read through 32 `.first` is answered within the allowance", () => {
+  const source = `let value = ${"[".repeat(32)}1${"]".repeat(32)}\nlet n: integer = value${".first".repeat(32)}\nexit`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const named = { name: "the 32-deep `.first` chain", request };
+  assert.deepEqual([analysed(named).outcome, analysed(named, true).outcome], ["valid", "valid"]);
 });
 
 /**
@@ -354,9 +344,11 @@ test("every alias member answers as its class does at every decided path, in bot
     ...W45_VARIANTS,
     ...ADMISSION_FAMILIES,
     ...ADMISSION_SAME_SOURCES,
+    ...VALUE_CLASS_SITES,
   ])
     for (const k of [2, 3, 5]) inBoth(`${family.name} at ${k}`, family.program(k));
-  for (const { name, files } of ORACLE_PROGRAMS) inBoth(name, files);
+  for (const { name, files } of [...ORACLE_PROGRAMS, ...VALUE_SHARING_PROGRAMS])
+    inBoth(name, files);
   for (const record of readFixture()) {
     const request = coreRequest(record.files);
     if (request !== null) run(record.files, request, false);

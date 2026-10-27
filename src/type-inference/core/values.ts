@@ -176,6 +176,30 @@ export class Values {
     );
   }
 
+  /**
+   * S6c: what a computed value's exact answer rests on beside its operands, as a part of its class
+   * (`Contract.classOf`): a `get`'s whether its default runs, and alone (`getProof`), an `otherwise`'s whether its
+   * fallback runs only where the left is null; each at the operation's own node, so where it has none, or for any other
+   * value, `null`.
+   */
+  public proofOf(value: PlaceId): string | null {
+    const { program } = this.pass;
+    const c = program.opOf.get(value);
+    const at = c === undefined ? null : program.exprAt(c.site);
+    if (at === null || c === undefined) return null;
+    if (c.kind === "get") {
+      const { reached, only } = getProof(program, c, at);
+      return `${reached ? "r" : ""}${only ? "o" : ""}`;
+    }
+    if (c.kind !== "fallback") return null;
+    const rightAt = program.exprAt(program.places[c.right]?.site ?? c.site);
+    return rightAt === null
+      ? "-"
+      : at.predecessors.length === 1 && at.predecessors[0] === rightAt
+        ? "d"
+        : "";
+  }
+
   /** The value of a place at a node, read at the path `rest` below it. */
   public valueItems(
     value: PlaceId,
@@ -200,15 +224,16 @@ export class Values {
     from: number,
   ): Work<readonly Item[]> {
     const { program } = this.pass;
-    const at = memberStep(rest, from);
+    // (a read, a projection or a call passes the path on whole: its member steps are scanned where it ends, S6c)
     if (
-      at < 0 ||
       program.occurrenceOf.has(value) ||
       program.projOf.has(value) ||
       program.speakerPlaces.has(value) ||
       (program.callOutOf.has(value) && program.opOf.get(value)?.kind === "call")
     )
       return this.#valueAt(value, node, rest);
+    const at = memberStep(rest, from);
+    if (at < 0) return this.#valueAt(value, node, rest);
     return this.#members(value, node, rest, at, from);
   }
 
@@ -297,14 +322,24 @@ export class Values {
           return yield* this.#iteration(projection.owner, at, rest);
         if (measuresLength(projection.step))
           return yield* this.#length(projection.owner, at, projection.step, rest);
-        const elements = yield* this.valueItems(
-          projection.owner,
-          at,
-          joinSteps([stepName(projection.step)], rest),
-        );
-        if (!selectsElement(projection.step)) return elements;
-        const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
-        return withOwnSelection(elements, owners, this.pass);
+        if (!selectsElement(projection.step))
+          return yield* this.valueItems(
+            projection.owner,
+            at,
+            joinSteps([stepName(projection.step)], rest),
+          );
+        // S6c: a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
+        // whatever asks: a chain of k `.first` reads each link once whole, never each link 2^k times
+        if (rest.length > 0)
+          return yield* this.#selection(projection.owner, projection.step, at, rest);
+        const site = program.places[value]?.site ?? null;
+        return yield {
+          key: joinParts("vpj", value, projection.node === null ? (node?.id ?? "-") : ""),
+          kind: "value",
+          file: site?.file ?? -1,
+          offset: site?.start ?? -1,
+          make: () => this.#selection(projection.owner, projection.step, at, []),
+        };
       }
       if (program.callOutOf.has(value)) {
         const call = program.opOf.get(value);
@@ -324,6 +359,18 @@ export class Values {
     } finally {
       this.pass.solver.leaveRead();
     }
+  }
+
+  /** An element selection's value at a path (`#valueAt`): its owner's at the step, with the owner's own selection. */
+  *#selection(
+    owner: PlaceId,
+    step: string,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const elements = yield* this.valueItems(owner, node, joinSteps([stepName(step)], rest));
+    const owners = withoutEmpty(yield* this.valueItems(owner, node, []));
+    return withOwnSelection(elements, owners, this.pass);
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
@@ -665,6 +712,9 @@ export class Values {
       ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
+      // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
+      const repeated = contract.plusRepeatOf(c.result, true);
+      if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
       for (const argument of c.arguments) operands.push(yield* this.valueItems(argument, at, rest));
       return [...plusElements(operands, rest, this.pass)];
@@ -716,6 +766,7 @@ export class Values {
         (value, path, element) =>
           element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
         contract.choiceKeysStored(),
+        contract.choiceOptions(c, true),
       );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));

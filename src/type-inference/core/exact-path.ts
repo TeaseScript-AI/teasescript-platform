@@ -15,10 +15,13 @@ import {
 } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
+import { sharing } from "./sharing.js";
 import {
   alternatives,
   EMPTY,
   firstContext,
+  firstWriter,
+  differsIn,
   mergeItems,
   REASON,
   weaken,
@@ -282,6 +285,11 @@ export class ExactPath {
   readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
   /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
   readonly #defRoutes = new Map<string, ReadRoute>();
+  /** Per add, its place in its run of adds of one class (`#repeatOf`): the run's third add, and its own position. */
+  readonly #runs = new Map<
+    Definition,
+    { readonly third: Definition | null; readonly at: number }
+  >();
   /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
   readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
   /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
@@ -673,7 +681,8 @@ export class ExactPath {
       const path = keptPathText(this.#work, key);
       const list = markSpans.get(path);
       if (list === undefined) markSpans.set(path, [...found]);
-      else list.push(...found);
+      // (one by one, as every append here: `found` holds at most seven spans, `tests/type-core-native.test.ts`)
+      else for (const span of found) list.push(span);
     };
     let open: { key: Key; callable: number; low: number; high: number } | null = null;
     for (const { key, callable, entry } of guards.branchRegions()) {
@@ -1130,6 +1139,17 @@ export class ExactPath {
       this.#defRoutes.set(routeKey, values.valueRoute(d.value!, d.node, rest));
       return mergeItems(withWriter(items, writer), scope);
     }
+    // S6c: an add that repeats the ones before it answers as the earlier one at every path (`#repeatOf`), but where
+    // its value's class is mixed and the earlier one's own value at the path holds a leaf or an operand's identity
+    const repeated = this.#repeatOf(d);
+    const mixed = repeated === d ? 0 : this.pass.contract.classMixed(d.value!, true);
+    if (
+      repeated !== d &&
+      (rest[0] !== "element" ||
+        mixed === 0 ||
+        !(yield* this.#ownAt(repeated, rest)).some((item) => differsIn(item, mixed)))
+    )
+      return yield* this.defVal(repeated, rest);
     const before = yield* values.keyItems(keyOf(d.place, joinSteps(d.path, rest)), d.node, true);
     // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
     // element is the dict's (r4.46 (2))
@@ -1169,6 +1189,85 @@ export class ExactPath {
       worded([...withoutEmpty(before), ...withoutEmpty(own), ...(empty ? [EMPTY] : [])]),
       scope,
     );
+  }
+
+  /**
+   * S6c: the add whose value D's answer is at every path (`#defVal`): D itself, or, where D stands fourth or later in a
+   * run of adds of one class, the run's third. In a run each add's exact read of its receiver before it is the add
+   * before it at every path (`#repeats`) and each adds a value of one class (`Contract.classOf`: equal items at every
+   * path apart from writers, each a later one: an add's own writer stands for every kind it adds, and a literal's
+   * absences lie in the add's own text), so each answers as the one before with that value merged in once more: past
+   * the run's first add its kinds hold the value's, and one merge more settles their certainty (`alternatives`),
+   * whatever came before the run; the earliest writer stands for each kind. So k adds of one source read at k fields
+   * walk at most three adds per field, never the chain. Once per add, on an explicit walk.
+   */
+  #repeatOf(d: Definition): Definition {
+    if (d.kind !== "add" || !sharing()) return d;
+    // (back to an add whose place in its run is known, or to the first of a run, then each placed after the one before)
+    const pending: Definition[] = [];
+    let before: { readonly third: Definition | null; readonly at: number } | null = null;
+    for (let add: Definition | null = d; add !== null; add = this.#repeats(add)) {
+      const known = this.#runs.get(add);
+      if (known !== undefined) {
+        before = known;
+        break;
+      }
+      pending.push(add);
+    }
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const add = pending[index]!;
+      const at = before === null ? 1 : before.at + 1;
+      this.#keep(2);
+      before = { third: at === 3 ? add : at > 3 ? before!.third : null, at };
+      this.#runs.set(add, before);
+    }
+    const run = this.#runs.get(d)!;
+    return run.at > 3 ? run.third! : d;
+  }
+
+  /**
+   * S6c: the add D repeats, or `null`: D and the add P before it add, in one mode, values of one class
+   * (`Contract.classOf`, never an ingress: equal items at every path) to one receiver key, whose exact read before D
+   * is P at every path (P with no rest at the key: every key below it is P's below it, an event below it being one of
+   * the key's own, X6), no guard of the key, a prefix or a key below holds D (no mark), and P's writer comes first.
+   */
+  #repeats(d: Definition): Definition | null {
+    const { program, guards, contract, definitions } = this.pass;
+    program.work.charge("exactValues");
+    if (d.kind !== "add" || d.value === undefined || d.orig !== undefined || d.loop !== undefined)
+      return null;
+    const key = keyOf(d.place, d.path);
+    const answer = this.exactPath(key, d.node, true);
+    if (!("def" in answer) || answer.rest.length > 0) return null;
+    const p = answer.def;
+    if (
+      p.kind !== "add" ||
+      p.how !== d.how ||
+      p.value === undefined ||
+      p.orig !== undefined ||
+      p.loop !== undefined
+    )
+      return null;
+    const cls = contract.classOf(d.value, true);
+    if (cls === null || contract.classOf(p.value, true) !== cls) return null;
+    if (guards.narrowed(key, d.node) || guards.guardedBelow(key, d.node).length > 0) return null;
+    const [first, later] = [definitions.writerOf(p), definitions.writerOf(d)];
+    if (first !== null && later !== null && firstWriter(first, later) !== first) return null;
+    return p;
+  }
+
+  /** An add's own value at `rest`, below its receiver's element step (`#defVal`). */
+  *#ownAt(d: Definition, rest: readonly string[]): Work<readonly Item[]> {
+    return yield* this.pass.values.valueItems(
+      d.value!,
+      (d.orig ?? d).node,
+      d.how === "elements" ? rest : rest.slice(1),
+    );
+  }
+
+  /** Charges `units` of what the exact path keeps (TABLE r4.58). */
+  #keep(units: number): void {
+    this.pass.program.work.charge("literalUnits", units);
   }
 }
 

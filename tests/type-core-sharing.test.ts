@@ -15,7 +15,12 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  HELD_SHARING_FAULTS,
+  MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
+  READ_CHAIN_PRODUCTS,
+  VALUE_CLASS_SITES,
+  VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -39,13 +44,15 @@ import {
 /*
  * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
  * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) is an optimization, so it is output-neutral: for
- * every program below, in both orders, the published diagnostics, the owed checks, every binding's admitted type at its
- * root and its element (the decider's site with it) and the candidate route's lowered plan (or its rejection) are
- * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
- * sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own tests run each source in both
- * orders) run in the source order only, every other program in both; a local `npm run check` runs them all in both
- * orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for the matrices).
+ * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds, a
+ * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
+ * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
+ * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
+ * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the
+ * test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own
+ * tests run each source in both orders) run in the source order only, every other program in both; a local `npm run
+ * check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for
+ * the matrices).
  *
  * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
  * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
@@ -88,11 +95,16 @@ function programs(): Program[] {
     ADMISSION_KNOWN_PRODUCTS,
     ADMISSION_SAME_SOURCES,
     ADMISSION_INGRESS_PRESETS,
+    READ_CHAIN_PRODUCTS,
+    MIXED_ADD_PRODUCTS,
+    VALUE_CLASS_SITES,
   ])
     for (const family of families)
       for (const k of [2, 3])
         out.push({ name: `${family.name} at ${k}`, files: family.program(k) });
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
+  // S6c's programs: each discovery it shares beside what a coarser key would merge (`VALUE_SHARING_PROGRAMS`)
+  for (const { name, files } of VALUE_SHARING_PROGRAMS) out.push({ name: `S6c ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
   // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
@@ -203,3 +215,19 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
+
+/** S6's sharing faults on `main` (`HELD_SHARING_FAULTS`, #1077), held: run and reported, failing nothing. */
+test(
+  "S6's held sharing faults are output-neutral in both orders",
+  { todo: "S6 sharing fault on main, #1077 (TABLE r4.83 (4)), repair pending" },
+  () => {
+    const differing: string[] = [];
+    for (const program of HELD_SHARING_FAULTS) {
+      const once = prepared(program);
+      for (const reversed of [false, true])
+        if (published(once, reversed) !== withoutSharing(() => published(once, reversed)))
+          differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+    }
+    assert.deepEqual(differing, []);
+  },
+);

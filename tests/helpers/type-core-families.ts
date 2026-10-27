@@ -2158,8 +2158,8 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
  * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
- * defaults, one product of admission's stop index with three witnesses: accepted in the same form (TABLE r4.78 (5),
- * option A).
+ * defaults and a sum of k terms, one product of admission's stop index with four witnesses: accepted in the same form
+ * (TABLE r4.78 (5), option A; r4.88 (1)).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2238,20 +2238,43 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   { ...nestedOwn("otherwise", (inner) => `null otherwise (${inner})`), measured: 3.94 },
   { ...nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`), measured: 3.05 },
   { ...nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`), measured: 3.6 },
+  // A fourth witness of the same product (TABLE r4.88 (1)): a sum of k terms of one list, k - 1 nested `+` carriers whose
+  // evaluation keys grow one step each (review r5 B2; the value side reads three `+` per field, `plusRepeatOf`): 42,063 /
+  // 101,824 units at k = 64, 128 (2.4364; reversed 2.4426; `main` 81,074 / 261,795, 3.25), `literalUnits` 3.64; the
+  // allowance reached between 3,328 terms (29,257,112 units) and 3,584
+  {
+    name: "S6c-nested-sum",
+    measures:
+      "TABLE r4.88: a sum of k terms of one list of a k-field record, every field of its last element read",
+    measured: 2.45,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let piece = [root]",
+          `let gathered = ${Array.from({ length: k }, () => "piece").join(" + ")}`,
+          rows(k, (i) => `repeat gathered.last.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**
- * S6-CARRIERS §4.5, §4.7: k adds of one record to one list, and a choice of k options of one record, every field read.
- * The value side's add chain and choice items are inherited products (on `main` too); admission's own counters are gated
- * as linear, each total's 64 → 128 step only as a regression check at its measured doubling (r4.45's form).
+ * S6-CARRIERS §4.5, §4.7 and S6c (TABLE r4.61, r4.69 (2)): k adds of one record to one list, a choice of k options of one
+ * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
+ * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source (a chain whose first link
+ * is a direct alias, `get`s whose alias writers cross, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
+ * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
+ * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
+ * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
+ * `Contract.classOf`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
  */
-export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
+export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   {
     name: "A5-same-source-adds",
     measures: "§4.5, A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
-    // 29,769 / 60,236 units at k = 64, 128 in both orders (2.0309); admission's counters at most 2.04 (`checks`), the
-    // value side's reaching-definition walk 2.32 (`rdWalk`, as on `main`)
-    measured: 2.04,
+    // 42,163 / 84,912 units at k = 64, 128 in both orders (2.0213; `main` 41,382 / 83,363)
     program: (k) =>
       main(
         lines(
@@ -2266,9 +2289,8 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
   {
     name: "A8-same-source-choices",
     measures: "§4.5, A8: a choice of k options whose value is one k-field record, every field read",
-    // 43,657 / 128,266 units at k = 64, 128 in both orders (2.9488): the value side's choice items, one per option at
-    // each field read (`mergeItems` 3.87, `eventSteps` 3.70, as on `main`); admission's counters at most 2.07 (`checks`)
-    measured: 2.97,
+    // 37,733 / 75,524 units at k = 64, 128 in both orders (2.0089; `main` 58,319 / 157,678, 2.71, the value side's
+    // choice items one per option at each field read)
     program: (k) =>
       main(
         lines(
@@ -2279,16 +2301,69 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
         ),
       ),
   },
+  {
+    name: "A8-same-source-gets",
+    measures:
+      "S6c, A8: a literal of k `xs.get(0, default: root)` of one k-field record, every field read",
+    // 51,535 / 103,047 units at k = 64, 128 in both orders (2.0094; `main` 112,830 / 348,534, 3.10, the literal's
+    // computed values each read at each field, `LiteralIndex.others`)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          `let box = [${cells(k, "xs.get(0, default: root)")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  // reviews r2, r3 (S6c): `get`s of aliases whose writers cross, and a chain of aliases as options and as defaults
+  {
+    name: "A8-same-source-crossed-alias-gets",
+    measures:
+      "S6c, A8: k `list_i.get(0, default: alias_(k-1-i))`, aliases of one list and one record whose writers cross",
+    // receivers' alias writers ascending, defaults' descending (review r3 B1): no value's writers all come first
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let list${i} = xs`),
+          rows(k, (i) => `let alias${i} = root`),
+          `let box = [${Array.from({ length: k }, (_, i) => `list${i}.get(0, default: alias${k - 1 - i})`).join(", ")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...(["choices", "gets"] as const).map((use) => ({
+    name: `A8-same-source-chained-alias-${use}`,
+    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "\`get\` defaults in one literal"}, every field read`,
+    // 47,447 / 94,966 and 72,526 / 145,230 units at k = 64, 128 (2.0078, 2.0099; `main` 3.46, 3.64)
+    program: (k: number) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          "let alias0 = root",
+          rows(k - 1, (i) => `let alias${i + 1} = alias${i}`),
+          use === "choices"
+            ? `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: alias${i}}`).join(", ")}`
+            : `let box = [${Array.from({ length: k }, (_, i) => `xs.get(0, default: alias${i})`).join(", ")}]`,
+          rows(k, (i) => (use === "choices" ? `repeat box.f${i} {}` : `repeat box[0].f${i} {}`)),
+          "exit",
+        ),
+      ),
+  })),
   // Astra r5 B2: the same with a root of unknown-bearing fields, whose adds and options admission reads at every field:
   // an add's class and a choice's options of one snapshot read once (S6-CARRIERS §4.5)
   {
     name: "A5-same-source-adds-unknown",
     measures:
       "§4.5, A5: k `xs.add(root)` of one k-field record of host data, every field of `xs[0]` read",
-    // 321,487 / 1,168,594 units at k = 64, 128 in both orders (3.6498; 456,577 / 1,733,444 before the add classes): the
-    // value side's reaching-definition walk, as on `main` (1,120,428 at k = 128), the excess over `main` linear;
-    // admission's counters at most 2.20 (`eligibility`)
-    measured: 3.65,
+    // 96,856 / 195,175 units at k = 64, 128 in both orders (2.0233; `main` 341,464 / 1,208,423, 3.55, the value side's
+    // exact add chain walked per field)
     program: (k) =>
       main(
         lines(
@@ -2301,15 +2376,48 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
         ),
       ),
   },
+  // review r1/r2 (S6c): adds of one source in two blocks, each a run of one class, the second after another source
+  {
+    name: "A5-two-blocks-adds-unknown",
+    measures:
+      "S6c, A5: k / 2 adds of each of two k-field records of host data, in two blocks, every field read",
+    // 161,051 / 324,558 units at k = 64, 128 in both orders (2.0231; `main` 389,088 / 1,304,083, 3.36)
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `let other = {${fields(k, () => "[2, raw][1]")}}`,
+          "let xs = []",
+          rows(k, (i) => (i < k / 2 ? "xs.add(root)" : "xs.add(other)")),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-same-source-alias-adds-unknown",
+    measures:
+      "S6c, A5: k adds of k stable aliases of one k-field record of host data, every field read",
+    // 110,704 / 223,221 units at k = 64, 128 in both orders (2.0236; `main` 387,427 / 1,366,248, 3.54)
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          rows(k, (i) => `let alias${i} = root`),
+          "let xs = []",
+          rows(k, (i) => `xs.add(alias${i})`),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
   {
     name: "A8-same-source-choices-unknown",
     measures:
       "§4.5, A8: a choice of k options whose value is one k-field record of host data, every field read",
-    // 172,165 / 574,215 units at k = 64, 128 in both orders (3.3489; 244,419 / 866,181 before the option stops were
-    // shared, 196,485 / 672,007 while A5's test of the choice's own entry read its items again at each field): the
-    // choice's items, one per option at each field read, as on `main` (528,234 at k = 128), read once per choice and
-    // path whatever asks (Astra r6 B2), the excess over `main` linear; admission's counters at most 2.04 (`checks`)
-    measured: 3.35,
+    // 82,323 / 165,189 units at k = 64, 128 in both orders (2.0148; `main` 195,133 / 620,207, 3.19)
     program: (k) =>
       main(
         lines(
@@ -2324,11 +2432,146 @@ export const ADMISSION_SAME_SOURCES: readonly KnownProduct[] = [
 ];
 
 /**
+ * TABLE r4.85: one family per site of the value side's discovery that a class reached only by `Contract.classOf` keys,
+ * each of one source read at k fields (the PR's inventory; the other sites' families are `ADMISSION_SAME_SOURCES` and
+ * `ADMISSION_INGRESS_PRESETS`): a choice's computed options (review r4 B1) and its literal ones, a literal's `get`s
+ * whose defaults are `get`s, and adds of literals of host data (the exact add chain's runs and the prefix's entries).
+ */
+export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
+  {
+    name: "S6c-choice-crossed-gets",
+    measures:
+      "TABLE r4.85, review r4 B1: a choice of k `l_i.get(0, default: a_(k-1-i))`, aliases of one list and one record, every field read",
+    // 83,231 / 166,448 units at k = 64, 128 in both orders (2.0059; `main` 375,053 / 1,355,246, 3.62: the choice's
+    // options read one by one at each field, a computed value having no read class)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let l${i} = xs`),
+          rows(k, (i) => `let a${i} = root`),
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: l${i}.get(0, default: a${k - 1 - i})}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "S6c-choice-records",
+    measures:
+      "TABLE r4.85: a choice of k records `{g: a_i}` of aliases of one record, every field read",
+    // 69,454 / 139,052 units at k = 64, 128 (2.0071, reversed 2.0069; `main` 212,767 / 732,257, 3.45)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: {g: a${i}}}`).join(", ")}`,
+          rows(k, (i) => `repeat box.g.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "S6c-nested-defaults",
+    measures:
+      "TABLE r4.85: a literal of k `l_i.get(0, default: l_(k-1-i).get(0, default: a_i))` of one list and one record, every field read",
+    // 99,659 / 200,084 units at k = 64, 128 in both orders (2.0134; `main` 429,058 / 1,545,947, 3.61)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let l${i} = xs`),
+          rows(k, (i) => `let a${i} = root`),
+          `let box = [${Array.from({ length: k }, (_, i) => `l${i}.get(0, default: l${k - 1 - i}.get(0, default: a${i}))`).join(", ")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  // TABLE r4.87: each other operation family that composes below its root, its members k values of one source in one
+  // choice of k options, every field read
+  ...(
+    [
+      [
+        "selections",
+        (i: number) => `[a${i}].first`,
+        "review r5 B1: an element selection of a literal",
+      ],
+      ["properties", (i: number) => `({g: a${i}}).g`, "a property of a literal"],
+      ["otherwises", (i: number) => `maybe otherwise a${i}`, "an `otherwise` of a null-or-record"],
+      ["calls", () => "give()", "a call's result"],
+      ["loads", (i: number) => `load("k", default: a${i})`, "a `load` landing in no written type"],
+      ["removals", (i: number) => `[a${i}].removeFirst()`, "a removal's result"],
+      ["copies", (i: number) => `[a${i}].take(1)[0]`, "an element of a copy"],
+      ["sums", (i: number) => `([a${i}] + [a${i}])[0]`, "an element of a list `+`"],
+      ["choices", (i: number) => `askChoice {text: "a", value: a${i}}`, "a choice's answer"],
+    ] as const
+  ).map(([family, member, what]): WorkFamily => ({
+    name: `S6c-choice-${family}`,
+    measures: `TABLE r4.87: a choice of k options whose values are ${what} of aliases of one k-field record, every field read`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          "function give {\n  return root\n}",
+          "let maybe = [null, root][0]",
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: ${member(i)}}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  // review r6 B2: adds of one typed ingress of one default, each its own source, at the prefix entries and the add run
+  ...(
+    [
+      ["load", 'load("saved", default: seed)'],
+      ["parse", 'fromJson("{}", default: seed, files: false)'],
+    ] as const
+  ).map(([kind, ingress]): WorkFamily => ({
+    name: `S6c-${kind}-adds`,
+    measures: `TABLE r4.87, review r6 B2: k adds of \`${ingress}\` of one k-field record, every field of the last read`,
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let gathered = []",
+          rows(k, () => `gathered.add(${ingress})`),
+          rows(k, (i) => `repeat gathered.last.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "S6c-record-adds-unknown",
+    measures:
+      "TABLE r4.85: k `ys.add({g: a_i})` of aliases of one k-field record of host data, every field read",
+    // 152,934 / 307,973 units at k = 64, 128 in both orders (2.0197; `main` 487,159 / 1,729,478, 3.56: the exact
+    // add chain walked per field, a literal having no read class)
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          "let ys = []",
+          rows(k, (i) => `ys.add({g: a${i}})`),
+          rows(k, (i) => `repeat ys[0].g.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
- * added to one list, every field read. The solver's demands are S4's product, as on `main` (each literal holding an
- * ingress its own identity, TABLE §8 r4.15: k contract entries for each of the k reads), so the total is not gated as
- * linear; admission's own counters are (Astra r2 D-W1: the literals' conflict discovery is shared by their typed
- * defaults' class).
+ * added to one list, every field read. Each literal holding an ingress is its own source (TABLE §8 r4.15), so the key's
+ * contract met k entries at each of the k reads (S4's product); S6c reads the entries of one shape once per field where
+ * no unknown answers there (an unknown's ingress stores are each entry's own, C9), so every counter grows with the
+ * program (§3.3's gate): 90,737 / 182,712 and 92,017 / 185,016 units at k = 64, 128 (2.0181, 2.0142; `main` 3.17, 3.16).
  */
 export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
   ["A8-added-load-presets", 'load("k", default: seed)'],
@@ -2347,6 +2590,138 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
       ),
     ),
 }));
+
+/**
+ * Read chains through nested literals (S6's PR, "Inherited products"; S6c): a list nested k deep read through k
+ * `.first`, the same around a record read through k index steps, and a record nested k deep read through its k
+ * properties. Each link reads a key one step longer, so the k keys' contracts and their texts grow with the chain's
+ * depth (TABLE §8: a lookup costs the key's depth): gated known limits (TABLE r4.83 (2)) at their measured 64 → 128
+ * step in r4.45's form, not a bound at larger sizes; reconsidered when a realistic chain approaches the allowance. On
+ * `main` the `.first` chain grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the
+ * allowance at k = 20); S6c reads a selection's whole answer once per value, and a projection's path scans its member
+ * steps once.
+ */
+export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "F12-first-chain",
+    measures: "F12, §8: a list nested k deep read through k `.first` into a written destination",
+    // 212,369 / 1,014,728 units at k = 64, 128 in both orders (4.8876); `main` stops at the allowance from k = 20
+    measured: 4.89,
+    program: (k) =>
+      main(
+        lines(
+          `let value = ${"[".repeat(k)}1${"]".repeat(k)}`,
+          `let n: integer = value${".first".repeat(k)}`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "F12-index-chain",
+    measures:
+      "F12, §8: a list nested k deep around a 4-field record of host data, each field read through k index steps",
+    // 334,190 / 1,425,929 units at k = 64, 128 (4.4747; reversed 4.4756; `main` 707,530 / 4,318,378, 6.4008)
+    measured: 4.49,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(4, () => "[1, raw][1]")}}`,
+          `let box = ${"[".repeat(k)}root${"]".repeat(k)}`,
+          rows(4, (i) => `repeat box${"[0]".repeat(k)}.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "F12-member-chain",
+    measures:
+      "F12, §8: a record nested k deep read through its k properties into a written destination",
+    // 197,206 / 959,101 units at k = 64, 128 in both orders (4.9309; `main` 261,675 / 1,496,830, 5.80)
+    measured: 4.94,
+    program: (k) =>
+      main(
+        lines(
+          `let value = ${Array.from({ length: k }, (_, i) => `{m${i}: `).join("")}1${"}".repeat(k)}`,
+          `let n: integer = value${Array.from({ length: k }, (_, i) => `.m${i}`).join("")}`,
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
+ * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits (TABLE
+ * r4.83 (5)) at their measured 64 → 128 step in r4.45's form (in the source order only on CI, TABLE r4.85), not a
+ * bound at larger sizes; reconsidered when a
+ * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
+ * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
+ * 660 adds (29,748,699 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
+ * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
+ * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
+ * has k keys).
+ */
+export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "A5-two-sources-alternating-adds",
+    measures: "§3.3: k adds alternating between two records of host data, each field read",
+    // 405,404 / 1,336,783 units at k = 64, 128 in both orders (3.3102)
+    measured: 3.36,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `let other = {${fields(k, () => "[2, raw][1]")}}`,
+          "let xs = []",
+          rows(k, (i) => (i % 2 === 0 ? "xs.add(root)" : "xs.add(other)")),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-three-sources-adds",
+    measures: "§3.3: k adds of three records of host data in the turn a, b, c, b, each field read",
+    // 470,597 / 1,483,590 units at k = 64, 128 in both orders (3.1642)
+    measured: 3.22,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let a = {${fields(k, () => "[1, raw][1]")}}`,
+          `let b = {${fields(k, () => '["s", raw][1]')}}`,
+          `let c = {${fields(k, () => "[2.5, raw][1]")}}`,
+          "let xs = []",
+          rows(k, (i) => `xs.add(${"abcb"[i % 4]})`),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...[
+    // 740,812 / 2,008,769 units at k = 64, 128 in both orders (2.7212)
+    { n: 8, measured: 2.78 },
+    // 798,340 / 2,124,045 units at k = 64, 128 (2.6700; reversed 2.6699)
+    { n: 9, measured: 2.73 },
+  ].map(({ n, measured }): KnownProduct => ({
+    name: `A5-cycle-of-${n}-sources-adds`,
+    measures: `§3.3: k adds of ${n} records of host data in turn, each field read`,
+    measured,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          rows(n, (j) => `let s${j} = {${fields(k, () => `[${j}, raw][1]`)}}`),
+          "let xs = []",
+          rows(k, (i) => `xs.add(s${i % n})`),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
+];
 
 /**
  * The member-answer oracle's own programs (S6-CARRIERS §4.1, condition (a)): Astra's two M1 witnesses (a conditional
@@ -2463,3 +2838,1664 @@ export const ORACLE_PROGRAMS: readonly {
   );
   return [...witnesses, ...aliases, ...beside, ...written];
 })();
+
+/**
+ * S6c's differential programs (TABLE r4.72's standing differential, the brief's ten per shape): for each discovery S6c
+ * shares (a choice's options, a run of adds, a literal's computed values, a prefix's entries of one shape) and for the
+ * selection read once per value, programs whose answers would differ were the shared key coarser than the answer:
+ * options of two written domains, a storing call or a guard between reads, a read beside its projection, host data,
+ * a store or a guard inside a run of adds, a `get`'s default read guarded and unguarded, an ingress identity read at two
+ * depths, a host cell beside each typed load, a chain of `.first` with a store between; and the check-first list's
+ * shapes: a copy cycle's places, held and empty options, aliases around a conditional child store or a whole reset,
+ * written, optional and null-only domains through parentheses, removals, dict projections and call results beside the
+ * shared values, the path end; and review r1's: stable aliases around a store, in reverse order, stored again, written,
+ * chained, guarded, read in a function, of a projection or host data, beside direct reads, as `get` defaults; adds of
+ * a few sources in turn, broken by a store, a test or a call, a late class, nine classes, a long run; and review r2's:
+ * two families in a written union list, where an equal window of classes is no equal answer (its B4), a chain of
+ * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross; and TABLE
+ * r4.85's class (`Contract.classOf`) at each site: computed and literal choice options, nested and literal defaults,
+ * adds of literals and computed values, around a store, a guard, a differing proof, property or kind, host data and a
+ * load, and warnings that name the writer a class's role minima and a literal's own role give; and TABLE r4.87's
+ * families: selections, properties, lengths, calls, loads, sums, removals, copies and choices around crossing writers,
+ * differing steps, names or callees, a store between calls, host data a mixed class reads each of, runs of `+` broken
+ * by a writer or another term. Each of the first 49, and the class's pieces, was checked against a build with that
+ * key made coarser (the PR's mutation tables). The sharing differential and the member-answer oracle run them in both
+ * orders.
+ */
+export const VALUE_SHARING_PROGRAMS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (
+  [
+    [
+      "choice: options of two written domains",
+      "let a: integer = 1",
+      "let b: number = 1.5",
+      'let box = askChoice {text: "a", value: a}, {text: "b", value: b}, {text: "c", value: a}',
+      "let n: integer = box",
+    ],
+    [
+      "choice: options a storing call separates",
+      "global g = {f0: 1}",
+      "function bump {",
+      "  g.f0 = 2.5",
+      '  return "b"',
+      "}",
+      'let box = askChoice {text: "a", value: g}, {text: bump(), value: g}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: options under a test of a field",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "if root.f0 is integer {",
+      '  let box = askChoice {text: "a", value: root}, {text: "b", value: root}',
+      "  repeat box.f0 {}",
+      "  repeat box.f1 {}",
+      "}",
+    ],
+    [
+      "choice: a read beside its projection",
+      "let raw = hostValue",
+      "let root = {inner: {f0: [1, raw][1]}, f0: 2.5}",
+      'let box = askChoice {text: "a", value: root.inner}, {text: "b", value: root}, {text: "c", value: root.inner}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: host data options",
+      'let box = askChoice {text: "a", value: hostValue}, {text: "b", value: hostValue}',
+      "repeat box {}",
+    ],
+    [
+      "choice: computed options",
+      "let raw = hostValue",
+      'let pick = {text: "r", value: [1, raw][1]}',
+      "let opts = [pick, pick]",
+      "let box = askChoice opts, opts",
+      "repeat box {}",
+    ],
+    [
+      "choice: a written list beside an unwritten one",
+      "let w: integer[] = [1]",
+      "let u = [1]",
+      "u = [2.5]",
+      'let box = askChoice {text: "a", value: w}, {text: "b", value: u}, {text: "c", value: w}',
+      "repeat box[0] {}",
+    ],
+    [
+      "choice: two choices a store separates",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let one = askChoice {text: "a", value: root}, {text: "b", value: root}',
+      "root.f0 = 2.5",
+      'let two = askChoice {text: "a", value: root}, {text: "b", value: root}',
+      "repeat one.f0 {}",
+      "repeat two.f0 {}",
+    ],
+    [
+      "choice: options by their text",
+      "let raw = hostValue",
+      'let t = ["x", raw][1]',
+      'let box = askChoice {text: t}, {text: t}, {text: "y"}',
+      "let s: string = box",
+    ],
+    [
+      "choice: options of a guarded and an unguarded copy",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let copy = root",
+      "if copy.f0 is integer {",
+      '  let box = askChoice {text: "a", value: copy}, {text: "b", value: root}',
+      "  repeat box.f0 {}",
+      "}",
+    ],
+    [
+      "add: a store below the list between adds",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs[0].f0 = 2.5",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "add: adds under a test of the list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "xs.add(root)",
+      "if xs[0].f0 is integer {",
+      "  xs.add(root)",
+      "  xs.add(root)",
+      "  xs.add(root)",
+      "  repeat xs[0].f0 {}",
+      "}",
+    ],
+    [
+      "add: a store to the source between adds",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "root.f0 = 2.5",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "add: runs of addAll",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let rs = [root]",
+      "let xs = []",
+      "xs.addAll(rs)",
+      "xs.addAll(rs)",
+      "xs.addAll(rs)",
+      "xs.addAll(rs)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "add: two lists interleaved",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "let ys = []",
+      "xs.add(root)",
+      "ys.add(root)",
+      "xs.add(root)",
+      "ys.add(root)",
+      "xs.add(root)",
+      "ys.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+      "repeat ys[0].f1 {}",
+    ],
+    [
+      "add: host values added",
+      "let xs = []",
+      "xs.add(hostValue)",
+      "xs.add(hostValue)",
+      "xs.add(hostValue)",
+      "xs.add(hostValue)",
+      "repeat xs[0] {}",
+    ],
+    [
+      "add: a clear inside the run",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.clear()",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "add: a call storing the list between adds",
+      "let root = {f0: 1, f1: 1}",
+      "global xs = []",
+      "function push {",
+      "  xs.add({f0: 2.5, f1: 2.5})",
+      "  return 0",
+      "}",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "let t = push()",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "add: adds of two families after an element of a third",
+      'let xs = [{f0: "s"}]',
+      "let root = {f0: 1}",
+      "let other = {f0: 2.5}",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "let n: integer = xs[1].f0",
+    ],
+    [
+      "add: alternating sources",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 1.5, f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "add: adds of a source under a test of its field",
+      "let root = {f0: 2.5, f1: 1}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "if root.f0 != null {",
+      "  xs.add(root)",
+      "  xs.add(root)",
+      "  repeat xs[0].f0 {}",
+      "}",
+    ],
+    [
+      "add: a run's answer past its first add",
+      "let root = {f0: 1}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "let s: string = xs[0].f0",
+    ],
+    [
+      "get: a default read guarded and unguarded",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let one = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "if root.f0 is integer {",
+      "  let two = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "  repeat two[0].f0 {}",
+      "}",
+      "repeat one[0].f0 {}",
+    ],
+    [
+      "get: two receivers",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let ys = [{f0: 2.5, f1: 2.5}]",
+      "let box = [xs.get(0, default: root), ys.get(0, default: root), xs.get(0, default: root)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: two defaults",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 2.5, f1: 1}",
+      "let xs = [root]",
+      "let box = [xs.get(0, default: root), xs.get(0, default: other), xs.get(0, default: root)]",
+      "repeat box[0].f0 {}",
+      "repeat box[0].f1 {}",
+    ],
+    [
+      "get: beside an otherwise of the same reads",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let maybe = [null, root][1]",
+      "let box = [xs.get(0, default: root), maybe otherwise root, xs.get(0, default: root)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: gets a storing call separates",
+      "global g = {f0: 1}",
+      "function bump {",
+      "  g.f0 = 2.5",
+      "  return {f0: 1}",
+      "}",
+      "let xs = [{f0: 1}]",
+      "let box = [xs.get(0, default: g), bump(), xs.get(0, default: g)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: gets of host keys",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let box = [xs.get(hostValue, default: root), xs.get(hostValue, default: root)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: gets of a host default",
+      "let xs = [{f0: 1}]",
+      "let box = [xs.get(0, default: hostValue), xs.get(0, default: hostValue)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: otherwise values in a record",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][1]",
+      "let box = {a: maybe otherwise root, b: maybe otherwise root}",
+      "repeat box.a.f0 {}",
+      "repeat box.b.f1 {}",
+    ],
+    [
+      "get: gets of a written list",
+      "let w: integer[] = [1]",
+      "let box = [w.get(0, default: 1.5), w.get(0, default: 1.5), w.get(0, default: 1)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "get: gets whose default the source's later store changes",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let one = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "root.f0 = 2.5",
+      "let two = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "repeat one[0].f0 {}",
+      "repeat two[0].f0 {}",
+    ],
+    [
+      "preset: an ingress identity read at two depths",
+      "let seed = {a: {b: hostValue}, c: 1}",
+      "let xs = []",
+      'xs.add([load("k", default: seed)])',
+      'xs.add([load("k", default: seed)])',
+      'xs.add([load("k", default: seed)])',
+      "let n: integer = xs[0][0].c",
+      "repeat xs[0][0].a.b {}",
+      "let m = xs[0][0].a",
+    ],
+    [
+      "preset: loads of two defaults",
+      "let one = {f0: 1}",
+      'let two = {f0: "x"}',
+      "let xs = []",
+      'xs.add([load("k", default: one)])',
+      'xs.add([load("k", default: two)])',
+      'xs.add([load("k", default: one)])',
+      "let n: integer = xs[0][0].f0",
+    ],
+    [
+      "preset: loads landing in a written type",
+      "let ys: number[] = []",
+      'ys.add(load("k", default: 1))',
+      'ys.add(load("k", default: 1))',
+      'ys.add(load("k", default: 1))',
+      "let n: integer = ys[0]",
+    ],
+    [
+      "preset: a parse beside a load of one default",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'xs.add([load("k", default: seed)])',
+      'xs.add([fromJson("{}", default: seed)])',
+      'xs.add([load("k", default: seed)])',
+      "let n: integer = xs[0][0].f0",
+    ],
+    [
+      "preset: a host cell beside each load",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'xs.add([load("k", default: seed), hostValue])',
+      'xs.add([load("k", default: seed), hostValue])',
+      'xs.add([load("k", default: seed), hostValue])',
+      "repeat xs[0][1] {}",
+      "let n: integer = xs[0][0].f0",
+    ],
+    [
+      "preset: guarded and unguarded adds",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'let flag = askBoolean "f"',
+      'xs.add([load("k", default: seed)])',
+      "if xs != null {",
+      '  xs.add([load("k", default: seed)])',
+      "}",
+      'xs.add([load("k", default: seed)])',
+      "let n: integer = xs[0][0].f0",
+    ],
+    [
+      "preset: a default read under a test",
+      "let raw = hostValue",
+      "let seed = {f0: [1, raw][1]}",
+      "let xs = []",
+      'xs.add([load("k", default: seed)])',
+      "if seed.f0 is integer {",
+      '  xs.add([load("k", default: seed)])',
+      "}",
+      'xs.add([load("k", default: seed)])',
+      "repeat xs[0][0].f0 {}",
+    ],
+    [
+      "preset: loads of a host default",
+      "let xs = []",
+      'xs.add([load("k", default: hostValue)])',
+      'xs.add([load("k", default: hostValue)])',
+      'xs.add([load("k", default: hostValue)])',
+      "repeat xs[0][0] {}",
+    ],
+    [
+      "preset: loads of a computed key",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'let name = ["k", hostValue][1]',
+      "xs.add([load(name, default: seed)])",
+      "xs.add([load(name, default: seed)])",
+      "xs.add([load(name, default: seed)])",
+      "let n: integer = xs[0][0].f0",
+    ],
+    [
+      "preset: loads added directly",
+      "let seed = {f0: 1, f1: {g: hostValue}}",
+      "let xs = []",
+      'xs.add(load("k", default: seed))',
+      'xs.add(load("k", default: seed))',
+      'xs.add(load("k", default: seed))',
+      "let n: integer = xs[0].f0",
+      "repeat xs[0].f1.g {}",
+    ],
+    [
+      "preset: host cells read through the contract",
+      "let seed = {f0: 1}",
+      "global xs = []",
+      'xs.add([load("k", default: seed), hostValue])',
+      'xs.add([load("k", default: seed), hostValue])',
+      'xs.add([load("k", default: seed), hostValue])',
+      "function look {",
+      "  repeat xs[0][1] {}",
+      "  let out = xs[0]",
+      "  out = [1, 2]",
+      "}",
+      "look()",
+    ],
+    [
+      "preset: host defaults read through the contract",
+      "global xs = []",
+      'xs.add([load("k", default: hostValue)])',
+      'xs.add([load("k", default: hostValue)])',
+      'xs.add([load("k", default: hostValue)])',
+      "function look {",
+      "  repeat xs[0][0] {}",
+      "  let copy = xs",
+      "  copy = [[1]]",
+      "}",
+      "look()",
+    ],
+    [
+      "first: a chain with a store between",
+      "let value = [[[1]]]",
+      "let a = value.first.first",
+      "value[0] = [[2.5]]",
+      "let n: integer = value.first.first.first",
+    ],
+    [
+      "first: a chain on host data",
+      "let value = [[[hostValue]]]",
+      "let n: integer = value.first.first.first",
+    ],
+    [
+      "first: a chain under a test",
+      "let raw = hostValue",
+      "let value = [[[1, raw][1]]]",
+      "if value.first.first is integer {",
+      "  let n: integer = value.first.first",
+      "}",
+    ],
+    [
+      "first: first and last mixed",
+      "let value = [[1, 2.5], [3]]",
+      "let n: integer = value.last.first",
+      "let m: integer = value.first.last",
+    ],
+    [
+      "first: index and first mixed",
+      "let value = [[[1]], [[2.5]]]",
+      "let n: integer = value[0].first[0]",
+      "let m: integer = value.first[1].first",
+    ],
+    [
+      "choice: options of a copy cycle's places",
+      'let flag = askBoolean "f"',
+      "let a = {f0: 1}",
+      "let b = {f0: 2.5}",
+      "if flag {",
+      "  a = b",
+      "}",
+      "b = a",
+      'let box = askChoice {text: "x", value: a}, {text: "y", value: b}, {text: "z", value: a}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: held options beside a written one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let opt = {text: "a", value: root}',
+      'let box = askChoice opt, opt, {text: "b", value: root}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "choice: options of an empty list",
+      "let xs = []",
+      'let box = askChoice {text: "a", value: xs}, {text: "b", value: xs}',
+      "repeat box[0] {}",
+    ],
+    [
+      "choice: options of a known root",
+      "let root = {f0: 1, f1: 2.5}",
+      'let box = askChoice {text: "a", value: root}, {text: "b", value: root}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "choice: an option without a value beside ones with it",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let box = askChoice {text: "a", value: root}, {text: "b"}, {text: "c", value: root}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "choice: a copy and its source a conditional child store separates",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: 1}",
+      "let copy = root",
+      "if raw != null {",
+      "  root.f0 = 2.5",
+      "}",
+      'let box = askChoice {text: "a", value: copy}, {text: "b", value: root}, {text: "c", value: copy}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "add: copies added around a conditional child store",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let copy = root",
+      "let xs = []",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "if raw != null {",
+      "  copy.f0 = 2.5",
+      "}",
+      "xs.add(copy)",
+      "xs.add(copy)",
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "choice: projected copies a child store separates",
+      "let raw = hostValue",
+      "let root = {inner: {f0: [1, raw][1]}}",
+      'let one = askChoice {text: "a", value: root.inner}, {text: "b", value: root.inner}',
+      "if raw != null {",
+      "  root.inner.f0 = 2.5",
+      "}",
+      'let two = askChoice {text: "a", value: root.inner}, {text: "b", value: root.inner}',
+      "repeat one.f0 {}",
+      "repeat two.f0 {}",
+    ],
+    [
+      "add: a whole reset of the source inside a run",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "root = {f0: 2.5, f1: 2.5}",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "get: defaults a conditional child store separates",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let one = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "if raw != null {",
+      "  root.f0 = 2.5",
+      "}",
+      "let two = [xs.get(0, default: root), xs.get(0, default: root)]",
+      "repeat one[0].f0 {}",
+      "repeat two[0].f0 {}",
+    ],
+    [
+      "get: an optional written default",
+      "let d: integer? = null",
+      "let xs = [1]",
+      "let box = [xs.get(0, default: d), xs.get(0, default: d)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "get: a null-only written default",
+      "let d: null = null",
+      "let xs = [1]",
+      "let box = [xs.get(0, default: d), xs.get(0, default: d)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "otherwise: parenthesized operands at the path end",
+      "let raw = hostValue",
+      "let maybe = [null, raw][1]",
+      "let fill = 1",
+      "let box = [(maybe) otherwise (fill), (maybe) otherwise (fill)]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "choice: options of an optional written value",
+      "let w: integer? = null",
+      'let box = askChoice {text: "a", value: w}, {text: "b", value: w}',
+      "let n: integer = box",
+    ],
+    [
+      "choice: options of a null-only written value",
+      "let w: null = null",
+      'let box = askChoice {text: "a", value: (w)}, {text: "b", value: (w)}',
+      "let n: integer = box",
+    ],
+    [
+      "get: removals beside gets",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root, root]",
+      "let box = [xs.get(0, default: root), xs.removeFirst(), xs.get(0, default: root)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "get: dict projections in a literal",
+      "let raw = hostValue",
+      "let d = dict{a: [1, raw][1], b: 2.5}",
+      "let box = [d.values, d.values]",
+      "repeat box[0][0] {}",
+    ],
+    [
+      "get: call results in a literal",
+      "let raw = hostValue",
+      "function make {",
+      "  return {f0: [1, raw][1]}",
+      "}",
+      "let box = [make(), make()]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "choice: options at the path end",
+      "let raw = hostValue",
+      "let pick = [1, raw][1]",
+      'let box = askChoice {text: "a", value: pick}, {text: "b", value: pick}, {text: "c", value: 2.5}',
+      "let n: integer = box",
+    ],
+    [
+      "preset: loads read at the path end",
+      "let seed = {f0: 1}",
+      "let xs = []",
+      'xs.add([load("k", default: seed), load("k", default: seed)])',
+      'xs.add([load("k", default: seed), load("k", default: seed)])',
+      "let whole = xs[0][0]",
+      "whole = {f0: 2.5}",
+    ],
+    [
+      "alias: aliases taken around a store to their source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "root.f0 = 2.5",
+      "let a2 = root",
+      'let box = askChoice {text: "0", value: a0}, {text: "1", value: a2}, {text: "2", value: a1}',
+      "repeat box.f0 {}",
+      "repeat box.f1 {}",
+    ],
+    [
+      "alias: options in the reverse of their aliases' order",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "let a2 = root",
+      'let box = askChoice {text: "2", value: a2}, {text: "1", value: a1}, {text: "0", value: a0}',
+      "let n: integer = box.f0",
+      "let s: string = box.f1",
+    ],
+    [
+      "alias: an alias stored again later",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}',
+      "repeat box.f0 {}",
+      "a1 = {f0: 2.5, f1: 2.5}",
+    ],
+    [
+      "alias: a written alias beside an unwritten one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0: object = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "alias: a chain of aliases beside a direct one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = a0",
+      "let a2 = root",
+      'let box = askChoice {text: "0", value: a1}, {text: "1", value: a2}, {text: "2", value: a0}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "alias: an alias taken under a test of its source's field",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "if root.f0 is integer {",
+      "  let a1 = root",
+      '  let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}',
+      "  repeat box.f0 {}",
+      "  repeat box.f1 {}",
+      "}",
+    ],
+    [
+      "alias: aliases read in a function",
+      "global root = {f0: [1, hostValue][1]}",
+      "global a0 = root",
+      "global a1 = root",
+      "function pick {",
+      '  let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}',
+      "  repeat box.f0 {}",
+      "  return 0",
+      "}",
+      "let t = pick()",
+    ],
+    [
+      "alias: aliases of a projection",
+      "let raw = hostValue",
+      "let root = {inner: {f0: [1, raw][1]}, f0: 2.5}",
+      "let a0 = root.inner",
+      "let a1 = root.inner",
+      "let a2 = root",
+      'let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}, {text: "2", value: a2}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "alias: aliases of host data",
+      "let a0 = hostValue",
+      "let a1 = hostValue",
+      'let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}',
+      "repeat box {}",
+    ],
+    [
+      "alias: aliases beside direct reads of their source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "r", value: root}, {text: "0", value: a0}, {text: "1", value: a1}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "alias: get defaults of aliases in reverse order",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "let a1 = root",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let box = [l1.get(0, default: a0), l0.get(0, default: a1), l0.get(0, default: a0)]",
+      "repeat box[0].f0 {}",
+      "let s: string = box[1].f1",
+    ],
+    [
+      "alias: aliases copied into a list after a store",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let xs = []",
+      "xs.add(a0)",
+      "root.f1 = 2.5",
+      "let a1 = root",
+      "xs.add(a1)",
+      "xs.add(a0)",
+      "xs.add(a1)",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "chain: alternation a store breaks",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: [2, raw][1], f1: 2.5}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs[0].f1 = 1",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "chain: alternating families after a third",
+      'let xs = [{f0: "s"}]',
+      "let a = {f0: 1}",
+      "let b = {f0: 2.5}",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let n: integer = xs[1].f0",
+    ],
+    [
+      "chain: alternation, then a run of one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 1.5, f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "chain: a class that comes back late",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let b = {f0: 2.5, f1: [1, raw][1]}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(root)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "chain: nine classes in turn",
+      "let raw = hostValue",
+      "let s0 = {f0: [0, raw][1], f1: 0.5}",
+      "let s1 = {f0: [1, raw][1], f1: 1.5}",
+      "let s2 = {f0: [2, raw][1], f1: 2.5}",
+      "let s3 = {f0: [3, raw][1], f1: 3.5}",
+      "let s4 = {f0: [4, raw][1], f1: 4.5}",
+      "let s5 = {f0: [5, raw][1], f1: 5.5}",
+      "let s6 = {f0: [6, raw][1], f1: 6.5}",
+      "let s7 = {f0: [7, raw][1], f1: 7.5}",
+      "let s8 = {f0: [8, raw][1], f1: 8.5}",
+      "let xs = []",
+      "xs.add(s0)",
+      "xs.add(s1)",
+      "xs.add(s2)",
+      "xs.add(s3)",
+      "xs.add(s4)",
+      "xs.add(s5)",
+      "xs.add(s6)",
+      "xs.add(s7)",
+      "xs.add(s8)",
+      "xs.add(s0)",
+      "xs.add(s1)",
+      "xs.add(s2)",
+      "xs.add(s3)",
+      "xs.add(s4)",
+      "xs.add(s5)",
+      "xs.add(s6)",
+      "xs.add(s7)",
+      "xs.add(s8)",
+      "repeat xs[0].f0 {}",
+      "let n: integer = xs[0].f1",
+    ],
+    [
+      "chain: a window of seventeen",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let b = {f0: 2.5, f1: 1}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(root)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(root)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "chain: alternation under a test of the list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 1.5, f1: 1}",
+      "let xs = []",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "if xs[0].f0 is integer {",
+      "  xs.add(other)",
+      "  xs.add(root)",
+      "  xs.add(other)",
+      "  repeat xs[0].f0 {}",
+      "}",
+    ],
+    [
+      "chain: alternating addAll",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 2.5, f1: 1}",
+      "let rs = [root]",
+      "let os = [other]",
+      "let xs = []",
+      "xs.addAll(rs)",
+      "xs.addAll(os)",
+      "xs.addAll(rs)",
+      "xs.addAll(os)",
+      "xs.addAll(rs)",
+      "repeat xs[0].f0 {}",
+    ],
+    [
+      "chain: two families in a written union list, a window repeating",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+    ],
+    [
+      "chain: the same with a random element",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.random, null].first",
+      "chosen = 1",
+    ],
+    [
+      "chain: two families, admitted only",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+    ],
+    [
+      "chain: a run of one family after two in a union list",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+    ],
+    [
+      "alias: a chain of aliases, one taken under a test",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      "if root.f0 is integer {",
+      "  let a1 = a0",
+      "  let a2 = a1",
+      '  let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}, {text: "2", value: a2}',
+      "  repeat box.f0 {}",
+      "}",
+    ],
+    [
+      "alias: get receivers and defaults with crossing writers",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "let l1 = xs",
+      "let a1 = root",
+      "let l0 = xs",
+      "let box = [l0.get(0, default: a0), l1.get(0, default: a1), l1.get(0, default: a0)]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "class: choice gets whose alias writers cross",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: l0.get(0, default: a1)}, {text: "1", value: l1.get(0, default: a0)}',
+      "repeat box.f0 {}",
+      "let n: integer = box.f1",
+    ],
+    [
+      "class: choice gets around a store to the source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "root.f0 = 2.5",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: xs.get(0, default: a0)}, {text: "1", value: xs.get(0, default: a1)}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: choice gets of one receiver, the default reached in one",
+      "let root = {f0: 1, f1: 1}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: a1)}, {text: "1", value: [a0].get(1, default: "s")}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: choice gets whose defaults' proofs differ",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: a1)}, {text: "1", value: [a0].get(3, default: a1)}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "class: choice otherwise values of one source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let m0 = maybe",
+      "let m1 = maybe",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: m0 otherwise a1}, {text: "1", value: m1 otherwise a0}',
+      "repeat box.f1 {}",
+    ],
+    [
+      "class: a choice get beside an otherwise of the same reads",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let xs = [root]",
+      'let box = askChoice {text: "0", value: xs.get(0, default: root)}, {text: "1", value: maybe otherwise root}, {text: "2", value: xs.get(0, default: root)}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: computed choice options without objects",
+      "let root = {f0: 1, f1: 1}",
+      "let xs = [root]",
+      'let box = askChoice xs.get(0, default: "a"), xs.get(0, default: "a")',
+      "let s: string = box",
+    ],
+    [
+      "class: choice records of aliases",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "let a2 = root",
+      'let box = askChoice {text: "0", value: {g: a2}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: a1}}',
+      "repeat box.g.f0 {}",
+      "let n: integer = box.g.f1",
+    ],
+    [
+      "class: choice records, one with another property",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1, h: 2.5}}, {text: "2", value: {g: a0}}',
+      "repeat box.g.f0 {}",
+      "let n: integer = box.h",
+    ],
+    [
+      "class: choice lists of a source and of host data",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let box = askChoice {text: "0", value: [root]}, {text: "1", value: [raw]}, {text: "2", value: [root]}',
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "class: choice records holding computed values",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: l0.get(0, default: a1)}}, {text: "1", value: {g: l1.get(0, default: a0)}}',
+      "repeat box.g.f0 {}",
+    ],
+    [
+      "class: choice records holding a load",
+      "let raw = hostValue",
+      "let seed = {f0: 1}",
+      'let box = askChoice {text: "0", value: {g: load("k", default: seed)}}, {text: "1", value: {g: load("k", default: seed)}}',
+      "let n: integer = box.g.f0",
+    ],
+    [
+      "class: choice records read under a test",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "if root.f0 is integer {",
+      '  let box = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1}}',
+      "  repeat box.g.f0 {}",
+      "}",
+      'let other = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1}}',
+      "repeat other.g.f0 {}",
+    ],
+    [
+      "class: nested defaults whose writers cross",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l0.get(0, default: l1.get(0, default: a0)), l1.get(0, default: l0.get(0, default: a1))]",
+      "repeat box[0].f0 {}",
+      "let n: integer = box[1].f1",
+    ],
+    [
+      "class: nested defaults, one inner default host data",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let box = [xs.get(0, default: xs.get(0, default: root)), xs.get(0, default: xs.get(0, default: raw)), xs.get(0, default: xs.get(0, default: root))]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "class: literal defaults of one shape",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [xs.get(0, default: {f0: a0.f0, f1: 2.5}), xs.get(0, default: {f0: a1.f0, f1: 2.5})]",
+      "repeat box[0].f1 {}",
+    ],
+    [
+      "class: adds of records of aliases",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "let ys = []",
+      "ys.add({g: a0})",
+      "ys.add({g: a1})",
+      "ys.add({g: a0})",
+      "ys.add({g: a1})",
+      "ys.add({g: a0})",
+      "repeat ys[0].g.f0 {}",
+      "repeat ys.last.g.f1 {}",
+    ],
+    [
+      "class: adds of records, one lacking a property",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "let n: integer = ys[0].h",
+      "repeat ys.random.g.f0 {}",
+    ],
+    [
+      "class: adds of lists, a store to the source after the third",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      "ys.add([root])",
+      "ys.add([root])",
+      "ys.add([root])",
+      "root.f0 = 2.5",
+      "ys.add([root])",
+      "ys.add([root])",
+      "repeat ys[0][0].f0 {}",
+    ],
+    [
+      "class: adds of gets, a guard after the third",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let ys = []",
+      "ys.add(xs.get(0, default: root))",
+      "ys.add(xs.get(0, default: root))",
+      "ys.add(xs.get(0, default: root))",
+      "if ys[0].f0 is integer {",
+      "  ys.add(xs.get(0, default: root))",
+      "  repeat ys.last.f0 {}",
+      "}",
+      "repeat ys.random.f1 {}",
+    ],
+    [
+      "class: adds of otherwise values after a host value",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let ys = [raw]",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "let chosen = [ys.first, null].first",
+      "chosen = 1",
+      "repeat ys.last.f0 {}",
+    ],
+    [
+      "class: adds of records into a written list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys: object[] = []",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "repeat ys[0].g.f0 {}",
+    ],
+    [
+      "writers: choice gets whose alias writers cross, a string beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: l1.get(0, default: a0)}, {text: "1", value: l0.get(0, default: a1)}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "writers: choice gets whose alias writers cross, defaults first",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let a0 = root",
+      "let a1 = root",
+      "let l0 = xs",
+      "let l1 = xs",
+      'let box = askChoice {text: "0", value: l1.get(0, default: a0)}, {text: "1", value: l0.get(0, default: a1)}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "writers: choice records lacking a property another option has",
+      "let root = {f0: 1}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a1}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: a0, h: 1}}',
+      "let n: integer = box.h",
+    ],
+    [
+      "writers: choice records of a string source beside an integer record",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a1}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: {f0: 1}}}',
+      "let n: integer = box.g.f0",
+    ],
+    [
+      "writers: literal gets whose alias writers cross, a string beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l1.get(0, default: a0), l0.get(0, default: a1), {f0: 1}]",
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "writers: nested defaults whose writers cross, beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l1.get(0, default: l0.get(0, default: a1)), l0.get(0, default: l1.get(0, default: a0)), {f0: 1}]",
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "writers: adds of records lacking a property, one with it",
+      "let root = {f0: 1}",
+      "let ys = []",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root, h: 1})",
+      "let n: integer = ys[0].h",
+    ],
+    [
+      "proof: choice gets of one literal receiver, the default reached in one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      'let other = {f0: "s"}',
+      "let w = other",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: w)}, {text: "1", value: [a0].get(4, default: w)}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "proof: adds of gets, the default reached from the second",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      'let other = {f0: "s"}',
+      "let w = other",
+      "let ys = []",
+      "ys.add([a0].get(0, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "let n: integer = ys[0].f0",
+    ],
+    [
+      "family: choice selections whose alias writers cross, a string beside an integer",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a1].first}, {text: "1", value: [a0].first}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: choice selections of different steps",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let other = {f0: "s"}',
+      "let a0 = root",
+      'let box = askChoice {text: "0", value: [a0, other].first}, {text: "1", value: [a0, other].last}, {text: "2", value: [a0, other].first}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: choice properties of different names",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      'let box = askChoice {text: "0", value: ({g: a0, h: {f0: "s"}}).g}, {text: "1", value: ({g: a0, h: {f0: "s"}}).h}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: choice lengths of an object and a list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      'let box = askChoice {text: "0", value: ({length: a0}).length}, {text: "1", value: [a0].length}',
+      "repeat box {}",
+    ],
+    [
+      "family: calls of two functions alike",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "function give {",
+      "  return root",
+      "}",
+      "function other {",
+      '  return {f0: "s"}',
+      "}",
+      'let box = askChoice {text: "0", value: give()}, {text: "1", value: other()}, {text: "2", value: give()}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: adds of calls around a store to what they return",
+      "global g = {f0: [1, hostValue][1]}",
+      "function give {",
+      "  return g",
+      "}",
+      "let ys = []",
+      "ys.add(give())",
+      "ys.add(give())",
+      "ys.add(give())",
+      'g = {f0: "s"}',
+      "ys.add(give())",
+      "ys.add(give())",
+      "let n: integer = ys[0].f0",
+    ],
+    [
+      "family: choice loads of a host-data default, each its own leaf",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: load("k", default: a0)}, {text: "1", value: load("k", default: a1)}, {text: "2", value: load("j", default: a0)}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: literal loads of a known default",
+      "let root = {f0: 1}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = [load("k", default: a1), load("k", default: a0), {f0: "s"}]',
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "family: adds of loads of a host-data default",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      'ys.add(load("k", default: root))',
+      'ys.add(load("k", default: root))',
+      'ys.add(load("k", default: root))',
+      'ys.add(load("k", default: root))',
+      'ys.add(load("k", default: root))',
+      "let n: string = ys[0].f0",
+    ],
+    [
+      "family: choice sums of host data, an operand's identity",
+      "let raw = hostValue",
+      "let u = [1, raw][1]",
+      "let m0 = u",
+      "let m1 = u",
+      'let box = askChoice {text: "0", value: m0 + 1}, {text: "1", value: m1 + 1}, {text: "2", value: m0 + 1}',
+      "let s: string = box",
+    ],
+    [
+      "family: literal records of sums of host data",
+      "let raw = hostValue",
+      "let u = [1, raw][1]",
+      "let m0 = u",
+      "let m1 = u",
+      'let box = askChoice {text: "0", value: {g: m0 + 1}}, {text: "1", value: {g: m1 + 1}}',
+      "let s: string = box.g",
+    ],
+    [
+      "family: choice list sums whose alias writers cross",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: ([a1] + [a0])[0]}, {text: "1", value: ([a0] + [a1])[0]}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: a sum of terms whose writers descend",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      "let a2 = root",
+      "let gathered = [a2] + [a1] + [a0] + [a2] + [a1] + [a0] + [a2]",
+      "let n: integer = gathered.last.f0",
+    ],
+    [
+      "family: a sum of two terms in turn",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let other = {f0: "s"}',
+      "let p0 = [root]",
+      "let q0 = [other]",
+      "let gathered = p0 + q0 + p0 + q0 + p0 + q0",
+      "let n: integer = gathered.last.f0",
+      "repeat gathered.first.f1 {}",
+    ],
+    [
+      "family: a sum of one list of host data",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let piece = [root]",
+      "let gathered = piece + piece + piece + piece + piece + piece",
+      "let n: string = gathered.last.f0",
+    ],
+    [
+      "family: choice removals and copies whose alias writers cross",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a1].removeFirst()}, {text: "1", value: [a0].removeFirst()}, {text: "2", value: [a1].take(1)[0]}, {text: "3", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "family: choices of choices",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: askChoice {text: "x", value: a0}}, {text: "1", value: askChoice {text: "y", value: a1}}',
+      "let n: string = box.f0",
+    ],
+    [
+      "family: adds of choices of one source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      'ys.add(askChoice {text: "x", value: root})',
+      'ys.add(askChoice {text: "x", value: root})',
+      'ys.add(askChoice {text: "x", value: root})',
+      'ys.add(askChoice {text: "x", value: root})',
+      "repeat ys[0].f0 {}",
+    ],
+  ] as const
+).map(([name, ...source]) => ({
+  name,
+  files: [{ path: "main.tease", source: `${source.join("\n")}\nexit\n` }],
+}));
+
+/**
+ * S6's sharing faults on `main` (#1077, TABLE r4.83 (4)), held from the differential until repaired: the first two
+ * reorder their diagnostics with the sharing on, the third publishes 16 diagnostics and 17 checks against 11 and 12
+ * (Sol's r3).
+ */
+export const HELD_SHARING_FAULTS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (
+  [
+    [
+      "chain: a period of three",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let b = {f0: 2.5, f1: [1, raw][1]}",
+      'let c = {f0: ["s", raw][1], f1: 1}',
+      "let xs = []",
+      ...Array.from({ length: 3 }, () => ["xs.add(root)", "xs.add(b)", "xs.add(c)"]).flat(),
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "chain: alternation with a call storing the list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 1.5, f1: 1}",
+      "global xs = []",
+      "function push {",
+      '  xs.add({f0: "s", f1: "s"})',
+      "  return 0",
+      "}",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "let t = push()",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "let n: integer = xs[0].f0",
+    ],
+    [
+      "chain: six adds of a host element, its last and a random element read",
+      "let root = [1.5, hostValue].first",
+      "let xs = [1.5]",
+      ...Array.from({ length: 6 }, () => "xs.add(root)"),
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+      "repeat xs.last {}",
+      "repeat xs.random {}",
+    ],
+  ] as const
+).map(([name, ...source]) => ({
+  name,
+  files: [{ path: "main.tease", source: `${source.join("\n")}\nexit\n` }],
+}));
