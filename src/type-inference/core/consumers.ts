@@ -29,7 +29,15 @@ import {
   typeTags,
   writtenOf,
 } from "./contract.js";
-import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
+import {
+  keptKey,
+  keptKeyBelow,
+  keyOf,
+  keyPath,
+  keyPlace,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import {
@@ -328,6 +336,8 @@ export class Consumers {
   readonly #anonymousChains = new Map<PlaceId, boolean>();
   /** Per value read in the finishing path, the written type at its own path (`#writtenRead`), `null` for none. */
   readonly #writtenReads = new Map<PlaceId, TypeTerm | null>();
+  /** Per value read in the finishing path, its key (`#readKey`), `null` for none. */
+  readonly #readKeys = new Map<PlaceId, Key | null>();
   readonly #presence = new Map<
     string,
     { readonly state: "none" | "some" | "all"; readonly literal: Writer | null }
@@ -376,11 +386,12 @@ export class Consumers {
   }
 
   /**
-   * A read in the finishing path (D4 a′, TABLE r4.90, r4.99), never proving anything new: a literal's own kind, which no
-   * proof decides (an error found there stands); else the read itself, then its key's contract, as the analysis had
-   * finished them before the stop (`#run`: the solver answers only from what had finished); else the written type at
-   * its key's path, settled by its syntax; `STOPPED` (`unknown` with the reason `budget`) only where none of these is
-   * settled, so its consumer owes its check when the script runs.
+   * A read in the finishing path (D4 a′, TABLE r4.90, r4.99; S3 §5 revision 14, r4.102), answered from the retained
+   * state only, the first source that decides it winning: a literal's own kind, which no proof decides (an error found
+   * there stands); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
+   * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
+   * decided, or a copy's through the copy forest, `Admission.retained`); `STOPPED` (`unknown` with the reason `budget`)
+   * only where none of these decides it, so its consumer owes its check when the script runs.
    */
   #finishingRead(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
     const { contract, values } = this.pass;
@@ -397,12 +408,59 @@ export class Consumers {
         : settled(() => values.valueItems(value, node, rest))) ??
       settled(() => contract.contractOfValueAt(value, rest));
     if (found !== null) return found;
+    // the admitted type as admission retained it (S3 §5 revision 14): a written type by its syntax in any finishing
+    // pass; a decision or a copy's only where admission settled
     const written = this.#writtenRead(value);
     const term = written === null ? null : termAt(written, rest);
-    const tags = term === null ? [] : typeTags(term);
+    const tags =
+      term !== null ? typeTags(term) : this.settled ? (this.#retainedRead(value, rest) ?? []) : [];
     return tags.length === 0 || tags.includes("unknown")
       ? STOPPED
       : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+  }
+
+  /** The admitted type admission retained at a read's key path and `rest` (`Admission.retained`), else `null`. */
+  #retainedRead(value: PlaceId, rest: readonly string[]): readonly ItemTag[] | null {
+    const key = this.#readKey(value);
+    return key === null
+      ? null
+      : this.admission.retained(keyPlace(key), joinSteps(keyPath(key), rest));
+  }
+
+  /**
+   * A read's key: its binding's root and path, then a step per projection, each value's kept once and made from its
+   * owner's by its step (`#writtenRead`'s walk); `null` where a loop's element or no binding is read.
+   */
+  #readKey(value: PlaceId): Key | null {
+    const { program } = this.pass;
+    const chain: PlaceId[] = [];
+    let at = value;
+    for (
+      let projection = program.projOf.get(at);
+      projection !== undefined && !this.#readKeys.has(at);
+      projection = program.projOf.get(at)
+    ) {
+      chain.push(at);
+      at = projection.owner;
+    }
+    let key = this.#readKeys.get(at);
+    if (key === undefined) {
+      program.work.charge("checks");
+      const binding = program.occurrenceOf.get(at);
+      const target = binding === undefined ? null : program.targetRoot(binding);
+      key = target === null ? null : keptKey(program.work, target.root, target.path);
+      this.#readKeys.set(at, key);
+    }
+    for (const next of chain.reverse()) {
+      program.work.charge("checks");
+      const step = program.projOf.get(next)!.step;
+      key =
+        key === null || step === "iteration"
+          ? null
+          : keptKeyBelow(program.work, key, [stepName(step)]);
+      this.#readKeys.set(next, key);
+    }
+    return key;
   }
 
   /** A scalar literal's own kind, which no proof decides (an error found there stands, D4 a′); `null` for any other value. */

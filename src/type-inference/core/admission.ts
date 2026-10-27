@@ -3021,6 +3021,41 @@ export class Admission {
       : tags;
   }
 
+  /**
+   * After a stop, a path's admitted type as admission retained it, without new solving (S3 §5 revision 14, TABLE r4.102):
+   * its written type (A1), its decision (A2), else a copied written type landing there (A4's seeds), else, where a copy
+   * of another place lands at or above it (a lazily decided copy path among them), that source's at the same path below
+   * the copy, through the copy forest's edges; with `null` where the decision admits one (admission's null rule, its
+   * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
+   * kind fits it.
+   */
+  public retained(place: PlaceId, path: readonly string[], seen = new Set<Key>()): ItemTag[] | null {
+    const { program } = this.pass;
+    const written = writtenOf(program.place(place).kind);
+    const term = written === null ? null : termAt(written, path);
+    if (term !== null) return [...new Set(typeTags(term))];
+    // (kept in `seen`)
+    const key = keptKey(this.#work, place, path);
+    if (this.#unrestricted.has(key)) return ["unknown"];
+    const decided = this.decided.get(key);
+    if (decided !== undefined)
+      return this.#permitsNull.has(key) || this.#nullable.get(key) !== false
+        ? [...new Set([...decided, "null" as const])]
+        : [...decided];
+    if (seen.has(key)) return null;
+    seen.add(key);
+    const { seeds, into } = this.#inheritance();
+    const levels = seeds.get(place)?.get(pathText(path));
+    if (levels !== undefined) return [...new Set([...levels].flatMap((level) => typeTags(level)))];
+    for (const copy of into.get(place) ?? []) {
+      this.pass.program.work.charge("checks");
+      if (copy.path.length > path.length || copy.path.some((step, at) => path[at] !== step)) continue;
+      const found = this.retained(copy.from, joinSteps(copy.strip, path.slice(copy.path.length)), seen);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
     this.#lazily(place, path);
