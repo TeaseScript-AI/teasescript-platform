@@ -914,6 +914,8 @@ export class Admission {
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
+  /** The places `#a4Keys` lands copies in (`#openAbove`). */
+  readonly #a4Places = new Set<PlaceId>();
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
   readonly #a4Copies: {
@@ -1135,6 +1137,7 @@ export class Admission {
             );
             landed.set(path, at);
             this.#a4Keys.add(keptKey(this.#work, d.place, at));
+            this.#a4Places.add(d.place);
           }
           if (term !== null) this.#a4Copies.push({ place: d.place, path: at, term });
           else this.#a4Inherits.push({ place: d.place, path: at, from: binding, strip });
@@ -3826,6 +3829,10 @@ export class Admission {
       work.charge("checksSkipped");
       return { ...NOTHING, ...none };
     }
+    // below an unrestricted part of a written type a copy decides above the path every kind fits, whatever decides the
+    // path itself, as below the place's own (`#openAbove`)
+    if (term === null && this.#openAbove(root, path))
+      return { ...NOTHING, ...none, tags: ["unknown"], byWritten: true };
     if (path.length > 0 && term === null) {
       // A3: a settled family needs no scan, where no store on the path was rejected
       const clean = this.#clean(root, path);
@@ -4205,21 +4212,34 @@ export class Admission {
   }
 
   /**
-   * Whether a path lies below an unrestricted part of its place's written type, or, where no decision was taken at it
-   * but copies land above it, of the written type the place's own decision copies there (`#inheritedAt`): every kind
-   * fits it, as where a store there decides it (`decide`), never the kinds the place's contents hold there (V30 §13;
-   * ADR 0021 1.3: a copy keeps the written type).
+   * Whether a path no decision was taken at lies below an unrestricted part of its place's written type, or of a written
+   * type a copy decides above it (`#openAbove`): every kind fits it, as where a store there decides it (`decide`), never
+   * the kinds the place's contents hold there (V30 §13; ADR 0021 1.3: a copy keeps the written type).
    */
   #openBelow(place: PlaceId, path: readonly string[]): boolean {
     const written = writtenOf(this.pass.program.place(place).kind);
-    let term = written === null ? null : permittedAt(written, path);
-    if (written === null && !this.#attempted.has(keyOf(place, path)))
-      for (let length = 0; length < path.length; length += 1)
-        if (this.#landed(place, path.slice(0, length))) {
-          term = this.#inheritedAt(place, path);
-          break;
-        }
+    if (written === null)
+      return !this.#attempted.has(keyOf(place, path)) && this.#openAbove(place, path);
+    const term = permittedAt(written, path);
     return term !== null && unrestricted(term);
+  }
+
+  /**
+   * Whether a written type a copy decides at a prefix of a path leaves the path unrestricted (A4 through copies, the
+   * lead's ruling on #1215: a copied written type is the written type below it too): a prefix copies land at
+   * (`#landed`) whose decision copies a written type (`#inheritedAt`) unrestricted at the rest (`permittedAt`), as an
+   * own written type is below it, whatever a store on the path decided before the copy. Only in a place copies land in.
+   */
+  #openAbove(place: PlaceId, path: readonly string[]): boolean {
+    if (!this.#a4Places.has(place)) return false;
+    for (let length = 0; length < path.length; length += 1) {
+      const prefix = path.slice(0, length);
+      if (!this.#landed(place, prefix)) continue;
+      const term = this.#inheritedAt(place, prefix);
+      const below = term === null ? null : permittedAt(term, path.slice(length));
+      if (below !== null && unrestricted(below)) return true;
+    }
+    return false;
   }
 
   /**
