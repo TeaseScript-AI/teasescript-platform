@@ -57,7 +57,6 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Advanced Standard Library default-prelude opt-out and replacement policy after the first POC.
 - Package-local and published community-library packaging, imports, moderation, compatibility, replacement mappings,
   dependency locks, transitive resolution, cycles, capability propagation, and version conflicts.
-- Standard Library string API and signatures beyond the first POC.
 - Module recursion, cooldown, and history rules (ADR 0022 decides file targets and endings; ADR 0023 decides file
   headers and tagged selection).
 
@@ -112,9 +111,6 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
 - Player UI preference persistence beyond Player Settings: which panel/tool/theme/media-fit/text-display preferences
   survive reload or session changes, and whether account settings take over or synchronize the browser-local Player
   Settings that `ui/PLAYER-UI.md` already keeps across reloads.
-- Exact tuned thresholds/measurements for constraint-driven dock/drawer decisions, compact geometry, per-tool width
-  presets, stage/conversation allocation, readable conversation bounds, and composer growth.
-- Temporary Player status/notification presentation for saved, paused, error, assignment, and similar platform state.
 - Exact developer-facing declaration for a Player-generated Standard tool that combines a title, ordered static
   content, and typed controls such as toggles, numeric/text fields, and selects, including value binding, updates,
   submission, persistence, accessibility metadata, and the boundary with fully custom tools.
@@ -135,9 +131,9 @@ remain in the [`release roadmap`](planning/RELEASE-ROADMAP.md).
   explicit session-media deletion. The Player capture foundation's shapes are implementation details, not this API;
   ephemeral handles are not restored after reload (ADR 0017).
 - Captured-media quotas and reclamation timing; captured media stored on a server. Saved-reference durability is
-  accepted in the specification (§33). Before durable checkpoint restore (#469) can restore a checkpoint whose state
-  holds unsaved session media after a reload, its design must preserve or explicitly reconcile that media, and a
-  restored reference must never silently alias different media.
+  accepted in the specification (§33); a kept session stores and restores the photos only it uses
+  (`ui/PLAYER-UI.md`), and a session import refuses a reference this browser holds with other media
+  (`DATA-AND-API.md`).
 - Motion detection, sampling, camera resource limits, and scene ownership.
 - User control of media playback: whether players may seek, pause, or skip script media, whether authors can allow or
   forbid it per media, and its Player UI. The Player currently offers no media controls; accepted controls would enter
@@ -180,5 +176,5 @@ Current constraints: [`DATA-AND-API.md`](DATA-AND-API.md),
 Current proposal sources: [ADR 0004](decisions/0004-expression-engine.md) and
 [`MATH-EXPRESSIONS.md`](MATH-EXPRESSIONS.md).
 
-- Whether to accept a restricted math.js-backed numeric and unit expression evaluator, and its exact validation and
-  capability boundary.
+- Whether the accepted measurement units are built in TeaseScript's own code or through a restricted math.js:
+  [#1169](https://github.com/TeaseScript-AI/teasescript-platform/issues/1169).
