@@ -41,6 +41,7 @@ import type {
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { takeSequence } from "./operations/support.js";
 import {
+  preparedReferenceSpeakerPath,
   readPreparedReference,
   scopeBindings,
   type PreparedReferenceDescriptor,
@@ -525,21 +526,37 @@ export class Evaluator {
     );
   }
 
-  /** A collection method changed the variable its receiver names; the call's value comes from that change. */
+  /** A collection method changed what its receiver names; the call's value comes from that change. */
   #traceMutation(descriptor: PreparedReferenceDescriptor | null, span: SourceSpan): void {
     this.trace!.replace(this.traceVariableChange("mutation", descriptor, span));
   }
 
   /**
    * Records the new version of the variable a change inside it reached, unless the change reached a copy, with the
-   * causes collected so far.
+   * causes collected so far. A change inside a speaker's property changes that property, which every name for the
+   * speaker reads, and keeps the rest of its earlier version.
    */
   public traceVariableChange(
     kind: "mutation" | "assignment",
     descriptor: PreparedReferenceDescriptor | null,
     span: SourceSpan,
   ): number | null {
-    if (descriptor === null || descriptor.detached) return null;
+    if (descriptor === null) return null;
+    const inSpeaker = preparedReferenceSpeakerPath(this.snapshot, descriptor);
+    const property = inSpeaker?.path[0];
+    if (property?.kind === "property") {
+      const speaker = speakerById(this, inSpeaker!.speakerId, span);
+      return this.trace!.writeState(
+        kind,
+        stateKey("speaker", speaker.id),
+        { property: property.name },
+        `${speaker.identifier}.${property.name}`,
+        speaker.properties.find((candidate) => candidate.name === property.name)?.value ?? null,
+        span,
+        true,
+      );
+    }
+    if (descriptor.detached) return null;
     const { rootFrameId, rootName } = descriptor;
     if (rootFrameId === null || rootName === null) return null;
     const root = scopeBindings(this.snapshot, rootFrameId)?.find(

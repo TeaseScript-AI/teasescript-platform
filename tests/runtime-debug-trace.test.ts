@@ -803,6 +803,46 @@ test("speaker and handle properties are state that every name for them reads", (
   assert.ok(!repeated.some((step) => step.target === "timer.pause()"));
 });
 
+test("a change inside a speaker's property explains it under every name for the speaker", () => {
+  for (const [change, kind] of [
+    ["guide.toys.add(extra)", "mutation"],
+    ["other.toys[0] = extra", "assignment"],
+    ['say "${speaker.toys.add(extra)}"', "mutation"],
+  ] as const) {
+    const played = traced(
+      [
+        "speaker guide {",
+        '    firstName: "Vera"',
+        '    toys: ["rope"]',
+        "}",
+        "let other = guide",
+        "speaker guide",
+        'let extra = "silk"',
+        change,
+        'say "${guide.toys.last} ${other.toys.last} ${speaker.toys.last} ${guide.firstName}"',
+        "exit",
+      ].join("\n"),
+    );
+    assertComplete(played);
+    const [named, alias, contextual, other] = causes(
+      played.trace,
+      outputOf(played, "silk silk silk Vera"),
+    );
+    for (const read of [named!, alias!, contextual!]) {
+      const steps = lineage(played.trace, read.id);
+      assert.ok(
+        steps.some(
+          (step) => step.kind === kind && step.target === "guide.toys" && step.location?.line === 8,
+        ),
+        `${change} explains ${read.preview}`,
+      );
+      assert.ok(steps.some((step) => step.target === "extra"));
+    }
+    // A change of one property is no cause of another.
+    assert.ok(!lineage(played.trace, other!.id).some((step) => step.location?.line === 8));
+  }
+});
+
 test("a term that a speaker's gender gives, a title read through the other one, or a derived displayName comes from those properties", () => {
   const played = traced(
     [

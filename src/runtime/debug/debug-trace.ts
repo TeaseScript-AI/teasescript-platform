@@ -910,7 +910,8 @@ export class TraceStore {
   /**
    * A change of runtime state outside variables, such as a speaker or timer (`base`): one property, the timed
    * properties that a timer or media method changes, or the whole state. The change sets what it covers, so it does not
-   * depend on the version it replaces, except for state that `accumulates`, such as the tagged photos.
+   * depend on the version it replaces, except for state that `accumulates`, such as the tagged photos. Gives the
+   * change's record.
    */
   writeState(
     kind: "declaration" | "assignment" | "mutation",
@@ -920,14 +921,14 @@ export class TraceStore {
     value: SerializableRuntimeValue,
     span: TraceSpan | null = null,
     accumulates = false,
-  ): void {
-    if (this.#failure !== null) return;
+  ): number | null {
+    if (this.#failure !== null) return null;
     const key = partKey(base, part);
     if (accumulates) {
       const previous = this.#versions.get(key);
       if (previous !== undefined) this.#add(this.acc, previous);
     }
-    this.write(kind, key, target, value, span);
+    return this.write(kind, key, target, value, span);
   }
 
   /**
