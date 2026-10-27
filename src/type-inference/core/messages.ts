@@ -462,6 +462,7 @@ function joinedText(operands: readonly SourceSite[], source: MessageSource): str
 /** The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). */
 function temporalFix(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
+  text: string,
   kinds: readonly ItemTag[],
   source: MessageSource,
 ): string {
@@ -492,7 +493,7 @@ function temporalFix(
       `'toDate(${left}) - toDate(${right})', or convert both with 'toAbsoluteDateTime()' for the elapsed time.`
     );
   if (moves && b === "time")
-    return ` Arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, ${right})'.`;
+    return ` Arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, ${rule.operand ? text : right})'.`;
   const compares = ["<", "<=", ">", ">="].includes(operator);
   if (compares && a === "date" && b === "datetime")
     return ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`;
@@ -583,9 +584,9 @@ function errorSentence(
       const join = joinFix(rule, kinds, [], source);
       if (join !== null) return join;
       return rule.operand
-        ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, kinds, source)}`
+        ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, text, kinds, source)}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.` +
-            temporalFix(rule, kinds, source);
+            temporalFix(rule, text, kinds, source);
     }
     case "shown": {
       const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
