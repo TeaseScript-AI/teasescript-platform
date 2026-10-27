@@ -18,7 +18,7 @@ import {
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   DIRECT_INGRESS_PROGRAMS,
-  HELD_SHARING_FAULTS,
+  REORDERING_SHARING_FAULTS,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
@@ -309,18 +309,24 @@ test("every occurrence over host data names each ingress's leaf with the sharing
   assert.deepEqual(differing, []);
 });
 
-/** S6's sharing faults that reorder their diagnostics (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing. */
-test(
-  "S6's held sharing faults are output-neutral in both orders",
-  { todo: "Depends on #1059 (diagnostics published in source order), TABLE r4.83 (4)" },
-  () => {
-    const differing: string[] = [];
-    for (const program of HELD_SHARING_FAULTS) {
-      const once = prepared(program);
-      for (const reversed of [false, true])
-        if (published(once, reversed).text !== withoutSharing(() => published(once, reversed)).text)
-          differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+/**
+ * S6's sharing faults that reordered their diagnostics on `main` (`REORDERING_SHARING_FAULTS`, TABLE r4.83 (4)): published in
+ * source order of their sites (r4.86 (1)), the same with the sharing on and off, and in both orders.
+ */
+test("S6's sharing faults that reordered their diagnostics are output-neutral in both orders", () => {
+  const differing: string[] = [];
+  const reordered: string[] = [];
+  for (const program of REORDERING_SHARING_FAULTS) {
+    const once = prepared(program);
+    const records: string[] = [];
+    for (const reversed of [false, true]) {
+      const shared = published(once, reversed);
+      if (shared.text !== withoutSharing(() => published(once, reversed)).text)
+        differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+      records.push(shared.record);
     }
-    assert.deepEqual(differing, []);
-  },
-);
+    if (records[0] !== records[1]) reordered.push(program.name);
+  }
+  assert.deepEqual(differing, []);
+  assert.deepEqual(reordered, []);
+});

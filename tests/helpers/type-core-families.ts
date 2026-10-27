@@ -5037,10 +5037,10 @@ export const DIRECT_INGRESS_PROGRAMS: readonly {
 }));
 
 /**
- * S6's sharing faults (TABLE r4.83 (4)), held from the differential: with the sharing on they publish their diagnostics
- * in another order, which publication in source order (#1059) repairs.
+ * S6's sharing faults (TABLE r4.83 (4)) that, with the sharing on, published their diagnostics in another order on
+ * `main`: publication in source order of their sites (r4.86 (1)) makes them neutral (`type-core-sharing`'s own test).
  */
-export const HELD_SHARING_FAULTS: readonly {
+export const REORDERING_SHARING_FAULTS: readonly {
   readonly name: string;
   readonly files: readonly SourceFile[];
 }[] = (
