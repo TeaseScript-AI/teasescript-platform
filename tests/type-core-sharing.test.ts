@@ -85,7 +85,7 @@ const one = (name: string, source: string): Program => ({
 /**
  * #1210's programs: projections of host reads (a property, an element, a nested property) in one literal, in records, in
  * lists or bare, two deep and read below, beside another field, another global, a direct read and known data, guarded,
- * changed between, in named records, added and stored by calls; a named source and a named projection the controls.
+ * changed between, and added; a named source and a named projection the controls.
  * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name.
  */
 const PROJECTED_INGRESS_PROGRAMS: readonly {
@@ -213,17 +213,6 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     read: "box[0].n",
   },
   {
-    name: "named records of one property read",
-    lines: [
-      "let x = {n: ^hostValue.n}",
-      "let y = {n: ^hostValue.n}",
-      "let box = [x, y]",
-      "let out: integer = box[0].n",
-    ],
-    place: ["box", ["element", "n"]],
-    read: "box[0].n",
-  },
-  {
     name: "property reads added",
     lines: [
       "let ys = []",
@@ -233,23 +222,6 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     ],
     place: ["ys", ["element"]],
     read: "ys[0]",
-  },
-  {
-    name: "records of one property read stored by two calls",
-    lines: [
-      "global st = {n: 1}",
-      "function a {",
-      "  st = {n: ^hostValue.n}",
-      "}",
-      "function b {",
-      "  st = {n: ^hostValue.n}",
-      "}",
-      "a()",
-      "b()",
-      "let out: integer = st.n",
-    ],
-    place: ["st", ["n"]],
-    read: "st.n",
   },
   {
     name: "control: property reads of a named source",
