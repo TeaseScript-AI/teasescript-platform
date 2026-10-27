@@ -7,7 +7,7 @@ import * as handles from "../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../adapters/relation.js";
 import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
-import type { Constraint, PlaceId, SourceSite } from "../graph.js";
+import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import {
   Admission,
   concrete,
@@ -264,6 +264,11 @@ const LITERALS: ReadonlySet<string> = new Set([
   "regexLiteral",
 ]);
 
+/** Whether an item is the unknown a stop leaves where nothing is settled (`STOPPED`'s). */
+function unsettledItem(item: Item): boolean {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
+}
+
 /** The walk's stages after admission's, in order (D4: a stop keeps every unit before it). */
 const STAGES = 4;
 
@@ -321,6 +326,8 @@ export class Consumers {
   readonly #elementSteps = new Map<PlaceId, string>();
   readonly #derivedChains = new Map<PlaceId, boolean>();
   readonly #anonymousChains = new Map<PlaceId, boolean>();
+  /** Per value read in the finishing path, the written type at its own path (`#writtenRead`), `null` for none. */
+  readonly #writtenReads = new Map<PlaceId, TypeTerm | null>();
   readonly #presence = new Map<
     string,
     { readonly state: "none" | "some" | "all"; readonly literal: Writer | null }
@@ -358,26 +365,91 @@ export class Consumers {
   }
 
   /**
-   * A value's items at a node and a path. In the finishing path a literal's own kind, which no proof decides (an error
-   * found there stands, D4 a′: what the literal is), and every other value `unknown` with the reason `budget`.
+   * A value's items at a node and a path: every consumer's one read, unstopped or finishing, so a stop's obligations
+   * come from the same consumers as an unstopped analysis's (TABLE r4.99). In the finishing path it reads what is
+   * settled (`#finishingRead`), `STOPPED` only where nothing is.
    */
   #valueItems(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
-    if (!this.#finishing) return this.#run(this.pass.values.valueItems(value, node, rest));
-    const { program } = this.pass;
+    return this.#finishing
+      ? this.#finishingRead(value, node, rest)
+      : this.#run(this.pass.values.valueItems(value, node, rest));
+  }
+
+  /**
+   * A read in the finishing path (D4 a′, TABLE r4.90, r4.99), never proving anything new: a literal's own kind, which no
+   * proof decides (an error found there stands); else the read itself, then its key's contract, as the analysis had
+   * finished them before the stop (`#run`: the solver answers only from what had finished); else the written type at
+   * its key's path, settled by its syntax; `STOPPED` (`unknown` with the reason `budget`) only where none of these is
+   * settled, so its consumer owes its check when the script runs.
+   */
+  #finishingRead(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
+    const { program, contract } = this.pass;
     const place = program.places[value]?.kind;
     const has = program.hasOf.get(value);
-    return rest.length === 0 &&
+    if (
+      rest.length === 0 &&
       place?.kind === "value" &&
       LITERALS.has(place.node) &&
       has?.length === 1 &&
       has[0]!.type.kind === "atom"
-      ? [makeItem(has[0]!.type.name, null, { cert: "def" })]
-      : STOPPED;
+    )
+      return [makeItem(has[0]!.type.name, null, { cert: "def" })];
+    if (this.pass.program.work.stopped !== null) {
+      const read = this.#run(this.pass.values.valueItems(value, node, rest));
+      if (!read.some(unsettledItem)) return read;
+    }
+    const contracted = this.#run(contract.contractOfValueAt(value, rest));
+    if (!contracted.some(unsettledItem)) return contracted;
+    const written = this.#writtenRead(value);
+    const term = written === null ? null : termAt(written, rest);
+    const tags = term === null ? [] : typeTags(term);
+    return tags.length === 0 || tags.includes("unknown")
+      ? STOPPED
+      : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
   }
 
-  /** A consumer's question of a value's items; in the finishing path every value is `STOPPED` (D4 a′). */
+  /**
+   * The written type a value's read holds at its own path: its binding's written type at the path its projections
+   * read; each value's made from its owner's by its step, so a chain of k projections takes k steps.
+   */
+  #writtenRead(value: PlaceId): TypeTerm | null {
+    const { program } = this.pass;
+    const chain: PlaceId[] = [];
+    let at = value;
+    for (
+      let projection = program.projOf.get(at);
+      projection !== undefined && !this.#writtenReads.has(at);
+      projection = program.projOf.get(at)
+    ) {
+      chain.push(at);
+      at = projection.owner;
+    }
+    let term = this.#writtenReads.get(at);
+    if (term === undefined) {
+      program.work.charge("checks");
+      const binding = program.occurrenceOf.get(at);
+      const target = binding === undefined ? null : program.targetRoot(binding);
+      const written = target === null ? null : writtenOf(program.place(target.root).kind);
+      term = written === null ? null : termAt(written, target!.path);
+      this.#writtenReads.set(at, term);
+    }
+    for (const next of chain.reverse()) {
+      program.work.charge("checks");
+      const step = program.projOf.get(next)!.step;
+      // (a loop's element read is the loop's own binding, read by its own occurrences)
+      term = term === null || step === "iteration" ? null : termAt(term, [stepName(step)]);
+      this.#writtenReads.set(next, term);
+    }
+    return term ?? null;
+  }
+
+  /**
+   * A consumer's question of the solver. In the finishing path after a stop the solver answers only from what had
+   * finished, else `STOPPED` (`Solver.run`); where nothing stopped (the units nested past the nesting limit) it is not
+   * asked at all.
+   */
   #run(work: Work<readonly Item[]>): readonly Item[] {
-    return this.#finishing ? STOPPED : this.#solve(work);
+    return this.#finishing && this.pass.program.work.stopped === null ? STOPPED : this.#solve(work);
   }
 
   /** A demand of the solver, its work counted to the read that asked it (S3 §5). */

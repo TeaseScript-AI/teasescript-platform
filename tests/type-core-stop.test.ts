@@ -10,10 +10,12 @@ import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { planChecks, stopProblems, type Globals } from "./helpers/type-core-stop-oracle.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
@@ -51,22 +53,6 @@ function compiled(source: string, allowance = ALLOWANCE) {
       };
     }),
   );
-}
-
-/** A plan's checked stores: each `typeCheck` (place and type) with the span of what holds it, sorted. */
-function storeChecks(plan: unknown): string[] {
-  const out: string[] = [];
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) for (const item of node) walk(item);
-    else if (node !== null && typeof node === "object") {
-      const fields = new Map(Object.entries(node));
-      if (fields.get("typeCheck") !== undefined)
-        out.push(JSON.stringify([fields.get("span") ?? null, fields.get("typeCheck")]));
-      for (const value of fields.values()) walk(value);
-    }
-  };
-  walk(plan);
-  return out.sort();
 }
 
 /** A run of a plan to its end with `hostValue`: what it said and where it failed. */
@@ -114,13 +100,16 @@ test("a check the stop moves to the runtime is decided, planned and run, in both
     `info TSV076 @${value}:${value + 9}`,
     `warning TSV076 @${value}:${value + 9}`,
   ]);
-  // the plan: valid, its store checked exactly as the unstopped compile's (place, type, span)
+  // the plan: valid, every check it carries as the unstopped compile's (the store's: place, type, span)
   assert.ok(plan !== null);
   assert.deepEqual(validateInstructionPlan(plan).errors, []);
   const unstopped = compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan;
   assert.ok(unstopped !== null);
-  assert.deepEqual(storeChecks(plan), storeChecks(unstopped));
-  assert.equal(storeChecks(plan).length, 1);
+  assert.deepEqual(planChecks(plan), planChecks(unstopped));
+  assert.deepEqual(
+    [...planChecks(plan).keys()].filter((at) => at.startsWith("typeCheck|")).length,
+    1,
+  );
   // the execution: a whole number reaches the next effect, a fraction stops at the store's check, its exact span
   assert.deepEqual(ran(plan, 1), { said: ["AFTER"], failure: null });
   assert.deepEqual(ran(plan, 1.5), { said: [], failure: `TSR058@${value}:${value + 9}` });
@@ -262,85 +251,114 @@ test("after a stop a typed default's own literal and the call's expected type an
 });
 
 /**
- * TABLE r4.90: what a phase settled is never discarded by a later one. A stop in a settled pass's walk or publication
- * keeps admission's contracts (an inferred scalar's, a record's), the findings (an error a copy brings, not a literal's)
- * and the quiet proofs, exactly as the unstopped compile has them: its diagnostics besides the stop's own, its plan's
- * checked stores (place, type, span), and the span a violating value fails at. The stop at the first unit of each such
- * phase and at its last, in both orders, with the sharing on and off (the every-unit sweep runs outside CI).
+ * TABLE r4.90, r4.99: what a phase settled is never discarded by a later one, and a stop owes what the unstopped
+ * analysis owes, through the same consumers (the stop oracle, `helpers/type-core-stop-oracle.ts`). A stop in a settled
+ * pass's walk or publication keeps admission's contracts (an inferred scalar's, a record's), the findings (an error a
+ * copy brings, not a literal's), the quiet proofs and every check the plan carries (a default's against a written or
+ * decided element type, Astra's B1 of round 2, beside an `otherwise`). Each mode's phases found in that mode; the stop
+ * at the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside CI).
  */
-test("a stop after admission settled keeps its contracts, findings and quiet proofs exactly", () => {
+test("a stop after admission settled keeps its contracts, findings, quiet proofs and checks", () => {
   const options = { globals: ["hostValue", "hostOther"] };
   const object = (props: Record<string, SerializableRuntimeValue>): SerializableRuntimeValue => ({
     kind: "object",
     properties: Object.entries(props).map(([name, value]) => ({ name, value })),
   });
-  const cases: readonly (readonly [string, readonly SerializableRuntimeValue[]])[] = [
-    ['let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n', [2, 1.5]],
+  const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntimeValue = 2) => ({
+    hostValue,
+    hostOther,
+  });
+  const cases: readonly (readonly [string, readonly Globals[], readonly Globals[]])[] = [
+    [
+      'let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n',
+      [host(2)],
+      [host(1.5)],
+    ],
     [
       'let parcel = {count: 1}\nparcel = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n',
-      [object({ count: 2 }), object({ count: 1.5 })],
+      [host(object({ count: 2 }))],
+      [host(object({ count: 1.5 }))],
     ],
     [
       'let good = {n:1}\nlet bad = {n:"x"}\nlet copy = good\ncopy = bad\nsay copy.n\nlet n: integer = hostValue\nexit\n',
       [],
+      [],
     ],
-    ['let count = 2\nrepeat count {}\nlet n: integer = hostValue\nsay "DONE"\nexit\n', [2, 1.5]],
+    [
+      'let count = 2\nrepeat count {}\nlet n: integer = hostValue\nsay "DONE"\nexit\n',
+      [host(2)],
+      [host(1.5)],
+    ],
+    [
+      'let items: integer[] = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
+      [host(2, 3)],
+      [host("bad", 3)],
+    ],
+    [
+      'let items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
+      [host(2, 3)],
+      [host("bad", 3)],
+    ],
+    [
+      "let anchor = 4\nlet value = anchor otherwise hostValue\nlet items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay value\nexit\n",
+      [host(2, 3)],
+      [host("bad", 3)],
+    ],
   ];
-  for (const [source, values] of cases) {
-    const request = coreRequest([{ path: "main.tease", source }], options.globals);
-    assert.ok(request !== null);
-    // the first and last unit of each settled phase: the stops below the total, down to the first that is not settled
-    const total = analyseCore(request).budget.total;
-    const stops = new Map<string, number[]>();
-    for (let allowance = total - 1; allowance > 0; allowance -= 1) {
-      const { stoppedIn, settled } = withTestAllowance(allowance, () =>
-        analyseCore(request),
-      ).budget;
-      if (!settled || stoppedIn === null) break;
-      stops.set(stoppedIn, [allowance, ...(stops.get(stoppedIn) ?? [])]);
-    }
-    assert.ok(stops.has("publication"), source);
-    const compile = () => compileSourceWithBackend(source, options, CORE_BACKEND);
-    const unstopped = compile();
-    const shown = (result: ReturnType<typeof compile>): string[] =>
-      result.diagnostics
-        .filter((d) => d.code !== "TSV076")
-        .map((d) => `${d.severity} ${d.code} @${d.span.start.offset}:${d.span.end.offset}`);
-    const runs = (plan: NonNullable<ReturnType<typeof compile>["plan"]>) =>
-      values.map((hostValue) => {
-        const result = run(
-          plan,
-          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue, hostOther: 2 } }),
-        );
-        const failure = result.events.find((event) => event.kind === "runtimeFailure");
-        return failure?.kind === "runtimeFailure"
-          ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
-          : "none";
-      });
-    for (const [phase, allowances] of stops)
-      for (const allowance of [allowances[0]!, allowances.at(-1)!])
-        for (const sharing of [true, false]) {
-          const result = withTestAllowance(allowance, () =>
-            sharing ? inBothOrders(compile) : withoutSharing(() => inBothOrders(compile)),
-          );
-          const where = `${source} ${phase} @${allowance} sharing: ${sharing}`;
-          if (phase === "publication") assert.deepEqual(shown(result), shown(unstopped), where);
-          else
-            for (const diagnostic of shown(unstopped))
-              assert.ok(
-                shown(result).includes(diagnostic) ||
-                  result.diagnostics.some(
-                    (d) =>
-                      d.severity === "warning" &&
-                      `@${d.span.start.offset}:${d.span.end.offset}` === diagnostic.split(" ")[2],
-                  ),
-                `${where}: ${diagnostic}`,
-              );
-          assert.equal(result.plan === null, unstopped.plan === null, where);
-          if (result.plan !== null && unstopped.plan !== null) {
-            assert.deepEqual(storeChecks(result.plan), storeChecks(unstopped.plan), where);
-            assert.deepEqual(runs(result.plan), runs(unstopped.plan), where);
-          }
+  const modes = [
+    { reversed: false, sharing: true },
+    { reversed: true, sharing: true },
+    { reversed: false, sharing: false },
+    { reversed: true, sharing: false },
+  ];
+  for (const [source, fitting, violating] of cases)
+    for (const { reversed, sharing } of modes) {
+      const inMode = <T>(make: () => T): T => {
+        const ordered = (): T =>
+          reversed
+            ? withSolverSeam({ reverseWorklist: true }, () =>
+                withConsumerOrder((list) => [...list].reverse(), make),
+              )
+            : make();
+        return sharing ? ordered() : withoutSharing(ordered);
+      };
+      const request = coreRequest([{ path: "main.tease", source }], options.globals);
+      assert.ok(request !== null);
+      const places = new CoreProgram(request).places;
+      const analyse = (allowance: number): Answers =>
+        withTestAllowance(allowance, () => inMode(() => analyseCore(request)));
+      const compile = () => inMode(() => compileSourceWithBackend(source, options, CORE_BACKEND));
+      // this mode's settled phases: the stops below its total, down to the first that is not settled
+      const total = inMode(() => analyseCore(request)).budget.total;
+      const stops = new Map<string, number[]>();
+      for (let allowance = total - 1; allowance > 0; allowance -= 1) {
+        const { stoppedIn, settled } = analyse(allowance).budget;
+        if (!settled || stoppedIn === null) break;
+        stops.set(stoppedIn, [allowance, ...(stops.get(stoppedIn) ?? [])]);
+      }
+      const where = `${source} reversed: ${reversed} sharing: ${sharing}`;
+      // (a settled phase at least: a program without boundaries charges its publication nothing)
+      assert.ok(stops.has("walk") || stops.has("publication"), where);
+      const unstopped = compile();
+      for (const [phase, allowances] of stops)
+        for (const allowance of [allowances[0]!, allowances.at(-1)!]) {
+          const answers = analyse(allowance);
+          assert.equal(answers.budget.stoppedIn, phase, `${where} @${allowance}`);
+          const undecided = (place: string, path: readonly string[]): boolean => {
+            const found = places.find((each) => `'${each.label}'` === place);
+            return found !== undefined && answers.place(found.id, path).admitted.by === "undecided";
+          };
+          const problems = stopProblems({
+            unstopped,
+            stopped: withTestAllowance(allowance, compile),
+            settled: true,
+            exact: phase === "publication",
+            deferred: answers.budget.deferred.map((d) => `${d.code} ${d.site.start}:${d.site.end}`),
+            undecided,
+            fitting,
+            violating,
+          });
+          assert.deepEqual(problems, [], `${where} ${phase} @${allowance}`);
         }
-  }
+    }
 });
