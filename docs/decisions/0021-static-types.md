@@ -2,7 +2,8 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25
+rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25; where an integer is required (rule
+1.2): Owner decision of 2026-10-27 (#1173, #1174)
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -47,11 +48,20 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such a variable
    widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
    `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A declared type stays strict, such as `integer`,
-   `integer[]`, or `integer set`. A read sees what the variable holds at that point: after `let i = 0`, `items[i]`
-   before `i = i / 2` is valid, because `i` can have received only whole numbers there. A value that may not be whole at
-   an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where the
-   compiler proves that it reaches the use, as `items[i]` after `i = i / 2`; where the compiler cannot tell whether it
-   does, the use is warned and the value checked when the script runs (rule 1.10).
+   `integer[]`, or `integer set`. A read sees what the variable holds at that point, except where an integer is
+   required: there the place's type decides, not the values that can reach that read, and a `number`, also a place of
+   type `number`, is a compile error (owner decision of 2026-10-27). An integer is required at an integer-only use,
+   which is a repeat count, a list index, the index of a list's `get`, the position of `removeAt`, or the count of
+   `take` or `takeLast`, and by a written `integer` place that a value is stored into: a variable, parameter, or result
+   with a written `integer` type, an element of a written `integer[]` or `integer set`, or a value of a written
+   `integer dict`. A place widened by this rule is a `number` wherever the non-whole value comes from, also at a read
+   before the store that brings it: after `let speed = 1`, `let count: integer = speed` before `speed = speed * 1.5` is
+   an error. So is a place with a written `number` type: `repeat n {}` after `let n: number = 1` is an error. The error
+   names the line that makes the place a `number`; at an integer-only use it suggests `round`, `floor`, or `ceil`, or a
+   separate variable for the non-whole value, and a store keeps the suggestions of rule 2.2. Only a type test such as
+   `if n is integer` narrows such a place to `integer` (rules 4–5), never an assignment of a whole number. A value the
+   compiler cannot know is not rejected (rule 1.7): at an integer-only use, it is warned and checked when the script
+   runs.
 3. An empty list or set takes its element type from the earliest element added or assigned. A list or set literal has
    one element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`, and the earliest
@@ -106,12 +116,14 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
     now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a proof, and
     warns everywhere else, so it never gives a false error and never accepts silently: an error means that the code is
     certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is an error only
-    where the run can really happen and the compiler proves it, as for `items[i]` after an unconditional `i = i / 2`
-    (rule 1.2). Which cases the compiler proves is its quality, not a language rule: the checker starts as a coarse
-    sound core that gives an exact answer only where it has a simple proof, and precision rules are added one at a
-    time, each with its own review and performance check, so that a warning becomes an error where the code is
-    certainly wrong, or disappears where it is certainly fine. The required-check rules stay: a use that needs a check
-    and has none on some route is an error (rules 1.9 and 5.6).
+    where the run can really happen and the compiler proves it, as for `copy.add(3)` after `let backpack = []`, an
+    unconditional `backpack.add("key")`, and `let copy = backpack`. A `number` where an integer is required breaks a
+    type rule (rule 1.2), so it is an error even where the value would be whole when the script runs. Which cases the
+    compiler proves is its quality, not a language rule: the checker starts as a coarse sound core that gives an exact
+    answer only where it has a simple proof, and precision rules are added one at a time, each with its own review and
+    performance check, so that a warning becomes an error where the code is certainly wrong, or disappears where it is
+    certainly fine. The required-check rules stay: a use that needs a check and has none on some route is an error
+    (rules 1.9 and 5.6).
     The compiler's work budget follows this rule: a place over it, and the checks that need what the compiler would
     have found, are checked when the script runs, with a warning there; every other use, also of the same variable or
     function, stays checked at compile time, and a known violation stays an error. A limit of the compiler is thus
@@ -183,7 +195,8 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    `while` body, and after an early `return`, `exit`, `break`, or `continue`. `x != null` and `x == null` narrow like
    `x is not null` and `x is null`.
 2. An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-   `reward` is known to be an `integer`.
+   `reward` is known to be an `integer`. Where an integer is required, a place of type `number` stays a `number` after
+   an assignment of a whole number (rule 1.2).
 3. Tests can overlap, because an integer is also a number. An `else` branch keeps only what the test provably excludes.
 4. A check on a stable path narrows like a check on a variable: a variable followed by properties, fixed indexes or
    keys, or indexes and keys held in plain variables, as in `rooms[i].door.locked`, where each read selects the same
@@ -254,6 +267,9 @@ union would be an inferred union (rule 3.4).
 - The O4 rules change what compiles when the compiler switches to the new type checker; scripts that rely on a
   property added by assignment, a union of whole collections, a mixed fallback, or two kinds in one place need a
   literal with every property, a union inside the collection, or a written union.
+- Where an integer is required, a place of type `number` is an error even where it holds a whole number, as
+  `repeat speed {}` before `speed = speed * 1.5` or `repeat n {}` after `let n: number = 1`: the author rounds, keeps
+  the non-whole value in a separate variable, or tests with `is integer`.
 
 ## Alternatives considered
 
@@ -285,16 +301,21 @@ union would be an inferred union (rule 3.4).
 - A compile error for a place over the work budget or a script over the total budget, or for a written check the
   compiler cannot keep: it rejects valid code for a limit of the compiler.
 - A compile error for code that may go wrong, as mypy gives: clear at first sight, but a false error confuses beginners
-  most, and an error should always mean that the code is certainly wrong.
+  most, and an error should always mean that the code is certainly wrong. A `number` where an integer is required is
+  not such a case: it breaks a type rule (rule 1.2), as in mypy and other typed languages.
 - Exact answers everywhere through an ever more precise analysis: its plan reviews kept finding new blockers of the
   same kinds, so precision comes one rule at a time instead.
 - A compile error for a store that reads its own place through a function: it needs another representation, with
   symbolic obligations, and a further design round.
 - An error or a warning at the copy itself for a property that reaches a place only through copies of whole objects
   (rule 1.1): it makes the compiler's work grow with the number of copies times the number of properties.
-- Accepting, at an integer-only use, a value that may not be whole where the compiler proves that it reaches the use
-  (rule 1.2), with a check when the script runs as in Lua, or with a warning: `items[score / 2]` would fail only when
-  `score` is odd.
+- Accepting a `number` where an integer is required (rule 1.2), with a check when the script runs as in Lua, or with a
+  warning: `items[score / 2]` would fail only when `score` is odd.
+- Checking a place where an integer is required by the values that can reach that read (the earlier rule 1.2), with an
+  error where a non-whole value provably reaches it and a warning where one may: every other type is judged per place,
+  and mainstream typed languages check a use against the type; its results were hard to explain, such as a warning for
+  `repeat n {}` inside `repeat 3 { ... }` after `let n = 1.5` and `n = 1`; an ignored warning ends the player's
+  session; and the fix, rounding or a separate variable, is simple.
 - A parameter typed from its default, as a `let` is from its start value (the earlier rule 1.5): `shake(0.5)` was an
   error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
 - The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19
