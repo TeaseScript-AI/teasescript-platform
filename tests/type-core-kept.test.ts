@@ -261,14 +261,34 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #forest id": [1, "a place, a callable and two positions"],
 };
 
-/** The arguments of the call whose `(` is at `open`, split at their top-level commas. */
+/** The offset just past the string or template that opens at `at` (a template's interpolations read whole). */
+function pastLiteral(text: string, at: number): number {
+  const quote = text[at]!;
+  let braces = 0;
+  for (let index = at + 1; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === "\\") index += 1;
+    else if (quote === "`" && braces === 0 && text.startsWith("${", index)) {
+      braces = 1;
+      index += 1;
+    } else if (braces > 0) braces += char === "{" ? 1 : char === "}" ? -1 : 0;
+    else if (char === quote) return index + 1;
+  }
+  return text.length;
+}
+
+/**
+ * The arguments of the call whose `(` is at `open`, split at their top-level commas; a delimiter inside a string or a
+ * template is text (`.set(")", text)`).
+ */
 function callArguments(text: string, open: number): string[] {
   const out: string[] = [];
   let depth = 0;
   let from = open + 1;
   for (let at = open + 1; at < text.length; at += 1) {
     const char = text[at]!;
-    if ("([{".includes(char)) depth += 1;
+    if (char === '"' || char === "'" || char === "`") at = pastLiteral(text, at) - 1;
+    else if ("([{".includes(char)) depth += 1;
     else if (")]}".includes(char)) {
       if (depth === 0) {
         out.push(text.slice(from, at).trim());
@@ -415,6 +435,10 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const id = `k${key}`;",
     "    this.#structures.push(id);",
     "  }",
+    "  #quoted(key: string) {",
+    "    const text = joinParts(key, 1);",
+    '    this.memo.set(")", text);',
+    "  }",
     "  #charged(key: string) {",
     "    const memoKey = joinParts(key, 2);",
     "    keepText(this.#work, memoKey.length);",
@@ -426,6 +450,11 @@ test("the scan finds a plain-made text kept uncharged", () => {
   ].join("\n");
   assert.deepEqual(
     [...plainStores("probe.ts", source)].map(([key, lines]) => `${key} ${lines.length}`),
-    ["probe.ts #snapshot snapshot 1", "probe.ts #distinct text 1", "probe.ts #structure id 1"],
+    [
+      "probe.ts #snapshot snapshot 1",
+      "probe.ts #distinct text 1",
+      "probe.ts #structure id 1",
+      "probe.ts #quoted text 1",
+    ],
   );
 });

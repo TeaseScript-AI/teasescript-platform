@@ -7,6 +7,7 @@ import {
   keepText,
   keptParts,
   keptSplit,
+  keptSlice,
   keptSteps,
   keptText,
   pathText,
@@ -2769,6 +2770,9 @@ export class Admission {
           (program.places[y.value!]?.site?.start ?? 0),
       );
     };
+    // a task: its value and node, its path, the strip still read into it, whether below an operation, its chain of
+    // operations, whether it is a carrier's own contribution, whether single, its evaluation key; each array a task or a
+    // stop keeps is the one it came from, shared, or made by a kept helper
     const pending: (readonly [
       PlaceId,
       FlowNode,
@@ -2815,12 +2819,14 @@ export class Admission {
       // a literal read into stands by its cells on the path
       if (literal && strip.length > 0) {
         const next = cells(current, strip[0]!);
+        // (its cells' tasks share one rest of the strip, charged as kept)
+        const below = next.length === 0 ? strip : keptSlice(this.#work, strip, 1);
         for (let index = next.length - 1; index >= 0; index -= 1)
           pending.push([
             next[index]![0].value!,
             next[index]![0].node ?? at,
             path,
-            strip.slice(1),
+            below,
             deep,
             via,
             false,
