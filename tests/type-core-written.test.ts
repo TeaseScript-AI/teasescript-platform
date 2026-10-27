@@ -15,6 +15,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
+import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -36,9 +37,12 @@ import {
  * the runs (each host value that fits says DONE, each other one stops at TSR058 at the first checked store's value,
  * nothing said). The decision layer also holds the outcome and every diagnostic: a runtime-check warning at each store
  * that brings a host value to a decided level, nothing else. Whether the candidate route takes a source is each row's
- * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone.
- * Each exact source is analysed and planned once per mode, the two orders' plans compared whole, and each distinct plan
- * runs its host values once; every row that holds the source is compared with that.
+ * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone
+ * (not whether the route still leaves it out: the slice grows). Each exact source is analysed once per mode and planned
+ * in each where its row is executable, else in the source order alone; the two orders' plans are compared whole, and
+ * each distinct plan runs its host values once; every row that holds the source is compared with that. The same
+ * analyses and plans give the sharing differential (TABLE r4.72, `type-core-standing.ts`) of the sources of the four
+ * matrices checked so, which `type-core-sharing.test.ts` runs for every other program.
  * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
  * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads
  * the declarations alone), each placement's first error and valid control in the decision layer too.
@@ -76,10 +80,17 @@ function checksOf(plan: InstructionPlan): string[] {
 /** The host globals a source may read: the host value, and a host-started binding's own (`WrittenCase.globals`). */
 const GLOBALS = ["hostValue", "hostInit"];
 
-/** A source's request and its bindings' ids, once per exact source (a `CoreProgram` builds its graph and dominators). */
+/**
+ * A source's request, its bindings' ids by name and every binding's place, once per exact source (a `CoreProgram` builds
+ * its graph and dominators).
+ */
 const prepared = new Map<
   string,
-  { readonly request: CoreAnalysisRequest; readonly ids: Map<string, PlaceId> }
+  {
+    readonly request: CoreAnalysisRequest;
+    readonly ids: Map<string, PlaceId>;
+    readonly bindings: readonly PlaceId[];
+  }
 >();
 
 function prepare(source: string) {
@@ -88,9 +99,13 @@ function prepare(source: string) {
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
     assert.ok(request !== null, `${JSON.stringify(source)}: its file parses and resolves`);
     const ids = new Map<string, PlaceId>();
+    const bindings: PlaceId[] = [];
     for (const { id, kind } of new CoreProgram(request).places)
-      if (kind.kind === "binding" && !ids.has(kind.name)) ids.set(kind.name, id);
-    prepared.set(source, (known = { request, ids }));
+      if (kind.kind === "binding") {
+        bindings.push(id);
+        if (!ids.has(kind.name)) ids.set(kind.name, id);
+      }
+    prepared.set(source, (known = { request, ids, bindings }));
   }
   return known;
 }
@@ -126,11 +141,11 @@ function lineAt(source: string, offset: number): string {
 const elementsOf = (c: WrittenCase): string[] => Array<string>(c.levels.length - 1).fill("element");
 
 /**
- * The decision of one source in one order (its analysis released before the route compiles), and its whole plan where
- * the route takes it.
+ * The decision of one source in one mode and what its analysis publishes (`publishedAnswers`; the analysis released
+ * before the route compiles), and the route's plan or rejection where `planned` (`publishedRoute`).
  */
-function observe(c: WrittenCase) {
-  const { request, ids } = prepare(c.source);
+function observe(c: WrittenCase, planned: boolean) {
+  const { request, ids, bindings } = prepare(c.source);
   const decided = (() => {
     const answers = analyseCore(request);
     return {
@@ -143,16 +158,13 @@ function observe(c: WrittenCase) {
           ),
         ),
       ].sort(),
+      published: publishedAnswers(answers, bindings, ["main.tease"]),
     };
   })();
-  let plan: InstructionPlan | null | "outside";
-  try {
-    plan = compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND).plan;
-  } catch (error) {
-    if (!(error instanceof CandidateOutsideSlice)) throw error;
-    plan = "outside";
-  }
-  return { ...decided, plan };
+  const route = planned
+    ? publishedRoute([{ path: "main.tease", source: c.source }], GLOBALS)
+    : null;
+  return { ...decided, route };
 }
 
 /** A plan's run of each host value of `c`, where the route takes the source. */
@@ -166,27 +178,69 @@ function runsOf(c: WrittenCase, plan: InstructionPlan | null | "outside") {
 }
 
 /**
- * Every layer of one exact input with the sharing on and off: each mode's decision and checked stores, analysed and
- * compiled in both orders (`inBothOrders` compares the whole plans), and the runs of each distinct plan, a plan equal
- * to the sharing's own running nothing again.
+ * Every layer of one exact input in both orders with the sharing on and off: each mode's decision, compared between the
+ * orders; its checked stores, planned in both orders where the row is executable (the whole plans compared), else in
+ * the source order alone; and the runs of each distinct plan of an executable row, a plan equal to the sharing's own
+ * running nothing again. `standing` compares what the input publishes: the orders where the sharing changes it, whether
+ * its record changes with the order, the orders whose record is out of source order of its sites, and whether both
+ * source-order modes planned it.
  */
 function observeModes(c: WrittenCase) {
-  const modes = [
-    inBothOrders(() => observe(c)),
-    inBothOrders(() => withoutSharing(() => observe(c))),
-  ];
-  const shared = runsOf(c, modes[0]!.plan);
-  return modes.map(({ plan, ...decided }, index) => ({
-    ...decided,
-    checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
-    runs: index === 0 || isDeepStrictEqual(plan, modes[0]!.plan) ? shared : runsOf(c, plan),
-  }));
+  const inMode = (reverse: boolean, shared: boolean) => {
+    const run = () => observe(c, c.executable || !reverse);
+    const mode = () => (shared ? run() : withoutSharing(run));
+    return reverse
+      ? withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), mode),
+        )
+      : mode();
+  };
+  // (each order's modes, the sharing on and off)
+  const forward = [inMode(false, true), inMode(false, false)];
+  const reversed = [inMode(true, true), inMode(true, false)];
+  const orders = [
+    ["source order", forward],
+    ["reversed", reversed],
+  ] as const;
+  const standing = {
+    differing: orders.flatMap(([order, [on, off]]) =>
+      on!.published.text === off!.published.text && on!.route?.text === off!.route?.text
+        ? []
+        : [order],
+    ),
+    reordered: forward[0]!.published.record !== reversed[0]!.published.record,
+    unsited: orders.flatMap(([order, [on]]) => (on!.published.sited ? [] : [order])),
+    planned: forward.every(({ route }) => route !== null),
+  };
+  const decided = ({ levels, boundaries, outcome, diagnostics }: ReturnType<typeof observe>) => ({
+    levels,
+    boundaries,
+    outcome,
+    diagnostics,
+  });
+  const plans = forward.map(({ route }) => route!.plan);
+  for (const [index, other] of reversed.entries()) {
+    assert.deepEqual(decided(other), decided(forward[index]!));
+    if (c.executable) assert.deepEqual(other.route!.plan, plans[index]);
+  }
+  const shared = c.executable ? runsOf(c, plans[0]!) : [];
+  return {
+    modes: plans.map((plan, index) => ({
+      ...decided(forward[index]!),
+      checks: plan === "outside" ? "outside" : plan === null ? "no plan" : checksOf(plan),
+      runs:
+        !c.executable || index === 0 || isDeepStrictEqual(plan, plans[0])
+          ? shared
+          : runsOf(c, plan),
+    })),
+    standing,
+  };
 }
 
 /** Each exact input's observations, the sharing on and off, shared by every row that holds it (Astra's D3). */
 const observations = new Map<string, ReturnType<typeof observeModes>>();
 
-function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observeModes>[number] {
+function observation(c: WrittenCase): ReturnType<typeof observeModes> {
   const key = JSON.stringify([
     c.source,
     c.place,
@@ -196,7 +250,11 @@ function observed(c: WrittenCase, shared: boolean): ReturnType<typeof observeMod
   ]);
   let found = observations.get(key);
   if (found === undefined) observations.set(key, (found = observeModes(c)));
-  return found[shared ? 0 : 1]!;
+  return found;
+}
+
+function observed(c: WrittenCase, shared: boolean) {
+  return observation(c).modes[shared ? 0 : 1]!;
 }
 
 /**
@@ -231,13 +289,12 @@ function failing(cases: readonly WrittenCase[]): {
       )
         wrong.push(`${name}: ${seen.outcome}, diagnostics ${JSON.stringify(seen.diagnostics)}`);
       const inside = seen.checks !== "outside";
-      if (inside !== c.executable)
-        wrong.push(`${name}: the route ${inside ? "takes" : "does not take"} it`);
+      if (c.executable && !inside) wrong.push(`${name}: the route does not take it`);
       if (shared) {
         taken.forms.set(c.form, (taken.forms.get(c.form) ?? false) || inside);
         taken.decisions.set(c.decision, (taken.decisions.get(c.decision) ?? false) || inside);
       }
-      if (!inside) continue;
+      if (!c.executable || !inside) continue;
       if (shared) full += 1;
       const checks = seen.checks;
       if (checks === "no plan" || JSON.stringify(checks) !== JSON.stringify(c.checks))
@@ -630,6 +687,43 @@ test("a copy of an unannotated parameter whose default copies a written binding 
     `${DEFAULT_CHAIN_MATRIX.length} sources (${full} in all three layers; a function is outside the candidate slice), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
+});
+
+/**
+ * The sharing differential (TABLE r4.72, r4.86) of the four matrices' sources above, each exact source once, on those
+ * tests' observations (made here where those tests did not run): in each order its answers, every binding's
+ * admitted types at its root and its element and the candidate route's plan or rejection (in the source order alone
+ * where its row is not executable) are byte-identical with the sharing on and off; its record is the same in both
+ * orders, each of its lists in source order of its sites.
+ */
+test("each source of the written-domain, V30 type, inferred-copy and default-chain matrices is output-neutral with the sharing on and off, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
+  const differing: string[] = [];
+  const reordered: string[] = [];
+  const unsited: string[] = [];
+  const sources = new Set<string>();
+  let planned = 0;
+  for (const c of [
+    ...WRITTEN_DOMAIN_MATRIX,
+    ...V30_TYPE_MATRIX,
+    ...INFERRED_COPY_MATRIX,
+    ...DEFAULT_CHAIN_MATRIX,
+  ]) {
+    if (sources.has(c.source)) continue;
+    sources.add(c.source);
+    const { standing } = observation(c);
+    differing.push(...standing.differing.map((order) => `${c.name} (${order})`));
+    if (standing.reordered) reordered.push(c.name);
+    unsited.push(...standing.unsited.map((order) => `${c.name} (${order})`));
+    if (standing.planned) planned += 1;
+  }
+  t.diagnostic(
+    `${sources.size} sources in both orders with the sharing on and off, ${planned} of them planned so in the ` +
+      "source order",
+  );
+  assert.deepEqual(differing, []);
+  assert.deepEqual(reordered, []);
+  assert.deepEqual(unsited, []);
+  assert.equal(planned, sources.size);
 });
 
 test("a copy keeps its source's written type past a later copy back, and agrees with its source on a cycle of copies (Sol r2)", () => {

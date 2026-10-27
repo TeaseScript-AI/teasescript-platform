@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../src/compiler.js";
-import { analyseCore, coreResult } from "../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
-import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
@@ -34,15 +31,12 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
+import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
 import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
 import {
-  DEFAULT_CHAIN_MATRIX,
-  INFERRED_COPY_MATRIX,
   OBJECT_PROPERTY_MATRIX,
   UNION_RULE_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
-  V30_TYPE_MATRIX,
-  WRITTEN_DOMAIN_MATRIX,
 } from "./helpers/type-core-written.js";
 
 /*
@@ -52,11 +46,13 @@ import {
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
- * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the
- * test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own
- * tests run each source in both orders) run in the source order only, every other program in both; a local `npm run
- * check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for
- * the matrices).
+ * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-standing.ts`).
+ * Any difference fails the test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices'
+ * sources (whose own tests run each source in both orders) run in the source order only, every other program in both;
+ * a local `npm run check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26,
+ * and the lead's for the matrices). `type-core-written.test.ts` compares the sources of the matrices it checks in three
+ * layers (`WRITTEN_DOMAIN_MATRIX`, `V30_TYPE_MATRIX`, `INFERRED_COPY_MATRIX`, `DEFAULT_CHAIN_MATRIX`) on the analyses
+ * and plans its own tests observe.
  *
  * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
  * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
@@ -304,15 +300,11 @@ function programs(): Program[] {
     out.push(one(`#1210 ${name}`, unmarked(lines).source));
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
-  // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
+  // the merged S6's other written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
   const sources = new Set<string>();
   for (const { name, source } of [
-    ...WRITTEN_DOMAIN_MATRIX,
     ...UNRESTRICTED_COLLECTION_MATRIX,
-    ...V30_TYPE_MATRIX,
-    ...INFERRED_COPY_MATRIX,
     ...OBJECT_PROPERTY_MATRIX,
-    ...DEFAULT_CHAIN_MATRIX,
     ...UNION_RULE_MATRIX,
   ])
     if (!sources.has(source)) {
@@ -360,67 +352,21 @@ function inOrder<T>(reversed: boolean, callback: () => T): T {
     : callback();
 }
 
-/** Two sites as (file index, start, end), in source order. */
-function compareSites(a: readonly number[], b: readonly number[]): number {
-  return a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
-}
-
 /**
- * What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection; the
- * record alone (its outcome, diagnostics and checks, and the same serialized); and whether each of its lists is in
- * source order of its sites (r4.86 (1)).
+ * What a program publishes, in one order (`publishedAnswers`, `publishedRoute`): the answers, each binding's admitted
+ * types, the plan or the rejection; the record alone; and whether each of its lists is in source order of its sites.
  */
 function published(
   { program, request, bindings }: Prepared,
   reversed: boolean,
 ): { readonly text: string; readonly record: string; readonly sited: boolean } {
-  const answers = inOrder(reversed, () => analyseCore(request));
-  const admitted = bindings.map((place) => [
-    place,
-    answers.place(place, []).admitted,
-    answers.place(place, ["element"]).admitted,
-  ]);
-  const lowered = (() => {
-    try {
-      const result = inOrder(reversed, () =>
-        compileProjectWithBackend(program.files, { globals: GLOBALS }, CORE_BACKEND),
-      );
-      return { plan: result.plan, diagnostics: result.diagnostics };
-    } catch (error) {
-      if (!(error instanceof CandidateOutsideSlice)) throw error;
-      return { outside: error.what };
-    }
-  })();
-  const record = {
-    outcome: answers.outcome,
-    diagnostics: answers.diagnostics,
-    checks: answers.checks,
-  };
-  const paths = program.files.map((file) => file.path);
-  const serialized = coreRecord(coreResult(answers), paths);
-  const sitesOf = (
-    list: readonly {
-      readonly site: { readonly file: number; readonly start: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [site.file, site.start, site.end]);
-  const recordSites = (
-    list: readonly {
-      readonly site: { readonly file: string; readonly offset: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
-  const sited = [
-    sitesOf(answers.diagnostics),
-    sitesOf(answers.checks),
-    recordSites(serialized.diagnostics),
-    recordSites(serialized.runtimeChecks),
-  ].every((sites) =>
-    sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
+  const answers = publishedAnswers(
+    inOrder(reversed, () => analyseCore(request)),
+    bindings,
+    program.files.map((file) => file.path),
   );
-  return {
-    text: JSON.stringify({ ...record, admitted, lowered }),
-    record: JSON.stringify({ record, serialized }),
-    sited,
-  };
+  const route = inOrder(reversed, () => publishedRoute(program.files, GLOBALS));
+  return { text: `${answers.text}\n${route.text}`, record: answers.record, sited: answers.sited };
 }
 
 test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
