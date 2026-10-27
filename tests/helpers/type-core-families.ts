@@ -2186,8 +2186,8 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
  * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
- * defaults, a sum of k terms and k nested choices, one product of admission's stop index with five witnesses: accepted
- * in the same form (TABLE r4.78 (5), option A; r4.88 (1); r4.93).
+ * defaults, a sum of k terms and k nested choices (direct, and in lists of two), one product of admission's stop index
+ * with six witnesses: accepted in the same form (TABLE r4.78 (5), option A; r4.88 (1); r4.93).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2305,6 +2305,21 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           "exit",
         ),
       ),
+  },
+  // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
+  // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
+  // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
+  // allowance at k = 224); the allowance reached between 1,216 choices (27,838,631 units) and 1,280
+  {
+    name: "I1106-nested-choice-lists",
+    measures:
+      'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
+    measured: 4.26,
+    program: (k) => {
+      let expression = 'askChoice "seed"';
+      for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
+      return main(lines(`let box = ${expression}`, "say box", "exit"));
+    },
   },
 ];
 
