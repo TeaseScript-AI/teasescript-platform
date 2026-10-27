@@ -722,17 +722,17 @@ test("external data in a choice's options or in a literal is warned at its own e
   // an external option read through a projection sits at its own expression (Astra B6-r2), in a choice and a literal
   assert.deepEqual(sited("let chosen: integer = askChoice [hostValue.field, 2]\nexit"), [
     "warning-runtime-check",
-    "written-target@33",
     "member-read@33",
-    "copy-type@33",
+    "written-target@33",
     "null-check@33",
+    "copy-type@33",
   ]);
   assert.deepEqual(sited("let chosen: integer = [hostValue.field, 2][0]\nexit"), [
     "warning-runtime-check",
-    "written-target@23",
     "member-read@23",
-    "copy-type@23",
+    "written-target@23",
     "null-check@23",
+    "copy-type@23",
   ]);
   // the selected value's site, not the first external expression in the option: a choice object's `value` beside an
   // external `text`, read whole or through a projection, alone or in a list; its `text` without a value
@@ -740,12 +740,12 @@ test("external data in a choice's options or in a literal is warned at its own e
     sited("let chosen: integer = askChoice {text: hostValue.label, value: hostValue.field}\nexit"),
     [
       "warning-runtime-check",
-      "written-target@63",
       "member-read@39",
       "member-read@63",
-      "copy-type@63",
+      "written-target@63",
       "null-check@39",
       "null-check@63",
+      "copy-type@63",
     ],
   );
   assert.deepEqual(
@@ -754,12 +754,12 @@ test("external data in a choice's options or in a literal is warned at its own e
     ),
     [
       "warning-runtime-check",
-      "written-target@71",
       "member-read@40",
       "member-read@71",
-      "copy-type@71",
+      "written-target@71",
       "null-check@40",
       "null-check@71",
+      "copy-type@71",
     ],
   );
   assert.deepEqual(
@@ -768,20 +768,20 @@ test("external data in a choice's options or in a literal is warned at its own e
     ),
     [
       "warning-runtime-check",
-      "written-target@72",
       "member-read@41",
       "member-read@72",
-      "copy-type@72",
+      "written-target@72",
       "null-check@41",
       "null-check@72",
+      "copy-type@72",
     ],
   );
   assert.deepEqual(sited("let chosen: integer = askChoice {text: hostValue.label}\nexit"), [
     "warning-runtime-check",
-    "written-target@39",
     "member-read@39",
-    "copy-type@39",
+    "written-target@39",
     "null-check@39",
+    "copy-type@39",
   ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place; the literal's
   // host element is checked against its whole numbers where it is stored (the owner's F1)
@@ -796,12 +796,12 @@ test("external data in a choice's options or in a literal is warned at its own e
     sited("let opts = [hostValue.field, 1]\nlet answer: integer = askChoice opts\nexit"),
     [
       "warning-runtime-check",
+      "member-read@12",
       "written-target@12",
       "written-target@54",
-      "member-read@12",
+      "null-check@12",
       "copy-type@12",
       "copy-type@54",
-      "null-check@12",
     ],
   );
 });

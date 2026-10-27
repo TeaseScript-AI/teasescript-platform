@@ -243,6 +243,8 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
 
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
+  /** Where each consumer's diagnostics end, in the order the consumers run (the published order's rules, r4.86 (1)). */
+  readonly rules: number[] = [];
   /** Admission's decisions, rejections and boundary checks (§5, C9). */
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -312,16 +314,22 @@ export class Consumers {
     for (const value of values) if (value !== undefined) this.quiet.add(value);
   }
 
-  /** Every consumer of the program, once. */
+  /** Every consumer of the program, once, each one's diagnostics ending at its entry of `rules`. */
   public check(): void {
-    this.#admittedStores();
-    this.admission.ingressStores();
-    this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found));
-    this.#operations();
-    this.#uses();
-    this.#receivers();
-    this.#speakers();
-    this.admission.publish();
+    const consumers = [
+      () => this.#admittedStores(),
+      () => this.admission.ingressStores(),
+      () => this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found)),
+      () => this.#operations(),
+      () => this.#uses(),
+      () => this.#receivers(),
+      () => this.#speakers(),
+      () => this.admission.publish(),
+    ];
+    for (const consumer of consumers) {
+      consumer();
+      this.rules.push(this.diagnostics.length);
+    }
   }
 
   // ----------------------------------------------------------------------------------------- diagnostics
