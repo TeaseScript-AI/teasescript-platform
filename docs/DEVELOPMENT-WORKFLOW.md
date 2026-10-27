@@ -32,9 +32,8 @@ Labels, described on GitHub:
   nothing upcoming builds on it;
 - `needs triage` until an orchestrator is assigned.
 
-With `gh`, set the type and labels (`--type`, `--label`); triage fills any gap. GitHub shows a
-single newline in issue and pull-request text as a line break, so write each paragraph on one line. Change labels only when the state
-changes.
+With `gh`, set the type and labels (`--type`, `--label`); triage fills any gap. GitHub shows a single newline in issue
+and pull-request text as a line break, so write each paragraph on one line. Change labels only when the state changes.
 
 Before implementation, the issue states the problem or goal, evidence, scope and exclusions, and acceptance criteria.
 Future-facing infrastructure also needs a concrete scheduled consumer, an accepted boundary that must be correct when
