@@ -2182,8 +2182,8 @@ export class Consumers {
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
     if (directTags.length === 0) {
-      // the type it is checked against a read a stop left undecided: owed against that key's contract, `unknown`
-      // with the reason `budget`, never dropped (TABLE r4.100); only a `null` fallback owes nothing
+      // a stop left the type it is checked against undecided: the check is owed against that key's contract,
+      // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing
       if (
         direct.some(unsettledItem) &&
         !withoutEmpty(this.#valueItems(value, node, rest)).every((item) => item.tag === "null")
