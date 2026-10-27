@@ -2,7 +2,17 @@ import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../st
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { BudgetExhausted, checkNesting, type BudgetLimit, type WorkCounter } from "./budget.js";
+import {
+  BudgetExhausted,
+  checkNesting,
+  joinParts,
+  joinSteps,
+  pathText,
+  splitPath,
+  stepText,
+  type BudgetLimit,
+  type WorkCounter,
+} from "./budget.js";
 import { Consumers } from "./consumers.js";
 import { carried, type Dispatch } from "./carriers.js";
 import {
@@ -17,6 +27,7 @@ import { dictList } from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
+  keyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -331,8 +342,8 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     case "c":
       return contract.contractOf(parts.join("|"));
     case "s": {
-      const rest = parts[2] === "" || parts[2] === undefined ? [] : parts[2].split(".");
-      return contract.subAt(`${parts[0]}|${parts[1] ?? ""}`, rest);
+      const rest = splitPath(parts[2] ?? "");
+      return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
     }
     case "rc":
       return contract.receiverKinds(parts.join("|"));
@@ -342,27 +353,27 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return contract.contractOfValue(Number(parts[0]));
     case "def": {
       const uid = Number(parts[0]);
-      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const rest = splitPath(parts[1] ?? "");
       const d = definitionByUid(pass, uid);
       return exact.defVal(d, rest);
     }
     case "lit": {
-      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const rest = splitPath(parts[1] ?? "");
       const node = parts[2] === "-" ? null : (program.flow.nodes[Number(parts[2])] ?? null);
       return values.valueItems(Number(parts[0]), node, rest);
     }
     case "op": {
-      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const rest = splitPath(parts[1] ?? "");
       return values.valueItems(Number(parts[0]), null, rest);
     }
     case "dk": {
-      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const rest = splitPath(parts[1] ?? "");
       return contract.defaultKinds(Number(parts[0]), rest);
     }
     case "dn":
       return contract.onlyNull(Number(parts[0]));
     case "vdk": {
-      const rest = parts[1] === "" || parts[1] === undefined ? [] : parts[1].split(".");
+      const rest = splitPath(parts[1] ?? "");
       const node = parts[2] === "-" ? null : (program.flow.nodes[Number(parts[2])] ?? null);
       return values.defaultKinds(Number(parts[0]), node, rest);
     }
@@ -655,7 +666,7 @@ class CoreAnswers implements Answers {
     const term = written === null ? null : termAt(written, path);
     const kinds = this.#run(contract.contractOf(key));
     const elements = kinds.some((item) => COLLECTION_TAGS.has(item.tag))
-      ? this.#run(contract.contractOf(keyOf(id, [...path, "element"])))
+      ? this.#run(contract.contractOf(keyOf(id, joinSteps(path, ["element"]))))
       : [];
     return {
       admitted: this.#admitted(id, path, term),
@@ -664,7 +675,7 @@ class CoreAnswers implements Answers {
         elements: withoutEmpty(elements),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      ingresses: this.#consumers.admission.boundaries.get(keyOf(id, path)) ?? [],
+      ingresses: this.#consumers.admission.boundaries.get(key) ?? [],
       // the exact service's list, not the raw stores (Astra B8)
       definitions: {
         list: lists.definitionsOf(key).list,
@@ -750,10 +761,10 @@ class CoreAnswers implements Answers {
       const task = pending.pop()!;
       const id =
         "key" in task
-          ? `k${task.key}`
+          ? joinParts("k", task.key)
           : "literal" in task
-            ? `l${task.literal}|${task.path.join(".")}`
-            : `v${task.value}|${task.path.join(".")}`;
+            ? joinParts(`l${task.literal}`, task.path)
+            : joinParts(`v${task.value}`, task.path);
       if (seen.has(id)) continue;
       seen.add(id);
       if ("value" in task) {
@@ -763,7 +774,7 @@ class CoreAnswers implements Answers {
         // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
         // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
         if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
-          pending.push({ key: keyOf(keyPlace(source), [...keyPath(source), ...recordPath(path)]) });
+          pending.push({ key: keyBelow(source, recordPath(path)) });
           continue;
         }
         if (program.hasOf.has(at)) {
@@ -778,7 +789,7 @@ class CoreAnswers implements Answers {
       }
       if ("literal" in task) {
         const index = contract.literalIndex(task.literal);
-        const at = task.path.join(".");
+        const at = pathText(task.path);
         for (const object of index.objects.get(at)?.list ?? [])
           for (const name of object.names) names.add(propertyName(name));
         // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
@@ -787,13 +798,13 @@ class CoreAnswers implements Answers {
           if (map.size > task.path.length + 1)
             for (let depth = 0, stand = ""; depth <= task.path.length; depth += 1) {
               if (depth > 0)
-                stand = depth === 1 ? task.path[0]! : `${stand}.${task.path[depth - 1]!}`;
+                stand = depth === 1 ? task.path[0]! : stepText(stand, task.path[depth - 1]!);
               for (const entry of map.get(stand) ?? [])
                 pending.push({ value: entry.value, path: task.path.slice(depth) });
             }
           else
             for (const [stand, entries] of map) {
-              const depth = stand === "" ? 0 : stand.split(".").length;
+              const depth = splitPath(stand).length;
               if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
               for (const entry of entries)
                 pending.push({ value: entry.value, path: task.path.slice(depth) });
@@ -811,17 +822,15 @@ class CoreAnswers implements Answers {
         const rest = path.slice(length);
         const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
         // the sources' own stores below their roots
-        for (const sub of contract.subSources(stores))
-          pending.push({ key: keyOf(keyPlace(sub), [...keyPath(sub), ...rest]) });
+        for (const sub of contract.subSources(stores)) pending.push({ key: keyBelow(sub, rest) });
         for (const entry of stores.list) {
-          const at = [...(entry.at ?? []), ...rest];
-          if (entry.key !== undefined)
-            pending.push({ key: keyOf(keyPlace(entry.key), [...keyPath(entry.key), ...at]) });
+          const at = joinSteps(entry.at ?? [], rest);
+          if (entry.key !== undefined) pending.push({ key: keyBelow(entry.key, at) });
           else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
           // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
           // at the collection itself
           else if (entry.elem !== undefined && rest[0] === "element")
-            pending.push({ value: entry.elem, path: [...(entry.at ?? []), ...rest.slice(1)] });
+            pending.push({ value: entry.elem, path: joinSteps(entry.at ?? [], rest.slice(1)) });
         }
       }
     }

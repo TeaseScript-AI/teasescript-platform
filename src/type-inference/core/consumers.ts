@@ -53,7 +53,7 @@ import {
   type RequiredKind,
 } from "./result.js";
 import type { ReadWork } from "./answers.js";
-import { WORK_PER_NODE } from "./budget.js";
+import { joinParts, joinSteps, keepText, pathText, stepText, WORK_PER_NODE } from "./budget.js";
 import type { Work } from "./solver.js";
 
 /*
@@ -341,7 +341,7 @@ export class Consumers {
               ),
             )
           : propertyName(projection.step);
-      return `${this.#keyLabel(projection.owner, depth + 1)}.${step}`;
+      return stepText(this.#keyLabel(projection.owner, depth + 1), step);
     }
     const result = this.#resultOfCall.get(value);
     if (result !== undefined) return program.place(result).label;
@@ -701,7 +701,7 @@ export class Consumers {
           const value = member(proof).value;
           if (emitted() === was) {
             // (equivalent values are quiet alike, §3.3: each side's once)
-            const side = `${d.uid}|${low}|${high}`;
+            const side = joinParts(d.uid, low, high);
             if (value !== undefined && this.quiet.has(value) && !this.#quietSides.has(side)) {
               this.#quietSides.add(side);
               program.work.charge("checksSkipped");
@@ -762,7 +762,9 @@ export class Consumers {
           c,
           node,
           (rest) =>
-            withoutEmpty(this.#run(values.valueItems(c.receiver, node, ["element", ...rest]))),
+            withoutEmpty(
+              this.#run(values.valueItems(c.receiver, node, joinSteps(["element"], rest))),
+            ),
           c.fallback,
         );
         continue;
@@ -860,12 +862,15 @@ export class Consumers {
     for (
       let rest: readonly string[] = [];
       this.#fallbackFitsAt(c, node, directAt, value, rest, written, label);
-      rest = [...rest, "element"]
+      rest = joinSteps(rest, ["element"])
     ) {
       program.work.charge("checks");
-      label = `${label}.${elementStep(
-        withoutEmpty(this.#run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
-      )}`;
+      label = stepText(
+        label,
+        elementStep(
+          withoutEmpty(this.#run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
+        ),
+      );
     }
   }
 
@@ -1165,7 +1170,7 @@ export class Consumers {
       );
     const offending = new Map<string, [number, Item]>();
     const offend = (index: number, item: Item): void => {
-      const key = `${index}|${item.fan === undefined ? item.tag : `fan ${item.fan}`}`;
+      const key = joinParts(index, item.fan === undefined ? item.tag : `fan ${item.fan}`);
       if (!offending.has(key)) offending.set(key, [index, item]);
     };
     let operation: [Item, readonly RequiredKind[]] | null = null;
@@ -1649,12 +1654,13 @@ export class Consumers {
     while (next !== null) {
       const step: { readonly key: Key; readonly at: FlowNode } = next;
       next = null;
-      const memoKey = `${step.key}|${step.at.id}`;
+      const memoKey = joinParts(step.key, step.at.id);
       if (this.#defaults.has(memoKey)) {
         found = this.#defaults.get(memoKey)!;
         break;
       }
       // a copy cycle leads to no parameter
+      keepText(program.work, memoKey.length);
       this.#defaults.set(memoKey, null);
       visited.push(memoKey);
       program.work.charge("checks");
@@ -1792,10 +1798,10 @@ export class Consumers {
     receiver: Key,
     property: string,
   ): { readonly state: "none" | "some" | "all"; readonly literal: Writer | null } {
-    const memoKey = `${receiver}|${property}`;
+    const { program, contract } = this.pass;
+    const memoKey = joinParts(receiver, property);
     const known = this.#presence.get(memoKey);
     if (known !== undefined) return known;
-    const { program, contract } = this.pass;
     const path = keyPath(receiver);
     let lacks = false;
     let has = false;
@@ -1816,13 +1822,14 @@ export class Consumers {
     for (let length = path.length; length >= 0 && !(lacks && has); length -= 1) {
       program.work.charge("checks");
       const stored = contract.prefixStores(keyOf(keyPlace(receiver), path.slice(0, length)));
-      const below = [...path.slice(length), property];
+      const below = joinSteps(path.slice(length), [property]);
       for (const entry of stored.list)
         if (!(lacks && has)) see(this.#run(contract.entryAt(entry, below)));
       for (const sub of contract.relevantSubs(stored, below))
         if (!(lacks && has)) see(this.#run(contract.subAt(sub.key, below)));
     }
     const presence = { state: lacks ? (has ? "some" : "none") : "all", literal } as const;
+    keepText(program.work, memoKey.length);
     this.#presence.set(memoKey, presence);
     return presence;
   }
@@ -1845,7 +1852,7 @@ export class Consumers {
         owner !== undefined
           ? this.#keyLabel(owner)
           : program.place(d.place).label +
-            (recvPath.length > 0 ? `.${recvPath.map(propertyName).join(".")}` : "");
+            (recvPath.length > 0 ? `.${pathText(recvPath.map(propertyName))}` : "");
       // C9: the receiver's external data brings its boundary checks, whichever member check follows
       this.admission.boundariesAt(
         receiver,

@@ -17,7 +17,8 @@ import {
   unknownItem,
   withOwnSelection,
 } from "./contract.js";
-import { keyOf, keyPath, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
+import { joinParts, joinSteps, keepText } from "./budget.js";
+import { keyOf, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
 import { belowSelected, withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
@@ -78,7 +79,10 @@ export class Values {
   public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
     const { program, exact, contract, lists, guards } = this.pass;
     const route = (taken: ReadRoute): void => {
-      this.#routes.set(`${key}|${node?.id ?? "-"}|${before ? 1 : 0}`, taken);
+      const at = joinParts(key, node?.id ?? "-", before ? 1 : 0);
+      // (a route's text charged where it is kept first, TABLE r4.58)
+      if (!this.#routes.has(at)) keepText(program.work, at.length);
+      this.#routes.set(at, taken);
     };
     if (program.isHost(keyPlace(key))) {
       route("contract");
@@ -125,15 +129,15 @@ export class Values {
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
     const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
-      this.#routes.get(`${key}|${at?.id ?? "-"}|0`) ?? "exact";
+      this.#routes.get(joinParts(key, at?.id ?? "-", 0)) ?? "exact";
     let path = rest;
     let at = node;
     for (let projection = program.projOf.get(value); projection !== undefined;) {
       if (projection.step === "iteration") return "exact";
-      path = [
-        measuresLength(projection.step) ? projection.step : stepName(projection.step),
-        ...path,
-      ];
+      path = joinSteps(
+        [measuresLength(projection.step) ? projection.step : stepName(projection.step)],
+        path,
+      );
       at = projection.node ?? at;
       value = projection.owner;
       projection = program.projOf.get(value);
@@ -246,7 +250,7 @@ export class Values {
               ? after.length === 1
                 ? weaken([of("string")])
                 : []
-              : yield* this.#through(value, node, [...before, ...after], at);
+              : yield* this.#through(value, node, joinSteps(before, after), at);
           // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
           const elements = after.length === 1 ? withoutEmpty(below) : below;
           out.push(...(item.cert === "def" ? elements : weaken(elements)));
@@ -275,45 +279,51 @@ export class Values {
 
   /** The value of a place at a node at a path, by the place's kind. */
   *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
-    const { program, contract } = this.pass;
-    if (program.speakerPlaces.has(value))
-      return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
-    const binding = program.occurrenceOf.get(value);
-    if (binding !== undefined)
-      return contract.entered(
-        value,
-        yield* this.keyItems(keyOf(binding, rest), program.occNode.get(value) ?? node),
-      );
-    const projection = program.projOf.get(value);
-    if (projection !== undefined) {
-      const at = projection.node ?? node;
-      if (projection.step === "iteration")
-        return yield* this.#iteration(projection.owner, at, rest);
-      if (measuresLength(projection.step))
-        return yield* this.#length(projection.owner, at, projection.step, rest);
-      const elements = yield* this.valueItems(projection.owner, at, [
-        stepName(projection.step),
-        ...rest,
-      ]);
-      if (!selectsElement(projection.step)) return elements;
-      const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
-      return withOwnSelection(elements, owners, this.pass);
-    }
-    if (program.callOutOf.has(value)) {
-      const call = program.opOf.get(value);
-      if (call?.kind === "call")
-        return yield* this.keyItems(
-          keyOf(program.functionOf(call.fn).result, rest),
-          program.callOutOf.get(value) ?? node,
+    this.pass.solver.enterRead();
+    try {
+      const { program, contract } = this.pass;
+      if (program.speakerPlaces.has(value))
+        return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
+      const binding = program.occurrenceOf.get(value);
+      if (binding !== undefined)
+        return contract.entered(
+          value,
+          yield* this.keyItems(keyOf(binding, rest), program.occNode.get(value) ?? node),
         );
+      const projection = program.projOf.get(value);
+      if (projection !== undefined) {
+        const at = projection.node ?? node;
+        if (projection.step === "iteration")
+          return yield* this.#iteration(projection.owner, at, rest);
+        if (measuresLength(projection.step))
+          return yield* this.#length(projection.owner, at, projection.step, rest);
+        const elements = yield* this.valueItems(
+          projection.owner,
+          at,
+          joinSteps([stepName(projection.step)], rest),
+        );
+        if (!selectsElement(projection.step)) return elements;
+        const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
+        return withOwnSelection(elements, owners, this.pass);
+      }
+      if (program.callOutOf.has(value)) {
+        const call = program.opOf.get(value);
+        if (call?.kind === "call")
+          return yield* this.keyItems(
+            keyOf(program.functionOf(call.fn).result, rest),
+            program.callOutOf.get(value) ?? node,
+          );
+      }
+      const operation = program.opOf.get(value);
+      if (operation !== undefined)
+        return contract.entered(value, yield* this.#operationItems(operation, node, rest));
+      if (program.hasOf.has(value) || program.cellOwner.has(value))
+        return yield* this.#literalItems(value, rest, node);
+      if (program.isHost(value)) return [unknownItem(REASON.external)];
+      return yield* this.keyItems(keyOf(value, rest), node);
+    } finally {
+      this.pass.solver.leaveRead();
     }
-    const operation = program.opOf.get(value);
-    if (operation !== undefined)
-      return contract.entered(value, yield* this.#operationItems(operation, node, rest));
-    if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* this.#literalItems(value, rest, node);
-    if (program.isHost(value)) return [unknownItem(REASON.external)];
-    return yield* this.keyItems(keyOf(value, rest), node);
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
@@ -326,7 +336,7 @@ export class Values {
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (item.tag === "list" || item.tag === "set") {
         const elements = belowSelected(
-          yield* this.valueItems(owner, node, ["element", ...rest]),
+          yield* this.valueItems(owner, node, joinSteps(["element"], rest)),
           rest,
         );
         out.push(...(item.cert === "def" ? elements : weaken(elements)));
@@ -360,7 +370,7 @@ export class Values {
     // F19a before F14 and the exact value: a receiver that may be a reference has the runtime's members, its `length`
     // among them, read as a member so its route is the member's
     if (heldReference(yield* this.pass.contract.valueReceiver(owner)))
-      return yield* this.valueItems(owner, node, [step, ...rest]);
+      return yield* this.valueItems(owner, node, joinSteps([step], rest));
     const out: Item[] = [];
     for (const item of withoutEmpty(yield* this.valueItems(owner, node, []))) {
       if (
@@ -378,7 +388,7 @@ export class Values {
           );
       } else if (item.tag === "object" || REFERENCE.has(item.tag)) {
         // an object's own `length` (F11), a reference's member (F19a)
-        const own = yield* this.valueItems(owner, node, [step, ...rest]);
+        const own = yield* this.valueItems(owner, node, joinSteps([step], rest));
         out.push(...(item.cert === "def" ? own : weaken(own)));
       } else if (item.tag === "unknown") out.push(item);
     }
@@ -393,7 +403,7 @@ export class Values {
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[literal]?.site ?? null;
     return yield {
-      key: `lit|${literal}|${rest.join(".")}|${node?.id ?? "-"}`,
+      key: joinParts("lit", literal, rest, node?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -422,7 +432,7 @@ export class Values {
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
     return yield {
-      key: `op|${c.result}|${rest.join(".")}`,
+      key: joinParts("op", c.result, rest),
       kind: "value",
       file: site.file,
       offset: site.start,
@@ -474,7 +484,7 @@ export class Values {
       out = [OPAQUE_MEMBER];
     } else if (c.kind === "get") {
       const receiver = belowSelected(
-        yield* this.valueItems(c.receiver, at, ["element", ...rest]),
+        yield* this.valueItems(c.receiver, at, joinSteps(["element"], rest)),
         rest,
       );
       const { fallbackAt, reached, only } = getProof(program, c, at);
@@ -517,7 +527,7 @@ export class Values {
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
-      key: `vdk|${fallback}|${rest.join(".")}|${at?.id ?? "-"}`,
+      key: joinParts("vdk", fallback, rest, at?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -530,7 +540,7 @@ export class Values {
   public *onlyNull(fallback: PlaceId, at: FlowNode | null): Work<readonly Item[]> {
     const site = this.pass.program.places[fallback]?.site ?? null;
     return yield {
-      key: `vdn|${fallback}|${at?.id ?? "-"}`,
+      key: joinParts("vdn", fallback, at?.id ?? "-"),
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
@@ -607,7 +617,10 @@ export class Values {
         } else if (COLLECTIONS.has(item.tag))
           out.push(
             ...weaken(
-              belowSelected(yield* this.valueItems(c.receiver, at, ["element", ...rest]), rest),
+              belowSelected(
+                yield* this.valueItems(c.receiver, at, joinSteps(["element"], rest)),
+                rest,
+              ),
             ),
           );
       }
@@ -646,7 +659,7 @@ export class Values {
             })
           : []),
         ...(kinds.some((item) => kindElement(item.tag) === undefined)
-          ? yield* this.valueItems(c.receiver, at, ["element", ...rest.slice(1)])
+          ? yield* this.valueItems(c.receiver, at, joinSteps(["element"], rest.slice(1)))
           : []),
         ...(copy.mayHoldNone && rest.length === 1 ? [EMPTY] : []),
       ];
@@ -736,11 +749,6 @@ export class Values {
       });
     }
     return [unknownItem(REASON.external)];
-  }
-
-  /** A key's path, for the demands that read one. */
-  public static pathOf(key: Key): readonly string[] {
-    return keyPath(key);
   }
 }
 

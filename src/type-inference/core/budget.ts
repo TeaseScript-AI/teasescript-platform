@@ -58,6 +58,10 @@ export type WorkCounter =
   | "eventSteps"
   // the contract per demanded path and its source indexes
   | "invSteps"
+  // what the literal indexes, their identities and structures keep, charged before they keep it: each entry, scheduled
+  // task and element of a sorted copy, and each text (a signature, a structure) by its size; and each path, key or
+  // composite key the core makes past `SHORT` (`keptText` and the helpers beside it)
+  | "literalUnits"
   // the exact path per read and the value per (D, path)
   | "exactQueries"
   | "exactValues"
@@ -86,13 +90,144 @@ export type WorkCounter =
   // the writers the result names
   | "evidence";
 
-/** Which limit an analysis reached: the work allowance or the nesting limit. */
-export type BudgetLimit = "work" | "nesting";
+/**
+ * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
+ * two and one per eight code units, so a short key costs about what an entry does and a long path or signature its
+ * length.
+ */
+export function textUnits(length: number): number {
+  return (length + 23) >> 3;
+}
 
-/** Thrown by `charge` at the unit that exceeds the allowance, and by `checkNesting` past the nesting limit. */
+/** The length of a path's text, its steps joined by dots, before it is made. */
+export function pathTextLength(path: readonly string[]): number {
+  let length = Math.max(0, path.length - 1);
+  for (const step of path) length += step.length;
+  return length;
+}
+
+/**
+ * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`
+ * (`tests/type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
+ * member, an entry's path or key) is made by a kept helper (`keptText`, `keptKey`, …), which charges its size to
+ * `literalUnits` before it makes it (TABLE r4.58), so a literal's depth, breadth or names reach the allowance before
+ * the heap; one a step only looks up or passes on is made by its plain twin (`pathText`, `keyOf`, …), which charges
+ * nothing: its making is the step's own work. Up to `SHORT` code units or elements ride on the unit of the step that
+ * makes them, so an ordinary path costs nothing more; beyond it a text costs a unit per eight code units and an array a
+ * unit per element, about their size in 8-byte words.
+ */
+const SHORT = 32;
+
+/** Charges `units` of what the core keeps (`literalUnits`): the one charge of the literal work, TABLE r4.58. */
+export function keep(work: WorkLedger, units: number): void {
+  if (units > 0) work.charge("literalUnits", units);
+}
+
+/** Charges a text of `length` code units about to be kept (see `SHORT`). */
+export function keepText(work: WorkLedger, length: number): void {
+  if (length > SHORT) keep(work, (length - SHORT + 7) >> 3);
+}
+
+/** Charges an array of `length` elements about to be kept (see `SHORT`). */
+function keepArray(work: WorkLedger, length: number): void {
+  if (length > SHORT) keep(work, length - SHORT);
+}
+
+/** A path's text, its steps joined by dots. */
+export function pathText(path: readonly string[]): string {
+  return path.join(".");
+}
+
+/** `pathText`, charged before it is made. */
+export function keptText(work: WorkLedger, path: readonly string[]): string {
+  keepText(work, pathTextLength(path));
+  return pathText(path);
+}
+
+/** A path's text one `step` longer (a label or a prefix's text). */
+export function stepText(text: string, step: string): string {
+  return `${text}.${step}`;
+}
+
+/** A part of a composite key: a text, a number, a flag, or a path (its text). */
+type Part = string | number | boolean | readonly string[];
+
+/** `parts` joined by bars (a composite key), each path among them by dots. */
+export function joinParts(...parts: readonly Part[]): string {
+  return parts.map((part) => (typeof part === "object" ? pathText(part) : String(part))).join("|");
+}
+
+/** `joinParts`, charged before it is made. */
+export function keptParts(work: WorkLedger, ...parts: readonly Part[]): string {
+  let length = parts.length - 1;
+  for (const part of parts)
+    length += typeof part === "object" ? pathTextLength(part) : String(part).length;
+  keepText(work, length);
+  return joinParts(...parts);
+}
+
+/** The steps of a path written as text (the empty text none). */
+export function splitPath(text: string): string[] {
+  return text === "" ? [] : text.split(".");
+}
+
+/** `splitPath`, charged before the steps are made. */
+export function keptSplit(work: WorkLedger, text: string): string[] {
+  keepText(work, text.length);
+  return splitPath(text);
+}
+
+/** The steps of `parts` in one new array (a path or an evaluation key extended). */
+export function joinSteps<T>(...parts: readonly (readonly T[])[]): T[] {
+  const steps: T[] = [];
+  for (const part of parts) for (const step of part) steps.push(step);
+  return steps;
+}
+
+/** `joinSteps`, charged before it is made. */
+export function keptSteps<T>(work: WorkLedger, ...parts: readonly (readonly T[])[]): T[] {
+  let length = 0;
+  for (const part of parts) length += part.length;
+  keepArray(work, length);
+  return joinSteps(...parts);
+}
+
+/** `steps` from `start` to `end` in one new array (a path's rest or a prefix of it), charged before it is made. */
+export function keptSlice<T>(
+  work: WorkLedger,
+  steps: readonly T[],
+  start: number,
+  end = steps.length,
+): T[] {
+  keepArray(work, end - start);
+  return steps.slice(start, end);
+}
+
+/**
+ * `steps`, made elsewhere (a fresh array a producer returned, which cannot know whether its caller keeps it), charged
+ * as kept here, where a structure keeps it.
+ */
+export function keptArray<T>(work: WorkLedger, steps: readonly T[]): readonly T[] {
+  keepArray(work, steps.length);
+  return steps;
+}
+
+/** Which limit an analysis reached: the work allowance, the statement nesting or the read depth. */
+export type BudgetLimit = "work" | "nesting" | "read-depth";
+
+const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
+  work: "work allowance",
+  nesting: "nesting limit",
+  "read-depth": "read-depth limit",
+};
+
+/**
+ * Thrown by `charge` at the unit that exceeds the allowance, by `checkNesting` past the nesting limit and by
+ * `checkReadDepth` past the read-depth limit.
+ */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
-    super(`The analysis exceeded its ${limit === "work" ? "work allowance" : "nesting limit"}.`);
+    super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
     this.name = "BudgetExhausted";
   }
 }
@@ -127,6 +262,23 @@ export class WorkLedger {
 /** Throws `BudgetExhausted` when `depth` nested statements exceed the nesting limit. */
 export function checkNesting(depth: number): void {
   if (depth > NESTING_LIMIT) throw new BudgetExhausted("nesting");
+}
+
+/**
+ * The levels of a read chain the analysis follows in one run of native calls: a read's projections and operations
+ * (`value[0][0]…`, `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s
+ * `contractOfValue` and `#valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack. Past it the
+ * analysis stops with `read-depth` instead of overflowing that stack. A technical bound, not a language limit: on Node
+ * 24.18.0's default stack (984 KiB) such a chain overflowed at 2,552 levels, alike on the laptop worker and the agent
+ * host, for index, property, `.first`, deep-literal and untyped reads; 1,024 is about 40 % of that, leaving the stack
+ * a compile is called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it
+ * (`compiler.core-read-depth`).
+ */
+const READ_DEPTH_LIMIT = 1_024;
+
+/** Throws `BudgetExhausted` when a read chain `depth` levels deep exceeds the read-depth limit. */
+export function checkReadDepth(depth: number): void {
+  if (depth > READ_DEPTH_LIMIT) throw new BudgetExhausted("read-depth");
 }
 
 /** The allowance a test imposes on every analysis started inside `withTestAllowance`, or `null`. */

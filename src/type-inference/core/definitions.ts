@@ -1,5 +1,13 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
+import {
+  keepText,
+  keptArray,
+  keptSlice,
+  keptText,
+  pathTextLength,
+  type WorkLedger,
+} from "./budget.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
 import { conversionCategory, methodCategory } from "./method-categories.js";
@@ -15,7 +23,9 @@ import { siteKey, type CoreProgram } from "./program.js";
 
 /**
  * A key: a place and a path of steps below it (`state.party.element.hp`), written `place|steps`. The collector's place
- * and the path are its identity; the place's label only shows it.
+ * and the path are its identity; the place's label only shows it. A key, its path or its prefixes that a structure
+ * keeps are made through the kept helpers below (`keptKey`, `keptPath`, …), which charge their text first (TABLE r4.58);
+ * `keyOf` and its kin make the ones a step only looks up or passes on.
  */
 export type Key = string;
 
@@ -64,6 +74,57 @@ export function prefixesOf(key: Key): Key[] {
   for (let length = path.length - 1; length >= 0; length -= 1)
     prefixes.push(keyOf(place, path.slice(0, length)));
   return prefixes;
+}
+
+/** `keyOf`, its text charged before it is made (`keepText`, TABLE r4.58). */
+export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[]): Key {
+  keepText(work, String(place).length + 1 + pathTextLength(path));
+  return keyOf(place, path);
+}
+
+/** `keyPath`, its steps charged by the key's text before they are made (`keepText`). */
+export function keptPath(work: WorkLedger, key: Key): string[] {
+  keepText(work, key.length);
+  return keyPath(key);
+}
+
+/** The key `rest` below `key` (what `keyOf(keyPlace(key), [...keyPath(key), ...rest])` gives). */
+export function keyBelow(key: Key, rest: readonly string[]): Key {
+  if (rest.length === 0) return key;
+  return key.endsWith("|") ? `${key}${rest.join(".")}` : `${key}.${rest.join(".")}`;
+}
+
+/** `keyBelow`, charged before it is made (`keepText`). */
+export function keptKeyBelow(work: WorkLedger, key: Key, rest: readonly string[]): Key {
+  if (rest.length > 0) keepText(work, key.length + 1 + pathTextLength(rest));
+  return keyBelow(key, rest);
+}
+
+/** A key's path as text (what `keyPath(key).join(".")` gives). */
+export function keyPathText(key: Key): string {
+  return key.slice(key.indexOf("|") + 1);
+}
+
+/** `keyPathText`, charged before it is made (`keepText`). */
+export function keptPathText(work: WorkLedger, key: Key): string {
+  keepText(work, key.length);
+  return keyPathText(key);
+}
+
+/** The key of `place` and a path already written as text (`keyOf(place, text.split("."))`). */
+export function keyOfText(place: PlaceId, text: string): Key {
+  return `${place}|${text}`;
+}
+
+/** `prefixesOf`, each prefix's text charged before it is made (`keepText`). */
+export function keptPrefixes(work: WorkLedger, key: Key): Key[] {
+  const steps = keptPath(work, key);
+  // (a prefix is the key without its last step and the dot before it, `place|` the last)
+  for (let length = steps.length - 1, size = key.length; length >= 0; length -= 1) {
+    size -= steps[length]!.length + (length > 0 ? 1 : 0);
+    keepText(work, size);
+  }
+  return prefixesOf(key);
 }
 
 /**
@@ -233,7 +294,7 @@ export class DefinitionIndex {
         continue;
       this.#foreignAt.add(d.key);
       this.#foreignBelow.add(d.key);
-      for (const prefix of prefixesOf(d.key)) this.#foreignBelow.add(prefix);
+      for (const prefix of keptPrefixes(this.program.work, d.key)) this.#foreignBelow.add(prefix);
     }
     const sites = new Set<number>();
     for (const site of program.flow.sites)
@@ -246,7 +307,7 @@ export class DefinitionIndex {
       const path = keyPath(key);
       for (let length = 0; length < path.length; length += 1) {
         work.charge("indexSteps");
-        append(this.#keysBelow, keyOf(place, path.slice(0, length)), key);
+        append(this.#keysBelow, keptKey(this.program.work, place, path.slice(0, length)), key);
       }
     }
   }
@@ -316,8 +377,11 @@ export class DefinitionIndex {
         : add && projection.node !== null && projection.node.expression?.kind === "callExpression"
           ? projection.node
           : program.effectNode(constraint.site);
-    const path = add ? target.path.slice(0, -1) : target.path;
-    const key = keyOf(target.root, path);
+    // (the definition keeps its path: an add's receiver path made here, or the target's, which `targetRoot` made fresh)
+    const path = add
+      ? keptSlice(this.program.work, target.path, 0, target.path.length - 1)
+      : keptArray(this.program.work, target.path);
+    const key = keptKey(this.program.work, target.root, path);
     const cell = program.cellOwner.has(target.root) || program.hasOf.has(target.root);
     if (node === null) return;
     const d = this.#add(
@@ -332,7 +396,11 @@ export class DefinitionIndex {
         how: constraint.how,
         site: constraint.site,
         into: constraint.into,
-        recv: add ? key : path.length > 0 ? keyOf(target.root, path.slice(0, -1)) : null,
+        recv: add
+          ? key
+          : path.length > 0
+            ? keptKey(this.program.work, target.root, path.slice(0, -1))
+            : null,
         prep: add
           ? this.#receiverNode(projection.owner)
           : node.prepared !== undefined
@@ -347,7 +415,7 @@ export class DefinitionIndex {
     this.storeDefs.push(d);
     this.#candidate(
       d,
-      add ? keyOf(target.root, target.path) : key,
+      add ? keptKey(this.program.work, target.root, target.path) : key,
       add && constraint.how === "elements" ? ["element"] : [],
     );
   }
@@ -362,7 +430,7 @@ export class DefinitionIndex {
     const d = this.#add({
       kind: "whole",
       weak: false,
-      key: keyOf(fn.result, []),
+      key: keptKey(this.program.work, fn.result, []),
       place: fn.result,
       path: [],
       value: constraint.value,
@@ -397,7 +465,7 @@ export class DefinitionIndex {
       const binding: Omit<Definition, "uid"> = {
         kind: "whole",
         weak: false,
-        key: keyOf(parameter, []),
+        key: keptKey(this.program.work, parameter, []),
         place: parameter,
         path: [],
         value: argument,
@@ -425,14 +493,16 @@ export class DefinitionIndex {
     const node = program.effectNode(site);
     if (node === null || program.cellOwner.has(target.root) || program.hasOf.has(target.root))
       return;
-    const key = keyOf(target.root, target.path);
+    const key = keptKey(this.program.work, target.root, target.path);
+    // (the definition keeps the target's path, which `targetRoot` made fresh)
+    const path = keptArray(this.program.work, target.path);
     this.storeDefs.push(
       this.#add({
         kind: effect === "clears" ? "clear" : "weaken",
-        weak: target.path.includes("element"),
+        weak: path.includes("element"),
         key,
         place: target.root,
-        path: target.path,
+        path,
         node,
         how: name,
         site,
@@ -459,7 +529,7 @@ export class DefinitionIndex {
         const d = this.#add({
           kind: "whole",
           weak: false,
-          key: keyOf(parameter, []),
+          key: keptKey(this.program.work, parameter, []),
           place: parameter,
           path: [],
           value: given.value,
@@ -593,7 +663,7 @@ export class DefinitionIndex {
       const d = this.#add({
         kind: "const",
         weak: false,
-        key: keyOf(fn.result, []),
+        key: keptKey(this.program.work, fn.result, []),
         place: fn.result,
         path: [],
         node: region.void,
@@ -619,7 +689,7 @@ export class DefinitionIndex {
           this.#add({
             kind: "const",
             weak: false,
-            key: keyOf(place.id, []),
+            key: keptKey(this.program.work, place.id, []),
             place: place.id,
             path: [],
             node,
@@ -827,7 +897,9 @@ export class DefinitionLists {
       : [this.#eventList(source)];
     for (const prefix of prefixesOf(source)) lists.push(this.definitionsOf(prefix).eventPositions);
     return [
-      reaching === null ? "-" : `${reaching.def.uid}:${reaching.rest.join(".")}`,
+      reaching === null
+        ? "-"
+        : `${reaching.def.uid}:${keptText(this.#program.work, reaching.rest)}`,
       star === null ? "-" : star.uid,
       program.live(node) ? "l" : "",
       node.dead ? "d" : "",

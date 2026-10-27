@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { ContractFacts } from "../src/type-inference/core/contract.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
 /**
@@ -348,5 +352,40 @@ test("flat chains of 8,192 links analyse without native recursion", () => {
   assert.deepEqual(
     CHAINS.map(([shape, , program]) => `${shape}: ${analysed(program(8192)).outcome}`),
     CHAINS.map(([shape, outcome]) => `${shape}: ${outcome}`),
+  );
+});
+
+/**
+ * A literal's signature names each path by its id (TABLE r4.58): `first` and `second` hold the same kinds in the same
+ * order under the same record names and empty lists, but their integer at different paths, so they are two sources and
+ * `archive`'s element at `.a` holds an integer; a signature without the paths' ids would merge them and lose it (the
+ * deep-literal review's witness). Alike in both orders, with the sharing on and off.
+ */
+test("two literals whose kinds differ only in their paths are two sources, in both orders", () => {
+  const request = coreRequest([
+    {
+      path: "main.tease",
+      source:
+        "let first = [{a: [], b: [1]}, {a: [], b: []}]\nlet second = [{a: [1], b: []}, {a: [], b: []}]\n" +
+        "let archive = [first, second]\nlet n: integer = archive[0][0].a[0]\nexit\n",
+    },
+  ]);
+  assert.ok(request !== null);
+  const archive = new CoreProgram(request).places.find(
+    (place) => place.kind.kind === "binding" && place.kind.name === "archive",
+  );
+  assert.ok(archive !== undefined);
+  const answer = (): string => {
+    const place = analyseCore(request).place(archive.id, ["element", "element", "a", "element"]);
+    return `${place.contract.kinds.map((item) => item.tag).join("|")} ${place.admitted.by}`;
+  };
+  const reversed = (run: () => string): string =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => withSolverSeam({ reverseWorklist: true }, run),
+    );
+  assert.deepEqual(
+    [answer(), reversed(answer), withoutSharing(answer), reversed(() => withoutSharing(answer))],
+    Array<string>(4).fill("integer decided"),
   );
 });

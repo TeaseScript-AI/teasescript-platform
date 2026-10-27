@@ -2,10 +2,13 @@ import type { Expression } from "../../ast.js";
 import { expressionChildren, unwrap } from "../../expression-children.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
+import { joinSteps, keptText } from "./budget.js";
 import {
+  keptKey,
+  keptPrefixes,
   keyOf,
-  keyPlace,
   keyPath,
+  keyPlace,
   prefixesOf,
   recordKey,
   sortCost,
@@ -135,7 +138,7 @@ export class GuardIndex {
     for (const key of [...this.#branches.keys(), ...this.#operands.keys()]) {
       const first = !listed.has(key);
       listed.add(key);
-      for (const prefix of prefixesOf(key)) {
+      for (const prefix of keptPrefixes(work, key)) {
         work.charge("indexSteps");
         this.belowTested.add(prefix);
         if (!first) continue;
@@ -226,7 +229,7 @@ export class GuardIndex {
       else list.push(entry);
     };
     for (const tested of under) {
-      const label = keyPath(tested).slice(depth).join(".");
+      const label = keptText(program.work, keyPath(tested).slice(depth));
       for (const [callable, regions] of this.#branches.get(tested) ?? [])
         for (const entry of regions.list)
           add(branches, callable, {
@@ -594,7 +597,7 @@ export class GuardIndex {
     const binding = program.occurrenceOf.get(current);
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) return false;
-    return this.narrowed(keyOf(binding, [...steps.reverse(), ...rest]), node);
+    return this.narrowed(keyOf(binding, joinSteps(steps.reverse(), rest)), node);
   }
 
   /** The tested keys `q` below each key, per relative path `q` (every split of every tested key's path). */
@@ -616,10 +619,10 @@ export class GuardIndex {
       this.#testedLength = Math.max(this.#testedLength, path.length);
       for (let length = 0; length < path.length; length += 1) {
         this.program.work.charge("indexSteps");
-        const below = path.slice(length).join(".");
+        const below = keptText(this.program.work, path.slice(length));
         let keys = relative.get(below);
         if (keys === undefined) relative.set(below, (keys = new Set()));
-        keys.add(keyOf(keyPlace(tested), path.slice(0, length)));
+        keys.add(keptKey(this.program.work, keyPlace(tested), path.slice(0, length)));
       }
     }
     this.#testedRelative = relative;

@@ -1980,23 +1980,8 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // S6-CARRIERS §3.2, §3.4 with Codex r20 B4 and B5: k nested own defaults, each walked once as a landing; k merged
-  // host stores met by k consumers, each provenance node resolved once
-  ...(
-    [
-      ["otherwise", (inner: string) => `null otherwise (${inner})`],
-      ["get", (inner: string) => `[1].get(7, default: ${inner})`],
-      ["load", (inner: string, i: number) => `load("k${i}", default: ${inner})`],
-    ] as const
-  ).map(([variant, wrap]): WorkFamily => ({
-    name: `C9-nested-own-${variant}`,
-    measures: `§3.2, C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
-    program: (k) => {
-      let value = "hostValue";
-      for (let i = k - 1; i >= 0; i -= 1) value = wrap(value, i);
-      return main(lines(`let out = ${value}`, "repeat out {}", "exit"));
-    },
-  })),
+  // S6-CARRIERS §3.4 with Codex r20 B5: k merged host stores met by k consumers, each provenance node resolved once (the
+  // nested own defaults of §3.2 are a gated known limit)
   ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
     name: `C9-merged-leaves-${variant}`,
     measures: `§3.4: k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
@@ -2152,6 +2137,19 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   })),
 ];
 
+/** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
+function nestedOwn(variant: string, wrap: (inner: string, i: number) => string): WorkFamily {
+  return {
+    name: `C9-nested-own-${variant}`,
+    measures: `§3.2, C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
+    program: (k) => {
+      let value = "hostValue";
+      for (let i = k - 1; i >= 0; i -= 1) value = wrap(value, i);
+      return main(lines(`let out = ${value}`, "repeat out {}", "exit"));
+    },
+  };
+}
+
 /**
  * A6's chain of k dependent rejections (Sol's twelve-step witness at size k): each copy reads its source after the
  * source's misfit, so each rejection shows only in the pass after the one before it, k passes in all: TABLE §8's
@@ -2159,7 +2157,9 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
- * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71).
+ * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
+ * defaults, one product of admission's stop index with three witnesses: accepted in the same form (TABLE r4.78 (5),
+ * option A).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2228,6 +2228,16 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
         ),
       ),
   },
+  // One known product with three witnesses, a gated known limit by the owner's decision (TABLE r4.78 (5), option A;
+  // evaluation keys that share their prefixes are a possible follow-up): admission's stop index keeps an evaluation
+  // key and a chain of operations per nested operation, each one entry longer than the one around it, now charged as
+  // kept, so k nested own defaults keep about k²/2 entries. In both orders at k = 64, 128 (`main` in brackets, the keys
+  // uncharged): `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,712 / 65,555 (3.040; 2.047), `load` 7,150 /
+  // 25,167 (3.592; 2.054), re-measured with the snapshots charged (3.937, 3.046 and 3.593 before); at k = 1,024 8.6 %,
+  // 10.9 % and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,141 and 4,472
+  { ...nestedOwn("otherwise", (inner) => `null otherwise (${inner})`), measured: 3.94 },
+  { ...nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`), measured: 3.05 },
+  { ...nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`), measured: 3.6 },
 ];
 
 /**
