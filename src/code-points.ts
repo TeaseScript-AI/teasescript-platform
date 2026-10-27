@@ -19,3 +19,14 @@ export function readCodePoint(text: string, index: number): number {
   if (codePointWidth(text, index) === 1) return unit;
   return (unit - 0xd800) * 0x400 + (text.charCodeAt(index + 1) - 0xdc00) + 0x10000;
 }
+
+/** Compares texts by Unicode code point, independently of locale; UTF-16 order differs above U+FFFF. */
+export function compareCodePoints(left: string, right: string): number {
+  for (let index = 0; index < left.length && index < right.length;) {
+    const leftPoint = readCodePoint(left, index);
+    const rightPoint = readCodePoint(right, index);
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
+    index += leftPoint > 0xffff ? 2 : 1;
+  }
+  return left.length - right.length;
+}

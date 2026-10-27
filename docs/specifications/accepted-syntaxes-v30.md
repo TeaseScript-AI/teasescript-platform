@@ -2388,9 +2388,9 @@ Runtime behavior:
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
   together), all text, all durations, all calendar durations of one family, all angles, or all dates, all times, all
   datetimes, or all absolute dates and times
-  ([§35](#35-date-time-and-durations)); text is ordered by Unicode code point, independently of locale, so
-  `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime
-  error otherwise.
+  ([§35](#35-date-time-and-durations)); text is ordered by Unicode code point, independently of locale, the order that
+  `<`, `<=`, `>`, and `>=` also use, so `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the
+  element type shows them, and a runtime error otherwise.
 - `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
   draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
   elements draws nothing.

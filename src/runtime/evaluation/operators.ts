@@ -1,3 +1,4 @@
+import { compareCodePoints } from "../../code-points.js";
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import { compareTemporal, temporalBinary } from "../values/temporal-operations.js";
 import type { BinaryExpressionPlan, ExpressionPlan, InstructionPlan } from "../../plan/model.js";
@@ -387,8 +388,9 @@ function angleBinary(
 }
 
 /**
- * `<`, `<=`, `>`, or `>=` (V30 §5): two values of one family that orders (`ordersWith`), numbers and texts as JavaScript
- * orders them, and durations, angles, and date and time values by their own order. Any other pair fails with `TSR009`.
+ * `<`, `<=`, `>`, or `>=` (V30 §5): two values of one family that orders (`ordersWith`), numbers as JavaScript orders
+ * them, texts by code point as `sort()` does, and durations, angles, and date and time values by their own order. Any
+ * other pair fails with `TSR009`.
  */
 function ordered(
   expression: BinaryExpressionPlan,
@@ -430,7 +432,7 @@ function orderWithin(
       break;
     case "string":
       if (typeof left === "string" && typeof right === "string")
-        return left < right ? -1 : left > right ? 1 : 0;
+        return Math.sign(compareCodePoints(left, right));
       break;
     case "duration":
     case "calendarDuration":

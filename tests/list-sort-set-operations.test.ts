@@ -53,6 +53,14 @@ test("sort orders numbers, text by code point, and durations in place", () => {
   );
 });
 
+test("comparisons order text by code point, as sort does", () => {
+  // U+1F600 is above U+FF5A, but its first UTF-16 unit is below.
+  assert.deepEqual(
+    said('say "${"😀" < "ｚ"} ${"😀" <= "ｚ"} ${"😀" > "ｚ"} ${"😀" >= "ｚ"}"\nexit'),
+    ["false false true true"],
+  );
+});
+
 test("shuffle reorders in place with the session RNG, drawing once per element after the first", () => {
   const source = (list: string) =>
     [
