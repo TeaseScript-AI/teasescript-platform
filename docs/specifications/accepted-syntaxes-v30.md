@@ -1187,7 +1187,8 @@ picks.add("three")    // compile error
   - a repeat count, and the count of media `repeat: n times` ([§22](#audio-and-video));
   - a list index, the index of a list's `get`, the position of `removeAt`, and the count of `take` and `takeLast`;
   - the start and end of `substring`, the count of text `repeat`, and the length of `padStart` and `padEnd`;
-  - the `decimals:` of `round`, and the amount of `calendar days` and `calendar months` ([§35](#durations));
+  - the `decimals:` of `round`, and the exponent of `pow` with a base that the compiler can see is negative;
+  - the amount of `calendar days` and `calendar months` ([§35](#durations));
   - a range bound in `for`, `randomInteger`, `toList`, `wait`, and `timer` ([§6](#6-range-semantics));
   - the `askInteger` prefill, and the start of an `integer` field of `askForm`;
   - a written `integer` place that a value is stored into: a variable, parameter, or result with a written `integer`
