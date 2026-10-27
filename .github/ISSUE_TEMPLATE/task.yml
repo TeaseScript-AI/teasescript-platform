@@ -8,7 +8,7 @@ body:
     id: goal
     attributes:
       label: Goal
-      description: What should be achieved, and why.
+      description: In plain words, what should be achieved, and why.
     validations:
       required: true
   - type: textarea

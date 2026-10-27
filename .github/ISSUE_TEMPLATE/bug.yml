@@ -8,24 +8,29 @@ body:
     id: what-happened
     attributes:
       label: What happened
-      description: What goes wrong, and when you run into it.
+      description: One or two sentences in plain words, as you would tell someone.
     validations:
       required: true
-  - type: textarea
-    id: impact
-    attributes:
-      label: Impact
-      description: What it blocks or degrades, how often, and any workaround.
   - type: textarea
     id: steps
     attributes:
       label: Steps to reproduce
-      description: The smallest TeaseScript source and what you do. An intermittent problem is welcome too.
+      description: What you do, with the smallest TeaseScript example. An intermittent problem is welcome too.
   - type: textarea
     id: expected
     attributes:
       label: Expected behavior
       description: What should happen, with the specification or decision that says so if you know it.
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happens instead.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What it blocks or degrades, how often, and any workaround.
   - type: textarea
     id: version
     attributes:

@@ -9,7 +9,7 @@ body:
     id: question
     attributes:
       label: Question
-      description: The choice to be made.
+      description: In plain words, the choice to be made, with a small example if it helps.
     validations:
       required: true
   - type: textarea
