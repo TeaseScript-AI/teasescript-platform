@@ -2,19 +2,47 @@ import type { CompilationResult } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import { propertyStep } from "../../src/type-inference/core/program.js";
+import type { Answers } from "../../src/type-inference/core/answers.js";
+import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 
 /*
- * The stop oracle (D4 a′, TABLE r4.90, r4.99): what a compile stopped at some unit keeps of the unstopped compile. One
- * function for `tests/type-core-stop.test.ts` and the every-unit sweep kept outside CI.
+ * The stop oracle (D4 a′, TABLE r4.99, r4.100, r4.108): a compile stopped at some unit against the unstopped compile,
+ * whole. One function for `tests/type-core-stop.test.ts` and the every-unit sweep kept outside CI.
  */
-
-/** A plan's fields that carry a check: a stored value's, a default's or fallback's, an index's, a typed read's, a repair. */
-const CHECK_FIELDS = ["typeCheck", "fallbackCheck", "indexCheck", "expected", "repair"] as const;
 
 /** A plan's globals for one run. */
 export type Globals = Readonly<Record<string, SerializableRuntimeValue>>;
+
+/** A compile's diagnostics and plan. */
+type Compiled = Pick<CompilationResult, "diagnostics" | "plan">;
+
+/** A compile of one source and its analysis at the same allowance, in the same mode. */
+export interface StopRun {
+  readonly result: Compiled;
+  readonly answers: Answers;
+  /** The compile again, the warnings whose `recordOf` `records` has left out of its discharge (`withoutRecords`). */
+  readonly without: (records: ReadonlySet<string>) => Compiled;
+}
+
+export interface StopCase {
+  readonly unstopped: StopRun;
+  readonly stopped: StopRun;
+  readonly fitting: readonly Globals[];
+  readonly violating: readonly Globals[];
+}
+
+/** A site's offsets. */
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Where two plans differ: the path of the differing value, and the innermost plan node with a span holding it. */
+interface PlanDifference {
+  readonly path: string;
+  readonly node: Span | null;
+}
 
 /** The parts of a plain value: an array's items, an object's fields; none for anything else. */
 function partsOf(value: unknown): Map<string, unknown> | null {
@@ -22,195 +50,176 @@ function partsOf(value: unknown): Map<string, unknown> | null {
   return value !== null && typeof value === "object" ? new Map(Object.entries(value)) : null;
 }
 
-/** A plan node's span as the plan serializes it: `so:eo` (an instruction's compact span), else its offsets. */
-function spanText(span: unknown): string {
-  const parts = partsOf(span);
-  if (parts === null) return "-";
-  if (parts.has("so")) return `${String(parts.get("so"))}:${String(parts.get("eo"))}`;
-  const offset = (end: string): string => String(partsOf(parts.get(end))?.get("offset") ?? "?");
-  return `${offset("start")}:${offset("end")}`;
+/** A plan node's span as the plan serializes it (an instruction's compact `so`/`eo`, else its offsets), or `null`. */
+function spanOf(value: unknown): Span | null {
+  const parts = partsOf(partsOf(value)?.get("span"));
+  if (parts === null) return null;
+  if (parts.has("so")) return { start: Number(parts.get("so")), end: Number(parts.get("eo")) };
+  const offset = (end: string): number => Number(partsOf(parts.get(end))?.get("offset"));
+  return { start: offset("start"), end: offset("end") };
 }
 
-/**
- * Every check a plan carries, by its field, the kind of the node that holds it and that node's span: the serialized
- * values at each, in plan order; the storage types by their place.
- */
-export function planChecks(plan: InstructionPlan): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  const add = (at: string, value: unknown): void => {
-    const list = out.get(at);
-    if (list === undefined) out.set(at, [JSON.stringify(value)]);
-    else list.push(JSON.stringify(value));
-  };
-  const pending: unknown[] = [];
-  for (const [name, value] of partsOf(plan) ?? [])
-    if (name === "storageTypes")
-      for (const entry of partsOf(value)?.values() ?? []) add("storageTypes", entry);
-    else pending.push(value);
-  while (pending.length > 0) {
-    const fields = partsOf(pending.pop());
-    if (fields === null) continue;
-    const at = `${String(fields.get("kind") ?? "-")}|${spanText(fields.get("span"))}`;
-    for (const field of CHECK_FIELDS)
-      if (fields.get(field) !== undefined) add(`${field}|${at}`, fields.get(field));
-    for (const value of fields.values()) pending.push(value);
+/** Every place two plans differ: each value's path where one has what the other lacks or another value. */
+function planDifferences(
+  want: unknown,
+  got: unknown,
+  node: Span | null = null,
+  path = "",
+  out: PlanDifference[] = [],
+): PlanDifference[] {
+  if (JSON.stringify(want) === JSON.stringify(got)) return out;
+  const here = spanOf(want) ?? spanOf(got) ?? node;
+  const [w, g] = [partsOf(want), partsOf(got)];
+  if (
+    w !== null &&
+    g !== null &&
+    Array.isArray(want) === Array.isArray(got) &&
+    (!Array.isArray(want) || w.size === g.size)
+  ) {
+    for (const key of new Set([...w.keys(), ...g.keys()]))
+      planDifferences(w.get(key), g.get(key), here, `${path}/${key}`, out);
+    return out;
   }
+  out.push({ path: path || "/", node: here });
   return out;
 }
 
-/** Every diagnostic: its severity, code, span and message. */
-function diagnosticTexts(result: CompilationResult): string[] {
-  return result.diagnostics.map(
-    (d) => `${d.severity} ${d.code} ${d.span.start.offset}:${d.span.end.offset} ${d.message}`,
-  );
-}
-
-/** A run of a plan to its end with `globals`: what it said and the failure's code and span. */
-function ranWith(plan: InstructionPlan, globals: Globals): string {
+/** A run of a plan to its end with `globals`: what it said and where it failed. */
+function ranWith(
+  plan: InstructionPlan,
+  globals: Globals,
+): { readonly said: readonly string[]; readonly failure: (Span & { code: string }) | null } {
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
   const failure = result.events.find((event) => event.kind === "runtimeFailure");
-  return JSON.stringify({
+  return {
     said: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     failure:
       failure?.kind === "runtimeFailure"
-        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+        ? { code: failure.code, start: failure.span.start.offset, end: failure.span.end.offset }
         : null,
-  });
+  };
 }
 
-export interface StopCase {
-  readonly unstopped: CompilationResult;
-  readonly stopped: CompilationResult;
-  /** Whether the stopped pass's admission had settled, by the unstopped analysis's passes (not the stop's own claim). */
-  readonly settled: boolean;
-  /** Whether the stop came in the publication of a settled pass or later: the unstopped diagnostics exactly. */
-  readonly exact: boolean;
-  /** The warnings the stop moved to the runtime and does not show, each `code start:end`. */
-  readonly deferred: readonly string[];
-  /** Whether the stopped analysis left a place's path undecided, where a check may stay open. */
-  readonly undecided?: (place: string, path: readonly string[]) => boolean;
-  readonly fitting: readonly Globals[];
-  readonly violating: readonly Globals[];
+/** A record's code and site, `code start:end`. */
+function recordOf(code: string, site: Span): string {
+  return `${code} ${site.start}:${site.end}`;
 }
 
-/** A check's type the stopped plan keeps of the unstopped one's: equal, or open only where the path is undecided. */
-function keptType(
-  c: StopCase,
-  place: string,
-  want: unknown,
-  got: unknown,
-  path: readonly string[],
-): string[] {
-  if (JSON.stringify(want) === JSON.stringify(got)) return [];
-  const label = `${place}${path.map((step) => `/${step}`).join("")}`;
-  if (got === null || got === undefined)
-    return c.undecided?.(place, path) === true ? [] : [`lost ${label}`];
-  const [w, g] = [partsOf(want), partsOf(got)];
-  if (w === null || g === null || w.get("kind") !== g.get("kind")) return [`changed ${label}`];
-  if (w.get("kind") === "object") {
-    const fields = (parts: Map<string, unknown>): Map<string, unknown> =>
-      new Map(
-        [...(partsOf(parts.get("properties"))?.values() ?? [])].map((property) => {
-          const p = partsOf(property);
-          return [String(p?.get("name")), p?.get("type")];
-        }),
-      );
-    const [wf, gf] = [fields(w), fields(g)];
-    return [...wf].flatMap(([name, type]) =>
-      keptType(c, place, type, gf.get(name) ?? null, [...path, propertyStep(name)]),
-    );
-  }
-  if (w.has("element"))
-    return keptType(c, place, w.get("element"), g.get("element"), [...path, "element"]);
-  return [`changed ${label}`];
+/** A diagnostic of the core as a record (`StopRun.without`). */
+export function recordOfDiagnostic(diagnostic: CoreDiagnostic): string {
+  return recordOf(diagnostic.code, diagnostic.site);
+}
+
+/** A diagnostic's offsets. */
+function offsets(d: Compiled["diagnostics"][number]): Span {
+  return { start: d.span.start.offset, end: d.span.end.offset };
+}
+
+/** Whether `inner` lies within `outer`. */
+function within(inner: Span, outer: Span): boolean {
+  return outer.start <= inner.start && inner.end <= outer.end;
 }
 
 /**
- * What a stop lost of the unstopped compile: at any stop, never an error it lacks, a plan wherever it has one, and its
- * fitting runs unchanged; where admission settled, each of its diagnostics (the same code at the same span, or among
- * the stop's deferred warnings there), every check its plan carries (the same value at the same node, a stored type
- * open only where the stopped analysis left the path undecided), and each violating run failing at the same check;
- * from a settled publication on, its diagnostics exactly, besides the stop's own.
+ * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108), none at a sound stop.
+ * At any stop: no error the unstopped compile lacks, a plan wherever it has one, the fitting runs unchanged. Where
+ * admission settled, the rest whole (r4.108 (1)): a mark excuses the record with its code at its site and nothing
+ * else. The diagnostics and the checks are compared in their published order (r4.86 (1)) besides those records and
+ * the stop's own warning. The plans are compared whole; a difference stands only inside the plan content of a mark
+ * whose obligation is not the unstopped one at its code and site (one that is owes the same check): the content that
+ * leaving it, and the unstopped warning with its code and site, out of each compile's discharge removes. A violating
+ * run differs only where the run that stops first fails in a node holding such content. C5's error at a literal never
+ * moves to its store's mark there: a settled stop decides its receiver's shape (r4.108 (2)).
  */
 export function stopProblems(c: StopCase): string[] {
+  const { unstopped, stopped } = c;
   const problems: string[] = [];
-  const key = (text: string): string => text.split(" ").slice(0, 3).join(" ");
-  const full = diagnosticTexts(c.unstopped);
-  const got = diagnosticTexts(c.stopped);
-  for (const d of got)
-    if (d.startsWith("error ") && !full.some((f) => key(f) === key(d)))
-      problems.push(`new ${key(d)}`);
-  if (
-    c.unstopped.plan !== null &&
-    c.stopped.plan === null &&
-    !got.some((d) => d.startsWith("error "))
-  )
-    problems.push("no plan");
-  const runs = (plan: InstructionPlan | null, globals: readonly Globals[]): string[] =>
-    plan === null ? [] : globals.map((each) => ranWith(plan, each));
-  const [fullFitting, gotFitting] = [
-    runs(c.unstopped.plan, c.fitting),
-    runs(c.stopped.plan, c.fitting),
-  ];
-  if (c.unstopped.plan !== null && c.stopped.plan !== null)
-    fullFitting.forEach((run, index) => {
-      if (gotFitting[index] !== run) problems.push(`fitting ${gotFitting[index]} against ${run}`);
+  const marks = stopped.answers.budget.deferred;
+  const [want, got] = [unstopped.result.plan, stopped.result.plan];
+  const fitting = (): void =>
+    c.fitting.forEach((globals) => {
+      const [a, b] = [
+        JSON.stringify(ranWith(want!, globals)),
+        JSON.stringify(ranWith(got!, globals)),
+      ];
+      if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
-  if (!c.settled) return problems;
-  for (const d of full) {
-    const [, code, at] = d.split(" ");
-    if (
-      !got.some((g) => key(g).endsWith(` ${code} ${at}`)) &&
-      !c.deferred.includes(`${code} ${at}`)
-    )
-      problems.push(`lost ${key(d)}`);
+  if (!stopped.answers.budget.settled) {
+    // (before admission settled nothing it found stands, r4.99: no error the unstopped compile lacks, a plan wherever
+    // it has one, the fitting runs unchanged; C5's error may stand as its store's mark there, r4.108 (2))
+    const errors = new Set(
+      unstopped.result.diagnostics.flatMap((d) =>
+        d.severity === "error" ? [recordOf(d.code, offsets(d))] : [],
+      ),
+    );
+    for (const d of stopped.result.diagnostics)
+      if (d.severity === "error" && !errors.has(recordOf(d.code, offsets(d))))
+        problems.push(`new error ${recordOf(d.code, offsets(d))}`);
+    if (want !== null && got === null) problems.push("no plan");
+    if (want !== null && got !== null) fitting();
+    return problems;
   }
-  if (c.unstopped.plan !== null && c.stopped.plan !== null) {
-    const kept = planChecks(c.stopped.plan);
-    for (const [at, values] of planChecks(c.unstopped.plan))
-      values.forEach((value, index) => {
-        const other = kept.get(at)?.[index];
-        if (other === value) return;
-        const typed = (text: string | undefined): Map<string, unknown> | null =>
-          text === undefined ? null : partsOf(JSON.parse(text));
-        const [want, have] = [typed(value), typed(other)];
-        // (a stored type may open where the path is undecided; its place and every other field never change)
-        const besides = (parts: Map<string, unknown> | null): string =>
-          JSON.stringify([...(parts ?? [])].filter(([name]) => name !== "type"));
-        if (
-          at.startsWith("typeCheck|") &&
-          want !== null &&
-          have !== null &&
-          besides(want) !== besides(have)
-        )
-          problems.push(`changed ${at} ${value} into ${other}`);
-        else if (at.startsWith("typeCheck|") && want !== null)
-          problems.push(
-            ...keptType(
-              c,
-              String(want.get("place")),
-              want.get("type"),
-              have?.get("type") ?? null,
-              [],
-            ),
-          );
-        else problems.push(`lost ${at} ${value}`);
-      });
-    const [fullViolating, gotViolating] = [
-      runs(c.unstopped.plan, c.violating),
-      runs(c.stopped.plan, c.violating),
-    ];
-    fullViolating.forEach((run, index) => {
-      const failure = (text: string | undefined): string =>
-        text === undefined ? "-" : String(partsOf(JSON.parse(text))?.get("failure") ?? null);
-      if (failure(gotViolating[index]) !== failure(run))
-        problems.push(`violating ${gotViolating[index]} against ${run}`);
-    });
+  const excused = new Set(marks.map((mark) => recordOf(mark.code, mark.site)));
+  // the diagnostics, in their published order
+  const shown = (each: StopRun): string[] =>
+    each.result.diagnostics
+      .filter((d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))))
+      .map(
+        (d) => `${d.severity} ${d.code} ${d.span.start.offset}:${d.span.end.offset} ${d.message}`,
+      );
+  const [before, after] = [shown(unstopped), shown(stopped)];
+  if (JSON.stringify(before) !== JSON.stringify(after))
+    problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
+  // the checks, in their published order
+  const marked = new Set<Obligation>(
+    [...unstopped.answers.diagnostics, ...stopped.answers.diagnostics, ...marks].flatMap((d) =>
+      "obligation" in d && excused.has(recordOf(d.code, d.site)) ? [d.obligation] : [],
+    ),
+  );
+  const checks = (each: StopRun): string[] =>
+    each.answers.checks.filter((check) => !marked.has(check)).map((check) => JSON.stringify(check));
+  const [owed, kept] = [checks(unstopped), checks(stopped)];
+  if (JSON.stringify(owed) !== JSON.stringify(kept))
+    problems.push(`checks ${kept.join(" | ")} against ${owed.join(" | ")}`);
+  if (want !== null && got === null) problems.push("no plan");
+  if (want === null || got === null) return problems;
+  // the plans, whole: each difference inside a changing mark's content
+  const differences = planDifferences(want, got);
+  const obligations = new Map(
+    unstopped.answers.diagnostics.flatMap((d) =>
+      "obligation" in d ? [[recordOf(d.code, d.site), JSON.stringify(d.obligation)] as const] : [],
+    ),
+  );
+  const changing = new Set(
+    marks
+      .filter(
+        (mark) =>
+          obligations.get(recordOf(mark.code, mark.site)) !== JSON.stringify(mark.obligation),
+      )
+      .map((mark) => recordOf(mark.code, mark.site)),
+  );
+  const content: PlanDifference[] = [];
+  if (differences.length > 0 && changing.size > 0) {
+    const own = (each: StopRun): PlanDifference[] =>
+      planDifferences(each.without(new Set()).plan, each.without(changing).plan);
+    content.push(...own(unstopped), ...own(stopped));
   }
-  if (c.exact) {
-    const own = got.filter((d) => !d.includes(" TSV076 ")).sort();
-    if (JSON.stringify(own) !== JSON.stringify([...full].sort()))
-      problems.push(`diagnostics ${own.join(" | ")} against ${full.join(" | ")}`);
-  }
+  const inContent = (path: string): boolean =>
+    content.some((part) => path === part.path || path.startsWith(`${part.path}/`));
+  const excusedNodes: Span[] = [];
+  for (const difference of differences)
+    if (difference.node !== null && inContent(difference.path)) excusedNodes.push(difference.node);
+    else problems.push(`plan ${difference.path}`);
+  // the runs
+  fitting();
+  const first = (one: ReturnType<typeof ranWith>, other: ReturnType<typeof ranWith>): boolean =>
+    one.failure !== null &&
+    excusedNodes.some((node) => within(one.failure!, node)) &&
+    one.said.every((text, index) => other.said[index] === text);
+  c.violating.forEach((globals) => {
+    const [a, b] = [ranWith(want, globals), ranWith(got, globals)];
+    if (JSON.stringify(a) !== JSON.stringify(b) && !first(a, b) && !first(b, a))
+      problems.push(`violating ${JSON.stringify(b)} against ${JSON.stringify(a)}`);
+  });
   return problems;
 }

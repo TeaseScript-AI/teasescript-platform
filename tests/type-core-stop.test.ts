@@ -9,13 +9,18 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withoutRecords } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { planChecks, stopProblems, type Globals } from "./helpers/type-core-stop-oracle.js";
+import {
+  recordOfDiagnostic,
+  stopProblems,
+  type Globals,
+  type StopRun,
+} from "./helpers/type-core-stop-oracle.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
@@ -100,16 +105,10 @@ test("a check the stop moves to the runtime is decided, planned and run, in both
     `info TSV076 @${value}:${value + 9}`,
     `warning TSV076 @${value}:${value + 9}`,
   ]);
-  // the plan: valid, every check it carries as the unstopped compile's (the store's: place, type, span)
+  // the plan: valid, the unstopped compile's whole (the store's check: place, type, span)
   assert.ok(plan !== null);
   assert.deepEqual(validateInstructionPlan(plan).errors, []);
-  const unstopped = compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan;
-  assert.ok(unstopped !== null);
-  assert.deepEqual(planChecks(plan), planChecks(unstopped));
-  assert.deepEqual(
-    [...planChecks(plan).keys()].filter((at) => at.startsWith("typeCheck|")).length,
-    1,
-  );
+  assert.deepEqual(plan, compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan);
   // the execution: a whole number reaches the next effect, a fraction stops at the store's check, its exact span
   assert.deepEqual(ran(plan, 1), { said: ["AFTER"], failure: null });
   assert.deepEqual(ran(plan, 1.5), { said: [], failure: `TSR058@${value}:${value + 9}` });
@@ -165,6 +164,24 @@ test("a stop in the route's questions after a finished analysis keeps its findin
   assert.deepEqual(errors, [
     `error TSV041 @${literal.indexOf("1.5")}:${literal.indexOf("1.5") + 3}`,
   ]);
+});
+
+/**
+ * The answers' own setup after a finished analysis counts its work too (the parameters with several call sites, for
+ * messages): a stop there is a question's, every finding kept, never an exception out of the analysis.
+ */
+test("a stop in the answers' setup after a finished analysis is a question's", () => {
+  const source =
+    "function make {\n  return {kept: 1}\n}\nlet mirror = make()\nmirror.absent = hostValue\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const unstopped = analyseCore(request);
+  const stopped = withTestAllowance(unstopped.budget.total - 1, () => analyseCore(request));
+  assert.equal(stopped.budget.stoppedIn, "questions");
+  assert.deepEqual(
+    stopped.diagnostics.filter((d) => d.code !== "TSV076"),
+    unstopped.diagnostics,
+  );
 });
 
 test("after a stop a typed parse still reads its JSON as its expected type and takes its default (F18)", () => {
@@ -287,15 +304,14 @@ function phaseEnds(
 }
 
 /**
- * TABLE r4.90, r4.99: what a phase settled is never discarded by a later one, and a stop owes what the unstopped
- * analysis owes, through the same consumers (the stop oracle, `helpers/type-core-stop-oracle.ts`). A stop in a settled
- * pass's walk or publication keeps admission's contracts (an inferred scalar's, a record's), the findings (an error a
- * copy brings, not a literal's), the quiet proofs and every check the plan carries (a default's against a written or
- * written element type, Astra's B1 of round 2; an `otherwise`'s). Each mode's phases found in that mode; the stop at
- * the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside CI).
- * `marked`: the code of an obligation whose type a stop may leave undecided and the source text of its site, the first
- * after `after` (TABLE r4.100): where the stopped plan lacks its check, the stop marks it among its deferred warnings,
- * and it does so at one stop at least.
+ * TABLE r4.90, r4.99, r4.108: what a phase settled is never discarded by a later one, and a stop changes nothing of the
+ * unstopped compile but the records its deferred marks name (the stop oracle, `helpers/type-core-stop-oracle.ts`). A
+ * stop in a settled pass's walk or publication keeps admission's contracts (an inferred scalar's, a record's), the
+ * findings (an error a copy brings, not a literal's), the quiet proofs and the whole plan (a default's check against a
+ * written or written element type, Astra's B1 of round 2; an `otherwise`'s). Each mode's phases found in that mode; the
+ * stop at the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside
+ * CI). `marked`: the code of an obligation a stop may leave undecided and the source text of its site, the first after
+ * `after` (TABLE r4.100): the stop marks it at one stop at least.
  */
 function settledPhases(
   cases: readonly (readonly [string, readonly Globals[], readonly Globals[]])[],
@@ -321,55 +337,50 @@ function settledPhases(
       };
       const request = coreRequest([{ path: "main.tease", source }], options.globals);
       assert.ok(request !== null);
-      const places = new CoreProgram(request).places;
       const analyse = (allowance: number): Answers =>
         withTestAllowance(allowance, () => inMode(() => analyseCore(request)));
       const compile = () => inMode(() => compileSourceWithBackend(source, options, CORE_BACKEND));
+      const without = (records: ReadonlySet<string>) =>
+        withoutRecords((d) => records.has(recordOfDiagnostic(d)), compile);
+      const unstopped: StopRun = {
+        result: compile(),
+        answers: inMode(() => analyseCore(request)),
+        without,
+      };
       // this mode's settled phases: the stops below its total, down to the first that is not settled
-      const stops = phaseEnds(inMode(() => analyseCore(request)).budget.total, (allowance) => {
+      const stops = phaseEnds(unstopped.answers.budget.total, (allowance) => {
         const { stoppedIn, settled } = analyse(allowance).budget;
         return settled ? stoppedIn : null;
       });
       const where = `${source} reversed: ${reversed} sharing: ${sharing}`;
       // (a settled phase at least: a program without boundaries charges its publication nothing)
       assert.ok(stops.has("walk") || stops.has("publication"), where);
-      const unstopped = compile();
+      // (the marked obligation's code and site)
+      const start = marked && source.indexOf(marked.text, source.indexOf(marked.after));
+      const site = marked && `${marked.code} ${start}:${start! + marked.text.length}`;
       let marks = 0;
       for (const [phase, ends] of stops)
         for (const allowance of ends) {
           const answers = analyse(allowance);
           assert.equal(answers.budget.stoppedIn, phase, `${where} @${allowance}`);
-          const undecided = (place: string, path: readonly string[]): boolean => {
-            const found = places.find((each) => `'${each.label}'` === place);
-            return found !== undefined && answers.place(found.id, path).admitted.by === "undecided";
-          };
-          const deferred = answers.budget.deferred.map(
-            (d) => `${d.code} ${d.site.start}:${d.site.end}`,
-          );
-          let problems = stopProblems({
-            unstopped,
-            stopped: withTestAllowance(allowance, compile),
-            settled: true,
-            exact: phase === "publication",
-            deferred,
-            undecided,
-            fitting,
-            violating,
-          });
-          const owed = problems.filter(
-            (problem) =>
-              problem.startsWith("lost fallbackCheck|") || problem.startsWith("violating "),
-          );
-          if (marked !== undefined && owed.length > 0) {
-            const at = source.indexOf(marked.text, source.indexOf(marked.after));
-            assert.ok(
-              deferred.includes(`${marked.code} ${at}:${at + marked.text.length}`),
-              `${where} ${phase} @${allowance}: ${owed.join(" | ")}`,
-            );
-            problems = problems.filter((problem) => !owed.includes(problem));
+          if (
+            answers.budget.deferred.some((d) => `${d.code} ${d.site.start}:${d.site.end}` === site)
+          )
             marks += 1;
-          }
-          assert.deepEqual(problems, [], `${where} ${phase} @${allowance}`);
+          assert.deepEqual(
+            stopProblems({
+              unstopped,
+              stopped: {
+                result: withTestAllowance(allowance, compile),
+                answers,
+                without: (records) => withTestAllowance(allowance, () => without(records)),
+              },
+              fitting,
+              violating,
+            }),
+            [],
+            `${where} ${phase} @${allowance}`,
+          );
         }
       if (marked !== undefined) assert.ok(marks > 0, where);
     }
@@ -417,49 +428,162 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
   ]);
 });
 
+/** A compile of `source` and its analysis, under an allowance where one is given. */
+function stopRun(source: string, allowance?: number): StopRun {
+  const options = { globals: ["hostValue", "hostOther"] };
+  const request = coreRequest([{ path: "main.tease", source }], options.globals);
+  assert.ok(request !== null);
+  const allowed = <T>(make: () => T): T =>
+    allowance === undefined ? make() : withTestAllowance(allowance, make);
+  const compile = () => compileSourceWithBackend(source, options, CORE_BACKEND);
+  return {
+    result: allowed(compile),
+    answers: allowed(() => analyseCore(request)),
+    without: (records) =>
+      allowed(() => withoutRecords((d) => records.has(recordOfDiagnostic(d)), compile)),
+  };
+}
+
+/** The lowest and highest allowance of a source's settled walk stops. */
+function walkEnds(source: string): readonly [number, number] {
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const walk = phaseEnds(analyseCore(request).budget.total, (allowance) => {
+    const { stoppedIn, settled } = withTestAllowance(allowance, () => analyseCore(request)).budget;
+    return settled ? stoppedIn : null;
+  }).get("walk");
+  assert.ok(walk !== undefined, source);
+  return walk;
+}
+
 /**
- * The stop oracle itself (Codex r8's T1): a kept store check is kept whole, its place as well as its type. Changes to
- * the unstopped plan's check stand in for a stop that changed it.
+ * The stop oracle itself (TABLE r4.108 (1)): the whole plan, a mark excusing only its own record. Changes to a compile
+ * stand in for a stop that made them: a store check's place, type or presence (Codex r8's T1), a property store's
+ * guard (Astra r3's T1), alone and beside the mark of a default the stop left undecided, and the diagnostics' order.
  */
-test("the stop oracle sees a store check's place, type or presence change", () => {
-  const unstopped = compileSourceWithBackend(
-    "let n: integer = hostValue\nexit\n",
-    OPTIONS,
-    CORE_BACKEND,
-  );
-  assert.ok(unstopped.plan !== null);
-  // (a change returns the check that stands instead, `null` for none)
-  const changed = (
-    change: (check: Record<string, unknown>) => Record<string, unknown> | null,
-  ): typeof unstopped => {
-    const plan = structuredClone(unstopped.plan);
+test("the stop oracle sees every change no mark of the stop names", () => {
+  // `edit` applied to every node of the plan, changing one at least
+  const edited = (each: StopRun, edit: (node: unknown) => boolean): StopRun => {
+    const plan = structuredClone(each.result.plan);
+    let changed = 0;
     const pending: unknown[] = [plan];
     while (pending.length > 0) {
-      const at = pending.pop();
-      if (at === null || typeof at !== "object") continue;
-      if ("typeCheck" in at && at.typeCheck !== null && typeof at.typeCheck === "object")
-        at.typeCheck = change(Object.fromEntries(Object.entries(at.typeCheck))) ?? undefined;
-      pending.push(...Object.values(at));
+      const node = pending.pop();
+      if (node === null || typeof node !== "object") continue;
+      if (edit(node)) changed += 1;
+      pending.push(...Object.values(node));
     }
-    return { ...unstopped, plan };
+    assert.ok(changed > 0);
+    return { ...each, result: { ...each.result, plan } };
   };
-  const problems = (stopped: typeof unstopped): string[] =>
-    stopProblems({
-      unstopped,
-      stopped,
-      settled: true,
-      exact: true,
-      deferred: [],
-      fitting: [],
-      violating: [],
-    });
-  assert.deepEqual(problems(unstopped), []);
-  for (const change of [
-    (check: Record<string, unknown>) => ({ ...check, place: "wrong target" }),
-    (check: Record<string, unknown>) => ({ ...check, type: { kind: "text" } }),
-    () => null,
+  // (the store's check is `{type: {kind: "integer"}, place: "'n'"}`; `undefined` removes it)
+  const typeCheck =
+    (check: unknown) =>
+    (node: unknown): boolean => {
+      if (node === null || typeof node !== "object" || !("typeCheck" in node)) return false;
+      node.typeCheck = check;
+      return true;
+    };
+  const withoutGuard = (node: unknown): boolean => {
+    if (node === null || typeof node !== "object" || !("requireExisting" in node)) return false;
+    delete node.requireExisting;
+    return true;
+  };
+  const problems = (unstopped: StopRun, stopped: StopRun, violating: readonly Globals[] = []) =>
+    stopProblems({ unstopped, stopped, fitting: [], violating });
+  const store = stopRun("let n: integer = hostValue\nexit\n");
+  assert.deepEqual(problems(store, store), []);
+  for (const edit of [
+    typeCheck({ type: { kind: "integer" }, place: "wrong target" }),
+    typeCheck({ type: { kind: "text" }, place: "'n'" }),
+    typeCheck(undefined),
   ])
-    assert.notDeepEqual(problems(changed(change)), []);
+    assert.notDeepEqual(problems(store, edited(store, edit)), []);
+  const vessel = stopRun('let vessel = hostValue\nvessel.amount = 4\nsay "AFTER"\nexit\n');
+  assert.deepEqual(problems(vessel, vessel), []);
+  assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
+  // a walk stop marks the default (r4.100), which excuses its own check and not the guard
+  const source =
+    'let nums: number?[] = [null,1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
+  const unstopped = stopRun(source);
+  const stopped = stopRun(source, walkEnds(source)[0]);
+  const fallback = source.indexOf("hostValue");
+  assert.ok(
+    stopped.answers.budget.deferred.some((d) => d.code === "TSV041" && d.site.start === fallback),
+  );
+  const violating = [host(2.5, object({ other: 2 }))];
+  assert.deepEqual(problems(unstopped, stopped, violating), []);
+  const unguarded = problems(unstopped, edited(stopped, withoutGuard), violating);
+  assert.ok(
+    unguarded.some((problem) => problem.includes("requireExisting")),
+    unguarded.join(" | "),
+  );
+  assert.ok(
+    unguarded.some((problem) => problem.startsWith("violating ")),
+    unguarded.join(" | "),
+  );
+  // the diagnostics in their published order
+  assert.ok(unstopped.result.diagnostics.length > 1);
+  const reordered = [...unstopped.result.diagnostics].reverse();
+  assert.notDeepEqual(
+    problems(unstopped, { ...unstopped, result: { ...unstopped.result, diagnostics: reordered } }),
+    [],
+  );
+});
+
+/**
+ * C5's record where the retained state decides its receiver's shape (TABLE r4.108 (2), Astra r3's N1): a store of a
+ * property no source of its receiver has is an error at the literal the receiver copies, and a stop after admission
+ * settled publishes it there, not a mark at the store.
+ */
+test("a stop after admission settled keeps the error at the literal a property store's receiver copies", () => {
+  settledPhases([
+    ["let original = {kept:1}\nlet mirror = original\nmirror.absent = hostValue\nexit\n", [], []],
+  ]);
+});
+
+/**
+ * Before admission settled nothing it decided stands, so the receiver's shape is undecided: the record stands as the
+ * mark of the store that owes it, the one move of a record's site the oracle accepts, and only there (TABLE r4.108 (2)).
+ */
+test("a stop before admission settled marks a property store whose receiver's shape it leaves undecided", () => {
+  const source =
+    "let original = {kept:1}\nlet mirror = original\nmirror.absent = hostValue\nexit\n";
+  const unstopped = stopRun(source);
+  const literal = source.indexOf("{kept:1}");
+  const store = source.indexOf("mirror.absent");
+  assert.deepEqual(
+    unstopped.answers.diagnostics.map((d) => `${d.class} ${d.code} ${d.site.start}`),
+    [`compile-error TSV043 ${literal}`],
+  );
+  // a stop in the setup, and the last before admission settled
+  for (const allowance of [ALLOWANCE, walkEnds(source)[0] - 1]) {
+    const stopped = stopRun(source, allowance);
+    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (d) => d.code === "TSV043" && d.site.start === store && d.site.end === store + 13,
+      ),
+      `@${allowance}`,
+    );
+    assert.deepEqual(
+      stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
+      [],
+      `@${allowance}`,
+    );
+    // (claimed settled, the moved record is not accepted)
+    const budget = { ...stopped.answers.budget, settled: true };
+    assert.notDeepEqual(
+      stopProblems({
+        unstopped,
+        stopped: { ...stopped, answers: { ...stopped.answers, budget } },
+        fitting: [],
+        violating: [],
+      }),
+      [],
+      `@${allowance}`,
+    );
+  }
 });
 
 /**
@@ -566,27 +690,16 @@ test("a stop keeps the empty check of a selection read through a copied written 
 test("no stop in a settled walk gives a fallback the family of its key's contract", () => {
   const source =
     'let v: integer? = null\nlet a = {v:v}\nlet b = a\nsay b.v otherwise hostValue\nv = 2\nsay "AFTER"\nexit\n';
-  const options = { globals: ["hostValue", "hostOther"] };
-  const request = coreRequest([{ path: "main.tease", source }], options.globals);
-  assert.ok(request !== null);
-  const compile = () => compileSourceWithBackend(source, options, CORE_BACKEND);
-  const walk = phaseEnds(analyseCore(request).budget.total, (allowance) => {
-    const { stoppedIn, settled } = withTestAllowance(allowance, () => analyseCore(request)).budget;
-    return settled ? stoppedIn : null;
-  }).get("walk");
-  assert.ok(walk !== undefined);
-  const unstopped = compile();
-  for (let allowance = walk[0]; allowance <= walk[1]; allowance += 1)
+  const unstopped = stopRun(source);
+  const [low, high] = walkEnds(source);
+  for (let allowance = low; allowance <= high; allowance += 1)
     assert.deepEqual(
       stopProblems({
         unstopped,
-        stopped: withTestAllowance(allowance, compile),
-        settled: true,
-        exact: false,
-        deferred: [],
+        stopped: stopRun(source, allowance),
         fitting: [host("good", 3)],
         violating: [],
-      }).filter((problem) => problem.startsWith("fitting") || problem.startsWith("new")),
+      }),
       [],
       `@${allowance}`,
     );

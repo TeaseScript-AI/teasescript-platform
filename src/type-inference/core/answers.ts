@@ -333,12 +333,19 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   // statements nested past the limit, the analysis run to its end: their checks run when the script runs
   const { pass, consumers } = analysed!;
   if (program.deep.length > 0) program.work.apart(() => consumers.finish(false));
-  return new CoreAnswers(
-    pass,
-    consumers,
-    written,
-    consumers.deferred.length > 0 ? "nesting" : null,
-  );
+  try {
+    return new CoreAnswers(
+      pass,
+      consumers,
+      written,
+      consumers.deferred.length > 0 ? "nesting" : null,
+    );
+  } catch (error) {
+    // (the answers' own setup after the finished analysis: a stop there is a question's, `stoppedAt`)
+    if (!(error instanceof BudgetExhausted)) throw error;
+    program.work.stop(error.limit);
+    return new CoreAnswers(pass, consumers, written, error.limit, "questions");
+  }
 }
 
 /**

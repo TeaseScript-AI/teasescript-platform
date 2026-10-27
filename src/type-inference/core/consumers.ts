@@ -442,6 +442,36 @@ export class Consumers {
   }
 
   /**
+   * A key's read in the finishing path (a store's receiver), from the same retained state as `#finishingRead`: its own
+   * finished answer at the node; else, domains, its finished contract and its written or retained admitted type (S3 §5
+   * revisions 14, 16); `STOPPED` where none decides it. A receiver the retained state decides keeps its shape, so a store
+   * into a property no source has keeps its error at the literal (TABLE r4.108).
+   */
+  #finishingKeyRead(key: Key, node: FlowNode): readonly Item[] {
+    const { contract, values, program } = this.pass;
+    const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
+      const items = this.#run(work());
+      return items.some(unsettledItem) ? null : items;
+    };
+    const found =
+      (program.work.stopped === null ? null : settled(() => values.keyItems(key, node))) ??
+      settled(() => contract.contractOf(key));
+    if (found !== null) return found;
+    const [place, path] = [keyPlace(key), keyPath(key)];
+    const written = writtenOf(program.place(place).kind);
+    const term = written === null ? null : termAt(written, path);
+    const tags =
+      term !== null
+        ? typeTags(term)
+        : this.settled
+          ? (this.admission.retained(place, path) ?? [])
+          : [];
+    return tags.length === 0 || tags.includes("unknown")
+      ? STOPPED
+      : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+  }
+
+  /**
    * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
    * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
    * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
@@ -3470,7 +3500,11 @@ export class Consumers {
     )) {
       if (!this.#runs(d.site)) continue;
       this.#reading = d.prep ?? d.node;
-      const receiver = withoutEmpty(this.#run(values.keyItems(d.recv!, d.prep ?? d.node)));
+      const receiver = withoutEmpty(
+        this.#finishing
+          ? this.#finishingKeyRead(d.recv!, d.prep ?? d.node)
+          : this.#run(values.keyItems(d.recv!, d.prep ?? d.node)),
+      );
       const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
       // §3.4: the whole member or element access, including a mutator's call.
       const at = d.into !== undefined ? this.#own(d.into, d.site) : d.site;
