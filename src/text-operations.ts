@@ -36,9 +36,8 @@ export type DomainValue = string | number | SerializableRegex;
 /**
  * A domain of a method's arguments: what it reads, the arguments by position and `length`, the length of the text the
  * method is called on, and why their values are invalid. The runtime checks each argument's type and then the domains
- * that read only that argument, in order, and then the other domains in order; a domain of a position fails with
- * `TSR025`, any other with `TSR057`. The compiler checks each domain whose values it knows, where the arguments it reads
- * have no other problem, with the same text.
+ * that read only that argument, in order, and then the other domains in order. The compiler checks each domain whose
+ * values it knows, where the arguments it reads have no other problem, with the same code (`TSV043`) and text.
  */
 export interface TextDomain {
   readonly reads: readonly (number | "length")[];
@@ -364,13 +363,6 @@ export function textMethodSyntax(name: TextMethodName): string {
   const required = method.parameters.filter((parameter) => parameter.optional !== true);
   const optional = method.parameters.filter((parameter) => parameter.optional === true);
   return `text.${name}(${required.map((parameter) => parameter.name).join(", ")}${optional.map((parameter) => ` [, ${parameter.name}]`).join("")})`;
-}
-
-/** Whether a domain is one of a position, whose failure is `TSR025` (see `TextDomain`). */
-export function readsPosition(method: TextSignature, domain: TextDomain): boolean {
-  return domain.reads.some(
-    (read) => read !== "length" && method.parameters[read]!.kind === "position",
-  );
 }
 
 /** The number of characters of a text: its Unicode code points. */

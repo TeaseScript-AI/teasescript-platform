@@ -408,7 +408,7 @@ test("a script compares an answer with a hash it holds, and hashText checks its 
   );
   const codes = (source: string) => diagnostics(source).map(([code]) => code);
   assert.deepEqual(diagnostics("let a = hashText(5)"), [
-    ["TSV043", "hashText(...) hashes text (string), but this is a whole number (integer)."],
+    ["TSV043", "hashText(...) hashes text (string), not a whole number (integer)."],
   ]);
   assert.deepEqual(codes('let a = hashText("a", algorithm: "sha1")'), ["TSV022"]);
   assert.deepEqual(codes('let a = hashText("a", "b")'), ["TSV020"]);
@@ -416,7 +416,7 @@ test("a script compares an answer with a hash it holds, and hashText checks its 
   assert.deepEqual(codes("let hashText = 1"), ["TSV001"]);
   // Any other value goes through toJson first; one the compiler could not see fails when the script runs.
   assert.deepEqual(failure('let a = hashText(fromJson("[1]", default: null))'), {
-    code: "TSR059",
+    code: "TSV043",
     message: "hashText(...) hashes text (string), not a list.",
   });
   assert.deepEqual(codes("let a = hashText(toJson([1, 2]))"), []);
@@ -542,31 +542,28 @@ test("toJson cannot write a value without a JSON form: a compile error where the
       ],
       [
         "TSV043",
-        `toJson(...) cannot write a message handle, which exists only in the current session, and this is a list (messageHandle[]). ${fix}`,
+        `toJson(...) cannot write this list: it holds a message handle, which exists only in the current session. ${fix}`,
       ],
       [
         "TSV043",
-        `toJson(...) cannot write a script reference, which has no JSON form, and this is an object. ${fix}`,
+        `toJson(...) cannot write this object: it holds a script reference, which has no JSON form. ${fix}`,
       ],
-      [
-        "TSV043",
-        `toJson(...) cannot write a range, which has no JSON form, and this is a whole number (integer) or a range. ${fix}`,
-      ],
+      ["TSV043", `toJson(...) cannot write a range, which has no JSON form. ${fix}`],
     ],
   );
 
   // Where the compiler cannot know the value, the runtime refuses it.
   const write = "function write(value) {\n  return toJson(value)\n}\n";
   assert.deepEqual(failure(`${write}let t = timer async 5 s {\n}\nlet j = write(t)`), {
-    code: "TSR059",
+    code: "TSV043",
     message: `toJson(...) cannot write a timer handle, which exists only in the current session. ${fix}`,
   });
   assert.deepEqual(failure(`${write}let j = write({ steps: [1..3] })`), {
-    code: "TSR059",
-    message: `toJson(...) cannot write this value: it holds a range, which has no JSON form. ${fix}`,
+    code: "TSV043",
+    message: `toJson(...) cannot write this object: it holds a range, which has no JSON form. ${fix}`,
   });
   assert.deepEqual(failure(`${write}let j = write(1 calendar day)`), {
-    code: "TSR059",
+    code: "TSV043",
     message: `toJson(...) cannot write a calendar duration, which has no JSON form. ${fix}`,
   });
   // A speaker that holds itself, through another, would never end.
@@ -612,7 +609,7 @@ test("the four functions check their arguments, need a default: to read, and the
     [],
   );
   assert.deepEqual(diagnostics("let a = toBase64(5)"), [
-    ["TSV043", "toBase64(...) encodes text (string), but this is a whole number (integer)."],
+    ["TSV043", "toBase64(...) encodes text (string), not a whole number (integer)."],
   ]);
   // toJson and toBase64 give text; fromBase64 its default otherwise.
   assert.deepEqual(codes('let a: string = toJson([1])\nlet b: string = toBase64("x")'), []);

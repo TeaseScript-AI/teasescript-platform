@@ -35,7 +35,7 @@ const OWNER_SOURCES: Readonly<Record<DiagnosticOwner, readonly string[]>> = {
   lowering: ["compiler/"],
   "plan analysis": ["reachability.ts", "speaker-flow.ts", "compiler.ts"],
   "plan validation": ["plan/"],
-  runtime: ["runtime/", "angle.ts", "numeric-functions.ts", "list-methods.ts"],
+  runtime: ["runtime/", "angle.ts", "numeric-functions.ts", "list-methods.ts", "handle-members.ts"],
   checkpoint: ["runtime/snapshot/checkpoint.ts"],
 };
 
@@ -382,13 +382,16 @@ test("each code is reported by every owner the registry names and by no other", 
       `${where(use)} reports ${use.code} outside every owner's sources.`,
     );
     const owners: readonly string[] = registry[use.code]!.owners;
-    const owner = fileOwners.find((candidate) => owners.includes(candidate));
+    // A file that several owners share, such as the handles' members, reports a code for each owner that has it.
+    const matching = fileOwners.filter((candidate) => owners.includes(candidate));
     assert.ok(
-      owner !== undefined,
+      matching.length > 0,
       `${where(use)} reports ${use.code} from ${fileOwners.join(", ")}, but the registry ` +
         `gives it to ${owners.join(", ")}. Add the owner to its entry and say how they share it.`,
     );
-    reportedBy.set(use.code, (reportedBy.get(use.code) ?? new Set()).add(owner));
+    const reporters = reportedBy.get(use.code) ?? new Set();
+    for (const owner of matching) reporters.add(owner);
+    reportedBy.set(use.code, reporters);
   }
   for (const [code, info] of Object.entries(registry)) {
     if (info.retired === true) continue;

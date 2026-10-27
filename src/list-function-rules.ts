@@ -8,7 +8,9 @@ import {
 import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
+import { TEMPORAL_KINDS } from "./temporal-builtins.js";
 import {
+  familyOf,
   ORDERED_FAMILIES,
   orderedFamily,
   VALUE_KINDS,
@@ -247,7 +249,7 @@ function describeKinds(kinds: readonly ListValueKind[]): string {
 
 /**
  * Why the list function `name` cannot read a value described as `given`, of `kind` (`undefined` for a value of no kind
- * a list function reads), where it reads `kinds`: from the compiler (`TSV043`) and the runtime (`TSR060`). `x` says
+ * a list function reads), where it reads `kinds`: from the compiler and the runtime (`TSV043`). `x` says
  * whether it is an x value of `linearRegression`. An angle wraps around at 360°, and a calendar day or month has no
  * fixed length.
  */
@@ -262,7 +264,40 @@ export function listValueMessage(
   return `${name}(...) needs ${describeKinds(kinds)}${x ? " as x values" : ""}, not ${given}.${kind === "calendarDuration" ? " A calendar day or month has no fixed length." : ""}`;
 }
 
-/** Why `name` cannot read values of several of `kinds` together, from the compiler and the runtime (`TSR060`). */
+/** A `predict` line with a `slope`, `intercept`, or `start` that is or may be null. */
+export const PREDICT_NULL_LINE_MESSAGE =
+  "predict(...) needs a line from linearRegression(...), whose slope, intercept, and start are never null.";
+
+/**
+ * A `predict` line, described as `given`, that is not an object with `slope`, `intercept`, and `start`, or, at runtime
+ * only, whose properties are not numbers, durations, or a start that x can be (runtime error `TSR059`).
+ */
+export function predictLineMessage(given: string): string {
+  return `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${given}.`;
+}
+
+/** A `predict` x, described as `given`, of a kind that no line starts at. */
+export function predictPositionMessage(given: string): string {
+  return `predict(...) needs a number, date, datetime, or absolute date and time as its x, not ${given}.`;
+}
+
+/**
+ * The kinds of a `predict` line's start that decide the kind x must have, which the compiler checks where it knows the
+ * start, and the runtime before the values the compiler does not check: a number takes a number, any other its own kind.
+ */
+export const LINE_START_KINDS = ["integer", "number", "duration", ...TEMPORAL_KINDS] as const;
+
+/** A `predict` x, described as `given`, of another kind than the line's start, which is `start`. */
+export function predictStartMessage(start: ValueKind, given: string): string {
+  return `predict(...) needs ${VALUE_KINDS[familyOf(start)].description} as its x, like the line's start, not ${given}.`;
+}
+
+/** A list function `name` whose `by:` or other option names `key`, a property that an object of the list lacks. */
+export function missingPropertyMessage(name: string, key: string): string {
+  return `${name}(...): an object in the list has no property '${key}'.`;
+}
+
+/** Why `name` cannot read values of several of `kinds` together, from the compiler and the runtime (`TSV043`). */
 export function mixedListValuesMessage(
   name: string,
   kinds: readonly ListValueKind[],

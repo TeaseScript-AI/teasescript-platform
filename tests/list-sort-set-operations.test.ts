@@ -313,7 +313,7 @@ test("values the compiler cannot know are checked at runtime", () => {
     ["TSR060", "sort() needs elements of one kind, but this list has numbers and texts."],
   );
   assert.deepEqual(failure(`${DYNAMIC}let items = dynamic([true])\nitems.sort()\nexit`), [
-    "TSR060",
+    "TSV043",
     "sort() sorts numbers, text, durations, angles, or date and time values, not true or false (boolean).",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let tags = dynamic(set[1, 2])\ntags.reverse()\nexit`), [
@@ -321,7 +321,7 @@ test("values the compiler cannot know are checked at runtime", () => {
     "A set keeps its insertion order, so it has no reverse(). Copy it into a list with toList() first.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items.union(dynamic(5))\nexit`), [
-    "TSR060",
+    "TSV043",
     "union() needs a list or a set, not a whole number (integer).",
   ]);
 });

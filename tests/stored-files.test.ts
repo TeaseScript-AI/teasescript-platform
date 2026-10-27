@@ -553,30 +553,35 @@ test("a saved file is a file in a later session, whose host names it at Start", 
 test("fileToBase64 and hashFile need a stored file this session knows", () => {
   const pass =
     "Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.";
-  for (const [call, message] of [
+  // Text that names no stored file is a runtime error; a value of another type has the compiler's code and text.
+  for (const [call, code, message] of [
     [
       'fileToBase64("images/a.jpg")',
+      "TSR059",
       `fileToBase64(...) reads a stored file, but "images/a.jpg" is not one. ${pass}`,
     ],
     [
       'fileToBase64(fromJson("1", default: null))',
-      `fileToBase64(...) reads a stored file, not a whole number (integer). ${pass}`,
+      "TSV043",
+      `fileToBase64(...) reads a stored file, which is text (string), not a whole number (integer). ${pass}`,
     ],
     // A package path is a file of the package, not a stored file.
     [
       'hashFile("images/a.jpg")',
+      "TSR059",
       `hashFile(...) hashes a stored file, but "images/a.jpg" is not one. ${pass}`,
     ],
     [
       'hashFile(fromJson("1", default: null))',
-      `hashFile(...) hashes a stored file, not a whole number (integer). ${pass}`,
+      "TSV043",
+      `hashFile(...) hashes a stored file, which is text (string), not a whole number (integer). ${pass}`,
     ],
   ] as const) {
     const played = play(`let data = ${call}\nexit`);
     assert.deepEqual(played.requests, []);
     assert.deepEqual(
       [played.snapshot.failure?.code, played.snapshot.failure?.message],
-      ["TSR059", message],
+      [code, message],
     );
   }
 });
@@ -815,7 +820,7 @@ test("the file functions are checked where the types show their arguments", () =
   assert.deepEqual(diagnostics("let h = hashFile(3)"), [
     [
       "TSV043",
-      "hashFile(...) hashes a stored file, which is text (string), but this is a whole number (integer).",
+      "hashFile(...) hashes a stored file, which is text (string), not a whole number (integer). Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.",
     ],
   ]);
   assert.deepEqual(diagnostics('let h = hashFile("x", type: "sha1")'), [
@@ -829,7 +834,7 @@ test("the file functions are checked where the types show their arguments", () =
     ["TSV001"],
   );
   assert.deepEqual(diagnostics('let j = toJson(1, files: "yes")'), [
-    ["TSV043", "'files:' takes true or false (boolean), not text (string)."],
+    ["TSV043", "'files:' of toJson(...) takes true or false (boolean), not text (string)."],
   ]);
   assert.deepEqual(diagnostics("let j = toJson(1, keep: true)"), [
     ["TSV022", "toJson() has no parameter 'keep'. Its only named argument is 'files:'."],

@@ -140,7 +140,8 @@ import {
   type Conversion,
   type ValueConversion,
 } from "../conversions.js";
-import { describeValue } from "../value-kinds.js";
+import { escapeMarkupFix, textOperandMessage } from "../text-operand-rules.js";
+import { describeValue, valueKindOf } from "../value-kinds.js";
 import {
   callPermanentButton,
   callTimer,
@@ -938,14 +939,14 @@ export class Evaluator {
               if (trace === null)
                 frame.text = templateText(
                   frame.text,
-                  interpolationText(this, result.value, part.expression.span),
+                  interpolationText(this, result.value, part.expression),
                   expression.span,
                 );
               else {
                 // A list's selection draw belongs to the placeholder, whose text the string then depends on.
                 const placeholder = finished?.deps ?? emptyDependencies();
                 trace.focus(placeholder, null, false);
-                const text = interpolationText(this, result.value, part.expression.span);
+                const text = interpolationText(this, result.value, part.expression);
                 trace.focus(frame.deps!, null, false);
                 trace.interpolation(placeholder, text, part.expression.span);
                 frame.text = templateText(frame.text, text, expression.span);
@@ -1814,8 +1815,12 @@ export class Evaluator {
     const text = call.positional[0]!;
     if (typeof text !== "string")
       throw fault(
-        "TSR059",
-        `escapeMarkup(...) needs text, not ${describeValue(text)}.${text !== null && isVisibleScalar(text) ? " Convert it with toString(...) first." : isList(text) && text.items.every(isVisibleScalar) ? " Use .join() to combine its elements as text." : ""}`,
+        "TSV043",
+        textOperandMessage(
+          "escapeMarkup",
+          describeValue(text),
+          escapeMarkupFix(valueKindOf(text), isList(text) && text.items.every(isVisibleScalar)),
+        ),
         call.span,
       );
     // Escaping puts a backslash before some characters, so only a text that could get too long is measured first.
@@ -1902,7 +1907,7 @@ function hashedText(
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const text = positional[0]!;
   if (typeof text !== "string")
-    throw fault("TSR059", `hashText(...) hashes text (string), not ${describeValue(text)}.`, span);
+    throw fault("TSV043", textOperandMessage("hashText", describeValue(text)), span);
   return textSha256(text);
 }
 

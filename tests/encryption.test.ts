@@ -694,18 +694,20 @@ test("public keys and keys are checked when they compile and when they run", () 
   ].map((source) => diagnostics(source).map(([, message]) => message));
   assert.deepEqual(problems, [
     [
-      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' of encryptText(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
     ],
     [
-      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' of encryptText(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "ssh-rsa AAAAB3NzaC1yc2E" is neither.`,
     ],
     [
-      `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
+      `'publicKey:' of encryptText(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
     ],
     [
-      "'publicKey:' takes a public key (string), a list of them, true, or false, not a whole number (integer).",
+      "'publicKey:' of encryptText(...) takes a public key (string), a list of them, true, or false, not a whole number (integer).",
     ],
-    ["'key:' takes an unlock key as text (string), not a whole number (integer)."],
+    [
+      "'key:' of decryptText(...) takes an unlock key as text (string), not a whole number (integer).",
+    ],
     [
       "decryptText() has no parameter 'publicKey'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
@@ -746,16 +748,16 @@ test("public keys and keys are checked when they compile and when they run", () 
   ].map((lines) => failure(play([...lines, "exit"].join("\n"))));
   assert.deepEqual(failures, [
     {
-      code: "TSR059",
+      code: "TSV043",
       message: `'publicKey:' of encryptText(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but "age1nothing" is neither.`,
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "'publicKey:' of encryptText(...) takes a public key (string), a list of them, true, or false, but its list holds a whole number (integer).",
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "'key:' of decryptText(...) takes an unlock key as text (string), not a whole number (integer).",
     },
@@ -874,10 +876,16 @@ test("the encrypt and decrypt calls check their arguments when they compile", ()
     [
       "decryptText() has no parameter 'timeLock'. Its named arguments are 'password:', 'key:', and 'default:'.",
     ],
-    ["'password:' takes text (string), true, or false, not a whole number (integer)."],
-    ["'timeLock:' takes a moment (absoluteDateTime), true, or false, not a date and time."],
-    ["'timeLock:' takes a moment (absoluteDateTime), true, or false, not null."],
-    ["'password:' takes text (string), not true or false (boolean)."],
+    [
+      "'password:' of encryptText(...) takes text (string), true, or false, not a whole number (integer).",
+    ],
+    [
+      "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not a date and time.",
+    ],
+    [
+      "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not null.",
+    ],
+    ["'password:' of decryptText(...) takes text (string), not true or false (boolean)."],
     [
       "encryptText(...) gives 'password:' but not 'publicKey:' or 'timeLock:'. Once a call gives one of 'password:', 'publicKey:', and 'timeLock:', it must give each, so no way to open it is left out by mistake. Add 'publicKey:' and 'timeLock:', each with a value, true to let the player choose, or false to leave it out.",
     ],
@@ -947,22 +955,22 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
   ].map((lines) => failure(play(lines.join("\n"))));
   assert.deepEqual(failures, [
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "encryptText(...) has no way to open, because 'password:', 'publicKey:', and 'timeLock:' are all false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "'password:' of encryptText(...) takes text (string), true, or false, not a whole number (integer).",
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not a whole number (integer).",
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message:
         "'timeLock:' of encryptText(...) takes a moment (absoluteDateTime), true, or false, not null.",
     },
@@ -977,7 +985,7 @@ test("an encrypt call fails at runtime without a way to open, with an argument o
         'decryptFile(...) opens a stored file, but "images/a.jpg" is not one. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.',
     },
     {
-      code: "TSR059",
+      code: "TSV043",
       message: "decryptText(...) opens locked text (string), not a whole number (integer).",
     },
   ]);

@@ -63,7 +63,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     const itemKind = orderedFamily(valueKindOf(item));
     if (itemKind === undefined)
       throw fault(
-        "TSR060",
+        "TSV043",
         `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(item)}.`,
         span,
       );
@@ -242,14 +242,15 @@ export function readCollection(
     case "take":
     case "takeLast": {
       const count = positional[0]!;
-      if (typeof count !== "number")
+      // A number that is not whole is of another type than a count, as the compiler sees it.
+      if (typeof count !== "number" || !Number.isInteger(count))
         throw fault(
-          "TSR057",
+          "TSV043",
           listArgumentMessage(name, "count", describeValue(count), "other"),
           span,
         );
       const problem = countProblem(name, count);
-      if (problem !== undefined) throw fault("TSR057", problem, span);
+      if (problem !== undefined) throw fault("TSV043", problem, span);
       // A count beyond the length takes the whole list.
       return createCapturedSerializableList(
         name === "take"
@@ -310,7 +311,7 @@ function setOperation(
 ): SerializableRuntimeValue[] {
   if (!isList(argument) && !isSet(argument))
     throw fault(
-      "TSR060",
+      "TSV043",
       listArgumentMessage(
         name,
         "collection",

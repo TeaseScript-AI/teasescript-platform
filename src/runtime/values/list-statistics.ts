@@ -24,6 +24,12 @@ import {
   type ListValueKind,
   type MinMaxName,
   type StatisticName,
+  missingPropertyMessage,
+  predictPositionMessage,
+  predictStartMessage,
+  PREDICT_NULL_LINE_MESSAGE,
+  predictLineMessage,
+  LINE_START_KINDS,
 } from "../../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../../random-functions.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
@@ -61,7 +67,7 @@ import {
   isRange,
   isTemporal,
 } from "./value-predicates.js";
-import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
+import { describeValue, valueKindOf } from "../../value-kinds.js";
 import { isTemporalKind } from "../../temporal-builtins.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -83,7 +89,7 @@ function listValues(
 ): SerializableRuntimeValue[] {
   if (!isList(list))
     throw fault(
-      "TSR059",
+      "TSV043",
       `${name}(...) needs a list, not ${describeValue(list)}.${isRange(list) ? RANGE_LIST_FIX : ""}`,
       span,
     );
@@ -101,23 +107,18 @@ function propertyValue(
 ): SerializableRuntimeValue {
   if (typeof property !== "string")
     throw fault(
-      "TSR059",
+      "TSV043",
       `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(property)}.`,
       span,
     );
   if (!isObject(item))
     throw fault(
-      "TSR060",
+      "TSV043",
       `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(item)}.`,
       span,
     );
   const found = item.properties.find((entry) => entry.name === property);
-  if (found === undefined)
-    throw fault(
-      "TSR060",
-      `${name}(...): an object in the list has no property '${property}'.`,
-      span,
-    );
+  if (found === undefined) throw fault("TSV043", missingPropertyMessage(name, property), span);
   return found.value;
 }
 
@@ -158,7 +159,7 @@ function kindOf(value: SerializableRuntimeValue): ListValueKind | undefined {
 
 /**
  * The one kind of `values`, each of one of `kinds`, or `undefined` for no values; otherwise it fails as the compiler
- * reports the problem (`TSR060`): an angle where `kinds` has none first, then the first value of another kind, then
+ * reports the problem (`TSV043`): an angle where `kinds` has none first, then the first value of another kind, then
  * values of several kinds. `x` is as for `listValueMessage`.
  */
 function listValuesKind(
@@ -172,12 +173,12 @@ function listValuesKind(
   const other = angle ?? values.find((value) => !kinds.some((kind) => kind === kindOf(value)));
   if (other !== undefined)
     throw fault(
-      "TSR060",
+      "TSV043",
       listValueMessage(name, kinds, describeValue(other), kindOf(other), x),
       span,
     );
   const found = new Set(values.map(kindOf));
-  if (found.size > 1) throw fault("TSR060", mixedListValuesMessage(name, kinds, x), span);
+  if (found.size > 1) throw fault("TSV043", mixedListValuesMessage(name, kinds, x), span);
   return values.length === 0 ? undefined : kindOf(values[0]!);
 }
 
@@ -245,7 +246,7 @@ function statisticValues(
 }
 
 /**
- * The numbers a statistic takes after its list, such as `percentile`'s percentage, each a number (`TSR059`) valid as
+ * The numbers a statistic takes after its list, such as `percentile`'s percentage, each a number (`TSV043`) valid as
  * the contract's domains say (`TSR039`).
  */
 function numbersOf(
@@ -259,7 +260,7 @@ function numbersOf(
     const value = positional[index + 1]!;
     if (typeof value !== "number")
       throw fault(
-        "TSR059",
+        "TSV043",
         `${name}(...) needs a number as its ${parameter}, not ${describeValue(value)}.`,
         span,
       );
@@ -482,6 +483,25 @@ function predict(
   const slope = property("slope");
   const intercept = property("intercept");
   const start = property("start");
+  // As the compiler checks them, with its code and text: an x of a kind that no line starts at, then a line property
+  // that is null, then a line that is not an object with the three properties.
+  const xKind = kindOf(x);
+  if (isAngle(x)) throw fault("TSV043", angleStatisticMessage("predict"), span);
+  if (xKind === undefined || !LIST_FUNCTION_CONTRACTS.predict.positions.includes(xKind))
+    throw fault("TSV043", predictPositionMessage(describeValue(x)), span);
+  if (slope === null || intercept === null || start === null)
+    throw fault("TSV043", PREDICT_NULL_LINE_MESSAGE, span);
+  if (slope === undefined || intercept === undefined || start === undefined)
+    throw fault("TSV043", predictLineMessage(describeValue(line)), span);
+  // Then a start of a kind that decides x's, with x of another kind.
+  const startKind = LINE_START_KINDS.find((one) => one === valueKindOf(start));
+  if (
+    startKind !== undefined &&
+    (startKind === "integer" || startKind === "number"
+      ? typeof x !== "number"
+      : valueKindOf(x) !== startKind)
+  )
+    throw fault("TSV043", predictStartMessage(startKind, describeValue(x)), span);
   // The amounts of a line: numbers, or exact durations.
   const amount = (value: SerializableRuntimeValue | undefined): number | undefined =>
     typeof value === "number"
@@ -491,23 +511,17 @@ function predict(
         : undefined;
   const slopeAmount = amount(slope);
   const interceptAmount = amount(intercept);
-  const durations = slope !== undefined && isDuration(slope);
-  const kind = start === undefined ? undefined : kindOf(start);
-  const startKind =
-    kind !== undefined && LIST_FUNCTION_CONTRACTS.predict.positions.includes(kind)
-      ? kind
-      : undefined;
+  const durations = isDuration(slope);
+  const position = kindOf(start);
+  // The compiler does not check the other values of the properties.
   if (
     slopeAmount === undefined ||
     interceptAmount === undefined ||
-    (intercept !== undefined && isDuration(intercept)) !== durations ||
-    startKind === undefined
+    isDuration(intercept) !== durations ||
+    position === undefined ||
+    !LIST_FUNCTION_CONTRACTS.predict.positions.includes(position)
   )
-    throw fault(
-      "TSR059",
-      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(line)}.`,
-      span,
-    );
+    throw fault("TSR059", predictLineMessage(describeValue(line)), span);
   // intercept + slope × (x - start), exactly, with x - start in days, and rounded once.
   let offset: Exact | undefined;
   let perDay = 1n;
@@ -517,14 +531,9 @@ function predict(
     offset = whole(unitsFrom(start, x));
     if (start.kind !== "date") perDay = BigInt(MS_PER_DAY);
   }
+  // An x of another kind than the start, which the compiler checks where it knows the start.
   if (offset === undefined)
-    throw fault(
-      "TSR059",
-      isAngle(x)
-        ? angleStatisticMessage("predict")
-        : `predict(...) needs ${VALUE_KINDS[familyOf(valueKindOf(start!))].description} as its x, like the line's start, not ${describeValue(x)}.`,
-      span,
-    );
+    throw fault("TSV043", predictStartMessage(valueKindOf(start), describeValue(x)), span);
   const value = quotient(
     add(multiply(exact(interceptAmount), whole(perDay)), multiply(exact(slopeAmount), offset)),
     whole(perDay),
@@ -645,7 +654,7 @@ function minMaxValue(
       ? argumentShapeProblem(name, listFunctionShape(name), 1, names)
       : minMaxValuesProblem(name, positional.length, names);
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
-  // The values of one list are of one kind it reads, as the compiler checks them (`TSR060`).
+  // The values of one list are of one kind it reads, as the compiler checks them (`TSV043`).
   if (one) {
     positional = statisticValues(name, positional[0]!, named.by, span);
     listValuesKind(name, positional, LIST_FUNCTION_CONTRACTS[name].values, span);

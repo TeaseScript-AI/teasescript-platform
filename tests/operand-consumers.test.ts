@@ -127,7 +127,7 @@ test("join checks the element type of a computed list", () => {
     for (const source of SOURCES.slice(1).map((wrap) => wrap(`[${value}]`, 'say @.join(", ")')))
       assert.deepEqual(
         errors(source).map(([code]) => code),
-        ["TSV043"],
+        ["TSV042"],
         source,
       );
   assert.deepEqual(says('let names = ["a", "b"]\nsay names.join(", ")\nexit'), ["a, b"]);

@@ -313,7 +313,7 @@ test("+ does not convert: text or a list with another kind is a compile error th
     "addAll() needs a list, not a whole number (integer).",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(set[2])"), [
-    "addAll() needs a list, not a set (integer set). Copy a set into a list with toList() first.",
+    "addAll() needs a list, not a set. Copy a set into a list with toList() first.",
   ]);
   assert.deepEqual(message("let seen = set[1]\nseen.addAll([2])"), [
     "Sets have no method 'addAll'.",
@@ -337,7 +337,7 @@ test("+ on values known only when the script runs joins them or fails with the f
     "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, use add(value), or write list + [value] for a new list.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nitems.addAll(dynamic(2))\nexit`), [
-    "TSR060",
+    "TSV043",
     "addAll() needs a list, not a whole number (integer).",
   ]);
   // Elements of unknown type are checked against the list's element type.

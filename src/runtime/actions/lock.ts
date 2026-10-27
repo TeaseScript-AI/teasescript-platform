@@ -31,6 +31,8 @@ import type {
   RuntimeLockNotice,
   RuntimeLockOutcome,
 } from "./model.js";
+import { lockOptionMessage, malformedPublicKeyMessage } from "../../lock-rules.js";
+import { storedFileFix, textOperandMessage } from "../../text-operand-rules.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../values/plain-data.js";
@@ -191,10 +193,13 @@ function startLock(
   const { value, password, passwordField } = operands;
   const span = instruction.span;
   const call = instruction.call;
-  if (!locks(call) && password !== undefined && typeof password !== "string")
+  // In the compiler's order, with its code and text: `password:` and `timeLock:`, `key:` and `publicKey:`, whether the
+  // call has a way to open, and the value; then what only the runtime checks.
+  if (locks(call)) checkOpenerTypes(call, operands, span);
+  else if (password !== undefined && typeof password !== "string")
     throw new RuntimeFault(
-      "TSR059",
-      `'password:' of ${call}(...) takes text (string), not ${describeValue(password)}.`,
+      "TSV043",
+      lockOptionMessage(call, "password", false, describeValue(password)),
       copySpan(span),
     );
   const written = typeof password === "string" ? password : null;
@@ -202,8 +207,8 @@ function startLock(
   if (call === "decryptText") {
     if (typeof value !== "string")
       throw new RuntimeFault(
-        "TSR059",
-        `decryptText(...) opens locked text (string), not ${describeValue(value)}.`,
+        "TSV043",
+        textOperandMessage("decryptText", describeValue(value)),
         copySpan(span),
       );
     // Text that is not Base64 is no lock, as for `fromBase64`.
@@ -220,28 +225,39 @@ function startLock(
       ? workStep(file, written, null, keys)
       : fieldStep(file, passwordField, keys);
   }
-  const openers = encryptOpeners(call, operands, keys, span);
-  const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
-  if (typeof text !== "string")
-    throw new RuntimeFault(
-      "TSR059",
-      `encryptText(...) locks text (string), not ${describeValue(text)}.`,
-      copySpan(span),
-    );
-  if (
+  const openers = encryptOpeners(operands, keys);
+  const closed =
     openers.choices.length === 0 &&
     openers.password === null &&
     passwordField === null &&
     openers.timeLockMs === null &&
-    openers.publicKeys.length === 0
-  )
+    openers.publicKeys.length === 0;
+  const noWay = (because: string) =>
+    `${call}(...) has no way to open, because ${because}, so nothing could ever open it. Give one of them a value, or true to let the player choose.`;
+  // The compiler sees openers written false, not an empty list of public keys.
+  if (closed && operands.publicKey === false)
+    throw new RuntimeFault(
+      "TSV043",
+      noWay("'password:', 'publicKey:', and 'timeLock:' are all false"),
+      copySpan(span),
+    );
+  const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
+  if (typeof text !== "string")
+    throw new RuntimeFault(
+      "TSV043",
+      textOperandMessage("encryptText", describeValue(text)),
+      copySpan(span),
+    );
+  if (closed)
     throw new RuntimeFault(
       "TSR059",
-      `${call}(...) has no way to open, because ${
-        operands.publicKey === false
-          ? "'password:', 'publicKey:', and 'timeLock:' are all false"
-          : "'publicKey:' holds no key and 'password:' and 'timeLock:' are false"
-      }, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
+      noWay("'publicKey:' holds no key and 'password:' and 'timeLock:' are false"),
+      copySpan(span),
+    );
+  if (keys.publicKeys.length > MAX_LOCK_PUBLIC_KEYS)
+    throw new RuntimeFault(
+      "TSR059",
+      `'publicKey:' of ${call}(...) has ${keys.publicKeys.length} public keys, but a lock holds at most ${MAX_LOCK_PUBLIC_KEYS}.`,
       copySpan(span),
     );
   // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog, after
@@ -252,28 +268,34 @@ function startLock(
 }
 
 /**
- * The checked openers of an encrypt call: `password:` takes text, `timeLock:` a moment, `publicKey:` public keys, and
- * each also `true`, which lets the player choose it, or `false`, which leaves it out. A call writes each opener or none
- * (plan validation).
+ * The openers of an encrypt call, whose types `checkOpenerTypes` and `writtenKeys` checked: `password:` takes text,
+ * `timeLock:` a moment, `publicKey:` public keys, and each also `true`, which lets the player choose it, or `false`,
+ * which leaves it out. A call writes each opener or none (plan validation).
  */
-function encryptOpeners(
+function checkOpenerTypes(
   call: LockCall,
-  { password, passwordField, publicKey, timeLock }: LockOperands,
-  { publicKeys }: WrittenKeys,
+  { password, timeLock }: LockOperands,
   span: LockInstruction["span"],
-): EncryptOpeners {
+): void {
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
     throw new RuntimeFault(
-      "TSR059",
-      `'password:' of ${call}(...) takes text (string), true, or false, not ${describeValue(password)}.`,
+      "TSV043",
+      lockOptionMessage(call, "password", true, describeValue(password)),
       copySpan(span),
     );
   if (timeLock !== undefined && typeof timeLock !== "boolean" && !isAbsoluteDateTime(timeLock))
     throw new RuntimeFault(
-      "TSR059",
-      `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeValue(timeLock)}.`,
+      "TSV043",
+      lockOptionMessage(call, "timeLock", true, describeValue(timeLock)),
       copySpan(span),
     );
+}
+
+/** The openers of an encrypt call, from its checked operands. */
+function encryptOpeners(
+  { password, passwordField, publicKey, timeLock }: LockOperands,
+  { publicKeys }: WrittenKeys,
+): EncryptOpeners {
   const written =
     password !== undefined ||
     passwordField !== null ||
@@ -282,7 +304,8 @@ function encryptOpeners(
   const chosen = { password, publicKey, timeLock };
   return {
     password: typeof password === "string" ? password : null,
-    timeLockMs: typeof timeLock === "object" ? timeLock.epochMilliseconds : null,
+    timeLockMs:
+      timeLock !== undefined && isAbsoluteDateTime(timeLock) ? timeLock.epochMilliseconds : null,
     publicKeys,
     choices: LOCK_CHOICES.filter((choice) => !written || chosen[choice] === true),
   };
@@ -319,8 +342,8 @@ function writtenKeys(
 ): WrittenKeys {
   if (key !== undefined && typeof key !== "string")
     throw new RuntimeFault(
-      "TSR059",
-      `'key:' of ${call}(...) takes an unlock key as text (string), not ${describeValue(key)}.`,
+      "TSV043",
+      lockOptionMessage(call, "key", false, describeValue(key)),
       copySpan(span),
     );
   const written =
@@ -333,28 +356,18 @@ function writtenKeys(
   for (const item of written) {
     if (typeof item !== "string")
       throw new RuntimeFault(
-        "TSR059",
-        `'publicKey:' of ${call}(...) takes a public key (string), a list of them, true, or false, ${
-          item === publicKey
-            ? `not ${describeValue(item)}`
-            : `but its list holds ${describeValue(item)}`
-        }.`,
+        "TSV043",
+        lockOptionMessage(call, "publicKey", true, describeValue(item), item !== publicKey),
         copySpan(span),
       );
     if (parsePublicKey(item) === null)
       throw new RuntimeFault(
-        "TSR059",
-        `'publicKey:' of ${call}(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but ${JSON.stringify(messageText(item))} is neither.`,
+        "TSV043",
+        malformedPublicKeyMessage(call, JSON.stringify(messageText(item))),
         copySpan(span),
       );
     publicKeys.push(item.trim());
   }
-  if (publicKeys.length > MAX_LOCK_PUBLIC_KEYS)
-    throw new RuntimeFault(
-      "TSR059",
-      `'publicKey:' of ${call}(...) has ${publicKeys.length} public keys, but a lock holds at most ${MAX_LOCK_PUBLIC_KEYS}.`,
-      copySpan(span),
-    );
   return { publicKeys, key: key ?? null };
 }
 
@@ -487,7 +500,8 @@ function nextLockStep(
           key: null,
         };
       }
-      const openers = encryptOpeners(call, operands, keys, span);
+      checkOpenerTypes(call, operands, span);
+      const openers = encryptOpeners(operands, keys);
       // The step after the dialog locks with what the player gave there, instead of the moment it suggested.
       if (outcome === "submitted")
         return {
@@ -595,12 +609,10 @@ function storedFile(
 ): string {
   if (typeof value === "string" && holdsStoredFile(snapshot.storedFiles, value)) return value;
   throw new RuntimeFault(
-    "TSR059",
-    `${call}(...) ${call === "encryptFile" ? "locks" : "opens"} a stored file, ${
-      typeof value === "string"
-        ? `but ${JSON.stringify(messageText(value))} is not one`
-        : `not ${describeValue(value)}`
-    }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.`,
+    typeof value === "string" ? "TSR059" : "TSV043",
+    typeof value === "string"
+      ? `${call}(...) ${call === "encryptFile" ? "locks" : "opens"} a stored file, but ${JSON.stringify(messageText(value))} is not one. ${storedFileFix(call)}`
+      : textOperandMessage(call, describeValue(value)),
     copySpan(span),
   );
 }

@@ -2493,7 +2493,7 @@ queue.addAll(nextRound)           // queue itself grows
 `take(count)` and `takeLast(count)` return a new list of the first or the last `count` elements, in order, and leave
 the list unchanged. A count beyond the length gives the whole list. The count is a whole number of at least 0: a count
 of type `number` ([§12](#12-variable-declarations)), or one that the compiler can see is negative, is a compile error,
-and any other count that is not a whole number of at least 0 is runtime error `TSR057`. A rolling window keeps only
+and any other count that is not a whole number of at least 0 fails at runtime with the same error, `TSV043`. A rolling window keeps only
 the newest values:
 
 ```text
@@ -2588,7 +2588,7 @@ max(scores)             // 18
 - An empty list, and a list of one value for `stddev`, is a compile error when the compiler can see it, and runtime
   error `TSR018` otherwise. A percentage outside 0 through 100 is a compile error when the compiler can see it, and
   runtime error `TSR039` otherwise. Values of other or mixed kinds, and a missing `by:` property, are compile errors
-  when the types show them, and runtime error `TSR060` otherwise.
+  when the types show them, and fail at runtime with the same error (`TSV043`) otherwise.
 
 A fair target is one the player reaches in most attempts. `percentile(recent, 10)` is the value that 90% of the recent
 attempts reached or beat, so a target there is met about nine times out of ten:
@@ -2631,7 +2631,7 @@ let expected = predict(trend, toDate("2026-10-31"))
 - Like the statistics, `linearRegression` and `predict` compute exactly and round each result once.
 - Fewer than 2 points is runtime error `TSR018`, and points that all have the same x `TSR036`. Values of other kinds,
   `x:` without `y:`, and a `predict` x of another kind than the start are compile errors when the types show them and
-  runtime errors otherwise (`TSR060`, and `TSR059` for `predict`).
+  fail at runtime with the same error (`TSV043`) otherwise.
 
 ## 17. Return statements
 
@@ -3798,7 +3798,7 @@ earlier handle refers to it again. `hideCamera` takes no arguments and hides eve
 Both use command syntax only.
 
 - The handle's one property is `placement`, `"window"` or `"stage"`, readable and assignable. Another value fails with
-  `TSR050`, or with `TSV059` when the compiler knows it; other properties and methods are `TSV059`. Assigning the
+  `TSV059`, also at runtime; other properties and methods are `TSV059`. Assigning the
   placement of a hidden view changes nothing and reports developer warning `TSW010`; reading it keeps working.
 - The view over the Stage covers the Stage image without replacing it: `showImage` and `hideImage` change the image
   underneath, and the view stays until `hideCamera`. It also lies over a playing Stage video.
@@ -4276,7 +4276,7 @@ Rules:
   of the place that receives it ([§13](#13-explicit-types)), or runtime error `TSR058` is raised; so does a default of
   unknown type that does not fit the declared type of the variable it starts.
 - Persistent plain data is storable. Timer, media, and message handles and speaker references exist only in the
-  current session and cannot be saved, including when nested inside lists or objects (`TSR055`); save a message's
+  current session and cannot be saved, including when nested inside lists or objects (`TSV043`); save a message's
   `text` instead. Because `load` gives its default in place of a saved value, a default whose type is known to hold a
   speaker, camera view, permanent button, or timer, media, or message handle is a compile error (`TSV043`). Nested
   `null` is allowed.

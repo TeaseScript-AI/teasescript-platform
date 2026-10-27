@@ -193,7 +193,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
     [
       'function draw(percent) {\n    return chance(percent)\n}\nsay draw("50")\nexit',
       "chance(percent)",
-      "TSR059",
+      "TSV043",
     ],
     // A fractional bound the compiler cannot know reaches the runtime; a literal one is rejected statically below.
     [

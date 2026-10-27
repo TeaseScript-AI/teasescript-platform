@@ -123,7 +123,7 @@ test("a value check sees each known form and fails where the run would, with the
       "1:28",
       "substring() needs 'start' from 0 through 3 (the length of the text), not 5.",
       'say (dynamic("a") + "bc").substring(5)',
-      "TSR025",
+      "TSV043",
     ],
     [
       'say toNumber("abc".trim())',

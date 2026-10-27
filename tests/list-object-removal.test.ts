@@ -116,8 +116,8 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
     ],
     [
       'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nlet index = dynamic(0 - 1)\nitems.removeAt(index)\nexit',
-      "TSR025",
-      "Cannot remove index -1: 'items' has 1 element, so its only index is 0. Check the index against 'items.length' first.",
+      "TSV045",
+      "A list index cannot be negative, but the index is -1. The first element is at index 0, and the last at 'items.length - 1'.",
     ],
     [
       "let items = []\nitems.removeAt(0)\nexit",
@@ -153,7 +153,7 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
 
 test("the compiler reports a list index it can see is invalid", () => {
   const negative =
-    "TSV045 A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
+    "TSV045 A list index cannot be negative, but the index is -1. The first element is at index 0, and the last at 'items.length - 1'.";
   const fractional =
     "TSV043 A list index must be a whole number (integer), but this is a number. Round it with floor(...), round(...), or ceil(...).";
   const text = "TSV043 A list index is a whole number (integer), but this is text (string).";

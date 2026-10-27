@@ -123,7 +123,7 @@ test("a count, list, or collection argument the compiler can see fails as it fai
       const [code, message] = failure(
         `${DYNAMIC}let xs = ${LITERALS.list}\nsay xs.${name}(dynamic(${value}))\nexit`,
       );
-      assert.equal(code, parameter.kind === "count" ? "TSR057" : "TSR060", call);
+      assert.equal(code, "TSV043", call);
       assert.deepEqual(
         errors(`let xs = ${LITERALS.list}\nsay xs.${call}\nexit`),
         [["TSV043", message]],

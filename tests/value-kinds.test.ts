@@ -310,7 +310,7 @@ test("the compiler and the runtime name a value of each kind with one text", () 
     const message = `sum(...) needs a list, not ${EXPECTED[kind][0]}.`;
     assert.equal(known.problems[0]?.[0], "TSV043", kind);
     assert.ok(known.problems[0]![1].startsWith(message), `${kind}: ${known.problems[0]![1]}`);
-    assert.deepEqual(unknown.problems, [["TSR059", known.problems[0]![1]]], kind);
+    assert.deepEqual(unknown.problems, [["TSV043", known.problems[0]![1]]], kind);
   }
 });
 

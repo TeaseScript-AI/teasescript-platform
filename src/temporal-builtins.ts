@@ -4,10 +4,10 @@
  * built-in, shared by the compiler, the runtime, and the editor; the runtime implements each in
  * `runtime/values/temporal-operations.ts`. A duration has no parts, and a calendar duration no methods. None of them takes
  * arguments, so none has a domain of its arguments: a call with any fails alike when the script is compiled and when it
- * runs (`temporalArgumentsMessage`).
+ * runs (`temporalArgumentsProblem`).
  */
 
-import { argumentCountMessage } from "./argument-rules.js";
+import { argumentShapeProblem, NO_ARGUMENTS, type ArgumentProblem } from "./argument-rules.js";
 import type { ClockFunctionName } from "./language-facts.js";
 import { WEEKDAY_NAMES } from "./temporal.js";
 import { isTextMember } from "./text-operations.js";
@@ -231,24 +231,25 @@ export function isCalendarDurationPart(name: string): name is CalendarDurationPa
 }
 
 /**
- * A call with `received` arguments of a clock read or a method of a date or time value, which take none (V30 §35), from
- * the compiler (`TSV020`) and the runtime (`TSR028`, `TSR015`). A format says that it follows the player's settings.
+ * The first problem with a call of a clock read or a method of a date or time value, which take no arguments (V30 §35),
+ * with `received` arguments without a name and the names `named`: a name first, as for every other built-in. From the
+ * compiler (`TSV022`, `TSV020`) and the runtime (`TSR028`, `TSR015`). A format says that it follows the player's
+ * settings. `undefined` for a call without arguments.
  */
-export function temporalArgumentsMessage(
+export function temporalArgumentsProblem(
   name: ClockFunctionName | TemporalMethodName,
   received: number,
-): string {
+  named: readonly string[],
+): ArgumentProblem | undefined {
+  const problem = argumentShapeProblem(name, NO_ARGUMENTS, received, named, false);
   const method: TemporalMethod | undefined = isTemporalMethod(name)
     ? TEMPORAL_METHODS[name]
     : undefined;
-  return argumentCountMessage(
-    name,
-    "no arguments",
-    received,
-    method?.formats === true
-      ? "It shows the value in the player's own date and time format."
-      : undefined,
-  );
+  if (problem === undefined || method?.formats !== true) return problem;
+  return {
+    ...problem,
+    message: `${problem.message} It shows the value in the player's own date and time format.`,
+  };
 }
 
 /**

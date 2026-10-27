@@ -5,10 +5,11 @@ import {
   defaultDescription,
   FILE_TEXT_FUNCTIONS,
   isConversion,
-  WRITABLE_JSON_FIX,
+  unwritableJsonMessage,
   type CallShape,
   type Conversion,
   type ValueConversion,
+  filesOptionMessage,
 } from "./conversions.js";
 import type { ConversionName } from "./language-facts.js";
 import { LOCK_CALLS } from "./capture-call.js";
@@ -22,10 +23,11 @@ import { isRandomFunction, RANDOM_CONTRACTS, type RandomFunction } from "./rando
 import {
   isTemporalMethod,
   TEMPORAL_METHODS,
-  temporalArgumentsMessage,
+  temporalArgumentsProblem,
 } from "./temporal-builtins.js";
 import { misspelledPropertyHint } from "./object-properties.js";
 import { parsePublicKey } from "./public-keys.js";
+import { messageText } from "./runtime/values/text-length.js";
 import { cannotConvert } from "./runtime/values/value-types.js";
 import type { SourceSpan } from "./source.js";
 import { staticVisibleText, type KnownValue } from "./static-evaluation.js";
@@ -49,14 +51,10 @@ import {
   isShown,
   type StaticType,
 } from "./static-types.js";
-import { describeValue, typeName } from "./static-types/type-names.js";
-import {
-  orderedFamily,
-  unwritableJsonReason,
-  VALUE_KINDS,
-  type OrderedFamily,
-  type ValueKind,
-} from "./value-kinds.js";
+import { describeKind, describeValue, typeName } from "./static-types/type-names.js";
+import { lockOptionMessage, malformedPublicKeyMessage, type LockOption } from "./lock-rules.js";
+import { joinElementMessage } from "./shown-text-rules.js";
+import { orderedFamily, VALUE_KINDS, type OrderedFamily, type ValueKind } from "./value-kinds.js";
 import {
   argumentCountMessage,
   argumentShapeProblem,
@@ -116,7 +114,7 @@ type Known = (expression: Expression) => KnownValue | undefined;
  * a value it cannot use.
  */
 export interface OperationProblem {
-  readonly kind: "argumentCount" | "unknownNamedArgument" | "invalidOperand";
+  readonly kind: "argumentCount" | "unknownNamedArgument" | "invalidOperand" | "unshowableValue";
   readonly message: string;
   readonly span: SourceSpan;
   /** An argument whose number type a widened variable may explain; the explanation goes before `fix`. */
@@ -171,8 +169,8 @@ export function memberProblems(
     const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
       problems.push({
-        kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not ${describeValue(element.type)}. Select an element or a property first.`,
+        kind: "unshowableValue",
+        message: joinElementMessage(valueKindOfType(element.type)),
         span: element.expression.span,
       });
     return problems;
@@ -197,16 +195,20 @@ export function memberProblems(
     const member = name === "join" ? LIST_JOIN : isTextMethod(name) ? TEXT_METHODS[name] : null;
     if (member !== null) return argumentProblems(member, call, typeOf, known, undefined);
     // Only date and time values have their methods, which take no arguments.
-    if (isTemporalMethod(name))
-      return call.arguments.length === 0
-        ? []
-        : [
-            {
-              kind: "argumentCount",
-              message: temporalArgumentsMessage(name, call.arguments.length),
-              span: property.span,
-            },
-          ];
+    if (isTemporalMethod(name)) {
+      const named = call.arguments.filter((argument) => argument.kind === "namedArgument");
+      const found = temporalArgumentsProblem(
+        name,
+        call.arguments.length - named.length,
+        named.map((argument) => argument.name.name),
+      );
+      if (found === undefined) return [];
+      const span =
+        found.kind === "unknownNamedArgument"
+          ? named.find((argument) => argument.name.name === found.name)!.name.span
+          : property.span;
+      return [{ kind: found.kind, message: found.message, span }];
+    }
     // Only handles have the other methods, and every handle with one takes the same.
     return handleMethodProblems(name, call);
   }
@@ -337,7 +339,7 @@ function argumentProblems(
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
-          message: argumentTypeMessage(member, parameter, describeValue(type)),
+          message: argumentTypeMessage(member, parameter, describeKind(type)),
           span: value.span,
           ...(text || searches ? {} : { widened: value }),
           fix: argumentFix(parameter, argumentKind(type)),
@@ -510,11 +512,7 @@ function lockProblems(
       span: call.span,
     });
   // An encrypt call's option also takes `true`, which lets the player choose it, or `false`, which leaves it out.
-  const optionProblem = (
-    option: string,
-    fits: (type: StaticType) => boolean,
-    expected: string,
-  ): boolean => {
+  const optionProblem = (option: LockOption, fits: (type: StaticType) => boolean): boolean => {
     const value = named.get(option);
     if (value === undefined) return false;
     const type = typeOf(value);
@@ -528,25 +526,31 @@ function lockProblems(
           (decrypts || option === "key" || !isScalar(candidate, "boolean")),
       )
     ) {
+      // A public key list, which the option takes, names the element it holds, as the runtime finds it.
+      const list =
+        option === "publicKey" && candidates.every((candidate) => candidate.kind === "list");
+      const element = list ? candidates.find((candidate) => candidate.kind === "list") : undefined;
       problems.push({
         kind: "invalidOperand",
-        message: `'${option}:' takes ${expected}${decrypts || option === "key" ? "" : ", true, or false"}, not ${describeValue(type)}.`,
+        message: lockOptionMessage(
+          name,
+          option,
+          !decrypts && option !== "key",
+          describeKind(element?.kind === "list" ? element.element : forUse(type)),
+          element !== undefined,
+        ),
         span: value.span,
       });
       return true;
     }
     return false;
   };
-  optionProblem("password", (type) => isScalar(type, "string"), "text (string)");
+  optionProblem("password", (type) => isScalar(type, "string"));
   if (decrypts) {
-    optionProblem("key", (type) => isScalar(type, "string"), "an unlock key as text (string)");
+    optionProblem("key", (type) => isScalar(type, "string"));
     return problems;
   }
-  optionProblem(
-    "timeLock",
-    (type) => isScalar(type, "absoluteDateTime"),
-    "a moment (absoluteDateTime)",
-  );
+  optionProblem("timeLock", (type) => isScalar(type, "absoluteDateTime"));
   // A public key, or a list of them, each an age recipient or an OpenSSH Ed25519 key; the written ones are read here.
   const keyText = (candidate: StaticType) =>
     isScalar(candidate, "string") ||
@@ -555,25 +559,22 @@ function lockProblems(
         .map(resolved)
         .every((element) => !isKnown(element) || isScalar(element, "string")));
   const publicKey = named.get("publicKey");
-  if (
-    publicKey !== undefined &&
-    !optionProblem("publicKey", keyText, "a public key (string), a list of them")
-  ) {
+  if (publicKey !== undefined && !optionProblem("publicKey", keyText)) {
     let written = publicKey;
     while (written.kind === "parenthesizedExpression") written = written.expression;
     const literals = written.kind === "listLiteral" ? written.elements : [written];
-    const wrong = literals.find((element) => {
+    for (const element of literals) {
       let literal = element;
       while (literal.kind === "parenthesizedExpression") literal = literal.expression;
       const text = literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
-      return text !== undefined && parsePublicKey(text) === null;
-    });
-    if (wrong !== undefined)
+      if (text === undefined || parsePublicKey(text) !== null) continue;
       problems.push({
         kind: "invalidOperand",
-        message: `'publicKey:' takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but this is neither.`,
-        span: wrong.span,
+        message: malformedPublicKeyMessage(name, JSON.stringify(messageText(text))),
+        span: element.span,
       });
+      break;
+    }
   }
   const given = openers.filter((option) => named.has(option));
   const missing = openers.filter((option) => !named.has(option));
@@ -642,7 +643,7 @@ function shapedCall(
     )
       problems.push({
         kind: "invalidOperand",
-        message: `'files:' takes true or false (boolean), not ${describeValue(type)}.`,
+        message: filesOptionMessage(name, describeKind(forUse(type))),
         span: files.span,
       });
   }
@@ -758,15 +759,16 @@ function unwritableJsonProblems(value: Expression, type: StaticType): OperationP
     return true;
   });
   if (unwritable === undefined || unwritableKind === undefined) return [];
-  const kind = describeValue(unwritable);
-  const reason = unwritableJsonReason(unwritableKind);
   return [
     {
       kind: "invalidOperand",
-      message:
-        resolved(type) === unwritable
-          ? `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
-          : `toJson(...) cannot write ${kind}, which ${reason}, and this is ${describeValue(type)}. ${WRITABLE_JSON_FIX}`,
+      // A value that may be one is named as one; one that holds one, by what holds it.
+      message: unwritableJsonMessage(
+        unwritableKind,
+        members(forUse(type)).some((member) => resolved(member) === unwritable)
+          ? undefined
+          : (valueKindOfType(forUse(type)) ?? null),
+      ),
       span: value.span,
     },
   ];
@@ -821,7 +823,7 @@ function numberArgumentProblems(
       message: numberArgumentMessage(
         name,
         signature,
-        describeValue(shown),
+        describeKind(shown),
         isScalar(shown, "integer", "number")
           ? "number"
           : isScalar(shown, "string")
@@ -1207,7 +1209,7 @@ function argumentKindProblems(
     // The first kind the count may be that is not a whole number, such as the number in `number?`.
     const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
     if (other !== undefined)
-      return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
+      return problem(listArgumentMessage(method.name, "count", describeKind(other), "other"));
     const count = known(argument);
     const message = typeof count === "number" ? countProblem(method.name, count) : undefined;
     return message === undefined ? [] : problem(message);
@@ -1229,7 +1231,7 @@ function argumentKindProblems(
       : kinds.some((member) => member.kind === "range")
         ? "range"
         : "other";
-  return problem(listArgumentMessage(method.name, kind, describeValue(type), other));
+  return problem(listArgumentMessage(method.name, kind, describeKind(type), other));
 }
 
 /**
@@ -1338,7 +1340,7 @@ function sortProblem(element: StaticType): string | undefined {
   };
   const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
   if (unsortable !== undefined)
-    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
+    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeKind(unsortable)}.`;
   const families = new Set(candidates.map(familyOfType));
   return families.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`

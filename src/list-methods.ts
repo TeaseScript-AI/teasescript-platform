@@ -365,7 +365,7 @@ export function missingListMethodMessage(kind: ListKind, name: string): string {
 
 /**
  * Why `name` cannot take `count`, a number, as the elements to take, or `undefined` when it can: a compile error when the
- * compiler can see it, and otherwise runtime error `TSR057`.
+ * compiler can see it, and otherwise the same error (`TSV043`) at runtime.
  */
 export function countProblem(name: string, count: number): string | undefined {
   return Number.isInteger(count) && count >= 0
@@ -375,7 +375,7 @@ export function countProblem(name: string, count: number): string | undefined {
 
 /**
  * Why an argument of the method `name` does not fit its parameter of `kind`, for a value described as `given`, which is
- * a `set`, a `range`, or another value: from the compiler and the runtime (`TSR060`, and `TSR057` for a count).
+ * a `set`, a `range`, or another value: from the compiler and the runtime (`TSV043`).
  */
 export function listArgumentMessage(
   name: string,

@@ -1223,7 +1223,7 @@ when the default runs as instructions, the load leaves the stored object in the 
 `storeTemporary` that selects the default carries `repair`, the type it repairs that object against.
 `InstructionPlan.storageTypes` lists, unique and in key order, the type that every typed load of a storage key written
 as a string literal accepts; every non-null saved value under such a key, also through a computed key, must fit it, or
-the `save` fails with `TSR058`, after `TSR055` for a value that cannot be stored. Host storage and debugging edits may
+the `save` fails with `TSR058`, after `TSV043` for a value that cannot be stored. Host storage and debugging edits may
 hold any storable value; each load decides whether it fits.
 
 `FreshRuntimeOptions.persistentScriptStorage` (default `false`, retained as `scriptStoragePersistent`) selects the
@@ -1458,7 +1458,7 @@ instruction with a `destinationTemporary`: it puts a message handle there as its
 then waits for its own reading time, snapshot validation requires that handle in place. A handle is `{ kind: "messageHandle", messageId }`, the sequence of the
 message's `say` event. Every copy names the same message, `==` compares that identity, and `say` shows the handle as
 `<message N>`; it has no scalar text. Like other runtime identities, host values, built-in results, and stored values
-cannot hold one, and `save` refuses one with `TSR055`.
+cannot hold one, and `save` refuses one with `TSV043`.
 
 `RuntimeSnapshot.liveMessages` holds `{ messageId, sourceText }` in ascending ID order: the markup source of the current
 text of each message that a handle in the state reaches through the roots snapshot validation checks for runtime
@@ -1469,7 +1469,7 @@ change the state. Snapshot validation requires unique positive IDs below `nextEv
 for every handle; a record no handle reaches is accepted and dropped by the next operation. Restore emits, sweeps, and
 observes nothing.
 
-Reading `.text` returns the source. Assigning it takes text (`TSR050` otherwise); another property fails with `TSR003`
+Reading `.text` returns the source. Assigning it takes text (`TSV041` otherwise); another property fails with `TSV043`
 or, read, `TSR017`, and a handle without a record with `TSR053`, all before anything changes. The same text again
 changes nothing. Different text is parsed whole, emitted as a `messageUpdated` event (`messageId`, parsed `content`,
 visible `text`, and the write's `span`), and becomes the record. A text write starts no reading time of its own.
@@ -1538,9 +1538,9 @@ formatted again after restore. List text follows
 [§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
 
 - `${...}` interpolation checks that every element is a scalar visible-text value, then selects exactly one element
-  with the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG
+  with the session RNG. An empty list and any other element fail with `TSV042`, both before any RNG
   draw. Any other value that is not a scalar, such as a dict, an object, a set, a range, a speaker, or a handle, fails
-  with `TSR021`; for a dict ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), an object, and a set
+  with `TSV042`; for a dict ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), an object, and a set
   the message names the fix.
 - `say` shows any other value in code-like notation, written iteratively so that deep nesting does not recurse
   natively. A timer or media handle shows the state the snapshot holds when `say` evaluates its value, so the text is
@@ -1550,7 +1550,7 @@ formatted again after restore. List text follows
   with `TSR050`, and speaker names and titles with `TSR030`; a list the compiler can see there is compile error
   `TSV040`, and another value they cannot show `TSV042`. Materializing an interaction draws no RNG.
 - `list.join(...)` and `toString(...)` apply the scalar conversion to each element or to the value, without selecting
-  from lists; another element fails `join` with `TSR021`, and another value fails `toString` with `TSR058`.
+  from lists; another element fails `join` with `TSV042`, and another value fails `toString` with `TSR058`.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
@@ -1566,9 +1566,9 @@ writes each number, native `btoa` and `atob` do the Base64, and `TextEncoder` an
 engine walks the structure itself, without native recursion, so that object keys keep their source order, which native
 JSON reading does not for keys that look like whole numbers, and so that any depth gives the same result in every host:
 
-- `toJson` writes a dict, object, or speaker's properties in their order, and fails with `TSR059` for a calendar
-  duration, range, script reference, regex, timer, media, or message handle, camera view, or permanent button, or for a
-  speaker met again inside its own properties. JSON longer than a text can be fails with `TSR084`.
+- `toJson` writes a dict, object, or speaker's properties in their order, and fails with `TSV043` for a calendar
+  duration, range, script reference, regex, timer, media, or message handle, camera view, or permanent button, and with
+  `TSR059` for a speaker met again inside its own properties. JSON longer than a text can be fails with `TSR084`.
 - `fromJson` reads RFC 8259 JSON, exactly the texts native JSON reads; a number too large to represent, such as `1e400`,
   gives the default. `-0` reads as `0`, and a whole number beyond the safe integer range as the nearest number, which
   stays whole. An array or object of more elements or keys than a list or dict can hold fails with `TSR088`; it is
@@ -1576,13 +1576,12 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
 - `toBase64` writes a lone surrogate as U+FFFD, as UTF-8 encoding does; a text whose Base64 would be longer than a text
   can be fails with `TSR084`. `fromBase64` keeps a leading byte order mark.
 - A value that is not text, such as `null` from a `string?` or a value of unknown type, gives the default of `fromJson`
-  and `fromBase64`. `toBase64` fails with `TSR059` for one that the compiler could not see.
+  and `fromBase64`. `toBase64` fails with `TSV043` for one that the compiler could not see.
 - With files, `toJson` writes each text of the value that is a stored file of the session, also inside a speaker's
   properties, as `data:<type>;base64,…` with the type its bytes give; a dict key stays as it is. `fromJson` turns each
   text it reads, the whole value or an element or dict value at any depth, that is a `data:` URL with Base64 data of a
   recognized type into a stored file and gives its reference; a dict key and any other data URL stay text. A file that
-  occurs twice is read or stored once. `files:` that is not true or false is compile error `TSV043` for a known type and
-  runtime error `TSR059` otherwise.
+  occurs twice is read or stored once. `files:` that is not true or false is `TSV043`, also at runtime.
 - A `fromJson` call or file store instruction with `expected`, which only the new type analysis emits
   ([ADR 0021 rule 2.6](decisions/0021-static-types.md)), reads the JSON as that type. JSON of another kind gives the
   default with developer warning `TSW020`, before any file is stored. An object type reads a JSON object as an object of
@@ -1598,7 +1597,7 @@ result at once: native `crypto.subtle.digest` always waits, so the engine has it
 `src/runtime/values/sha256.ts`). `TextEncoder` writes the text's UTF-8 in parts of 65,536 code units, a surrogate pair kept in
 one part and a lone surrogate written as U+FFFD, as for `toBase64`, so the time grows only with the bytes and no part
 needs the whole text's UTF-8 at once. The result is 64 lowercase hexadecimal digits. A value that is not text is
-`TSV043` where the compiler knows it and `TSR059` otherwise.
+`TSV043`, also at runtime.
 
 ## Stored files
 
@@ -1616,8 +1615,8 @@ does not fit it fails with `TSR058`. The instruction first finds the files it ne
   padding, or the Base64 data of a `data:<type>;base64,…` URL, whose declared type it ignores. Anything else, also a
   value that is not text, gives the default at once. A file whose standard Base64 would be longer than a text can be
   fails with `TSR084`.
-- `fileToBase64` and `hashFile` need a text that is a stored file of the session; anything else, also a package path
-  such as `"images/a.jpg"`, fails with `TSR059`.
+- `fileToBase64` and `hashFile` need a text that is a stored file of the session; other text, also a package path such
+  as `"images/a.jpg"`, fails with `TSR059`, and a value that is not text with `TSV043`.
 - `toJson` and `fromJson` find the files their [data URLs](#json-and-base64-text) need.
 
 Without files the instruction gives its result at once. Otherwise it creates a foreground `fileStore` action, either
@@ -1696,13 +1695,14 @@ default's type. `password: askPassword(...)` written directly, also in parenthes
 arguments before it are evaluated first, then its question is said as the ask's would be, and then the arguments after
 it.
 
-The instruction's first run checks its operands: `encryptText` needs text, the file calls a stored file of the session
-(`TSR059`, as for `fileToBase64`), `password:` and `key:` text, an encrypt call's `password:` also `true` or `false`,
-`publicKey:` a public key, a list of at most 594 of them, `true`, or `false`, and `timeLock:` an `absoluteDateTime`,
-`true`, or `false` (`TSR059`); an encrypt call whose openers are all `false`, or whose `publicKey:` list is empty while
-`password:` and `timeLock:` are `false`, fails with `TSR059`. Its openers written `true`, or each when it writes none,
+The instruction's first run checks its operands, with the compiler's code `TSV043` for what it also checks: `encryptText`
+needs text, the file calls a stored file of the session (`TSR059` for other text, as for `fileToBase64`), `password:`
+and `key:` text, an encrypt call's `password:` also `true` or `false`, `publicKey:` a public key, a list of them,
+`true`, or `false`, and `timeLock:` an `absoluteDateTime`, `true`, or `false`; an encrypt call whose openers are all
+`false` fails too. One whose `publicKey:` list is empty while `password:` and `timeLock:` are `false`, and more than
+594 public keys, fail with `TSR059`. Its openers written `true`, or each when it writes none,
 are its `choices`, which the lock dialog asks for; a chosen time lock is suggested 7 days after the session clock's
-current moment (`TSR064` without a clock). `decryptText` needs text (`TSR059`), and gives the default at once for text
+current moment (`TSR064` without a clock). `decryptText` needs text (`TSV043`), and gives the default at once for text
 that is not Base64, read as `fromBase64` reads it. Otherwise it
 creates a foreground `lock` action with the `call`, the `value` (the text, the Base64 lock in standard Base64, or the
 stored file), the written `password` text or `null`, the written `publicKeys`, each trimmed (encrypt only, else empty),
@@ -1841,13 +1841,15 @@ value only as a bounded preview. It uses only names and values the engine has al
 the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked
 _defect_ means that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier
 checkpoint or restart, and report the failure with its debug export. Every code is registered in
-`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics.
+`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics. A rule
+that the compiler also checks fails with the compiler's code and text, also for a value the compiler did not know
+([Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner)); this table lists the others.
 
 | Code | What failed | What to do |
 | --- | --- | --- |
 | `TSR001` | A global, speaker, variable, or parameter is set up twice in one scope. _Defect._ | Report it. |
 | `TSR002` | An assignment names no variable. _Defect._ | Report it. |
-| `TSR003` | An assignment to a property that the value or handle does not allow. | Assign a property the message names. |
+| `TSR003` | An assignment to a property that the value does not allow. | Assign a property the message names. |
 | `TSR004` | An index on a set, which has no positions. | Copy it into a list with `toList()`, or test with `contains(...)`. |
 | `TSR005` | An index assignment on a value that is not a list or dict. | Assign to a list element or a dict entry. |
 | `TSR006` | An unknown name. _Defect._ | Report it. |
@@ -1865,11 +1867,11 @@ checkpoint or restart, and report the failure with its debug export. Every code 
 | `TSR018` | Too few elements: an empty collection, or fewer values than a statistic needs. | Check the length first. |
 | `TSR019` | A random selection from an empty list or set. | Check that it has an element first. |
 | `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
-| `TSR021` | A value that cannot be shown where only scalar text is allowed ([Visible text boundary](#visible-text-boundary)), such as a dict in `${...}`, a list or dict as a button label, or a list inside a list that `${...}` or `join()` shows. | Select an element or a property. |
+| `TSR021` | A value that cannot be shown where only scalar text is allowed ([Visible text boundary](#visible-text-boundary)), such as a list or dict as a button label. | Select an element or a property. |
 | `TSR022` | A speaker whose `displayName` is empty. | Give it a name, or leave `displayName` out. |
 | `TSR023` | A speaker that the session does not have. _Defect._ | Report it. |
 | `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
-| `TSR025` | A list index or text position outside the valid range, a text end before its start, or a list element that a statement changes but that the same statement removed. | Check it against `length`, and an end against its start, first. |
+| `TSR025` | A list index beyond the list's end, or a list element that a statement changes but that the same statement removed. | Check it against `length` first. |
 | `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false. | Compare explicitly, as in `x != 0`. |
 | `TSR027` | An arithmetic operand, range bound, or amount before a unit (also in a `wait` or timer) that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
 | `TSR028` | Too many or too few arguments, or arguments in the wrong form. | Write the call as the message shows. |
@@ -1891,16 +1893,16 @@ checkpoint or restart, and report the failure with its debug export. Every code 
 | `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
 | `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
 | `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command or handle property with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, a camera placement, a message's text, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
+| `TSR050` | A command, or a handle's time, with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
 | `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
 | `TSR054` | A storage key that is not text. | Write the key as text. |
-| `TSR055` | A `save` of a value that exists only in this session: a timer, media, or message handle, a speaker, a camera view, or a permanent button. | Save plain data, and recreate the session value after loading. |
-| `TSR057` | A count or text argument that a text method or `take(...)` cannot use, such as a negative count or empty text, or a regex replacement that refers to a group the regex does not have. | Pass the kind of value the message names, or refer to a group the regex has. |
+| `TSR055` | Retired: a `save` of a value that exists only in this session now fails with `TSV043`. | Save plain data, and recreate the session value after loading. |
+| `TSR057` | A regex value that cannot be compiled. _Defect._ | Report it. |
 | `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion. | Convert or check the value, or declare a type that includes it. |
-| `TSR059` | A built-in argument of the wrong kind, such as a value that `toJson` cannot write or a text that `fileToBase64` does not know as a stored file. | Pass the kind the message names. |
-| `TSR060` | A collection operation whose elements or argument have the wrong kind, or whose elements lack the property it reads. | Make the elements one kind the operation takes, or name a property they have. |
+| `TSR059` | A built-in argument that the compiler does not check, such as a text that `fileToBase64` does not know as a stored file, more public keys than a lock holds or an empty list of them, a `predict` line whose properties are not numbers, or `min` of values of several kinds. | Pass a value the message names. |
+| `TSR060` | A `sort()` of elements of several kinds, or of calendar durations of different kinds, or a weight of `randomWeighted` that is not a number. | Make the elements one kind the operation takes. |
 | `TSR061` | A dict without the key that is read. | Check with `contains(...)` first, or use `get(key, default: value)`. |
 | `TSR062` | A dict key that is not text. | Write the key as text. |
 | `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range. | Use a date and time in the range the message gives. |

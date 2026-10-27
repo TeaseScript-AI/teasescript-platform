@@ -48,19 +48,19 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
     ),
     ["TSV043"],
   );
-  // `dynamic` hides the argument's type from the compiler, so the runtime check rejects it.
+  // `dynamic` hides the argument's type from the compiler, so the runtime check rejects it with the compiler's code.
   for (const [argument, message] of [
     [
       "1",
-      "escapeMarkup(...) needs text, not a whole number (integer). Convert it with toString(...) first.",
+      "escapeMarkup(...) takes text (string), not a whole number (integer). Convert it with toString(...) first.",
     ],
     [
       "[1]",
-      "escapeMarkup(...) needs text, not a list. Use .join() to combine its elements as text.",
+      "escapeMarkup(...) takes text (string), not a list. Use .join() to combine its elements as text.",
     ],
     // `.join()` cannot join a list of lists.
-    ["[[1]]", "escapeMarkup(...) needs text, not a list."],
-    ["null", "escapeMarkup(...) needs text, not null."],
+    ["[[1]]", "escapeMarkup(...) takes text (string), not a list."],
+    ["null", "escapeMarkup(...) takes text (string), not null."],
   ] as const) {
     const source = `function dynamic(value) { return value }\nsay escapeMarkup(dynamic(${argument})), instant\nexit`;
     const wrongType = compileValidPlan(source);
@@ -68,7 +68,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
     const call = source.indexOf("escapeMarkup(");
     assert.deepEqual(
       [failure?.code, failure?.message, failure?.span.start.offset],
-      ["TSR059", message, call],
+      ["TSV043", message, call],
       argument,
     );
   }

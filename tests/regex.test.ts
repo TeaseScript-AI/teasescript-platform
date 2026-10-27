@@ -551,7 +551,7 @@ test("a replacement that refers to a group the regex does not have is a compile 
     'function dynamic(value) {\n  return value\n}\nlet r = toRegex(dynamic("x"), default: null)\nif r != null {\n  let t = "ab".replace(r, "$1")\n}\nexit',
   ]) {
     const runtime = runWithGlobals(source, { replacement: "$2" });
-    assert.equal(runtime.snapshot.failure?.code, "TSR057", source);
+    assert.equal(runtime.snapshot.failure?.code, "TSV043", source);
     assert.match(
       runtime.snapshot.failure!.message,
       /^'\$[12]' in the replacement refers to group/u,
@@ -603,7 +603,7 @@ test("the regex operations check their arguments", () => {
   // A regex that matches empty text is a valid search.
   assert.deepEqual(diagnostics('let t = "a".replace(/x*/, "")\nexit'), []);
   const runtime = runWithGlobals('let all = "a,b".split(separator)\nexit', { separator: 4 });
-  assert.equal(runtime.snapshot.failure?.code, "TSR057");
+  assert.equal(runtime.snapshot.failure?.code, "TSV043");
   assert.equal(
     runtime.snapshot.failure?.message,
     "split() needs text (string) or a regex for 'separator', not a whole number (integer). Convert it with toString(...).",
@@ -738,7 +738,7 @@ test("the regex methods and a regex's members are checked", () => {
     "TSV043",
   );
   const runtime = runWithGlobals('let ok = "a".matches(pattern)\nexit', { pattern: "a" });
-  assert.equal(runtime.snapshot.failure?.code, "TSR057");
+  assert.equal(runtime.snapshot.failure?.code, "TSV043");
 });
 
 test("toJson cannot write a regex, also inside a list or a dict", () => {
@@ -755,10 +755,10 @@ test("toJson cannot write a regex, also inside a list or a dict", () => {
     'function write(value) {\n  say toJson(value)\n}\nwrite(dict { "k": [/a/] })\nexit',
   );
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-  assert.equal(result.snapshot.failure?.code, "TSR059");
+  assert.equal(result.snapshot.failure?.code, "TSV043");
   assert.equal(
     result.snapshot.failure?.message,
-    "toJson(...) cannot write this value: it holds a regex, which has no JSON form. Write plain values, such as text, numbers, lists, or dicts, instead.",
+    "toJson(...) cannot write this dict: it holds a regex, which has no JSON form. Write plain values, such as text, numbers, lists, or dicts, instead.",
   );
 });
 

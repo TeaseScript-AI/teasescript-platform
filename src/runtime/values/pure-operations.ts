@@ -33,6 +33,7 @@ import { combinedDateAndTime, temporalConverted } from "./temporal-operations.js
 import { checkTextLength } from "./text-length.js";
 import { isAngle, isList, isRange, isSet } from "./value-predicates.js";
 import { isVisibleScalar } from "./value-text.js";
+import { textOperandMessage } from "../../text-operand-rules.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -130,7 +131,7 @@ export function callNumbers(
       if (isAngle(value)) return value.degrees;
     } else if (typeof value === "number") return value;
     throw fault(
-      "TSR059",
+      "TSV043",
       numberArgumentMessage(
         name,
         signature,
@@ -200,11 +201,7 @@ const CONVERSION_RUNS: {
   fromJson: ([text], run) => (typeof text === "string" ? valueFromJson(text, run.span) : undefined),
   toBase64: ([text], run) => {
     if (typeof text !== "string")
-      throw fault(
-        "TSR059",
-        `toBase64(...) ${CONVERSIONS.toBase64.does}, not ${describeValue(text!)}.`,
-        run.span,
-      );
+      throw fault("TSV043", textOperandMessage("toBase64", describeValue(text!)), run.span);
     return base64Text(text, run.span);
   },
   fromBase64: ([text]) => (typeof text === "string" ? textFromBase64(text) : undefined),

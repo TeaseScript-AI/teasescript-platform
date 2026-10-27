@@ -6,7 +6,6 @@ import { compileProject, compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
 import { MAX_TEXT_LENGTH } from "../src/runtime/values/text-length.js";
 import {
-  readsPosition,
   stringLength,
   TEXT_METHODS,
   type DomainValue,
@@ -201,7 +200,7 @@ test("count gives how often a part occurs, counted from the start without overla
   // Text the compiler cannot know is checked when the script runs, on a receiver of known or unknown type.
   for (const source of ["say text.count(part)\nexit", 'say "abc".count(part)\nexit']) {
     const result = runWithGlobals(source, { text: "abc", part: "" });
-    assert.equal(result.snapshot.failure?.code, "TSR057", source);
+    assert.equal(result.snapshot.failure?.code, "TSV043", source);
     assert.equal(result.snapshot.failure?.message, "count() needs non-empty text for 'part'.");
   }
 });
@@ -443,8 +442,8 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     ],
     [
       "say [[1], [2]].join()\nexit",
-      "TSV043",
-      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not a list (integer[]). Select an element or a property first.",
+      "TSV042",
+      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not a list. Select an element or a property first.",
       "[1]",
     ],
     ["say null.trim()\nexit", "TSV043", "Null has no method 'trim'.", "trim"],
@@ -475,19 +474,19 @@ test("values the compiler cannot know are checked at runtime, with messages that
     [
       "say text.substring(at)\nexit",
       { text: "abc", at: 4 },
-      "TSR025",
+      "TSV043",
       "substring() needs 'start' from 0 through 3 (the length of the text), not 4.",
     ],
     [
       "say text.substring(at)\nexit",
       { text: "abc", at: -1 },
-      "TSR025",
+      "TSV043",
       "substring() needs 'start' to be 0 or more, not -1.",
     ],
     [
       "say text.substring(2, at)\nexit",
       { text: "abc", at: 1 },
-      "TSR025",
+      "TSV043",
       "substring() needs 'end' not before 'start', but 1 is before 2.",
     ],
     [
@@ -499,43 +498,43 @@ test("values the compiler cannot know are checked at runtime, with messages that
     [
       'say text.replace(part, "x")\nexit',
       { text: "abc", part: "" },
-      "TSR057",
+      "TSV043",
       "replace() needs non-empty text for 'search'.",
     ],
     [
       "say text.contains(part)\nexit",
       { text: "abc", part: 1 },
-      "TSR057",
+      "TSV043",
       "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
     ],
     [
       "say text.repeat(times)\nexit",
       { text: "abc", times: -1 },
-      "TSR057",
+      "TSV043",
       "repeat() needs 'count' to be 0 or more, not -1.",
     ],
     [
       "say text.repeat(times)\nexit",
       { text: "abc", times: 1.5 },
-      "TSR057",
+      "TSV043",
       "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
     ],
     [
       "say text.padStart(size, fill)\nexit",
       { text: "abc", size: 5, fill: "" },
-      "TSR057",
+      "TSV043",
       "padStart() needs non-empty text for 'fill'.",
     ],
     [
       'say text.padEnd(size, "-")\nexit',
       { text: "abc", size: "5" },
-      "TSR057",
+      "TSV043",
       "padEnd() needs a whole number (integer) for 'length', not text (string). Convert it with toInteger(...).",
     ],
     [
       "say [text].join(separator)\nexit",
       { text: "a", separator: null },
-      "TSR057",
+      "TSV043",
       "join() needs text (string) for 'separator', not null.",
     ],
     [
@@ -578,35 +577,31 @@ test("values the compiler cannot know are checked at runtime, with messages that
   assert.deepEqual(
     [nested.snapshot.failure?.code, nested.snapshot.failure?.message],
     [
-      "TSR021",
-      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
+      "TSV042",
+      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes, not a list. Select an element or a property first.",
     ],
   );
 });
 
-/**
- * Calls of methods of text whose arguments fail one domain, with the runtime's code: each domain of every contract has
- * one. A position out of range fails with TSR025, any other value with TSR057.
- */
+/** Calls of methods of text whose arguments fail one domain: each domain of every contract has one. */
 const INVALID: readonly {
   readonly name: TextMethodName;
   readonly text: string;
   readonly values: readonly string[];
-  readonly code: "TSR025" | "TSR057";
 }[] = [
-  { name: "count", text: "banana", values: ['""'], code: "TSR057" },
-  { name: "substring", text: "abc", values: ["-1"], code: "TSR025" },
-  { name: "substring", text: "abc", values: ["1", "-1"], code: "TSR025" },
-  { name: "substring", text: "a😀c", values: ["4"], code: "TSR025" },
-  { name: "substring", text: "abc", values: ["1", "4"], code: "TSR025" },
-  { name: "substring", text: "abc", values: ["2", "1"], code: "TSR025" },
-  { name: "replace", text: "aaa", values: ['""', '"x"'], code: "TSR057" },
-  { name: "replace", text: "aaa", values: ["/(a)/", '"$2"'], code: "TSR057" },
-  { name: "repeat", text: "ab", values: ["-1"], code: "TSR057" },
-  { name: "padStart", text: "7", values: ["-1", '"0"'], code: "TSR057" },
-  { name: "padStart", text: "7", values: ["3", '""'], code: "TSR057" },
-  { name: "padEnd", text: "7", values: ["-1", '"0"'], code: "TSR057" },
-  { name: "padEnd", text: "7", values: ["3", '""'], code: "TSR057" },
+  { name: "count", text: "banana", values: ['""'] },
+  { name: "substring", text: "abc", values: ["-1"] },
+  { name: "substring", text: "abc", values: ["1", "-1"] },
+  { name: "substring", text: "a😀c", values: ["4"] },
+  { name: "substring", text: "abc", values: ["1", "4"] },
+  { name: "substring", text: "abc", values: ["2", "1"] },
+  { name: "replace", text: "aaa", values: ['""', '"x"'] },
+  { name: "replace", text: "aaa", values: ["/(a)/", '"$2"'] },
+  { name: "repeat", text: "ab", values: ["-1"] },
+  { name: "padStart", text: "7", values: ["-1", '"0"'] },
+  { name: "padStart", text: "7", values: ["3", '""'] },
+  { name: "padEnd", text: "7", values: ["-1", '"0"'] },
+  { name: "padEnd", text: "7", values: ["3", '""'] },
 ];
 
 /** The value an argument of the table above writes: text, a whole number, or a regex literal without flags. */
@@ -618,7 +613,7 @@ function writtenValue(source: string): DomainValue {
 
 test("a domain of a text method fails alike when the compiler sees the values it reads, whatever the others are", () => {
   const covered = new Set<string>();
-  for (const { name, text, values, code } of INVALID) {
+  for (const { name, text, values } of INVALID) {
     const method: TextMethod = TEXT_METHODS[name];
     const read = (reads: readonly (number | "length")[]) =>
       reads.map((position) =>
@@ -632,14 +627,13 @@ test("a domain of a text method fails alike when the compiler sees the values it
     covered.add(`${name} ${failing}`);
     const domain = method.domains[failing]!;
     const message = domain.problem(read(domain.reads), method)!;
-    assert.equal(readsPosition(method, domain) ? "TSR025" : "TSR057", code, name);
     const receiver = JSON.stringify(text);
     const parameters = values.map((_, position) => `p${position}`).join(", ");
     // The runtime checks the values it is given.
     const failure = runValidSource(
       `function f(t, ${parameters}) {\n    return t.${name}(${parameters})\n}\nsay f(${receiver}, ${values.join(", ")})\nexit`,
     ).snapshot.failure;
-    assert.deepEqual([failure?.code, failure?.message], [code, message], `${name} ${values}`);
+    assert.deepEqual([failure?.code, failure?.message], ["TSV043", message], `${name} ${values}`);
     // The compiler gives the runtime's text at the last argument the domain reads, when it sees all the values and when it
     // sees only those the domain reads.
     const last = Math.max(

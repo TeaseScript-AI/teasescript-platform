@@ -243,7 +243,7 @@ test("speakers and handles are set members by identity, like list elements, and 
   );
   assert.deepEqual(
     failure(`${DYNAMIC}speaker vera {}\nsave dynamic(set[vera]) as "voices"\nexit`)?.[0],
-    "TSR055",
+    "TSV043",
   );
 });
 

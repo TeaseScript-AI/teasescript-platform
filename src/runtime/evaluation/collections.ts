@@ -200,7 +200,7 @@ function callList(
       const other = positional[0]!;
       if (!isList(other))
         throw fault(
-          "TSR060",
+          "TSV043",
           listArgumentMessage(
             name,
             "list",

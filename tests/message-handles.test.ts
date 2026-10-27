@@ -500,8 +500,8 @@ test("a handle that a timer block shares keeps its message while the block can s
 test("a write the compiler cannot check fails at runtime before it changes the message", () => {
   // Parameters without a type leave the receiver and value to the runtime.
   for (const [write, code] of [
-    ["setText(line, 5)", "TSR050"],
-    ['setColor(line, "red")', "TSR003"],
+    ["setText(line, 5)", "TSV041"],
+    ['setColor(line, "red")', "TSV043"],
     ["say colorOf(line)", "TSR017"],
     ['callOn(line, "stop")', "TSR016"],
     ['callOn(line, "remove", 1)', "TSR028"],

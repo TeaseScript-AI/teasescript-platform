@@ -8,14 +8,15 @@ diagnostic takes the registry's code types, so an unregistered code does not com
 checks that every code in `src/` is registered and reported only by its owners, and that every registered code is still
 reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
 
-This document lists the compiler's codes. Runtime errors (`TSR`) are listed in
+This document lists the compiler's codes. The other runtime errors (`TSR`) are listed in
 [Runtime errors](RUNTIME.md#runtime-errors), checkpoint errors (`TSK`) in
 [Checkpoint boundary](RUNTIME.md#checkpoint-boundary), and each developer warning (`TSW`) in the section of its
 feature.
 
 One problem gets one code, whichever pass finds it
-([One home for each language rule](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#one-home-for-each-language-rule)).
-The codes that more than one owner reports are listed in
+([One home for each language rule](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#one-home-for-each-language-rule)),
+also when the runtime finds it in a value the compiler did not know: then the runtime fails with the compiler's code
+and text. The codes that more than one owner reports are listed in
 [Codes with more than one owner](#codes-with-more-than-one-owner).
 
 ## Messages
@@ -158,18 +159,18 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV029` | Invalid choice | error | type checker |
 | `TSV032` | Blocking command in a parameter default | error | name pass |
 | `TSV033` | Invalid timer or handler return | error | name pass |
-| `TSV034` | Invalid timer handle member | error | type checker |
+| `TSV034` | Invalid timer handle member | error | type checker, runtime |
 | `TSV035` | Duration combined with a number | error | type checker |
 | `TSV036` | Invalid media file, option, or cue | error | type checker |
-| `TSV037` | Invalid media handle member | error | type checker |
+| `TSV037` | Invalid media handle member | error | type checker, runtime |
 | `TSV038` | Invalid storage key | error | type checker |
 | `TSV039` | Invalid prefill | error | type checker |
 | `TSV040` | List where text is shown | error | type checker |
-| `TSV041` | Type mismatch | error or warning | type checker |
-| `TSV042` | Value that cannot be shown | error or warning | type checker |
-| `TSV043` | Unsupported operand, method, or property | error or warning | type checker, plan analysis |
+| `TSV041` | Type mismatch | error or warning | type checker, runtime |
+| `TSV042` | Value that cannot be shown | error or warning | type checker, runtime |
+| `TSV043` | Unsupported operand, method, or property | error or warning | type checker, plan analysis, runtime |
 | `TSV044` | Mixed types | error | type checker |
-| `TSV045` | Negative list index | error | type checker |
+| `TSV045` | Negative list index | error | type checker, runtime |
 | `TSV046` | Test with a constant result | warning | type checker |
 | `TSV047` | Invalid `case` value | error | name pass |
 | `TSV048` | Repeated or overlapping `case` | error | name pass |
@@ -183,7 +184,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV056` | Global function that uses names of its file | error | name pass |
 | `TSV057` | Invalid file target | error | name pass, plan analysis |
 | `TSV058` | Loop with no way out | warning | plan analysis |
-| `TSV059` | Invalid camera view member | error | type checker |
+| `TSV059` | Invalid camera view member | error | type checker, runtime |
 | `TSV061` | Wait or timer written in days or weeks | warning | compiler |
 | `TSV062` | Fallback that is never used | warning | type checker |
 | `TSV063` | `speaker` without a speaker | error | name pass |
@@ -245,9 +246,22 @@ code each.
 - `TSV022`
   - name pass: calls of the script's functions and of the commands it knows by name (`unknownNamedArgumentMessage`)
   - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
+- `TSV034`, `TSV037`, `TSV059`
+  - type checker: a member that a timer handle, media handle, or camera view does not have, a property it cannot assign, and a value outside a property's domain (`handle-members.ts`)
+  - runtime: the same rules with the same texts for a property it cannot assign and a value outside a property's domain, where the handle is not known when the script is compiled
+- `TSV041`
+  - type checker: every value that does not fit its place, among them a handle property of another type (`assignedTypeMessage`)
+  - runtime: the same rule with the same text for a handle property, where the handle is not known when the script is compiled
+- `TSV042`
+  - type checker: every value that text cannot show, among them in `${...}` and `join()` (`shown-text-rules.ts`)
+  - runtime: the same rules with the same texts for `${...}` and `join()` of a value whose type the compiler does not know
 - `TSV043`
   - type checker: every operation that its operands do not support, among them a speaker property that no declaration or assignment gives a speaker the read may reach (`missingSpeakerPropertyMessage`)
   - plan analysis: the same rule with the same text for a speaker property that a way to the read misses (V30 §37)
+  - runtime: the same rules with the same texts for a value whose type or value the compiler does not know: a built-in's argument of another type, among them the text of `text-operand-rules.ts`, the options of `lock-rules.ts`, `toJson`, the numeric and list functions, the arguments of a text or list method, a `save` of a value that exists only in the session (`save-rules.ts`), and a property of a message handle or a permanent button that cannot be assigned
+- `TSV045`
+  - type checker: a list index that the compiler knows is below 0 (`negativeListIndexMessage`)
+  - runtime: the same rule with the same text for an index it does not know
 - `TSV055`
   - name pass: a start value that says, asks, waits, plays media, calls a function, or uses a local or a later global (`startValueMessage`)
   - type checker: the same rule with the same text for a start value that selects at random, with `.random` or a list in `${...}`, which needs the value's type

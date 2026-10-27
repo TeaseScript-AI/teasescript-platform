@@ -115,7 +115,7 @@ test("statistics report empty lists, values they cannot read, and percentages ou
   ]);
   assert.deepEqual(
     diagnostics('let sessions = [{ count: 10 }]\nsay sum(sessions, by: "amount")\nexit'),
-    [["TSV043", "sum(...): the objects in this list have no property 'amount'.", '"amount"']],
+    [["TSV043", "sum(...): an object in the list has no property 'amount'.", '"amount"']],
   );
   assert.deepEqual(diagnostics('say average([1, 2], by: "count")\nexit'), [
     [
@@ -146,30 +146,30 @@ test("statistics report empty lists, values they cannot read, and percentages ou
     ],
     [
       "average(dynamic([1, dynamic(2 s)]))",
-      "TSR060",
+      "TSV043",
       "average(...) needs values of one kind: numbers or durations.",
     ],
     [
       "average(dynamic([1 calendar day, 2 calendar days]))",
-      "TSR060",
+      "TSV043",
       "average(...) needs numbers or durations, not a calendar duration. A calendar day or month has no fixed length.",
     ],
     [
       "sum([dynamic(2), dynamic(1 s)])",
-      "TSR060",
+      "TSV043",
       "sum(...) needs values of one kind: numbers, durations, or angles.",
     ],
     [
       'sum(dynamic([{ n: 1 }]), by: "count")',
-      "TSR060",
+      "TSV043",
       "sum(...): an object in the list has no property 'count'.",
     ],
     [
       'median(dynamic([1]), by: "count")',
-      "TSR060",
+      "TSV043",
       "median(...) needs a list of objects for by:, not a list that holds a whole number (integer).",
     ],
-    ["sum(dynamic(5))", "TSR059", "sum(...) needs a list, not a whole number (integer)."],
+    ["sum(dynamic(5))", "TSV043", "sum(...) needs a list, not a whole number (integer)."],
     [
       "sum(dynamic([1e308, 1e308]))",
       "TSR036",
@@ -242,7 +242,7 @@ test("a property that code checked later gives the elements reaches by:, y:, x:,
     diagnostics(`${start}\n${report}\nexit`),
     calls.map(([call]) => [
       "TSV043",
-      `${call.slice(0, call.indexOf("("))}(...): the objects in this list have no property 'count'.`,
+      `${call.slice(0, call.indexOf("("))}(...): an object in the list has no property 'count'.`,
       '"count"',
     ]),
   );
@@ -252,7 +252,7 @@ test("a property that code checked later gives the elements reaches by:, y:, x:,
   ).at(10_000);
   assert.deepEqual(
     [partly.snapshot.failure?.code, partly.snapshot.failure?.message],
-    ["TSR060", "sum(...): an object in the list has no property 'count'."],
+    ["TSV043", "sum(...): an object in the list has no property 'count'."],
   );
 });
 
@@ -425,7 +425,7 @@ test("take and takeLast return a new list of the first or last elements", () => 
     ],
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say [1, 2].takeLast(dynamic(-2))\nexit`), [
-    "TSR057",
+    "TSV043",
     "takeLast() needs a whole number of at least 0, not -2.",
   ]);
 });
@@ -942,22 +942,22 @@ test("linearRegression and predict report too few points, one x, and values of t
     ],
     [
       'linearRegression(dynamic([{ x: toTime("08:00"), y: 2 }, { x: toTime("09:00"), y: 3 }]), x: "x", y: "y")',
-      "TSR060",
+      "TSV043",
       "linearRegression(...) needs numbers, dates, dates and times, or absolute dates and times as x values, not a time.",
     ],
     [
       "predict(dynamic({ slope: 1 }), 2)",
-      "TSR059",
+      "TSV043",
       "predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not an object.",
     ],
     [
       'predict(linearRegression([1, 2]), dynamic(toDate("2026-01-01")))',
-      "TSR059",
+      "TSV043",
       "predict(...) needs a number as its x, like the line's start, not a date.",
     ],
     [
       'predict(linearRegression([{ at: toAbsoluteDateTime("2026-01-01T00:00:00Z"), n: 1 }, { at: toAbsoluteDateTime("2026-01-02T00:00:00Z"), n: 2 }], x: "at", y: "n"), dynamic(toDate("2026-01-01")))',
-      "TSR059",
+      "TSV043",
       "predict(...) needs an absolute date and time as its x, like the line's start, not a date.",
     ],
   ];
@@ -1106,7 +1106,7 @@ test("values of another kind, or of several kinds, fail alike when the compiler 
       assert.equal(compiled.length, 1, `${name}: ${list}`);
       assert.deepEqual(
         failure(`${DYNAMIC}${list}\nsay ${name}(dynamic(xs)${rest})\nexit`),
-        ["TSR060", compiled[0]![1]],
+        ["TSV043", compiled[0]![1]],
         `${name}: ${list}`,
       );
     }
@@ -1116,6 +1116,6 @@ test("values of another kind, or of several kinds, fail alike when the compiler 
   const compiled = diagnostics(`${points}\nsay linearRegression(points, y: "y", x: "x")\nexit`);
   assert.deepEqual(
     failure(`${DYNAMIC}${points}\nsay linearRegression(dynamic(points), y: "y", x: "x")\nexit`),
-    ["TSR060", compiled[0]?.[1]],
+    ["TSV043", compiled[0]?.[1]],
   );
 });

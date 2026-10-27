@@ -24,7 +24,7 @@ import { messageText } from "../values/text-length.js";
 import { listHasPosition } from "../values/collection-operations.js";
 import { loweredOperand } from "./lowered-operands.js";
 import { durationPropertyMessage } from "../../duration.js";
-import { LIST_INDEX_RULE } from "../../operand-rules.js";
+import { LIST_INDEX_RULE, negativeListIndexMessage } from "../../operand-rules.js";
 import { missingMemberMessage } from "../values/string-operations.js";
 import { stringLength, unknownTextMemberMessage } from "../../text-operations.js";
 import { missingPropertyMessage } from "../../object-properties.js";
@@ -358,8 +358,9 @@ export function notWholeIndex(
 }
 
 /**
- * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number and `TSR025` unless
- * the list has it. `indexPlan` is the index as written, or `null` for an argument such as of `removeAt(...)`.
+ * The position `value` gives in `list`, which `receiver` gives: `TSR024` unless it is a whole number, `TSV045` for one
+ * below 0, as the compiler reports a known one, and `TSR025` beyond the list's end. `indexPlan` is the index as written,
+ * or `null` for an argument such as of `removeAt(...)`.
  */
 export function listPosition(
   evaluator: Evaluator,
@@ -376,6 +377,8 @@ export function listPosition(
   const indexLabel = writtenIndexLabel(evaluator, indexPlan);
   const length = list.items.length;
   const owner = receiverLabel(evaluator, receiver);
+  if (typeof value === "number" && value < 0)
+    throw fault("TSV045", negativeListIndexMessage(value, indexLabel, owner), span);
   const named = owner === null ? "the list" : `'${owner}'`;
   const action = `Cannot ${use === "assign" ? "assign to" : use} ${owner === null || indexLabel === null ? `index ${value}` : `'${owner}[${indexLabel}]'`}`;
   const given =

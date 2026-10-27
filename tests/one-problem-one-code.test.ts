@@ -162,8 +162,21 @@ test("a date or time call with arguments has the compiler's text where the runti
     }
     assert.fail("The call did not fail.");
   };
-  for (const [source, run, code] of [
+  for (const [source, run, code, compiledCode = "TSV020"] of [
     ["say getDate(1)", () => temporalNow("getDate", [1], {}, capture, 0, span), "TSR028"],
+    // A name is an unknown named argument, as for any other built-in.
+    [
+      "say getDate(foo: 1)",
+      () => temporalNow("getDate", [], { foo: 1 }, capture, 0, span),
+      "TSR028",
+      "TSV022",
+    ],
+    [
+      'say toDate("2026-10-04").formatDate(locale: "de")',
+      () => temporalMethod(day, "formatDate", [], { locale: "de" }, DEFAULT_TEMPORAL_CONTEXT, span),
+      "TSR015",
+      "TSV022",
+    ],
     [
       'say toDate("2026-10-04").toISO(1)',
       () => temporalMethod(day, "toISO", [1], {}, DEFAULT_TEMPORAL_CONTEXT, span),
@@ -177,8 +190,83 @@ test("a date or time call with arguments has the compiler's text where the runti
   ] as const) {
     const compiled = diagnostics(source);
     assert.equal(compiled.length, 1, source);
-    assert.equal(compiled[0]![0], "TSV020", source);
+    assert.equal(compiled[0]![0], compiledCode, source);
     assert.deepEqual(fault(run), [code, compiled[0]![1]], source);
+  }
+});
+
+test("a problem that the compiler and the runtime both find has the compiler's code and text in both", () => {
+  // The runtime finds it in a value whose type or value the compiler does not know.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  for (const [known, unknown] of [
+    ["say hashText(5)", `${D}say hashText(dynamic(5))`],
+    ['say [dict{ "a": 1 }].join()', `${D}say dynamic([dict{ "a": 1 }]).join()`],
+    ['say "${1..2}"', `${D}say "\${dynamic(1..2)}"`],
+    [
+      'let t = timer async 10 s\nsave t as "k"',
+      `${D}let t = timer async 10 s\nsave dynamic(t) as "k"`,
+    ],
+    [
+      "let items = [1, 2, 3]\nlet i = -1\nsay items[i]",
+      `${D}let items = [1, 2, 3]\nlet i = dynamic(-1)\nsay items[i]`,
+    ],
+    [
+      'let h = timer async 10 s\nh.remaining = "wrong"',
+      `${D}let t = timer async 10 s\nlet h = dynamic(t)\nh.remaining = "wrong"`,
+    ],
+    // A collection is named by its kind, which the runtime knows too.
+    [
+      "let h = timer async 10 s\nh.remaining = [1]",
+      `${D}let t = timer async 10 s\nlet h = dynamic(t)\nh.remaining = [1]`,
+    ],
+    ['say "abc".split([1])', `${D}say "abc".split(dynamic([1]))`],
+    ["say [1].take([1])", `${D}say [1].take(dynamic([1]))`],
+    ["let xs = [1]\nxs.addAll(set[2])", `${D}let xs = [1]\nxs.addAll(dynamic(set[2]))`],
+    ["let xs = [[1]]\nxs.sort()", `${D}let xs = dynamic([[1]])\nxs.sort()`],
+    [
+      'let r = encryptText("hi", password: ["p"], publicKey: false, timeLock: false)',
+      `${D}let r = encryptText("hi", password: dynamic(["p"]), publicKey: false, timeLock: false)`,
+    ],
+    // A predict line checked in the compiler's order: x first, then a property that is null or missing.
+    [
+      "let n = predict({ slope: null, intercept: 0, start: 0 }, 1)",
+      `${D}let n = predict(dynamic({ slope: null, intercept: 0, start: 0 }), 1)`,
+    ],
+    ['let n = predict(5, "a")', `${D}let n = predict(dynamic(5), dynamic("a"))`],
+    // Then a start that decides x's kind, also one predict cannot use, before the values the compiler does not check.
+    [
+      "let n = predict({ slope: 1, intercept: 0, start: 1 s }, 1)",
+      `${D}let n = predict(dynamic({ slope: 1, intercept: 0, start: 1 s }), dynamic(1))`,
+    ],
+    [
+      'let n = predict({ slope: "bad", intercept: 0, start: 0 }, toDate("2026-01-01"))',
+      `${D}let n = predict(dynamic({ slope: "bad", intercept: 0, start: 0 }), dynamic(toDate("2026-01-01")))`,
+    ],
+    // Of several problems, the one the compiler reports first, and one it checks before one only the runtime checks.
+    [
+      "let r = encryptText(5, password: 5, publicKey: 5, timeLock: false)",
+      `${D}let r = encryptText(dynamic(5), password: dynamic(5), publicKey: dynamic(5), timeLock: false)`,
+    ],
+    [
+      "let r = encryptText(5, password: false, publicKey: [], timeLock: false)",
+      `${D}let r = encryptText(dynamic(5), password: false, publicKey: dynamic([]), timeLock: false)`,
+    ],
+    ["say [1].take(1.5)", `${D}say [1].take(dynamic(1.5))`],
+    // An argument is not an index written in brackets, so neither names it.
+    [
+      "let items = [1, 2]\nlet i = -2\nitems.removeAt(i)",
+      `${D}let items = [1, 2]\nlet i = dynamic(-2)\nitems.removeAt(i)`,
+    ],
+    // Of several values that exist only in the session, the first as written.
+    [
+      'let t = timer async 10 s\nlet m = say "Hi", instant\nsave { a: t, b: m } as "k"',
+      `${D}let t = timer async 10 s\nlet m = say "Hi", instant\nsave dynamic({ a: t, b: m }) as "k"`,
+    ],
+  ]) {
+    const compiled = diagnostics(known!);
+    // Of several, the runtime gives the one the compiler reports first.
+    assert.ok(compiled.length > 0, known);
+    assert.deepEqual(runtimeFailure(compileValidPlan(`${unknown}\nexit`)), compiled[0], unknown);
   }
 });
 
