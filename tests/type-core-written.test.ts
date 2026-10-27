@@ -877,14 +877,14 @@ test("copies of different sources, repeated self copies, cycles and a rejection 
       `round${mode}`,
     );
     const compile = (): InstructionPlan | null =>
-      compileSourceWithBackend(host, { globals: GLOBALS }, CORE_BACKEND).plan;
+      compileSourceWithBackend(round, { globals: GLOBALS }, CORE_BACKEND).plan;
     const plan = shared ? compile() : withoutSharing(compile);
-    assert.ok(plan !== null, `host plan${mode}`);
-    // (the record's own host data checked where it is declared, its copy's field where it lands)
+    assert.ok(plan !== null, `round plan${mode}`);
+    // (the record's own host data checked where it is declared, the copy's field at its store from the cycle)
     assert.deepEqual(
       checksOf(plan),
-      [`${at(host, "let other={f:hostValue,g:typed}")} object`, `${at(host, "a=other")} object`],
-      `host plan${mode}`,
+      [`${at(round, "let other={f:hostValue,g:typed}")} object`, `${at(round, "c=a")} object`],
+      `round plan${mode}`,
     );
     const fits = runGlobals(plan, { hostValue: 5 });
     assert.deepEqual(
@@ -894,7 +894,7 @@ test("copies of different sources, repeated self copies, cycles and a rejection 
     const misfits = runGlobals(plan, { hostValue: "bad" });
     assert.deepEqual(
       [misfits.status, misfits.failure, misfits.said],
-      ["failed", `TSR058@${copy}`, []],
+      ["failed", `TSR058@${read}:${read + 1}`, []],
     );
   }
 });
