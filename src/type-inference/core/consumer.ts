@@ -1231,9 +1231,10 @@ function unionOf(plans: readonly TypePlan[]): TypePlan {
 }
 
 /**
- * The diagnostics the compiler reports (#1195): every one but a warning at a site that never runs once its file,
- * function or block runs, whose line the warning for code that never runs (TSV065) reports; an error there stays (ADR
- * 0021 rule 1.8).
+ * The diagnostics the compiler reports (#1195): every one but a warning whose expression never runs once its file,
+ * function or block runs, as code after an `exit` or the right side of `false and …`, which the warning for code that
+ * never runs (TSV065) reports; an error there stays (ADR 0021 rule 1.8). An expression the flow graph has no node for
+ * runs with its statement.
  */
 export function reportedDiagnostics(answers: Answers): CoreDiagnostic[] {
   const { graph } = answers;
@@ -1252,7 +1253,7 @@ export function reportedDiagnostics(answers: Answers): CoreDiagnostic[] {
           }
     }
     const node = graph.expressionAt(diagnostic.site) ?? graph.statementAt(diagnostic.site);
-    return node === undefined || reached.has(node.enclosing ?? node);
+    return node === undefined || reached.has(node);
   });
 }
 
