@@ -1321,6 +1321,38 @@ test("a cycle whose options share its value is answered with the option it showe
   }
 });
 
+test("a restored form answer keeps the date and time presentation it was sent in after a Continue in another", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      'let when = askForm "When?", fields: { day: toDate("2026-10-04"), at: toTime("18:30") }',
+      'showButton "Next"',
+      "exit",
+    ].join("\n"),
+    { temporalContext: playerTemporalContext({ timeZone: "UTC", locale: "en-US" }) },
+  );
+  const done = submitPlayerRuntimeForm(session)!.session;
+  const summary = (shown: PlayerRuntimeSession) => {
+    const answer = shown.transcriptEntries.find(
+      (entry) => entry.kind === "message" && entry.responseKind === "form",
+    );
+    return answer?.kind === "message" ? answer.formSummary : undefined;
+  };
+  const sent = summary(done);
+  // The live summary writes the answers as the player's language does.
+  assert.ok(sent?.[0]?.kind === "value" && sent[0].value !== "2026-10-04");
+  // The kept state after a Continue in Dutch has only the Dutch presentation.
+  const continued = continuePlayerRuntimeSession(
+    restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(done)),
+    {
+      wallClockMs: Date.UTC(2026, 9, 5),
+      temporalContext: playerTemporalContext({ timeZone: "UTC", locale: "nl-NL" }),
+    },
+  ).session;
+  const again = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(continued));
+  assert.notDeepEqual(again.state.temporalPresentation, done.state.temporalPresentation);
+  assert.deepEqual(summary(again), sent);
+});
+
 test("a typed form field opens in the composer, keeps its draft through a restore, and takes the composer's text", () => {
   const session = createPlayerRuntimeSession(
     [
@@ -1530,10 +1562,7 @@ test("a removed message keeps its row, marked removed, also through a restore an
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
   assert.deepEqual(restored.transcriptRemovedRows, [0, 1]);
-  assert.deepEqual(
-    playerRuntimeTranscript(session.events, session.state.temporalPresentation).entries,
-    session.transcriptEntries,
-  );
+  assert.deepEqual(playerRuntimeTranscript(session.events).entries, session.transcriptEntries);
   assert.deepEqual(restorePlayerRuntimeSession(restorePoint).transcriptRemovedRows, []);
 });
 

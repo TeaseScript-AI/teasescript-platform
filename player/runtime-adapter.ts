@@ -286,11 +286,6 @@ export class PlayerRuntimeEngine {
     return this.runtimeAt(at).exportCheckpoint();
   }
 
-  /** The date and time presentation in force at publication `at`. */
-  temporalPresentation(at: PlayerRuntimePublication): PresentationSettings {
-    return this.runtimeAt(at).temporalPresentation();
-  }
-
   /** Publication `at`'s variables with bounded previews, for Debug. */
   variablePreviews(at: PlayerRuntimePublication): RuntimeSessionVariablePreviews {
     return this.runtimeAt(at).variablePreviews();
@@ -2304,12 +2299,9 @@ function applyOperation(
       appendRuntimeEvents(session, operation.events),
       !REFUSALS.has(operation.outcome.kind),
     );
-  // The operation's events are presented as they stood before the continuation, but only once it ran: when it throws,
-  // the session goes on from the publication before the operation, which never showed them.
-  const presentation =
-    operation.events.length === 0 ? null : session.engine.temporalPresentation(session);
   // The continuation runs on the same engine-owned state before anything publishes. It returns at once when nothing is
-  // runnable.
+  // runnable. The operation's events are presented only once it ran: when it throws, the session goes on from the
+  // publication before the operation, which never showed them.
   const continuation = session.engine.call(
     session,
     "run",
@@ -2317,7 +2309,7 @@ function applyOperation(
     (runtime) => runtime.run(traceOptions(session.debugTrace)),
     true,
   );
-  const next = appendRuntimeEvents(session, operation.events, presentation);
+  const next = appendRuntimeEvents(session, operation.events);
   return publish(appendRuntimeEvents(next, continuation.events));
 }
 
@@ -2404,20 +2396,17 @@ export function playerRuntimeTranscriptEventSequence(entryId: string): number | 
 }
 
 /**
- * The transcript that `events` present, from the start of a session: its entries and the speakers they name, with a
- * form's answers in `presentation`, as a session restored with these events shows them in the presentation of its
- * state. Debug's rewind shows with it the messages of a state the shown one has not reached yet.
+ * The transcript that `events` present, from the start of a session: its entries and the speakers they name, as a
+ * session restored with these events shows them. Debug's rewind shows with it the messages of a state the shown one has
+ * not reached yet.
  */
-export function playerRuntimeTranscript(
-  events: readonly InterpreterEvent[],
-  presentation: PresentationSettings,
-): {
+export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
   readonly entries: readonly PlayerTranscriptEntryPresentation[];
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 } {
   const entries: PlayerTranscriptEntryPresentation[] = [];
   const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
-  appendTranscript(entries, new Map(), [], speakers, events, presentation);
+  appendTranscript(entries, new Map(), [], speakers, events);
   return { entries, speakers };
 }
 
@@ -2443,12 +2432,12 @@ function appendTranscript(
   removedRows: number[],
   speakers: Record<string, PlayerSpeakerPresentation>,
   events: readonly InterpreterEvent[],
-  presentation: TemporalContext["presentation"],
 ) {
   const responseKinds = new Map<number, "choice" | "button" | "form">();
   // The rows these events remove, sorted and merged into `removedRows` once, whatever order they come in.
   const removedNow: number[] = [];
-  // A submitted form's answer shows every field with its state, one per line (V30 askForm).
+  // A submitted form's answer shows every field with its state, one per line (V30 askForm), in the presentation its
+  // answers were sent in.
   const formSummaries = new Map<number, readonly FormSummaryLine[]>();
   for (const event of events) {
     if (
@@ -2460,9 +2449,11 @@ function appendTranscript(
         event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
-      const { ui, result, shownOptions } = event.settlement;
+      const { ui, result, shownOptions, temporalPresentation } = event.settlement;
       const summary =
-        ui.kind === "form" ? formSummaryOf(ui, result, shownOptions, presentation) : null;
+        ui.kind === "form" && temporalPresentation
+          ? formSummaryOf(ui, result, shownOptions, temporalPresentation)
+          : null;
       if (summary !== null) formSummaries.set(event.settlement.transcriptEventSequence, summary);
     }
   }
@@ -2554,7 +2545,6 @@ function mergeSortedRows(rows: number[], added: number[]): void {
 function appendRuntimeEvents(
   session: PlayerRuntimeSession,
   events: readonly InterpreterEvent[],
-  presentation: PresentationSettings | null = null,
 ): PlayerRuntimeSession {
   if (events.length === 0) return Object.freeze(session);
   // EVIDENCE: emptySession creates an unfrozen adapter-owned speaker accumulator for every session.
@@ -2568,14 +2558,7 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned list of removed rows for every session.
   const removedRows = session.transcriptRemovedRows as number[];
   for (const event of events) retainedEvents.push(event);
-  appendTranscript(
-    transcriptEntries,
-    messageRows,
-    removedRows,
-    speakers,
-    events,
-    presentation ?? session.engine.temporalPresentation(session),
-  );
+  appendTranscript(transcriptEntries, messageRows, removedRows, speakers, events);
   return Object.freeze({
     ...session,
     events: retainedEvents,

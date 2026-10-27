@@ -1102,7 +1102,8 @@ control keeps the action button geometry above, also among 43 toggles on a phone
 adds nothing to the transcript; submitting adds the player's answer listing every field
 ([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
 of the `›` response marker; screen readers read its plain text. Each cycle line names the option the cycle showed,
-also where several of its options share a value. Exact
+also where several of its options share a value, and a date or time keeps the presentation it was sent in, also after a
+Continue in another language. Exact
 unambiguous text of one field label or of the submit or cancel button activates it from the composer, as for
 `askChoice`. A form with a time limit closes at it without a transcript line, as a `showButton` timeout does.
 

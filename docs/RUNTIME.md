@@ -1423,11 +1423,12 @@ with `null` for an optional field without a value. The transcript is the plain t
 completion, as a date or time ask's line is; answers too long for one transcript line are refused. The text is built
 from the form's state, which tells cycle options with the same value apart. The settlement records that too, as
 `shownOptions`: for each field the position of the option a cycle showed, else `null`, and `null` as a whole for a form
-that returned `null`. The Player rebuilds the per-line summary from the settlement's definition, result, and shown
-options. A refusal leaves the form open.
+that returned `null`; and, as `temporalPresentation`, the presentation the answers were shown in, `null` for a form that
+sent none. The Player rebuilds the per-line summary from the settlement's definition, result, shown options, and
+presentation, so a later capture does not change it. A refusal leaves the form open.
 The settlement records the definition, and validation checks its result and shown options against it (each shown
-option has its field's answer as value) and its transcript as text, since a later capture may change the presentation;
-the result handoff is checked against the plan's shape.
+option has its field's answer as value) and its transcript against the summary in its presentation; the result
+handoff is checked against the plan's shape.
 A form with `timeout` and `onTimeout` carries its limit in its UI as `timeout: { milliseconds, onTimeout }` and as the
 action's `timeoutMs`; like a button's timeout, reaching `createdAtMs + pausedMs + timeoutMs` is a time settlement
 (`timedOut`, no transcript) whose result is the answers as they stand, without the draft, or `null`.
@@ -2062,8 +2063,8 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
 | Instruction plan | 103 | The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`, and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore` of `fromJson` `expected`, and a `storageLoad` `repair`, which plan validation previously rejected; a plan without them runs as before. |
-| Runtime snapshot | 90 | Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as `playerProfile`; previously they were kept as `account`. |
-| Checkpoint | 127 | The plan contract of the new type analysis's runtime checks. |
+| Runtime snapshot | 91 | Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the presentation in force when the session was restored. |
+| Checkpoint | 128 | The form-presentation snapshot contract. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2300,6 +2301,8 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 90: Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as
+  `playerProfile`; previously they were kept as `account`.
 - Revision 89: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script
   reference is `{ kind: "script", path }` without `label`, and an activation root's `entry` is its file's entry, never a
   label; validation previously accepted all three.
@@ -2465,6 +2468,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 127: The plan contract of the new type analysis's runtime checks.
 - Revision 126: The player-profile plan and snapshot contracts.
 - Revision 125: The plan and snapshot contracts of files entered at their top.
 - Revision 124: The single-argument-copy snapshot contract.

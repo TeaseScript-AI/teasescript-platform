@@ -1,9 +1,4 @@
-import {
-  CheckpointError,
-  type InstructionPlan,
-  type InterpreterEvent,
-  type PresentationSettings,
-} from "../src/index.js";
+import { CheckpointError, type InstructionPlan, type InterpreterEvent } from "../src/index.js";
 import type { DebugEditedWhileDebugging, DebugRewoundWhileDebugging } from "./debug-export.js";
 import type {
   PlayerForegroundPresentation,
@@ -43,8 +38,6 @@ export interface DebugHistoryPosition {
   /** The session's event list; its first `eventCount` events led to this state and rebuild its transcript. */
   readonly events: readonly InterpreterEvent[];
   readonly eventCount: number;
-  /** The date and time presentation in force in this state, in which its restored transcript shows a form's answers. */
-  readonly presentation: PresentationSettings;
   readonly sceneTimeMs: number;
   readonly marks: DebugHistoryMarks;
 }
@@ -404,7 +397,6 @@ export class DebugHistory {
       id,
       events: session.events,
       eventCount: session.events.length,
-      presentation: session.state.temporalPresentation,
       sceneTimeMs: session.state.observedSessionTimeMs,
       marks,
     };
@@ -458,15 +450,8 @@ export function rewindFutureTranscript(
   readonly entries: readonly PlayerTranscriptEntryPresentation[];
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
 } {
-  const reached = playerRuntimeTranscript(
-    shown.events.slice(0, shown.eventCount),
-    shown.presentation,
-  ).entries.length;
-  // Forward restores `future` with its transcript in its own presentation.
-  const later = playerRuntimeTranscript(
-    future.events.slice(0, future.eventCount),
-    future.presentation,
-  );
+  const reached = playerRuntimeTranscript(shown.events.slice(0, shown.eventCount)).entries.length;
+  const later = playerRuntimeTranscript(future.events.slice(0, future.eventCount));
   return {
     entries: later.entries
       .slice(reached)

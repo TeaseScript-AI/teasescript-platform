@@ -598,6 +598,14 @@ function cloneSettlement(
     ...(settlement.shownOptions === undefined
       ? {}
       : { shownOptions: settlement.shownOptions && [...settlement.shownOptions] }),
+    ...(settlement.temporalPresentation === undefined
+      ? {}
+      : {
+          temporalPresentation: settlement.temporalPresentation && {
+            ...settlement.temporalPresentation,
+            dayPeriods: [...settlement.temporalPresentation.dayPeriods],
+          },
+        }),
   };
 }
 

@@ -17,7 +17,13 @@ import type {
 } from "../../plan/model.js";
 import type { SerializableRuntimeValue } from "../values/serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
-import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
+import {
+  presentDate,
+  presentDateTime,
+  presentTime,
+  type PresentationSettings,
+  type TemporalContext,
+} from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from "./model.js";
 import { submitForm } from "./form.js";
@@ -42,6 +48,8 @@ export type ResolvedInteraction =
       readonly transcriptText: string | null;
       /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
       readonly shownOptions?: readonly (number | null)[] | null;
+      /** Only a form's: the presentation its answers were shown in, `null` when it sent none. */
+      readonly temporalPresentation?: PresentationSettings | null;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -73,7 +81,13 @@ export function resolveInteractionCompletion(
     if (payload.kind === "cancel")
       return action.ui.cancel === null
         ? { ok: false, message: "This form has no cancel button, so it can only be submitted." }
-        : { ok: true, result: null, transcriptText: action.ui.cancel.text, shownOptions: null };
+        : {
+            ok: true,
+            result: null,
+            transcriptText: action.ui.cancel.text,
+            shownOptions: null,
+            temporalPresentation: null,
+          };
     return submitForm(action.ui, action.form, context.presentation);
   }
   if (action.interactionKind === "button") {

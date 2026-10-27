@@ -117,8 +117,8 @@ function isSpeaker(value: unknown): boolean {
 }
 
 /**
- * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers and shown options
- * checked against it.
+ * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers, shown options, and
+ * presentation checked against it.
  */
 function validSettlement(settlement: unknown): boolean {
   if (
@@ -146,6 +146,7 @@ function validSettlement(settlement: unknown): boolean {
         settlement["result"],
         transcriptText,
         settlement["shownOptions"],
+        settlement["temporalPresentation"],
         settlement["settlementKind"] === "timedOut",
       ))
   );
