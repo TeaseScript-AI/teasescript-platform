@@ -110,10 +110,11 @@ const PORTS: readonly Port[] = [
     from: /^Show its elements with 'toList\(\)\.join\(\)' instead\.$/,
     to: (_, { subject }) => exact(`Show all its elements with '\${${subject}.toList().join()}'.`),
   },
-  // (the text of the whole chain of `+`, which the compile check below proves)
+  // (an example only for a flat chain of simple pieces, which the repair test below runs; the current checker's
+  // `${value}` placeholder does not compile, so the sentence alone keeps the fix, docs/DIAGNOSTICS.md "Messages")
   {
     from: /^Put the value in the text instead, as in "(.+)"\.$/,
-    to: () => /Put the value in the text instead, as in '"[^']*"'\./,
+    to: () => /Put the value in the text instead(?:, as in '"[^']*"')?\./,
   },
   // the current checker's fixes, code in single quotes, the value named
   {
@@ -448,19 +449,33 @@ test("the new checker keeps every fix the current checker gives, in the new form
 
 /**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
- * and structured values, each fix's family once. A declaration's `= ...` keeps the source's own start value.
+ * and structured values, each fix's family once, and for an example of a text join or of a property shown the lines
+ * the repaired source says. A declaration's `= ...` keeps the source's own start value.
  */
-const REPAIRS: readonly (readonly [string, RegExp])[] = [
-  // the text join, a chain of `+`, also as a warning
-  ['let score = 3\nsay ⟦"You have " + score + " points"⟧\nexit\n', /as in '([^']*)'/],
-  ['function f(n) {\nsay ⟦"You have " + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n', /as in '([^']*)'/],
-  // text in a variable, a sum of numbers kept whole
-  ['let prefix = "You have "\nlet n = 1\nsay ⟦prefix + n + " points"⟧\nexit\n', /as in '([^']*)'/],
+const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
+  // the text join of a flat chain of simple pieces, also as a warning, text in a variable, a property, an inner chain
+  [
+    'let score = 3\nsay ⟦"You have " + score + " points"⟧\nexit\n',
+    /as in '([^']*)'/,
+    ["You have 3 points"],
+  ],
+  [
+    'function f(n) {\nsay ⟦"You have " + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n',
+    /as in '([^']*)'/,
+    ["You have 1 points", "You have 2 points"],
+  ],
+  [
+    'let prefix = "You have "\nlet n = 1\nsay ⟦prefix + n + " points"⟧\nexit\n',
+    /as in '([^']*)'/,
+    ["You have 1 points"],
+  ],
   [
     'function f(n) {\nlet prefix = "You have "\nsay ⟦prefix + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n',
     /as in '([^']*)'/,
+    ["You have 1 points", "You have 2 points"],
   ],
-  ['let n = 1\nsay ⟦"Sum: " + (n + 2)⟧\nexit\n', /as in '([^']*)'/],
+  ['let box = {n: 2}\nsay ⟦"n is " + box.n⟧\nexit\n', /as in '([^']*)'/, ["n is 2"]],
+  ['let n = 1\nsay "a" + (⟦"b" + n⟧)\nexit\n', /as in '([^']*)'/, ["ab1"]],
   // date and time operators, composed operands grouped, also as a warning
   [
     'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay ⟦(t + 1 s) + 1 calendar day⟧\nexit\n',
@@ -490,9 +505,15 @@ const REPAIRS: readonly (readonly [string, RegExp])[] = [
     /such as '([^']*)'/,
   ],
   // `${...}`: an object's first property it shows, a set
-  ['let slave = {nested: {name: "A"}, age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/],
-  ['let slave = {names: ["A"], age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/],
-  ['let s = set[1]\nsay "⟦${s}⟧"\nexit\n', /with '([^']*)'/],
+  // (the first plain property: a list's emptiness is known only when the script runs)
+  ['let slave = {nested: {name: "A"}, age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/, ["1"]],
+  ['let slave = {names: ["A"], age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/, ["1"]],
+  [
+    'let box = {first: ["A"], second: 2}\nbox.first.clear()\nsay "⟦${box}⟧"\nexit\n',
+    /as in '([^']*)'/,
+    ["2"],
+  ],
+  ['let s = set[1]\nsay "⟦${s}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
   // a condition, a key, text
   ['let count = 2\nif ⟦count⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
@@ -516,8 +537,8 @@ const REPAIRS: readonly (readonly [string, RegExp])[] = [
   ],
 ];
 
-test("the code each fix suggests compiles where it stands and runs (#1195)", () => {
-  for (const [marked, pick] of REPAIRS) {
+test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
+  for (const [marked, pick, says] of REPAIRS) {
     const source = marked.replace(/[⟦⟧]/g, "");
     const files = [{ path: "main.tease", source }];
     const request = coreRequest(files);
@@ -545,7 +566,46 @@ test("the code each fix suggests compiles where it stands and runs (#1195)", () 
       delayPerWordMs: 0,
       delayPerCharacterMs: 0,
     });
-    const failures = session.run().events.filter((event) => event.kind === "runtimeFailure");
-    assert.deepEqual(failures, [], fixed);
+    const events = session.run().events;
+    assert.deepEqual(
+      events.filter((event) => event.kind === "runtimeFailure"),
+      [],
+      fixed,
+    );
+    if (says !== undefined)
+      assert.deepEqual(
+        events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        says,
+        fixed,
+      );
+  }
+});
+
+test("a text join or an object shown gives its fix without an example where no simple one exists (#1195)", () => {
+  const cases: readonly (readonly [string, string])[] = [
+    // a sum in parentheses (never opened), with a text alternative, written over lines, text with `${...}`
+    ['let n = 1\nsay "Sum: " + (n + 2)\nexit\n', "Put the value in the text instead"],
+    [
+      'let n: integer | string = 1\nsay "Sum: " + (n+2)\nexit\n',
+      "Put the value in the text instead",
+    ],
+    ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead"],
+    ['let n = 1\nsay "Sum: " +\n  n\nexit\n', "Put the value in the text instead"],
+    ['let n = 1\nlet m = 2\nsay "m=${m} " + n\nexit\n', "Put the value in the text instead"],
+    // an object whose only properties are lists
+    ['let rec = {names: ["A"]}\nsay "${rec}"\nexit\n', "Show one of its properties instead"],
+  ];
+  for (const [source, fix] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    const messages = analyseCore(request).diagnostics.map((diagnostic) =>
+      coreMessage(diagnostic, text),
+    );
+    assert.ok(
+      messages.some((message) => message.includes(`${fix}.`)) &&
+        !messages.some((message) => message.includes(`${fix}, as in`)),
+      `${source}: ${messages.join(" | ")}`,
+    );
   }
 });
