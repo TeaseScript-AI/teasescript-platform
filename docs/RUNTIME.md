@@ -1823,13 +1823,12 @@ deadline-arithmetic domains.
 ## Runtime errors
 
 A runtime failure (`RuntimeErrorInfo`) has a `code`, a `message`, and the `span` of the failing source. Owner decision,
-2026-10-09: like a compiler diagnostic, a message says what went wrong and why, naming the real operand or value, and
-what to do about it, in whole sentences without semicolons. It quotes source in single quotes, as in `'total / count'`,
-and shows a long value only as a bounded preview. It uses only names and values the engine has already evaluated. The
-engine source owns the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked _defect_ means
-that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier checkpoint or
-restart, and report the failure with its debug export. Every code is registered in `src/diagnostic-codes.ts`, and
-[`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics.
+2026-10-09: like a compiler diagnostic, a message follows the [message rules](DIAGNOSTICS.md#messages) and shows a long
+value only as a bounded preview. It uses only names and values the engine has already evaluated. The engine source owns
+the exact text, and a failure that a checkpoint or debug export already recorded keeps its message. A code marked
+_defect_ means that the plan, the engine's state, or the host is wrong rather than the script: continue from an earlier
+checkpoint or restart, and report the failure with its debug export. Every code is registered in
+`src/diagnostic-codes.ts`, and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) lists the codes of compiler diagnostics.
 
 | Code | What failed | What to do |
 | --- | --- | --- |

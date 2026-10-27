@@ -1153,23 +1153,31 @@ picks.add("three")    // compile error
 - A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
   number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
   declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
-  that point: where it can have received only whole numbers so far, it is an `integer` there. A value that may not be
-  whole at an integer-only use, such as a list index, a `removeAt` position, or a repeat count, is a compile error where
-  the compiler can prove that such a value reaches the use, as `items[j]` after `let j = 0` and `j = j / 2`; `floor`,
-  `round`, or `toInteger` makes it whole. Where the compiler cannot tell whether such a value reaches the use, the use
-  gives a warning, and the value is checked to be whole when the script runs
-  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
+  that point: where it can have received only whole numbers so far, it is an `integer` there. Where an integer is
+  required, the place's type decides instead (owner decision, 2026-10-27): a `number`, also a place of type `number`, is
+  a compile error there, wherever the non-whole value comes from and also at a read before the store that brings it. An
+  integer is required by a repeat count, a list index, the index of a list's `get`, the position of `removeAt`, the
+  count of `take` and `takeLast`, and a written `integer` place that a value is stored into: a variable, parameter, or
+  result with a written `integer` type, an element of a written `integer[]` or `integer set`, or a value of a written
+  `integer dict`. The compile error names the line that makes the place a `number`. `floor`, `round`, `ceil`, or
+  `toInteger` makes a value whole, a separate variable can keep the non-whole value, and a type test such as
+  `if n is integer` narrows the place ([§13](#type-tests-and-narrowing)); an assignment of a whole number does not. A
+  repeat count, index, position, or count whose type the compiler cannot know gives a warning, and the value is checked
+  to be whole when the script runs ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
   let speed = 1
-  speed = speed * 1.5   // speed is a number from here on
-  let count = 0
-  count += 1            // count stays an integer
+  let count: integer = speed   // compile error: line 3 makes speed a number
+  speed = speed * 1.5          // speed is a number, also on line 2
+  let rounds = 0
+  rounds += 1                  // rounds stays an integer
   let i = 0
-  say items[i]          // valid: i holds only whole numbers here
-  i = i / 2             // i may not be whole from here on, so a later items[i] is a compile error
+  say items[i]                 // compile error: line 8 makes i a number
+  i = i / 2
+  let n: number = 1
+  repeat n { say "Again" }     // compile error: line 9 makes n a number
   let prices = [1, 2]
-  prices.add(2.5)       // prices is a number[]
+  prices.add(2.5)              // prices is a number[]
   ```
 
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
@@ -1477,7 +1485,8 @@ let level: integer = saved   // valid: saved is an integer here
 ```
 
 - An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-  `reward` is an `integer`.
+  `reward` is an `integer`. Where an integer is required, a place of type `number` stays a `number` after an assignment
+  of a whole number ([§12](#12-variable-declarations)).
 - Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
   `is integer` is still a `number`.
 - A check on a stable path narrows like a check on a variable. A path is a variable followed by properties
@@ -1530,14 +1539,15 @@ if box.n != null {
 ```
 
 ### Compile errors, warnings, and checks when the script runs
-**Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, 2026-10-23, and 2026-10-25)
+**Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, 2026-10-23, 2026-10-25, and 2026-10-27)
 
 Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
-error names a violation of one of them, such as a value that may be `null` used without any check. Where the compiler
-cannot prove at reasonable cost that a written check still holds, or where checking at compile time is impractical,
-the check moves to the runtime: the code compiles, the value is checked there when the script runs, and the compiler
-gives a warning that names the place and says how to let the compiler check it now. The compiler catches as much as it
-can at compile time; a check when the script runs is the exception.
+error names a violation of one of them, such as a value that may be `null` used without any check, or a `number` where
+an integer is required, also one that would be whole when the script runs ([§12](#12-variable-declarations)). Where the
+compiler cannot prove at reasonable cost that a written check still holds, or where checking at compile time is
+impractical, the check moves to the runtime: the code compiles, the value is checked there when the script runs, and the
+compiler gives a warning that names the place and says how to let the compiler check it now. The compiler catches as
+much as it can at compile time; a check when the script runs is the exception.
 
 The compiler gives an exact answer, a compile error or acceptance without a warning, only where it can prove that
 answer. Everywhere else it gives the warning, and the value is checked when the script runs. It never reports a compile
@@ -2354,8 +2364,8 @@ Those examples require an explicit element or `.random` where the receiving API 
 Runtime behavior:
 
 - An invalid index raises a runtime error rather than returning `null`; `get(index, default: value)` gives a default
-  instead ([§16](#reading-an-element-with-a-default)). The compiler reports an index that it can see is negative or not
-  a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
+  instead ([§16](#reading-an-element-with-a-default)). The compiler reports an index that it can see is negative, and
+  one of type `number` ([§12](#12-variable-declarations)), such as `items[-1]` or `items.removeAt(0.5)`.
 - Interpolating an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
   element to select from.
@@ -2428,8 +2438,9 @@ queue.addAll(nextRound)           // queue itself grows
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `take(count)` and `takeLast(count)` return a new list of the first or the last `count` elements, in order, and leave
-the list unchanged. A count beyond the length gives the whole list. The count is a whole number of at least 0; another
-count is a compile error when the compiler can see it, and runtime error `TSR057` otherwise. A rolling window keeps only
+the list unchanged. A count beyond the length gives the whole list. The count is a whole number of at least 0: a count
+of type `number` ([§12](#12-variable-declarations)), or one that the compiler can see is negative, is a compile error,
+and any other count that is not a whole number of at least 0 is runtime error `TSR057`. A rolling window keeps only
 the newest values:
 
 ```text
@@ -2474,8 +2485,8 @@ that is negative, past the end, or, when the script runs, not a whole number, su
 value lands directly in a place with a written union that holds both. The default types only the result, never the list:
 after `let ys = []`, `let v = ys.get(0, default: 0)` makes `v` an `integer` and leaves the element type of `ys` open.
 The default is evaluated only when it is used, when the list has no such position (owner decision, 2026-10-16). The
-compiler checks the index as for `items[index]`, except that a negative index gives the default: an index that it can
-see is not a whole number, such as `0.5`, or may be `null`, is an error.
+compiler checks the index as for `items[index]`, except that a negative index gives the default: an index of type
+`number` ([§12](#12-variable-declarations)), such as `0.5`, or one that may be `null`, is an error.
 
 ```text
 let deck = ["ace", "king"]

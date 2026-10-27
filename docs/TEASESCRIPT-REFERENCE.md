@@ -139,7 +139,8 @@ let missing = null
 **Syntax:** `let name = value` · `let name: T = value` · `name = value` · `+=` · `-=`
 
 - **Gives:** a variable (see [Copies](#copies)). Without a declared type, the first non-null value decides the type
-  (`null`, `[]`, `set[]` leave it open); an `integer` variable later given a fraction becomes a `number`.
+  (`null`, `[]`, `set[]` leave it open); an `integer` variable that any assignment gives a fraction is a `number`, so
+  where an integer is required it fails, also before that assignment.
 - **Fails:** a missing start value; redeclaring a visible name; assigning an undeclared name or another type.
 - **Status:** Implemented. Type rule ahead: storing `null` later makes an inferred variable optional; today that needs
   a declared `T?` · [§12](specifications/accepted-syntaxes-v30.md#12-variable-declarations)

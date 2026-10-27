@@ -18,7 +18,8 @@
 - `TEASESCRIPT.md`
 - `TEASESCRIPT-REFERENCE.md`: non-authoritative summary of every accepted construct, with status and V30 links.
 - `RUNTIME.md`
-- `DIAGNOSTICS.md`: the codes of compiler diagnostics, and where runtime and checkpoint codes are listed.
+- `DIAGNOSTICS.md`: the message rules, the codes of compiler diagnostics, and where runtime and checkpoint codes are
+  listed.
 - `ENCRYPTION.md`: the locks of `encryptText`, `encryptFile`, `decryptText`, and `decryptFile`: scheme, format, drand
   time locks, what is recorded, and honest limits.
 - `RESOURCE-LIMITS.md`: canonical resource-limit inventory, evidence/policy status, coupling, and reassessment routing.
