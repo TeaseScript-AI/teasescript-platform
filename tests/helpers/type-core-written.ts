@@ -1032,10 +1032,12 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
  * The names whose forms `V30_TYPE_MATRIX` also copies, projects, seeds and feeds named or held at an index: one per way
  * the core moves and checks a copied kind. A copy, a projection or a seed moves what a written type admits as a set of
  * kinds and rebuilds a copy's checked type by the kind's class (`closedType`: a scalar, `null`, a collection, `object`,
- * a plain kind); a binding whose form has no literal starts as host data its copies carry on (`CARRIED`). So: the whole
- * number and the number (scalars with literals, the one pair where a kind fits another), `null` alone, the unrestricted
- * collections and `object` (no literal), `date` (a scalar with no literal) and `range` (a plain kind a host value can
- * be). Every other name's own kind, its check and its values are its forms', written and fed directly.
+ * a plain kind); a binding whose form has no literal starts as host data its copies carry on (`CARRIED`), by where the
+ * data comes from, whatever its kind. So: the whole number and the number (scalars, the one pair where a kind fits
+ * another), `null` alone, the unrestricted collections and `object`, and `range` (a plain kind a host value can be);
+ * `object`, `set`, `dict` and `range` start as host data. Every other name's own kind, its check and its values are its
+ * forms', written and fed directly. A copy rule that comes to depend on a kind needs that kind's class crossed here:
+ * `FULL` shows what the sample would miss.
  */
 const CROSSED_NAMES: ReadonlySet<string> = new Set([
   "integer",
@@ -1045,7 +1047,6 @@ const CROSSED_NAMES: ReadonlySet<string> = new Set([
   "set",
   "dict",
   "object",
-  "date",
   "range",
 ]);
 
