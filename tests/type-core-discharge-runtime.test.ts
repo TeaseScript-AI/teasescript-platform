@@ -242,11 +242,11 @@ test("a store of a property its object may lack requires it, in three layers, in
     [unknown, "x", "x.n = 2", "x.n", object({ n: 1 }), object({ m: 1 })],
     [some, "room", "room.count = 2", "room.count", 0, 1],
   ] as const) {
-    // the receiver as the store reads it, after its declaration
-    const recv = at(source, receiver, 1);
+    // the whole access the store writes through (TABLE §3.4)
+    const access = at(source, target);
     const known = decision(source);
-    assert.ok(known.diagnostics.includes(`warning-runtime-check member-read @${recv}`), source);
-    assert.ok(known.checks.includes(`null-check ${receiver} [non-null] @${recv}`), source);
+    assert.ok(known.diagnostics.includes(`warning-runtime-check member-read @${access}`), source);
+    assert.ok(known.checks.includes(`null-check ${receiver} [non-null] @${access}`), source);
     const plan = candidatePlan(source);
     assert.ok(contentOf(plan).includes(`requireExisting assign@${line(source, store)}`), source);
     assert.deepEqual(

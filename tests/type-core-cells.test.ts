@@ -10,7 +10,6 @@ import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-co
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
 import {
-  endDeviations,
   recordDifferences,
   recordOf,
   type CompactCheck,
@@ -35,7 +34,7 @@ function analysed(record: FixtureRecord): CompactRecord {
 }
 
 test("the core gives the expected record for every record of the cells it completes", (t) => {
-  // the classes held back at the set's revision `81b3a0c4…`, so a refresh that moves records between them shows
+  // the classes held back at the set's revision `8992e5c3…` (r481), so a refresh that moves records between them shows
   const held = new Map<string, number>();
   for (const record of records) {
     const reason = heldBack(record);
@@ -44,28 +43,21 @@ test("the core gives the expected record for every record of the cells it comple
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 9,
     "stage 3b's cells (S10)": 653,
+    "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
+    "S9b's F18 shapes (r4.81 (1))": 32,
   });
-  assert.equal(asserted.length, 1_319);
-  const deviating = new Map<string, number>();
-  let shortened = 0;
+  assert.equal(asserted.length, 1_318);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
     const input = JSON.stringify(record.files);
     const actual = analyses.get(input) ?? analysed(record);
     analyses.set(input, actual);
-    const deviations = endDeviations(record.expected, actual);
-    if (deviations.length > 0) shortened += 1;
-    for (const kind of deviations) deviating.set(kind, (deviating.get(kind) ?? 0) + 1);
     const differences = recordDifferences(record.expected, actual);
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
   });
-  // (TABLE §3.4, D2: a member read's and an operator's sites are S8's; until then they compare by their start)
-  t.diagnostic(
-    `${asserted.length} records compared by whole sites; ${shortened} compare a member read's or an operator's site ` +
-      `by its start only, its end differing: ` +
-      [...deviating].map(([kind, count]) => `${kind} ${count}`).join(", "),
-  );
+  // (TABLE §3.4, D2, r4.62: every site compares whole, a member read's and an operator's included)
+  t.diagnostic(`${asserted.length} records compared by whole sites`);
   assert.deepEqual(failures, []);
 });
 
@@ -1359,13 +1351,13 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'speaker vera { length: 2 }\nlet pool: dict = dict{a: dict{k: "bad"}, b: vera}\nlet o = pool.get("a", default: vera)\nrepeat (o otherwise null).keys.first {}\nexit',
       (at) => [
         "warning-runtime-check",
-        `member-read warning-runtime-check @${at("o otherwise")}`,
-        `member-read warning-runtime-check @${at("o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
         `member-read warning-runtime-check @${at("(o otherwise")}`,
         `member-read warning-runtime-check @${at("(o otherwise")}`,
         `integer-use warning-runtime-check @${at("(o otherwise")}`,
-        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
-        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("(o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("(o otherwise")}`,
         `empty-check (o otherwise null).keys [list] @${at("(o otherwise")}`,
         `null-check (o otherwise null).keys [non-null] @${at("(o otherwise")}`,
         `integer-check (o otherwise null).keys.first [integer] @${at("(o otherwise")}`,
@@ -2932,12 +2924,13 @@ test("a named collection in a literal or an add brings its elements' types to th
     ["inline lists", `let xs = [[1], ["bad"]]${after}`, "compile-error", [16]],
     ["an inline add", `let xs = [[1]]\nxs.add(["bad"])${after}`, "compile-error", [22]],
     ["inline records", `let xs = [{n: 1}, {n: "bad"}]${after}`, "compile-error", [22]],
-    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12)
+    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12): reached only through
+    // copies, at its first direct read, the copy `b` its related site (ADR 0021 rule 1.1, r4.75 (4))
     [
       "records, a field read",
       `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}${after}`,
       "compile-error",
-      [47],
+      [57],
     ],
     [
       "a record beside a literal one",
@@ -2997,6 +2990,204 @@ test("a named collection in a literal or an add brings its elements' types to th
     }
   }
   assert.deepEqual(differing, []);
+});
+
+test("a property only copies of whole objects bring errs at its first direct read or store, the copy related; a store or a literal's own field keeps its error (ADR 0021 rule 1.1, r4.75 (4))", () => {
+  // per program its errors as site text, with the related site's text where there is one
+  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+    [
+      "copies of variables",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = a\nc = b\nsay c.n\nexit',
+      ["c.n (b)"],
+    ],
+    // a projection that copies a whole object is a copy too
+    [
+      "copies through projections",
+      'let bundle = {left: {n: 1}, right: {n: "bad"}}\nlet c = bundle.left\nc = bundle.right\nsay c.n\nexit',
+      ["c.n (bundle.right)"],
+    ],
+    // a store through the property is the property's own, whatever names its value
+    [
+      "a direct store of a named value",
+      'let a = {n: 1}\nlet c = a\nsay c.n\nlet wrong = "bad"\nc.n = wrong\nexit',
+      ["wrong"],
+    ],
+    // copies inside literals that wrap them, the copy named
+    [
+      "copies through literal wrappers",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = {box: {inner: a}}\nc = {box: {inner: b}}\nsay c.box.inner.n\nexit',
+      ["c.box.inner.n (b)"],
+    ],
+    [
+      "elements wrapping copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    // a dict's values, an added list's elements, and a wrapper without the property, like the list's
+    [
+      "dict values wrapping copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = dict{a: {inner: a}, b: {inner: b}}\nsay xs["a"].inner.n\nexit',
+      ['xs["a"].inner.n (b)'],
+    ],
+    [
+      "an added list wrapping a copy",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}]\nxs.addAll([{inner: b}])\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    [
+      "a wrapper without the property beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {}}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    [
+      "a wrapper with the property beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {n: 2}}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["{inner: b}"],
+    ],
+    // copies in a literal that lands inside another literal or through an add: at the first direct read or store
+    [
+      "a list of copies inside an object",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = {items: [a, b]}\nxs.items[0].n = 2\nexit',
+      ["xs.items[0].n (b)"],
+    ],
+    [
+      "a list of copies inside a list",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [[a, b]]\nsay xs[0][0].n\nexit',
+      ["xs[0][0].n (b)"],
+    ],
+    [
+      "an added list of copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.addAll([a, b])\nsay xs[0].n\nexit',
+      ["xs[0].n (b)"],
+    ],
+    [
+      "an added element that is a list of copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.add([a, b])\nsay xs[0][0].n\nexit',
+      ["xs[0][0].n (b)"],
+    ],
+    // a literal's own field is its own contribution, whatever it copies
+    [
+      "a literal's field copied from a property",
+      'let a = {n: 1}\nlet c = {n: a.n}\nc = {n: "bad"}\nsay c.n\nexit',
+      ['"bad"'],
+    ],
+    // a literal of the destination gives the property itself, so the copy's error stays at the copy
+    [
+      "a literal's field beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, {n: 2}, b]\nsay xs[0].n\nexit',
+      ["b"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const errors = record.diagnostics
+        .filter((diagnostic) => diagnostic.class === "compile-error")
+        .map(
+          ({ site, related }) =>
+            source.slice(site.offset, site.end) +
+            (related === undefined ? "" : ` (${source.slice(related.offset, related.end)})`),
+        );
+      if (JSON.stringify(errors) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${errors.join(", ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+test("the copied-property check grows with the program, not with its copies times its fields (A2, ADR 0021 rule 1.1)", () => {
+  // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
+  // copies as a list's elements, as stores into one variable, and wrapped in literals of both
+  const fields = (k: number, value: string): string =>
+    Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
+  const records = (k: number): string =>
+    `let good = {${fields(k, "1")}}\nlet bad = {${fields(k, '"x"')}}\n`;
+  const reads = (k: number, read: string): string =>
+    Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
+  const copies = (k: number, copy: string): string =>
+    Array.from({ length: k }, () => copy).join(", ");
+  const shapes: readonly (readonly [string, (k: number) => string])[] = [
+    [
+      "elements",
+      (k) =>
+        `${records(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
+    ],
+    [
+      "stores",
+      (k) =>
+        `${records(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
+        `${reads(k, "c")}\nexit`,
+    ],
+    [
+      "wrapped stores",
+      (k) =>
+        `${records(k)}let c = {box: {inner: good}}\n` +
+        `${Array.from({ length: k }, () => "c = {box: {inner: good}}").join("\n")}\n` +
+        `c = {box: {inner: bad}}\n${reads(k, "c.box.inner")}\nexit`,
+    ],
+    [
+      "wrapped elements",
+      (k) =>
+        `${records(k)}let xs = [${copies(k, "{inner: good}")}]\nxs.add({inner: bad})\n` +
+        `${reads(k, "xs[0].inner")}\nexit`,
+    ],
+  ];
+  for (const [name, program] of shapes) {
+    const work = (k: number): { total: number; nodes: number } => {
+      const request = coreRequest([{ path: "main.tease", source: program(k) }]);
+      assert.ok(request !== null, name);
+      const answers = analyseCore(request);
+      assert.equal(
+        answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
+        k,
+        name,
+      );
+      return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
+    };
+    const small = work(32);
+    const large = work(64);
+    // the work ratio per doubling of the source, against `type-core-work.test.ts`'s criterion (2 for linear work)
+    const doubling = (2 * (large.total / small.total)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.15, `${name}: ${doubling.toFixed(3)}`);
+  }
+});
+
+test("a mixed literal's landing is walked once for all its conflicts, under however many wrappers (A2)", () => {
+  // k wrappers around a list of k copies (or k lists of two copies): one conflicting copy against k, at one size, so the
+  // deep literal's own checks cancel and the difference is the conflicts' own work
+  const source = (k: number, siblings: boolean, many: boolean): string => {
+    const values = Array.from({ length: k }, (_, i) =>
+      siblings ? (many || i === 0 ? "[a, b]" : "[a, a]") : many || i === 0 ? "b" : "a",
+    ).join(", ");
+    const list = siblings ? `[${values}]` : `[a, ${values}]`;
+    return (
+      `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = ${"{inner: ".repeat(k)}${list}${"}".repeat(k)}\n` +
+      `say xs${".inner".repeat(k)}${siblings ? "[0][0]" : "[0]"}.n\nexit`
+    );
+  };
+  for (const siblings of [false, true]) {
+    const extra = (k: number): { checks: number; nodes: number } => {
+      const counts = [false, true].map((many) => {
+        const request = coreRequest([{ path: "main.tease", source: source(k, siblings, many) }]);
+        assert.ok(request !== null);
+        return analyseCore(request).budget.counts;
+      });
+      return {
+        checks: (counts[1]!.get("checks") ?? 0) - (counts[0]!.get("checks") ?? 0),
+        nodes: counts[1]!.get("syntaxNodes") ?? 0,
+      };
+    };
+    const small = extra(32);
+    const large = extra(64);
+    // the conflicts' checks per doubling of the source, against `type-core-work.test.ts`'s counter criterion
+    const doubling = (2 * (large.checks / small.checks)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.35, `${siblings ? "siblings" : "copies"}: ${doubling.toFixed(3)}`);
+  }
 });
 
 test("a written expected type holds a default to its own kinds at every depth, known or possible (C10, the owner's F3)", () => {
@@ -4161,11 +4352,11 @@ test("a guarded read inside a computed child keeps its mark where literals share
     const expected: CompactRecord = {
       outcome: "warning-runtime-check",
       diagnostics: [
-        ...(own ? [branch("member-read", at(read + 8))] : []),
+        ...(own ? [branch("member-read", at(read + 10))] : []),
         branch("integer-use", at(read + 10)),
       ],
       checks: [
-        ...(own ? [check("null-check", "box.data", "non-null", at(read + 8))] : []),
+        ...(own ? [check("null-check", "box.data", "non-null", at(read + 10))] : []),
         check("integer-check", "box.data.n", "integer", at(read + 10)),
       ],
     };
@@ -4230,7 +4421,7 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
           {
             kind: "member-read",
             class: "warning-runtime-check",
-            site: at(24, 33),
+            site: at(24, 39),
             context: "unknown",
           },
         ],
@@ -4247,7 +4438,7 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
             target: "hostValue",
             against: ["non-null"],
             boundary: false,
-            site: at(24, 33),
+            site: at(24, 39),
           },
           boundary("rows.element", "integer", at(24, 33)),
         ],
@@ -4320,11 +4511,11 @@ test("named data beside inline host data keeps its check and boundary, and an ad
       warned(
         [
           ["written-target", at(22, 40)],
-          ["member-read", at(22, 31)],
+          ["member-read", at(22, 40)],
         ],
         [
           check("xs.element.element", "integer", false, at(22, 40)),
-          nonNull(at(22, 31)),
+          nonNull(at(22, 40)),
           check("xs.element", "list", true, at(22, 31)),
         ],
       ),
@@ -4334,11 +4525,11 @@ test("named data beside inline host data keeps its check and boundary, and an ad
       warned(
         [
           ["written-target", at(23, 41)],
-          ["member-read", at(23, 32)],
+          ["member-read", at(23, 41)],
         ],
         [
           check("xs.element", "integer", false, at(23, 41)),
-          nonNull(at(23, 32)),
+          nonNull(at(23, 41)),
           check("xs.element", "integer", true, at(23, 32)),
         ],
       ),

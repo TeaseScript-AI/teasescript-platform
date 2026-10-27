@@ -22,6 +22,8 @@ export interface CompactDiagnostic {
   readonly site: CompactSite;
   /** `null`: not asserted. */
   readonly context: ContextWord | null;
+  /** The copy that brought a copied property's rejected kind (TABLE r4.75 (4)), where the diagnostic has one. */
+  readonly related?: CompactSite;
 }
 
 export interface CompactCheck {
@@ -55,6 +57,15 @@ export function compactRecord(record: CoreRecord): CompactRecord {
         end: diagnostic.site.end,
       },
       context: diagnostic.provenance?.context ?? null,
+      ...(diagnostic.related === undefined
+        ? {}
+        : {
+            related: {
+              file: diagnostic.related.file,
+              offset: diagnostic.related.offset,
+              end: diagnostic.related.end,
+            },
+          }),
     })),
     checks: record.runtimeChecks.map((check) => ({
       kind: check.kind,
@@ -154,6 +165,9 @@ export function readCompactRecord(value: unknown, where = "record"): CompactReco
         class: member(CLASSES, diagnostic["class"], `${at}.class`),
         site: site(diagnostic["site"], `${at}.site`),
         context,
+        ...(diagnostic["related"] === undefined
+          ? {}
+          : { related: site(diagnostic["related"], `${at}.related`) }),
       };
     }),
     checks: list(fields["checks"], `${where}.checks`).map((entry, index) => {
@@ -181,87 +195,17 @@ function excess(more: readonly string[], fewer: readonly string[]): string[] {
   return [...counts].filter(([, count]) => count > 0).map(([entry, count]) => `${entry} ×${count}`);
 }
 
-/** An entry as `startOnly` names it: its kind and start; a check also by its target and required kinds. */
-function looseKey(entry: CompactDiagnostic | CompactCheck): string {
-  const start = `${entry.site.file}:${entry.site.offset}`;
-  return "target" in entry
-    ? `${entry.kind} ${entry.target} [${entry.against.join("|")}] ${start}`
-    : `${entry.kind} ${start}`;
-}
-
 /**
- * The sites a record compares by their start only, by rule: a member read's and an operator's diagnostic, and C5's
- * null-check at a member read's site, against `non-null` (a destination's own null-check at that start, C1's, compares
- * whole: Codex r20 H3). TABLE §3.4 (D2, r4.53) fixes them: a member read's site is the member expression, an operator's
- * its offending operand, else the operation once. The set and the core both deviate from it in places (82 records at
- * the set's revision `1de35708`, with equal starts, none of them C1's, C9's or C10's). The core's ends are S8's, the
- * set's Sol's revision before S8 (TABLE r4.62); every other site compares whole.
- */
-function startOnly(record: CompactRecord): ReadonlySet<string> {
-  const start = (where: CompactSite): string => `${where.file}:${where.offset}`;
-  const members = new Set(
-    record.diagnostics
-      .filter((entry) => entry.kind === "member-read")
-      .map((entry) => start(entry.site)),
-  );
-  return new Set([
-    ...record.diagnostics
-      .filter((entry) => entry.kind === "member-read" || entry.kind === "operator")
-      .map(looseKey),
-    ...record.checks
-      .filter(
-        (entry) =>
-          entry.kind === "null-check" &&
-          entry.against.length === 1 &&
-          entry.against[0] === "non-null" &&
-          members.has(start(entry.site)),
-      )
-      .map(looseKey),
-  ]);
-}
-
-/**
- * The entries `startOnly` matched by their start whose ends differ, each as its kind, paired one to one: what the
- * comparison leaves to S8 (TABLE §3.4, D2), reported by the cells test.
- */
-export function endDeviations(expected: CompactRecord, actual: CompactRecord): string[] {
-  const loose = new Set([...startOnly(expected), ...startOnly(actual)]);
-  const out: string[] = [];
-  const pair = (
-    wanted: readonly (CompactDiagnostic | CompactCheck)[],
-    got: readonly (CompactDiagnostic | CompactCheck)[],
-  ): void => {
-    const left = [...got];
-    for (const entry of wanted) {
-      const key = looseKey(entry);
-      if (!loose.has(key)) continue;
-      const whole = left.findIndex(
-        (other) => looseKey(other) === key && other.site.end === entry.site.end,
-      );
-      const index = whole >= 0 ? whole : left.findIndex((other) => looseKey(other) === key);
-      if (index < 0) continue;
-      if (whole < 0) out.push(entry.kind);
-      left.splice(index, 1);
-    }
-  };
-  pair(expected.diagnostics, actual.diagnostics);
-  pair(expected.checks, actual.checks);
-  return out;
-}
-
-/**
- * How `actual` differs from `expected`: the outcome; the diagnostics as a multiset of kind, class and site, and each
- * context `expected` asserts at least as often; the checks as a multiset. A site is compared whole, its start and end,
- * except where `startOnly` says. Order never matters, multiplicity does.
+ * How `actual` differs from `expected`: the outcome; the diagnostics as a multiset of kind, class, site and related
+ * site, and each context `expected` asserts at least as often; the checks as a multiset. Every site is compared whole,
+ * its start and end (TABLE §3.4, D2, r4.62). Order never matters, multiplicity does.
  */
 export function recordDifferences(expected: CompactRecord, actual: CompactRecord): string[] {
-  const loose = new Set([...startOnly(expected), ...startOnly(actual)]);
-  const span = (entry: CompactDiagnostic | CompactCheck): string =>
-    loose.has(looseKey(entry))
-      ? `${entry.site.file}:${entry.site.offset}`
-      : `${entry.site.file}:${entry.site.offset}-${entry.site.end}`;
+  const at = (site: CompactSite): string => `${site.file}:${site.offset}-${site.end}`;
+  const span = (entry: CompactDiagnostic | CompactCheck): string => at(entry.site);
   const diagnostic = (entry: CompactDiagnostic): string =>
-    `${entry.kind} ${entry.class} ${span(entry)}`;
+    `${entry.kind} ${entry.class} ${span(entry)}` +
+    (entry.related === undefined ? "" : ` related ${at(entry.related)}`);
   const withContext = (entry: CompactDiagnostic): string => `${diagnostic(entry)} ${entry.context}`;
   const check = (entry: CompactCheck): string =>
     `${entry.kind} ${entry.target} [${entry.against.join("|")}]${entry.boundary ? " boundary" : ""} ${span(entry)}`;

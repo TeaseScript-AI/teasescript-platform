@@ -16,6 +16,9 @@ export function logicalOperandRule(operator: "and" | "or" | null): string {
     : `'${operator}' needs true or false (boolean) values`;
 }
 
+/** A list's index is a whole number (compile errors `TSV043`, runtime error `TSR024`). */
+export const LIST_INDEX_RULE = "A list index must be a whole number (integer)";
+
 /**
  * The amount before a duration or an angle unit is a number (runtime error `TSR027`): in a `wait` or a timer, which also
  * take a range there, as in any other place.

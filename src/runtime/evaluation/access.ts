@@ -24,6 +24,7 @@ import { messageText } from "../values/text-length.js";
 import { listHasPosition } from "../values/collection-operations.js";
 import { loweredOperand } from "./lowered-operands.js";
 import { durationPropertyMessage } from "../../duration.js";
+import { LIST_INDEX_RULE } from "../../operand-rules.js";
 import { missingMemberMessage } from "../values/string-operations.js";
 import { stringLength, unknownTextMemberMessage } from "../../text-operations.js";
 import { missingPropertyMessage } from "../../object-properties.js";
@@ -351,7 +352,7 @@ export function notWholeIndex(
           : "";
   return fault(
     "TSR024",
-    `A list index must be a whole number (integer), but ${subject} is ${describeShownValue(value)}.${fix}`,
+    `${LIST_INDEX_RULE}, but ${subject} is ${describeShownValue(value)}.${fix}`,
     span,
   );
 }

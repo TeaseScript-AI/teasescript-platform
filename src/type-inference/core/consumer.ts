@@ -13,12 +13,7 @@ import type {
 } from "../../ast.js";
 import { messageColorDiagnostics } from "../../authored-presentation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
-import {
-  isRepeatCount,
-  REPEAT_COUNT_RULE,
-  repeatCountFix,
-  repeatCountMessage,
-} from "../../loop-rules.js";
+import { isRepeatCount, repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
 import type { TypeCheckPlan, TypePlan, TypePropertyPlan } from "../../plan/model.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
 import type { SourceSpan } from "../../source.js";
@@ -28,7 +23,7 @@ import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
+import { VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type {
   CoreRuntimeChecks,
   FactSite,
@@ -39,8 +34,9 @@ import type {
 import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
-import { REASON, type Item, type ItemTag } from "./items.js";
+import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
+import { coreMessage, messageSource, type MessageSource } from "./messages.js";
 import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
 
 /*
@@ -139,6 +135,10 @@ export class SliceIndex {
               pending.push({ expression: statement.value, store: statement, whole: true });
               // a property store reads its receiver, which a member check at the store reads (C5c)
               if (statement.target.kind === "propertyAccessExpression") {
+                // C5 diagnostics name the whole target (§3.4); it is a store, so do not visit it as a read.
+                this.#bySite.set(siteKey(file, statement.target.span), statement.target);
+                this.#file.set(statement.target, file);
+                this.#storeOfReceiver.set(statement.target, statement);
                 this.#write(statement.target.property.name, file, statement.target.property.span);
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
@@ -313,7 +313,7 @@ export class SliceIndex {
     return this.#fallbackOf.get(expression);
   }
 
-  /** The property store whose target's receiver `expression` is, or holds in parentheses. */
+  /** The property store whose whole target or receiver `expression` is, or holds in parentheses. */
   public storeOfReceiver(expression: Expression): AssignmentStatement | undefined {
     return this.#storeOfReceiver.get(expression);
   }
@@ -411,94 +411,20 @@ function declarationOf(
   return declaration;
 }
 
-/** The kinds of these items as text, for a message: `a number`, `text (string) or null`. */
-function kindsText(items: readonly Item[]): string {
-  const tags = [...new Set(items.map((item) => item.tag))].filter(
-    (tag): tag is Exclude<ItemTag, "unknown" | "empty"> => tag !== "unknown" && tag !== "empty",
-  );
-  return tags.length === 0
-    ? "not one"
-    : tags.map((tag) => VALUE_KINDS[tag].description).join(" or ");
-}
-
 /**
- * A diagnostic of the core with its code (D3 (a): a runtime-checked warning keeps its rule's code). The sentences are
- * provisional, neutral texts until the owner decides them (D1, S8); the sites are the structured record's (D2).
+ * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class, its
+ * sentences (`messages.ts`, D1) and its site's span (D2).
  */
 function diagnosticOf(
   diagnostic: CoreDiagnostic,
-  answers: Answers,
   index: SliceIndex,
-  request: CoreAnalysisRequest,
+  source: MessageSource,
 ): Diagnostic {
-  const expression = index.expressionAt(diagnostic.site);
-  const text = request.files[diagnostic.site.file]!.source.slice(
-    diagnostic.site.start,
-    diagnostic.site.end,
-  );
-  const severity =
-    diagnostic.class === "compile-error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning;
-  // a member of a receiver, which a read or a store needs (C5), is TSV043's rule (D3 (a))
-  if (diagnostic.kind === "member-read")
-    return createDiagnostic(
-      severity,
-      "TSV043",
-      diagnostic.class === "compile-error"
-        ? `'${text}' does not have the property or member that the script uses here.`
-        : `The compiler cannot prove that '${text}' has the property or member that the script uses here, so ` +
-            "the script checks it when it runs.",
-      expression.span,
-    );
-  // a fallback or a default of another type than the value it stands in for (C10)
-  if (
-    diagnostic.kind === "written-target" &&
-    index.fallbackOf(expression) !== undefined &&
-    (diagnostic.class === "compile-error" || diagnostic.obligation.target === text)
-  )
-    return createDiagnostic(
-      severity,
-      "TSV041",
-      diagnostic.class === "compile-error"
-        ? `'${text}' does not fit the type of the value it stands in for.`
-        : `The compiler cannot prove that '${text}' fits the type of the value it stands in for, so the script ` +
-            "checks it when it runs.",
-      expression.span,
-    );
-  if (diagnostic.kind === "written-target") {
-    const store = index.storeOf(expression);
-    const name =
-      store === undefined
-        ? "the place"
-        : store.kind === "letStatement"
-          ? store.name.name
-          : store.target.kind === "identifier"
-            ? store.target.name
-            : "the place";
-    return createDiagnostic(
-      severity,
-      "TSV041",
-      diagnostic.class === "compile-error"
-        ? `'${text}' does not fit the type written for '${name}'.`
-        : `The compiler cannot prove that '${text}' fits the type written for ` +
-            `'${diagnostic.obligation.target}', so the script checks it when it runs.`,
-      expression.span,
-    );
-  }
-  // a count is TSV011's rule, a list index TSV043's (D3 (a): each rule's existing code)
-  const listIndex = index.roleOf(expression) === "index";
-  const rule = listIndex ? "A list index must be a whole number (integer)" : REPEAT_COUNT_RULE;
   return createDiagnostic(
-    severity,
-    listIndex ? "TSV043" : "TSV011",
-    diagnostic.class === "compile-error"
-      ? `${rule}, but '${text}' is ${kindsText(
-          (answers.at(nodeOf(answers, index, expression))?.items ?? []).filter(
-            (item) => item.tag !== "integer",
-          ),
-        )}.`
-      : `${rule}, and the compiler cannot prove that '${text}' is one here, so the script checks it when ` +
-          "it runs.",
-    expression.span,
+    diagnostic.class === "compile-error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+    diagnostic.code,
+    coreMessage(diagnostic, source),
+    index.spanAt(diagnostic.site),
   );
 }
 
@@ -509,12 +435,13 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
+  const source = messageSource(request.files.map((file) => file.source));
   const sited = new Set<string>();
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "operator")
       throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
     sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
-    diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, answers, index, request));
+    diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
   }
   const { checks, core } = runtimeChecks(answers, index, request);
   // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets

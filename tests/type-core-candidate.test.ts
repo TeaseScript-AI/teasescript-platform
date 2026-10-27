@@ -228,12 +228,79 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
  * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
  * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
  */
+/** The codes of each record kind's rules on the route (D3): a store's or a literal's, a count's or an index's, a member's. */
+const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
+  "written-target": ["TSV041", "TSV044"],
+  "integer-use": ["TSV011", "TSV043"],
+  "member-read": ["TSV043"],
+};
+
+type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];
+
+/**
+ * The route's diagnostics and a record's that no one-to-one pairing matches (D2, D3): each reported diagnostic paired
+ * with its own expected one of its severity, at its whole site, with a code of the expected kind's rules. Kinds share a
+ * code, so the pairing is a matching (by augmenting paths), not a first fit.
+ */
+function unmatchedDiagnostics(
+  reported: CompilationResult["diagnostics"],
+  expected: readonly ExpectedDiagnostic[],
+): string[] {
+  const fits = (
+    diagnostic: CompilationResult["diagnostics"][number],
+    wanted: ExpectedDiagnostic,
+  ): boolean =>
+    (wanted.class === "compile-error" ? "error" : "warning") === diagnostic.severity &&
+    wanted.site.offset === diagnostic.span.start.offset &&
+    wanted.site.end === diagnostic.span.end.offset &&
+    RECORD_CODES[wanted.kind]?.includes(diagnostic.code) === true;
+  const pairedWith = expected.map((): number => -1);
+  const pair = (index: number, seen: Set<number>): boolean =>
+    expected.some((wanted, at) => {
+      if (seen.has(at) || !fits(reported[index]!, wanted)) return false;
+      seen.add(at);
+      if (pairedWith[at] !== -1 && !pair(pairedWith[at]!, seen)) return false;
+      pairedWith[at] = index;
+      return true;
+    });
+  return [
+    ...reported
+      .filter((_, index) => !pair(index, new Set()))
+      .map(
+        (diagnostic) =>
+          `reported ${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
+      ),
+    ...expected
+      .filter((_, at) => pairedWith[at] === -1)
+      .map(
+        (wanted) =>
+          `expected ${wanted.class} ${wanted.kind} ${wanted.site.offset}:${wanted.site.end}`,
+      ),
+  ];
+}
+
+test("the route's diagnostics pair one to one with a record's, so one expected diagnostic never answers two (D2, D3)", () => {
+  // a member read of host data: a store's warning and the member's, both at `v.n`
+  const record = readFixture().find(
+    (found) => found.name === "cp9-cells/r46/m3/sol-m3/external-30",
+  );
+  assert.ok(record !== undefined);
+  const reported = compileProjectWithBackend(
+    record.files,
+    OPTIONS,
+    CORE_BACKEND,
+  ).diagnostics.filter(
+    (diagnostic) => diagnostic.code === "TSV041" || diagnostic.code === "TSV043",
+  );
+  assert.deepEqual(reported.map((diagnostic) => diagnostic.code).sort(), ["TSV041", "TSV043"]);
+  assert.deepEqual(unmatchedDiagnostics(reported, record.expected.diagnostics), []);
+  // the member's code replaced by the store's: the store's expected diagnostic cannot answer both
+  const twice = reported.map((diagnostic) => ({ ...diagnostic, code: "TSV041" }));
+  assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
+});
+
 test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
-  const kinds: Readonly<Record<string, string>> = {
-    TSV041: "written-target",
-    TSV011: "integer-use",
-    TSV043: "integer-use",
-  };
+  const routed = new Set(Object.values(RECORD_CODES).flat());
   const accepted: string[] = [];
   const outside = new Map<string, number>();
   const classes = new Map<string, number>();
@@ -259,25 +326,21 @@ test("every positive-list record the candidate route reaches plans and runs as i
     accepted.push(record.name);
     assert.equal(record.files.length, 1, `${record.name}: one file`);
     const source = record.files[0]!.source;
-    // records: the diagnostics at their whole sites, the obligations exactly, alike on the one-file route
+    // records: the diagnostics at their whole sites, each with a code of its kind's rules (D2, D3), the obligations
+    // exactly, alike on the one-file route
+    const reported = (compiled: Pick<CompilationResult, "diagnostics">) =>
+      compiled.diagnostics.filter((diagnostic) => routed.has(diagnostic.code));
     const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
-      compiled.diagnostics
-        .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
+      reported(compiled)
         .map(
           (diagnostic) =>
-            `${diagnostic.severity} ${diagnostic.code === "TSV043" && diagnostic.message.includes("property or member") ? "member-read" : kinds[diagnostic.code]} ` +
-            `${diagnostic.span.start.offset}:${diagnostic.message.includes("property or member") ? diagnostic.span.start.offset : diagnostic.span.end.offset}`,
+            `${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset} ` +
+            diagnostic.message,
         )
         .sort();
     assert.deepEqual(
-      diagnosed(result),
-      record.expected.diagnostics
-        .map(
-          (diagnostic) =>
-            `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
-            `${diagnostic.site.offset}:${diagnostic.kind === "member-read" ? diagnostic.site.offset : diagnostic.site.end}`,
-        )
-        .sort(),
+      unmatchedDiagnostics(reported(result), record.expected.diagnostics),
+      [],
       record.name,
     );
     const request = coreRequest(record.files);
@@ -857,8 +920,8 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     ],
     // A8 (the owner's F2): a named list in a literal brings its elements' type, as a literal one does; whole numbers
     // with numbers
-    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV041@41"], null, []],
-    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV041@43"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV044@41"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV044@43"], null, []],
     ['let a = [1]\nlet b = ["bad"]\nlet xs = a\nxs = b\nexit\n', ["error TSV041@44"], null, []],
     ['let a = [1]\nlet b = [2.5]\nlet xs = [a, b]\nsay "after"\nexit\n', [], [], [[2, null]]],
     // C9: external data stored whole into a written collection, checked there with its elements
@@ -1162,12 +1225,20 @@ test("parentheses answer for their content: a parenthesised count and index read
   // on the candidate route: the content's site, the kinds the core names, and the check at the content
   const count = inBothOrders(() => candidate("repeat ((2.5)) {}\nexit\n").diagnostics);
   assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
-  assert.match(count[0]!.message, /but '2\.5' is a number\.$/);
+  assert.equal(
+    count[0]!.message,
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round it with " +
+      "floor(...), round(...), or ceil(...) first.",
+  );
   const listed = inBothOrders(
     () => candidate("let xs = [1, 2]\nlet y = xs[(0.5)]\nexit\n").diagnostics,
   );
   assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
-  assert.match(listed[0]!.message, /but '0\.5' is a number\.$/);
+  assert.equal(
+    listed[0]!.message,
+    "A list index must be a whole number (integer), but '0.5' is a number. Round it with floor(...), round(...), " +
+      "or ceil(...) first.",
+  );
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
   assert.deepEqual(sited(host), ["warning TSV011@9"]);
   assert.ok(host.plan !== null);
@@ -1221,10 +1292,10 @@ test("a projection of a literal carries its elements' types and host data on the
   // A8 through the projection, direct and named; A2 across a change of the named list; C1 and C9 at the store, before
   // any later effect
   for (const [source, diagnostics] of [
-    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV041@20"]],
+    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV044@20"]],
     [
       'let v1 = [1]\nlet v2 = ["bad"]\nlet xs = [[v1][0], [v2][0]]\nsay "AFTER"\nexit\n',
-      ["error TSV041@49"],
+      ["error TSV044@49"],
     ],
     [
       'let a = [1]\nlet xs = []\nxs = [[a][0], [[1]][0]]\na = ["bad"]\nxs = [[a][0], [[1]][0]]\nexit\n',
