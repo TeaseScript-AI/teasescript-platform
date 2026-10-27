@@ -2777,8 +2777,10 @@ export class Admission {
       EvaluationKey,
     ])[] = [[value, node, [], [], false, [], false, true, []]];
     // a cell's position: its value's place in the literal's own source, never its index in a list one step filtered
+    // (each evaluation key and chain of operations a task or stop keeps is charged as kept, TABLE r4.78 (5): k nested
+    // operations keep k keys and chains up to k long)
     const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey =>
-      joinSteps(key, [program.places[d.value!]?.site?.start ?? 0]);
+      keptSteps(this.#work, key, [program.places[d.value!]?.site?.start ?? 0]);
     while (pending.length > 0) {
       const [current, at, path, strip, deep, via, after, single, key] = pending.pop()!;
       program.work.charge("indexSteps");
@@ -2829,12 +2831,24 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([current, at, path, strip, deep, via, true, single, joinSteps(key, [OWN])]);
+          pending.push([
+            current,
+            at,
+            path,
+            strip,
+            deep,
+            via,
+            true,
+            single,
+            keptSteps(this.#work, key, [OWN]),
+          ]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
             const [operand, rest, role, position] = carried[index]!;
             const through = program.projOf.has(current)
               ? via
-              : joinSteps(via, [{ value: current, node: at, path, strip, operand, role }]);
+              : keptSteps(this.#work, via, [
+                  { value: current, node: at, path, strip, operand, role },
+                ]);
             pending.push([
               operand,
               at,
@@ -2844,7 +2858,7 @@ export class Admission {
               through,
               false,
               single,
-              joinSteps(key, [position]),
+              keptSteps(this.#work, key, [position]),
             ]);
           }
           continue;

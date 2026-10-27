@@ -155,6 +155,39 @@ test("typed copies of a list nested 4,096 deep with 16,384 references stop withi
 });
 
 /**
+ * 8,192 and 10,000 nested defaults around a host value (`null otherwise (null otherwise (… hostValue …))`, the family
+ * `C9-nested-own-otherwise`): each carrier kept an evaluation key and a chain of operations one entry longer than the
+ * one around it, uncharged, so the analysis held about 1.4 GB of heap at 8,192 with under 4 % of the allowance charged
+ * and died on the heap at 10,000, at 8,192 in the source order (the deep-literal review's round-3 witness). In both
+ * orders, in a child with the same heap, each must end with its outcome.
+ */
+test("8,192 and 10,000 nested defaults around a host value stop within the allowance in either order, never crashing", () => {
+  const script = `
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {withConsumerOrder} from ${url("../src/type-inference/core/consumers.js")};
+    import {withSolverSeam} from ${url("../src/type-inference/core/solver.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    for (const depth of [8192, 10000])
+      for (const reversed of [false, true]) {
+        const value = "null otherwise (".repeat(depth) + "hostValue" + ")".repeat(depth);
+        const request = coreRequest([{path: "main.tease", source: "let out = " + value + "\\nrepeat out {}\\nexit\\n"}]);
+        const run = () => analyseCore(request).outcome;
+        const outcome = reversed
+          ? withConsumerOrder((list) => [...list].reverse(), () => withSolverSeam({reverseWorklist: true}, run))
+          : run();
+        console.log(depth + "\\t" + (reversed ? "reversed" : "forward") + "\\t" + outcome);
+      }
+  `;
+  const lines = childLines("nested defaults", script);
+  assert.deepEqual(
+    lines.map((line) => line.split("\t").slice(0, 2).join(" ")),
+    ["8192 forward", "8192 reversed", "10000 forward", "10000 reversed"],
+  );
+  for (const line of lines)
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+});
+
+/**
  * A read 3,000 and 4,097 index steps deep of a one-element list (`value[0][0]…`): each step is read by a generator inside
  * the one before, and the native stack overflowed (`RangeError`) at about 2,550 levels. The core's read-depth guard
  * stops it cleanly; on the candidate route and in the core, in a child with the same heap, it must end with a result.

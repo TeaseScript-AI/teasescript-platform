@@ -12,6 +12,7 @@ import {
   joinParts,
   joinSteps,
   keep,
+  keepText,
   keptParts,
   keptSteps,
   keptText,
@@ -1747,6 +1748,7 @@ export class Contract {
     const { program, definitions } = this.pass;
     const memoKey = joinParts(value, path);
     if (this.#lands.has(memoKey)) return this.#lands.get(memoKey)!;
+    keepText(this.#work, memoKey.length);
     this.#lands.set(memoKey, null);
     const keep = (found: TypeTerm | null): TypeTerm | null => {
       if (found === CUT) this.#lands.delete(memoKey);
