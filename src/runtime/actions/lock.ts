@@ -193,7 +193,10 @@ function startLock(
   const { value, password, passwordField } = operands;
   const span = instruction.span;
   const call = instruction.call;
-  if (!locks(call) && password !== undefined && typeof password !== "string")
+  // In the compiler's order, with its code and text: `password:` and `timeLock:`, `key:` and `publicKey:`, whether the
+  // call has a way to open, and the value; then what only the runtime checks.
+  if (locks(call)) checkOpenerTypes(call, operands, span);
+  else if (password !== undefined && typeof password !== "string")
     throw new RuntimeFault(
       "TSV043",
       lockOptionMessage(call, "password", false, describeValue(password)),
@@ -222,7 +225,22 @@ function startLock(
       ? workStep(file, written, null, keys)
       : fieldStep(file, passwordField, keys);
   }
-  const openers = encryptOpeners(call, operands, keys, span);
+  const openers = encryptOpeners(operands, keys);
+  const closed =
+    openers.choices.length === 0 &&
+    openers.password === null &&
+    passwordField === null &&
+    openers.timeLockMs === null &&
+    openers.publicKeys.length === 0;
+  const noWay = (because: string) =>
+    `${call}(...) has no way to open, because ${because}, so nothing could ever open it. Give one of them a value, or true to let the player choose.`;
+  // The compiler sees openers written false, not an empty list of public keys.
+  if (closed && operands.publicKey === false)
+    throw new RuntimeFault(
+      "TSV043",
+      noWay("'password:', 'publicKey:', and 'timeLock:' are all false"),
+      copySpan(span),
+    );
   const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
   if (typeof text !== "string")
     throw new RuntimeFault(
@@ -230,21 +248,16 @@ function startLock(
       textOperandMessage("encryptText", describeValue(text)),
       copySpan(span),
     );
-  if (
-    openers.choices.length === 0 &&
-    openers.password === null &&
-    passwordField === null &&
-    openers.timeLockMs === null &&
-    openers.publicKeys.length === 0
-  )
-    // The compiler sees openers written false, not an empty list of public keys.
+  if (closed)
     throw new RuntimeFault(
-      operands.publicKey === false ? "TSV043" : "TSR059",
-      `${call}(...) has no way to open, because ${
-        operands.publicKey === false
-          ? "'password:', 'publicKey:', and 'timeLock:' are all false"
-          : "'publicKey:' holds no key and 'password:' and 'timeLock:' are false"
-      }, so nothing could ever open it. Give one of them a value, or true to let the player choose.`,
+      "TSR059",
+      noWay("'publicKey:' holds no key and 'password:' and 'timeLock:' are false"),
+      copySpan(span),
+    );
+  if (keys.publicKeys.length > MAX_LOCK_PUBLIC_KEYS)
+    throw new RuntimeFault(
+      "TSR059",
+      `'publicKey:' of ${call}(...) has ${keys.publicKeys.length} public keys, but a lock holds at most ${MAX_LOCK_PUBLIC_KEYS}.`,
       copySpan(span),
     );
   // An opener written `true`, or each without any written, is chosen by the player in the Player's lock dialog, after
@@ -255,16 +268,15 @@ function startLock(
 }
 
 /**
- * The checked openers of an encrypt call: `password:` takes text, `timeLock:` a moment, `publicKey:` public keys, and
- * each also `true`, which lets the player choose it, or `false`, which leaves it out. A call writes each opener or none
- * (plan validation).
+ * The openers of an encrypt call, whose types `checkOpenerTypes` and `writtenKeys` checked: `password:` takes text,
+ * `timeLock:` a moment, `publicKey:` public keys, and each also `true`, which lets the player choose it, or `false`,
+ * which leaves it out. A call writes each opener or none (plan validation).
  */
-function encryptOpeners(
+function checkOpenerTypes(
   call: LockCall,
-  { password, passwordField, publicKey, timeLock }: LockOperands,
-  { publicKeys }: WrittenKeys,
+  { password, timeLock }: LockOperands,
   span: LockInstruction["span"],
-): EncryptOpeners {
+): void {
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
     throw new RuntimeFault(
       "TSV043",
@@ -277,6 +289,13 @@ function encryptOpeners(
       lockOptionMessage(call, "timeLock", true, describeValue(timeLock)),
       copySpan(span),
     );
+}
+
+/** The openers of an encrypt call, from its checked operands. */
+function encryptOpeners(
+  { password, passwordField, publicKey, timeLock }: LockOperands,
+  { publicKeys }: WrittenKeys,
+): EncryptOpeners {
   const written =
     password !== undefined ||
     passwordField !== null ||
@@ -285,7 +304,8 @@ function encryptOpeners(
   const chosen = { password, publicKey, timeLock };
   return {
     password: typeof password === "string" ? password : null,
-    timeLockMs: typeof timeLock === "object" ? timeLock.epochMilliseconds : null,
+    timeLockMs:
+      timeLock !== undefined && isAbsoluteDateTime(timeLock) ? timeLock.epochMilliseconds : null,
     publicKeys,
     choices: LOCK_CHOICES.filter((choice) => !written || chosen[choice] === true),
   };
@@ -348,12 +368,6 @@ function writtenKeys(
       );
     publicKeys.push(item.trim());
   }
-  if (publicKeys.length > MAX_LOCK_PUBLIC_KEYS)
-    throw new RuntimeFault(
-      "TSR059",
-      `'publicKey:' of ${call}(...) has ${publicKeys.length} public keys, but a lock holds at most ${MAX_LOCK_PUBLIC_KEYS}.`,
-      copySpan(span),
-    );
   return { publicKeys, key: key ?? null };
 }
 
@@ -486,7 +500,8 @@ function nextLockStep(
           key: null,
         };
       }
-      const openers = encryptOpeners(call, operands, keys, span);
+      checkOpenerTypes(call, operands, span);
+      const openers = encryptOpeners(operands, keys);
       // The step after the dialog locks with what the player gave there, instead of the moment it suggested.
       if (outcome === "submitted")
         return {

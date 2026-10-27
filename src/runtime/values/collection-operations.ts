@@ -242,7 +242,8 @@ export function readCollection(
     case "take":
     case "takeLast": {
       const count = positional[0]!;
-      if (typeof count !== "number")
+      // A number that is not whole is of another type than a count, as the compiler sees it.
+      if (typeof count !== "number" || !Number.isInteger(count))
         throw fault(
           "TSV043",
           listArgumentMessage(name, "count", describeValue(count), "other"),

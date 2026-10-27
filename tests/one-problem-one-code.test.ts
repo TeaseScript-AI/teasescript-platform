@@ -242,6 +242,16 @@ test("a problem that the compiler and the runtime both find has the compiler's c
       'let n = predict({ slope: "bad", intercept: 0, start: 0 }, toDate("2026-01-01"))',
       `${D}let n = predict(dynamic({ slope: "bad", intercept: 0, start: 0 }), dynamic(toDate("2026-01-01")))`,
     ],
+    // Of several problems, the one the compiler reports first, and one it checks before one only the runtime checks.
+    [
+      "let r = encryptText(5, password: 5, publicKey: 5, timeLock: false)",
+      `${D}let r = encryptText(dynamic(5), password: dynamic(5), publicKey: dynamic(5), timeLock: false)`,
+    ],
+    [
+      "let r = encryptText(5, password: false, publicKey: [], timeLock: false)",
+      `${D}let r = encryptText(dynamic(5), password: false, publicKey: dynamic([]), timeLock: false)`,
+    ],
+    ["say [1].take(1.5)", `${D}say [1].take(dynamic(1.5))`],
     // An argument is not an index written in brackets, so neither names it.
     [
       "let items = [1, 2]\nlet i = -2\nitems.removeAt(i)",
@@ -254,7 +264,8 @@ test("a problem that the compiler and the runtime both find has the compiler's c
     ],
   ]) {
     const compiled = diagnostics(known!);
-    assert.equal(compiled.length, 1, known);
+    // Of several, the runtime gives the one the compiler reports first.
+    assert.ok(compiled.length > 0, known);
     assert.deepEqual(runtimeFailure(compileValidPlan(`${unknown}\nexit`)), compiled[0], unknown);
   }
 });
