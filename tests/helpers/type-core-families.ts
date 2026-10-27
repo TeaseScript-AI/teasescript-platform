@@ -1497,8 +1497,8 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * copies the root feeds held in one literal, each copy replaced by another record, the chain closed into a cycle, the
  * root copied into itself at another path; review r3's shapes (a read stored into each copy's own field, literals
  * holding the root read into one list, copies replaced by aliases that store their own field), the design review's
- * and review r5's (two roots met with a narrow projection each, a chain's last copy read at every field, a chain of own
- * fields copied beside a small record each). A copy costs its own divergences,
+ * and reviews r5's to r7's (two roots met with a narrow projection each, a chain's last copy read at every field, a chain
+ * of own fields copied beside a small record each, distinct records held in two lists). A copy costs its own divergences,
  * never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
@@ -1778,6 +1778,21 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
           `let root = {${fields(k, () => "typed")}}`,
           copiesOf(k, "chain"),
           `let out = [${Array.from({ length: k }, (_, i) => `a${k - 1}.f${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-records-twice",
+    measures:
+      "Sol's review r7: k distinct records of written-typed fields held in two lists, each record a group both places hold",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          rows(k, (i) => `let r${i} = {fixed: typed, x${i}: typed}`),
+          `let a = [${Array.from({ length: k }, (_, i) => `r${i}`).join(", ")}]`,
+          `let b = [${Array.from({ length: k }, (_, i) => `r${i}`).join(", ")}]`,
           "exit",
         ),
       ),
