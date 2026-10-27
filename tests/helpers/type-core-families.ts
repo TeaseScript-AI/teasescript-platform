@@ -3071,6 +3071,41 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // #1203: k loads of a computed key, one class, each read below its root at every field (F19: host data whatever the
+  // path), the issue's shape and every key form beside every default
+  {
+    name: "I1203-computed-loads",
+    measures: "#1203: a list of k `load(hostValue, default: 0)`, a field of its first read k times",
+    // 36,637 / 73,477 units at k = 64, 128 in both orders (2.0133; `main` 56,667 / 154,499, 2.74: each load read at
+    // each field)
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${cells(k, "load(hostValue, default: 0)")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "I1203-computed-load-forms",
+    measures:
+      "#1203: a list of k loads whose keys are a host value, a variable, a property, an element and a sum, their defaults a number, `null` and a record, then a record added (the contract side's class too), a field of its first read k times",
+    // 54,822 / 108,555 units at k = 64, 128 in both orders (2.0143; `main` 82,071 / 220,411, 2.73)
+    program: (k) => {
+      const keys = ["hostValue", "key", "names.key", "keys[0]", 'key + "1"'];
+      const defaults = ["0", "null", "{f0: 1, f1: 2}"];
+      return main(
+        lines(
+          'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]',
+          `let box = [${Array.from({ length: k }, (_, i) => `load(${keys[i % 5]}, default: ${defaults[i % 3]})`).join(", ")}]`,
+          "box.add({f0: 1})",
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  },
 ];
 
 /**

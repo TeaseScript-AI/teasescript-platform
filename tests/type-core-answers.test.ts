@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
+import { ingressLeaves, REASON, writerKey } from "../src/type-inference/core/items.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 
@@ -489,4 +493,168 @@ test("a value an add or an addAll inserts has its properties, never the collecti
     );
     assert.equal(reversed, answered(), name);
   }
+});
+
+/**
+ * #1203: below their root computed-key loads hold host data at every path (F19; never a kind from their default, ADR
+ * 0021 §6.2), each naming its own ingress (C9), and the value side answers a literal's class of them once for every
+ * path. A field read answers one unknown that holds the leaf of each load its list holds, whatever the key's form or the
+ * default, and the root keeps a `null` default's `null`. With the sharing off (`withoutSharing`) each load is read at
+ * each path by itself: every read's answer, its items whole with their leaves, and the program's diagnostics and checks
+ * are the same either way, in both orders, for the controls too. These sources lie outside the candidate's slice: they
+ * are analysed, never run.
+ */
+test("a field read of computed-key loads holds every load's leaf, as each load read by itself (#1203)", () => {
+  const loads = (n: number, fallback = "0"): string =>
+    Array.from({ length: n }, () => `load(hostValue, default: ${fallback})`).join(", ");
+  const keyed = (fallback: string): string =>
+    'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]\nlet box = [' +
+    ["hostValue", "key", "names.key", "keys[0]", 'key + "1"']
+      .map((key) => `load(${key}, default: ${fallback})`)
+      .join(", ") +
+    "]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n";
+  // per program its reads, each with the binding whose line holds the loads it holds and the kinds it answers
+  const programs: readonly (readonly [string, readonly (readonly [string, string, string])[]])[] = [
+    [
+      keyed("0"),
+      [
+        ["box[0].f0", "box", "unknown"],
+        ["box[1].f1", "box", "unknown"],
+        ["box[2]", "box", "unknown"],
+      ],
+    ],
+    [
+      keyed("null"),
+      [
+        ["box[0].f0", "box", "unknown"],
+        ["box[2]", "box", "unknown,null"],
+      ],
+    ],
+    [
+      keyed("{f0: 1, f1: 2}"),
+      [
+        ["box[0].f0", "box", "unknown"],
+        ["box[2]", "box", "unknown"],
+      ],
+    ],
+    // the linear control: one load copied, its one leaf
+    [
+      "let one = load(hostValue, default: 0)\nlet box = [one, one, one]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n",
+      [
+        ["box[0].f0", "one", "unknown"],
+        ["box[1].f1", "one", "unknown"],
+      ],
+    ],
+    // disjoint lists: each its own loads
+    [
+      `let a = [${loads(2)}]\nlet b = [${loads(3, "null")}]\nrepeat a[0].f0 {}\nrepeat b[1].f0 {}\nexit\n`,
+      [
+        ["a[0].f0", "a", "unknown"],
+        ["b[1].f0", "b", "unknown"],
+      ],
+    ],
+    // changed receivers, guarded reads, a written destination, mixed literals, nested paths, member steps, a choice and
+    // a loop that adds to the list
+    [
+      `let box = [${loads(3)}]\nbox[0] = {f0: 1}\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3)}]\nif hostValue == 1 {\n  box = [{f0: 1}]\n}\nrepeat box[0].f0 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3)}]\nbox.add(load(hostValue, default: null))\nrepeat box[0].f0 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3)}]\nif box[0].f0 is integer {\n  repeat box[0].f0 {}\n}\nif box[1].f1 != null {\n  repeat box[1].f1 {}\n}\nexit\n`,
+      [],
+    ],
+    [
+      `let typed: integer[] = [${loads(3)}]\nlet box = [${loads(3)}]\nrepeat typed[0] {}\nrepeat box[0].f0 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let h = hostValue\nlet box = [h, ${loads(3)}, {f0: 1}, 5]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3, "{f0: {g: 1}}")}]\nrepeat box[0].f0.g {}\nrepeat box[1][0].f0 {}\nlet nested = [[${loads(2)}], [${loads(1)}]]\nrepeat nested[0][1].f0 {}\nrepeat nested[1][0].f1 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3, '{text: "a", value: {f0: 1}}')}]\nrepeat box[0].year {}\nlet names = box[0].keys\nlet picked = askChoice box\nrepeat picked.f0 {}\nexit\n`,
+      [],
+    ],
+    [
+      `let box = [${loads(3)}]\nrepeat 2 {\n  repeat box[0].f0 {}\n  box.add(load(hostValue, default: null))\n}\nexit\n`,
+      [],
+    ],
+  ];
+  for (const [source, reads] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const published = (sharing: boolean, reversed: boolean): string => {
+      const run = (): Answers =>
+        sharing ? analyseCore(request) : withoutSharing(() => analyseCore(request));
+      const answers = reversed
+        ? withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), run),
+          )
+        : run();
+      for (const [text, list, kinds] of reads) {
+        const start = source.indexOf(text);
+        const read = answers.graph.expressionAt({ file: 0, start, end: start + text.length });
+        assert.ok(read !== undefined, text);
+        // the sites of the loads on the binding's own line, from the source
+        const line = source.indexOf(`let ${list} =`);
+        const own = [...source.slice(line, source.indexOf("\n", line)).matchAll(/load\(/g)].map(
+          (match) => line + match.index,
+        );
+        assert.deepEqual(
+          answers
+            .at(read)!
+            .items.map((item) => [
+              item.tag,
+              item.reasons,
+              item.ingress === undefined
+                ? []
+                : ingressLeaves(item.ingress).map(({ start }) => start),
+            ]),
+          kinds
+            .split(",")
+            .map((tag) => (tag === "unknown" ? [tag, REASON.external, own] : [tag, 0, []])),
+          `${text} in ${source}`,
+        );
+      }
+      // every read's answer, its items whole with their ingress stores by their leaves
+      const occurrences = answers.graph.nodes.flatMap((node) => {
+        const at = node.kind === "expression" ? answers.at(node) : null;
+        if (at === null) return [];
+        const items = at.items.map((item) => ({
+          ...item,
+          ingress: item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey),
+        }));
+        return [[node.span?.start.offset, at.route, at.place, at.obligations, items]];
+      });
+      const { outcome, diagnostics, checks } = answers;
+      return JSON.stringify({ outcome, diagnostics, checks, occurrences });
+    };
+    for (const reversed of [false, true])
+      assert.equal(
+        published(true, reversed),
+        published(false, reversed),
+        `${source}, reversed: ${reversed}`,
+      );
+  }
+  assert.throws(
+    () =>
+      compileProjectWithBackend(
+        [{ path: "main.tease", source: keyed("0") }],
+        { globals: ["hostValue"] },
+        CORE_BACKEND,
+      ),
+    (error) => error instanceof CandidateOutsideSlice && error.what === "this load expression",
+  );
 });
