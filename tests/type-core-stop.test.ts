@@ -260,6 +260,33 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
 });
 
 /**
+ * A mode's settled phases, each with its lowest and highest stopping allowance, found by bisection: below the analysis's
+ * total `phaseOf` (an analysis stopped at the allowance: its phase where admission had settled, else `null`) names
+ * contiguous ranges, the publication's above the walk's, down to the first stop that is not settled. A phase found twice
+ * is not contiguous and fails.
+ */
+function phaseEnds(
+  total: number,
+  phaseOf: (allowance: number) => string | null,
+): Map<string, readonly [number, number]> {
+  const ends = new Map<string, readonly [number, number]>();
+  for (let high = total - 1; high > 0;) {
+    const phase = phaseOf(high);
+    if (phase === null) break;
+    assert.ok(!ends.has(phase), `${phase} again below ${high + 1}`);
+    let low = 1;
+    for (let top = high; low < top;) {
+      const middle = (low + top) >> 1;
+      if (phaseOf(middle) === phase) top = middle;
+      else low = middle + 1;
+    }
+    ends.set(phase, [low, high]);
+    high = low - 1;
+  }
+  return ends;
+}
+
+/**
  * TABLE r4.90, r4.99: what a phase settled is never discarded by a later one, and a stop owes what the unstopped
  * analysis owes, through the same consumers (the stop oracle, `helpers/type-core-stop-oracle.ts`). A stop in a settled
  * pass's walk or publication keeps admission's contracts (an inferred scalar's, a record's), the findings (an error a
@@ -299,20 +326,17 @@ function settledPhases(
         withTestAllowance(allowance, () => inMode(() => analyseCore(request)));
       const compile = () => inMode(() => compileSourceWithBackend(source, options, CORE_BACKEND));
       // this mode's settled phases: the stops below its total, down to the first that is not settled
-      const total = inMode(() => analyseCore(request)).budget.total;
-      const stops = new Map<string, number[]>();
-      for (let allowance = total - 1; allowance > 0; allowance -= 1) {
+      const stops = phaseEnds(inMode(() => analyseCore(request)).budget.total, (allowance) => {
         const { stoppedIn, settled } = analyse(allowance).budget;
-        if (!settled || stoppedIn === null) break;
-        stops.set(stoppedIn, [allowance, ...(stops.get(stoppedIn) ?? [])]);
-      }
+        return settled ? stoppedIn : null;
+      });
       const where = `${source} reversed: ${reversed} sharing: ${sharing}`;
       // (a settled phase at least: a program without boundaries charges its publication nothing)
       assert.ok(stops.has("walk") || stops.has("publication"), where);
       const unstopped = compile();
       let marks = 0;
-      for (const [phase, allowances] of stops)
-        for (const allowance of [allowances[0]!, allowances.at(-1)!]) {
+      for (const [phase, ends] of stops)
+        for (const allowance of ends) {
           const answers = analyse(allowance);
           assert.equal(answers.budget.stoppedIn, phase, `${where} @${allowance}`);
           const undecided = (place: string, path: readonly string[]): boolean => {
@@ -458,15 +482,13 @@ test("a stop in a settled walk keeps the error of a member read of a null defaul
       return allowance === undefined ? ordered() : withTestAllowance(allowance, ordered);
     };
     assert.deepEqual(errors(analyse()), [`TSV043 ${at}:${at + "item.name".length}`]);
-    // the settled walk's stops, from the last down to the first
-    const walk: number[] = [];
-    for (let allowance = analyse().budget.total - 1; allowance > 0; allowance -= 1) {
+    // the settled walk's first and last stops
+    const walk = phaseEnds(analyse().budget.total, (allowance) => {
       const { stoppedIn, settled } = analyse(allowance).budget;
-      if (!settled) break;
-      if (stoppedIn === "walk") walk.push(allowance);
-    }
-    assert.ok(walk.length > 0, `reversed: ${reversed}`);
-    for (const allowance of [walk[0]!, walk.at(-1)!])
+      return settled ? stoppedIn : null;
+    }).get("walk");
+    assert.ok(walk !== undefined, `reversed: ${reversed}`);
+    for (const allowance of walk)
       assert.deepEqual(errors(analyse(allowance)), errors(analyse()), `${reversed} @${allowance}`);
   }
 });
