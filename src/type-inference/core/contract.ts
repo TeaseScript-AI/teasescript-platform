@@ -2172,7 +2172,8 @@ export class Contract {
   /**
    * S6c (TABLE r4.85, r4.87): the class every discovery of the value side keys a value by, so that values of one class
    * answer alike at every path apart from the writers of their roles (`classWriters`) and, for a mixed class
-   * (`classMixed`), an ingress's leaf or an operand's identity. A read by `readClass`; a projection (a property, an
+   * (`classMixed`), an ingress's leaf or an operand's identity. A read by `readClass`; a read of a host global, whose
+   * leaf is its own (`readClass`'s `null`), by the global and its guards, mixed (#1196); a projection (a property, an
    * element selection, a length) by its step and its owner's class; a call's result by the callee's result key (F20; on
    * the value side with the key's exact-path signature where the call returns); a literal by its structure (its own
    * kinds, objects, empty collections and absences per path, its cells' classes and guards, whether it is a cell); a
@@ -2180,9 +2181,9 @@ export class Contract {
    * parse landing in no written type by its kind and its default's class and guards; any other operation by its family,
    * its name and its operands' classes (a `get`'s receiver and default, never its key, §4.6). On the value side
    * (`exact`) an operation only at its own node, a `get` or an `otherwise` with whether its default or fallback runs
-   * (`Values.proofOf`). `null` for a loop's visit, a speaker, a read an ingress stands in, a literal holding a
-   * reference, an ingress read or a read its holder marks, a choice holding a list's or a set's buttons, and a value
-   * any part of which has none. Once per value and side, on an explicit walk.
+   * (`Values.proofOf`). `null` for a loop's visit, a speaker, a literal holding a reference or a read its holder marks,
+   * a choice holding a list's or a set's buttons, and a value any part of which has none. Once per value and side, on
+   * an explicit walk.
    */
   public classOf(value: PlaceId, exact: boolean): string | null {
     return this.#classed(value, exact).cls;
@@ -2282,9 +2283,22 @@ export class Contract {
     const { program, definitions, values, lists, handlers, guards } = this.pass;
     const read = this.readClass(value, exact);
     if (read !== null) return { cls: read, writers: [this.aliasWriter(value, exact)], mixed: 0 };
+    // #1196: a host global's read answers external data at every path, on either side, named by its own leaf (C9) and
+    // marked where its guards mark it, so a value over it (a projection, a literal, a parse) is classed by its other parts
+    if (program.occurrenceOf.has(value)) {
+      if (!definitions.ingress.has(value)) return NO_CLASS;
+      const cls = keptParts(
+        this.#work,
+        "host",
+        program.occurrenceOf.get(value)!,
+        guards.guardedRead(value) ? "g" : "",
+        guards.guardedBelowRead(value).join(" "),
+      );
+      return { cls, writers: [], mixed: MIXED_LEAF };
+    }
     const memo = this.#valueClasses[exact ? 1 : 0]!;
     const of = parts.map((part) => memo.get(part)!);
-    if (program.occurrenceOf.has(value) || of.some(({ cls }) => cls === null)) return NO_CLASS;
+    if (of.some(({ cls }) => cls === null)) return NO_CLASS;
     const classes = of.map(({ cls }) => cls!);
     let writers: (Writer | null)[] | null = [];
     for (const part of of)
@@ -2407,11 +2421,8 @@ export class Contract {
         for (const entry of entries) {
           const part = of[next++]!;
           const read = "holder" in entry ? entry : null;
-          if (
-            part.cls === null ||
-            (read !== null && (read.ingress !== undefined || !this.#markFree(read.holder)))
-          )
-            return NO_CLASS;
+          // (a read of host data is mixed by its class: its leaves, unioned here, are what literals of it differ by)
+          if (part.cls === null || (read !== null && !this.#markFree(read.holder))) return NO_CLASS;
           parts.push(this.#kept(`${mark}${read?.guarded === true ? "g" : ""}${part.cls}`));
           mixed |= part.mixed;
           if (part.writers === null) writers = null;
