@@ -21,6 +21,7 @@ import {
   EMPTY,
   firstContext,
   firstWriter,
+  differsIn,
   mergeItems,
   REASON,
   weaken,
@@ -1138,9 +1139,17 @@ export class ExactPath {
       this.#defRoutes.set(routeKey, values.valueRoute(d.value!, d.node, rest));
       return mergeItems(withWriter(items, writer), scope);
     }
-    // S6c: an add that repeats the ones before it answers as the earlier one at every path (`#repeatOf`)
+    // S6c: an add that repeats the ones before it answers as the earlier one at every path (`#repeatOf`), but where
+    // its value's class is mixed and the earlier one's own value at the path holds a leaf or an operand's identity
     const repeated = this.#repeatOf(d);
-    if (repeated !== d) return yield* this.defVal(repeated, rest);
+    const mixed = repeated === d ? 0 : this.pass.contract.classMixed(d.value!, true);
+    if (
+      repeated !== d &&
+      (rest[0] !== "element" ||
+        mixed === 0 ||
+        !(yield* this.#ownAt(repeated, rest)).some((item) => differsIn(item, mixed)))
+    )
+      return yield* this.defVal(repeated, rest);
     const before = yield* values.keyItems(keyOf(d.place, joinSteps(d.path, rest)), d.node, true);
     // F5–F7: the collection's kind is unchanged, and a dict's `values` or `keys` still a list of what it holds, whose
     // element is the dict's (r4.46 (2))
@@ -1245,6 +1254,15 @@ export class ExactPath {
     const [first, later] = [definitions.writerOf(p), definitions.writerOf(d)];
     if (first !== null && later !== null && firstWriter(first, later) !== first) return null;
     return p;
+  }
+
+  /** An add's own value at `rest`, below its receiver's element step (`#defVal`). */
+  *#ownAt(d: Definition, rest: readonly string[]): Work<readonly Item[]> {
+    return yield* this.pass.values.valueItems(
+      d.value!,
+      (d.orig ?? d).node,
+      d.how === "elements" ? rest : rest.slice(1),
+    );
   }
 
   /** Charges `units` of what the exact path keeps (TABLE r4.58). */

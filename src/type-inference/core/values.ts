@@ -712,6 +712,9 @@ export class Values {
       ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
+      // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
+      const repeated = contract.plusRepeatOf(c.result, true);
+      if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
       for (const argument of c.arguments) operands.push(yield* this.valueItems(argument, at, rest));
       return [...plusElements(operands, rest, this.pass)];

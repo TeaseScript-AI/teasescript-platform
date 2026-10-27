@@ -61,6 +61,9 @@ import {
   EMPTY,
   firstContext,
   firstWriter,
+  differsIn,
+  MIXED_FAN,
+  MIXED_LEAF,
   makeItem,
   marksOf,
   mergeItems,
@@ -461,18 +464,40 @@ interface ReadClass {
   readonly base: string | null;
 }
 
-/** A computed value of a literal at a path its class's answer reads (`#othersAt`), with the class's earliest cell writer. */
-interface OtherGroup extends ValueEntry {
+/**
+ * A literal's computed values of one class at a path (`#othersAt`): those its answer reads, the others of a mixed class,
+ * and the class's earliest cell writer.
+ */
+interface OtherGroup {
+  readonly read: readonly ValueEntry[];
+  readonly rest: readonly ValueEntry[];
   readonly writer: Writer | null;
+  readonly mixed: number;
 }
 
-/** A value's class and its roles' writers (`Contract.classOf`, `classWriters`). */
+/** A choice's options of one class (`Contract.choiceOptions`): those its answer reads, the others of a mixed class. */
+export interface ChoiceGroup {
+  readonly read: readonly number[];
+  readonly rest: readonly number[];
+  readonly mixed: number;
+}
+
+/** A value's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`). */
 interface ValueClass {
   readonly cls: string | null;
   readonly writers: readonly (Writer | null)[] | null;
+  /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
+  readonly mixed: number;
 }
 
-const NO_CLASS: ValueClass = { cls: null, writers: null };
+const NO_CLASS: ValueClass = { cls: null, writers: null, mixed: 0 };
+
+/** Whether an operation is a choice (`askChoice`, V30 §19). */
+function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): boolean {
+  return (
+    c.contract.family === "interaction" && interactionCategory(c.contract.name)?.kind === "options"
+  );
+}
 
 /**
  * TABLE r4.85: the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
@@ -480,12 +505,18 @@ const NO_CLASS: ValueClass = { cls: null, writers: null };
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
  * earliest in some role, merged, answer as all of them, whatever order the writers come in. A member without a class,
  * or whose roles are not known, stands by itself. Per class in the order of its first member: the members read, each
- * once and in role order (the first member for a role no later one is earlier in), and all its members.
+ * once and in role order (the first member for a role no later one is earlier in), the others where the class is
+ * mixed (`Contract.classMixed`: read where the read ones' answer holds a leaf or an operand's identity), and all.
  */
 function roleMinima(
   members: readonly ValueClass[],
   charge: () => void,
-): readonly { readonly read: readonly number[]; readonly all: readonly number[] }[] {
+): readonly {
+  readonly read: readonly number[];
+  readonly rest: readonly number[];
+  readonly all: readonly number[];
+  readonly mixed: number;
+}[] {
   const classes: {
     readonly read: number[];
     readonly best: (Writer | null)[];
@@ -516,7 +547,16 @@ function roleMinima(
       }
     }
   }
-  return classes.map(({ read, all }) => ({ read: [...new Set(read)], all }));
+  return classes.map(({ read, all }) => {
+    const chosen = new Set(read);
+    const mixed = members[all[0]!]!.mixed;
+    return {
+      read: [...chosen],
+      rest: mixed !== 0 ? all.filter((m) => !chosen.has(m)) : [],
+      all,
+      mixed,
+    };
+  });
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
@@ -643,8 +683,13 @@ export class Contract {
   ];
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly #choiceOptions = [
-    new Map<PlaceId, readonly number[]>(),
-    new Map<PlaceId, readonly number[]>(),
+    new Map<PlaceId, readonly ChoiceGroup[]>(),
+    new Map<PlaceId, readonly ChoiceGroup[]>(),
+  ];
+  /** Per `+`, its place in its run of terms on the contract side and on the value side (`plusRepeatOf`). */
+  readonly #plusRuns = [
+    new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
+    new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
   ];
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly #structures = new Map<PlaceId, string>();
@@ -1019,7 +1064,10 @@ export class Contract {
           for (const group of this.#entryGroups(levels)) {
             const first = yield* this.entryAt(group.entries[0]!, rest);
             // (an unknown's ingress stores are each entry's own, C9: there every entry answers by itself)
-            if (group.entries.length > 1 && !first.some((item) => item.tag === "unknown")) {
+            if (
+              group.entries.length > 1 &&
+              !first.some((item) => item.tag === "unknown" || item.fan !== undefined)
+            ) {
               for (const item of withWriter(first, group.w)) out.push(item);
               continue;
             }
@@ -1775,6 +1823,9 @@ export class Contract {
       ];
     }
     if (family === "operator" && name === "+" && rest.length > 0) {
+      // TABLE r4.87: a `+` fourth or later in a run of terms answers below its root as the run's third
+      const repeated = this.plusRepeatOf(c.result, false);
+      if (repeated !== c.result) return yield* this.contractOfValueAt(repeated, rest);
       const operands: (readonly Item[])[] = [];
       for (const argument of c.arguments)
         operands.push(yield* this.contractOfValueAt(argument, rest));
@@ -2121,32 +2172,45 @@ export class Contract {
   }
 
   /**
-   * S6c (TABLE r4.85): the class every discovery of the value side keys a value by, so that values of one class answer
-   * alike at every path apart from the writers of their roles (`classWriters`): a read by `readClass`; a `get` by its
-   * receiver's and its default's classes, never its key (`#contractOfOp` reads only these, §4.6), an `otherwise` by its
-   * operands', on the value side (`exact`) with whether its default or fallback runs (`Values.proofOf`), so a computed
-   * default or operand is classed in turn; a literal by its structure (its own kinds, objects and empty collections per
-   * path, its cells' classes and guards, whether it is a cell); on the contract side an ingress that lands in no
-   * written type by what its contract reads, its kind and its default's class and guards. `null` for any other value,
-   * and for a literal holding a reference, an ingress or a read its holder marks. Once per value and side, on an
-   * explicit walk.
+   * S6c (TABLE r4.85, r4.87): the class every discovery of the value side keys a value by, so that values of one class
+   * answer alike at every path apart from the writers of their roles (`classWriters`) and, for a mixed class
+   * (`classMixed`), an ingress's leaf or an operand's identity. A read by `readClass`; a projection (a property, an
+   * element selection, a length) by its step and its owner's class; a call's result by the callee's result key (F20; on
+   * the value side with the key's exact-path signature where the call returns); a literal by its structure (its own
+   * kinds, objects, empty collections and absences per path, its cells' classes and guards, whether it is a cell); a
+   * choice by its options (a label's kind, a choice object's selected value, any other option's value); a `load` or a
+   * parse landing in no written type by its kind and its default's class and guards; any other operation by its family,
+   * its name and its operands' classes (a `get`'s receiver and default, never its key, §4.6). On the value side
+   * (`exact`) an operation only at its own node, a `get` or an `otherwise` with whether its default or fallback runs
+   * (`Values.proofOf`). `null` for a loop's visit, a speaker, a read an ingress stands in, a literal holding a
+   * reference, an ingress read or a read its holder marks, a choice holding a list's or a set's buttons, and a value
+   * any part of which has none. Once per value and side, on an explicit walk.
    */
   public classOf(value: PlaceId, exact: boolean): string | null {
     return this.#classed(value, exact).cls;
   }
 
   /**
-   * The writers of a class's roles (`classOf`), in its parts' order: a read's alias's (`aliasWriter`), a computed
-   * value's operands' in turn, a literal's own place's (every kind, object and absence it gives itself lies in its own
-   * text, so the earlier of two literals gives each of them first) and then its cells'; `null` where an answer's
-   * writers are not these alone (an ingress's leaf is its own, C9). Each role's writer stands for the kinds that role
-   * gives, the rest of a class's answer being alike (`roleMinima`).
+   * The writers of a class's roles (`classOf`), in its parts' order: a read's alias's (`aliasWriter`), an operation's
+   * operands' in turn, a literal's own place's (every kind, object and absence it gives itself lies in its own text, so
+   * the earlier of two literals gives each of them first) and then its cells'; none for a call's result, whose stores
+   * are the callee's. Each role's writer stands for the kinds that role gives, the rest of a class's answer being alike
+   * (`roleMinima`).
    */
   public classWriters(value: PlaceId, exact: boolean): readonly (Writer | null)[] | null {
     return this.#classed(value, exact).writers;
   }
 
-  /** A value's class and its roles' writers (`classOf`), its parts' first, on an explicit stack. */
+  /**
+   * Whether a class (`classOf`) holds an ingress, whose external data names its own leaf (C9), or an operator's result,
+   * which names its unknown operand by that operand's writer or by its own site (`fan`, F16): values of such a class
+   * differ by those where their answer holds them (`differsIn`), so a site that shares them reads each where it does.
+   */
+  public classMixed(value: PlaceId, exact: boolean): number {
+    return this.#classed(value, exact).mixed;
+  }
+
+  /** A value's class (`classOf`), its parts' first, on an explicit stack. */
   #classed(value: PlaceId, exact: boolean): ValueClass {
     const memo = this.#valueClasses[exact ? 1 : 0]!;
     const known = memo.get(value);
@@ -2179,13 +2243,14 @@ export class Contract {
     return memo.get(value)!;
   }
 
-  /** The values a class rests on (`classOf`), in its roles' order: a computed value's operands, a literal's cells. */
+  /** The values a class rests on (`classOf`), in its roles' order: a projection's owner, a literal's cells, operands. */
   #classParts(value: PlaceId, exact: boolean): readonly PlaceId[] {
-    const { program, definitions } = this.pass;
+    const { program } = this.pass;
     program.work.charge("invSteps");
-    const c = program.opOf.get(value);
-    if (c?.kind === "get") return [c.receiver, c.fallback];
-    if (c?.kind === "fallback") return [c.left, c.right];
+    if (program.occurrenceOf.has(value) || this.readClass(value, exact) !== null) return [];
+    const projection = program.projOf.get(value);
+    if (projection !== undefined) return projection.step === "iteration" ? [] : [projection.owner];
+    if (program.callOutOf.has(value)) return [];
     if (program.hasOf.has(value)) {
       const index = this.literalIndex(value);
       const out: PlaceId[] = [];
@@ -2197,48 +2262,126 @@ export class Contract {
       this.#keep(out.length);
       return out;
     }
-    const fallback =
-      !exact && definitions.ingress.has(value)
-        ? (this.#ingressKind(value)?.fallback ?? null)
-        : null;
-    return fallback === null ? [] : [fallback];
+    const c = program.opOf.get(value);
+    if (c?.kind === "get") return [c.receiver, c.fallback];
+    if (c?.kind === "fallback") return [c.left, c.right];
+    if (c?.kind === "load") return c.fallback === null ? [] : [c.fallback];
+    if (c?.kind !== "operation") return [];
+    if (isChoice(c)) {
+      const out: PlaceId[] = [];
+      for (const member of this.#choiceMembers(c))
+        if (member?.place !== undefined) out.push(member.place);
+      return out;
+    }
+    // (its receiver, its arguments, then its named ones: a parse's or a conversion's default)
+    const out = c.receiver === null ? [...c.arguments] : [c.receiver, ...c.arguments];
+    if ("named" in c) for (const argument of c.named) out.push(argument.value);
+    return out;
   }
 
   /** A value's class (`classOf`), its parts' known. */
   #joinedClass(value: PlaceId, exact: boolean, parts: readonly PlaceId[]): ValueClass {
-    const { program, definitions, values } = this.pass;
+    const { program, definitions, values, lists, handlers, guards } = this.pass;
+    const read = this.readClass(value, exact);
+    if (read !== null) return { cls: read, writers: [this.aliasWriter(value, exact)], mixed: 0 };
     const memo = this.#valueClasses[exact ? 1 : 0]!;
     const of = parts.map((part) => memo.get(part)!);
-    const c = program.opOf.get(value);
-    if (c?.kind === "get" || c?.kind === "fallback") {
-      const proof = exact ? values.proofOf(value) : "";
-      if (proof === null || of.some(({ cls }) => cls === null)) return NO_CLASS;
-      let writers: (Writer | null)[] | null = [];
-      for (const part of of)
-        if (part.writers === null) writers = null;
-        else if (writers !== null) for (const writer of part.writers) writers.push(writer);
-      return { cls: keptParts(this.#work, c.kind, ...of.map(({ cls }) => cls!), proof), writers };
+    if (program.occurrenceOf.has(value) || of.some(({ cls }) => cls === null)) return NO_CLASS;
+    const classes = of.map(({ cls }) => cls!);
+    let writers: (Writer | null)[] | null = [];
+    for (const part of of)
+      if (part.writers === null) writers = null;
+      else if (writers !== null) for (const writer of part.writers) writers.push(writer);
+    const projection = program.projOf.get(value);
+    if (projection !== undefined) {
+      if (projection.step === "iteration" || (exact && projection.node === null)) return NO_CLASS;
+      const cls = keptParts(
+        this.#work,
+        "p",
+        projection.step,
+        classes[0]!,
+        guards.guardedRead(value) ? "g" : "",
+        guards.guardedBelowRead(value).join(" "),
+      );
+      return { cls, writers, mixed: of[0]!.mixed };
+    }
+    if (program.callOutOf.has(value)) {
+      const call = program.opOf.get(value);
+      if (call?.kind !== "call") return NO_CLASS;
+      const key = keyOf(program.functionOf(call.fn).result, []);
+      const node = program.callOutOf.get(value) ?? null;
+      if (!exact) return { cls: keptParts(this.#work, "call", key), writers: [], mixed: 0 };
+      if (node === null) return NO_CLASS;
+      const signature = lists.readSignature(key, node);
+      const after = handlers.afterSomeCreation(node) ? "h" : "";
+      return { cls: keptParts(this.#work, "call", key, signature, after), writers: [], mixed: 0 };
     }
     if (program.hasOf.has(value)) return this.#literalClass(value, of);
-    if (!exact && definitions.ingress.has(value)) {
-      const ingress = this.#ingressKind(value);
-      const fallback = ingress?.fallback ?? null;
-      const of0 = fallback === null ? "" : (of[0]?.cls ?? null);
-      if (ingress === null || of0 === null || this.landsIn(value, []) !== null) return NO_CLASS;
-      return {
-        cls: keptParts(
-          this.#work,
-          "in",
-          ingress.kind,
-          of0,
-          fallback === null ? "" : this.#guardsBelow(fallback),
-        ),
-        writers: null,
-      };
-    }
-    if (c !== undefined) return NO_CLASS;
-    const cls = this.readClass(value, exact);
-    return cls === null ? NO_CLASS : { cls, writers: [this.aliasWriter(value, exact)] };
+    const c = program.opOf.get(value);
+    if (c === undefined || c.kind === "call" || (exact && program.exprAt(c.site) === null))
+      return NO_CLASS;
+    let mixed = of.reduce((all, part) => all | part.mixed, 0);
+    if (definitions.ingress.has(value)) mixed |= MIXED_LEAF;
+    if (c.kind === "operation" && operatorOf(c) !== null) mixed |= MIXED_FAN;
+    let cls: string;
+    if (c.kind === "get" || c.kind === "fallback") {
+      const proof = exact ? values.proofOf(value) : "";
+      if (proof === null) return NO_CLASS;
+      cls = keptParts(this.#work, c.kind, ...classes, proof);
+    } else if (c.kind === "load") {
+      if (c.receiver !== null || this.landsIn(value, []) !== null) return NO_CLASS;
+      const below = c.fallback === null ? "" : this.#guardsBelow(c.fallback);
+      cls = keptParts(this.#work, c.key === null ? "load?" : "load", ...classes, below);
+    } else if (c.kind === "operation" && isChoice(c)) {
+      const options: string[] = [];
+      let next = 0;
+      for (const member of this.#choiceMembers(c)) {
+        if (member === null) return NO_CLASS;
+        options.push(
+          member.place === undefined
+            ? this.#kept(`l${member.label}`)
+            : this.#kept(`${member.object ? "o" : "c"}${classes[next++]!}`),
+        );
+      }
+      cls = keptParts(this.#work, "choice", ...options);
+    } else if (c.kind === "operation") {
+      const { family, name } = c.contract;
+      const fallback = defaultOf(c);
+      const parses = family === "conversion" && conversionCategory(name)?.kind === "parses";
+      if (parses && this.landsIn(value, []) !== null) return NO_CLASS;
+      const below = parses && fallback !== undefined ? this.#guardsBelow(fallback) : "";
+      const named = "named" in c ? c.named.map((argument) => argument.name).join(",") : "";
+      const own = c.receiver === null ? "" : "r";
+      cls = keptParts(this.#work, family, name, own, named, ...classes, below);
+    } else return NO_CLASS;
+    return { cls, writers, mixed };
+  }
+
+  /**
+   * A choice's options as its answer reads them (`choiceItems`), per argument: a label by its kind, a choice object by
+   * the value it selects, any other option by its value; `null` for a list's or a set's buttons, and for a choice object
+   * without a selected key.
+   */
+  #choiceMembers(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+  ): readonly ({
+    readonly label?: string;
+    readonly place?: PlaceId;
+    readonly object?: true;
+  } | null)[] {
+    const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
+    const labels = choiceLabels(c);
+    return c.arguments.map((argument, index) => {
+      this.pass.program.work.charge("invSteps");
+      const label = labels[index];
+      const content = evidence[index]?.content;
+      if (content?.kind === "list" || content?.kind === "set") return null;
+      if (label !== undefined) return { label: label ?? "" };
+      if (content?.kind !== "object") return { place: argument };
+      const selected =
+        content.object === null ? null : (content.object.value ?? content.object.text);
+      return selected === null ? null : { place: selected, object: true };
+    });
   }
 
   /** A literal's class (`classOf`), its cells' known, in `#classParts`' order. */
@@ -2251,6 +2394,7 @@ export class Contract {
     let writers: (Writer | null)[] | null = [
       { kind: "literal", file: site.file, start: site.start, end: site.end },
     ];
+    let mixed = 0;
     let next = 0;
     for (const at of this.#pathOrder(index)) {
       program.work.charge("structureSteps");
@@ -2269,6 +2413,7 @@ export class Contract {
           )
             return NO_CLASS;
           parts.push(this.#kept(`${mark}${read?.guarded === true ? "g" : ""}${part.cls}`));
+          mixed |= part.mixed;
           if (part.writers === null) writers = null;
           else if (writers !== null) for (const writer of part.writers) writers.push(writer);
         }
@@ -2280,31 +2425,15 @@ export class Contract {
       .map((path) => this.#pathId(path))
       .sort((a, b) => a - b);
     parts.push(`empty:${this.#emptyIds(index)}`, this.#kept(`lacking:${lacking.join(",")}`));
-    return { cls: this.#internStructure(`lit(${this.#joined(parts, ";")})`), writers };
-  }
-
-  /** An ingress by what its contract reads: a `load`'s or a parse's kind and its default, `null` for none. */
-  #ingressKind(
-    value: PlaceId,
-  ): { readonly kind: string; readonly fallback: PlaceId | null } | null {
-    const c = this.pass.program.opOf.get(value);
-    if (c?.kind === "load" && c.receiver === null)
-      return { kind: c.key === null ? "load?" : "load", fallback: c.fallback };
-    if (
-      c?.kind === "operation" &&
-      c.contract.family === "conversion" &&
-      conversionCategory(c.contract.name)?.kind === "parses"
-    )
-      return { kind: c.contract.name, fallback: defaultOf(c) ?? null };
-    return null;
+    return { cls: this.#internStructure(`lit(${this.#joined(parts, ";")})`), writers, mixed };
   }
 
   /**
    * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
    * once per list and side: of values of one class (`classOf`) its role minima (`roleMinima`), the earliest cell writer
-   * standing for its kinds (each value's kinds take its cell's writer, F28); any other value by itself. In order, so
-   * the merged answer keeps its kinds' order; the count of the contributions (§3.4's several elements) stays the
-   * list's.
+   * standing for its kinds (each value's kinds take its cell's writer, F28), and of a mixed class the others; any other
+   * value by itself. In order, so the merged answer keeps its kinds' order; the count of the contributions (§3.4's
+   * several elements) stays the list's.
    */
   #othersAt(list: readonly ValueEntry[] | undefined, exact: boolean): readonly OtherGroup[] {
     if (list === undefined) return [];
@@ -2326,16 +2455,21 @@ export class Contract {
       members.push({
         cls: key,
         writers: key === null ? null : this.classWriters(entry.value, exact),
+        mixed: key === null ? 0 : this.classMixed(entry.value, exact),
       });
     }
     const groups: OtherGroup[] = [];
-    for (const { read, all } of roleMinima(members, () => program.work.charge("invSteps"))) {
+    const charge = (): void => program.work.charge("invSteps");
+    for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
       let writer: Writer | null = null;
       for (const member of all) writer = firstWriter(writer, cellWriter(list[member]!));
-      for (const member of read) {
-        this.#keep(2);
-        groups.push({ value: list[member]!.value, g: list[member]!.g, writer });
-      }
+      this.#keep(2 + read.length + rest.length);
+      groups.push({
+        read: read.map((member) => list[member]!),
+        rest: rest.map((member) => list[member]!),
+        writer,
+        mixed,
+      });
     }
     memo.set(list, groups);
     return groups;
@@ -2344,53 +2478,107 @@ export class Contract {
   /**
    * S6c: the options of a choice its answer reads, by their index, once per choice and side: of options that answer
    * alike at every path apart from their roles' writers (a label of one kind; a choice object's selected value, or any
-   * other option, of one class, `classOf`) the role minima (`roleMinima`), so a choice of k options of one source read
-   * at k fields reads it once per field; a list's or a set's buttons by themselves.
+   * other option, of one class, `classOf`) the role minima (`roleMinima`), and of a mixed class the others, so a choice
+   * of k options of one source read at k fields reads it once per field; a list's or a set's buttons by themselves.
    */
   public choiceOptions(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
     exact: boolean,
-  ): readonly number[] {
+  ): readonly ChoiceGroup[] {
     const memo = this.#choiceOptions[exact ? 1 : 0]!;
     const known = memo.get(c.result);
     if (known !== undefined) return known;
     const { program } = this.pass;
-    const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
-    const labels = choiceLabels(c);
     const members: ValueClass[] = [];
-    for (const [index, argument] of c.arguments.entries()) {
-      program.work.charge("invSteps");
-      const label = labels[index];
-      const content = evidence[index]?.content;
-      // (a label by its kind; a choice object by the value it selects, one without a selected key by itself; a list's
-      // or a set's buttons by themselves; any other option by its value)
-      let member = NO_CLASS;
-      if (sharing() && content?.kind !== "list" && content?.kind !== "set") {
-        if (label !== undefined)
-          member = { cls: keptParts(this.#work, "l", label ?? ""), writers: [] };
-        else {
-          const object = content?.kind === "object";
-          const selected = !object
-            ? argument
-            : content.object === null
-              ? null
-              : (content.object.value ?? content.object.text);
-          const cls = selected === null ? null : this.classOf(selected, exact);
-          if (cls !== null)
-            member = {
-              cls: keptParts(this.#work, object ? "o" : "c", cls),
-              writers: this.classWriters(selected!, exact),
-            };
-        }
+    for (const member of this.#choiceMembers(c)) {
+      let classed = NO_CLASS;
+      if (sharing() && member !== null) {
+        const cls = member.place === undefined ? null : this.classOf(member.place, exact);
+        if (member.place === undefined)
+          classed = { cls: keptParts(this.#work, "l", member.label!), writers: [], mixed: 0 };
+        else if (cls !== null)
+          classed = {
+            cls: keptParts(this.#work, member.object ? "o" : "c", cls),
+            writers: this.classWriters(member.place, exact),
+            mixed: this.classMixed(member.place, exact),
+          };
       }
-      members.push(member);
+      members.push(classed);
     }
-    const options: number[] = [];
-    for (const { read } of roleMinima(members, () => program.work.charge("invSteps")))
-      for (const member of read) options.push(member);
-    this.#keep(options.length);
+    const options: ChoiceGroup[] = [];
+    const charge = (): void => program.work.charge("invSteps");
+    for (const { read, rest, mixed } of roleMinima(members, charge)) {
+      this.#keep(2 + read.length + rest.length);
+      options.push({ read, rest, mixed });
+    }
     memo.set(c.result, options);
     return options;
+  }
+
+  /**
+   * TABLE r4.87: the `+` whose answer below its root a `+` over a run of terms gives (`plusElements`): the value itself,
+   * or, where it stands fourth or later in a run, the run's third. In a run each `+`'s left operand is the `+` before
+   * it, and its right operand is of one class with that one's (`classOf`, no mixed one), its roles' writers no earlier:
+   * each answers below its root as the one before with that term's elements merged in once more, and the merge and the
+   * `member` weakening settle on the second (the first `+` of a run may hold one operand's elements unweakened); the
+   * earliest writer stands for each kind. So a sum of k terms of one source read at k fields reads at most three `+`
+   * per field, never the sum. Once per value and side, on an explicit walk.
+   */
+  public plusRepeatOf(value: PlaceId, exact: boolean): PlaceId {
+    if (!sharing()) return value;
+    const memo = this.#plusRuns[exact ? 1 : 0]!;
+    const pending: PlaceId[] = [];
+    let before: { readonly third: PlaceId | null; readonly at: number } | null = null;
+    for (let sum: PlaceId | null = value; sum !== null; sum = this.#plusBefore(sum, exact)) {
+      const known = memo.get(sum);
+      if (known !== undefined) {
+        before = known;
+        break;
+      }
+      pending.push(sum);
+    }
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const sum = pending[index]!;
+      const at = before === null ? 1 : before.at + 1;
+      this.#keep(2);
+      before = { third: at === 3 ? sum : at > 3 ? before!.third : null, at };
+      memo.set(sum, before);
+    }
+    const run = memo.get(value)!;
+    return run.at > 3 ? run.third! : value;
+  }
+
+  /** The `+` a `+` repeats (`plusRepeatOf`), or `null`. */
+  #plusBefore(value: PlaceId, exact: boolean): PlaceId | null {
+    const { program } = this.pass;
+    program.work.charge("invSteps");
+    const plus = (place: PlaceId): readonly PlaceId[] | null => {
+      const c = program.opOf.get(place);
+      return c?.kind === "operation" &&
+        c.contract.family === "operator" &&
+        c.contract.name === "+" &&
+        c.arguments.length === 2 &&
+        (!exact || program.exprAt(c.site) !== null)
+        ? c.arguments
+        : null;
+    };
+    const own = plus(value);
+    const left = own === null ? null : plus(own[0]!);
+    if (own === null || left === null) return null;
+    const cls = this.classOf(own[1]!, exact);
+    if (
+      cls === null ||
+      cls !== this.classOf(left[1]!, exact) ||
+      this.classMixed(own[1]!, exact) !== 0
+    )
+      return null;
+    const [mine, earlier] = [this.classWriters(own[1]!, exact), this.classWriters(left[1]!, exact)];
+    if (mine === null || earlier === null) return null;
+    for (const [role, writer] of mine.entries()) {
+      const first = earlier[role] ?? null;
+      if (writer !== null && first !== null && firstWriter(first, writer) !== first) return null;
+    }
+    return own[0]!;
   }
 
   /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
@@ -4175,10 +4363,19 @@ export class Contract {
               ),
             ),
           );
-        for (const group of this.#othersAt(index.others.get(path), false))
-          out.push(
-            ...withWriter(yield* this.contractOfValueAt(group.value, after()), group.writer),
-          );
+        for (const group of this.#othersAt(index.others.get(path), false)) {
+          const from = out.length;
+          for (const entry of group.read)
+            out.push(
+              ...withWriter(yield* this.contractOfValueAt(entry.value, after()), group.writer),
+            );
+          // (a mixed class's values differ where their answer holds a leaf or an operand's identity: each is read)
+          if (group.rest.length > 0 && out.slice(from).some((item) => differsIn(item, group.mixed)))
+            for (const entry of group.rest)
+              out.push(
+                ...withWriter(yield* this.contractOfValueAt(entry.value, after()), group.writer),
+              );
+        }
       } else {
         const copies = length < rest.length && elementAbove ? (index.reads.get(path) ?? []) : null;
         if (copies !== null && copies.length > 0) overCopy = true;
@@ -4191,8 +4388,14 @@ export class Contract {
           for (const entry of index.exact.get(path) ?? [])
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
-        for (const group of this.#othersAt(others, true))
-          out.push(...(yield* values.valueItems(group.value, group.g?.node ?? node, after())));
+        for (const group of this.#othersAt(others, true)) {
+          const from = out.length;
+          for (const entry of group.read)
+            out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
+          if (group.rest.length > 0 && out.slice(from).some((item) => differsIn(item, group.mixed)))
+            for (const entry of group.rest)
+              out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
+        }
         sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
@@ -4365,7 +4568,7 @@ export function* choiceItems(
   rest: readonly string[],
   read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
   stored: StoredChoiceKeys,
-  options: readonly number[],
+  options: readonly ChoiceGroup[],
 ): Work<Item[]> {
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
@@ -4410,17 +4613,17 @@ export function* choiceItems(
     for (const item of items)
       if (item.tag !== "object" && (rest.length === 0 || item.tag === "unknown")) out.push(item);
   };
-  for (const index of options) {
+  const option = function* (index: number): Work<void> {
     const argument = c.arguments[index]!;
     const label = labels[index];
     if (label !== undefined) {
       if (label !== null && rest.length === 0) out.push(makeItem(label));
-      continue;
+      return;
     }
     const content: ChoiceOptionEvidence["content"] | undefined = evidence[index]?.content;
     if (content?.kind === "object") {
       yield* button(argument, content.object, false);
-      continue;
+      return;
     }
     if (content?.kind === "list" || content?.kind === "set") {
       // written choice objects alone: together below the list's element step, as its literal analogue reads them
@@ -4433,18 +4636,25 @@ export function* choiceItems(
           out.push(...(yield* read(argument, joinSteps(["element", step], rest))));
       else
         for (const element of content.elements) yield* button(element.place, element.object, true);
-      continue;
+      return;
     }
     // a computed option: a list's or a set's elements, a choice object, or a value
-    const option = withoutEmpty(yield* read(argument, []));
-    if (option.some((item) => item.tag === "list" || item.tag === "set"))
+    const items = withoutEmpty(yield* read(argument, []));
+    if (items.some((item) => item.tag === "list" || item.tag === "set"))
       for (const item of withoutEmpty(yield* read(argument, ["element"])))
         if (item.tag === "object") yield* held(argument, ["element"]);
         else if (rest.length === 0 || item.tag === "unknown") out.push(item);
-    if (option.some((item) => item.tag === "object")) yield* held(argument, []);
-    for (const item of option)
+    if (items.some((item) => item.tag === "object")) yield* held(argument, []);
+    for (const item of items)
       if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
       else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+  };
+  for (const { read: chosen, rest: others, mixed } of options) {
+    const from = out.length;
+    for (const index of chosen) yield* option(index);
+    // (a mixed class's options differ where their answer holds a leaf or an operand's identity: each is read)
+    if (others.length > 0 && out.slice(from).some((item) => differsIn(item, mixed)))
+      for (const index of others) yield* option(index);
   }
   return out;
 }
