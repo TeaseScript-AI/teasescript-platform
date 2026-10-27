@@ -266,9 +266,13 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
  * copy brings, not a literal's), the quiet proofs and every check the plan carries (a default's against a written or
  * written element type, Astra's B1 of round 2; an `otherwise`'s). Each mode's phases found in that mode; the stop at
  * the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside CI).
+ * `marked`: the code of an obligation whose type a stop may leave undecided and the source text of its site, the first
+ * after `after` (TABLE r4.100): where the stopped plan lacks its check, the stop marks it among its deferred warnings,
+ * and it does so at one stop at least.
  */
 function settledPhases(
   cases: readonly (readonly [string, readonly Globals[], readonly Globals[]])[],
+  marked?: { readonly code: string; readonly after: string; readonly text: string },
 ): void {
   const options = { globals: ["hostValue", "hostOther"] };
   const modes = [
@@ -306,6 +310,7 @@ function settledPhases(
       // (a settled phase at least: a program without boundaries charges its publication nothing)
       assert.ok(stops.has("walk") || stops.has("publication"), where);
       const unstopped = compile();
+      let marks = 0;
       for (const [phase, allowances] of stops)
         for (const allowance of [allowances[0]!, allowances.at(-1)!]) {
           const answers = analyse(allowance);
@@ -314,18 +319,34 @@ function settledPhases(
             const found = places.find((each) => `'${each.label}'` === place);
             return found !== undefined && answers.place(found.id, path).admitted.by === "undecided";
           };
-          const problems = stopProblems({
+          const deferred = answers.budget.deferred.map(
+            (d) => `${d.code} ${d.site.start}:${d.site.end}`,
+          );
+          let problems = stopProblems({
             unstopped,
             stopped: withTestAllowance(allowance, compile),
             settled: true,
             exact: phase === "publication",
-            deferred: answers.budget.deferred.map((d) => `${d.code} ${d.site.start}:${d.site.end}`),
+            deferred,
             undecided,
             fitting,
             violating,
           });
+          const owed = problems.filter(
+            (problem) => problem.startsWith("lost fallbackCheck|") || problem.startsWith("violating "),
+          );
+          if (marked !== undefined && owed.length > 0) {
+            const at = source.indexOf(marked.text, source.indexOf(marked.after));
+            assert.ok(
+              deferred.includes(`${marked.code} ${at}:${at + marked.text.length}`),
+              `${where} ${phase} @${allowance}: ${owed.join(" | ")}`,
+            );
+            problems = problems.filter((problem) => !owed.includes(problem));
+            marks += 1;
+          }
           assert.deepEqual(problems, [], `${where} ${phase} @${allowance}`);
         }
+      if (marked !== undefined) assert.ok(marks > 0, where);
     }
 }
 
@@ -365,15 +386,14 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
 });
 
 /**
- * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a
- * walk stop before that unit leaves nothing settled to check the default against: r4.99's open item, awaiting the
- * lead's ruling (`/tmp/agent-work/o4-3a-lead-fable/m4/s8-handover.md`).
+ * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
+ * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
+ * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the
+ * stop, to check it, is the per-demand fallback's step.
  */
-test(
-  "a stop after admission settled keeps an inferred list's default check",
-  { todo: "the ruling on reads that r4.99 leaves unsettled" },
-  () => {
-    settledPhases([
+test("a stop after admission settled marks an inferred list's default it leaves undecided", () => {
+  settledPhases(
+    [
       [
         'let items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
         [host(2, 3)],
@@ -384,6 +404,7 @@ test(
         [host(2, 3)],
         [host("bad", 3)],
       ],
-    ]);
-  },
-);
+    ],
+    { code: "TSV041", after: "default:", text: "hostValue" },
+  );
+});

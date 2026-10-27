@@ -2176,7 +2176,20 @@ export class Consumers {
     const into = contract.landsIn(c.result, rest);
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
-    if (directTags.length === 0) return false;
+    if (directTags.length === 0) {
+      // the type it is checked against a read a stop left undecided: owed against that key's contract, `unknown`
+      // with the reason `budget`, never dropped (TABLE r4.100); only a `null` fallback owes nothing
+      if (
+        direct.some(unsettledItem) &&
+        !withoutEmpty(this.#valueItems(value, node, rest)).every((item) => item.tag === "null")
+      )
+        this.#storeWarning(site, label, STOPPED[0]!, ["unknown"], {
+          rule: "fallback",
+          fallback: c.kind === "fallback",
+          type: ["unknown"],
+        });
+      return false;
+    }
     const directFamilies = new Set(directTags.map(family));
     // one domain for the quiet path, the error, the warning and the check: a written type's own kinds, else the family
     const admits = (tag: ItemTag, refs: readonly ItemTag[]): boolean =>
