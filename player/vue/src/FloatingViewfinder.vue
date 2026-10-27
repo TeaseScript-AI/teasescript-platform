@@ -22,7 +22,11 @@ defineProps<{
   /** The camera switch's name, or `null` without another camera to switch to. */
   switchLabel?: string | null;
 }>();
-const emit = defineEmits<{ switchCamera: [] }>();
+const emit = defineEmits<{
+  switchCamera: [];
+  /** The picture stopped while the page is shown. */
+  stalled: [];
+}>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
 const mirrored = defineModel<boolean>("mirrored", { default: true });
 
@@ -209,7 +213,13 @@ function measured(next: number) {
       <div class="floating-viewfinder-window">
         <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }" />
         <div class="floating-viewfinder-picture" :style="{ '--viewfinder-ratio': ratio }">
-          <Viewfinder v-if="track" :track="track" :mirrored="mirrored" @aspect="measured" />
+          <Viewfinder
+            v-if="track"
+            :track="track"
+            :mirrored="mirrored"
+            @aspect="measured"
+            @stalled="emit('stalled')"
+          />
           <div v-else class="floating-viewfinder-empty" />
           <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
           <slot />

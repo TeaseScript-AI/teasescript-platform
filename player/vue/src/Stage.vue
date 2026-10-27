@@ -23,6 +23,8 @@ const emit = defineEmits<{
   mediaLoad: [src: string | null];
   mediaFailure: [src: string | null];
   switchCamera: [];
+  /** The camera view's picture stopped while the page is shown. */
+  cameraStalled: [];
 }>();
 const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
 // The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
@@ -105,7 +107,13 @@ function cameraMeasured(ratio: number) {
         data-stage-camera
         :style="{ '--viewfinder-ratio': cameraRatio }"
       >
-        <Viewfinder v-if="camera" :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
+        <Viewfinder
+          v-if="camera"
+          :track="camera"
+          :mirrored="cameraMirrored"
+          @aspect="cameraMeasured"
+          @stalled="emit('cameraStalled')"
+        />
         <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
         <slot name="camera" />
         <ViewfinderControls

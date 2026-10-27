@@ -615,6 +615,7 @@ async function toggleFullscreen() {
             :preview="imagePreview"
             :camera-switch-label="player.cameraChoice.switchLabel.value"
             @switch-camera="player.cameraChoice.switchCamera"
+            @camera-stalled="player.cameraChoice.stalled"
             @media-aspect="mediaAspect = $event"
             @media-load="stageImageLoaded"
             @media-failure="stageImageFailed"
@@ -635,6 +636,7 @@ async function toggleFullscreen() {
             :track="captureInWindow ? capture!.track : player.viewfinder.value"
             :switch-label="player.cameraChoice.switchLabel.value"
             @switch-camera="player.cameraChoice.switchCamera"
+            @stalled="player.cameraChoice.stalled"
           >
             <ImageCapture v-if="captureInWindow" :view="capture!" />
           </FloatingViewfinder>

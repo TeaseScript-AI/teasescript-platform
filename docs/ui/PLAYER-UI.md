@@ -606,14 +606,17 @@ flips between its front and back cameras. Its accessible name says which camera 
 that, such as "Switch to back camera", and is "Switch camera" otherwise. A camera switched to starts from its own
 mirroring default. The script keeps running, and `takePhoto()` and an image request's camera step use the chosen
 camera. The Player opens the browser's default camera until the player switches, and remembers the chosen camera in
-this browser, like its [settings](#player-settings); a camera that is gone falls back to the default. Without an
-available camera the view is not shown. In the window it floats over the Player with a slim title bar. Like a desktop
-window, the user drags it anywhere and resizes it from any edge or corner, keeping the camera's aspect; focused, the
-arrow keys move it and + and - resize it. It floats in the whole Player, so showing or hiding the tools sidebar never
-moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it. It keeps its place while the
-Player is mounted, also when the script moves the view to the Stage and back. Over the Stage, the view covers the Stage
-image, which stays loaded underneath, and the Stage takes the camera's aspect until the view goes. The Player's camera
-view is the only one: the browser's own picture-in-picture is not offered for it.
+this browser, like its [settings](#player-settings); a camera that is gone falls back to the default. A camera whose
+stream the browser or the system ends or stops, as when another app takes it while the browser is in the background,
+opens again by itself with the same camera once the page is shown, while the view keeps its last picture and
+`takePhoto()` waits for it; one that is refused, cannot be opened again after a few tries, or keeps stopping right after
+it opened again stays off. Without an available camera the view is not shown. In the window it floats over the Player
+with a slim title bar. Like a desktop window, the user drags it anywhere and resizes it from any edge or corner, keeping
+the camera's aspect; focused, the arrow keys move it and + and - resize it. It floats in the whole Player, so showing or
+hiding the tools sidebar never moves it: it lies over the docked sidebar, and the narrow layout's drawer slides over it.
+It keeps its place while the Player is mounted, also when the script moves the view to the Stage and back. Over the
+Stage, the view covers the Stage image, which stays loaded underneath, and the Stage takes the camera's aspect until the
+view goes. The Player's camera view is the only one: the browser's own picture-in-picture is not offered for it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
@@ -983,12 +986,13 @@ new photo, also during the countdown, which then takes none, and a file given du
 file. Once the player works in these controls, each step moves keyboard focus to its main control, such as Take photo
 in the camera step and Use image once there is a preview. The camera step uses the session camera when it is open and
 leaves it on; otherwise it opens a camera of its own, only for itself, and turns it off on the return to the first step
-and when the request ends. A camera that is denied, missing, broken, or ended shows why in an alert on the viewfinder,
-and the chat offers **Try again**, which asks for it again, and Back. The steps belong to their request: they close,
-dropping the preview, when the request ends or is interrupted, or its session is replaced or stopped by a Player error;
-a restored or resumed request starts at the first step without a preview and never takes a photo by itself. Where no
-camera can be used, such as on a page that is not a secure context, the first step offers no Open camera, and a request
-that allows only the camera cannot be answered with an image; a [player notice](#player-notices) says so.
+and when the request ends. A camera that ends or stops opens again by itself, as for the camera view; one that is
+denied, missing, or broken, or cannot be opened again, shows why in an alert on the viewfinder, and the chat offers
+**Try again**, which asks for it again, and Back. The steps belong to their request: they close, dropping the preview,
+when the request ends or is interrupted, or its session is replaced or stopped by a Player error; a restored or resumed
+request starts at the first step without a preview and never takes a photo by itself. Where no camera can be used, such
+as on a page that is not a secure context, the first step offers no Open camera, and a request that allows only the
+camera cannot be answered with an image; a [player notice](#player-notices) says so.
 
 Skip, or its exact text submitted from the composer, answers the request with `null`, which the transcript records as
 the player message `Skip`; a camera the request opened turns off, as after any answer. Skip waits while a chosen image
