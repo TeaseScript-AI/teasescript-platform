@@ -789,3 +789,95 @@ test("a copy's inherited written field is decided at the copy's own store in eve
     }
   }
 });
+
+/**
+ * Sol's review r1 on #1059 (TABLE r4.80's repair): a place copying itself whole twice decides as before, with the sharing
+ * on and off; a record whose host or misfitting field another copy's written type lands in the copy owes its check or
+ * its error at the copy's store, the check in the plan stopping a forbidden value (all three layers); and a store
+ * rejected at a field stays rejected through a cycle of copies that adds a step. Both orders, the sharing on and off.
+ */
+test("copies of different sources, repeated self copies and a rejection through a path cycle keep their answers", () => {
+  const at = (source: string, text: string): string => {
+    const start = source.lastIndexOf(text);
+    return `${start}:${start + text.length}`;
+  };
+  const decided = (source: string, shared: boolean) =>
+    inBothOrders(() => {
+      const run = (): Answers =>
+        analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!);
+      const answers = shared ? run() : withoutSharing(run);
+      return {
+        outcome: answers.outcome,
+        diagnostics: answers.diagnostics.map(
+          (found) => `${found.class} ${found.kind} ${found.site.start}:${found.site.end}`,
+        ),
+        checks: answers.checks
+          .map(
+            (check) =>
+              `${check.target} [${sorted(check.against).join(",")}] ${check.site.start}:${check.site.end}${check.boundary ? " boundary" : ""}`,
+          )
+          .sort(),
+      };
+    });
+  const typed = "let typed:integer=1\n";
+  const self = `${typed}let a={f:typed}\na=a\na=a\nexit\n`;
+  const host = `${typed}let root={f:typed}\nlet other={f:hostValue,g:typed}\nlet a=root\na=other\nsay "stored"\nexit\n`;
+  const text = `${typed}let root={f:typed}\nlet other={f:"s",g:typed}\nlet a=root\na=other\nexit\n`;
+  const cycle = `${typed}let root={f:typed}\nlet bad={f:"s"}\nlet a=root\nlet b={p:a}\na=b.p\na=bad\nexit\n`;
+  for (const shared of [true, false]) {
+    const mode = shared ? "" : " (no sharing)";
+    assert.deepEqual(
+      decided(self, shared),
+      { outcome: "valid", diagnostics: [], checks: [] },
+      `self${mode}`,
+    );
+    const copy = at(host, "other");
+    assert.deepEqual(
+      decided(host, shared),
+      {
+        outcome: "warning-runtime-check",
+        diagnostics: [`warning-runtime-check written-target ${copy}`],
+        checks: [`a.f [integer] ${copy}`, `other [object] ${at(host, "hostValue")} boundary`],
+      },
+      `host${mode}`,
+    );
+    assert.deepEqual(
+      decided(text, shared),
+      {
+        outcome: "compile-error",
+        diagnostics: [`compile-error written-target ${at(text, "other")}`],
+        checks: [],
+      },
+      `text${mode}`,
+    );
+    assert.deepEqual(
+      decided(cycle, shared),
+      {
+        outcome: "compile-error",
+        diagnostics: [`compile-error written-target ${at(cycle, "bad")}`],
+        checks: [],
+      },
+      `cycle${mode}`,
+    );
+    const compile = (): InstructionPlan | null =>
+      compileSourceWithBackend(host, { globals: GLOBALS }, CORE_BACKEND).plan;
+    const plan = shared ? compile() : withoutSharing(compile);
+    assert.ok(plan !== null, `host plan${mode}`);
+    // (the record's own host data checked where it is declared, its copy's field where it lands)
+    assert.deepEqual(
+      checksOf(plan),
+      [`${at(host, "let other={f:hostValue,g:typed}")} object`, `${at(host, "a=other")} object`],
+      `host plan${mode}`,
+    );
+    const fits = runGlobals(plan, { hostValue: 5 });
+    assert.deepEqual(
+      [fits.status, fits.failure, fits.said.map(({ text: said }) => said)],
+      ["halted", null, ["stored"]],
+    );
+    const misfits = runGlobals(plan, { hostValue: "bad" });
+    assert.deepEqual(
+      [misfits.status, misfits.failure, misfits.said],
+      ["failed", `TSR058@${copy}`, []],
+    );
+  }
+});
