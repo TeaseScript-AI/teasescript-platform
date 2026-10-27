@@ -7,6 +7,8 @@ export const MAIN_FILE_PATH = "main.tease";
  */
 export interface UnreadablePackageFile {
   readonly path: string;
+  /** A folder, whose files the host could not list; `.` is the package root. */
+  readonly folder?: boolean;
   readonly reason: string;
 }
 
@@ -80,21 +82,21 @@ export function globMatches(pattern: string, paths: Iterable<string>): string[] 
     .sort(compareProjectPaths);
 }
 
-/**
- * Whether `path`, written out, is `entry`, a package file or folder, or lies in it; `.` stands for the package root
- * (#595).
- */
-export function liesIn(path: string, entry: string): boolean {
-  return entry === "." || path === entry || path.startsWith(`${entry}/`);
+/** Whether `path`, written out, names the file the host could not load, or lies in the folder (#595). */
+export function liesIn(path: string, entry: UnreadablePackageFile): boolean {
+  return entry.folder === true
+    ? entry.path === "." || path.startsWith(`${entry.path}/`)
+    : path === entry.path;
 }
 
-/** Whether a glob may match `entry`, a package file or folder, or a path in it; `.` stands for the package root. */
-export function globMayReach(pattern: string, entry: string): boolean {
-  if (entry === ".") return true;
+/** Whether a glob matches the file the host could not load, or may match a path in the folder. */
+export function globMayReach(pattern: string, entry: UnreadablePackageFile): boolean {
+  if (entry.folder !== true) return globMatches(pattern, [entry.path]).length > 0;
+  if (entry.path === ".") return true;
   const segments = pattern.split("/");
-  const parts = entry.split("/");
+  const parts = entry.path.split("/");
   return (
-    parts.length <= segments.length &&
+    parts.length < segments.length &&
     parts.every((part, index) => segmentMatches(segments[index]!, part))
   );
 }

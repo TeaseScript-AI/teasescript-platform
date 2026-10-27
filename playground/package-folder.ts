@@ -197,10 +197,12 @@ async function listFiles(root: string, unreadable: UnreadablePackageFile[]): Pro
         folder === ""
           ? {
               path: ".",
+              folder: true,
               reason: `The package folder cannot be opened${errorCode(error)}. Check that the package folder exists and that its permissions allow reading the folder.`,
             }
           : {
               path: folder,
+              folder: true,
               reason: `The folder '${folder}' cannot be opened${errorCode(error)}. Check that the permissions of '${folder}' allow reading the folder.`,
             },
       );

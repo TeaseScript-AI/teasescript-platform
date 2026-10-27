@@ -80,9 +80,10 @@ function packageCatalog(value: unknown): PackageCatalog | null {
   const parsedUnreadable: UnreadablePackageFile[] = [];
   for (const file of unreadable) {
     if (!isRecord(file)) return null;
-    const { path, reason } = file;
+    const { path, folder, reason } = file;
     if (typeof path !== "string" || typeof reason !== "string") return null;
-    parsedUnreadable.push({ path, reason });
+    if (folder !== undefined && typeof folder !== "boolean") return null;
+    parsedUnreadable.push({ path, reason, ...(folder === true ? { folder } : {}) });
   }
   return {
     images: parsedImages,

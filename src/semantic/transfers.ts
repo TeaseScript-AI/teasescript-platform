@@ -233,7 +233,7 @@ export function reportUnreadableFiles(
 ): boolean {
   let named = false;
   for (const file of validator.project.unreadable) {
-    if (!(glob ? globMayReach(path, file.path) : liesIn(path, file.path))) continue;
+    if (!(glob ? globMayReach(path, file) : liesIn(path, file))) continue;
     named = true;
     validator.unreadableNamed.add(file.path);
     validator.report(semanticCode.unreadableFile, file.reason, span);

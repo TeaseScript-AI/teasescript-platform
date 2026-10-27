@@ -157,6 +157,7 @@ test("the catalog follows edits that keep a file's size and time, and skips what
     unreadable: [
       {
         path: ".",
+        folder: true,
         reason:
           "The package folder cannot be opened (ENOENT). Check that the package folder exists and that its permissions allow reading the folder.",
       },
@@ -342,15 +343,17 @@ test("a package lists every .tease file it can read, and compiling it reports th
   if (process.getuid?.() !== 0) {
     await writeFile(join(root, "odd/locked.tease"), "exit\n");
     await chmod(join(root, "odd/locked.tease"), 0o000);
-    await mkdir(join(root, "odd/rooms/locked"), { recursive: true });
-    await writeFile(join(root, "odd/rooms/locked/b.tease"), "end\n");
-    await chmod(join(root, "odd/rooms/locked"), 0o000);
+    // A folder, though its name looks like a file's.
+    const lockedFolder = join(root, "odd/rooms/locked.tease");
+    await mkdir(lockedFolder, { recursive: true });
+    await writeFile(join(lockedFolder, "b.tease"), "end\n");
+    await chmod(lockedFolder, 0o000);
     // Removing the package needs the folder readable again.
-    const locked = await catalog().finally(() => chmod(join(root, "odd/rooms/locked"), 0o700));
+    const locked = await catalog().finally(() => chmod(lockedFolder, 0o700));
     const folder =
-      "The folder 'rooms/locked' cannot be opened (EACCES). Check that the permissions of 'rooms/locked' allow reading the folder.";
+      "The folder 'rooms/locked.tease' cannot be opened (EACCES). Check that the permissions of 'rooms/locked.tease' allow reading the folder.";
     assert.deepEqual(locked.unreadable, [
-      { path: "rooms/locked", reason: folder },
+      { path: "rooms/locked.tease", folder: true, reason: folder },
       { path: "latin1.tease", reason: latin1 },
       {
         path: "locked.tease",
@@ -358,17 +361,41 @@ test("a package lists every .tease file it can read, and compiling it reports th
           "'locked.tease' cannot be opened (EACCES). Check that the permissions of 'locked.tease' allow reading the file.",
       },
     ]);
-    // A glob that may pick a file in that folder cannot leave it out silently.
-    assert.deepEqual(
+    // A glob that may pick a file in that folder cannot leave it out silently; one that cannot reach into it picks as
+    // before.
+    const compiled = (main: string) =>
       compilePlayerProject({
-        files: [{ path: "main.tease", source: 'call "rooms/*/*.tease"\nexit' }],
+        files: [
+          { path: "main.tease", source: main },
+          { path: "rooms/open.tease", source: 'say "open"\nend' },
+        ],
         unreadableFiles: locked.unreadable,
-      }).diagnostics.map(({ path, severity, code, message }) => [path, severity, code, message]),
-      [
-        ["latin1.tease", "warning", "TSC011", latin1],
-        ["locked.tease", "warning", "TSC011", locked.unreadable[2].reason],
-        ["main.tease", "error", "TSC011", folder],
-      ],
+      });
+    const warnings = [
+      ["latin1.tease", "warning", "TSC011", latin1],
+      ["locked.tease", "warning", "TSC011", locked.unreadable[2].reason],
+    ];
+    const reached = compiled('call "rooms/*/*.tease"\nexit');
+    assert.equal(reached.plan, null);
+    assert.deepEqual(
+      reached.diagnostics.map(({ path, severity, code, message }) => [
+        path,
+        severity,
+        code,
+        message,
+      ]),
+      [...warnings, ["main.tease", "error", "TSC011", folder]],
+    );
+    const beside = compiled('call "rooms/*.tease"\nexit');
+    assert.notEqual(beside.plan, null);
+    assert.deepEqual(
+      beside.diagnostics.map(({ path, severity, code, message }) => [
+        path,
+        severity,
+        code,
+        message,
+      ]),
+      [["rooms/locked.tease", "warning", "TSC011", folder], ...warnings],
     );
   }
 });

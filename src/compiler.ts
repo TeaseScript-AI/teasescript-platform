@@ -225,7 +225,7 @@ function compileProjectFiles(
   const named = new Set(files.flatMap((file) => [...(file.unreadableNamed ?? [])]));
   // A missing `main.tease` reports the one it lies in, as an error of the inventory.
   if (files[0]?.result.path !== MAIN_FILE_PATH)
-    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file.path)) named.add(file.path);
+    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file)) named.add(file.path);
   const packageDiagnostics = [
     ...catalog.diagnostics,
     // A path or glob that names one reports it there instead.
@@ -295,7 +295,7 @@ function checkProjectFiles(
     }
   }
   if (!byPath.has(MAIN_FILE_PATH)) {
-    const main = unreadable.find((file) => liesIn(MAIN_FILE_PATH, file.path));
+    const main = unreadable.find((file) => liesIn(MAIN_FILE_PATH, file));
     diagnostics.push(
       main === undefined
         ? projectDiagnostic(

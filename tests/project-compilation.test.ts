@@ -380,7 +380,7 @@ test("a package file the host could not load is an error where a path written ou
     path: "sounds/bell*.mp3",
     reason: "The name of 'sounds/bell*.mp3' is not usable.",
   };
-  const attic = { path: "attic", reason: "The folder 'attic' cannot be opened." };
+  const attic = { path: "attic", folder: true, reason: "The folder 'attic' cannot be opened." };
   const unreadableFiles = [broken, locked, bell, attic];
   const compile = (main: string) =>
     compileProject([{ path: "main.tease", source: main }], { unreadableFiles });
@@ -440,7 +440,7 @@ test("a package file the host could not load is an error where a path written ou
   // not read.
   for (const main of [
     { path: "main.tease", reason: "The text of 'main.tease' cannot be read." },
-    { path: ".", reason: "The package folder cannot be opened." },
+    { path: ".", folder: true, reason: "The package folder cannot be opened." },
   ])
     assert.deepEqual(
       compileProject([], { unreadableFiles: [main] }).diagnostics.map(
