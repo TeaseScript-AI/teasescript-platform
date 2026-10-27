@@ -2442,7 +2442,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     name: "S6c-choice-crossed-gets",
     measures:
       "TABLE r4.85, review r4 B1: a choice of k `l_i.get(0, default: a_(k-1-i))`, aliases of one list and one record, every field read",
-    // 83,227 / 166,444 units at k = 64, 128 in both orders (2.0059; `main` 375,053 / 1,355,246, 3.62: the choice's
+    // 83,231 / 166,448 units at k = 64, 128 in both orders (2.0059; `main` 375,053 / 1,355,246, 3.62: the choice's
     // options read one by one at each field, a computed value having no read class)
     program: (k) =>
       main(
@@ -2461,7 +2461,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     name: "S6c-choice-records",
     measures:
       "TABLE r4.85: a choice of k records `{g: a_i}` of aliases of one record, every field read",
-    // 69,450 / 139,048 units at k = 64, 128 (2.0071, reversed 2.0070; `main` 212,767 / 732,257, 3.45)
+    // 69,454 / 139,052 units at k = 64, 128 (2.0071, reversed 2.0069; `main` 212,767 / 732,257, 3.45)
     program: (k) =>
       main(
         lines(
@@ -2529,7 +2529,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     name: "S6c-record-adds-unknown",
     measures:
       "TABLE r4.85: k `ys.add({g: a_i})` of aliases of one k-field record of host data, every field read",
-    // 146,086 / 294,277 units at k = 64, 128 in both orders (2.0204; `main` 487,159 / 1,729,478, 3.56: the exact
+    // 152,934 / 307,973 units at k = 64, 128 in both orders (2.0197; `main` 487,159 / 1,729,478, 3.56: the exact
     // add chain walked per field, a literal having no read class)
     program: (k) =>
       main(
@@ -2600,7 +2600,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
     name: "F12-index-chain",
     measures:
       "F12, §8: a list nested k deep around a 4-field record of host data, each field read through k index steps",
-    // 333,162 / 1,423,306 units at k = 64, 128 in both orders (4.4803; `main` 707,530 / 4,318,378, 6.4008)
+    // 334,190 / 1,425,929 units at k = 64, 128 (4.4747; reversed 4.4756; `main` 707,530 / 4,318,378, 6.4008)
     measured: 4.49,
     program: (k) =>
       main(
@@ -2637,7 +2637,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
  * bound at larger sizes; reconsidered when a
  * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
  * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
- * 660 adds (29,608,315 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
+ * 660 adds (29,748,699 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
  * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
  * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
  * has k keys).
@@ -2646,7 +2646,7 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A5-two-sources-alternating-adds",
     measures: "§3.3: k adds alternating between two records of host data, each field read",
-    // 391,708 / 1,309,391 units at k = 64, 128 (3.3558; reversed 3.3557)
+    // 405,404 / 1,336,783 units at k = 64, 128 in both orders (3.3102)
     measured: 3.36,
     program: (k) =>
       main(
@@ -2664,7 +2664,7 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A5-three-sources-adds",
     measures: "§3.3: k adds of three records of host data in the turn a, b, c, b, each field read",
-    // 450,301 / 1,442,998 units at k = 64, 128 in both orders (3.2163)
+    // 470,597 / 1,483,590 units at k = 64, 128 in both orders (3.1642)
     measured: 3.22,
     program: (k) =>
       main(
@@ -2681,9 +2681,9 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
   ...[
-    // 686,028 / 1,899,201 units at k = 64, 128 (2.7783; reversed 2.7782)
+    // 740,812 / 2,008,769 units at k = 64, 128 in both orders (2.7212)
     { n: 8, measured: 2.78 },
-    // 736,708 / 2,000,781 units at k = 64, 128 (2.7255; reversed 2.7254)
+    // 798,340 / 2,124,045 units at k = 64, 128 (2.6700; reversed 2.6699)
     { n: 9, measured: 2.73 },
   ].map(({ n, measured }): KnownProduct => ({
     name: `A5-cycle-of-${n}-sources-adds`,
