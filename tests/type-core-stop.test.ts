@@ -559,6 +559,40 @@ test("a stop keeps the empty check of a selection read through a copied written 
 });
 
 /**
+ * The key's finished contract is a domain too (TABLE r4.106): `b.v` is only `null` at the read though `v` may hold an
+ * integer later, so no stop gives the fallback the integer family (Codex r10's B1, a band inside the walk): at every
+ * settled walk stop, in the source order, the text fallback still runs.
+ */
+test("no stop in a settled walk gives a fallback the family of its key's contract", () => {
+  const source =
+    'let v: integer? = null\nlet a = {v:v}\nlet b = a\nsay b.v otherwise hostValue\nv = 2\nsay "AFTER"\nexit\n';
+  const options = { globals: ["hostValue", "hostOther"] };
+  const request = coreRequest([{ path: "main.tease", source }], options.globals);
+  assert.ok(request !== null);
+  const compile = () => compileSourceWithBackend(source, options, CORE_BACKEND);
+  const walk = phaseEnds(analyseCore(request).budget.total, (allowance) => {
+    const { stoppedIn, settled } = withTestAllowance(allowance, () => analyseCore(request)).budget;
+    return settled ? stoppedIn : null;
+  }).get("walk");
+  assert.ok(walk !== undefined);
+  const unstopped = compile();
+  for (let allowance = walk[0]; allowance <= walk[1]; allowance += 1)
+    assert.deepEqual(
+      stopProblems({
+        unstopped,
+        stopped: withTestAllowance(allowance, compile),
+        settled: true,
+        exact: false,
+        deferred: [],
+        fitting: [host("good", 3)],
+        violating: [],
+      }).filter((problem) => problem.startsWith("fitting") || problem.startsWith("new")),
+      [],
+      `@${allowance}`,
+    );
+});
+
+/**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
  * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
  * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the
