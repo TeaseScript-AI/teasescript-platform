@@ -53,15 +53,20 @@ function harness(
   const requests: CaptureRequest[] = [];
   const diagnostics: PlayerDiagnostic[] = [];
   const grabbed: FakeTrack[] = [];
-  const frames = { fail: false, grabbed };
+  const frames = { fail: false, hold: false, grabbed };
   const host: CaptureHost<FakeTrack> = {
     acquire: (request) => (requests.push(request), grant(request)),
     listDevices: async () => [],
     createRecorder: () => {
       throw new Error("not used");
     },
-    grabFrame: async (track) => {
+    grabFrame: async (track, released) => {
       if (frames.fail) throw Object.assign(new Error(), { name: "NotReadableError" });
+      // A held grab waits for a frame until its stream stops, as the browser's does.
+      if (frames.hold) {
+        frames.hold = false;
+        await new Promise((_, reject) => released.addEventListener("abort", reject));
+      }
       frames.grabbed.push(track);
       return new RgbaImage(1, 1, new Uint8ClampedArray([1, 2, 3, 255]));
     },
@@ -291,6 +296,14 @@ test("a camera whose stream ended or stopped opens again with the same camera, a
   await settle();
   assert.equal(opened.length, 9);
   assert.equal((await camera.answer()).kind, "captured");
+  // A photo whose stream ends while it waits for its frame comes from the reopened camera, which stays open.
+  frames.hold = true;
+  const photo = camera.answer();
+  await settle();
+  opened[8]?.end();
+  assert.equal((await photo).kind, "captured");
+  assert.equal(frames.grabbed.at(-1), opened[9]);
+  assert.equal(camera.available, true);
   assert.deepEqual(diagnostics, []);
 });
 
@@ -336,6 +349,17 @@ test("a camera that is refused, cannot be opened again, or keeps stopping stops 
   assert.equal(opened.length, 4);
   assert.equal(stopping.camera.available, false);
   assert.match(stopping.diagnostics[0]?.message ?? "", /kept stopping/);
+  // Also one whose stream ends without an event, as a view whose frames stopped reports.
+  const silent: FakeTrack[] = [];
+  const quiet = harness(newTracks(silent));
+  await quiet.camera.open(true);
+  for (let recovery = 0; recovery < 4; recovery++) {
+    silent.at(-1)?.stop();
+    quiet.camera.stalled();
+    await settle();
+  }
+  assert.equal(silent.length, 4);
+  assert.equal(quiet.camera.available, false);
 });
 
 test("a session released while the browser answers never reports its camera as opened", async () => {

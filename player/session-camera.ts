@@ -239,10 +239,12 @@ export class SessionCamera<Track extends CaptureTrack> {
     const now = this.#now();
     if (now - this.#recoveredAt >= RECOVERY_SPACING_MS) this.#recoveries = 0;
     if (this.#recoveries >= RECOVERIES) {
-      // Trouble that keeps coming back right after each recovery stops them: a camera without a stream then stays
-      // unavailable, and one that still has its stream, such as a muted one, is left to resume by itself.
+      // Trouble that keeps coming back right after each recovery stops them: a camera whose stream is gone or ended,
+      // also without an event, then stays unavailable, and one with a live stream, such as a muted one, is left to
+      // resume by itself.
       this.#recoveriesStopped = true;
-      if (this.#device.state("camera").status !== "active")
+      const track = this.#device.track("camera");
+      if (track === null || track.readyState === "ended")
         this.#markUnavailable("revoked", "kept stopping after it was opened again");
       return;
     }
@@ -273,6 +275,15 @@ export class SessionCamera<Track extends CaptureTrack> {
   /** Captures a photo for `takePhoto()`, or reports why the camera is unavailable. */
   async answer(): Promise<PlayerCaptureAnswer> {
     const generation = this.#generation;
+    let photo = await this.#capture(generation);
+    // A stream that ended, switched, or opened again while the photo waited for its frame leaves the camera to its
+    // successor, and the photo comes from that one.
+    if (photo === "retired") photo = await this.#capture(generation);
+    return photo === "retired" ? { kind: "unavailable", reason: "revoked" } : photo;
+  }
+
+  /** One try at a photo; `"retired"` when its stream ended or was replaced while the photo was taken. */
+  async #capture(generation: number): Promise<PlayerCaptureAnswer | "retired"> {
     // A photo never comes from a dead stream: it waits for a switch, or for the camera to open again, which it starts
     // itself when nothing noticed earlier that the stream ended or stays muted.
     if (this.#switching !== null) await this.#switching;
@@ -289,6 +300,7 @@ export class SessionCamera<Track extends CaptureTrack> {
     const photo = await this.#device.capturePhoto();
     if (generation !== this.#generation) return { kind: "unavailable", reason: "revoked" };
     if (photo.kind === "photo") return { kind: "captured", reference: photo.media.reference };
+    if (photo.failure.kind === "inactive" || live.readyState !== "live") return "retired";
     this.#markUnavailable(REASONS[photo.failure.kind], "could not capture a photo", photo.failure);
     return { kind: "unavailable", reason: REASONS[photo.failure.kind] };
   }
