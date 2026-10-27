@@ -61,8 +61,10 @@ const code = (pattern: string): RegExp => new RegExp(pattern);
  * word such as `true` is none. And whether its own text may stand in code: on one line, without a comment.
  */
 const NAME = "(?!(?:true|false|null)\\b)[A-Za-z_]\\w*";
+/** A key written as text without `${...}`: with escapes, and a `$` only before no `{`. */
+const KEY = '"(?:[^"\\\\$]|\\\\.|\\$(?!\\{))*"';
 const STABLE = new RegExp(
-  `^${NAME}(?:\\.(?!random\\b)[A-Za-z_]\\w*|\\[(?:-?\\d+|${NAME}|"[^"\\\\$]*")\\])*$`,
+  `^${NAME}(?:\\.(?!random\\b)[A-Za-z_]\\w*|\\[\\s*(?:-?\\d+|${NAME}|${KEY})\\s*\\])*$`,
 );
 const stablePath = (text: string): boolean => STABLE.test(text);
 const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
@@ -841,6 +843,10 @@ const SELECTIONS: readonly (readonly [string, boolean])[] = [
   [`${GROUPS}say ⟦groups[1]⟧.last\nexit\n`, true],
   [`${GROUPS}let i = 1\nsay ⟦groups[i]⟧.last\nexit\n`, true],
   ['let d = dict{"a": [21], "b": []}\nsay ⟦d["a"]⟧.last\nexit\n', true],
+  // (keys as the parser reads them: an escape, a `$` before no `{`, spaces; Sol r6)
+  ['let d = dict{"a\\"b": [21], "c": []}\nsay ⟦d["a\\"b"]⟧.last\nexit\n', true],
+  ['let d = dict{"a$b": [21], "c": []}\nsay ⟦d["a$b"]⟧.last\nexit\n', true],
+  ['let d = dict{"a": [21], "b": []}\nsay ⟦d[ "a" ]⟧.last\nexit\n', true],
 ];
 
 /** Seeds under which `groups.random` picks, in turn, the same and different selections. */
@@ -872,6 +878,8 @@ test("a length check's fix checks the selection the read takes, under every seed
   for (const [marked, stable] of SELECTIONS) {
     const collection = /⟦([^⟧]*)⟧/.exec(marked)![1]!;
     const source = marked.replace(/[⟦⟧]/g, "");
+    // (the parity's own oracle agrees with each case)
+    assert.equal(stablePath(collection), stable, collection);
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     const text = messageSource([source]);
