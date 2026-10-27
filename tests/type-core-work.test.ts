@@ -13,6 +13,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
   VALUE_SHARING_PROGRAMS,
@@ -158,13 +159,13 @@ test("the value side's work on same sources and typed presets grows with the pro
 });
 
 /**
- * Read chains through nested literals (`READ_CHAIN_PRODUCTS`): each link's key is one step longer, so their contracts
- * grow with the chain's depth (TABLE §8): proposed known products, a regression check on the 64 → 128 step only, each
- * held to its measured doubling in either order; not a bound at larger sizes.
+ * The value side's gated known limits (TABLE r4.83 (2), (5)): read chains through nested literals, each link's key one
+ * step longer (`READ_CHAIN_PRODUCTS`), and adds of several sources into one list in turn (`MIXED_ADD_PRODUCTS`); a
+ * regression check on the 64 → 128 step only, each held to its measured doubling in either order.
  */
-test("read chains through nested literals grow no faster than measured", () => {
+test("read chains and mixed-source adds grow no faster than measured", () => {
   const steep: string[] = [];
-  for (const family of READ_CHAIN_PRODUCTS) {
+  for (const family of [...READ_CHAIN_PRODUCTS, ...MIXED_ADD_PRODUCTS]) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
       const small = analysed(at64, reversed).budget;

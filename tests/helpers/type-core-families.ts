@@ -2439,11 +2439,12 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
 /**
  * Read chains through nested literals (S6's PR, "Inherited products"; S6c): a list nested k deep read through k
  * `.first`, the same around a record read through k index steps, and a record nested k deep read through its k
- * properties. Each link reads a key one step longer, so the k
- * keys' contracts and their texts grow with the chain's depth (TABLE §8: a lookup costs the key's depth): **proposed
- * known products**, gated at their measured 64 → 128 step in r4.45's form, not a bound at larger sizes. On `main` the
- * `.first` chain grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the allowance at
- * k = 20); S6c reads a selection's whole answer once per value, and a projection's path scans its member steps once.
+ * properties. Each link reads a key one step longer, so the k keys' contracts and their texts grow with the chain's
+ * depth (TABLE §8: a lookup costs the key's depth): gated known limits (TABLE r4.83 (2)) at their measured 64 → 128
+ * step in r4.45's form, not a bound at larger sizes; reconsidered when a realistic chain approaches the allowance. On
+ * `main` the `.first` chain grew as 2^k (each selection read its owner twice, at its step and whole, neither once: the
+ * allowance at k = 20); S6c reads a selection's whole answer once per value, and a projection's path scans its member
+ * steps once.
  */
 export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2492,6 +2493,78 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
         ),
       ),
   },
+];
+
+/**
+ * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
+ * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits (TABLE
+ * r4.83 (5)) at their measured 64 → 128 step in r4.45's form, not a bound at larger sizes; reconsidered when a
+ * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
+ * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
+ * 660 adds (29,606,342 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
+ * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
+ * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
+ * has k keys).
+ */
+export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "A5-two-sources-alternating-adds",
+    measures: "§3.3: k adds alternating between two records of host data, each field read",
+    // 391,511 / 1,309,002 units at k = 64, 128 (3.3565; reversed 3.3564)
+    measured: 3.36,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          `let other = {${fields(k, () => "[2, raw][1]")}}`,
+          "let xs = []",
+          rows(k, (i) => (i % 2 === 0 ? "xs.add(root)" : "xs.add(other)")),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-three-sources-adds",
+    measures: "§3.3: k adds of three records of host data in the turn a, b, c, b, each field read",
+    // 450,094 / 1,442,599 units at k = 64, 128 in both orders (3.2169)
+    measured: 3.22,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let a = {${fields(k, () => "[1, raw][1]")}}`,
+          `let b = {${fields(k, () => '["s", raw][1]')}}`,
+          `let c = {${fields(k, () => "[2.5, raw][1]")}}`,
+          "let xs = []",
+          rows(k, (i) => `xs.add(${"abcb"[i % 4]})`),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...[
+    // 685,831 / 1,898,812 units at k = 64, 128 (2.7785; reversed 2.7784)
+    { n: 8, measured: 2.78 },
+    // 736,511 / 2,000,392 units at k = 64, 128 (2.7256 in both orders)
+    { n: 9, measured: 2.73 },
+  ].map(({ n, measured }): KnownProduct => ({
+    name: `A5-cycle-of-${n}-sources-adds`,
+    measures: `§3.3: k adds of ${n} records of host data in turn, each field read`,
+    measured,
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          rows(n, (j) => `let s${j} = {${fields(k, () => `[${j}, raw][1]`)}}`),
+          "let xs = []",
+          rows(k, (i) => `xs.add(s${i % n})`),
+          rows(k, (i) => `repeat xs[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**
@@ -3693,6 +3766,62 @@ export const VALUE_SHARING_PROGRAMS: readonly {
       "let l0 = xs",
       "let box = [l0.get(0, default: a0), l1.get(0, default: a1), l1.get(0, default: a0)]",
       "repeat box[0].f0 {}",
+    ],
+  ] as const
+).map(([name, ...source]) => ({
+  name,
+  files: [{ path: "main.tease", source: `${source.join("\n")}\nexit\n` }],
+}));
+
+/**
+ * S6's sharing faults on `main` (TABLE r4.83 (4)), held from the differential until their repair: the first two reorder
+ * their diagnostics with the sharing on, the third publishes 16 diagnostics and 17 checks against 11 and 12 (Sol's r3).
+ */
+export const HELD_SHARING_FAULTS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (
+  [
+    [
+      "chain: a period of three",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let b = {f0: 2.5, f1: [1, raw][1]}",
+      'let c = {f0: ["s", raw][1], f1: 1}',
+      "let xs = []",
+      ...Array.from({ length: 3 }, () => ["xs.add(root)", "xs.add(b)", "xs.add(c)"]).flat(),
+      "repeat xs[0].f0 {}",
+      "repeat xs[0].f1 {}",
+    ],
+    [
+      "chain: alternation with a call storing the list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let other = {f0: 1.5, f1: 1}",
+      "global xs = []",
+      "function push {",
+      '  xs.add({f0: "s", f1: "s"})',
+      "  return 0",
+      "}",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "xs.add(other)",
+      "let t = push()",
+      "xs.add(root)",
+      "xs.add(other)",
+      "xs.add(root)",
+      "let n: integer = xs[0].f0",
+    ],
+    [
+      "chain: six adds of a host element, its last and a random element read",
+      "let root = [1.5, hostValue].first",
+      "let xs = [1.5]",
+      ...Array.from({ length: 6 }, () => "xs.add(root)"),
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+      "repeat xs.last {}",
+      "repeat xs.random {}",
     ],
   ] as const
 ).map(([name, ...source]) => ({

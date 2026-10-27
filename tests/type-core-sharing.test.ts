@@ -15,6 +15,8 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  HELD_SHARING_FAULTS,
+  MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
   VALUE_SHARING_PROGRAMS,
@@ -93,6 +95,7 @@ function programs(): Program[] {
     ADMISSION_SAME_SOURCES,
     ADMISSION_INGRESS_PRESETS,
     READ_CHAIN_PRODUCTS,
+    MIXED_ADD_PRODUCTS,
   ])
     for (const family of families)
       for (const k of [2, 3])
@@ -210,3 +213,19 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
+
+/** S6's sharing faults on `main` (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing until their repair. */
+test(
+  "S6's held sharing faults are output-neutral in both orders",
+  { todo: "S6 sharing fault on main, TABLE r4.83 (4), repair pending" },
+  () => {
+    const differing: string[] = [];
+    for (const program of HELD_SHARING_FAULTS) {
+      const once = prepared(program);
+      for (const reversed of [false, true])
+        if (published(once, reversed) !== withoutSharing(() => published(once, reversed)))
+          differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+    }
+    assert.deepEqual(differing, []);
+  },
+);
