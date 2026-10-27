@@ -40,10 +40,9 @@ Each option needs an accepted decision on at least one point:
 
 ## Proposal on record
 
-[#260][i260] (label `owner: parked`) records a direction the owner endorsed on 2026-08-07 "as a concept but not in
-every detail": Laravel-owned server-rendered pages by default, Vue islands or dedicated trusted Vue apps where
-justified, and a hard DOM boundary around the Player iframe. Bootstrap and the exact architecture remain open. It is
-not accepted.
+[#260][i260] records a direction the owner endorsed on 2026-08-07 "as a concept but not in every detail":
+Laravel-owned server-rendered pages by default, Vue islands or dedicated trusted Vue apps where justified, and a hard
+DOM boundary around the Player iframe. Bootstrap and the exact architecture remain open. It is not accepted.
 
 ## Options
 
