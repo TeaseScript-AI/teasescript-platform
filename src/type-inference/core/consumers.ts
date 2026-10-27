@@ -1510,6 +1510,8 @@ export class Consumers {
         }
       }
     }
+    // (the member-answer oracle's paths the copies land and no decision took)
+    admission.compareLanded();
   }
 
   /**

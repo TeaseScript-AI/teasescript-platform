@@ -92,14 +92,41 @@ interface InheritedCopy {
 }
 
 /**
+ * A4 through copies' landings (`groups`, r4.75 (1)): where copies of written types land in each place, and the copies of
+ * inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
+ * copies' sources' landed paths below their strips, asked of those sources, never made per copy (TABLE r4.80). A cycle
+ * of copies has its members' landed paths made once, as the landing within it brings them.
+ */
+interface Inheritance {
+  /** Per place, the paths copies of written types land at in it (their elements too), with each type at the path. */
+  readonly seeds: ReadonlyMap<PlaceId, ReadonlyMap<string, ReadonlySet<TypeTerm>>>;
+  /** Per place, the copies of inheriting places that land in it, each distinct one once. */
+  readonly into: ReadonlyMap<PlaceId, readonly InheritedCopy[]>;
+  /** The places in a cycle of copies, by cycle (`cyclesOf`). */
+  readonly cycleOf: ReadonlyMap<PlaceId, number>;
+  /** Per member of a cycle of copies, its landed paths. */
+  readonly cycles: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  /** The places copies join, each one's sources' before its own (`cyclesOf`). */
+  readonly order: readonly (readonly PlaceId[])[];
+}
+
+/** Whether `path` starts with `prefix` (or is it). */
+function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
+  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
+}
+
+/**
  * The cycles of places a graph of copies holds (Tarjan's strongly connected components, with an explicit stack): each
- * place in one, a place copied into itself too, by the cycle's number.
+ * place in one, a place copied into itself too, by the cycle's number; and every component of the graph, each place's
+ * sources' before its own.
  */
 function cyclesOf(
   edges: ReadonlyMap<PlaceId, readonly InheritedCopy[]>,
   work: { charge(counter: "indexSteps", units?: number): void },
-): Map<PlaceId, number> {
+): { readonly cycleOf: Map<PlaceId, number>; readonly order: readonly (readonly PlaceId[])[] } {
   const out = new Map<PlaceId, number>();
+  // (Tarjan's components come a place's copies' first)
+  const components: PlaceId[][] = [];
   const order = new Map<PlaceId, number>();
   const low = new Map<PlaceId, number>();
   const stack: PlaceId[] = [];
@@ -153,9 +180,10 @@ function cyclesOf(
       work.charge("indexSteps", targets.length);
       if (members.length > 1 || targets.includes(frame.place))
         for (const member of members) out.set(member, frame.place);
+      components.push(members);
     }
   }
-  return out;
+  return { cycleOf: out, order: components.reverse() };
 }
 
 /**
@@ -533,6 +561,51 @@ export interface Decision {
   readonly published: boolean;
 }
 
+/** A path's stores: the direct ones and the prefixes whole stores or adds reach (`#inputs`). */
+type Inputs = {
+  readonly direct: readonly Candidate[];
+  readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
+};
+
+/** A decision before it is recorded and its candidates taken (`#decided`). */
+interface Decided {
+  readonly key: Key;
+  /** The decided kinds; `null` where nothing is checked; with `unknown` where an unrestricted part decides nothing. */
+  readonly tags: readonly ItemTag[] | null;
+  readonly nullable: boolean;
+  readonly byWritten: boolean;
+  /** Whether the place's own written type decides (A1). */
+  readonly own: boolean;
+  /** A written parameter's or result's (A9, C7). */
+  readonly transfer: boolean;
+  readonly permitsNull: boolean;
+  readonly decider: Definition | null;
+  readonly site: SourceSite | null;
+  readonly published: boolean;
+}
+
+/** A decision's fields where nothing is checked (`#decided`). */
+const NOTHING = {
+  nullable: true,
+  byWritten: false,
+  permitsNull: false,
+  decider: null,
+  site: null,
+  published: false,
+} as const;
+
+/** Whether items hold one a decision does not admit (A5: an offending kind; a `null` where none is admitted). */
+function offending(items: readonly Item[], decision: Decided): boolean {
+  const tags = decision.tags ?? [];
+  return items.some((item) =>
+    item.tag === "null"
+      ? !decision.nullable
+      : item.tag === "unknown"
+        ? contributes(item)
+        : item.tag !== "empty" && !tags.some((tag) => fits(item.tag, tag, decision.byWritten)),
+  );
+}
+
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
@@ -656,6 +729,14 @@ export class Admission {
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   #groups: { readonly root: PlaceId; readonly path: readonly string[] }[] | null = null;
+  /** A4 through copies' landings (`#inheritance`), and per place and path whether its copies land it (`#landed`). */
+  #inherits: Inheritance | null = null;
+  readonly #landedPaths = new Map<string, boolean>();
+  /** Per place copies land in, the landed paths whose contents may not fit (`#hotSets`). */
+  #hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
+  /** Per key, its decision before it is recorded (`#decided`); the keys `decide` took (`#lazily`). */
+  readonly #decisions = new Map<Key, Decided | null>();
+  readonly #attempted = new Set<Key>();
   #landings: LandingIndex | null = null;
 
   public constructor(
@@ -1094,8 +1175,7 @@ export class Admission {
       if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
       paths.add(keptPathText(this.#work, key));
     }
-    // A1, A8: a written collection's elements at every depth; A4: a copied written type's paths, where the copy lands
-    // and below, whether a read asks for them or not
+    // A1, A8: a written collection's elements at every depth
     for (const place of program.places) {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
@@ -1107,83 +1187,34 @@ export class Admission {
       )
         paths.add(keptText(this.#work, path));
     }
-    const copied = new Map<Key, Set<TypeTerm>>();
-    // (per place and path, the rests below it of the paths copies of written types land at in the place: all of them,
-    // and its base ones, those its own written copies and its copies from outside its cycle of places bring)
-    const below = { all: new Map<string, Set<string>>(), base: new Map<string, Set<string>>() };
-    const land = (place: PlaceId, path: readonly string[], base: boolean): boolean => {
-      let grew = false;
-      for (const rests of base ? [below.all, below.base] : [below.all]) {
-        const own = keptParts(this.#work, place, "=", path);
-        if (rests.has(own)) continue;
-        rests.set(own, new Set());
-        grew = true;
-        for (let length = 0; length < path.length; length += 1) {
-          work.charge("indexSteps");
-          const prefix = keptParts(this.#work, place, path.slice(0, length));
-          let found = rests.get(prefix);
-          if (found === undefined) rests.set(prefix, (found = new Set()));
-          found.add(keptText(this.#work, path.slice(length)));
-        }
-      }
+    const at = (place: PlaceId): Set<string> => {
       let paths = roots.get(place);
       if (paths === undefined) roots.set(place, (paths = new Set()));
-      paths.add(keptText(this.#work, path));
-      return grew;
+      return paths;
     };
-    for (const { place, path, term } of this.#a4Copies) {
-      // (once per landing path and written type: k copies of one binding into one literal are one)
-      const at = keptKey(this.#work, place, path);
-      let terms = copied.get(at);
-      if (terms === undefined) copied.set(at, (terms = new Set()));
-      work.charge("indexSteps");
-      if (terms.has(term)) continue;
-      terms.add(term);
-      land(place, path, true);
-      for (
-        let step = ["element"];
-        termAt(term, step) !== null;
-        step = joinSteps(step, ["element"])
-      ) {
-        work.charge("indexSteps");
-        land(place, joinSteps(path, step), true);
-      }
+    // A4: a copied written type's paths, where the copy lands and below (A8: its elements)
+    const { seeds, into, order } = this.#inheritance();
+    for (const [place, paths] of seeds) {
+      const own = at(place);
+      for (const text of paths.keys()) own.add(text);
     }
-    // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
-    // copies of written types land at in that place, sources before their copies; within a cycle of places (a place
-    // copied into itself, `a = {p: a}`) it brings the place's base paths only, and a copy that adds or takes a step
-    // keeps them out of its own base, so no path grows by going round
-    const bySource = new Map<PlaceId, InheritedCopy[]>();
-    for (const copy of this.#a4Inherits) {
-      const list = bySource.get(copy.from);
-      if (list === undefined) bySource.set(copy.from, [copy]);
-      else list.push(copy);
-    }
-    const cycleOf = cyclesOf(bySource, work);
-    // (each source queued once at a time: taken again only where its paths grew after it was taken)
-    const sources = [...bySource.keys()];
-    const queued = new Set(sources);
-    for (let index = 0; index < sources.length; index += 1) {
-      queued.delete(sources[index]!);
-      for (const { place, path, from, strip } of bySource.get(sources[index]!)!) {
-        work.charge("indexSteps");
-        const cycle = cycleOf.get(from);
-        const across = cycle === undefined || cycle !== cycleOf.get(place);
-        // (within a cycle a whole copy, no step added or taken, carries the base paths on as base: they keep their
-        // length going round, so a cycle of whole copies brings each member every one, Sol's round 4 B1)
-        const keeps = across || (path.length === 0 && strip.length === 0);
-        let grew = land(place, path, keeps);
-        const rests = (across ? below.all : below.base).get(joinParts(from, strip));
-        for (const rest of [...(rests ?? [])]) {
+    // A4 through copies (r4.75 (1)): a copy of a place that may inherit a written type lands at its own path; below it,
+    // where copies of written types land in that place, it is decided with the copy only where the place's contents may
+    // not fit (`#hotSets`: a store's host data or other kinds, two copies of different sources meeting, a store taken again),
+    // and where an answer asks otherwise (`#lazily`), so a copy costs its own divergences, never its source's every
+    // path (the owner's reviewer's F1 on #1049, TABLE r4.80; r4.51)
+    const hots = this.#hotSets();
+    for (const component of order)
+      for (const place of component) {
+        const copies = into.get(place);
+        if (copies === undefined) continue;
+        const own = at(place);
+        for (const { path } of copies) own.add(keptText(this.#work, path));
+        for (const path of hots.get(place) ?? []) {
           work.charge("indexSteps");
-          grew = land(place, joinSteps(path, splitPath(rest)), keeps) || grew;
-        }
-        if (grew && bySource.has(place) && !queued.has(place)) {
-          queued.add(place);
-          sources.push(place);
+          own.add(keptText(this.#work, path));
         }
       }
-    }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
       for (const path of paths) groups.push({ root, path: keptSplit(this.#work, path) });
@@ -1191,130 +1222,490 @@ export class Admission {
     return groups;
   }
 
+  /** A4 through copies' landings (`Inheritance`), once per pass. */
+  #inheritance(): Inheritance {
+    if (this.#inherits !== null) return this.#inherits;
+    const work = this.pass.program.work;
+    const seeds = new Map<PlaceId, Map<string, Set<TypeTerm>>>();
+    // (once per landing path and written type: k copies of one binding into one literal are one)
+    const copied = new Map<Key, Set<TypeTerm>>();
+    for (const { place, path, term } of this.#a4Copies) {
+      const key = keptKey(this.#work, place, path);
+      let terms = copied.get(key);
+      if (terms === undefined) copied.set(key, (terms = new Set()));
+      work.charge("indexSteps");
+      if (terms.has(term)) continue;
+      terms.add(term);
+      let paths = seeds.get(place);
+      if (paths === undefined) seeds.set(place, (paths = new Map()));
+      // (each element level with the written type there)
+      let step: readonly string[] = [];
+      for (let level: TypeTerm | null = term; level !== null; level = termAt(term, step)) {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, joinSteps(path, step));
+        let levels = paths.get(text);
+        if (levels === undefined) paths.set(text, (levels = new Set()));
+        levels.add(level);
+        step = joinSteps(step, ["element"]);
+      }
+    }
+    const into = new Map<PlaceId, InheritedCopy[]>();
+    const bySource = new Map<PlaceId, InheritedCopy[]>();
+    const distinct = new Set<string>();
+    for (const copy of this.#a4Inherits) {
+      const list = bySource.get(copy.from);
+      if (list === undefined) bySource.set(copy.from, [copy]);
+      else list.push(copy);
+      work.charge("indexSteps");
+      const id = keptParts(this.#work, copy.place, copy.path, copy.from, copy.strip);
+      if (distinct.has(id)) continue;
+      distinct.add(id);
+      const own = into.get(copy.place);
+      if (own === undefined) into.set(copy.place, [copy]);
+      else own.push(copy);
+    }
+    const { cycleOf, order } = cyclesOf(bySource, work);
+    const cycles = new Map<PlaceId, Set<string>>();
+    this.#inherits = { seeds, into, cycleOf, cycles, order };
+    // a cycle's landed paths, sources before it: a copy from outside it brings every path landed below its strip, and
+    // within it a copy brings its source's base paths only, kept base by a whole copy alone, so no path grows by going
+    // round (Sol's round 4 B1)
+    for (const component of order) {
+      const cycle = cycleOf.get(component[0]!);
+      if (cycle === undefined) continue;
+      const all = new Map<PlaceId, Set<string>>();
+      const base = new Map<PlaceId, Set<string>>();
+      for (const member of component) {
+        all.set(member, new Set(seeds.get(member)?.keys() ?? []));
+        base.set(member, new Set(seeds.get(member)?.keys() ?? []));
+      }
+      const land = (member: PlaceId, path: readonly string[], keeps: boolean): boolean => {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, path);
+        let grew = false;
+        for (const paths of keeps ? [all.get(member)!, base.get(member)!] : [all.get(member)!])
+          if (!paths.has(text)) {
+            paths.add(text);
+            grew = true;
+          }
+        return grew;
+      };
+      const below = (copy: InheritedCopy, text: string, keeps: boolean): boolean => {
+        const steps = splitPath(text);
+        return (
+          steps.length > copy.strip.length &&
+          isPrefix(copy.strip, steps) &&
+          land(copy.place, keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)), keeps)
+        );
+      };
+      for (const member of component)
+        for (const copy of into.get(member) ?? [])
+          if (cycleOf.get(copy.from) !== cycle) {
+            land(member, copy.path, true);
+            for (const text of this.#landedBelow(copy.from, copy.strip)) below(copy, text, true);
+          }
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const member of component)
+          for (const copy of into.get(member) ?? []) {
+            if (cycleOf.get(copy.from) !== cycle) continue;
+            const keeps = copy.path.length === 0 && copy.strip.length === 0;
+            grew = land(member, copy.path, keeps) || grew;
+            // (a path it lands meanwhile is a fixpoint's next step, met in the same pass or the next)
+            for (const text of base.get(copy.from)!) grew = below(copy, text, keeps) || grew;
+          }
+      }
+      for (const member of component) cycles.set(member, all.get(member)!);
+    }
+    return this.#inherits;
+  }
+
+  /**
+   * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
+   * their strips, on an explicit stack, each place and path asked once.
+   */
+  #landed(place: PlaceId, path: readonly string[]): boolean {
+    const { seeds, into, cycleOf, cycles } = this.#inheritance();
+    const work = this.pass.program.work;
+    const memo = this.#landedPaths;
+    const frames: {
+      readonly key: string;
+      readonly place: PlaceId;
+      readonly path: readonly string[];
+      next: number;
+    }[] = [];
+    // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one
+    const open = (at: PlaceId, steps: readonly string[]): boolean | null => {
+      const key = keptParts(this.#work, at, steps);
+      const known = memo.get(key);
+      if (known !== undefined) return known;
+      work.charge("indexSteps");
+      const text = pathText(steps);
+      const found = cycleOf.has(at)
+        ? cycles.get(at)!.has(text)
+        : seeds.get(at)?.has(text) === true ||
+          (into.get(at) ?? []).some(
+            (copy) => copy.path.length === steps.length && isPrefix(copy.path, steps),
+          ) ||
+          null;
+      if (found !== null) memo.set(key, found);
+      else frames.push({ key, place: at, path: steps, next: 0 });
+      return found;
+    };
+    const first = open(place, path);
+    if (first !== null) return first;
+    const key = frames[0]!.key;
+    let answer: boolean | null = null;
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      if (answer === true) {
+        memo.set(frame.key, true);
+        frames.pop();
+        continue;
+      }
+      const copies = into.get(frame.place) ?? [];
+      if (frame.next >= copies.length) {
+        memo.set(frame.key, false);
+        frames.pop();
+        answer = false;
+        continue;
+      }
+      const copy = copies[frame.next++]!;
+      work.charge("indexSteps");
+      answer =
+        copy.path.length < frame.path.length && isPrefix(copy.path, frame.path)
+          ? open(copy.from, keptSteps(this.#work, copy.strip, frame.path.slice(copy.path.length)))
+          : false;
+    }
+    return memo.get(key)!;
+  }
+
+  /**
+   * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
+   * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
+   * source, prefix and way of writing its paths once.
+   */
+  #landedBelow(place: PlaceId, prefix: readonly string[]): string[] {
+    const { seeds, into, cycleOf, cycles } = this.#inheritance();
+    const work = this.pass.program.work;
+    const out = new Set<string>();
+    const seen = new Set<string>();
+    // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
+    // its first `drop` steps replaced by `prepend`
+    const tasks: {
+      readonly place: PlaceId;
+      readonly below: readonly string[];
+      readonly drop: number;
+      readonly prepend: readonly string[];
+    }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
+    while (tasks.length > 0) {
+      const task = tasks.pop()!;
+      const id = keptParts(this.#work, task.place, task.below, task.drop, task.prepend);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const emit = (path: readonly string[]): void => {
+        work.charge("indexSteps");
+        if (isPrefix(task.below, path))
+          out.add(keptText(this.#work, joinSteps(task.prepend, path.slice(task.drop))));
+      };
+      if (cycleOf.has(task.place)) {
+        for (const text of cycles.get(task.place)!) emit(splitPath(text));
+        continue;
+      }
+      for (const text of seeds.get(task.place)?.keys() ?? []) emit(splitPath(text));
+      for (const copy of into.get(task.place) ?? []) {
+        emit(copy.path);
+        // (the source's paths at or below the strip, those the prefix asks for)
+        const below = isPrefix(copy.path, task.below)
+          ? keptSteps(this.#work, copy.strip, task.below.slice(copy.path.length))
+          : isPrefix(task.below, copy.path)
+            ? copy.strip
+            : null;
+        if (below === null) continue;
+        tasks.push(
+          task.drop <= copy.path.length
+            ? {
+                place: copy.from,
+                below,
+                drop: copy.strip.length,
+                prepend: keptSteps(this.#work, task.prepend, copy.path.slice(task.drop)),
+              }
+            : {
+                place: copy.from,
+                below,
+                drop: copy.strip.length + task.drop - copy.path.length,
+                prepend: task.prepend,
+              },
+        );
+      }
+    }
+    return [...out];
+  }
+
+  /**
+   * Per place copies land in, the landed paths a copy decides with its store (`groups`): those where the place's
+   * contents may hold a kind its decision there does not admit (`#hotAt`), among its candidates: where its written types
+   * land (a written binding's own host data, which each copy carries on: C9 r4.50 (1)), its own stores' host data,
+   * other values and literals (`#ownStructure`), the hot paths of the sources it copies where it lands them, and where
+   * two of its copies or written types meet (`#meeting`); and each store taken again (A6). Elsewhere a copy's
+   * contents fit what its source's decision admits, so its decision there owes nothing; a copy that only copies one
+   * source, whole, stands for that source's (TABLE r4.80). Sources first; a cycle's members test every landed path.
+   */
+  #hotSets(): ReadonlyMap<PlaceId, readonly (readonly string[])[]> {
+    if (this.#hots !== null) return this.#hots;
+    const { seeds, into, cycleOf, cycles, order } = this.#inheritance();
+    const work = this.pass.program.work;
+    const hots = new Map<PlaceId, readonly (readonly string[])[]>();
+    // (the source a copy that only copies one source whole stands for, and a bound on each place's landed paths)
+    const origins = new Map<PlaceId, PlaceId>();
+    const sizes = new Map<PlaceId, number>();
+    const retaken = new Map<PlaceId, (readonly string[])[]>();
+    for (const key of this.#retaken.keys()) {
+      work.charge("indexSteps");
+      const list = retaken.get(keyPlace(key));
+      if (list === undefined) retaken.set(keyPlace(key), [keptPath(this.#work, key)]);
+      else list.push(keptPath(this.#work, key));
+    }
+    for (const component of order) {
+      if (cycleOf.has(component[0]!)) {
+        for (const member of component) {
+          const hot: (readonly string[])[] = [];
+          for (const text of cycles.get(member)!) {
+            const path = keptSplit(this.#work, text);
+            if (this.#hotAt(member, path)) hot.push(path);
+          }
+          hots.set(member, hot);
+          origins.set(member, member);
+          sizes.set(member, cycles.get(member)!.size);
+        }
+        continue;
+      }
+      const place = component[0]!;
+      // its copies, a copy of a place standing for one source by that source
+      const classes = new Map<string, InheritedCopy>();
+      for (const copy of into.get(place) ?? []) {
+        work.charge("indexSteps");
+        const origin = origins.get(copy.from) ?? copy.from;
+        const id = keptParts(this.#work, origin, copy.path, copy.strip);
+        if (!classes.has(id))
+          classes.set(id, origin === copy.from ? copy : { ...copy, from: origin });
+      }
+      const own = this.#ownStructure(place);
+      const only = classes.size === 1 ? [...classes.values()][0]! : null;
+      if (
+        only !== null &&
+        own === null &&
+        !seeds.has(place) &&
+        !retaken.has(place) &&
+        only.path.length === 0 &&
+        only.strip.length === 0
+      ) {
+        origins.set(place, only.from);
+        hots.set(place, hots.get(only.from) ?? []);
+        sizes.set(place, (sizes.get(only.from) ?? 0) + 1);
+        continue;
+      }
+      let size = seeds.get(place)?.size ?? 0;
+      for (const copy of classes.values()) size += 1 + (sizes.get(copy.from) ?? 0);
+      sizes.set(place, size);
+      const candidates = new Map<string, readonly string[]>();
+      const put = (path: readonly string[]): void => {
+        work.charge("indexSteps");
+        candidates.set(keptText(this.#work, path), path);
+      };
+      for (const copy of classes.values())
+        for (const path of hots.get(copy.from) ?? []) {
+          work.charge("indexSteps");
+          if (isPrefix(copy.strip, path))
+            put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+        }
+      for (const text of seeds.get(place)?.keys() ?? []) put(keptSplit(this.#work, text));
+      for (const path of own?.points ?? []) if (this.#landed(place, path)) put(path);
+      for (const prefix of own?.below ?? [])
+        for (const text of this.#landedBelow(place, prefix)) put(keptSplit(this.#work, text));
+      for (const path of this.#meeting(place, [...classes.values()], sizes)) put(path);
+      const hot: (readonly string[])[] = [];
+      for (const path of candidates.values()) if (this.#hotAt(place, path)) hot.push(path);
+      for (const path of retaken.get(place) ?? []) if (this.#landed(place, path)) hot.push(path);
+      hots.set(place, hot);
+    }
+    this.#hots = hots;
+    return hots;
+  }
+
+  /**
+   * A place's own contributions besides its copies of inheriting places (`#hotSets`): the paths of each store's literals
+   * (another kind may stand there), and the paths of every other value with what lies below them (host data, a read
+   * of another place, a call: anything); a written binding's copy stands where it lands (`#hotSets`). `null` where
+   * there is none.
+   */
+  #ownStructure(
+    place: PlaceId,
+  ): {
+    readonly points: readonly (readonly string[])[];
+    readonly below: readonly (readonly string[])[];
+  } | null {
+    const { definitions } = this.pass;
+    const work = this.pass.program.work;
+    const copies = new Set<string>();
+    for (const copy of this.#inheritance().into.get(place) ?? [])
+      copies.add(keptParts(this.#work, copy.path, copy.from, copy.strip));
+    const points: (readonly string[])[] = [];
+    const below: (readonly string[])[] = [];
+    const root = keyOf(place, []);
+    for (const key of [root, ...definitions.keysBelow(root)])
+      for (const d of definitions.byKey.get(key) ?? []) {
+        work.charge("indexSteps");
+        if (d.kind === "const") points.push(d.path);
+        if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
+        const base =
+          d.kind === "add" && d.how !== "elements"
+            ? keptSteps(this.#work, d.path, ["element"])
+            : d.path;
+        const stops = this.#stopsOf(d.value, d.node);
+        // (a copy the place's copies list stands for its source's contents, its value with it)
+        const copying = new Set<string>();
+        for (const list of stops.written.values())
+          for (const stop of list) {
+            work.charge("indexSteps");
+            if (stop.from === null) continue;
+            const at = keptSteps(this.#work, base, stop.path);
+            if (copies.has(keptParts(this.#work, at, stop.from, stop.strip)))
+              copying.add(keptParts(this.#work, stop.path, stop.value));
+            else below.push(at);
+          }
+        for (const list of stops.values.values())
+          for (const stop of list) {
+            work.charge("indexSteps");
+            if (!copying.has(keptParts(this.#work, stop.path, stop.value)))
+              below.push(keptSteps(this.#work, base, stop.path));
+          }
+        for (const list of stops.literals.values())
+          for (const stop of list) {
+            work.charge("indexSteps");
+            points.push(keptSteps(this.#work, base, stop.path));
+          }
+      }
+    return points.length === 0 && below.length === 0 ? null : { points, below };
+  }
+
+  /**
+   * Where a place's copies of different sources, or its written types, meet (`#hotSets`): the paths two of them land,
+   * a written type at a path beside another or a copy's. The largest copy is asked of each path the others land.
+   */
+  #meeting(
+    place: PlaceId,
+    copies: readonly InheritedCopy[],
+    sizes: ReadonlyMap<PlaceId, number>,
+  ): (readonly string[])[] {
+    const types = this.#inheritance().seeds.get(place);
+    if (types === undefined && copies.length < 2) return [];
+    const work = this.pass.program.work;
+    const met = new Map<string, { readonly path: readonly string[]; count: number }>();
+    const put = (path: readonly string[], count: number): void => {
+      work.charge("indexSteps");
+      const text = keptText(this.#work, path);
+      const found = met.get(text);
+      if (found === undefined) met.set(text, { path, count });
+      else found.count += count;
+    };
+    for (const [text, levels] of types ?? []) put(keptSplit(this.#work, text), levels.size);
+    let largest: InheritedCopy | null = null;
+    for (const copy of copies)
+      if (largest === null || (sizes.get(copy.from) ?? 0) > (sizes.get(largest.from) ?? 0))
+        largest = copy;
+    for (const copy of copies) {
+      if (copy === largest) continue;
+      put(copy.path, 1);
+      for (const text of this.#landedBelow(copy.from, copy.strip)) {
+        const steps = splitPath(text);
+        if (steps.length > copy.strip.length)
+          put(keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)), 1);
+      }
+    }
+    const out: (readonly string[])[] = [];
+    for (const entry of met.values()) {
+      work.charge("indexSteps");
+      if (
+        largest !== null &&
+        isPrefix(largest.path, entry.path) &&
+        (entry.path.length === largest.path.length ||
+          this.#landed(
+            largest.from,
+            keptSteps(this.#work, largest.strip, entry.path.slice(largest.path.length)),
+          ))
+      )
+        entry.count += 1;
+      if (entry.count > 1) out.push(entry.path);
+    }
+    return out;
+  }
+
+  /** Whether a place's contents at a path hold a kind its decision there does not admit (`#hotSets`, A5). */
+  #hotAt(place: PlaceId, path: readonly string[]): boolean {
+    const found = this.#decided(place, path);
+    if (found === null || found.tags === null || found.tags.includes("unknown")) return false;
+    return offending(withoutEmpty(this.#run(this.pass.contract.contractOf(found.key))), found);
+  }
+
+  /**
+   * A path copies land in a place that `groups` left out, decided where an answer asks for it (`decide`'s `lazily`):
+   * its contents fit, so its decision owes nothing, and its answer is the one deciding it with the copy gives.
+   */
+  #lazily(place: PlaceId, path: readonly string[]): void {
+    if (this.#attempted.has(keyOf(place, path)) || !this.#landed(place, path)) return;
+    this.decide(place, path, true);
+  }
+
+  /**
+   * Under the member-answer oracle (`withMemberOracle`), after the decisions: every path copies land that `groups` left
+   * out, compared as a decided one is, so the oracle covers each landed path as when every one was decided.
+   */
+  public compareLanded(): void {
+    if (memberOracle === null) return;
+    for (const place of this.#inheritance().into.keys())
+      for (const text of this.#landedBelow(place, [])) {
+        const path = splitPath(text);
+        if (this.#attempted.has(keyOf(place, path))) continue;
+        const inputs = this.#inputs(place, path);
+        if (inputs !== null) this.#compareMembers(place, path, inputs.prefixes);
+      }
+  }
+
   /**
    * The decision of one place at one path (§5), or `null` where nothing is checked: no store reaches it, it lies below
    * a reference (F19a), a settled family needs no scan (A3), or nothing decides. The decision is recorded for the
-   * boundary checks' `against` (C9).
+   * boundary checks' `against` (C9). `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
+   * it (`#lazily`): recorded, its candidates owe nothing (`#hotSets`) and are not taken.
    */
-  public decide(root: PlaceId, path: readonly string[]): Decision | null {
+  public decide(root: PlaceId, path: readonly string[], lazily = false): Decision | null {
     const { program, definitions, lists, contract } = this.pass;
     const work = program.work;
-    const place = program.place(root);
+    const key = keptKey(this.#work, root, path);
+    this.#attempted.add(key);
     const inputs = this.#inputs(root, path);
     if (inputs === null) return null;
     const { direct, prefixes } = inputs;
-    if (memberOracle !== null) this.#compareMembers(root, path, prefixes);
-    const key = keptKey(this.#work, root, path);
-    const written = writtenOf(place.kind);
-    const term = written === null ? null : permittedAt(written, path);
-    // A9, C7: every argument and return into a written parameter or result is a candidate
-    const transfer =
-      term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
-    // F19a: below a reference nothing is admitted
-    if (path.length > 0 && this.#run(contract.refReceiver(key))) {
-      work.charge("checksSkipped");
-      return null;
-    }
-    if (path.length > 0 && term === null) {
-      // A3: a settled family needs no scan, where no store on the path was rejected
-      const clean = this.#clean(root, path);
-      const kinds = clean ? withoutEmpty(this.#run(contract.contractOf(key))) : [];
-      if (
-        clean &&
-        kinds.every((item) => item.tag !== "unknown") &&
-        family(kinds.map((item) => item.tag))
-      ) {
-        work.charge("checksSkipped");
-        return null;
-      }
-    }
-    const writtenTags = term === null ? null : typeTags(term);
-    let nullable = writtenTags === null ? true : writtenTags.includes("null");
-    let tags: ItemTag[] | null =
-      writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
-    let byWritten = writtenTags !== null;
-    let permitsNull = false;
-    let decider: Definition | null = null;
-    let deciderSite: SourceSite | null = null;
-    let published = false;
-    // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
-    if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
-      let plain = true;
-      const all: ItemTag[] = [];
-      for (const { d, at } of direct) {
-        work.charge("checks");
-        // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
-        if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
-        const kinds = at.length === 0 ? this.#quietKinds(d.value) : null;
-        if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
-          plain = false;
-          break;
-        }
-        all.push(...kinds);
-      }
-      if (plain && family(all)) {
-        work.charge("checksSkipped");
-        return null;
-      }
-    }
-    // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
-    // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
-    // decides (A4), and a store rejected there is decided again (A6)
-    if (
-      tags === null &&
-      this.#clean(root, path) &&
-      !withoutEmpty(this.#run(contract.contractOf(key))).some((item) => concrete(item))
-    ) {
-      work.charge("checksSkipped");
-      return null;
-    }
-    if (tags === null) {
-      const found = this.#drive(this.#scan(direct, prefixes, key));
-      if (found !== null)
-        ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
-      else {
-        // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
-        // kinds are the type the place is published with, so external data a store brings into it owes its check
-        // there, named as well as inline (`published`)
-        const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
-        if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
-          tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
-          deciderSite = this.#concreteSite(direct, prefixes);
-          published = true;
-        }
-      }
-    }
-    if (tags === null) return null;
-    if (byWritten && writtenTags === null) this.#inheritsWritten.add(key);
+    if (memberOracle !== null && !lazily) this.#compareMembers(root, path, prefixes);
+    const found = this.#decided(root, path, inputs);
+    if (found === null || found.tags === null) return null;
+    const { nullable, byWritten, permitsNull, decider, transfer, published } = found;
+    if (byWritten && !found.own) this.#inheritsWritten.add(key);
     else this.#inheritsWritten.delete(key);
     // an unrestricted written part, or a copy's, decides nothing: every kind fits there, no store owes it anything
-    if (tags.includes("unknown")) {
+    if (found.tags.includes("unknown")) {
       this.#unrestricted.add(key);
       work.charge("checksSkipped");
       return null;
     }
-    // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
-    // number possible solely through external data admits nothing (r4.36)
-    if (
-      !byWritten &&
-      tags.includes("integer") &&
-      withoutEmpty(this.#run(contract.contractOf(key))).some(admitsNumber)
-    )
-      tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
+    const tags = found.tags;
     this.decided.set(key, tags);
     this.#nullable.set(key, nullable);
     if (permitsNull) this.#permitsNull.add(key);
     else this.#permitsNull.delete(key);
-    this.#deciderSites.set(key, deciderSite);
-    const decidedTags = tags;
-    const offends = (items: readonly Item[]): boolean =>
-      items.some((item) =>
-        item.tag === "null"
-          ? !nullable
-          : item.tag === "unknown"
-            ? contributes(item)
-            : item.tag !== "empty" && !decidedTags.some((tag) => fits(item.tag, tag, byWritten)),
-      );
+    this.#deciderSites.set(key, found.site);
+    if (lazily) return null;
+    const offends = (items: readonly Item[]): boolean => offending(items, found);
     // A5: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an offending kind
     const candidates = new Map<string, Candidate>();
     work.charge("checks", direct.length);
@@ -1389,12 +1780,139 @@ export class Admission {
       root,
       path,
       label: this.pathLabel(root, path),
-      tags: decidedTags,
+      tags,
       written: byWritten,
-      own: writtenTags !== null,
+      own: found.own,
       nullable,
       decider,
       candidates: ordered,
+      published,
+    };
+  }
+
+  /**
+   * A place's decision at a path as `decide` takes it (§5), unrecorded and without its candidates: `null` where no store
+   * reaches the path; `tags` `null` where nothing is checked, with `unknown` where an unrestricted part decides nothing.
+   * Once per key and pass, so the paths `groups` tests (`#hotAt`) and their decisions share it.
+   */
+  #decided(
+    root: PlaceId,
+    path: readonly string[],
+    inputs = this.#inputs(root, path),
+  ): Decided | null {
+    const key = keptKey(this.#work, root, path);
+    const known = this.#decisions.get(key);
+    if (known !== undefined) return known;
+    const found = inputs === null ? null : this.#decision(root, path, key, inputs);
+    this.#decisions.set(key, found);
+    return found;
+  }
+
+  #decision(root: PlaceId, path: readonly string[], key: Key, inputs: Inputs): Decided {
+    const { program, lists, contract } = this.pass;
+    const work = program.work;
+    const place = program.place(root);
+    const { direct, prefixes } = inputs;
+    const written = writtenOf(place.kind);
+    const term = written === null ? null : permittedAt(written, path);
+    const none = { key, own: term !== null, transfer: false, tags: null } as const;
+    // A9, C7: every argument and return into a written parameter or result is a candidate
+    const transfer =
+      term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
+    // F19a: below a reference nothing is admitted
+    if (path.length > 0 && this.#run(contract.refReceiver(key))) {
+      work.charge("checksSkipped");
+      return { ...NOTHING, ...none };
+    }
+    if (path.length > 0 && term === null) {
+      // A3: a settled family needs no scan, where no store on the path was rejected
+      const clean = this.#clean(root, path);
+      const kinds = clean ? withoutEmpty(this.#run(contract.contractOf(key))) : [];
+      if (
+        clean &&
+        kinds.every((item) => item.tag !== "unknown") &&
+        family(kinds.map((item) => item.tag))
+      ) {
+        work.charge("checksSkipped");
+        return { ...NOTHING, ...none };
+      }
+    }
+    const writtenTags = term === null ? null : typeTags(term);
+    let nullable = writtenTags === null ? true : writtenTags.includes("null");
+    let tags: ItemTag[] | null =
+      writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
+    let byWritten = writtenTags !== null;
+    let permitsNull = false;
+    let decider: Definition | null = null;
+    let deciderSite: SourceSite | null = null;
+    let published = false;
+    // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
+    if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
+      let plain = true;
+      const all: ItemTag[] = [];
+      for (const { d, at } of direct) {
+        work.charge("checks");
+        // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
+        if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
+        const kinds = at.length === 0 ? this.#quietKinds(d.value) : null;
+        if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
+          plain = false;
+          break;
+        }
+        all.push(...kinds);
+      }
+      if (plain && family(all)) {
+        work.charge("checksSkipped");
+        return { ...NOTHING, ...none };
+      }
+    }
+    // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
+    // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
+    // decides (A4), and a store rejected there is decided again (A6)
+    if (
+      tags === null &&
+      this.#clean(root, path) &&
+      !withoutEmpty(this.#run(contract.contractOf(key))).some((item) => concrete(item))
+    ) {
+      work.charge("checksSkipped");
+      return { ...NOTHING, ...none };
+    }
+    if (tags === null) {
+      const found = this.#drive(this.#scan(direct, prefixes, key));
+      if (found !== null)
+        ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
+      else {
+        // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
+        // kinds are the type the place is published with, so external data a store brings into it owes its check
+        // there, named as well as inline (`published`)
+        const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
+        if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
+          tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
+          deciderSite = this.#concreteSite(direct, prefixes);
+          published = true;
+        }
+      }
+    }
+    if (tags === null) return { ...NOTHING, ...none };
+    // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
+    // number possible solely through external data admits nothing (r4.36)
+    if (
+      !tags.includes("unknown") &&
+      !byWritten &&
+      tags.includes("integer") &&
+      withoutEmpty(this.#run(contract.contractOf(key))).some(admitsNumber)
+    )
+      tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
+    return {
+      key,
+      own: writtenTags !== null,
+      transfer,
+      tags,
+      nullable,
+      byWritten,
+      permitsNull,
+      decider,
+      site: deciderSite,
       published,
     };
   }
@@ -1467,13 +1985,7 @@ export class Admission {
    * default none, F21) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
    * property, and where none reaches it.
    */
-  #inputs(
-    root: PlaceId,
-    path: readonly string[],
-  ): {
-    readonly direct: readonly Candidate[];
-    readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
-  } | null {
+  #inputs(root: PlaceId, path: readonly string[]): Inputs | null {
     const { program, definitions } = this.pass;
     const place = program.place(root);
     if (
@@ -1662,6 +2174,7 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
+    this.#lazily(place, path);
     const key = keyOf(place, path);
     // (a copy of an unrestricted written part admits every kind, as the part itself: never what is stored)
     if (this.#unrestricted.has(key)) return ["unknown"];
@@ -1682,6 +2195,7 @@ export class Admission {
 
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
+    this.#lazily(place, path);
     return this.#inheritsWritten.has(keyOf(place, path));
   }
 
@@ -1691,6 +2205,7 @@ export class Admission {
    * definite contribution found here, once, where an answer asks for it.
    */
   public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
+    this.#lazily(place, path);
     const key = keyOf(place, path);
     if (!this.#deciderSites.has(key)) {
       const inputs = this.#inputs(place, path);
