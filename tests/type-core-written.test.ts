@@ -898,3 +898,84 @@ test("copies of different sources, repeated self copies, cycles and a rejection 
     );
   }
 });
+
+test("a literal's elements are compared at every field copies land, decided or not, after a rejection too (Astra's review B1)", () => {
+  // (each source's complete record, one in both orders and with the sharing on and off: `main`'s)
+  const record = (source: string): ReturnType<typeof coreRecord> => {
+    const run = (): ReturnType<typeof coreRecord> =>
+      coreRecord(coreResult(analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!)), [
+        "main.tease",
+      ]);
+    const shared = inBothOrders(run);
+    assert.deepEqual(
+      inBothOrders(() => withoutSharing(run)),
+      shared,
+    );
+    return shared;
+  };
+  // (the error at an element's last occurrence of its text)
+  const errors = (source: string, ...texts: string[]) => ({
+    outcome: "compile-error",
+    diagnostics: texts.map((text) => {
+      const offset = source.lastIndexOf(text);
+      return {
+        class: "compile-error",
+        kind: "written-target",
+        site: { file: "main.tease", offset, end: offset + text.length },
+      };
+    }),
+    runtimeChecks: [],
+  });
+  const typed = 'let t:string="ok"\nlet root={spare:t}\n';
+  const cases: readonly (readonly [string, string, ...string[]])[] = [
+    // a field the copy lands, met by a plain element after it and before it
+    ["landed first", `${typed}let other={spare:1}\nlet a=[root,other]\n`, "other"],
+    ["plain first", `${typed}let other={spare:1}\nlet a=[other,root]\n`, "root"],
+    // under rejection: a third element, and the root's own store rejected
+    [
+      "a third element",
+      `${typed}let other={spare:1}\nlet more={spare:2}\nlet a=[other,root,more]\n`,
+      "root",
+    ],
+    [
+      "a rejected store",
+      `${typed}root.spare=5\nlet other={spare:1}\nlet a=[root,other]\n`,
+      "5",
+      "other",
+    ],
+    // under a guard: the literal, and a store at the root's field
+    [
+      "a guarded literal",
+      `${typed}let other={spare:1}\nlet a=[root]\nif hostValue == 1 { a=[root,other] }\n`,
+      "other",
+    ],
+    [
+      "a guarded store",
+      `${typed}if hostValue == 1 { root.spare = "x" }\nlet other={spare:1}\nlet a=[other,root]\n`,
+      "root",
+    ],
+    // through a copy, with and without its own store
+    ["a copy", `${typed}let b=root\nlet other={spare:1}\nlet a=[other,b]\n`, "b"],
+    [
+      "a copy's store",
+      'let t:string="ok"\nlet root={spare:t,extra:1}\nlet b=root\nb.extra=2\nlet other={spare:1}\nlet a=[b,other]\n',
+      "other",
+    ],
+    // a union the plain element's kind fits, the copy's another
+    [
+      "a union",
+      'let t:integer|string="ok"\nlet root={spare:t}\nlet other={spare:1}\nlet a=[other,root]\n',
+      "root",
+    ],
+    // two plain elements where another store's copy lands
+    [
+      "two plain elements",
+      `${typed}let o1={spare:1}\nlet o2={spare:"x"}\nlet a=[root]\na=[o2,o1]\n`,
+      "o1",
+    ],
+  ];
+  for (const [name, body, ...texts] of cases) {
+    const source = `${body}exit\n`;
+    assert.deepEqual(record(source), errors(source, ...texts), name);
+  }
+});
