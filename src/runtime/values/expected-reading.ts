@@ -15,6 +15,12 @@ import { VALUE_KIND_NAMES } from "../../value-kinds.js";
  * is one; a stored value is read as it is. Deep values are read without native recursion.
  */
 
+/**
+ * What a reading gives for a value that does not fit its type, or a field that is missing: never a value, so that no
+ * valid value, `null` included, is taken for one (ADR 0021 rule 2.6).
+ */
+const MISFIT: unique symbol = Symbol("misfit");
+
 /** A field of a record that the default supplies: its path from the record, and what the record holds there. */
 export interface MissingField {
   readonly path: readonly string[];
@@ -89,7 +95,7 @@ function memberFor(
 }
 
 /**
- * `value` read whole as `type`, or `undefined` where it does not fit. A stored value fits as the runtime type checks
+ * `value` read whole as `type`, or `MISFIT` where it does not fit. A stored value fits as the runtime type checks
  * take it (`matchesValueType`). JSON is read as the type: a dict where the type is an object becomes an object of the
  * type's properties, each of which it must have, its other keys left out, and lists, sets and dicts are read element by
  * element; a union reads a value that fits it as it is, and otherwise as its member of the value's own kind: a record
@@ -100,31 +106,31 @@ function readWhole(
   value: SerializableRuntimeValue,
   type: TypePlan,
   json: boolean,
-): SerializableRuntimeValue | undefined {
+): SerializableRuntimeValue | typeof MISFIT {
   const fits = matchesValueType(value, type);
-  if (fits || !json) return fits ? value : undefined;
+  if (fits || !json) return fits ? value : MISFIT;
   interface Frame {
     /** The parts to read, each with its type, and what the frame builds of their results. */
     readonly parts: readonly (readonly [SerializableRuntimeValue, TypePlan])[];
     readonly build: (read: readonly SerializableRuntimeValue[]) => SerializableRuntimeValue;
     readonly results: SerializableRuntimeValue[];
   }
-  /** The frame that reads `part` as `of`, or the part's result where it needs none (`undefined`: it does not fit). */
+  /** The frame that reads `part` as `of`, or the part's result where it needs none. */
   const open = (
     part: SerializableRuntimeValue,
     of: TypePlan,
-  ): Frame | { readonly result: SerializableRuntimeValue | undefined } => {
+  ): Frame | { readonly result: SerializableRuntimeValue | typeof MISFIT } => {
     if (matchesValueType(part, of)) return { result: part };
     const member = of.kind === "union" ? memberFor(part, of.members) : of;
-    if (member === undefined) return { result: undefined };
+    if (member === undefined) return { result: MISFIT };
     if (member.kind === "object") {
       const object = member;
-      if (!isRecordValue(part, true)) return { result: undefined };
+      if (!isRecordValue(part, true)) return { result: MISFIT };
       const parts: (readonly [SerializableRuntimeValue, TypePlan])[] = [];
       const fieldOf = fieldsOf(part, true);
       for (const property of object.properties) {
         const field = fieldOf(property.name);
-        if (field === undefined) return { result: undefined };
+        if (field === undefined) return { result: MISFIT };
         parts.push([field, property.type]);
       }
       return {
@@ -148,7 +154,7 @@ function readWhole(
           : isSet(part)
             ? part.items
             : null;
-      if (items === null) return { result: undefined };
+      if (items === null) return { result: MISFIT };
       const { kind, element } = member;
       return {
         parts: items.map((item) => [item, element] as const),
@@ -167,7 +173,7 @@ function readWhole(
         results: [],
       };
     }
-    return { result: undefined };
+    return { result: MISFIT };
   };
   const first = open(value, type);
   if ("result" in first) return first.result;
@@ -184,9 +190,22 @@ function readWhole(
     const [part, of] = frame.parts[frame.results.length]!;
     const next = open(part, of);
     if (!("result" in next)) frames.push(next);
-    else if (next.result === undefined) return undefined;
+    else if (next.result === MISFIT) return MISFIT;
     else frame.results.push(next.result);
   }
+}
+
+/**
+ * The field a record holds (`undefined`: none) as a reading by field keeps it (ADR 0021 rule 2.6): read whole, `null`
+ * included where the type takes it, or `MISFIT` where it is missing or does not fit, the only fields the default
+ * supplies. The one decision for `readExpected`'s fields and `repairedRecord`'s.
+ */
+function keptField(
+  found: SerializableRuntimeValue | undefined,
+  type: TypePlan,
+  json: boolean,
+): SerializableRuntimeValue | typeof MISFIT {
+  return found === undefined ? MISFIT : readWhole(found, type, json);
 }
 
 /** A place in JSON that holds a part, with the type it is read as there and its field path from a repaired record. */
@@ -302,8 +321,8 @@ export function readExpected(
   json: boolean,
 ): ExpectedReading {
   if (type.kind !== "object" || !isRecordValue(value, json)) {
-    const whole = type.kind === "object" ? undefined : readWhole(value, type, json);
-    return whole === undefined ? { kind: "none" } : { kind: "whole", value: whole };
+    const whole = type.kind === "object" ? MISFIT : readWhole(value, type, json);
+    return whole === MISFIT ? { kind: "none" } : { kind: "whole", value: whole };
   }
   const fields: MissingField[] = [];
   const frames: {
@@ -321,15 +340,14 @@ export function readExpected(
     const property = frame.type.properties[frame.next++]!;
     const path = [...frame.path, property.name];
     const found = frame.fieldOf(property.name);
-    if (found === undefined) fields.push({ path, found, type: property.type });
-    else if (property.type.kind === "object" && isRecordValue(found, json))
+    if (found !== undefined && property.type.kind === "object" && isRecordValue(found, json))
       frames.push({ fieldOf: fieldsOf(found, json), type: property.type, path, next: 0 });
-    else if (readWhole(found, property.type, json) === undefined)
+    else if (keptField(found, property.type, json) === MISFIT)
       fields.push({ path, found, type: property.type });
   }
   if (fields.length > 0) return { kind: "fields", fields };
   const whole = readWhole(value, type, json);
-  return whole === undefined ? { kind: "none" } : { kind: "whole", value: whole };
+  return whole === MISFIT ? { kind: "none" } : { kind: "whole", value: whole };
 }
 
 /**
@@ -399,11 +417,12 @@ export function repairedRecord(
         });
         continue;
       }
-      const whole = found === undefined ? undefined : readWhole(found, property.type, json);
-      // a stored field that reads whole is in the copy already
-      if (whole !== undefined && !json) continue;
-      const value = whole ?? given;
-      if (value !== undefined) put(property.name, value);
+      const kept = keptField(found, property.type, json);
+      // a kept field is the candidate's, `null` included, a stored one in the copy already; a missing or misfit one the
+      // fallback's
+      if (kept === MISFIT) {
+        if (given !== undefined) put(property.name, given);
+      } else if (json) put(property.name, kept);
     }
   }
   return root;

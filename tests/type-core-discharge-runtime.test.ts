@@ -20,6 +20,7 @@ import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { propertyStep } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -1473,6 +1474,250 @@ test("JSON fitting a nullable collection's level reads whole, at every nesting, 
       const violating = runWith(plan, '[[{"n": "x"}], 1]');
       assert.deepEqual(ran(violating), halted(["AFTER"], [`TSW020@${parse}`]), source);
     }
+});
+
+/** A field nothing settles, as #1058 writes it: it takes every value, and its default's value is 17. */
+const OPEN = 'fromJson("17", default: null, files: false)';
+
+/** The type of such a field, as `typeText` writes it: every kind, a collection's elements any. */
+const EVERY = VALUE_KIND_NAMES.map((kind) =>
+  kind === "object"
+    ? "{}"
+    : kind === "list" || kind === "set" || kind === "dict"
+      ? `${kind}<any>`
+      : kind,
+).join("|");
+
+test("a field that fits, `null` included, survives a sibling's repair: fromJson on both lowerings, nested, through a file store's answer and every checkpoint, and a load, in three layers, in both orders (#1058)", () => {
+  const dictOf = (
+    entries: Readonly<Record<string, SerializableRuntimeValue>>,
+  ): SerializableRuntimeValue => ({
+    kind: "dict",
+    entries: Object.entries(entries).map(([key, value]) => ({ key, value })),
+  });
+  /**
+   * `let out = <call>`: the core's decision, a boundary at the call and at a parse its default runs (`inner`), and its
+   * plan, whose S7 content is `content` of the call's site.
+   */
+  const compiled = (
+    call: string,
+    content: (site: string, source: string) => readonly string[],
+    inner?: string,
+  ) => {
+    const source = `let out = ${call}\nsay "AFTER"\nexit\n`;
+    const site = at(source, call);
+    assert.deepEqual(
+      decision(source).checks,
+      [
+        ...(inner === undefined
+          ? []
+          : [`copy-type fromJson.result [object] boundary @${at(source, inner)}`]),
+        `copy-type out [object] boundary @${site}`,
+      ],
+      source,
+    );
+    const plan = candidatePlan(source);
+    assert.deepEqual(contentOf(plan), content(site, source), source);
+    return { source, site, plan };
+  };
+  /** A typed parse's S7 content: its expected type, and on the instruction lowering the repair at its default. */
+  const parsed = (fallback: string, files: string, type: string) =>
+    compiled(`fromJson(hostValue, default: ${fallback}${files})`, (site, source) =>
+      files === ""
+        ? [
+            `expected fileStore@${site} ${type}`,
+            `repair storeTemporary@${at(source, fallback)} ${type}`,
+          ]
+        : [`expected call@${site} ${type}`],
+    );
+  /** What a run of `plan` with `hostValue` says and warns, and the value `out` holds where it ends. */
+  const read = (plan: InstructionPlan, hostValue: string) => {
+    const result = runWith(plan, hostValue);
+    return { ...ran(result), out: bound(result.snapshot, "out") };
+  };
+  const after = (out: SerializableRuntimeValue, warnings: readonly string[] = []) => ({
+    ...halted(["AFTER"], warnings),
+    out,
+  });
+  // the values a test of absence or truthiness could take for none, each as JSON and as the value a reading keeps
+  const valid: readonly (readonly [json: string, value: SerializableRuntimeValue])[] = [
+    ["null", null],
+    ["false", false],
+    ["0", 0],
+    ['""', ""],
+    ["[]", listOf()],
+    ["{}", dictOf({})],
+  ];
+  for (const files of ["", ", files: false"]) {
+    // #1058's default: only a missing or wrong `m` is the default's, and `n` keeps what the JSON holds; the issue's
+    // reproduction is the first value beside a missing `m`
+    const { plan, site } = parsed(`{n: ${OPEN}, m: 0}`, files, `{n: ${EVERY}, m: integer}`);
+    const repaired = [`TSW020@${site}`];
+    for (const [json, value] of valid) {
+      assert.deepEqual(read(plan, `{"n": ${json}}`), after(object({ n: value, m: 0 }), repaired));
+      assert.deepEqual(
+        read(plan, `{"n": ${json}, "m": "x"}`),
+        after(object({ n: value, m: 0 }), repaired),
+      );
+    }
+    // the controls: JSON that reads whole, its extra key left out; a missing `n` is the default's, quietly as it takes
+    // every value; another value is kept
+    assert.deepEqual(
+      read(plan, '{"n": null, "m": 4, "extra": 1}'),
+      after(object({ n: null, m: 4 })),
+    );
+    assert.deepEqual(read(plan, '{"m": 4}'), after(object({ n: 17, m: 4 })));
+    assert.deepEqual(read(plan, '{"n": 5}'), after(object({ n: 5, m: 0 }), repaired));
+    // fields of definite kinds keep their false, zero, empty text, empty list and empty object
+    const typed = parsed(
+      '{b: true, i: 1, t: "x", l: [1], o: {}, m: 0}',
+      files,
+      "{b: boolean, i: integer, t: string, l: list<integer>, o: {}, m: integer}",
+    );
+    assert.deepEqual(
+      read(typed.plan, '{"b": false, "i": 0, "t": "", "l": [], "o": {}}'),
+      after(object({ b: false, i: 0, t: "", l: listOf(), o: object({}), m: 0 }), [
+        `TSW020@${typed.site}`,
+      ]),
+    );
+    // nested: a valid `null` two levels down while a field at the top is repaired, and the reverse
+    const nested = parsed(
+      `{n: ${OPEN}, a: {b: {n: ${OPEN}, m: 0}}, m: 0}`,
+      files,
+      `{n: ${EVERY}, a: {b: {n: ${EVERY}, m: integer}}, m: integer}`,
+    );
+    const deep = (m: SerializableRuntimeValue) => object({ b: object({ n: null, m }) });
+    assert.deepEqual(
+      read(nested.plan, '{"n": null, "a": {"b": {"n": null, "m": 1}}}'),
+      after(object({ n: null, a: deep(1), m: 0 }), [`TSW020@${nested.site}`]),
+    );
+    assert.deepEqual(
+      read(nested.plan, '{"n": null, "a": {"b": {"n": null}}, "m": 2}'),
+      after(object({ n: null, a: deep(0), m: 2 }), [`TSW020@${nested.site}`]),
+    );
+  }
+  // the legacy plan gives what the JSON holds, as it did
+  const legacy = `let out = fromJson(hostValue, default: {n: ${OPEN}, m: 0})\nsay "AFTER"\nexit\n`;
+  assert.deepEqual(read(legacyPlan(legacy), '{"n": null}'), after(dictOf({ n: null })));
+  // a file store keeps the file of the kept field only, never the wrong field's or the extra key's, and the valid
+  // `null` beside the repaired `m`, with and without checkpoints of the request and of the answer
+  const photo = parsed(
+    `{photo: "", n: ${OPEN}, m: 0}`,
+    "",
+    `{photo: string, n: ${EVERY}, m: integer}`,
+  );
+  const photoJson = `{"photo": "${pngDataUrl(1)}", "n": null, "m": "${pngDataUrl(2)}", "extra": "${pngDataUrl(3)}"}`;
+  for (const checkpoints of [false, true]) {
+    const result = throughFileStore(
+      photo.plan,
+      photoJson,
+      { kind: "stored", references: [STORED] },
+      checkpoints,
+    );
+    assert.deepEqual(
+      { stored: result.stored, ...ran(result), out: bound(result.snapshot, "out") },
+      { stored: 1, ...after(object({ photo: STORED, n: null, m: 0 }), [`TSW020@${photo.site}`]) },
+    );
+  }
+  // a default that runs as instructions: the JSON's record waits in the result's temporary, restored at every boundary
+  const record = `{n: ${OPEN}, m: 0}`;
+  const type = `{n: ${EVERY}, m: integer}`;
+  const inner = `fromJson("{\\"m\\": 1}", default: ${record})`;
+  const waiting = compiled(
+    `fromJson("{\\"n\\": null}", default: ${inner})`,
+    (site, source) => [
+      `expected fileStore@${site} ${type}`,
+      `expected fileStore@${at(source, inner)} ${type}`,
+      `repair storeTemporary@${at(source, record)} ${type}`,
+      `repair storeTemporary@${at(source, inner)} ${type}`,
+    ],
+    inner,
+  );
+  const resumed = assertRuntimeResumeEquivalent(waiting.source, {
+    transformPlan: () => waiting.plan,
+  });
+  assert.deepEqual(
+    {
+      ...summary(resumed.events, resumed.finalSnapshot.status),
+      out: bound(resumed.finalSnapshot, "out"),
+    },
+    after(object({ n: null, m: 1 }), [`TSW020@${waiting.site}`]),
+  );
+  // a load repairs a stored record the same way and keeps the stored value, each field it repairs named by TSW016
+  const stored = compiled(
+    `load("k", default: {n: ${OPEN}, a: {b: {n: ${OPEN}, m: 0}}, m: 0})`,
+    (site) => [
+      `repair storageLoad@${site}`,
+      `type storageLoad@${site} {n: ${EVERY}, a: {b: {n: ${EVERY}, m: integer}}, m: integer}`,
+    ],
+  );
+  const loaded = (value: SerializableRuntimeValue) => {
+    const storage = [{ key: "k", value }];
+    const result = runWith(stored.plan, null, storage);
+    return {
+      ...ran(result),
+      out: bound(result.snapshot, "out"),
+      named: result.events.flatMap((event) =>
+        event.kind === "developerWarning"
+          ? [/takes '([\w.]+)' from its default/.exec(event.message)?.[1]]
+          : [],
+      ),
+      storage: result.snapshot.scriptStorage,
+    };
+  };
+  const fieldRepaired = (
+    before: SerializableRuntimeValue,
+    out: SerializableRuntimeValue,
+    named: string,
+  ) => ({
+    ...after(out, [`TSW016@${stored.site}`]),
+    named: [named],
+    storage: [{ key: "k", value: before }],
+  });
+  const deepStored = (fields: Readonly<Record<string, SerializableRuntimeValue>>) =>
+    object({ b: object({ n: null, ...fields }) });
+  for (const [, value] of valid)
+    for (const m of [undefined, "x"]) {
+      const before = object({
+        n: value,
+        a: deepStored({ m: 1 }),
+        ...(m === undefined ? {} : { m }),
+      });
+      assert.deepEqual(
+        loaded(before),
+        fieldRepaired(before, object({ n: value, a: deepStored({ m: 1 }), m: 0 }), "m"),
+      );
+    }
+  const deepMissing = object({ n: null, a: deepStored({}), m: 2 });
+  assert.deepEqual(
+    loaded(deepMissing),
+    fieldRepaired(deepMissing, object({ n: null, a: deepStored({ m: 0 }), m: 2 }), "a.b.m"),
+  );
+  // a load whose default runs as instructions: the stored record waits in the result's temporary at every boundary
+  const loadWaiting = compiled(
+    `load("k", default: ${inner})`,
+    (site, source) => [
+      `repair storageLoad@${site}`,
+      `type storageLoad@${site} ${type}`,
+      `expected fileStore@${at(source, inner)} ${type}`,
+      `repair storeTemporary@${at(source, record)} ${type}`,
+      `repair storeTemporary@${at(source, inner)} ${type}`,
+    ],
+    inner,
+  );
+  const storage = [{ key: "k", value: object({ n: null }) }];
+  const loadResumed = assertRuntimeResumeEquivalent(loadWaiting.source, {
+    scriptStorage: storage,
+    transformPlan: () => loadWaiting.plan,
+  });
+  assert.deepEqual(
+    {
+      ...summary(loadResumed.events, loadResumed.finalSnapshot.status),
+      out: bound(loadResumed.finalSnapshot, "out"),
+      storage: loadResumed.finalSnapshot.scriptStorage,
+    },
+    { ...after(object({ n: null, m: 1 }), [`TSW016@${loadWaiting.site}`]), storage },
+  );
 });
 
 test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
