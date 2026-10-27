@@ -2248,7 +2248,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
  * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
- * `Contract.readClass`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
+ * `Contract.classOf`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
  */
 export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   {
@@ -2412,6 +2412,87 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
 ];
 
 /**
+ * TABLE r4.85: one family per site of the value side's discovery that a class reached only by `Contract.classOf` keys,
+ * each of one source read at k fields (the PR's inventory; the other sites' families are `ADMISSION_SAME_SOURCES` and
+ * `ADMISSION_INGRESS_PRESETS`): a choice's computed options (review r4 B1) and its literal ones, a literal's `get`s
+ * whose defaults are `get`s, and adds of literals of host data (the exact add chain's runs and the prefix's entries).
+ */
+export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
+  {
+    name: "S6c-choice-crossed-gets",
+    measures:
+      "TABLE r4.85, review r4 B1: a choice of k `l_i.get(0, default: a_(k-1-i))`, aliases of one list and one record, every field read",
+    // 83,227 / 166,444 units at k = 64, 128 in both orders (2.0059; `main` 375,053 / 1,355,246, 3.62: the choice's
+    // options read one by one at each field, a computed value having no read class)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let l${i} = xs`),
+          rows(k, (i) => `let a${i} = root`),
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: l${i}.get(0, default: a${k - 1 - i})}`).join(", ")}`,
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "S6c-choice-records",
+    measures:
+      "TABLE r4.85: a choice of k records `{g: a_i}` of aliases of one record, every field read",
+    // 69,450 / 139,048 units at k = 64, 128 (2.0071, reversed 2.0070; `main` 212,767 / 732,257, 3.45)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: {g: a${i}}}`).join(", ")}`,
+          rows(k, (i) => `repeat box.g.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "S6c-nested-defaults",
+    measures:
+      "TABLE r4.85: a literal of k `l_i.get(0, default: l_(k-1-i).get(0, default: a_i))` of one list and one record, every field read",
+    // 99,659 / 200,084 units at k = 64, 128 in both orders (2.0134; `main` 429,058 / 1,545,947, 3.61)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let l${i} = xs`),
+          rows(k, (i) => `let a${i} = root`),
+          `let box = [${Array.from({ length: k }, (_, i) => `l${i}.get(0, default: l${k - 1 - i}.get(0, default: a${i}))`).join(", ")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "S6c-record-adds-unknown",
+    measures:
+      "TABLE r4.85: k `ys.add({g: a_i})` of aliases of one k-field record of host data, every field read",
+    // 146,086 / 294,277 units at k = 64, 128 in both orders (2.0204; `main` 487,159 / 1,729,478, 3.56: the exact
+    // add chain walked per field, a literal having no read class)
+    program: (k) =>
+      main(
+        lines(
+          "let raw = hostValue",
+          `let root = {${fields(k, () => "[1, raw][1]")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          "let ys = []",
+          rows(k, (i) => `ys.add({g: a${i}})`),
+          rows(k, (i) => `repeat ys[0].g.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Product (c) of W34's class: k literals of two typed ingresses (a `load` or a parse) of one k-field record default
  * added to one list, every field read. Each literal holding an ingress is its own source (TABLE §8 r4.15), so the key's
  * contract met k entries at each of the k reads (S4's product); S6c reads the entries of one shape once per field where
@@ -2498,10 +2579,11 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
 /**
  * Adds of several sources into one list strictly in turn (S6c's review r1, r2 B4): an add's certainty depends on the
  * state the adds before it leave, so each add of a mixed run is answered at each field read. Gated known limits (TABLE
- * r4.83 (5)) at their measured 64 → 128 step in r4.45's form, not a bound at larger sizes; reconsidered when a
+ * r4.83 (5)) at their measured 64 → 128 step in r4.45's form (in the source order only on CI, TABLE r4.85), not a
+ * bound at larger sizes; reconsidered when a
  * realistic straight-line run of dozens of alternating adds of several sources into one list appears. A script writes
  * tens of such adds at most (a loop body is one add to the analysis); two alternating sources reach the allowance near
- * 660 adds (29,606,342 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
+ * 660 adds (29,608,315 units at 656). The sound fix, an order-aware summary of a mixed run, is a redesign of the exact
  * add chain's representation that buys linear work only beyond those tens; the cheaper forms are unsound (a window of
  * several classes dropped a warning and its check, r2 B4) or share nothing (a prefix memo keyed by the class sequence
  * has k keys).
@@ -2510,7 +2592,7 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A5-two-sources-alternating-adds",
     measures: "§3.3: k adds alternating between two records of host data, each field read",
-    // 391,511 / 1,309,002 units at k = 64, 128 (3.3565; reversed 3.3564)
+    // 391,708 / 1,309,391 units at k = 64, 128 (3.3558; reversed 3.3557)
     measured: 3.36,
     program: (k) =>
       main(
@@ -2528,7 +2610,7 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A5-three-sources-adds",
     measures: "§3.3: k adds of three records of host data in the turn a, b, c, b, each field read",
-    // 450,094 / 1,442,599 units at k = 64, 128 in both orders (3.2169)
+    // 450,301 / 1,442,998 units at k = 64, 128 in both orders (3.2163)
     measured: 3.22,
     program: (k) =>
       main(
@@ -2545,9 +2627,9 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
       ),
   },
   ...[
-    // 685,831 / 1,898,812 units at k = 64, 128 (2.7785; reversed 2.7784)
+    // 686,028 / 1,899,201 units at k = 64, 128 (2.7783; reversed 2.7782)
     { n: 8, measured: 2.78 },
-    // 736,511 / 2,000,392 units at k = 64, 128 (2.7256 in both orders)
+    // 736,708 / 2,000,781 units at k = 64, 128 (2.7255; reversed 2.7254)
     { n: 9, measured: 2.73 },
   ].map(({ n, measured }): KnownProduct => ({
     name: `A5-cycle-of-${n}-sources-adds`,
@@ -2696,10 +2778,12 @@ export const ORACLE_PROGRAMS: readonly {
  * chained, guarded, read in a function, of a projection or host data, beside direct reads, as `get` defaults; adds of
  * a few sources in turn, broken by a store, a test or a call, a late class, nine classes, a long run; and review r2's:
  * two families in a written union list, where an equal window of classes is no equal answer (its B4), a chain of
- * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross. Each of the
- * first 49 was checked against a
- * build with that key made coarser (the PR's mutation table). The sharing differential and the member-answer oracle
- * run them in both orders.
+ * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross; and TABLE
+ * r4.85's class (`Contract.classOf`) at each site: computed and literal choice options, nested and literal defaults,
+ * adds of literals and computed values, around a store, a guard, a differing proof, property or kind, host data and a
+ * load, and warnings that name the writer a class's role minima and a literal's own role give. Each of the first 49,
+ * and the class's pieces, was checked against a build with that key made coarser (the PR's mutation tables). The
+ * sharing differential and the member-answer oracle run them in both orders.
  */
 export const VALUE_SHARING_PROGRAMS: readonly {
   readonly name: string;
@@ -3767,6 +3851,343 @@ export const VALUE_SHARING_PROGRAMS: readonly {
       "let box = [l0.get(0, default: a0), l1.get(0, default: a1), l1.get(0, default: a0)]",
       "repeat box[0].f0 {}",
     ],
+    [
+      "class: choice gets whose alias writers cross",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: l0.get(0, default: a1)}, {text: "1", value: l1.get(0, default: a0)}',
+      "repeat box.f0 {}",
+      "let n: integer = box.f1",
+    ],
+    [
+      "class: choice gets around a store to the source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "root.f0 = 2.5",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: xs.get(0, default: a0)}, {text: "1", value: xs.get(0, default: a1)}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: choice gets of one receiver, the default reached in one",
+      "let root = {f0: 1, f1: 1}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: a1)}, {text: "1", value: [a0].get(1, default: "s")}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: choice gets whose defaults' proofs differ",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: a1)}, {text: "1", value: [a0].get(3, default: a1)}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "class: choice otherwise values of one source",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let m0 = maybe",
+      "let m1 = maybe",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: m0 otherwise a1}, {text: "1", value: m1 otherwise a0}',
+      "repeat box.f1 {}",
+    ],
+    [
+      "class: a choice get beside an otherwise of the same reads",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let xs = [root]",
+      'let box = askChoice {text: "0", value: xs.get(0, default: root)}, {text: "1", value: maybe otherwise root}, {text: "2", value: xs.get(0, default: root)}',
+      "repeat box.f0 {}",
+    ],
+    [
+      "class: computed choice options without objects",
+      "let root = {f0: 1, f1: 1}",
+      "let xs = [root]",
+      'let box = askChoice xs.get(0, default: "a"), xs.get(0, default: "a")',
+      "let s: string = box",
+    ],
+    [
+      "class: choice records of aliases",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "let a2 = root",
+      'let box = askChoice {text: "0", value: {g: a2}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: a1}}',
+      "repeat box.g.f0 {}",
+      "let n: integer = box.g.f1",
+    ],
+    [
+      "class: choice records, one with another property",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1, h: 2.5}}, {text: "2", value: {g: a0}}',
+      "repeat box.g.f0 {}",
+      "let n: integer = box.h",
+    ],
+    [
+      "class: choice lists of a source and of host data",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      'let box = askChoice {text: "0", value: [root]}, {text: "1", value: [raw]}, {text: "2", value: [root]}',
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "class: choice records holding computed values",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: l0.get(0, default: a1)}}, {text: "1", value: {g: l1.get(0, default: a0)}}',
+      "repeat box.g.f0 {}",
+    ],
+    [
+      "class: choice records holding a load",
+      "let raw = hostValue",
+      "let seed = {f0: 1}",
+      'let box = askChoice {text: "0", value: {g: load("k", default: seed)}}, {text: "1", value: {g: load("k", default: seed)}}',
+      "let n: integer = box.g.f0",
+    ],
+    [
+      "class: choice records read under a test",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "if root.f0 is integer {",
+      '  let box = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1}}',
+      "  repeat box.g.f0 {}",
+      "}",
+      'let other = askChoice {text: "0", value: {g: a0}}, {text: "1", value: {g: a1}}',
+      "repeat other.g.f0 {}",
+    ],
+    [
+      "class: nested defaults whose writers cross",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l0.get(0, default: l1.get(0, default: a0)), l1.get(0, default: l0.get(0, default: a1))]",
+      "repeat box[0].f0 {}",
+      "let n: integer = box[1].f1",
+    ],
+    [
+      "class: nested defaults, one inner default host data",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let box = [xs.get(0, default: xs.get(0, default: root)), xs.get(0, default: xs.get(0, default: raw)), xs.get(0, default: xs.get(0, default: root))]",
+      "repeat box[0].f0 {}",
+    ],
+    [
+      "class: literal defaults of one shape",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [xs.get(0, default: {f0: a0.f0, f1: 2.5}), xs.get(0, default: {f0: a1.f0, f1: 2.5})]",
+      "repeat box[0].f1 {}",
+    ],
+    [
+      "class: adds of records of aliases",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let a0 = root",
+      "let a1 = root",
+      "let ys = []",
+      "ys.add({g: a0})",
+      "ys.add({g: a1})",
+      "ys.add({g: a0})",
+      "ys.add({g: a1})",
+      "ys.add({g: a0})",
+      "repeat ys[0].g.f0 {}",
+      "repeat ys.last.g.f1 {}",
+    ],
+    [
+      "class: adds of records, one lacking a property",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "ys.add({g: root, h: 1})",
+      "let n: integer = ys[0].h",
+      "repeat ys.random.g.f0 {}",
+    ],
+    [
+      "class: adds of lists, a store to the source after the third",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys = []",
+      "ys.add([root])",
+      "ys.add([root])",
+      "ys.add([root])",
+      "root.f0 = 2.5",
+      "ys.add([root])",
+      "ys.add([root])",
+      "repeat ys[0][0].f0 {}",
+    ],
+    [
+      "class: adds of gets, a guard after the third",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let xs = [root]",
+      "let ys = []",
+      "ys.add(xs.get(0, default: root))",
+      "ys.add(xs.get(0, default: root))",
+      "ys.add(xs.get(0, default: root))",
+      "if ys[0].f0 is integer {",
+      "  ys.add(xs.get(0, default: root))",
+      "  repeat ys.last.f0 {}",
+      "}",
+      "repeat ys.random.f1 {}",
+    ],
+    [
+      "class: adds of otherwise values after a host value",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let maybe = [null, root][0]",
+      "let ys = [raw]",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "ys.add(maybe otherwise root)",
+      "let chosen = [ys.first, null].first",
+      "chosen = 1",
+      "repeat ys.last.f0 {}",
+    ],
+    [
+      "class: adds of records into a written list",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1], f1: [1, raw][1]}",
+      "let ys: object[] = []",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "repeat ys[0].g.f0 {}",
+    ],
+    [
+      "writers: choice gets whose alias writers cross, a string beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: l1.get(0, default: a0)}, {text: "1", value: l0.get(0, default: a1)}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "writers: choice gets whose alias writers cross, defaults first",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let a0 = root",
+      "let a1 = root",
+      "let l0 = xs",
+      "let l1 = xs",
+      'let box = askChoice {text: "0", value: l1.get(0, default: a0)}, {text: "1", value: l0.get(0, default: a1)}, {text: "2", value: {f0: 1}}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "writers: choice records lacking a property another option has",
+      "let root = {f0: 1}",
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a1}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: a0, h: 1}}',
+      "let n: integer = box.h",
+    ],
+    [
+      "writers: choice records of a string source beside an integer record",
+      'let root = {f0: "s"}',
+      "let a0 = root",
+      "let a1 = root",
+      'let box = askChoice {text: "0", value: {g: a1}}, {text: "1", value: {g: a0}}, {text: "2", value: {g: {f0: 1}}}',
+      "let n: integer = box.g.f0",
+    ],
+    [
+      "writers: literal gets whose alias writers cross, a string beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l1.get(0, default: a0), l0.get(0, default: a1), {f0: 1}]",
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "writers: nested defaults whose writers cross, beside an integer",
+      'let root = {f0: "s"}',
+      "let xs = [root]",
+      "let l0 = xs",
+      "let l1 = xs",
+      "let a0 = root",
+      "let a1 = root",
+      "let box = [l1.get(0, default: l0.get(0, default: a1)), l0.get(0, default: l1.get(0, default: a0)), {f0: 1}]",
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "writers: adds of records lacking a property, one with it",
+      "let root = {f0: 1}",
+      "let ys = []",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root})",
+      "ys.add({g: root, h: 1})",
+      "let n: integer = ys[0].h",
+    ],
+    [
+      "proof: choice gets of one literal receiver, the default reached in one",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      'let other = {f0: "s"}',
+      "let w = other",
+      'let box = askChoice {text: "0", value: [a0].get(0, default: w)}, {text: "1", value: [a0].get(4, default: w)}',
+      "let n: integer = box.f0",
+    ],
+    [
+      "proof: adds of gets, the default reached from the second",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      'let other = {f0: "s"}',
+      "let w = other",
+      "let ys = []",
+      "ys.add([a0].get(0, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "ys.add([a0].get(4, default: w))",
+      "let n: integer = ys[0].f0",
+    ],
   ] as const
 ).map(([name, ...source]) => ({
   name,
@@ -3774,8 +4195,9 @@ export const VALUE_SHARING_PROGRAMS: readonly {
 }));
 
 /**
- * S6's sharing faults on `main` (TABLE r4.83 (4)), held from the differential until their repair: the first two reorder
- * their diagnostics with the sharing on, the third publishes 16 diagnostics and 17 checks against 11 and 12 (Sol's r3).
+ * S6's sharing faults on `main` (#1077, TABLE r4.83 (4)), held from the differential until repaired: the first two
+ * reorder their diagnostics with the sharing on, the third publishes 16 diagnostics and 17 checks against 11 and 12
+ * (Sol's r3).
  */
 export const HELD_SHARING_FAULTS: readonly {
   readonly name: string;

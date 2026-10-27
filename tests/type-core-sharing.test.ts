@@ -19,6 +19,7 @@ import {
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
+  VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
@@ -43,15 +44,15 @@ import {
 /*
  * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
  * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds
- * and a literal's computed values by their read classes, a prefix's entries of one shape) is an optimization, so it is
- * output-neutral: for
- * every program below, in both orders, the published diagnostics, the owed checks, every binding's admitted type at its
- * root and its element (the decider's site with it) and the candidate route's lowered plan (or its rejection) are
- * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
- * sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own tests run each source in both
- * orders) run in the source order only, every other program in both; a local `npm run check` runs them all in both
- * orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for the matrices).
+ * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds, a
+ * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
+ * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
+ * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
+ * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the
+ * test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices' sources (whose own
+ * tests run each source in both orders) run in the source order only, every other program in both; a local `npm run
+ * check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26, and the lead's for
+ * the matrices).
  *
  * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
  * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
@@ -96,6 +97,7 @@ function programs(): Program[] {
     ADMISSION_INGRESS_PRESETS,
     READ_CHAIN_PRODUCTS,
     MIXED_ADD_PRODUCTS,
+    VALUE_CLASS_SITES,
   ])
     for (const family of families)
       for (const k of [2, 3])
@@ -214,10 +216,10 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
 
-/** S6's sharing faults on `main` (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing until their repair. */
+/** S6's sharing faults on `main` (`HELD_SHARING_FAULTS`, #1077), held: run and reported, failing nothing. */
 test(
   "S6's held sharing faults are output-neutral in both orders",
-  { todo: "S6 sharing fault on main, TABLE r4.83 (4), repair pending" },
+  { todo: "S6 sharing fault on main, #1077 (TABLE r4.83 (4)), repair pending" },
   () => {
     const differing: string[] = [];
     for (const program of HELD_SHARING_FAULTS) {
