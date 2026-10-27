@@ -1695,6 +1695,23 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  {
+    name: "N3-omitted-default",
+    measures:
+      "N3: a parameter's omitted `null` default, k conditional stores and k reads: one argument index, never a scan per read",
+    program: (k) =>
+      main(
+        lines(
+          "function inspect(n = null) {",
+          'let gate = askBoolean "gate"',
+          rows(k, (i) => `if gate { n = ${i} }`),
+          rows(k, () => "repeat n {}"),
+          "}",
+          "inspect()",
+          "exit",
+        ),
+      ),
+  },
   ...(["is", "is not"] as const).map((test): WorkFamily => ({
     name: `N1-wide-union-${test.replace(" ", "-")}`,
     measures: `N1: \`${test}\` a union naming one kind k times, read k times: each kind filtered once`,
