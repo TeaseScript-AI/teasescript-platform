@@ -20,8 +20,9 @@ import {
   predictStartMessage,
   PREDICT_NULL_LINE_MESSAGE,
   predictLineMessage,
+  LINE_START_KINDS,
 } from "./list-function-rules.js";
-import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
+import type { TemporalKind } from "./temporal-builtins.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
@@ -436,9 +437,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
 /** The single kind of a type that a line's start or intercept may have, or `undefined`. */
 function knownKind(type: StaticType): "integer" | "number" | "duration" | TemporalKind | undefined {
   const value = resolved(forUse(type));
-  return (["integer", "number", "duration", ...TEMPORAL_KINDS] as const).find((kind) =>
-    isScalar(value, kind),
-  );
+  return LINE_START_KINDS.find((kind) => isScalar(value, kind));
 }
 
 /** `randomWeighted`: a key of a dict of weights, or a copy of an element of a list of objects with `weight:`. */

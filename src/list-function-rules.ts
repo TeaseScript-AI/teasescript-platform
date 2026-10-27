@@ -8,6 +8,7 @@ import {
 import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
+import { TEMPORAL_KINDS } from "./temporal-builtins.js";
 import {
   familyOf,
   ORDERED_FAMILIES,
@@ -279,6 +280,12 @@ export function predictLineMessage(given: string): string {
 export function predictPositionMessage(given: string): string {
   return `predict(...) needs a number, date, datetime, or absolute date and time as its x, not ${given}.`;
 }
+
+/**
+ * The kinds of a `predict` line's start that decide the kind x must have, which the compiler checks where it knows the
+ * start, and the runtime before the values the compiler does not check: a number takes a number, any other its own kind.
+ */
+export const LINE_START_KINDS = ["integer", "number", "duration", ...TEMPORAL_KINDS] as const;
 
 /** A `predict` x, described as `given`, of another kind than the line's start, which is `start`. */
 export function predictStartMessage(start: ValueKind, given: string): string {

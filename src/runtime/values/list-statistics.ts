@@ -29,6 +29,7 @@ import {
   predictStartMessage,
   PREDICT_NULL_LINE_MESSAGE,
   predictLineMessage,
+  LINE_START_KINDS,
 } from "../../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../../random-functions.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
@@ -492,6 +493,15 @@ function predict(
     throw fault("TSV043", PREDICT_NULL_LINE_MESSAGE, span);
   if (slope === undefined || intercept === undefined || start === undefined)
     throw fault("TSV043", predictLineMessage(describeValue(line)), span);
+  // Then a start of a kind that decides x's, with x of another kind.
+  const startKind = LINE_START_KINDS.find((one) => one === valueKindOf(start));
+  if (
+    startKind !== undefined &&
+    (startKind === "integer" || startKind === "number"
+      ? typeof x !== "number"
+      : valueKindOf(x) !== startKind)
+  )
+    throw fault("TSV043", predictStartMessage(startKind, describeValue(x)), span);
   // The amounts of a line: numbers, or exact durations.
   const amount = (value: SerializableRuntimeValue | undefined): number | undefined =>
     typeof value === "number"
@@ -501,18 +511,15 @@ function predict(
         : undefined;
   const slopeAmount = amount(slope);
   const interceptAmount = amount(intercept);
-  const durations = slope !== undefined && isDuration(slope);
-  const kind = start === undefined ? undefined : kindOf(start);
-  const startKind =
-    kind !== undefined && LIST_FUNCTION_CONTRACTS.predict.positions.includes(kind)
-      ? kind
-      : undefined;
+  const durations = isDuration(slope);
+  const position = kindOf(start);
   // The compiler does not check the other values of the properties.
   if (
     slopeAmount === undefined ||
     interceptAmount === undefined ||
     isDuration(intercept) !== durations ||
-    startKind === undefined
+    position === undefined ||
+    !LIST_FUNCTION_CONTRACTS.predict.positions.includes(position)
   )
     throw fault("TSR059", predictLineMessage(describeValue(line)), span);
   // intercept + slope × (x - start), exactly, with x - start in days, and rounded once.
