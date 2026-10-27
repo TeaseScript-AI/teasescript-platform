@@ -2478,6 +2478,8 @@ export class Admission {
    */
   #lazily(place: PlaceId, path: readonly string[]): void {
     if (this.#attempted.has(keyOf(place, path)) || !this.#landed(place, path)) return;
+    // (after a stop admission decides nothing more: such a path is answered from what it retained, `#retainedSource`)
+    if (this.pass.program.work.stopped !== null) return;
     this.decide(place, path, true);
   }
 
@@ -3002,6 +3004,7 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
+    if (this.#undecidedCopy(place, path)) return this.#retainedSource(place, path)?.tags ?? [];
     this.#lazily(place, path);
     const key = keyOf(place, path);
     // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
@@ -3029,44 +3032,93 @@ export class Admission {
    * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
    * kind fits it.
    */
-  public retained(
+  public retained(place: PlaceId, path: readonly string[]): ItemTag[] | null {
+    return this.#retainedSource(place, path)?.tags ?? null;
+  }
+
+  /**
+   * `retained`'s answer, and whether a written type decides it through copies (A4: a seed, a copy's source's written
+   * type, or a source's decision that inherits one): the copy forest walked from the path with an explicit worklist,
+   * each key once, in the copies' order; round a cycle of copies a path never grows (a copy of a member's part is not
+   * followed within the cycle, as F1's landings), so the walk ends.
+   */
+  #retainedSource(
     place: PlaceId,
     path: readonly string[],
-    seen = new Set<Key>(),
-  ): ItemTag[] | null {
+  ): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
     const { program } = this.pass;
-    const written = writtenOf(program.place(place).kind);
-    const term = written === null ? null : termAt(written, path);
-    if (term !== null) return [...new Set(typeTags(term))];
-    // (kept in `seen`)
-    const key = keptKey(this.#work, place, path);
-    if (this.#unrestricted.has(key)) return ["unknown"];
-    const decided = this.decided.get(key);
-    if (decided !== undefined)
-      return this.#permitsNull.has(key) || this.#nullable.get(key) !== false
-        ? [...new Set([...decided, "null" as const])]
-        : [...decided];
-    if (seen.has(key)) return null;
-    seen.add(key);
-    const { seeds, into } = this.#inheritance();
-    const levels = seeds.get(place)?.get(pathText(path));
-    if (levels !== undefined) return [...new Set([...levels].flatMap((level) => typeTags(level)))];
-    for (const copy of into.get(place) ?? []) {
-      this.pass.program.work.charge("checks");
-      if (copy.path.length > path.length || copy.path.some((step, at) => path[at] !== step))
-        continue;
-      const found = this.retained(
-        copy.from,
-        joinSteps(copy.strip, path.slice(copy.path.length)),
-        seen,
-      );
-      if (found !== null) return found;
+    const seen = new Set<Key>();
+    const pending: {
+      readonly place: PlaceId;
+      readonly path: readonly string[];
+      readonly copied: boolean;
+    }[] = [{ place, path, copied: false }];
+    while (pending.length > 0) {
+      const at = pending.pop()!;
+      const written = writtenOf(program.place(at.place).kind);
+      const term = written === null ? null : termAt(written, at.path);
+      if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
+      // (kept in `seen`)
+      const key = keptKey(this.#work, at.place, at.path);
+      if (this.#unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };
+      const decided = this.decided.get(key);
+      if (decided !== undefined)
+        return {
+          tags:
+            this.#permitsNull.has(key) || this.#nullable.get(key) !== false
+              ? [...new Set([...decided, "null" as const])]
+              : [...decided],
+          inherited: this.#inheritsWritten.has(key),
+        };
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const { seeds, into, cycleOf } = this.#inheritance();
+      const levels = seeds.get(at.place)?.get(pathText(at.path));
+      if (levels !== undefined)
+        return {
+          tags: [...new Set([...levels].flatMap((level) => typeTags(level)))],
+          inherited: true,
+        };
+      const copies = into.get(at.place) ?? [];
+      const cycle = cycleOf.get(at.place);
+      // (pushed in reverse: the first copy is taken first)
+      for (let index = copies.length - 1; index >= 0; index -= 1) {
+        const copy = copies[index]!;
+        program.work.charge("checks");
+        if (copy.path.length > at.path.length || copy.path.some((step, i) => at.path[i] !== step))
+          continue;
+        if (
+          cycle !== undefined &&
+          cycleOf.get(copy.from) === cycle &&
+          copy.strip.length > copy.path.length
+        )
+          continue;
+        pending.push({
+          place: copy.from,
+          path: joinSteps(copy.strip, at.path.slice(copy.path.length)),
+          copied: true,
+        });
+      }
     }
     return null;
   }
 
+  /**
+   * Whether, after a stop, a path is one `#lazily` would decide now (copies land there, `groups` left it out): no
+   * decision is made after a stop (S3 §5 revision 14), so it is answered from what admission retained.
+   */
+  #undecidedCopy(place: PlaceId, path: readonly string[]): boolean {
+    return (
+      this.pass.program.work.stopped !== null &&
+      !this.#attempted.has(keyOf(place, path)) &&
+      this.#landed(place, path)
+    );
+  }
+
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
+    if (this.#undecidedCopy(place, path))
+      return this.#retainedSource(place, path)?.inherited ?? false;
     this.#lazily(place, path);
     return (
       this.#inheritsWritten.has(keyOf(place, path)) ||

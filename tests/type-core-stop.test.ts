@@ -494,6 +494,28 @@ test("a stop in a settled walk keeps the error of a member read of a null defaul
 });
 
 /**
+ * After a stop a read is answered from admission's retained state through the copy forest (S3 §5 revision 14), walked
+ * finitely: round a cycle of copies whose member copies another's part (`b = a.next`, `a = b`) a path grows no step,
+ * so a read below it finishes at every settled phase's ends instead of overflowing the native stack (Codex r9's B2).
+ */
+test("after a stop a read through a cycle of copies that would grow its path finishes", () => {
+  const source =
+    'let items: integer[] = [2,3]\nlet a = {xs: items, next: {xs: items}}\nlet b = a.next\na = b\nsay b.next.xs.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const analyse = (allowance: number): Answers =>
+    withTestAllowance(allowance, () => analyseCore(request));
+  const ends = phaseEnds(analyseCore(request).budget.total, (allowance) => {
+    const { stoppedIn, settled } = analyse(allowance).budget;
+    return settled ? stoppedIn : null;
+  });
+  assert.ok(ends.has("walk"));
+  for (const pair of ends.values())
+    for (const allowance of pair)
+      assert.equal(analyse(allowance).outcome, "warning-runtime-check", `@${allowance}`);
+});
+
+/**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
  * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
  * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the
