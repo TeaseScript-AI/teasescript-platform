@@ -74,6 +74,7 @@ export class NarrowingEvents {
     readonly pass: CorePass,
     readonly index: NarrowingIndex,
   ) {
+    pass.program.work.charge("indexSteps", pass.program.flow.loops.length);
     for (const loop of pass.program.flow.loops) this.#loops.set(loop.head, loop);
   }
 
@@ -83,7 +84,8 @@ export class NarrowingEvents {
 
   /**
    * N2: whether G answers a read at `node`, or the word of the first condition that fails: X1 (`dead-code`), X4
-   * (`label`, `call`), X5 with N5 (`loop`), X6 with N5 (the first event's word), X7 (`handler`). `kinds` are G's
+   * (`label`, `call`), X5 with N5 (`loop`), X6 with N5 (the first event's word), X7 (`handler`); a path through a
+   * reference (a speaker, a handle, a value holding one) is never narrowed (N8, F19a: `unmodelled`). `kinds` are G's
    * filtered kinds, which N5's preserving test needs; without them no store is preserving.
    */
   public *holds(
@@ -94,6 +96,7 @@ export class NarrowingEvents {
     const { program, handlers } = this.pass;
     program.work.charge("exactQueries");
     if (!program.live(node) || !program.live(g.node)) return "dead-code"; // X1
+    if (yield* this.pass.contract.refReceiver(g.key)) return "unmodelled";
     if (g.region !== null) return this.#inOperand(g, node);
     if (!program.dom.dominates(g.node, node)) return "branch";
     const boundary = program.dom.edom(node);
@@ -102,6 +105,7 @@ export class NarrowingEvents {
     const events = this.#events(g);
     // X5 with N5: every event of a dependency key inside a loop around the read that does not enclose G
     for (const head of node.loops) {
+      program.work.charge("eventSteps", 1 + g.node.loops.length);
       if (g.node.loops.includes(head)) continue;
       const loop = this.#loops.get(head);
       if (loop === undefined) return "loop";
@@ -143,9 +147,9 @@ export class NarrowingEvents {
     let word: ContextWord | null = null;
     for (const [byFile, found] of lists) {
       const offsets = byFile?.get(region.file);
-      program.work.charge("eventSteps", 2);
+      program.work.charge("eventSteps");
       if (offsets === undefined) continue;
-      const index = lowerBound(offsets, region.start);
+      const index = lowerBound(program.work, offsets, region.start);
       if (index < offsets.length && offsets[index]! < at && offsets[index]! < first) {
         first = offsets[index]!;
         word = found;
@@ -281,23 +285,22 @@ export class NarrowingEvents {
     for (const list of events)
       for (const [low, high] of ranges) {
         if (low > high) continue;
-        work.charge("eventSteps", 2);
-        const from = lowerBound(list.positions, low);
-        const to = lowerBound(list.positions, high + 1);
+        work.charge("eventSteps");
+        const from = lowerBound(work, list.positions, low);
+        const to = lowerBound(work, list.positions, high + 1);
         if (from >= to || list.positions[from]! >= at) continue;
         let first = from;
         if (list.own && kinds !== null) {
           const subset = yield* this.#subset(g, kinds);
-          const base = lowerBound(subset, low);
-          work.charge("eventSteps", 2);
-          if (to - from <= countIn(subset, low, high + 1)) continue;
+          const base = lowerBound(work, subset, low);
+          if (to - from <= countIn(work, subset, low, high + 1)) continue;
           // the first rank j with more events than preserving stores up to its position
           let lo = from;
           let hi = to - 1;
           while (lo < hi) {
             const middle = (lo + hi) >> 1;
             work.charge("eventSteps");
-            const preserving = lowerBound(subset, list.positions[middle]! + 1) - base;
+            const preserving = lowerBound(work, subset, list.positions[middle]! + 1) - base;
             if (middle - from + 1 > preserving) hi = middle;
             else lo = middle + 1;
           }
@@ -379,7 +382,10 @@ export class NarrowingEvents {
     return preserving;
   }
 
-  /** A value's items with every read of `location` taken as `kinds`: reads, operators and `otherwise` here, the rest read. */
+  /**
+   * A value's items with every read of `location` taken as `kinds`: reads, operators and `otherwise` here, every other
+   * value read through `Values`. Post-order with an explicit stack, so a long expression never deepens the native stack.
+   */
   *#value(
     value: PlaceId,
     node: FlowNode,
@@ -387,29 +393,60 @@ export class NarrowingEvents {
     kinds: readonly ItemTag[],
   ): Work<readonly Item[]> {
     const { program, values } = this.pass;
-    program.work.charge("exactValues");
-    const site = program.places[value]?.site ?? null;
-    const at = site === null ? null : program.exprAt(site);
-    const expression = at?.expression;
-    if (expression !== undefined && at !== null) {
-      const path = stablePath(program, at.file, expression);
-      if (path !== null && locationOf(path) === location)
-        return kinds.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    const done = new Map<PlaceId, readonly Item[]>();
+    const pending: { readonly place: PlaceId; parts: readonly PlaceId[] | null }[] = [
+      { place: value, parts: null },
+    ];
+    while (pending.length > 0) {
+      const top = pending.at(-1)!;
+      if (done.has(top.place)) {
+        pending.pop();
+        continue;
+      }
+      const c = program.opOf.get(top.place);
+      const operator = c === undefined ? null : operatorOf(c);
+      // an operation's operands and an `otherwise`'s two sides first
+      if (top.parts === null) {
+        program.work.charge("exactValues");
+        const site = program.places[top.place]?.site ?? null;
+        const at = site === null ? null : program.exprAt(site);
+        const expression = at?.expression;
+        const path =
+          expression === undefined || at === null ? null : stablePath(program, at.file, expression);
+        if (path !== null && locationOf(path) === location) {
+          done.set(
+            top.place,
+            kinds.map((tag) => makeItem(tag, null, { cert: "pos" })),
+          );
+          continue;
+        }
+        top.parts =
+          c?.kind === "operation" && operator !== null
+            ? c.arguments
+            : c?.kind === "fallback"
+              ? [c.left, c.right]
+              : [];
+        if (top.parts.length === 0) {
+          done.set(top.place, yield* values.valueItems(top.place, at ?? node, []));
+          continue;
+        }
+        for (const part of top.parts) pending.push({ place: part, parts: null });
+        continue;
+      }
+      pending.pop();
+      if (c?.kind === "operation" && operator !== null) {
+        const operands = top.parts.map((part) => withoutEmpty(done.get(part)!));
+        done.set(top.place, operationItems(operator, operands, program.scope, c.site));
+      } else {
+        const [left, right] = top.parts.map((part) => done.get(part)!);
+        done.set(
+          top.place,
+          left!.some((item) => item.tag === "null" || item.tag === "unknown")
+            ? [...left!.filter((item) => item.tag !== "null"), ...right!]
+            : left!,
+        );
+      }
     }
-    const c = program.opOf.get(value);
-    const operator = c === undefined ? null : operatorOf(c);
-    if (c?.kind === "operation" && operator !== null) {
-      const operands: (readonly Item[])[] = [];
-      for (const argument of c.arguments)
-        operands.push(withoutEmpty(yield* this.#value(argument, node, location, kinds)));
-      return operationItems(operator, operands, program.scope, c.site);
-    }
-    if (c?.kind === "fallback") {
-      const left = yield* this.#value(c.left, node, location, kinds);
-      if (!left.some((item) => item.tag === "null" || item.tag === "unknown")) return left;
-      const right = yield* this.#value(c.right, node, location, kinds);
-      return [...left.filter((item) => item.tag !== "null"), ...right];
-    }
-    return yield* values.valueItems(value, at ?? node, []);
+    return done.get(value)!;
   }
 }

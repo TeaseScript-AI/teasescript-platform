@@ -6,7 +6,7 @@ import { caseValueKey } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
+import { joinParts, keepText, keptArray, keptParts, keptSteps, type WorkLedger } from "./budget.js";
 import { keyBelow, keyOf, sortCost, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
@@ -140,20 +140,6 @@ export type NarrowingForm =
 const NON_NULL: NarrowingForm = { kind: "non-null" };
 const ONLY_NULL: NarrowingForm = { kind: "null" };
 
-/** The form the opposite outcome of a test leaves: the complement arm, an `or`'s right operand, the way past a leave. */
-function complement(form: NarrowingForm): NarrowingForm {
-  switch (form.kind) {
-    case "non-null":
-      return ONLY_NULL;
-    case "null":
-      return NON_NULL;
-    case "is":
-      return { kind: "is-not", kinds: form.kinds };
-    case "is-not":
-      return { kind: "is", kinds: form.kinds };
-  }
-}
-
 /** Whether an item of kind `tag` lies wholly within `kinds` (an integer is a number). */
 function within(tag: ItemTag, kinds: readonly ValueKind[]): boolean {
   return kinds.some((kind) => kind === tag || (tag === "integer" && kind === "number"));
@@ -195,6 +181,7 @@ export function narrowedItems(
         if (item.tag === "null" || item.tag === "unknown") kept.push({ ...item, tag: "null" });
         break;
       case "is":
+        scope.work.charge("mergeItems", form.kinds.length);
         for (const kind of form.kinds) {
           const tag = overlap(item.tag, kind, form.fractional === true);
           if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
@@ -226,77 +213,115 @@ export function removes(form: NarrowingForm, tag: ItemTag): boolean {
   }
 }
 
-/** A type test's kinds and, for a single collection type, the type its element step names. */
-function testedType(annotation: TypeAnnotation): {
+/**
+ * A type test's type: its kinds; the collection kinds it names with an element type (`integer[]`: `list`), which a
+ * negative test never removes (only items wholly within the tested type are); and, for a single collection type beside
+ * `null` alone, the type its element step names. Walked with an explicit stack: a type nests as deep as it is written.
+ */
+interface TestedType {
   readonly kinds: readonly ValueKind[];
-  readonly element: TypeAnnotation | null;
-} {
-  switch (annotation.kind) {
-    case "namedType":
-      return { kinds: [annotation.name], element: null };
-    case "listType":
-    case "setType":
-    case "dictType":
-      return {
-        kinds: [
-          annotation.kind === "listType" ? "list" : annotation.kind === "setType" ? "set" : "dict",
-        ],
-        element: annotation.element,
-      };
-    case "optionalType": {
-      const inner = testedType(annotation.value);
-      return { kinds: [...inner.kinds, "null"], element: inner.element };
-    }
-    case "unionType": {
-      const members = annotation.members.map(testedType);
-      const collections = members.filter((member) => member.element !== null);
-      return {
-        kinds: members.flatMap((member) => member.kinds),
-        // an element step only where one collection type stands beside `null` alone
-        element:
-          collections.length === 1 &&
-          members.every(
-            (member) =>
-              member.element !== null || (member.kinds.length === 1 && member.kinds[0] === "null"),
-          )
-            ? collections[0]!.element
-            : null,
-      };
-    }
-  }
-}
-
-/** A test at a truth position: its tested path's expression and the form each outcome leaves. */
-interface Fact {
-  readonly tested: Expression;
-  readonly form: NarrowingForm;
-  /** For a positive collection test, the element step's type. */
+  readonly constrained: ReadonlySet<ValueKind>;
   readonly element: TypeAnnotation | null;
 }
 
-/** A test form (N1): a null test or a type test, or `not` before one, with the form its true outcome leaves. */
-function testForm(expression: Expression): Fact | null {
-  const shape = conditionShape(expression);
-  if (shape.kind === "not") {
-    const inner = testForm(shape.operand);
-    return inner === null
-      ? null
-      : { tested: inner.tested, form: complement(inner.form), element: null };
+function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
+  const kinds: ValueKind[] = [];
+  const constrained = new Set<ValueKind>();
+  const elements: TypeAnnotation[] = [];
+  let others = 0;
+  const pending = [annotation];
+  while (pending.length > 0) {
+    const type = pending.pop()!;
+    work.charge("indexSteps");
+    switch (type.kind) {
+      case "namedType":
+        kinds.push(type.name);
+        if (type.name !== "null") others += 1;
+        break;
+      case "listType":
+      case "setType":
+      case "dictType": {
+        const kind = type.kind === "listType" ? "list" : type.kind === "setType" ? "set" : "dict";
+        kinds.push(kind);
+        constrained.add(kind);
+        elements.push(type.element);
+        break;
+      }
+      case "optionalType":
+        kinds.push("null");
+        pending.push(type.value);
+        break;
+      case "unionType":
+        for (const member of type.members) pending.push(member);
+        break;
+    }
   }
-  if (shape.kind === "null")
-    return { tested: shape.tested, form: shape.negated ? NON_NULL : ONLY_NULL, element: null };
-  if (shape.kind !== "type") return null;
-  const type = testedType(shape.node.type);
-  // `is null` and `is not null` are the null tests' forms
-  if (type.kinds.length === 1 && type.kinds[0] === "null")
-    return { tested: shape.tested, form: shape.negated ? NON_NULL : ONLY_NULL, element: null };
-  return shape.negated
-    ? { tested: shape.tested, form: { kind: "is-not", kinds: type.kinds }, element: null }
-    : { tested: shape.tested, form: { kind: "is", kinds: type.kinds }, element: type.element };
+  return {
+    kinds,
+    constrained,
+    element: elements.length === 1 && others === 0 ? elements[0]! : null,
+  };
 }
 
 /**
- * The tests a condition's outcome proves (N1, N9): a test form's own form, or its complement for the false outcome; an
+ * A test form at a truth position (N1): the tested expression, the test (a null test, or a type test with its type),
+ * and the outcome a region takes: `true` where the test holds (`x == null`, `x is T`), `false` where it fails.
+ */
+interface Fact {
+  readonly tested: Expression;
+  readonly type: TestedType | null;
+  readonly holds: boolean;
+}
+
+/** The complement arm, an `or`'s right operand, the way past a leave: the opposite outcome. */
+function opposite(fact: Fact): Fact {
+  return { ...fact, holds: !fact.holds };
+}
+
+/**
+ * What a fact's outcome leaves (N1): `null` alone or every item but `null` for a null test; for a type test that holds,
+ * each item's overlap with the type, and an element step's test per element type the type names; for one that fails,
+ * only the items wholly within the type removed (never a collection kind the type names with an element type).
+ */
+function formOf(fact: Fact): {
+  readonly form: NarrowingForm;
+  readonly element: TypeAnnotation | null;
+} {
+  const type = fact.type;
+  if (type === null) return { form: fact.holds ? ONLY_NULL : NON_NULL, element: null };
+  return fact.holds
+    ? { form: { kind: "is", kinds: type.kinds }, element: type.element }
+    : {
+        form: { kind: "is-not", kinds: type.kinds.filter((kind) => !type.constrained.has(kind)) },
+        element: null,
+      };
+}
+
+/**
+ * A test form (N1): a null test or a type test, or `not` before one (its complement), with the outcome its truth
+ * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
+ */
+function testForm(expression: Expression, work: WorkLedger): Fact | null {
+  let shape = conditionShape(expression);
+  let holds = true;
+  while (shape.kind === "not") {
+    work.charge("indexSteps");
+    holds = !holds;
+    shape = conditionShape(shape.operand);
+  }
+  if (shape.kind === "null")
+    return { tested: shape.tested, type: null, holds: shape.negated ? !holds : holds };
+  if (shape.kind !== "type") return null;
+  const type = testedType(shape.node.type, work);
+  const outcome = shape.negated ? !holds : holds;
+  // `is null` and `is not null` are the null tests
+  if (type.kinds.length === 1 && type.kinds[0] === "null")
+    return { tested: shape.tested, type: null, holds: outcome };
+  return { tested: shape.tested, type, holds: outcome };
+}
+
+/**
+ * The tests a condition's outcome proves (N1, N9): a test form's own outcome, or its opposite for the false outcome; an
  * `and`'s true outcome what each operand's true outcome proves, an `or`'s false outcome what each operand's false
  * outcome proves (§13.3's W30 and its `or` mirror). Any other compound or negated condition proves nothing.
  */
@@ -305,11 +330,9 @@ function facts(condition: Expression, outcome: boolean, into: Fact[], work: Work
   while (pending.length > 0) {
     const expression = pending.pop()!;
     work.charge("indexSteps");
-    const test = testForm(expression);
+    const test = testForm(expression, work);
     if (test !== null) {
-      into.push(
-        outcome ? test : { tested: test.tested, form: complement(test.form), element: null },
-      );
+      into.push(outcome ? test : opposite(test));
       continue;
     }
     const shape = conditionShape(expression);
@@ -473,8 +496,8 @@ export class NarrowingIndex {
   readonly #byLocation = new Map<string, Laminar<Narrowing>>();
   /** Per refined location and file, its operand regions' narrowing definitions by their text spans. */
   readonly #byOperand = new Map<string, Map<number, Laminar<Narrowing>>>();
-  /** Per guarded region's entry, its narrowing definitions in evaluation order (an arm's first Gs, N3). */
-  readonly #atEntry = new Map<FlowNode, Narrowing[]>();
+  /** Per guarded region's entry and refined location, its narrowing definitions in evaluation order (N3's arms). */
+  readonly #atEntry = new Map<string, Narrowing[]>();
   /** Per collection key, its mutating method calls (N2). */
   readonly #invalidations = new Map<Key, Invalidations>();
   private constructor(
@@ -489,21 +512,36 @@ export class NarrowingIndex {
     const define = (
       node: FlowNode,
       file: number,
-      fact: Fact,
+      tested: Expression,
+      outcome: { readonly form: NarrowingForm; readonly element: TypeAnnotation | null },
       region: OperandSpan | null = null,
     ): void => {
       if (!program.reached(node)) return;
-      const tested = unwrap(fact.tested);
-      const path = stablePath(program, file, tested);
+      const operand = unwrap(tested);
+      const path = stablePath(program, file, operand);
       const input = program.exprAt({
         file,
-        start: tested.span.start.offset,
-        end: tested.span.end.offset,
+        start: operand.span.start.offset,
+        end: operand.span.end.offset,
       });
       if (path === null || input === null) return;
-      // the tested path and, for a positive collection test, one more element step per element type it names
-      let form = fact.form;
-      let element = fact.element;
+      keptArray(work, path.steps);
+      // the keys a G keeps, each charged as it is made (TABLE r4.58)
+      const kept = (key: Key): Key => {
+        keepText(work, key.length);
+        return key;
+      };
+      const variables = path.steps.flatMap((step) =>
+        step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
+      );
+      const base = path.steps.flatMap((step, index) =>
+        readsElement(step) ? [kept(pathKey(path, index))] : [],
+      );
+      // the tested path and, for a positive collection test, one more element step per element type it names: each
+      // element step's collection, the tested path's key and those below it, is one of its G's collections too (N2)
+      let { form, element } = outcome;
+      let collections = base;
+      let key = kept(pathKey(path));
       for (let elements = 0; ; elements += 1) {
         work.charge("indexSteps");
         const location = locationOf(path, elements, work);
@@ -511,13 +549,9 @@ export class NarrowingIndex {
           location,
           path,
           elements,
-          key: elementKey(path, elements),
-          variables: path.steps.flatMap((step) =>
-            step.kind === "variable" ? [keyOf(step.place, [])] : [],
-          ),
-          collections: path.steps.flatMap((step, index) =>
-            readsElement(step) ? [pathKey(path, index)] : [],
-          ),
+          key,
+          variables,
+          collections,
           node,
           region,
           input,
@@ -528,8 +562,9 @@ export class NarrowingIndex {
           const entry = { start: program.position(node), end: program.positionEnd(node), item: g };
           if (list === undefined) lists.set(location, [entry]);
           else list.push(entry);
-          const at = this.#atEntry.get(node);
-          if (at === undefined) this.#atEntry.set(node, [g]);
+          const entryKey = keptParts(work, node.id, location);
+          const at = this.#atEntry.get(entryKey);
+          if (at === undefined) this.#atEntry.set(entryKey, [g]);
           else at.push(g);
         } else {
           let byFile = operands.get(location);
@@ -540,9 +575,11 @@ export class NarrowingIndex {
           else list.push(entry);
         }
         if (element === null) break;
-        const inner = testedType(element);
+        const inner = testedType(element, work);
         form = { kind: "is", kinds: inner.kinds };
         element = inner.element;
+        collections = keptSteps(work, collections, [key]);
+        key = kept(keyBelow(key, ["element"]));
       }
     };
     const proven: Fact[] = [];
@@ -552,7 +589,7 @@ export class NarrowingIndex {
         if (index > 1) break;
         proven.length = 0;
         facts(use.operand, index === 0, proven, work);
-        for (const fact of proven) define(branch, use.file, fact);
+        for (const fact of proven) define(branch, use.file, fact.tested, formOf(fact));
       }
     // `switch` cases: `case null`, a literal case by its value, `default` and later cases after `case null`
     for (const use of flow.switchUses) {
@@ -565,9 +602,9 @@ export class NarrowingIndex {
         const form =
           switchCase === undefined ? null : caseForm(switchCase.values, switchCase.typeTest);
         const after = afterNull ? NON_NULL : null;
-        if (form !== null) define(branch, use.file, { tested: use.operand, form, element: null });
+        if (form !== null) define(branch, use.file, use.operand, { form, element: null });
         else if (after !== null)
-          define(branch, use.file, { tested: use.operand, form: after, element: null });
+          define(branch, use.file, use.operand, { form: after, element: null });
         if (switchCase !== undefined && form?.kind === "null") afterNull = true;
       }
     }
@@ -588,7 +625,13 @@ export class NarrowingIndex {
    * walk of each outermost logical tree with an explicit stack; a logical below another expression is a tree of its own.
    */
   #operandRegions(
-    define: (node: FlowNode, file: number, fact: Fact, region: OperandSpan) => void,
+    define: (
+      node: FlowNode,
+      file: number,
+      tested: Expression,
+      outcome: { readonly form: NarrowingForm; readonly element: TypeAnnotation | null },
+      region: OperandSpan,
+    ) => void,
   ): void {
     const program = this.program;
     const work = program.work;
@@ -606,6 +649,7 @@ export class NarrowingIndex {
       readonly or: Expression | null;
     };
     for (const logical of logicals) {
+      work.charge("indexSteps");
       if (
         outer !== null &&
         outer.file === logical.file &&
@@ -618,7 +662,7 @@ export class NarrowingIndex {
       while (pending.length > 0) {
         const { expression, and, or } = pending.pop()!;
         work.charge("indexSteps");
-        const test = testForm(expression);
+        const test = testForm(expression, work);
         if (test !== null) {
           const node = program.exprAt({
             file,
@@ -627,10 +671,10 @@ export class NarrowingIndex {
           });
           for (const [top, fact] of [
             [and, test],
-            [or, { tested: test.tested, form: complement(test.form), element: null }],
+            [or, opposite(test)],
           ] as const)
             if (node !== null && top !== null)
-              define(node, file, fact, {
+              define(node, file, fact.tested, formOf(fact), {
                 file,
                 start: expression.span.end.offset,
                 end: top.span.end.offset,
@@ -766,9 +810,10 @@ export class NarrowingIndex {
     return this.#byLocation.get(location)?.items ?? [];
   }
 
-  /** The narrowing definitions at a guarded region's entry, in evaluation order. */
-  public atEntry(node: FlowNode): readonly Narrowing[] {
-    return this.#atEntry.get(node) ?? [];
+  /** The narrowing definitions of a refined location at a guarded region's entry, in evaluation order. */
+  public atEntry(node: FlowNode, location: string): readonly Narrowing[] {
+    this.program.work.charge("eventSteps");
+    return this.#atEntry.get(joinParts(node.id, location)) ?? [];
   }
 
   /**
@@ -830,14 +875,6 @@ export function locationOf(
 ): string {
   const labels = labelsOf(path, elements, length);
   return work === null ? joinParts(path.root, labels) : keptParts(work, path.root, labels);
-}
-
-/** The contract key of a tested path followed by `elements` element steps. */
-function elementKey(path: StablePath, elements: number): Key {
-  return keyBelow(
-    pathKey(path),
-    Array.from({ length: elements }, () => "element"),
-  );
 }
 
 /** Whether a method changes the collection it is called on in place (`ListMethod.changes`, `DictMethod.changes`). */

@@ -11,6 +11,7 @@ import {
 } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { ItemTag } from "./items.js";
+import type { Work } from "./solver.js";
 import {
   locationOf,
   pathKey,
@@ -69,10 +70,20 @@ interface Candidates {
   readonly size: number;
 }
 
-/** A key's per-key layer for one offending kind: per block, the indexes of the statements it closes, sorted. */
+/**
+ * A sparse layer of closed statements (N3, §13.3) over a parent layer: a key's kill layer over its parent key's (the
+ * key's own kills, and the compound statements they close beside the shared layer and every layer below), or a key's
+ * test layer for one offending kind over its kill layer (the blocking tests of the needed form, and what they close).
+ * A prefix's kills stay in the prefix's layer, never copied into a descendant's. Per block, the indexes it closes
+ * (sorted) and their number; per compound statement, how many of its live arms it closes.
+ */
 interface Layer {
+  readonly parent: Layer | null;
+  readonly statements: ReadonlySet<TreeStatement>;
   readonly closed: ReadonlyMap<number, readonly number[]>;
-  /** The shared layer's applicability for the key: calls close only where an owner lies outside its activation. */
+  readonly counts: ReadonlyMap<number, number>;
+  readonly arms: ReadonlyMap<TreeStatement, number>;
+  /** The shared layer's applicability: calls close only for a key with an owner outside its activation (X6). */
   readonly calls: boolean;
 }
 
@@ -92,7 +103,11 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
   return null;
 }
 
+/** The definitions N3 may certify (N3 (iii)): declarations, assignments, a parameter's default; never an argument. */
+const CERTIFIED: ReadonlySet<string> = new Set(["initializer", "assignment", "parameter default"]);
+
 export class NarrowingRoutes {
+  /** Per key and applicability its kill layer, per (key, offending kind) its test layer. */
   readonly #layers = new Map<string, Layer>();
   /** Per (key, offending kind) its certified own definitions, and per key (`*`) its whole stores, by callable body. */
   readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
@@ -116,7 +131,7 @@ export class NarrowingRoutes {
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    */
-  public witness(key: Key, tag: ItemTag, node: FlowNode): Definition | null {
+  public *witness(key: Key, tag: ItemTag, node: FlowNode): Work<Definition | null> {
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
     let memo = joinParts(key, node.id, tag);
@@ -130,7 +145,7 @@ export class NarrowingRoutes {
       // (a query met again on its own chain proves nothing)
       keepText(this.#work, memo.length);
       this.#witnesses.set(memo, null);
-      const found = this.#examined(key, tag, node);
+      const found = yield* this.#examined(key, tag, node);
       const source = found === null ? false : this.#certificate(found, key, tag);
       if (found === null || source === false) {
         answer = null;
@@ -158,14 +173,14 @@ export class NarrowingRoutes {
    * The one candidate a consumer examines, when its corridor is open: the nearest of the key's own certified
    * definitions and each prefix's whole stores whose writer side reaches the read, then the corridor checked whole.
    */
-  #examined(key: Key, tag: ItemTag, node: FlowNode): Candidate | null {
-    const { program, handlers } = this.pass;
+  *#examined(key: Key, tag: ItemTag, node: FlowNode): Work<Candidate | null> {
+    const { program, handlers, contract } = this.pass;
     program.work.charge("exactQueries");
     if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
     if (handlers.handlerTouches(key) && handlers.afterSomeCreation(node)) return null;
     // positions and members are not facts: no element key and no reference member has a route
-    if (keyPath(key).includes("element")) return null;
+    if (keyPath(key).includes("element") || (yield* contract.refReceiver(key))) return null;
     const chain = this.#chainOf(node);
     if (chain === null) return null;
     const body = chain[0]!.block;
@@ -195,13 +210,14 @@ export class NarrowingRoutes {
     const { program, definitions, lists } = this.pass;
     const d = found.def;
     program.work.charge("exactQueries");
-    // X3's exact definitions only: never a weak store, an element or dict key, a return, a multi-site argument
+    // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a single-site
+    // parameter's default; never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
       d.kind !== "whole" ||
       d.weak ||
       d.value === undefined ||
-      d.how === "return" ||
-      ((d.how === "argument" || d.how === "parameter default") && !lists.singleSite(d.fn)) ||
+      !CERTIFIED.has(d.how) ||
+      (d.how === "parameter default" && !lists.singleSite(d.fn)) ||
       !lists.certain(d)
     )
       return false;
@@ -292,7 +308,10 @@ export class NarrowingRoutes {
     return chain.reverse();
   }
 
-  /** Whether a segment of a block, statements `low` to `high` exclusive, holds a closed statement in either layer. */
+  /**
+   * Whether a segment of a block, statements `low` to `high` exclusive, holds a closed statement: in the shared layer
+   * (its applicability) or in a layer of the chain, two binary searches each.
+   */
   #closed(
     block: TreeBlock,
     low: number,
@@ -300,10 +319,15 @@ export class NarrowingRoutes {
     layer: Layer | null,
     calls: boolean,
   ): boolean {
-    this.#work.charge("eventSteps", 2);
-    if (countIn(calls ? block.calls : block.leaves, low, high) > 0) return true;
-    const own = layer?.closed.get(block.id);
-    return own !== undefined && countIn(own, low, high) > 0;
+    const work = this.#work;
+    work.charge("eventSteps");
+    if (countIn(work, calls ? block.calls : block.leaves, low, high) > 0) return true;
+    for (let at = layer; at !== null; at = at.parent) {
+      work.charge("eventSteps");
+      const own = at.closed.get(block.id);
+      if (own !== undefined && countIn(work, own, low, high) > 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -345,7 +369,7 @@ export class NarrowingRoutes {
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
-    const layer = this.#layer(key, tag);
+    const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
     while (
@@ -392,86 +416,150 @@ export class NarrowingRoutes {
   }
 
   /**
-   * The per-key layer of a key and offending kind (N3, §13.3): kills of the key and its prefixes, blocking tests of
-   * the needed form, and the branches and loops they close beside the shared layer, built once.
+   * A key's kill layer (§13.3's sparse per-key layer, its kills): the statements its own whole stores stand in, and the
+   * compound statements they close beside the shared layer and its prefixes' kill layers; built once per key and
+   * applicability, over the statements holding its own kills and their ancestors.
    */
-  #layer(key: Key, tag: ItemTag): Layer {
-    const memo = joinParts(key, tag);
+  #killLayer(key: Key, calls: boolean): Layer {
+    const memo = joinParts(key, calls ? "calls" : "leaves");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
-    const work = program.work;
-    const calls = definitions.ownedAway(key);
-    const variant = calls ? "calls" : "leaves";
-    const closed = new Set<TreeStatement>();
-    const counts = new Map<number, number>();
-    const location = this.#location(key);
-    const armClosed = (arm: TreeBlock): boolean =>
-      arm[variant].length > 0 || (counts.get(arm.id) ?? 0) > 0;
-    const starts = (arm: TreeBlock): boolean =>
-      location !== null &&
-      arm.entry !== null &&
-      this.index.atEntry(arm.entry).some((g) => g.location === location && removes(g.form, tag));
-    const pending: TreeStatement[] = [];
-    const mark = (statement: TreeStatement): void => {
-      if (closed.has(statement) || statement[variant]) return;
-      closed.add(statement);
-      counts.set(statement.block.id, (counts.get(statement.block.id) ?? 0) + 1);
-      if (statement.block.owner !== null) pending.push(statement.block.owner);
-    };
-    // the compound statements a kill or a test of the key stands in, until one stays open
-    const check = (statement: TreeStatement): void => {
-      work.charge("indexSteps", statement.arms.length + 1);
+    const prefix = prefixesOf(key)[0];
+    const parent = prefix === undefined ? null : this.#killLayer(prefix, calls);
+    const seeds: TreeStatement[] = [];
+    for (const d of definitions.byKey.get(key) ?? []) {
+      program.work.charge("indexSteps");
       if (
-        closed.has(statement) ||
-        statement[variant] ||
-        statement.skip ||
-        statement.arms.length === 0
+        (d.kind !== "whole" && d.kind !== "const") ||
+        d.weak ||
+        !lists.live(d) ||
+        !program.live(d.node) ||
+        d.node.span === null ||
+        d.node.statement === undefined
       )
-        return;
-      const live = statement.arms.filter((arm) => arm.entry === null || program.live(arm.entry));
-      if (live.every((arm) => armClosed(arm) || starts(arm))) mark(statement);
-    };
-    // kills: a whole store or fixed value of the key or a prefix where it stands
-    for (const killed of [key, ...prefixesOf(key)])
-      for (const d of definitions.byKey.get(killed) ?? []) {
-        work.charge("indexSteps");
-        if (
-          (d.kind !== "whole" && d.kind !== "const") ||
-          d.weak ||
-          !lists.live(d) ||
-          !program.live(d.node) ||
-          d.node.span === null ||
-          d.node.statement === undefined
-        )
-          continue;
-        const statement = this.tree.statementAt(d.node.file, d.node.span.start.offset);
-        if (statement !== null) mark(statement);
-        while (pending.length > 0) check(pending.pop()!);
-      }
-    // blocking tests: the branches whose arms a narrowing of the key's location enters
+        continue;
+      const statement = this.tree.statementAt(d.node.file, d.node.span.start.offset);
+      if (statement !== null) seeds.push(statement);
+    }
+    const layer = this.#build(parent, calls, seeds, null);
+    keepText(program.work, memo.length);
+    this.#layers.set(memo, layer);
+    return layer;
+  }
+
+  /**
+   * A key's test layer for an offending kind over its kill layer: the blocking tests of the needed form (every live
+   * arm starts with a narrowing of the key's location that removes the kind, or is closed) and what they close.
+   */
+  #testLayer(key: Key, tag: ItemTag): Layer {
+    const memo = joinParts(key, tag);
+    const known = this.#layers.get(memo);
+    if (known !== undefined) return known;
+    const calls = this.pass.definitions.ownedAway(key);
+    const parent = this.#killLayer(key, calls);
+    const location = this.#location(key);
+    const tests = new Set<TreeStatement>();
     if (location !== null)
       for (const g of this.index.definitionsOf(location)) {
-        work.charge("indexSteps");
+        this.#work.charge("indexSteps");
         const owner = this.tree.armAt(g.node)?.owner;
-        if (owner !== undefined && owner !== null) check(owner);
-        while (pending.length > 0) check(pending.pop()!);
+        if (owner !== undefined && owner !== null) tests.add(owner);
       }
-    const byBlock = new Map<number, number[]>();
-    for (const statement of closed) {
+    const layer = this.#build(
+      parent,
+      calls,
+      [...tests],
+      location === null
+        ? null
+        : (arm) =>
+            arm.entry !== null &&
+            this.index.atEntry(arm.entry, location).some((g) => removes(g.form, tag)),
+    );
+    keepText(this.#work, memo.length);
+    this.#layers.set(memo, layer);
+    return layer;
+  }
+
+  /**
+   * A layer over `parent`: the `seeds` (kills) closed, or with `starts`, the seeds' arms that start with a narrowing of
+   * the needed form counted closed; then every compound statement whose live arms are all closed, by the shared layer,
+   * a layer below or this one, found from the arms that close, each arm counted once in one layer.
+   */
+  #build(
+    parent: Layer | null,
+    calls: boolean,
+    seeds: readonly TreeStatement[],
+    starts: ((arm: TreeBlock) => boolean) | null,
+  ): Layer {
+    const work = this.#work;
+    const variant = calls ? "calls" : "leaves";
+    const statements = new Set<TreeStatement>();
+    const counts = new Map<number, number>();
+    const arms = new Map<TreeStatement, number>();
+    const counted = new Set<TreeBlock>();
+    const closedBelow = (statement: TreeStatement): boolean => {
+      if (statement[variant]) return true;
+      for (let at = parent; at !== null; at = at.parent) {
+        work.charge("eventSteps");
+        if (at.statements.has(statement)) return true;
+      }
+      return false;
+    };
+    const armBelow = (arm: TreeBlock): boolean => {
+      if (arm[variant].length > 0) return true;
+      for (let at = parent; at !== null; at = at.parent) {
+        work.charge("eventSteps");
+        if ((at.counts.get(arm.id) ?? 0) > 0) return true;
+      }
+      return false;
+    };
+    const pending: TreeStatement[] = [];
+    // an arm closed here for the first time counts for its statement, which may then close
+    const close = (arm: TreeBlock): void => {
+      if (counted.has(arm) || !arm.live || arm.owner === null || armBelow(arm)) return;
+      counted.add(arm);
+      arms.set(arm.owner, (arms.get(arm.owner) ?? 0) + 1);
+      pending.push(arm.owner);
+    };
+    const mark = (statement: TreeStatement): void => {
       work.charge("indexSteps");
-      const list = byBlock.get(statement.block.id);
-      if (list === undefined) byBlock.set(statement.block.id, [statement.index]);
+      if (statements.has(statement) || closedBelow(statement)) return;
+      statements.add(statement);
+      counts.set(statement.block.id, (counts.get(statement.block.id) ?? 0) + 1);
+      close(statement.block);
+    };
+    const check = (statement: TreeStatement): void => {
+      work.charge("indexSteps");
+      if (statement.skip || statement.arms.length === 0 || statements.has(statement)) return;
+      let closedArms = statement.sharedArms[variant] + (arms.get(statement) ?? 0);
+      for (let at = parent; at !== null; at = at.parent) {
+        work.charge("eventSteps");
+        closedArms += at.arms.get(statement) ?? 0;
+      }
+      if (closedArms >= statement.liveArms) mark(statement);
+    };
+    for (const seed of seeds) {
+      if (starts === null) mark(seed);
+      else
+        for (const arm of seed.arms) {
+          work.charge("indexSteps");
+          if (starts(arm)) close(arm);
+        }
+      while (pending.length > 0) check(pending.pop()!);
+    }
+    const closed = new Map<number, number[]>();
+    work.charge("indexSteps", statements.size);
+    for (const statement of statements) {
+      const list = closed.get(statement.block.id);
+      if (list === undefined) closed.set(statement.block.id, [statement.index]);
       else list.push(statement.index);
     }
-    for (const list of byBlock.values()) {
+    for (const list of closed.values()) {
       work.charge("indexSteps", sortCost(list.length));
       list.sort((a, b) => a - b);
     }
-    const layer: Layer = { closed: byBlock, calls };
-    keepText(work, memo.length);
-    this.#layers.set(memo, layer);
-    return layer;
+    return { parent, statements, closed, counts, arms, calls };
   }
 
   /** The refined location of a key without element steps: its properties' texts. */
@@ -489,7 +577,7 @@ export class NarrowingRoutes {
     const memo = joinParts(key, tag);
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
-    const layer = this.#layer(key, tag);
+    const layer = this.#testLayer(key, tag);
     const made = this.#candidateLists(
       (this.pass.definitions.byKey.get(key) ?? []).filter((d) => this.#carries(d, tag)),
       layer,
@@ -574,8 +662,7 @@ export class NarrowingRoutes {
   /** The last candidate starting before `at` whose writer side reaches `at`: a binary search and a descent. */
   #last(candidates: Candidates, at: number): Candidate | null {
     const work = this.#work;
-    const before = lowerBound(candidates.starts, at);
-    work.charge("eventSteps", Math.ceil(Math.log2(candidates.list.length + 1)) + 1);
+    const before = lowerBound(work, candidates.starts, at);
     const { reaches, size } = candidates;
     // the rightmost leaf below `before` whose reach is at least `at`
     const search = (node: number, low: number, high: number): number => {

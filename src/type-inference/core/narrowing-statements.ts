@@ -1,5 +1,5 @@
 import type { Block, Statement, SwitchStatement } from "../../ast.js";
-import { joinParts, keptParts } from "./budget.js";
+import { joinParts, keptParts, type WorkLedger } from "./budget.js";
 import type { FlowLoop, FlowNode, GuardUse } from "./flow-graph.js";
 import { Laminar } from "./narrowing.js";
 import { sortCost } from "./definitions.js";
@@ -40,6 +40,9 @@ export interface TreeStatement {
   calls: boolean;
   /** A loop's header: the node where its condition, count or iterable is evaluated (`null` otherwise). */
   readonly loop: FlowLoop | null;
+  /** Its live alternatives, and how many of them the shared layer closes, in either applicability. */
+  liveArms: number;
+  readonly sharedArms: { leaves: number; calls: number };
 }
 
 /** A block of statements: a callable's body (`owner` null) or an alternative of a compound statement. */
@@ -51,6 +54,8 @@ export interface TreeBlock {
   readonly entry: FlowNode | null;
   /** Where its last statement ends (its owner's start when it has none); a callable's body never ends. */
   end: number;
+  /** Whether its entry is live (a callable's body is). */
+  readonly live: boolean;
   /** The indexes of its statements the shared layer closes for every key, and for a key with an outside owner. */
   readonly leaves: number[];
   readonly calls: number[];
@@ -65,16 +70,23 @@ const LEAVING: ReadonlySet<Statement["kind"]> = new Set([
   "endStatement",
 ]);
 
-/** How many of the sorted indexes lie in [low, high): two binary searches. */
-export function countIn(sorted: readonly number[], low: number, high: number): number {
-  if (low >= high) return 0;
-  return lowerBound(sorted, high) - lowerBound(sorted, low);
+/** How many of the sorted indexes lie in [low, high): two binary searches, each comparison charged. */
+export function countIn(
+  work: WorkLedger,
+  sorted: readonly number[],
+  low: number,
+  high: number,
+): number {
+  if (low >= high || sorted.length === 0) return 0;
+  return lowerBound(work, sorted, high) - lowerBound(work, sorted, low);
 }
 
-export function lowerBound(sorted: readonly number[], target: number): number {
+/** The index of the first of the sorted numbers at least `target`: a binary search, each comparison charged. */
+export function lowerBound(work: WorkLedger, sorted: readonly number[], target: number): number {
   let low = 0;
   let high = sorted.length;
   while (low < high) {
+    work.charge("eventSteps");
     const middle = (low + high) >> 1;
     if (sorted[middle]! < target) low = middle + 1;
     else high = middle;
@@ -106,6 +118,7 @@ export class StatementTree {
       uses.set(keptParts(work, use.file, use.span.start.offset, use.span.end.offset), use);
     }
     const loops = new Map<Statement, FlowLoop>();
+    work.charge("indexSteps", flow.loops.length + flow.regions.length);
     for (const loop of flow.loops) loops.set(loop.statement, loop);
     const order: TreeStatement[] = [];
     const byFile = new Map<number, { start: number; end: number; item: TreeStatement }[]>();
@@ -126,6 +139,7 @@ export class StatementTree {
         statements: [],
         entry,
         end: owner === null ? Infinity : owner.start,
+        live: entry === null || program.live(entry),
         leaves: [],
         calls: [],
       };
@@ -176,6 +190,8 @@ export class StatementTree {
           leaves: LEAVING.has(statement.kind),
           calls: LEAVING.has(statement.kind),
           loop,
+          liveArms: 0,
+          sharedArms: { leaves: 0, calls: 0 },
         };
         into.statements.push(made);
         if (into.owner !== null) into.end = made.end;
@@ -260,24 +276,35 @@ export class StatementTree {
       if (statement !== null && done !== null && program.dom.dominates(at, done))
         statement.called = true;
     }
-    // bottom-up: a statement after its alternatives' statements (they were made after it)
+    // bottom-up: a statement after its alternatives' statements (they were made after it), each block counting its
+    // closed statements as they are decided
+    const closedIn = new Map<TreeBlock, { leaves: number; calls: number }>();
     for (let index = order.length - 1; index >= 0; index -= 1) {
-      work.charge("indexSteps");
-      const statement = order[index]!;
-      if (statement.called) statement.calls = true;
-      if (statement.arms.length === 0 || statement.leaves) continue;
-      const live = statement.arms.filter((arm) => arm.entry === null || program.live(arm.entry));
-      const open = (variant: "leaves" | "calls"): boolean =>
-        statement.skip || live.some((arm) => !arm.statements.some((inner) => inner[variant]));
-      work.charge("indexSteps", live.length);
-      if (!open("leaves")) statement.leaves = statement.calls = true;
-      else if (!statement.calls && !open("calls")) statement.calls = true;
+      const made = order[index]!;
+      work.charge("indexSteps", 1 + made.arms.length);
+      if (made.called) made.calls = true;
+      for (const arm of made.arms) {
+        if (!arm.live) continue;
+        made.liveArms += 1;
+        const closed = closedIn.get(arm);
+        if ((closed?.leaves ?? 0) > 0) made.sharedArms.leaves += 1;
+        if ((closed?.calls ?? 0) > 0) made.sharedArms.calls += 1;
+      }
+      if (made.arms.length > 0 && !made.leaves && !made.skip) {
+        if (made.sharedArms.leaves === made.liveArms) made.leaves = made.calls = true;
+        else if (made.sharedArms.calls === made.liveArms) made.calls = true;
+      }
+      let counts = closedIn.get(made.block);
+      if (counts === undefined) closedIn.set(made.block, (counts = { leaves: 0, calls: 0 }));
+      if (made.leaves) counts.leaves += 1;
+      if (made.calls) counts.calls += 1;
     }
     this.#calls = new Laminar(work, calls);
     for (const offsets of this.callTexts.values()) {
       work.charge("indexSteps", sortCost(offsets.length));
       offsets.sort((a, b) => a - b);
     }
+    work.charge("indexSteps", order.length);
     for (const made of this.blocks)
       for (const statement of made.statements) {
         if (statement.leaves) made.leaves.push(statement.index);
