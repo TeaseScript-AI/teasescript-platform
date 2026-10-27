@@ -464,10 +464,14 @@ Debug off removes the buttons without re-creating the transcript's rows.
 The Player does not run a script on page load. It opens on the start page: the menu and the title bar, and in the
 middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
 neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
-hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player lists its
-errors, each with its file, line, and message. Its warnings are for the author's tools, not the start page. The
-player's activation of Start is the user activation that later audible media playback relies on, so scripts may play
-audio from their first statement without a separate unlock step.
+hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player shows "This
+Tease cannot start" and "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs
+to fix the file." when an error is a package file the host could not load (`TSC011`), else "This Tease contains an
+error, so the Tease cannot start. The creator of this Tease needs to fix the error." Below, **Technical details**,
+collapsed as in the error dialog, lists each error with its file, line, and message. Warnings are for the author's
+tools, not the start page (owner decision, 2026-10-27). The player's activation of Start is the user activation that
+later audible media playback relies on, so scripts may play audio from their first statement without a separate unlock
+step.
 
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page

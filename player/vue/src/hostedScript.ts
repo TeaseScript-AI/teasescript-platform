@@ -11,6 +11,9 @@ import { MAIN_FILE_PATH } from "../../../src/index.js";
 import { lex } from "../../../src/lexer.js";
 import { readScriptHeader } from "../../../src/script-header.js";
 
+/** The code of a package file the host could not load (`docs/DIAGNOSTICS.md`). */
+const UNREADABLE_FILE_CODE = "TSC011";
+
 /** The trusted host of one script: its storage scope, how its references resolve, and how its project loads. */
 export interface ScriptHost {
   readonly storageScope: string;
@@ -51,10 +54,16 @@ export function prepareHostedScript(
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
+        // Warnings are for the creator's tools, not the start page (PLAYER-UI "Session start and user activation").
+        const errors = compilation.diagnostics.filter(
+          (diagnostic) => diagnostic.severity === "error",
+        );
         failure.value = {
-          title: "This script cannot start",
-          // Warnings are for the author's tools, not the start page (PLAYER-UI "Session start and user activation").
-          problems: compilation.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+          title: "This Tease cannot start",
+          summary: errors.some((error) => error.code === UNREADABLE_FILE_CODE)
+            ? "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."
+            : "This Tease contains an error, so the Tease cannot start. The creator of this Tease needs to fix the error.",
+          problems: errors,
         };
         return;
       }
@@ -78,7 +87,8 @@ export function prepareHostedScript(
     (error: unknown) => {
       failure.value = {
         title: "This package cannot be opened",
-        problems: [{ message: error instanceof Error ? error.message : String(error) }],
+        summary: error instanceof Error ? error.message : String(error),
+        problems: [],
       };
     },
   );

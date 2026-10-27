@@ -9,13 +9,22 @@ export interface ScriptProblem {
 
 export interface ScriptFailure {
   readonly title: string;
+  /** What the player reads. */
+  readonly summary: string;
+  /** For the creator, under Technical details. */
   readonly problems: readonly ScriptProblem[];
 }
 </script>
 
 <script setup lang="ts">
-// Shown instead of Start when the script cannot run (PLAYER-UI "Session start and user activation"), so the author
-// sees what to fix rather than an empty Player.
+import { ChevronDown, ChevronUp } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
+import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
+import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+
+// Shown instead of Start when the script cannot run (PLAYER-UI "Session start and user activation"): a sentence for the
+// player, and what the creator needs to fix collapsed below it, as in the error dialog, rather than an empty Player.
 defineProps<{ failure: ScriptFailure }>();
 
 function location(problem: ScriptProblem): string {
@@ -30,15 +39,30 @@ function location(problem: ScriptProblem): string {
       aria-labelledby="script-failure-title"
       class="flex max-h-full w-full max-w-xl flex-col gap-3 rounded-xl border bg-card p-5 text-foreground shadow-lg"
     >
-      <div role="alert">
+      <div role="alert" class="flex flex-col gap-1">
         <h2 id="script-failure-title" class="text-base font-semibold">{{ failure.title }}</h2>
+        <p class="text-sm" data-script-failure-summary>{{ failure.summary }}</p>
       </div>
-      <ol class="flex min-h-0 flex-col gap-3 overflow-y-auto wrap-anywhere">
-        <li v-for="(problem, index) in failure.problems" :key="index" class="flex flex-col gap-0.5">
-          <span v-if="problem.path" class="font-mono text-sm text-muted-foreground">{{ location(problem) }}</span>
-          <span class="text-sm">{{ problem.message }}</span>
-        </li>
-      </ol>
+      <Collapsible
+        v-if="failure.problems.length > 0"
+        v-slot="{ open: expanded }"
+        class="flex min-h-0 flex-col gap-2"
+      >
+        <CollapsibleTrigger as-child>
+          <Button variant="outline" class="min-h-11 w-full justify-between" data-script-failure-technical-toggle>
+            Technical details
+            <component :is="expanded ? ChevronUp : ChevronDown" aria-hidden="true" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent class="min-h-0 overflow-y-auto">
+          <ol class="flex flex-col gap-3 wrap-anywhere" data-script-failure-technical>
+            <li v-for="(problem, index) in failure.problems" :key="index" class="flex flex-col gap-0.5">
+              <span v-if="problem.path" class="font-mono text-sm text-muted-foreground">{{ location(problem) }}</span>
+              <span class="text-sm">{{ problem.message }}</span>
+            </li>
+          </ol>
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   </div>
 </template>
