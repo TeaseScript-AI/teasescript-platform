@@ -1183,9 +1183,10 @@ export class Contract {
    * groups that answer alike at every path apart from their writers and ingress stores, once per prefix: adds of values
    * of one class (`classOf`, its ingresses by what their contract reads), each unguarded or each guarded, none holding
    * a mark (a holder of no guarded path, read or reference); any other entry its own group. An entry's ingress stores
-   * reach only its unknowns (C9), so where the group's first answers without one, it answers for the group, the
-   * earliest writer for its kinds (F28); k adds of literals of two typed `load`s of one default, each its own source
-   * (r4.15), read at k fields, are one group read once per field. In the entries' order.
+   * reach only its unknowns (C9), an operator's result its operand's identity, so where the group's first answers
+   * without either, it answers for the group, the earliest writer for its kinds (F28); k adds of a typed `load` of one
+   * default, or of literals of two, each its own source (r4.15), read at k fields, are one group read once per field
+   * (review r6 B2). In the entries' order.
    */
   #entryGroups(levels: PrefixLevels): readonly EntryGroup[] {
     const known = this.#entryGroupsOf.get(levels);
@@ -1195,10 +1196,7 @@ export class Contract {
     for (const entry of levels.others) {
       this.pass.program.work.charge("structureSteps");
       const shape =
-        !sharing() ||
-        entry.elem === undefined ||
-        entry.ingress !== undefined ||
-        !this.#markFree(entry.holder)
+        !sharing() || entry.elem === undefined || !this.#markFree(entry.holder)
           ? null
           : this.classOf(entry.elem, false);
       const key =
@@ -2343,7 +2341,8 @@ export class Contract {
             : this.#kept(`${member.object ? "o" : "c"}${classes[next++]!}`),
         );
       }
-      cls = keptParts(this.#work, "choice", ...options);
+      // (its options joined first: a choice may hold more of them than one call takes arguments)
+      cls = keptParts(this.#work, "choice", this.#joined(options, "|"));
     } else if (c.kind === "operation") {
       const { family, name } = c.contract;
       const fallback = defaultOf(c);
@@ -2352,7 +2351,8 @@ export class Contract {
       const below = parses && fallback !== undefined ? this.#guardsBelow(fallback) : "";
       const named = "named" in c ? c.named.map((argument) => argument.name).join(",") : "";
       const own = c.receiver === null ? "" : "r";
-      cls = keptParts(this.#work, family, name, own, named, ...classes, below);
+      // (its operands' classes joined first: an operation may take more of them than one call does)
+      cls = keptParts(this.#work, family, name, own, named, this.#joined(classes, "|"), below);
     } else return NO_CLASS;
     return { cls, writers, mixed };
   }
