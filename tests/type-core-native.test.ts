@@ -176,3 +176,30 @@ test("130,000 tests of one field beside a test of another are analysed within th
     );
   }
 });
+
+/**
+ * A strongly connected component of the solver abandoned when a rerun finds an earlier dependency (`Solver.#abandon`):
+ * 130,000 functions each returning the next one's result, the last the first's, beside one returning their length.
+ */
+test("a component of 130,000 mutually recursive results is abandoned within the native stack", () => {
+  for (const size of [10_000, 130_000]) {
+    const request = program([
+      'let flagHost = askBoolean "flag"',
+      "let out = outer().length",
+      'function outer: string | integer { if flagHost { return "ok" }\nreturn get0().length }',
+      ...Array.from(
+        { length: size },
+        (_, i) =>
+          `function get${i}${i === 0 ? ": object | string | integer" : ""} {\n${
+            i === 0 ? "  if flagHost { return {length: outer()} }\n" : ""
+          }  return ${i + 1 < size ? `get${i + 1}()` : "get0().length"}\n}`,
+      ),
+    ]);
+    const answers = analyseCore(request);
+    assert.deepEqual(
+      [answers.outcome, answers.diagnostics.length, answers.checks.length],
+      ["warning-runtime-check", 3, 3],
+      `${size} functions`,
+    );
+  }
+});

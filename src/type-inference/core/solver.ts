@@ -597,7 +597,11 @@ export class Solver {
       member.component = null;
       member.choice = null;
     }
-    this.#stack.splice(component.base, 0, ...members);
+    // (one by one: a component's members grow with the source, past one call's arguments; the stack above the
+    // component's base kept after them, in order)
+    const above = this.#stack.splice(component.base);
+    for (const member of members) this.#stack.push(member);
+    for (const member of above) this.#stack.push(member);
     const parent = this.#frames.at(-1)!;
     parent.low = Math.min(parent.low, component.low);
     parent.pending = solving.closing.node!.value;
