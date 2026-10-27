@@ -174,7 +174,7 @@ const imageOrigin = computed(() => {
         </div>
       </dl>
       <Collapsible v-if="now.calls.length" class="grid gap-1">
-        <CollapsibleDisclosure data-debug-now-calls-toggle>
+        <CollapsibleDisclosure class="text-xs" data-debug-now-calls-toggle>
           Call chain ({{ now.calls.length }})
         </CollapsibleDisclosure>
         <CollapsibleContent>
@@ -220,7 +220,11 @@ const imageOrigin = computed(() => {
       </section>
 
       <Collapsible class="grid gap-1">
-        <CollapsibleDisclosure :disabled="!now.timers.length" data-debug-now-timers-toggle>
+        <CollapsibleDisclosure
+          class="text-xs"
+          :disabled="!now.timers.length"
+          data-debug-now-timers-toggle
+        >
           Timers ({{ now.timers.length }})
         </CollapsibleDisclosure>
         <CollapsibleContent>

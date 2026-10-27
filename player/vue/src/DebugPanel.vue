@@ -46,7 +46,7 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
   <div class="grid gap-4 p-4 text-xs" data-debug-panel>
     <Collapsible class="grid gap-1">
       <div class="flex min-h-9 items-center justify-between gap-2">
-        <CollapsibleDisclosure aria-label="About Debug">Debug</CollapsibleDisclosure>
+        <CollapsibleDisclosure class="text-xs" aria-label="About Debug">Debug</CollapsibleDisclosure>
         <Switch v-model="active" aria-label="Debug" data-debug-active />
       </div>
       <CollapsibleContent class="text-muted-foreground">
@@ -72,7 +72,9 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
       <h3 id="debug-time" class="font-semibold">Time</h3>
       <Collapsible class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
-          <CollapsibleDisclosure aria-label="About auto-skip">Auto-skip</CollapsibleDisclosure>
+          <CollapsibleDisclosure class="text-xs" aria-label="About auto-skip">
+            Auto-skip
+          </CollapsibleDisclosure>
           <Switch v-model="time.autoSkip.value" aria-label="Auto-skip" />
         </div>
         <CollapsibleContent class="text-muted-foreground">
@@ -81,7 +83,9 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
         </CollapsibleContent>
       </Collapsible>
       <Collapsible class="grid gap-1">
-        <CollapsibleDisclosure aria-label="About time jumps">Jumps</CollapsibleDisclosure>
+        <CollapsibleDisclosure class="text-xs" aria-label="About time jumps">
+          Jumps
+        </CollapsibleDisclosure>
         <CollapsibleContent class="text-muted-foreground">
           Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1
           min advance time; messages, waits and timers in the skipped span still happen.
@@ -124,7 +128,7 @@ const nextLabels: Record<Exclude<DebugRandomNext, "ask">, string> = {
       <h3 id="debug-random" class="font-semibold">Random draws</h3>
       <Collapsible class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
-          <CollapsibleDisclosure aria-label="About choosing outcomes">
+          <CollapsibleDisclosure class="text-xs" aria-label="About choosing outcomes">
             Choose outcomes
           </CollapsibleDisclosure>
           <Switch

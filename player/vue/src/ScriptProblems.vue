@@ -4,6 +4,8 @@ export interface ScriptProblem {
   readonly path?: string;
   readonly line?: number;
   readonly column?: number;
+  /** The diagnostic's code, such as `TSC011`. */
+  readonly code?: string;
   readonly message: string;
 }
 
@@ -43,11 +45,14 @@ function location(problem: ScriptProblem): string {
       </div>
       <Collapsible v-if="failure.problems.length > 0" class="flex min-h-0 flex-col gap-2">
         <CollapsibleDisclosure data-script-failure-technical-toggle>Technical details</CollapsibleDisclosure>
-        <CollapsibleContent class="min-h-0 overflow-y-auto rounded-md bg-muted p-3">
-          <ol class="flex flex-col gap-3 wrap-anywhere" data-script-failure-technical>
+        <CollapsibleContent class="min-h-0 overflow-y-auto">
+          <ol class="flex flex-col gap-2 text-xs wrap-anywhere" data-script-failure-technical>
             <li v-for="(problem, index) in failure.problems" :key="index" class="flex flex-col gap-0.5">
-              <span v-if="problem.path" class="font-mono text-sm text-muted-foreground">{{ location(problem) }}</span>
-              <span class="text-sm">{{ problem.message }}</span>
+              <span v-if="problem.path" class="font-mono text-muted-foreground">{{ location(problem) }}</span>
+              <span
+                ><template v-if="problem.code"><code class="font-mono">{{ problem.code }}</code>: </template
+                >{{ problem.message }}</span
+              >
             </li>
           </ol>
         </CollapsibleContent>
