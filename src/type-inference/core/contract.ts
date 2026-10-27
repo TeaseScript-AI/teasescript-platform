@@ -3958,7 +3958,8 @@ export class Contract {
           exact,
           elementAbove,
         );
-        out.push(...selected.items);
+        // (one by one: a selection's alternatives grow with the source, past one call's arguments)
+        for (const item of selected.items) out.push(item);
         // each alternative a selection takes is a contribution of the read (§3.4: several past an element step)
         sources += selected.sources;
         break;

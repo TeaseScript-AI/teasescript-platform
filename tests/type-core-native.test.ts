@@ -203,3 +203,18 @@ test("a component of 130,000 mutually recursive results is abandoned within the 
     );
   }
 });
+
+/** A choice's button values at a selection step (`Contract.indexItems`): a list of 130,000 choice records. */
+test("a choice of 130,000 written records is answered within the native stack", () => {
+  for (const records of [10_000, 130_000]) {
+    const request = program([
+      `let picked: integer = askChoice [${rows(records, "{text: 1}").join(",")}]`,
+    ]);
+    const answers = analyseCore(request);
+    assert.deepEqual(
+      [answers.outcome, answers.diagnostics.length, answers.checks.length],
+      ["valid", 0, 0],
+      `${records} records`,
+    );
+  }
+});
