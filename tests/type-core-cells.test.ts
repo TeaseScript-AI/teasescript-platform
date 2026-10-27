@@ -852,19 +852,19 @@ test("a choice's option reached through index and property projections is select
   );
   assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), at(52));
   assert.deepEqual(sites('askChoice {option: {text: "A", value: hostValue.field}}.option'), at(60));
-  // a choice as another choice's option (Astra B6-r4), beside its literal analogue; a returned choice object read
-  // through the outer choice's selection; a returned text-only option's length
+  // a choice as another choice's option (Astra B6-r4), beside its literal analogue; a returned choice object as the
+  // outer choice's button itself, never selected again (TABLE r4.93), so a text-only one has no length
   assert.deepEqual(sites("askChoice [(askChoice [hostValue.field, 1]), 2]"), at(45));
   assert.deepEqual(sites("[(askChoice [hostValue.field, 1]), 2][0]"), at(35));
   assert.deepEqual(
     sites(
       '(askChoice [(askChoice {text: "inner", value: {text: hostValue.label, value: {text: hostValue.field}}})]).text',
     ),
-    at(106),
+    at(75),
   );
   assert.deepEqual(
     sites('(askChoice [(askChoice {text: "inner", value: {text: hostValue.label}})]).length'),
-    at(75),
+    ["compile-error", "written-target@22", "copy-type@22"],
   );
   // the controls: the literal analogues and the direct choice object
   assert.deepEqual(
@@ -935,9 +935,10 @@ test("C1's site follows a choice's selection as its value does, over options, wr
   ])[] = [
     [(w) => `askChoice [${w}]`, (w, select) => `[${w}][0]${select}`],
     [(w) => `askChoice [(askChoice [${w}])]`, (w, select) => `[[${w}][0]${select}][0]`],
+    // (the inner choice's answer is the outer's button itself, never selected again: TABLE r4.93)
     [
       (w) => `askChoice [(askChoice {text: "inner", value: ${w}})]`,
-      (w, select) => `[{text: "inner", value: ${w}}.value${select}][0]`,
+      (w) => `[{text: "inner", value: ${w}}.value][0]`,
     ],
   ];
   const differing: string[] = [];
@@ -962,8 +963,10 @@ test("C1's site follows a choice's selection as its value does, over options, wr
             );
         }
   assert.deepEqual(differing, []);
-  // every external option's analogue sites C1 at its own external expression: 4 kinds × 4 wrappers × 3 × 3
-  assert.equal(external, 144);
+  // every external option's analogue sites C1 at its own external expression: 4 kinds × 4 wrappers × 3 × 3, less the 20
+  // where the third nesting returns a choice object whole (TABLE r4.93): `{text: "A", value: hostValue.field}` at each
+  // path and `{text: hostValue.label}` whole and at its length, in each wrapper
+  assert.equal(external, 124);
 });
 
 test("the core gives the expected outcome for the programs beside the set", () => {

@@ -4570,6 +4570,9 @@ export function* choiceItems(
   stored: StoredChoiceKeys,
   options: readonly ChoiceGroup[],
 ): Work<Item[]> {
+  // r4.93: the answer is a scalar button (V30 §19, TSV029): an outer choice's selection of it is the button itself
+  if (rest[0] === SELECTED_VALUE || rest[0] === SELECTED_TEXT)
+    return yield* choiceItems(c, rest.slice(1), read, stored, options);
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);

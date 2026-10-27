@@ -2135,6 +2135,34 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // TABLE r4.93 (#1106): the menus a script writes, beside the nested choices of `ADMISSION_KNOWN_PRODUCTS`: one choice
+  // of k choice objects, and a list of k parenthesised choices of one each, every answer read; 13,675 / 27,371 and
+  // 37,542 / 75,150 units at k = 64, 128 in both orders (2.0080, 2.0066; `main` alike, the list 23 units more)
+  {
+    name: "I1106-menu",
+    measures: "r4.93: a choice of k choice objects of integers, its answer read k times",
+    program: (k) =>
+      main(
+        lines(
+          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: ${i}}`).join(", ")}`,
+          rows(k, () => "repeat box {}"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "I1106-list-of-choices",
+    measures:
+      "r4.93: a list of k parenthesised choices of one choice object each, every element read",
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${Array.from({ length: k }, (_, i) => `(askChoice {text: "${i}", value: ${i}})`).join(", ")}]`,
+          rows(k, (i) => `repeat box[${i}] {}`),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
@@ -2158,8 +2186,8 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
  * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
- * defaults and a sum of k terms, one product of admission's stop index with four witnesses: accepted in the same form
- * (TABLE r4.78 (5), option A; r4.88 (1)).
+ * defaults, a sum of k terms and k nested choices (direct, and in lists of two), one product of admission's stop index
+ * with six witnesses: accepted in the same form (TABLE r4.78 (5), option A; r4.88 (1); r4.93).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2257,6 +2285,41 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           "exit",
         ),
       ),
+  },
+  // A fifth witness of the same product (TABLE r4.93, #1106): a list literal of k choices, which nests them, each the
+  // last option of the one before; a choice's answer is a scalar button, so each walk reaches each choice once, and its
+  // stops keep a carrier chain and an evaluation key one entry longer per choice: 37,053 / 164,122 units at k = 64, 128
+  // in both orders (4.4841; `literalUnits` 5.38, each kept array's first 32 entries uncharged; `indexSteps` 2.00); the
+  // allowance reached between 1,536 choices (27,849,550 units) and 1,600. `main` reached it at k = 11, each choice's four
+  // option rows multiplying the paths every walk follows by four (4,480 / 1,203,140 units at k = 4, 8)
+  {
+    name: "I1106-nested-choices",
+    measures:
+      'TABLE r4.93: `[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
+    measured: 4.49,
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${Array.from({ length: k }, (_, i) => `askChoice "${i}"`).join(", ")}]`,
+          "say box[0]",
+          "exit",
+        ),
+      ),
+  },
+  // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
+  // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
+  // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
+  // allowance at k = 224); the allowance reached between 1,216 choices (27,838,631 units) and 1,280
+  {
+    name: "I1106-nested-choice-lists",
+    measures:
+      'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
+    measured: 4.26,
+    program: (k) => {
+      let expression = 'askChoice "seed"';
+      for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
+      return main(lines(`let box = ${expression}`, "say box", "exit"));
+    },
   },
 ];
 

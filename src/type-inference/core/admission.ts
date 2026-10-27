@@ -3662,8 +3662,12 @@ export class Admission {
           const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
           if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
-            // decider on the path
-            const copied = this.#earliestDecider(d.value, d.node, path, null)?.term ?? null;
+            // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
+            // in each other asked each other's stops)
+            const copied =
+              identity === null
+                ? null
+                : (this.#earliestDecider(d.value, d.node, path, null)?.term ?? null);
             const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {
