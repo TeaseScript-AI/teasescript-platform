@@ -93,7 +93,7 @@ import type { Work } from "./solver.js";
 
 type Operation = Extract<ValueConstraint, { kind: "operation" }>;
 
-/** How deep a chain of `+` a text-join fix opens (`Consumers.#chain`); a deeper operand stays whole. */
+/** How long a chain of `+` a text-join example climbs (`Consumers.#chain`); a longer one is cut there. */
 const CHAIN_DEPTH = 256;
 
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
@@ -342,21 +342,17 @@ export class Consumers {
   }
 
   /**
-   * A chain's text in one diagnostic only (#1195), so that its sentences stay as long as its operands: the first of its
-   * `+` diagnostics in source order writes the whole chain; any other its own two operands, or, where one of them is a
-   * `+` with text itself, no example.
+   * A chain's example in one diagnostic only (#1195), so that its sentences stay as long as its operands: the first of
+   * its `+` diagnostics in source order writes it, any other the fix without an example.
    */
   #settleChains(): void {
-    const plus = this.#plus;
-    if (plus === null) return;
-    const { program } = this.pass;
-    const first = new Map<readonly SourceSite[], SourceSite>();
+    const first = new Map<SourceSite, SourceSite>();
     for (const diagnostic of this.diagnostics)
       if (diagnostic.kind !== "written-type" && diagnostic.rule.rule === "operator") {
         const { chain } = diagnostic.rule;
-        const known = first.get(chain);
+        const known = chain === null ? undefined : first.get(chain);
         if (
-          chain.length > 0 &&
+          chain !== null &&
           (known === undefined ||
             diagnostic.site.file < known.file ||
             (diagnostic.site.file === known.file && diagnostic.site.start < known.start))
@@ -366,16 +362,8 @@ export class Consumers {
     this.diagnostics.forEach((diagnostic, index) => {
       if (diagnostic.kind === "written-type" || diagnostic.rule.rule !== "operator") return;
       const { rule } = diagnostic;
-      if (rule.chain.length === 0 || first.get(rule.chain) === diagnostic.site) return;
-      const joined = rule.operands.some((site) => {
-        const value = program.placeBySite.get(siteKey(site));
-        const inner = value === undefined ? undefined : plus.byResult.get(value);
-        return inner !== undefined && plus.texts.get(inner) === true;
-      });
-      this.diagnostics[index] = {
-        ...diagnostic,
-        rule: { ...rule, chain: joined ? [] : rule.operands },
-      };
+      if (rule.chain === null || first.get(rule.chain) === diagnostic.site) return;
+      this.diagnostics[index] = { ...diagnostic, rule: { ...rule, chain: null } };
     });
   }
 
@@ -768,16 +756,8 @@ export class Consumers {
     for (const step of first.names) {
       program.work.charge("checks");
       const kinds = withoutEmpty(this.#run(contract.contractOfValueAt(value, [step])));
-      // (a list shows one element: its elements shown)
-      const shown = (item: Item): boolean =>
-        SHOWN.some((kind) => kind === item.tag) ||
-        (item.tag === "list" &&
-          ((elements) =>
-            elements.length > 0 &&
-            elements.every((element) => SHOWN.some((kind) => kind === element.tag)))(
-            withoutEmpty(this.#run(contract.contractOfValueAt(value, [step, "element"]))),
-          ));
-      if (kinds.length > 0 && kinds.every(shown)) {
+      // (a plain value: a list's emptiness is known only when the script runs, so none is suggested)
+      if (kinds.length > 0 && kinds.every((item) => SHOWN.some((kind) => kind === item.tag))) {
         found = propertyName(step);
         break;
       }
@@ -841,39 +821,31 @@ export class Consumers {
 
   #directSites: Map<string, SourceSite> | null = null;
 
-  /**
-   * The `+` operations by their result and by each operand they take, and each chain's operands by its outermost `+`
-   * and each `+` its outermost, made on a `+` diagnostic's first need (`#chain`).
-   */
+  /** Each `+` by the operand it takes on its left, and each `+` its chain's outermost, made on first need (`#chain`). */
   #plus: {
-    readonly byResult: Map<PlaceId, Operation>;
-    readonly byOperand: Map<PlaceId, Operation>;
+    readonly byLeft: Map<PlaceId, Operation>;
     readonly tops: Map<Operation, Operation>;
-    readonly chains: Map<Operation, readonly SourceSite[]>;
-    /** Whether a `+` has text among its operands, or below them through another `+`. */
-    readonly texts: Map<Operation, boolean>;
   } | null = null;
 
   /**
-   * The operands of the chain of `+` an operation stands in, left to right (#1195's text join: `"You have " + score +
-   * " points"` as one text): an operand that is a `+` with text among its own operands is opened, any other kept whole.
-   * Each chain is walked once, each step charged, so the warnings of one chain share it.
+   * The outermost `+` of the chain an operation stands in, through the left operands only, as a chain without
+   * parentheses is written (`"You have " + score + " points"`): the expression a text-join example rewrites (#1195),
+   * never opening an operand of its own. Once per chain, each step charged.
    */
-  #chain(c: Operation): readonly SourceSite[] {
+  #chain(c: Operation): SourceSite {
     const { program } = this.pass;
     if (this.#plus === null) {
-      const byResult = new Map<PlaceId, Operation>();
-      const byOperand = new Map<PlaceId, Operation>();
+      const byLeft = new Map<PlaceId, Operation>();
       for (const constraint of program.constraints)
         if (constraint.kind === "operation" && operatorOf(constraint) === "+") {
           program.work.charge("indexSteps");
-          byResult.set(constraint.result, constraint);
-          for (const argument of constraint.arguments) byOperand.set(argument, constraint);
+          const left = constraint.arguments[0];
+          if (left !== undefined) byLeft.set(left, constraint);
         }
-      this.#plus = { byResult, byOperand, tops: new Map(), chains: new Map(), texts: new Map() };
+      this.#plus = { byLeft, tops: new Map() };
     }
-    const { byResult, byOperand, tops, chains, texts } = this.#plus;
-    // the outermost `+`, each step's own remembered
+    const { byLeft, tops } = this.#plus;
+    // the outermost, each step's own remembered
     const climbed: Operation[] = [];
     let top = c;
     for (
@@ -883,43 +855,14 @@ export class Consumers {
     ) {
       program.work.charge("indexSteps");
       climbed.push(top);
-      const outer = byOperand.get(top.result);
-      if (outer === undefined) break;
+      const outer = byLeft.get(top.result);
+      // (a left operand in parentheses is an operand of its own, never opened)
+      if (outer === undefined || program.textAt(outer.site).startsWith("(")) break;
       top = outer;
     }
     top = tops.get(top) ?? top;
     for (const step of climbed) tops.set(step, top);
-    const found = chains.get(top);
-    if (found !== undefined) return found;
-    // whether each `+` below the top joins text, by its operands' types (a text value as a literal), once per `+`,
-    // then one walk that opens those; any other operand, a sum of numbers among them, stays whole
-    const hasText = (operation: Operation, depth: number): boolean => {
-      const known = texts.get(operation);
-      if (known !== undefined) return known;
-      program.work.charge("indexSteps");
-      const opened = operation.arguments.some((argument) => {
-        const inner = byResult.get(argument);
-        if (inner !== undefined && depth < CHAIN_DEPTH && hasText(inner, depth + 1)) return true;
-        program.work.charge("checks");
-        return this.#run(this.pass.contract.contractOfValue(argument)).some(
-          (item) => item.tag === "string",
-        );
-      });
-      texts.set(operation, opened);
-      return opened;
-    };
-    const leaves: SourceSite[] = [];
-    const walk = (operation: Operation, depth: number): void => {
-      for (const argument of operation.arguments) {
-        const inner = byResult.get(argument);
-        if (inner !== undefined && depth < CHAIN_DEPTH && hasText(inner, depth + 1))
-          walk(inner, depth + 1);
-        else leaves.push(this.#own(argument, operation.site));
-      }
-    };
-    walk(top, 0);
-    chains.set(top, leaves);
-    return leaves;
+    return top.site;
   }
 
   /**
@@ -2233,7 +2176,7 @@ export class Consumers {
             ),
       operands: c.arguments.map((_, index) => operandSite(index)),
       pair,
-      chain: operator === "+" && text ? this.#chain(c) : [],
+      chain: operator === "+" && text ? this.#chain(c) : null,
     });
     // an operand's items its domain takes; none for the operation
     const taken = (index: number | null): Item[] => {

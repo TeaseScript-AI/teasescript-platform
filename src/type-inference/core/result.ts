@@ -129,8 +129,8 @@ export type DiagnosticRule =
   /**
    * C4: an operand of an operator, with the kinds it takes there, or the operation where no operand alone offends; the
    * operation's operands, which a fix rewrites (a date and time through a conversion), and where the operation offends as
-   * a whole the kinds of its operands there (`pair`, one per operand); for a `+` with text the operands of the whole
-   * chain of `+` it stands in, which the text-join fix writes as one text.
+   * a whole the kinds of its operands there (`pair`, one per operand); for a `+` with text the outermost `+` of the chain
+   * it stands in through left operands, whose text a text-join example rewrites, in the chain's first diagnostic.
    */
   | {
       readonly rule: "operator";
@@ -139,7 +139,7 @@ export type DiagnosticRule =
       readonly domain: readonly ItemTag[];
       readonly operands: readonly SourceSite[];
       readonly pair: readonly ItemTag[];
-      readonly chain: readonly SourceSite[];
+      readonly chain: SourceSite | null;
     }
   /** C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead. */
   | { readonly rule: "shown"; readonly element: boolean; readonly property: string | null }
