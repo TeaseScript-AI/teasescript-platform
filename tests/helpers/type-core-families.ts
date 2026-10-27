@@ -1493,8 +1493,9 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * written binding, and k whole copies of it with no field read, as a chain, a fan-out and one destination stored k
  * times; k objects with a written field, one other field of each stored into one list a copy then reads (his second
  * witness: the scan resumed, never taken again); and their controls: plain fields, one dimension fixed, one field read,
- * the root changed between its copies, each copy storing its own field, those copies held in one literal, the chain
- * closed into a cycle, the root copied into itself at another path. A copy costs its own divergences, never its source's every field (r4.51); each is gated
+ * the root changed between its copies, each copy storing its own field, those copies held in one literal, cycles of
+ * copies the root feeds held in one literal, each copy replaced by another record, the chain closed into a cycle, the
+ * root copied into itself at another path. A copy costs its own divergences, never its source's every field (r4.51); each is gated
  * with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
@@ -1622,6 +1623,35 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A4-inherited-fed-cycles",
+    measures:
+      "Sol's review r2: k cycles of two whole copies each fed by the root, each copy storing its own plain field, held in one literal",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          rows(k, (i) => `let a${i} = root\nlet b${i} = a${i}\na${i} = b${i}\na${i}.extra = 2`),
+          `let out = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  ...(["2", "typed"] as const).map((value): WorkFamily => ({
+    name: `A4-inherited-replaced${value === "typed" ? "-typed" : ""}`,
+    measures: `Sol's reviews r1 B3 and r2 B2: k copies of a root of k written-typed fields, each storing its own plain field, then replaced by a record of k ${value === "typed" ? "written-typed" : "plain"} fields`,
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          `let other = {${fields(k, () => value)}, extra: 1}`,
+          rows(k, (i) => `let a${i} = root\na${i}.extra = 2\na${i} = other`),
+          "exit",
+        ),
+      ),
+  })),
+  {
     name: "A4-inherited-closed-chain",
     measures:
       "r4.80's control: A4-inherited-chain closed into a cycle of whole copies, its first copy taking the last",
@@ -1667,28 +1697,6 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
       ),
   },
 ];
-
-/**
- * Sol's review r1 B3 on #1059: k whole copies of a root of k written-typed fields, each then replaced whole by one other
- * record of k fields, plain or written-typed. Every copy has the same stores by alias class (S6-CARRIERS §4.1), so its
- * hot paths are another's of one signature; as every alias class's sharing, this holds with the sharing on.
- */
-const INHERITED_SHARED_FAMILIES: readonly WorkFamily[] = (["2", "typed"] as const).map(
-  (value): WorkFamily => ({
-    name: `A4-inherited-replaced${value === "typed" ? "-typed" : ""}`,
-    measures: `Sol's review r1 B3: k copies of a root of k written-typed fields, each replaced by a record of k ${value === "typed" ? "written-typed" : "plain"} fields`,
-    program: (k) =>
-      main(
-        lines(
-          "let typed: integer = 1",
-          `let root = {${fields(k, () => "typed")}}`,
-          `let other = {${fields(k, () => value)}}`,
-          rows(k, (i) => `let a${i} = root\na${i} = other`),
-          "exit",
-        ),
-      ),
-  }),
-);
 
 /**
  * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
@@ -2370,7 +2378,6 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   ...INHERITED_FIELD_FAMILIES,
-  ...INHERITED_SHARED_FAMILIES,
 ];
 
 /** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */

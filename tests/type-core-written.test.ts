@@ -791,12 +791,13 @@ test("a copy's inherited written field is decided at the copy's own store in eve
 });
 
 /**
- * Sol's review r1 on #1059 (TABLE r4.80's repair): a place copying itself whole twice decides as before, with the sharing
- * on and off; a record whose host or misfitting field another copy's written type lands in the copy owes its check or
- * its error at the copy's store, the check in the plan stopping a forbidden value (all three layers); and a store
- * rejected at a field stays rejected through a cycle of copies that adds a step. Both orders, the sharing on and off.
+ * Sol's reviews r1 and r2 on #1059 (TABLE r4.80's repair): a place copying itself whole twice decides as before; a record
+ * whose host or misfitting field another copy's written type lands in the copy owes its check or its error at the copy's
+ * store, also where the record reaches the copy through a cycle of copies, the check in the plan stopping a forbidden
+ * value (all three layers); and a store rejected at a field stays rejected through a cycle of copies that adds a step.
+ * Both orders, the sharing on and off.
  */
-test("copies of different sources, repeated self copies and a rejection through a path cycle keep their answers", () => {
+test("copies of different sources, repeated self copies, cycles and a rejection through a path cycle keep their answers", () => {
   const at = (source: string, text: string): string => {
     const start = source.lastIndexOf(text);
     return `${start}:${start + text.length}`;
@@ -824,6 +825,8 @@ test("copies of different sources, repeated self copies and a rejection through 
   const host = `${typed}let root={f:typed}\nlet other={f:hostValue,g:typed}\nlet a=root\na=other\nsay "stored"\nexit\n`;
   const text = `${typed}let root={f:typed}\nlet other={f:"s",g:typed}\nlet a=root\na=other\nexit\n`;
   const cycle = `${typed}let root={f:typed}\nlet bad={f:"s"}\nlet a=root\nlet b={p:a}\na=b.p\na=bad\nexit\n`;
+  // (review r2 B1: the record's host field reaches the copy through a cycle of copies)
+  const round = `${typed}let root={f:typed,g:typed}\nlet other={f:hostValue,g:typed}\nlet a=other\na=a\nlet c=root\nc=a\nsay "stored"\nexit\n`;
   for (const shared of [true, false]) {
     const mode = shared ? "" : " (no sharing)";
     assert.deepEqual(
@@ -858,6 +861,20 @@ test("copies of different sources, repeated self copies and a rejection through 
         checks: [],
       },
       `cycle${mode}`,
+    );
+    // (the copy's read in `c=a`)
+    const read = round.indexOf("c=a") + 2;
+    assert.deepEqual(
+      decided(round, shared),
+      {
+        outcome: "warning-runtime-check",
+        diagnostics: [`warning-runtime-check written-target ${read}:${read + 1}`],
+        checks: [
+          `c.f [integer] ${read}:${read + 1}`,
+          `other [object] ${at(round, "hostValue")} boundary`,
+        ],
+      },
+      `round${mode}`,
     );
     const compile = (): InstructionPlan | null =>
       compileSourceWithBackend(host, { globals: GLOBALS }, CORE_BACKEND).plan;
