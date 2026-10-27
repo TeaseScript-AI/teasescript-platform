@@ -666,8 +666,9 @@ const seedsOf = (form: Form): readonly Decision[] =>
 
 /**
  * The forms whose rows also take the host value named or held at an index: where a host read lands is the decision's,
- * not the transport's, so these cross it with a whole number, its optional and `null` alone, and with lists one and two
- * deep, their element or the outer list optional and a list of `null`.
+ * not the transport's, so these cross it with a whole number, its optional and `null` alone, with lists one and two
+ * deep, their element or the outer list optional and a list of `null`, and with three lists, both the element and the
+ * outer list optional.
  */
 const HOST_FORMS: ReadonlySet<string> = new Set([
   "integer",
@@ -678,6 +679,7 @@ const HOST_FORMS: ReadonlySet<string> = new Set([
   "integer[][]",
   "integer[]?",
   "null[]",
+  "integer?[][][]?",
 ]);
 
 /**
@@ -1027,10 +1029,13 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
 }
 
 /**
- * The names whose forms `V30_TYPE_MATRIX` also copies, projects, seeds and feeds named or held at an index: the whole
- * number and the number, `null` alone, the unrestricted collections and `object`, which has no literal, so its copies
- * carry host data on (`CARRIED`). A copy, a projection or a seed moves what a written type admits as a set of kinds,
- * whatever their names; every other name's own kind, its check and its values are its forms', written and fed directly.
+ * The names whose forms `V30_TYPE_MATRIX` also copies, projects, seeds and feeds named or held at an index: one per way
+ * the core moves and checks a copied kind. A copy, a projection or a seed moves what a written type admits as a set of
+ * kinds and rebuilds a copy's checked type by the kind's class (`closedType`: a scalar, `null`, a collection, `object`,
+ * a plain kind); a binding whose form has no literal starts as host data its copies carry on (`CARRIED`). So: the whole
+ * number and the number (scalars with literals, the one pair where a kind fits another), `null` alone, the unrestricted
+ * collections and `object` (no literal), `date` (a scalar with no literal) and `range` (a plain kind a host value can
+ * be). Every other name's own kind, its check and its values are its forms', written and fed directly.
  */
 const CROSSED_NAMES: ReadonlySet<string> = new Set([
   "integer",
@@ -1040,6 +1045,8 @@ const CROSSED_NAMES: ReadonlySet<string> = new Set([
   "set",
   "dict",
   "object",
+  "date",
+  "range",
 ]);
 
 /**
