@@ -387,6 +387,46 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
 });
 
 /**
+ * TABLE r4.99: the finishing path derives a unit's findings as the analysis does. A parameter whose `null` default
+ * reaches a member read is an error (#1172's `defaultOf`); a walk stop before that read keeps the error, in both orders.
+ * Functions are outside the candidate route: through the analysis.
+ */
+test("a stop in a settled walk keeps the error of a member read of a null default", () => {
+  const source =
+    'function show(item = null) {\n  say item.name\n}\nshow({name: "n0"})\nlet n: integer = hostValue\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const errors = (answers: Answers): string[] =>
+    answers.diagnostics
+      .filter((d) => d.class === "compile-error")
+      .map((d) => `${d.code} ${d.site.start}:${d.site.end}`);
+  const at = source.indexOf("item.name");
+  for (const reversed of [false, true]) {
+    const analyse = (allowance?: number): Answers => {
+      const run = (): Answers => analyseCore(request);
+      const ordered = (): Answers =>
+        reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), run),
+            )
+          : run();
+      return allowance === undefined ? ordered() : withTestAllowance(allowance, ordered);
+    };
+    assert.deepEqual(errors(analyse()), [`TSV043 ${at}:${at + "item.name".length}`]);
+    // the settled walk's stops, from the last down to the first
+    const walk: number[] = [];
+    for (let allowance = analyse().budget.total - 1; allowance > 0; allowance -= 1) {
+      const { stoppedIn, settled } = analyse(allowance).budget;
+      if (!settled) break;
+      if (stoppedIn === "walk") walk.push(allowance);
+    }
+    assert.ok(walk.length > 0, `reversed: ${reversed}`);
+    for (const allowance of [walk[0]!, walk.at(-1)!])
+      assert.deepEqual(errors(analyse(allowance)), errors(analyse()), `${reversed} @${allowance}`);
+  }
+});
+
+/**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
  * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
  * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the

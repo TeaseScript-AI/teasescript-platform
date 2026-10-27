@@ -667,7 +667,7 @@ export class Consumers {
     rule: DiagnosticRule,
     kinds: readonly ItemTag[],
   ): void {
-    // (in the finishing path only a literal's own kind errs: every other value it reads is unknown)
+    // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
     const diagnostic: CoreDiagnostic = {
       class: "compile-error",
       kind,
@@ -3194,8 +3194,6 @@ export class Consumers {
     member: string,
     use: "read" | "call",
   ): void {
-    // (an error only: the finishing path proves nothing)
-    if (this.#finishing) return;
     const { program, definitions, lists, values, contract } = this.pass;
     const key = contract.copiedKey(owner);
     const source =
