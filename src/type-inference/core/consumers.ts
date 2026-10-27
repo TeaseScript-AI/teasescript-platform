@@ -455,11 +455,14 @@ export class Consumers {
 
   /**
    * A consumer's question of the solver. In the finishing path after a stop the solver answers only from what had
-   * finished, else `STOPPED` (`Solver.run`); where nothing stopped (the units nested past the nesting limit) it is not
-   * asked at all.
+   * finished, else `STOPPED` (`Solver.run`); it is not asked at all where nothing stopped (the units nested past the
+   * nesting limit) nor where admission had not settled (a fresh pass, nothing finished: as the route's questions,
+   * `CoreAnswers.#run`).
    */
   #run(work: Work<readonly Item[]>): readonly Item[] {
-    return this.#finishing && this.pass.program.work.stopped === null ? STOPPED : this.#solve(work);
+    return this.#finishing && (this.pass.program.work.stopped === null || !this.settled)
+      ? STOPPED
+      : this.#solve(work);
   }
 
   /** A demand of the solver, its work counted to the read that asked it (S3 §5). */
