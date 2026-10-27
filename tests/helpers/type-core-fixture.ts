@@ -41,6 +41,10 @@ function texts(value: unknown, where: string): string[] {
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
  */
 export function heldBack(record: FixtureRecord): string | null {
+  // Its right-hand datetime has no subtraction row: §3.4 sites that operand, not the whole pair. Keep the set
+  // unchanged until its maintainer corrects this start as well as its end (r4.62).
+  if (record.name === "cp9-cells/F16/invalid-datetime-difference")
+    return "operator site awaiting set correction (TABLE §3.4, r4.62)";
   // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
   if (record.owner === "adapter") return "the adapters' records (S9b)";
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and

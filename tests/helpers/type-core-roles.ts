@@ -496,10 +496,10 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
       `outcome warning-runtime-check
       D written-target warning 30:45 later
       D written-target warning 30:61 later
-      D member-read warning 30:39 unknown
+      D member-read warning 30:45 unknown
       C copy-type out [list] 30:45
       C copy-type out.element [integer] 30:61
-      C null-check hostValue [non-null] 30:39
+      C null-check hostValue [non-null] 30:45
       B copy-type raw [unknown] 10:19
       B copy-type out [list] 30:39`,
     ],
@@ -515,9 +515,9 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
       "a union holding a reference across two carriers",
       'speaker vera { length: 2 }\nlet pool: dict = dict{a: [1], b: vera}\nlet holder = pool.get("a", default: vera)\nlet out = [holder][0].get(0, default: 7)\nrepeat out {}\n',
       `outcome warning-runtime-check
-      D member-read warning 118:129 unmodelled
+      D member-read warning 118:148 unmodelled
       D integer-use warning 156:159 unmodelled
-      C null-check [holder][0] [non-null] 118:129
+      C null-check [holder][0] [non-null] 118:148
       C integer-check out [integer] 156:159`,
     ],
     [
@@ -525,11 +525,11 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
       'let out = [1, hostValue.inner.field][1]\nsay "AFTER"\n',
       `outcome warning-runtime-check
       D written-target warning 14:35 unknown
-      D member-read warning 14:23 unknown
       D member-read warning 14:29 unknown
+      D member-read warning 14:35 unknown
       C copy-type out [integer] 14:35
-      C null-check hostValue [non-null] 14:23
-      C null-check hostValue.inner [non-null] 14:29
+      C null-check hostValue [non-null] 14:29
+      C null-check hostValue.inner [non-null] 14:35
       B copy-type out [integer] 14:23`,
     ],
   ];

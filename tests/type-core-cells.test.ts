@@ -10,7 +10,6 @@ import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-co
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
 import {
-  endDeviations,
   recordDifferences,
   recordOf,
   type CompactCheck,
@@ -44,28 +43,20 @@ test("the core gives the expected record for every record of the cells it comple
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 9,
     "stage 3b's cells (S10)": 653,
+    "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
   });
-  assert.equal(asserted.length, 1_319);
-  const deviating = new Map<string, number>();
-  let shortened = 0;
+  assert.equal(asserted.length, 1_318);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
     const input = JSON.stringify(record.files);
     const actual = analyses.get(input) ?? analysed(record);
     analyses.set(input, actual);
-    const deviations = endDeviations(record.expected, actual);
-    if (deviations.length > 0) shortened += 1;
-    for (const kind of deviations) deviating.set(kind, (deviating.get(kind) ?? 0) + 1);
     const differences = recordDifferences(record.expected, actual);
     return differences.length === 0 ? [] : [`${record.name}: ${differences.join("; ")}`];
   });
-  // (TABLE §3.4, D2: a member read's and an operator's sites are S8's; until then they compare by their start)
-  t.diagnostic(
-    `${asserted.length} records compared by whole sites; ${shortened} compare a member read's or an operator's site ` +
-      `by its start only, its end differing: ` +
-      [...deviating].map(([kind, count]) => `${kind} ${count}`).join(", "),
-  );
+  // (TABLE §3.4, D2, r4.62: every site compares whole, a member read's and an operator's included)
+  t.diagnostic(`${asserted.length} records compared by whole sites`);
   assert.deepEqual(failures, []);
 });
 
@@ -1359,13 +1350,13 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       'speaker vera { length: 2 }\nlet pool: dict = dict{a: dict{k: "bad"}, b: vera}\nlet o = pool.get("a", default: vera)\nrepeat (o otherwise null).keys.first {}\nexit',
       (at) => [
         "warning-runtime-check",
-        `member-read warning-runtime-check @${at("o otherwise")}`,
-        `member-read warning-runtime-check @${at("o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
+        `member-read warning-runtime-check @${at("(o otherwise")}`,
         `member-read warning-runtime-check @${at("(o otherwise")}`,
         `member-read warning-runtime-check @${at("(o otherwise")}`,
         `integer-use warning-runtime-check @${at("(o otherwise")}`,
-        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
-        `null-check o otherwise null [non-null] @${at("o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("(o otherwise")}`,
+        `null-check o otherwise null [non-null] @${at("(o otherwise")}`,
         `empty-check (o otherwise null).keys [list] @${at("(o otherwise")}`,
         `null-check (o otherwise null).keys [non-null] @${at("(o otherwise")}`,
         `integer-check (o otherwise null).keys.first [integer] @${at("(o otherwise")}`,
@@ -4161,11 +4152,11 @@ test("a guarded read inside a computed child keeps its mark where literals share
     const expected: CompactRecord = {
       outcome: "warning-runtime-check",
       diagnostics: [
-        ...(own ? [branch("member-read", at(read + 8))] : []),
+        ...(own ? [branch("member-read", at(read + 10))] : []),
         branch("integer-use", at(read + 10)),
       ],
       checks: [
-        ...(own ? [check("null-check", "box.data", "non-null", at(read + 8))] : []),
+        ...(own ? [check("null-check", "box.data", "non-null", at(read + 10))] : []),
         check("integer-check", "box.data.n", "integer", at(read + 10)),
       ],
     };
@@ -4230,7 +4221,7 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
           {
             kind: "member-read",
             class: "warning-runtime-check",
-            site: at(24, 33),
+            site: at(24, 39),
             context: "unknown",
           },
         ],
@@ -4247,7 +4238,7 @@ test("the landing index keeps F18's own check, sites a member's C1 at its read a
             target: "hostValue",
             against: ["non-null"],
             boundary: false,
-            site: at(24, 33),
+            site: at(24, 39),
           },
           boundary("rows.element", "integer", at(24, 33)),
         ],
@@ -4320,11 +4311,11 @@ test("named data beside inline host data keeps its check and boundary, and an ad
       warned(
         [
           ["written-target", at(22, 40)],
-          ["member-read", at(22, 31)],
+          ["member-read", at(22, 40)],
         ],
         [
           check("xs.element.element", "integer", false, at(22, 40)),
-          nonNull(at(22, 31)),
+          nonNull(at(22, 40)),
           check("xs.element", "list", true, at(22, 31)),
         ],
       ),
@@ -4334,11 +4325,11 @@ test("named data beside inline host data keeps its check and boundary, and an ad
       warned(
         [
           ["written-target", at(23, 41)],
-          ["member-read", at(23, 32)],
+          ["member-read", at(23, 41)],
         ],
         [
           check("xs.element", "integer", false, at(23, 41)),
-          nonNull(at(23, 32)),
+          nonNull(at(23, 41)),
           check("xs.element", "integer", true, at(23, 32)),
         ],
       ),

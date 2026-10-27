@@ -1132,7 +1132,11 @@ export class Consumers {
       opaque === undefined &&
       operands.flat().every((item) => item.cert === "def")
     ) {
-      this.#error("operator", c.site);
+      const offending = operands.flatMap((items, index) =>
+        items.every((item) => !rows.some((row) => matches(row, index, item.tag))) ? [index] : [],
+      );
+      if (offending.length === 0) this.#error("operator", c.site);
+      else for (const index of offending) this.#error("operator", operandSite(index));
       return;
     }
     const owe = (
@@ -1309,22 +1313,14 @@ export class Consumers {
         quietOwner.every((tag) => tag === "object") &&
         !owners.some((item) => item.guarded === true)
       ) {
-        this.#error("member-read", this.#own(c.owner, c.site));
+        this.#error("member-read", c.site);
         return;
       }
       if (missing.length > 0) extra.push([missing[0]!, `has .${property} before the read`]);
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
-    this.#memberChecks(
-      this.#own(c.owner, c.site),
-      label,
-      owners,
-      takes,
-      `.${property}`,
-      "read",
-      extra,
-    );
+    this.#memberChecks(c.site, label, owners, takes, `.${property}`, "read", extra);
   }
 
   /** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
@@ -1352,18 +1348,11 @@ export class Consumers {
       ),
     );
     this.#defaultNull(receiver, node, site);
-    this.#memberChecks(
-      this.#own(receiver, site),
-      label,
-      kinds,
-      (tag) => hasMethod(tag, name),
-      `.${name}()`,
-      "call",
-    );
+    this.#memberChecks(site, label, kinds, (tag) => hasMethod(tag, name), `.${name}()`, "call");
   }
 
   /**
-   * C5a–c, F19a, §4: a member access's receiver kinds at the receiver's span (r4.10). An error when every kind is
+   * C5a–c, F19a, §4: a member access's receiver kinds at the whole access's span (§3.4). An error when every kind is
    * definite and null, or definite and without the member; else one warning and member obligation per offending kind:
    * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
    * have the member, A7 r4.10), and the `extra` ones (an object without the property, an object's own selection).
@@ -1845,8 +1834,8 @@ export class Consumers {
       this.#reading = d.prep ?? d.node;
       const receiver = withoutEmpty(this.#run(values.keyItems(d.recv!, d.prep ?? d.node)));
       const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
-      // the receiver's own span
-      const at = owner !== undefined ? this.#own(owner, d.site) : d.site;
+      // §3.4: the whole member or element access, including a mutator's call.
+      const at = d.into !== undefined ? this.#own(d.into, d.site) : d.site;
       const recvPath = keyPath(d.recv!);
       const label =
         owner !== undefined
@@ -1937,7 +1926,17 @@ export class Consumers {
         else high = middle;
       }
       const before = low > 0 && speakers[low - 1]!.file === c.site.file ? speakers[low - 1]! : null;
-      const site = c.kind === "speakerRead" ? c.site : (before ?? c.site);
+      const target = c.kind === "speakerStore" ? program.effectNode(c.site)?.statement : undefined;
+      const site =
+        target?.kind === "assignmentStatement"
+          ? {
+              file: c.site.file,
+              start: target.target.span.start.offset,
+              end: target.target.span.end.offset,
+            }
+          : c.kind === "speakerRead"
+            ? c.site
+            : (before ?? c.site);
       const speaker = c.speaker ?? "the speaker";
       this.#nullWarning(
         "member-read",

@@ -139,6 +139,10 @@ export class SliceIndex {
               pending.push({ expression: statement.value, store: statement, whole: true });
               // a property store reads its receiver, which a member check at the store reads (C5c)
               if (statement.target.kind === "propertyAccessExpression") {
+                // C5 diagnostics name the whole target (§3.4); it is a store, so do not visit it as a read.
+                this.#bySite.set(siteKey(file, statement.target.span), statement.target);
+                this.#file.set(statement.target, file);
+                this.#storeOfReceiver.set(statement.target, statement);
                 this.#write(statement.target.property.name, file, statement.target.property.span);
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
@@ -313,7 +317,7 @@ export class SliceIndex {
     return this.#fallbackOf.get(expression);
   }
 
-  /** The property store whose target's receiver `expression` is, or holds in parentheses. */
+  /** The property store whose whole target or receiver `expression` is, or holds in parentheses. */
   public storeOfReceiver(expression: Expression): AssignmentStatement | undefined {
     return this.#storeOfReceiver.get(expression);
   }
