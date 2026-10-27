@@ -4178,8 +4178,8 @@ export class Admission {
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
     this.#lazily(place, path);
     const key = keyOf(place, path);
-    // (a copy of an unrestricted written part admits every kind, as the part itself: never what is stored)
-    if (this.#unrestricted.has(key)) return ["unknown"];
+    // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
+    if (this.#unrestricted.has(key) || this.#openBelow(place, path)) return ["unknown"];
     const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
     const decided = this.decided.get(key);
     let tags = [
@@ -4198,7 +4198,28 @@ export class Admission {
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
     this.#lazily(place, path);
-    return this.#inheritsWritten.has(keyOf(place, path));
+    return (
+      this.#inheritsWritten.has(keyOf(place, path)) ||
+      (writtenOf(this.pass.program.place(place).kind) === null && this.#openBelow(place, path))
+    );
+  }
+
+  /**
+   * Whether a path lies below an unrestricted part of its place's written type, or, where no decision was taken at it
+   * but copies land above it, of the written type the place's own decision copies there (`#inheritedAt`): every kind
+   * fits it, as where a store there decides it (`decide`), never the kinds the place's contents hold there (V30 §13;
+   * ADR 0021 1.3: a copy keeps the written type).
+   */
+  #openBelow(place: PlaceId, path: readonly string[]): boolean {
+    const written = writtenOf(this.pass.program.place(place).kind);
+    let term = written === null ? null : permittedAt(written, path);
+    if (written === null && !this.#attempted.has(keyOf(place, path)))
+      for (let length = 0; length < path.length; length += 1)
+        if (this.#landed(place, path.slice(0, length))) {
+          term = this.#inheritedAt(place, path);
+          break;
+        }
+    return term !== null && unrestricted(term);
   }
 
   /**

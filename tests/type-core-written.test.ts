@@ -7,14 +7,18 @@ import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import {
+  type CoreAnalysisRequest,
+  CoreProgram,
+  propertyStep,
+} from "../src/type-inference/core/program.js";
 import { coreRecord, type WrittenTypeError } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { runGlobals } from "./helpers/type-core-route.js";
+import { plannedStores, runGlobals } from "./helpers/type-core-route.js";
 import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
 import {
   DEFAULT_CHAIN_MATRIX,
@@ -403,6 +407,146 @@ test("an object's properties take any contents in every form, copy and projectio
     `${OBJECT_PROPERTY_MATRIX.length} sources (${full} planned and run), both orders, sharing on and off`,
   );
   assert.deepEqual(wrong, []);
+});
+
+/**
+ * #1215 (V30 §13: `object` is any object; ADR 0021 1.3: a copy keeps the written type): a copy of a written `object`
+ * whose start has fields stays unrestricted below it at every path no store visits, as `object?`, as `object[]`'s
+ * element, through a chain of copies, a record projection and an enclosing record; a scalar-typed field beside it and
+ * an inferred record's field keep their restriction. Per source the analysis's admission at each path (`copied` where a
+ * copy of a written type decides it), its C9 boundaries, and the plan's checked stores in full (`plannedStores`), each
+ * compared on its own, in both orders with the sharing on and off; the four plans are equal, so their runs are one
+ * (the candidate test runs them against the S7 oracle).
+ */
+test("a copied written object stays unrestricted below it in the analysis and the plan, its neighbours restricted (#1215)", () => {
+  const rows: readonly {
+    readonly lines: string;
+    /** `place.step…` (`[]` an element), its admission as `written`, `copied` or `decided`, and its kinds. */
+    readonly levels: readonly (readonly [string, string])[];
+    /** The host store's target, the kinds its C9 boundary is against, and its whole checked type. */
+    readonly check: readonly [string, string, string];
+  }[] = [
+    {
+      lines: "let typed: object = {n: 1}\nlet out = typed\nout = hostValue",
+      levels: [
+        ["out", "copied object"],
+        ["out.n", "copied unknown"],
+        ["typed", "written object"],
+        ["typed.n", "decided unknown"],
+      ],
+      check: ["out", "object", "{}"],
+    },
+    {
+      lines: "let typed: object? = {n: 1}\nlet out = typed\nout = hostValue",
+      levels: [
+        ["out", "copied null,object"],
+        ["out.n", "copied unknown"],
+      ],
+      check: ["out", "null,object", "null|{}"],
+    },
+    {
+      lines: "let typed: object[] = [{n: 1}]\nlet out = typed\nout = hostValue",
+      levels: [
+        ["out", "copied list"],
+        ["out.[]", "copied object"],
+        ["out.[].n", "copied unknown"],
+      ],
+      check: ["out", "list", "list<{}>"],
+    },
+    {
+      // (a field named as an internal step: a quoted key step)
+      lines:
+        "let typed: object = {element: 1}\nlet a = typed\nlet b = a\nlet out = b\nout = hostValue",
+      levels: [
+        ["out", "copied object"],
+        ["out.element", "copied unknown"],
+      ],
+      check: ["out", "object", "{}"],
+    },
+    {
+      lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nlet out = rec.o\nout = hostValue",
+      levels: [
+        ["out", "copied object"],
+        ["out.n", "copied unknown"],
+      ],
+      check: ["out", "object", "{}"],
+    },
+    {
+      lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nrec = hostValue",
+      levels: [
+        ["rec", "decided object"],
+        ["rec.o", "copied object"],
+        ["rec.o.n", "copied unknown"],
+      ],
+      check: ["rec", "object", "{o: {}}"],
+    },
+    {
+      lines:
+        "let typed: object = {n: 1}\nlet count: integer = 2\nlet rec = {c: count, o: typed}\nrec = hostValue",
+      levels: [
+        ["rec.c", "copied integer"],
+        ["rec.o", "copied object"],
+        ["rec.o.n", "copied unknown"],
+      ],
+      check: ["rec", "object", "{c: integer, o: {}}"],
+    },
+    {
+      lines: "let rec = {n: 1}\nlet out = rec\nout = hostValue",
+      levels: [
+        ["out", "decided object"],
+        ["out.n", "decided integer"],
+      ],
+      check: ["out", "object", "{n: integer}"],
+    },
+  ];
+  for (const { lines, levels, check } of rows) {
+    const source = `${lines}\nsay "DONE"\nexit\n`;
+    const { request, ids } = prepare(source);
+    const store = lines.slice(lines.lastIndexOf("\n") + 1);
+    const start = source.indexOf(`${store}\n`);
+    const at = `${start + store.indexOf("hostValue")}:${start + store.length}`;
+    const expected = {
+      levels: levels.map(([path, admitted]) => `${path} ${admitted}`),
+      boundaries: [`${check[0]} [${check[1]}] ${at}`],
+      checks: [`${check[0]} ${start}:${start + store.length} ${at} ${check[2]}`],
+    };
+    const observe = () => {
+      const answers = analyseCore(request);
+      return {
+        levels: levels.map(([path]) => {
+          const [name, ...steps] = path.split(".");
+          const { admitted } = answers.place(
+            ids.get(name!)!,
+            steps.map((step) => (step === "[]" ? "element" : propertyStep(step))),
+          );
+          const by = admitted.by === "decided" && admitted.inherited ? "copied" : admitted.by;
+          return `${path} ${by}${admitted.by === "undecided" ? "" : ` ${sorted(admitted.kinds).join(",")}`}`;
+        }),
+        boundaries: answers.checks
+          .filter((found) => found.boundary)
+          .map(
+            (found) =>
+              `${found.target} [${sorted(found.against).join(",")}] ${found.site.start}:${found.site.end}`,
+          ),
+        plan: compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND).plan,
+      };
+    };
+    const shared = inBothOrders(observe);
+    const unshared = inBothOrders(() => withoutSharing(observe));
+    for (const [mode, { plan, ...analysed }] of [
+      ["", shared],
+      [" (no sharing)", unshared],
+    ] as const) {
+      assert.ok(plan !== null, `${lines}${mode}`);
+      assert.deepEqual(analysed.levels, expected.levels, `${lines}${mode}: admission`);
+      assert.deepEqual(analysed.boundaries, expected.boundaries, `${lines}${mode}: C9`);
+      assert.deepEqual(plannedStores(plan), expected.checks, `${lines}${mode}: plan`);
+    }
+    assert.ok(
+      isDeepStrictEqual(unshared.plan, shared.plan),
+      `${lines}: the plans with and without sharing`,
+    );
+  }
 });
 
 test("V30 §13's written types, each form and copy, admit what they permit in every layer (merged S6 B1, B2)", (t) => {
