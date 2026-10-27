@@ -383,29 +383,44 @@ export class Consumers {
    * settled, so its consumer owes its check when the script runs.
    */
   #finishingRead(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
-    const { program, contract } = this.pass;
-    const place = program.places[value]?.kind;
-    const has = program.hasOf.get(value);
-    if (
-      rest.length === 0 &&
-      place?.kind === "value" &&
-      LITERALS.has(place.node) &&
-      has?.length === 1 &&
-      has[0]!.type.kind === "atom"
-    )
-      return [makeItem(has[0]!.type.name, null, { cert: "def" })];
-    if (this.pass.program.work.stopped !== null) {
-      const read = this.#run(this.pass.values.valueItems(value, node, rest));
-      if (!read.some(unsettledItem)) return read;
-    }
-    const contracted = this.#run(contract.contractOfValueAt(value, rest));
-    if (!contracted.some(unsettledItem)) return contracted;
+    const { contract, values } = this.pass;
+    const own = rest.length === 0 ? this.#literalKind(value) : null;
+    if (own !== null) return own;
+    // (a read chain past the read depth stops here as anywhere: unsettled, the next source asked)
+    const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
+      try {
+        const items = this.#run(work());
+        return items.some(unsettledItem) ? null : items;
+      } catch (error) {
+        if (!(error instanceof BudgetExhausted)) throw error;
+        return null;
+      }
+    };
+    const found =
+      (this.pass.program.work.stopped === null
+        ? null
+        : settled(() => values.valueItems(value, node, rest))) ??
+      settled(() => contract.contractOfValueAt(value, rest));
+    if (found !== null) return found;
     const written = this.#writtenRead(value);
     const term = written === null ? null : termAt(written, rest);
     const tags = term === null ? [] : typeTags(term);
     return tags.length === 0 || tags.includes("unknown")
       ? STOPPED
       : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+  }
+
+  /** A scalar literal's own kind, which no proof decides (an error found there stands, D4 a′); `null` for any other value. */
+  #literalKind(value: PlaceId): readonly Item[] | null {
+    const { program } = this.pass;
+    const place = program.places[value]?.kind;
+    const has = program.hasOf.get(value);
+    return place?.kind === "value" &&
+      LITERALS.has(place.node) &&
+      has?.length === 1 &&
+      has[0]!.type.kind === "atom"
+      ? [makeItem(has[0]!.type.name, null, { cert: "def" })]
+      : null;
   }
 
   /**
@@ -618,7 +633,8 @@ export class Consumers {
           brought: null,
         };
         // a literal's own kind fits or errs (C1, A6); any other value is checked when the script runs
-        const items = withoutEmpty(this.#valueItems(d.value, d.node, []));
+        // (only what the store's syntax tells: the whole value's type alone would not check the parts it holds)
+        const items = withoutEmpty(this.#literalKind(d.value) ?? STOPPED);
         const fitting = (item: Item): boolean =>
           concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
         if (items.every(fitting)) continue;

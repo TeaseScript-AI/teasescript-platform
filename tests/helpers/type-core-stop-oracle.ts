@@ -59,14 +59,14 @@ export function planChecks(plan: InstructionPlan): Map<string, string[]> {
 }
 
 /** Every diagnostic: its severity, code, span and message. */
-export function diagnosticTexts(result: CompilationResult): string[] {
+function diagnosticTexts(result: CompilationResult): string[] {
   return result.diagnostics.map(
     (d) => `${d.severity} ${d.code} ${d.span.start.offset}:${d.span.end.offset} ${d.message}`,
   );
 }
 
 /** A run of a plan to its end with `globals`: what it said and the failure's code and span. */
-export function ranWith(plan: InstructionPlan, globals: Globals): string {
+function ranWith(plan: InstructionPlan, globals: Globals): string {
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
   const failure = result.events.find((event) => event.kind === "runtimeFailure");
   return JSON.stringify({
@@ -191,8 +191,8 @@ export function stopProblems(c: StopCase): string[] {
       runs(c.stopped.plan, c.violating),
     ];
     fullViolating.forEach((run, index) => {
-      const failure = (text: string | undefined): unknown =>
-        text === undefined ? undefined : partsOf(JSON.parse(text))?.get("failure");
+      const failure = (text: string | undefined): string =>
+        text === undefined ? "-" : String(partsOf(JSON.parse(text))?.get("failure") ?? null);
       if (failure(gotViolating[index]) !== failure(run))
         problems.push(`violating ${gotViolating[index]} against ${run}`);
     });
