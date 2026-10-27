@@ -78,15 +78,15 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
 
 /*
  * Source-sized lists append one by one, never spread as one call's arguments: S6's (review r3, external review r6 F1,
- * Astra r6 N1) and S6c's (Astra's static list on S6, TABLE r4.73 (2)). A call's arguments overflow near 125,000 at
- * Node's default stack and near 12,000 under a 100 KiB stack, so each case runs in a child of that stack
- * (`--stack-size=100`) at 30,000, where its spread restored fails: the same failure at a fraction of the work (the
- * owner's test-cost rule; at 130,000 on the default stack each case took 3 to 21 s). The fifth of S6c's, the copy
- * forest's mark spans (`ExactPath.#forest`'s `found`), has no source-sized case: a source with more than four anchors
- * takes the cross-source index before the append (`FEW_ANCHORS`), and the copies of at most four anchors, sorted by
- * dominator position, make at most 2 × 4 − 1 = 7 runs of one nearest anchor (dominator intervals are laminar: each
- * nested anchor splits its ancestor's run once), one span each; 130,000 tested copies of a root beside four tested side
- * sources append one span.
+ * Astra r6 N1) and S6c's (Astra's static list on S6, TABLE r4.73 (2); the class keys, review r6 B1). A call's arguments
+ * overflow near 125,000 at Node's default stack and near 12,000 under a 100 KiB stack, so each case runs in a child of
+ * that stack (`--stack-size=100`) at 30,000, where its spread restored fails: the same failure at a fraction of the
+ * work (the owner's test-cost rule; at 130,000 on the default stack each case took 3 to 21 s). The fifth of S6c's, the
+ * copy forest's mark spans (`ExactPath.#forest`'s `found`), has no source-sized case: a source with more than four
+ * anchors takes the cross-source index before the append (`FEW_ANCHORS`), and the copies of at most four anchors,
+ * sorted by dominator position, make at most 2 × 4 − 1 = 7 runs of one nearest anchor (dominator intervals are laminar:
+ * each nested anchor splits its ancestor's run once), one span each; 130,000 tested copies of a root beside four tested
+ * side sources append one span.
  */
 
 /** A spread case's result: the analysis's outcome, its diagnostics, its checks and the case's own fact if it has one. */
@@ -157,4 +157,14 @@ test("a choice of written records is answered within the native stack", () => {
 test("a choice record whose value holds computed elements is answered within the native stack", () => {
   // `Contract.#selectedAt`
   assert.deepEqual(spreadCase("property"), ["valid", 0, 0]);
+});
+
+test("a choice of choices of many options is classed within the native stack", () => {
+  // `Contract.classOf`'s choice key (review r6 B1)
+  assert.deepEqual(spreadCase("choiceClass"), ["valid", 0, 0]);
+});
+
+test("a choice of a call of many arguments is classed within the native stack", () => {
+  // `Contract.classOf`'s operation key (review r6 B1)
+  assert.deepEqual(spreadCase("operationClass"), ["warning-runtime-check", 1, 2]);
 });

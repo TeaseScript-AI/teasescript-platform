@@ -98,4 +98,14 @@ export const SPREAD_CASES: Readonly<Record<string, SpreadCase>> = {
         "exit",
       ].join("\n"),
   },
+  // a choice's class by its options (`Contract.classOf`, review r6 B1): a choice of k labels as another's option's value
+  choiceClass: {
+    source: (size) =>
+      `let result: string = askChoice {text: "outer", value: (askChoice ${Array.from({ length: size }, () => '"A"').join(", ")})}\nexit`,
+  },
+  // an operation's class by its operands (`Contract.classOf`, review r6 B1): a call of k arguments as an option's value
+  operationClass: {
+    source: (size) =>
+      `let result: integer = askChoice {text: "outer", value: (max(${Array.from({ length: size }, () => "1").join(", ")}))}\nexit`,
+  },
 };

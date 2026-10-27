@@ -2525,6 +2525,26 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // review r6 B2: adds of one typed ingress of one default, each its own source, at the prefix entries and the add run
+  ...(
+    [
+      ["load", 'load("saved", default: seed)'],
+      ["parse", 'fromJson("{}", default: seed, files: false)'],
+    ] as const
+  ).map(([kind, ingress]): WorkFamily => ({
+    name: `S6c-${kind}-adds`,
+    measures: `TABLE r4.87, review r6 B2: k adds of \`${ingress}\` of one k-field record, every field of the last read`,
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          "let gathered = []",
+          rows(k, () => `gathered.add(${ingress})`),
+          rows(k, (i) => `repeat gathered.last.f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
   {
     name: "S6c-record-adds-unknown",
     measures:
