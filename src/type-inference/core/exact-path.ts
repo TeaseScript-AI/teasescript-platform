@@ -275,27 +275,6 @@ function exitsOf(
   return out;
 }
 
-/** The classes a chain of adds may hold, and the longest run of them, for `#repeatOf`'s windows. */
-const CHAIN_CLASSES = 8;
-const CHAIN_WINDOW = 16;
-
-/** A chain of adds (`ExactPath.#repeatOf`): its classes by number, each one's last place, the runs of classes met. */
-interface AddChain {
-  readonly classes: Map<string, number>;
-  readonly last: number[];
-  readonly sequence: number[];
-  readonly windows: Map<string, Definition>;
-  /** Cleared where an add without a class stands in the chain: no run past it is compared. */
-  open?: false;
-}
-
-/** An add's place in its chain, and the add whose answer it is. */
-interface PlacedAdd {
-  readonly chain: AddChain;
-  readonly at: number;
-  readonly same: Definition;
-}
-
 export class ExactPath {
   readonly #memo = new Map<string, ExactAnswer>();
   #copies: CopyForest | null = null;
@@ -305,8 +284,11 @@ export class ExactPath {
   readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
   /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
   readonly #defRoutes = new Map<string, ReadRoute>();
-  /** Per add, its place in its chain of adds (`#repeatOf`). */
-  readonly #chains = new Map<Definition, PlacedAdd>();
+  /** Per add, its place in its run of adds of one class (`#repeatOf`): the run's third add, and its own position. */
+  readonly #runs = new Map<
+    Definition,
+    { readonly third: Definition | null; readonly at: number }
+  >();
   /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
   readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
   /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
@@ -1201,25 +1183,21 @@ export class ExactPath {
   }
 
   /**
-   * S6c: the add whose value D's answer is at every path (`#defVal`): D itself, or an earlier add of D's chain. In a
-   * chain each add's exact read of its receiver before it is the add before it at every path (`#repeats`), and each adds
-   * a read of a class (`readClass`: equal items at every path, a writer of its own), so each answers as the one before
-   * with its read merged in once more. Let L be the shortest run of adds ending at D that holds every class of the chain
-   * so far, standing after the chain's first add: an earlier add whose last L classes are D's answers as D does, whatever
-   * came before. Within those L merges, at any path, either two families of definite kinds meet (`alternatives` makes
-   * them possible) and what follows is the run's alone, or no two meet and the definite kinds only grow, by the same
-   * classes on both sides; every other part of an item (reasons, writers, words, marks, ingress stores) only grows, the
-   * earliest writer standing for each kind. So k adds of one source, or of a few sources in turn, read at k fields walk
-   * a bounded number of adds per field, never the chain. Up to eight classes and runs of sixteen; once per add, on an
-   * explicit walk.
+   * S6c: the add whose value D's answer is at every path (`#defVal`): D itself, or, where D stands fourth or later in a
+   * run of adds of one class, the run's third. In a run each add's exact read of its receiver before it is the add
+   * before it at every path (`#repeats`) and each adds a read of one class (`readClass`: equal items at every path, a
+   * later writer), so each answers as the one before with that read merged in once more: past the run's first add its
+   * kinds hold the read's, and one merge more settles their certainty (`alternatives`), whatever came before the run;
+   * the earliest writer stands for each kind. So k adds of one source read at k fields walk at most three adds per
+   * field, never the chain. Once per add, on an explicit walk.
    */
   #repeatOf(d: Definition): Definition {
     if (d.kind !== "add" || !sharing()) return d;
-    // (back to an add whose place in its chain is known, or to a chain's first add, then each placed after the one before)
+    // (back to an add whose place in its run is known, or to the first of a run, then each placed after the one before)
     const pending: Definition[] = [];
-    let before: PlacedAdd | null = null;
+    let before: { readonly third: Definition | null; readonly at: number } | null = null;
     for (let add: Definition | null = d; add !== null; add = this.#repeats(add)) {
-      const known = this.#chains.get(add);
+      const known = this.#runs.get(add);
       if (known !== undefined) {
         before = known;
         break;
@@ -1228,53 +1206,17 @@ export class ExactPath {
     }
     for (let index = pending.length - 1; index >= 0; index -= 1) {
       const add = pending[index]!;
-      const chain: AddChain = before?.chain ?? {
-        classes: new Map(),
-        last: [],
-        sequence: [],
-        windows: new Map(),
-      };
-      const at = before === null ? 0 : before.at + 1;
-      this.#keep(3);
-      before = { chain, at, same: this.#place(chain, add, at) };
-      this.#chains.set(add, before);
+      const at = before === null ? 1 : before.at + 1;
+      this.#keep(2);
+      before = { third: at === 3 ? add : at > 3 ? before!.third : null, at };
+      this.#runs.set(add, before);
     }
-    return this.#chains.get(d)!.same;
-  }
-
-  /** `#repeatOf`'s step: D placed at `at` in its chain, and the earlier add of the same last classes, if any. */
-  #place(chain: AddChain, d: Definition, at: number): Definition {
-    const cls = d.value === undefined ? null : this.pass.contract.readClass(d.value, true);
-    if (cls === null) {
-      chain.open = false;
-      return d;
-    }
-    let id = chain.classes.get(cls);
-    if (id === undefined) {
-      id = chain.classes.size;
-      chain.classes.set(cls, id);
-      chain.last.push(at);
-    }
-    chain.last[id] = at;
-    chain.sequence.push(id);
-    if (chain.open === false || chain.classes.size > CHAIN_CLASSES) return d;
-    // (the shortest run ending here that holds every class: from the earliest of their last places)
-    let from = at;
-    for (const last of chain.last) {
-      this.pass.program.work.charge("exactValues");
-      from = Math.min(from, last);
-    }
-    if (from < 1 || at - from + 1 > CHAIN_WINDOW) return d;
-    const window = keptParts(this.#work, chain.sequence.slice(from).join(" "));
-    const earlier = chain.windows.get(window);
-    if (earlier !== undefined) return earlier;
-    this.#keep(1);
-    chain.windows.set(window, d);
-    return d;
+    const run = this.#runs.get(d)!;
+    return run.at > 3 ? run.third! : d;
   }
 
   /**
-   * S6c: the add before D in D's chain, or `null`: D and the add P before it add, in one mode, reads of a class
+   * S6c: the add D repeats, or `null`: D and the add P before it add, in one mode, reads of one class
    * (`Contract.readClass`, never an ingress: equal items at every path) to one receiver key, whose exact read before D
    * is P at every path (P with no rest at the key: every key below it is P's below it, an event below it being one of
    * the key's own, X6), no guard of the key, a prefix or a key below holds D (no mark), and P's writer comes first.
@@ -1296,8 +1238,8 @@ export class ExactPath {
       p.loop !== undefined
     )
       return null;
-    if (contract.readClass(d.value, true) === null || contract.readClass(p.value, true) === null)
-      return null;
+    const cls = contract.readClass(d.value, true);
+    if (cls === null || contract.readClass(p.value, true) !== cls) return null;
     if (guards.narrowed(key, d.node) || guards.guardedBelow(key, d.node).length > 0) return null;
     const [first, later] = [definitions.writerOf(p), definitions.writerOf(d)];
     if (first !== null && later !== null && firstWriter(first, later) !== first) return null;
