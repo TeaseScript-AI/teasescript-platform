@@ -118,7 +118,7 @@ function lower(
 // ------------------------------------------------------------------------------------------------- the plan's side
 
 /**
- * Which functions and files of the plan can return, by the rules of the graph's `#decideReturns`, on instructions: a
+ * Which functions and files of the plan can return, by the rules of the graph's `decideReturns`, on instructions: a
  * function returns at a `return`; a file at an `end` of its top level, at an `end` in a function it calls, through a
  * file it starts with `goto` that returns, or at an `end` of a block whose registering instruction the session reaches
  * through the calls found to return so far (r4.26: never through a return that the block's own `end` would justify);
