@@ -397,15 +397,18 @@ test("the stop oracle sees a store check's place, type or presence change", () =
     CORE_BACKEND,
   );
   assert.ok(unstopped.plan !== null);
-  const changed = (change: (holder: Record<string, unknown>) => void): typeof unstopped => {
+  // (a change returns the check that stands instead, `null` for none)
+  const changed = (
+    change: (check: Record<string, unknown>) => Record<string, unknown> | null,
+  ): typeof unstopped => {
     const plan = structuredClone(unstopped.plan);
     const pending: unknown[] = [plan];
     while (pending.length > 0) {
       const at = pending.pop();
       if (at === null || typeof at !== "object") continue;
-      const holder = at as Record<string, unknown>;
-      if (holder["typeCheck"] !== undefined) change(holder);
-      pending.push(...Object.values(holder));
+      if ("typeCheck" in at && at.typeCheck !== null && typeof at.typeCheck === "object")
+        at.typeCheck = change(Object.fromEntries(Object.entries(at.typeCheck))) ?? undefined;
+      pending.push(...Object.values(at));
     }
     return { ...unstopped, plan };
   };
@@ -421,15 +424,9 @@ test("the stop oracle sees a store check's place, type or presence change", () =
     });
   assert.deepEqual(problems(unstopped), []);
   for (const change of [
-    (holder: Record<string, unknown>) => {
-      holder["typeCheck"] = { ...(holder["typeCheck"] as object), place: "wrong target" };
-    },
-    (holder: Record<string, unknown>) => {
-      holder["typeCheck"] = { ...(holder["typeCheck"] as object), type: { kind: "text" } };
-    },
-    (holder: Record<string, unknown>) => {
-      delete holder["typeCheck"];
-    },
+    (check: Record<string, unknown>) => ({ ...check, place: "wrong target" }),
+    (check: Record<string, unknown>) => ({ ...check, type: { kind: "text" } }),
+    () => null,
   ])
     assert.notDeepEqual(problems(changed(change)), []);
 });
