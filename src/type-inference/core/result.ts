@@ -171,7 +171,10 @@ export type DiagnosticRule =
       readonly rule: "mixed";
       readonly collection: "list" | "set" | "dict";
       readonly path: readonly string[];
+      /** The earliest element's own kinds there (a whole number as such). */
       readonly type: readonly ItemTag[];
+      /** The variable whose start value the literal is, which a fix declares; `null` for any other literal. */
+      readonly root: StoreRoot | null;
     };
 
 /** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */

@@ -1185,7 +1185,15 @@ export class Consumers {
               ? "dict"
               : "list",
         path: found.path,
-        type: found.decided,
+        type: found.earliest,
+        // (the variable the literal is the start value of)
+        root: ((d) => (d === undefined ? null : this.#storeRoot(d.place)))(
+          literal === undefined
+            ? undefined
+            : (this.pass.definitions.byValue.get(literal) ?? []).find(
+                (each) => each.kind === "whole" && each.path.length === 0,
+              ),
+        ),
       },
       found.kinds,
     );
@@ -2187,10 +2195,11 @@ export class Consumers {
               items.some((item) => item.tag === "unknown" || matches(row, other, item.tag)),
           ),
       );
-    const offending = new Map<string, [number, Item]>();
-    const offend = (index: number, item: Item): void => {
+    // (each offending operand with the kinds of the combination it offends in, which its sentence names)
+    const offending = new Map<string, [number, Item, readonly ItemTag[]]>();
+    const offend = (index: number, item: Item, pair: readonly ItemTag[] = []): void => {
       const key = joinParts(index, item.fan === undefined ? item.tag : `fan ${item.fan}`);
-      if (!offending.has(key)) offending.set(key, [index, item]);
+      if (!offending.has(key)) offending.set(key, [index, item, pair]);
     };
     // (the operation's offending item, what it owes, and its combination's kinds, which its fixes name)
     let operation: [Item, readonly RequiredKind[], readonly ItemTag[]] | null = null;
@@ -2211,7 +2220,12 @@ export class Consumers {
         places = items
           .map((_, index) => index)
           .filter((index) => !fitsBeside(index, items[index]!.tag));
-      if (places.length === 1) offend(places[0]!, items[places[0]!]!);
+      if (places.length === 1)
+        offend(
+          places[0]!,
+          items[places[0]!]!,
+          items.map((item) => item.tag),
+        );
       else
         operation ??= [
           items.find((item) => item.cert === "pos") ?? items[0]!,
@@ -2223,8 +2237,8 @@ export class Consumers {
       const unknown = items.find((item) => isOpaque(item) || isExternal(item));
       if (unknown !== undefined) offend(index, unknown);
     });
-    for (const [index, item] of offending.values())
-      owe(item, operandSite(index), operandText(index), domain(index), index);
+    for (const [index, item, pair] of offending.values())
+      owe(item, operandSite(index), operandText(index), domain(index), index, pair);
     if (operation !== null) {
       const [item, against, pair] = operation;
       owe(item, c.site, program.textAt(c.site), against, null, pair);
