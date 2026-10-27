@@ -85,7 +85,7 @@ const one = (name: string, source: string): Program => ({
 /**
  * #1210's programs: projections of host reads (a property, an element, a nested property) in one literal, in records, in
  * lists or bare, two deep and read below, beside another field, another global, a direct read and known data, guarded,
- * changed between, and added; a named source and a named projection the controls.
+ * changed between, chosen, selected and added; a named source and a named projection the controls.
  * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name.
  */
 const PROJECTED_INGRESS_PROGRAMS: readonly {
@@ -211,6 +211,21 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     ],
     place: ["box", ["element", "n"]],
     read: "box[0].n",
+  },
+  {
+    name: "a choice of records of one property read",
+    lines: [
+      'let box = askChoice {text: "a", value: {g: ^hostValue.n}}, {text: "b", value: {g: ^hostValue.n}}',
+      "let out: integer = box.g",
+    ],
+    place: ["box", ["g"]],
+    read: "box.g",
+  },
+  {
+    name: "the first of records of one property read",
+    lines: ["let box = [{g: ^hostValue.n}, {g: ^hostValue.n}].first", "let out: integer = box.g"],
+    place: ["box", ["g"]],
+    read: "box.g",
   },
   {
     name: "property reads added",
