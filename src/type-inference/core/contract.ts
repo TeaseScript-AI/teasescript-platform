@@ -557,6 +557,13 @@ export class Contract {
   readonly #literalIds = new Map<string, string>();
   /** Per read, its snapshot (`readSnapshot`). */
   readonly #snapshots = new Map<PlaceId, string>();
+  /** Per value, its read class on the contract side and on the value side (`readClass`). */
+  readonly #readClasses = [new Map<PlaceId, string | null>(), new Map<PlaceId, string | null>()];
+  /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
+  readonly #choiceOptions = [
+    new Map<PlaceId, readonly number[]>(),
+    new Map<PlaceId, readonly number[]>(),
+  ];
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
   readonly #structures = new Map<PlaceId, string>();
   readonly #structureIds = new Map<string, string>();
@@ -1652,6 +1659,7 @@ export class Contract {
           rest,
           (value, path) => this.contractOfValueAt(value, path),
           this.choiceKeysStored(),
+          this.choiceOptions(c, false),
         ),
         scope,
       );
@@ -1818,6 +1826,94 @@ export class Contract {
           );
     this.#snapshots.set(value, snapshot);
     return snapshot;
+  }
+
+  /**
+   * S6c: what a read's answer at every path below it rests on, as one text, so reads of one class answer alike at every
+   * path: its place and projection steps, and its guards there and below (`guardedRead`, `guardedBelowRead`: the
+   * outermost tested paths below it whose regions hold it decide its mark at any path, §3.2); on the value side
+   * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node, r4.68 (1)). Never coarser than
+   * the answer: `null` for a value that is no read, a loop's visit, or a read an ingress stands in (its leaf is its
+   * own, S6-CARRIERS §3.1). Once per read and side.
+   */
+  public readClass(value: PlaceId, exact: boolean): string | null {
+    const memo = this.#readClasses[exact ? 1 : 0]!;
+    const known = memo.get(value);
+    if (known !== undefined) return known;
+    const { program, guards, definitions } = this.pass;
+    const steps: string[] = [];
+    let current = value;
+    let fresh = definitions.ingress.has(current);
+    for (let projection = program.projOf.get(current); projection !== undefined && !fresh;) {
+      program.work.charge("invSteps");
+      if (projection.step === "iteration") fresh = true;
+      steps.push(projection.step);
+      current = projection.owner;
+      fresh ||= definitions.ingress.has(current);
+      projection = program.projOf.get(current);
+    }
+    const binding = program.occurrenceOf.get(current);
+    let cls: string | null = null;
+    if (!fresh && binding !== undefined) {
+      const snapshot = exact ? this.readSnapshot(value) : "";
+      if (snapshot !== null)
+        cls = keptParts(
+          this.#work,
+          binding,
+          steps.reverse().join(" "),
+          guards.guardedRead(value) ? "g" : "",
+          guards.guardedBelowRead(value).join(" "),
+          snapshot,
+        );
+    }
+    memo.set(value, cls);
+    return cls;
+  }
+
+  /**
+   * S6c: the options of a choice its answer reads, by their index, once per choice and side: of options that answer
+   * alike at every path (a label of one kind; a choice object's selected value, or a computed option, of one read
+   * class, `readClass`), the first alone, so a choice of k options of one source read at k fields reads it once per
+   * field; any other option by itself. In the options' order, so the merged answer keeps its kinds' order.
+   */
+  public choiceOptions(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    exact: boolean,
+  ): readonly number[] {
+    const memo = this.#choiceOptions[exact ? 1 : 0]!;
+    const known = memo.get(c.result);
+    if (known !== undefined) return known;
+    const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
+    const labels = choiceLabels(c);
+    const seen = new Set<string>();
+    const options: number[] = [];
+    for (const [index, argument] of c.arguments.entries()) {
+      this.pass.program.work.charge("invSteps");
+      const label = labels[index];
+      const content = evidence[index]?.content;
+      // (a label by its kind; a choice object by the read it selects, one without a selected key by itself; a list's
+      // or a set's buttons by themselves; a computed option by its read)
+      let cls: string | null = null;
+      if (!sharing() || content?.kind === "list" || content?.kind === "set") cls = null;
+      else if (label !== undefined) cls = keptParts(this.#work, "l", label ?? "");
+      else if (content?.kind === "object") {
+        const selected =
+          content.object === null ? null : (content.object.value ?? content.object.text);
+        const read = selected === null ? null : this.readClass(selected, exact);
+        if (read !== null) cls = keptParts(this.#work, "o", read);
+      } else {
+        const read = this.readClass(argument, exact);
+        if (read !== null) cls = keptParts(this.#work, "c", read);
+      }
+      if (cls !== null) {
+        if (seen.has(cls)) continue;
+        seen.add(cls);
+      }
+      options.push(index);
+    }
+    this.#keep(options.length);
+    memo.set(c.result, options);
+    return options;
   }
 
   /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */
@@ -3784,13 +3880,15 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
  * (`SELECTED_VALUE`, `SELECTED_TEXT`, the literal's objects). Where a store goes below a property of that name after
  * a record is made (`stored`), that key is read by its key instead, as the literal's records no longer say what it
  * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (F11's
- * `missing`), possible where some has one.
+ * `missing`), possible where some has one. Only the `options` are read (`Contract.choiceOptions`: one of each class),
+ * in order.
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
   rest: readonly string[],
   read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
   stored: StoredChoiceKeys,
+  options: readonly number[],
 ): Work<Item[]> {
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
@@ -3835,7 +3933,8 @@ export function* choiceItems(
     for (const item of items)
       if (item.tag !== "object" && (rest.length === 0 || item.tag === "unknown")) out.push(item);
   };
-  for (const [index, argument] of c.arguments.entries()) {
+  for (const index of options) {
+    const argument = c.arguments[index]!;
     const label = labels[index];
     if (label !== undefined) {
       if (label !== null && rest.length === 0) out.push(makeItem(label));

@@ -716,6 +716,7 @@ export class Values {
         (value, path, element) =>
           element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
         contract.choiceKeysStored(),
+        contract.choiceOptions(c, true),
       );
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
