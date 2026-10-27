@@ -5,6 +5,7 @@ import { changesEntries, DICT_METHODS, type DictMethod } from "../src/dict-opera
 import {
   changesElements,
   LIST_METHODS,
+  listMethod,
   reordersList,
   type ListMethod,
 } from "../src/list-methods.js";
@@ -104,14 +105,25 @@ const COARSE = {
 } as const;
 
 test("what a method changes in place derives from its category as the coarse table said", () => {
-  const listChange = (name: string): string =>
-    changesElements(name) ? "elements" : reordersList(name) ? "order" : "none";
-  const dictChange = (name: string): string => (changesEntries(name) ? "entries" : "none");
   const drift = [
-    ...Object.entries(COARSE.list).filter(([name, change]) => listChange(name) !== change),
-    ...Object.entries(COARSE.dict).filter(([name, change]) => dictChange(name) !== change),
+    ...Object.entries(COARSE.list).filter(
+      ([name, change]) =>
+        changesElements(name) !== (change === "elements") ||
+        reordersList(name) !== (change === "order"),
+    ),
+    ...Object.entries(COARSE.dict).filter(
+      ([name, change]) => changesEntries(name) !== (change === "entries"),
+    ),
   ];
   assert.deepEqual(drift, []);
+});
+
+test("a list's and a dict's method of one name do the same to their receiver, as the core keys it by name", () => {
+  const differ = DICTS.filter((method) => {
+    const list = listMethod(method.name);
+    return list !== undefined && list.changes !== method.changes;
+  }).map((method) => method.name);
+  assert.deepEqual(differ, []);
 });
 
 test("a new method that removes elements is one row of its contract for the core and the runtime", () => {

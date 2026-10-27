@@ -19,13 +19,13 @@ import type { ValueKind } from "../../value-kinds.js";
  * What each built-in operation does to the values the coarse core follows, by semantic category (the owner's
  * extensibility criterion, 2026-10-24: PLAN §6a, S3 revision 8 §2). The generic core (definitions, contract, exact
  * path, values, answers) reads an operation's category, never its name: a new method that uses a mechanism the core
- * already has is a new row here, with its language rules in the adapter layer (`consumers.ts`), and no change to the
- * core. A new mechanism (a new kind of definition, a new transfer, a new loop form, a new certainty rule) is a change to
- * the core. The rows are the model's (`points14.mjs`: `METHOD_RESULT`, `REMOVALS`, `SELECTIONS`, `ASKED`, the
- * conversions). The selections, the conversions, and what a method does to its receiver's elements come from the
- * language's own tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and the runtime
- * read too, so a method that removes or clears is a row of its contracts alone; the other methods' results are rows
- * here, which `tests/type-core-method-categories.test.ts` checks against the contracts.
+ * already has is a new row of a table (below), with its language rules in the adapter layer (`consumers.ts`), and no
+ * change to the core. A new mechanism (a new kind of definition, a new transfer, a new loop form, a new certainty rule)
+ * is a change to the core. The rows are the model's (`points14.mjs`: `METHOD_RESULT`, `REMOVALS`, `SELECTIONS`,
+ * `ASKED`, the conversions). The selections, the conversions, and what a method does to its receiver's elements come
+ * from the language's own tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and
+ * the runtime read too, so a method that removes or clears is a row of its contracts alone; the other methods' results
+ * are rows here, which `tests/type-core-method-categories.test.ts` checks against the contracts.
  */
 
 /** What a method of a collection does and gives. */
