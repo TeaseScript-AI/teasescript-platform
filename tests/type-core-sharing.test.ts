@@ -318,7 +318,7 @@ test(
     for (const program of HELD_SHARING_FAULTS) {
       const once = prepared(program);
       for (const reversed of [false, true])
-        if (published(once, reversed) !== withoutSharing(() => published(once, reversed)))
+        if (published(once, reversed).text !== withoutSharing(() => published(once, reversed)).text)
           differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
     assert.deepEqual(differing, []);
