@@ -21,11 +21,19 @@ only as supporting links, and only durable links (no `/tmp` paths). An incomplet
 closed issues first and add evidence to the one tracking the same problem, reopening it if work remains. Ground a
 diagnosis in reproduction, source or logs, and mark hypotheses as such.
 
-Labels, described on GitHub: one orchestrator label (`platform`, `V2 compiler`, `importer`); `owner: blocking` or
-`owner: input` while a question the owner has not yet decided waits; `in progress` while an agent works on it;
-`spare capacity` for work that must be done but can wait (ready, no owner input, and no more expensive later because
-nothing upcoming builds on it); `needs triage` until an orchestrator is assigned. With `gh`, set the type and labels
-(`--type`, `--label`); triage fills any gap. Change labels only when the state changes.
+Labels, described on GitHub:
+
+- one orchestrator label: `platform`, `V2 compiler` or `importer`;
+- while a question the owner has not yet decided is open: `owner: blocking` (work waits), `owner: input` (nothing
+  waits) or `owner: parked` (the owner said not now). An issue without one can be finished without asking the owner;
+  a task that only waits on a decision issue says "Depends on #N" instead;
+- `in progress` while an agent works on it;
+- `spare capacity` for work that must be done but can wait: ready, no owner input, and no more expensive later because
+  nothing upcoming builds on it;
+- `needs triage` until an orchestrator is assigned.
+
+With `gh`, set the type and labels (`--type`, `--label`); triage fills any gap. Change labels only when the state
+changes.
 
 Before implementation, the issue states the problem or goal, evidence, scope and exclusions, and acceptance criteria.
 Future-facing infrastructure also needs a concrete scheduled consumer, an accepted boundary that must be correct when
