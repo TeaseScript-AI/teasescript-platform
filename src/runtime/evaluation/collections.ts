@@ -1,5 +1,6 @@
 import { unknownNamedArgumentMessage } from "../../argument-rules.js";
 import {
+  changesEntries,
   DICT_METHODS,
   dictArgumentsProblem,
   isDictMethod,
@@ -17,10 +18,13 @@ import {
 import type { ExpressionPlan, TypeCheckPlan } from "../../plan/model.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import {
+  freezeCurrentValuesForChange,
   freezePreparedReferenceDescendants,
   preparePreparedReferencesForListRemoval,
   preparePreparedReferencesForListReorder,
+  readPreparedReference,
   refreshPreparedReferenceFallbacks,
+  type PreparedReferenceDescriptor,
 } from "../scopes/prepared-references.js";
 import { joinedText } from "../values/value-text.js";
 import {
@@ -45,14 +49,16 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
+import { snapshotValidationAnalysis } from "../snapshot/snapshot-validation-analysis.js";
 import { currentTemporalContext } from "../snapshot/state.js";
 import { isList, isRange, isSet } from "../values/value-predicates.js";
 import { assertValueType } from "../values/value-types.js";
 import { describeValue } from "../../value-kinds.js";
 import type { Evaluator } from "../evaluator.js";
 import { shuffleOrder } from "./draws.js";
-import { type SourceSpan, fault, USE_DEFAULT } from "./support.js";
+import { type SourceSpan, fault, readTemporary, USE_DEFAULT } from "./support.js";
 import { dictKey, missingKey, listPosition } from "./access.js";
+import { findBindingLocation } from "./bindings.js";
 
 // The methods of lists, sets, and dicts.
 
@@ -98,11 +104,15 @@ export function callCollection(
       if (!hasListMethod("set", name))
         throw fault("TSR016", missingListMethodMessage("set", name), span);
       expect(LIST_METHODS[name]);
+      if (listMethod(name)?.changes !== undefined)
+        freezeCurrentValuesBeforeChange(evaluator, receiverPlan);
       return callSet(evaluator, receiver, name, positional, span, added);
     }
     if (!hasListMethod("list", name))
       throw fault("TSR016", missingListMethodMessage("list", name), span);
     expect(LIST_METHODS[name]);
+    if (listMethod(name)?.changes !== undefined)
+      freezeCurrentValuesBeforeChange(evaluator, receiverPlan);
     return callList(
       evaluator,
       receiver,
@@ -312,6 +322,7 @@ export function callDict(
     ...(defaulted ? ["default"] : []),
   ]);
   if (problem !== undefined) throw fault("TSR028", problem.message, span);
+  if (changesEntries(name)) freezeCurrentValuesBeforeChange(evaluator, callee.object);
   if (name === "clear") {
     clearDict(evaluator, receiver);
     return null;
@@ -334,6 +345,31 @@ export function callDict(
       throw new Error(`Dict method '${String(unhandled)}' has no implementation.`);
     }
   }
+}
+
+/**
+ * Before a method changes its receiver in place, freezes the current values that `+=` reads which may hold the receiver
+ * or lead into it: those read from the variable that holds the receiver, or every one when that variable is not known. A
+ * receiver read from a temporary or a detached reference is a copy that no variable holds.
+ */
+function freezeCurrentValuesBeforeChange(evaluator: Evaluator, receiverPlan: ExpressionPlan): void {
+  if (snapshotValidationAnalysis(evaluator.plan).currentValueTemporaries.size === 0) return;
+  let base = receiverPlan;
+  while (base.kind === "property" || base.kind === "index" || base.kind === "group")
+    base = base.kind === "group" ? base.expression : base.object;
+  if (base.kind === "temporary") return;
+  let root: PreparedReferenceDescriptor | { rootFrameId: number; rootName: string } | null = null;
+  if (base.kind === "identifier") {
+    const location = findBindingLocation(evaluator.snapshot, evaluator.plan, base.name);
+    if (location !== undefined) root = { rootFrameId: location.frame.id, rootName: base.name };
+  } else if (base.kind === "preparedReference") {
+    root = readPreparedReference(
+      readTemporary(evaluator.snapshot.temporaries, base.temporaryId, base.span),
+      base.span,
+    );
+    if (root.detached) return;
+  }
+  freezeCurrentValuesForChange(evaluator.snapshot, evaluator.plan, root);
 }
 
 /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */

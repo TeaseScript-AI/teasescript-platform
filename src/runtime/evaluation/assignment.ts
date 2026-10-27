@@ -37,9 +37,12 @@ import {
   getSerializableProperty,
   setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
+  type SerializableRuntimeList,
   type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
+import { listHasPosition } from "../values/collection-operations.js";
+import { isDictKey } from "../../value-kinds.js";
 import {
   isDict,
   isList,
@@ -67,6 +70,7 @@ import { getProperty, dictKey, listPosition, notIndexable } from "./access.js";
 import { speakerById, setSpeakerProperty } from "./speakers.js";
 import { binary } from "./operators.js";
 import { findBindingLocation } from "./bindings.js";
+import { mayChangeValue } from "./effect-facts.js";
 
 // Assignment and its checks, and prepared references: preparing, restoring, and resolving them.
 
@@ -108,7 +112,7 @@ export function assign(
         target.span,
       );
     }
-    detachPreparedReferencesForMutation(evaluator.snapshot, {
+    detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
       rootFrameId: location.frame.id,
       rootName: target.name,
       path: [],
@@ -123,17 +127,7 @@ export function assign(
     return;
   }
   const object = evaluator.evaluate(target.object);
-  const receiverDescriptor =
-    target.object.kind === "preparedReference"
-      ? readPreparedReference(
-          readTemporary(
-            evaluator.snapshot.temporaries,
-            target.object.temporaryId,
-            target.object.span,
-          ),
-          target.object.span,
-        )
-      : null;
+  const receiverDescriptor = storeReceiver(evaluator, target);
   if (target.kind === "property") {
     // before anything changes, prepared references included
     if (
@@ -150,17 +144,7 @@ export function assign(
         ),
         target.span,
       );
-    if (receiverDescriptor !== null && !receiverDescriptor.detached) {
-      const mutationStep: PreparedReferenceStep = { kind: "property", name: target.name };
-      detachPreparedReferencesForMutation(evaluator.snapshot, {
-        rootFrameId: receiverDescriptor.rootFrameId,
-        rootName: receiverDescriptor.rootName,
-        path: [...receiverDescriptor.path, mutationStep],
-        speakerPath: preparedReferenceSpeakerPath(evaluator.snapshot, receiverDescriptor, [
-          mutationStep,
-        ]),
-      });
-    }
+    detachForStore(evaluator, receiverDescriptor, { kind: "property", name: target.name });
     if (isObject(object)) {
       setCapturedSerializableProperty(object, target.name, value);
       if (evaluator.trace !== null)
@@ -175,7 +159,7 @@ export function assign(
       const has = (name: string) => speaker.properties.some((property) => property.name === name);
       for (const name of [target.name, ...propertiesReadThrough(has, target.name)]) {
         const path: PreparedReferenceStep[] = [{ kind: "property", name }];
-        detachPreparedReferencesForMutation(evaluator.snapshot, {
+        detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
           rootFrameId: GLOBAL_SCOPE_ID,
           rootName: speaker.identifier,
           path,
@@ -225,17 +209,7 @@ export function assign(
         target.span,
         object.entries.length + 1,
       );
-    if (receiverDescriptor !== null && !receiverDescriptor.detached) {
-      const mutationStep: PreparedReferenceStep = { kind: "key", key };
-      detachPreparedReferencesForMutation(evaluator.snapshot, {
-        rootFrameId: receiverDescriptor.rootFrameId,
-        rootName: receiverDescriptor.rootName,
-        path: [...receiverDescriptor.path, mutationStep],
-        speakerPath: preparedReferenceSpeakerPath(evaluator.snapshot, receiverDescriptor, [
-          mutationStep,
-        ]),
-      });
-    }
+    detachForStore(evaluator, receiverDescriptor, { kind: "key", key });
     setCapturedSerializableDictValue(object, key, value);
     if (evaluator.trace !== null)
       evaluator.traceVariableChange("assignment", receiverDescriptor, target.span);
@@ -250,63 +224,97 @@ export function assign(
     evaluator.evaluate(target.index),
     "assign",
   );
-  if (receiverDescriptor !== null && !receiverDescriptor.detached) {
-    const mutationStep: PreparedReferenceStep = { kind: "index", index };
-    detachPreparedReferencesForMutation(evaluator.snapshot, {
-      rootFrameId: receiverDescriptor.rootFrameId,
-      rootName: receiverDescriptor.rootName,
-      path: [...receiverDescriptor.path, mutationStep],
-      speakerPath: preparedReferenceSpeakerPath(evaluator.snapshot, receiverDescriptor, [
-        mutationStep,
-      ]),
-    });
-  }
+  detachForStore(evaluator, receiverDescriptor, { kind: "index", index });
   object.items[index] = cloneCapturedSerializableValue(value);
   if (evaluator.trace !== null)
     evaluator.traceVariableChange("assignment", receiverDescriptor, target.span);
 }
 
+/** The prepared reference to the object, list, or dict that `target` stores into, or `null` when it reads a value. */
+function storeReceiver(
+  evaluator: Evaluator,
+  target: Exclude<AssignmentTargetPlan, { kind: "identifier" }>,
+): PreparedReferenceDescriptor | null {
+  return target.object.kind === "preparedReference"
+    ? readPreparedReference(
+        readTemporary(
+          evaluator.snapshot.temporaries,
+          target.object.temporaryId,
+          target.object.span,
+        ),
+        target.object.span,
+      )
+    : null;
+}
+
+/** Freezes the prepared references that a store at `step` of an attached receiver changes the value of. */
+function detachForStore(
+  evaluator: Evaluator,
+  receiver: PreparedReferenceDescriptor | null,
+  step: PreparedReferenceStep,
+): void {
+  if (receiver === null || receiver.detached) return;
+  detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
+    rootFrameId: receiver.rootFrameId,
+    rootName: receiver.rootName,
+    path: [...receiver.path, step],
+    speakerPath: preparedReferenceSpeakerPath(evaluator.snapshot, receiver, [step]),
+  });
+}
+
 /**
- * Runs `items += more`, or `items = items + more`, while the variable holds a list. The joined list starts with the
- * variable's own elements, so copies of the added ones are appended in place, as `addAll` adds them, instead of a
- * copy of the whole list for every addition. The result, its type check, its failures, and the prepared references
- * it freezes are those of the assignment. Gives `false`, having evaluated nothing, for any other assignment, and
- * while Debug traces, which explains the joined value.
+ * Runs `items += more`, or `items = items + more`, while the target, a variable, a property of an object, an element of a
+ * list, or a value of a dict, holds a list. When the joined list would start with the very list the target still holds,
+ * copies of the added elements are appended to it in place, as `addAll` adds them, instead of storing a copy of the
+ * whole list for every addition. `+=` reads its current value from the target, or with a call or an ask in `more`,
+ * through the reference that read it first, which holds that list until something may change it
+ * (`currentValueTemporaries`). The result, its type check, its failures, and the prepared references it freezes are
+ * those of the assignment. Gives `false`, having evaluated nothing, for an assignment of another form or to a variable
+ * that holds no list, and while Debug traces, which explains the joined value.
  */
 export function appendAssigned(
   evaluator: Evaluator,
   target: AssignmentTargetPlan,
   value: ExpressionPlan,
   typeCheck: TypeCheckPlan | undefined,
+  requireExisting: boolean,
 ): boolean {
   if (
     evaluator.trace !== null ||
-    target.kind !== "identifier" ||
     value.kind !== "binary" ||
     value.operator !== "+" ||
-    value.left.kind !== "identifier" ||
-    value.left.name !== target.name ||
-    (typeCheck !== undefined && typeCheck.type.kind !== "list")
+    !(
+      value.left.kind === "preparedReference" ||
+      value.left.kind === "identifier" ||
+      value.left.kind === "property" ||
+      value.left.kind === "index"
+    ) ||
+    (typeCheck !== undefined && typeCheck.type.kind !== "list") ||
+    // The join copies a current value read through a reference before `more` can change it in place.
+    (value.left.kind === "preparedReference" && mayChangeValue(value.right))
   )
     return false;
-  const location = findBindingLocation(evaluator.snapshot, evaluator.plan, target.name);
-  if (location === undefined) return false;
-  const list = location.binding.value;
-  if (!isList(list)) return false;
+  if (target.kind === "identifier") {
+    const location = findBindingLocation(evaluator.snapshot, evaluator.plan, target.name);
+    if (location === undefined || !isList(location.binding.value)) return false;
+  }
   const left = evaluator.evaluate(value.left);
   const right = evaluator.evaluate(value.right);
-  // The compiler reads the variable before a user call in `more`, so without one `more` changes the list only in
-  // place. Every store into the variable fits its type, so the joined list fits when the added elements do.
+  // `more` may have changed the target's list in place, which the join sees as well, or put another value there. Every
+  // store into the target fits its type, so the joined list fits when the added elements do.
+  const held = heldList(evaluator, target);
   if (
-    left !== list ||
+    held === null ||
+    left !== held.list ||
     !isList(right) ||
     (typeCheck !== undefined && !matchesValueType(right, typeCheck.type))
   ) {
     const joined = binary(evaluator, value, left, right);
     if (typeCheck !== undefined) assertValueType(joined, typeCheck, value.span);
-    assign(evaluator, target, joined);
+    assign(evaluator, target, joined, requireExisting);
     return true;
   }
+  const list = held.list;
   checkCollectionLength(
     "list",
     list.items.length + right.items.length,
@@ -314,11 +322,14 @@ export function appendAssigned(
     "joining with +",
     value.span,
   );
-  detachPreparedReferencesForMutation(evaluator.snapshot, {
-    rootFrameId: location.frame.id,
-    rootName: target.name,
-    path: [],
-  });
+  // The reference to the current value is spent, and freezing it for this change would copy the list.
+  if (value.left.kind === "preparedReference") {
+    const spent = value.left.temporaryId;
+    const temporaries = evaluator.snapshot.temporaries;
+    const position = temporaries.findIndex(({ id }) => id === spent);
+    if (position >= 0) temporaries.splice(position, 1);
+  }
+  held.detach();
   // Copies are taken first, so a list can add itself.
   const added = right.items.map((item) => cloneCapturedSerializableValue(item));
   for (const item of added) list.items.push(item);
@@ -326,19 +337,79 @@ export function appendAssigned(
 }
 
 /**
- * `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary. Gives
- * the reference to store and the value it selects, which the debug trace shows instead of the reference.
+ * The list that `target` holds now, with the freezing of the prepared references that a store there does, or `null` for
+ * any other value, and for a property of a speaker or handle, which keeps its properties as runtime state.
+ */
+function heldList(
+  evaluator: Evaluator,
+  target: AssignmentTargetPlan,
+): { readonly list: SerializableRuntimeList; readonly detach: () => void } | null {
+  if (target.kind === "identifier") {
+    const location = findBindingLocation(evaluator.snapshot, evaluator.plan, target.name);
+    if (location === undefined) return null;
+    const list = location.binding.value;
+    if (!isList(list)) return null;
+    const mutation = { rootFrameId: location.frame.id, rootName: target.name, path: [] };
+    return {
+      list,
+      detach: () =>
+        detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, mutation),
+    };
+  }
+  const object = evaluator.evaluate(target.object);
+  const receiver = storeReceiver(evaluator, target);
+  let held: SerializableRuntimeValue | undefined;
+  let step: PreparedReferenceStep;
+  if (target.kind === "property") {
+    if (!isObject(object)) return null;
+    held = getSerializableProperty(object, target.name);
+    step = { kind: "property", name: target.name };
+  } else if (isDict(object)) {
+    const key = evaluator.evaluate(target.index);
+    if (!isDictKey(key)) return null;
+    held = getSerializableDictEntry(object, key)?.value;
+    step = { kind: "key", key };
+  } else if (isList(object)) {
+    const index = evaluator.evaluate(target.index);
+    if (!listHasPosition(object.items.length, index)) return null;
+    held = object.items[index];
+    step = { kind: "index", index };
+  } else return null;
+  if (held === undefined || !isList(held)) return null;
+  return { list: held, detach: () => detachForStore(evaluator, receiver, step) };
+}
+
+/**
+ * `keepsRoot`: whether an attached reference keeps a copy of its root, as the plan decides for its temporary.
+ * `currentValue`: whether an assignment joins with what it reads (`currentValueTemporaries`). Gives the reference to
+ * store and the value it selects, which the debug trace shows instead of the reference.
  */
 export function prepareReference(
   evaluator: Evaluator,
   expression: ExpressionPlan,
   keepsRoot: boolean,
+  currentValue: boolean,
 ): { readonly reference: SerializableRuntimeObject; readonly value: SerializableRuntimeValue } {
   evaluator.keepPreparedRoot = keepsRoot;
   const prepared = evaluator.evaluateMachine(expression, true);
   let descriptor = prepared.descriptor!;
   // A reference extended from one that keeps a copy for its own preparation shares that copy.
   if (!keepsRoot && !descriptor.detached) descriptor = { ...descriptor, capturedRoot: undefined };
+  // A current value stays attached only to a list it reads from a variable through no speaker, whose changes freeze it
+  // first (`detachPreparedReferencesForMutation`). It keeps any other value as a copy, as a temporary does.
+  if (
+    currentValue &&
+    !descriptor.detached &&
+    (!isList(prepared.value) ||
+      preparedReferenceSpeakerPath(evaluator.snapshot, descriptor) !== null)
+  )
+    descriptor = {
+      rootFrameId: null,
+      rootName: null,
+      path: [],
+      capturedRoot: prepared.value,
+      detached: true,
+    };
   return {
     reference: serializePreparedReference(
       restorableDescriptor(evaluator, descriptor, expression.span),

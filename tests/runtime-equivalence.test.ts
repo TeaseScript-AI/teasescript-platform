@@ -185,6 +185,34 @@ test("a list joined with += under a prepared receiver leaves the receiver the va
   );
 });
 
+test("+= with a call that waits appends in place across checkpoints, and joins the value it read when a block changed it", () => {
+  // A value read before the call is stored as it was (V30 §14), so the element the block adds meanwhile is lost.
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "let t = [1]",
+      "let o = { items: [1] }",
+      "function slow(n) {",
+      "    wait 2 s",
+      "    return n",
+      "}",
+      "timer async 1 s {",
+      "    t.add(9)",
+      "}",
+      "t += [slow(2)]",
+      "o.items += [slow(3)]",
+      "say t",
+      "say o",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.equal(result.finalSnapshot.failure, null);
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["[1, 2]", "{ items: [1, 3] }"],
+  );
+});
+
 test("a prepared receiver whose index adds the value it names resumes from every checkpoint", () => {
   // The receiver's root is captured before its index runs, and the index adds the element or entry it names.
   for (const [setup, change, shown, expected] of [

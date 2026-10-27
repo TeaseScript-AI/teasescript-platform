@@ -1,5 +1,5 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
-import type { PlanSourceLocation } from "../../plan/model.js";
+import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
 import { findScope } from "./activations.js";
 import {
   createSourcePosition,
@@ -27,6 +27,7 @@ import {
   type RuntimeSnapshot,
   type RuntimeTemporarySnapshot,
 } from "../snapshot/state.js";
+import { snapshotValidationAnalysis } from "../snapshot/snapshot-validation-analysis.js";
 import { speakerPropertyValue } from "../../speaker-terms.js";
 import { derivedDisplayName } from "../values/speaker-text.js";
 import { isDict, isList, isObject, isSet, isSpeakerReference } from "../values/value-predicates.js";
@@ -217,11 +218,18 @@ export function readPreparedReference(
   return { rootFrameId, rootName, path, capturedRoot, detached };
 }
 
+/**
+ * Freezes, before a store at `mutation`, the attached references that the store changes the value of: a receiver at the
+ * changed place or below it, and a current value (`currentValueTemporaries` of the snapshot validation analysis) at,
+ * below, or above it.
+ */
 export function detachPreparedReferencesForMutation(
   snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
   mutation: PreparedReferenceMutation,
 ): void {
   if (mutation.rootFrameId === null || mutation.rootName === null) return;
+  const currentValues = snapshotValidationAnalysis(plan).currentValueTemporaries;
   for (const temporaries of allTemporaryCollections(snapshot)) {
     for (const temporary of temporaries) {
       if (!isObject(temporary.value)) continue;
@@ -231,12 +239,55 @@ export function detachPreparedReferencesForMutation(
       } catch {
         continue;
       }
+      // A current value is attached only to a list it reads from a variable, through no speaker.
+      if (currentValues.has(temporary.id)) {
+        if (
+          !descriptor.detached &&
+          descriptor.rootFrameId === mutation.rootFrameId &&
+          descriptor.rootName === mutation.rootName &&
+          (pathStartsWith(descriptor.path, mutation.path) ||
+            pathStartsWith(mutation.path, descriptor.path))
+        )
+          freezePreparedReference(snapshot, temporary.value, descriptor, descriptor.path.length);
+        continue;
+      }
       // A detached reference holds a copy of its root, which changes only where its path goes through a speaker, whose
       // properties stay shared state, as for a receiver that `speaker` or a function result gave.
       if (descriptor.detached && mutation.speakerPath == null) continue;
       const changedDepth = preparedReferenceMutationDepth(snapshot, descriptor, mutation, false);
       if (changedDepth === null) continue;
       freezePreparedReference(snapshot, temporary.value, descriptor, changedDepth);
+    }
+  }
+}
+
+/**
+ * Freezes, before a method changes a list, set, or dict in place, the current values (see
+ * `detachPreparedReferencesForMutation`) that may hold it or lead into it: those read from the variable `root` that holds
+ * the receiver, or with `null`, when that variable is not known, every one.
+ */
+export function freezeCurrentValuesForChange(
+  snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
+  root: { readonly rootFrameId: number | null; readonly rootName: string | null } | null,
+): void {
+  const currentValues = snapshotValidationAnalysis(plan).currentValueTemporaries;
+  for (const temporaries of allTemporaryCollections(snapshot)) {
+    for (const temporary of temporaries) {
+      if (!currentValues.has(temporary.id) || !isObject(temporary.value)) continue;
+      let descriptor: PreparedReferenceDescriptor;
+      try {
+        descriptor = readPreparedReference(temporary.value, INTERNAL_REFERENCE_SPAN);
+      } catch {
+        continue;
+      }
+      if (
+        descriptor.detached ||
+        (root !== null &&
+          (descriptor.rootFrameId !== root.rootFrameId || descriptor.rootName !== root.rootName))
+      )
+        continue;
+      freezePreparedReference(snapshot, temporary.value, descriptor, descriptor.path.length);
     }
   }
 }

@@ -88,7 +88,7 @@ export function copyPlayerProfile(evaluator: Evaluator, span: SourceSpan): void 
   // The copy may change every person field, so a reference prepared to one keeps the value it leads to now.
   for (const name of PERSON_FIELDS) {
     const path: PreparedReferenceStep[] = [{ kind: "property", name }];
-    detachPreparedReferencesForMutation(evaluator.snapshot, {
+    detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
       rootFrameId: GLOBAL_SCOPE_ID,
       rootName: player.identifier,
       path,

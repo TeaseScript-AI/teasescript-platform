@@ -48,7 +48,7 @@ import {
 } from "./scopes/prepared-references.js";
 import type { RandomSource } from "./random/random.js";
 import { RandomControlSignal, type RandomControl } from "./random/random-control.js";
-import { evaluatedChildren, expressionEffects } from "./evaluation/effect-facts.js";
+import { mayChangeValue } from "./evaluation/effect-facts.js";
 import { isVisibleScalar, quotedText, visibleText } from "./values/value-text.js";
 import {
   checkTextLength,
@@ -1124,9 +1124,11 @@ export class Evaluator {
           if (frame.stage === 1) {
             frame.value = result.value;
             // An operand is read when it is evaluated: copy a shared list, set, or object before the right operand can
-            // change it.
+            // change it. The current value that `+=` reads through a reference before a call was read then.
             if (
-              (expression.operator === "==" || expression.operator === "!=") &&
+              (expression.operator === "==" ||
+                expression.operator === "!=" ||
+                expression.left.kind === "preparedReference") &&
               !result.owned &&
               (isList(frame.value) ||
                 isSet(frame.value) ||
@@ -1381,8 +1383,9 @@ export class Evaluator {
     target: AssignmentTargetPlan,
     value: ExpressionPlan,
     typeCheck: TypeCheckPlan | undefined,
+    requireExisting: boolean,
   ): boolean {
-    return appendAssigned(this, target, value, typeCheck);
+    return appendAssigned(this, target, value, typeCheck, requireExisting);
   }
 
   /**
@@ -1392,8 +1395,9 @@ export class Evaluator {
   public prepareReference(
     expression: ExpressionPlan,
     keepsRoot: boolean,
+    currentValue: boolean,
   ): { readonly reference: SerializableRuntimeObject; readonly value: SerializableRuntimeValue } {
-    return prepareReference(this, expression, keepsRoot);
+    return prepareReference(this, expression, keepsRoot, currentValue);
   }
 
   public validateAssignmentTarget(target: AssignmentTargetPlan): void {
@@ -2021,36 +2025,6 @@ interface EvaluationFrame {
   candidate: SerializableRuntimeValue | undefined;
   /** With a debug trace, the causes collected for this frame's value. */
   deps: DebugDependencies | null;
-}
-const changingExpressions = new WeakMap<ExpressionPlan, boolean>();
-
-/**
- * Whether evaluating an expression may change a value in place, as `expressionEffects` says of each of its nodes, such
- * as a list method that changes its receiver or a call whose effects the engine does not know. Results are cached per
- * plan node, so nested checks stay linear.
- */
-function mayChangeValue(expression: ExpressionPlan): boolean {
-  // A node is decided after its children, which are pushed above it.
-  const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
-    { expression, children: null },
-  ];
-  while (work.length > 0) {
-    const current = work.pop()!;
-    if (changingExpressions.has(current.expression)) continue;
-    if (expressionEffects(current.expression).changesValue) {
-      changingExpressions.set(current.expression, true);
-    } else if (current.children !== null) {
-      changingExpressions.set(
-        current.expression,
-        current.children.some((child) => changingExpressions.get(child) === true),
-      );
-    } else {
-      const children = evaluatedChildren(current.expression);
-      work.push({ expression: current.expression, children });
-      for (const child of children) work.push({ expression: child, children: null });
-    }
-  }
-  return changingExpressions.get(expression)!;
 }
 
 function evaluationFrame(

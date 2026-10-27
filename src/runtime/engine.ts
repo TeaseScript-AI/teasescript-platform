@@ -809,7 +809,7 @@ function executePlannedInstruction(
       if (rerun) {
         const root = currentFrame(snapshot);
         const binding = root.bindings.find((item) => item.name === instruction.name)!;
-        detachPreparedReferencesForMutation(snapshot, {
+        detachPreparedReferencesForMutation(snapshot, plan, {
           rootFrameId: root.id,
           rootName: instruction.name,
           path: [],
@@ -831,11 +831,11 @@ function executePlannedInstruction(
       return;
     }
     case "prepareReference": {
+      const analysis = snapshotValidationAnalysis(plan);
       const { reference, value } = evaluator.prepareReference(
         instruction.expression,
-        snapshotValidationAnalysis(plan).preparedReferenceTemporaries.get(
-          instruction.destinationTemporary,
-        ) === true,
+        analysis.preparedReferenceTemporaries.get(instruction.destinationTemporary) === true,
+        analysis.currentValueTemporaries.has(instruction.destinationTemporary),
       );
       setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
       if (evaluator.trace !== null) {
@@ -865,7 +865,14 @@ function executePlannedInstruction(
       advance(snapshot);
       return;
     case "assign": {
-      if (!evaluator.appendAssigned(instruction.target, instruction.value, instruction.typeCheck)) {
+      if (
+        !evaluator.appendAssigned(
+          instruction.target,
+          instruction.value,
+          instruction.typeCheck,
+          instruction.requireExisting === true,
+        )
+      ) {
         const value = evaluator.evaluate(instruction.value);
         if (instruction.typeCheck !== undefined)
           assertValueType(value, instruction.typeCheck, instruction.value.span);
