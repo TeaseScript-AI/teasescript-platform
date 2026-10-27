@@ -9,7 +9,7 @@ const TEASE_EXTENSION = ".tease";
  */
 export function packagePathProblem(path: string): string | null {
   if (!path.endsWith(TEASE_EXTENSION) || path.split("/").at(-1) === TEASE_EXTENSION) {
-    return "it does not name a .tease file";
+    return "the path does not name a .tease file";
   }
   return packageAssetPathProblem(path);
 }
@@ -17,7 +17,8 @@ export function packagePathProblem(path: string): string | null {
 /** Why `path` is not a path of a package file, such as an image, or `null` when it is one; as for `.tease` files. */
 export function packageAssetPathProblem(path: string): string | null {
   for (const segment of path.split("/")) {
-    if (segment === "") return "it has an empty folder name. Separate folders with a single '/'";
+    if (segment === "")
+      return "the path has an empty folder name. Separate folders with a single '/'";
     if (segment === "." || segment === "..")
       return "paths start at the package root and use no '.' or '..'";
   }
@@ -25,7 +26,7 @@ export function packageAssetPathProblem(path: string): string | null {
   if (path.includes("*")) return "'*' is only allowed in a glob";
   for (let index = 0; index < path.length; index += 1) {
     const code = path.charCodeAt(index);
-    if (code < 0x20 || code === 0x7f) return "it contains a control character";
+    if (code < 0x20 || code === 0x7f) return "the path contains a control character";
   }
   return null;
 }

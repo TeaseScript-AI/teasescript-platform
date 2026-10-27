@@ -1114,7 +1114,10 @@ test("a glob picks only files that do something, and needs one", () => {
     ],
   ]);
   assert.deepEqual(codes('call "rooms/*"\nexit'), [
-    ["TSV057", "'rooms/*' is not a pattern of package file paths: it does not name a .tease file."],
+    [
+      "TSV057",
+      "'rooms/*' is not a pattern of package file paths: the path does not name a .tease file.",
+    ],
   ]);
   const plan = compiled(
     project('call "rooms/*.tease"\nexit', {

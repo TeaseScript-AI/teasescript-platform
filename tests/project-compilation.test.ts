@@ -148,12 +148,12 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "/abs.tease",
         "TSC009",
-        "'/abs.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
+        "'/abs.tease' is not a package file path: the path has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "a//b.tease",
         "TSC009",
-        "'a//b.tease' is not a package file path: it has an empty folder name. Separate folders with a single '/'.",
+        "'a//b.tease' is not a package file path: the path has an empty folder name. Separate folders with a single '/'.",
       ],
       [
         "../up.tease",
@@ -178,17 +178,17 @@ test("the file list needs main.tease and unique package paths", () => {
       [
         "notes.txt",
         "TSC009",
-        "'notes.txt' is not a package file path: it does not name a .tease file.",
+        "'notes.txt' is not a package file path: the path does not name a .tease file.",
       ],
       [
         "rooms/.tease",
         "TSC009",
-        "'rooms/.tease' is not a package file path: it does not name a .tease file.",
+        "'rooms/.tease' is not a package file path: the path does not name a .tease file.",
       ],
       [
         "bad\u0007.tease",
         "TSC009",
-        "'bad\u0007.tease' is not a package file path: it contains a control character.",
+        "'bad\u0007.tease' is not a package file path: the path contains a control character.",
       ],
       ["main.tease", "TSC009", "The project has no main.tease. Every session starts there."],
     ],

@@ -300,7 +300,7 @@ function decodePacket(bytes: Uint8Array): string | Failure {
     [0x3c, 0x00, 0x00, 0x00],
   ];
   if (utf32.some((prefix) => startsWith(bytes, prefix))) {
-    return unsupported("The XMP is encoded as UTF-32. Save it as UTF-8 instead.");
+    return unsupported("The XMP is encoded as UTF-32. Save the XMP as UTF-8 instead.");
   }
   const encoding = startsWith(bytes, [0xfe, 0xff])
     ? "utf-16be"
