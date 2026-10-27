@@ -627,6 +627,9 @@ function completeInteraction(
       result,
       transcriptText,
       ...(resolved.shownOptions === undefined ? {} : { shownOptions: resolved.shownOptions }),
+      ...(resolved.temporalPresentation === undefined
+        ? {}
+        : { temporalPresentation: resolved.temporalPresentation }),
     },
     trace,
   );
@@ -725,6 +728,7 @@ function commitInteractionSettlement(
     | "result"
     | "transcriptText"
     | "shownOptions"
+    | "temporalPresentation"
   >,
   trace: TraceStore | null,
 ): RuntimeInteractionActionSettlementSnapshot {
@@ -763,8 +767,14 @@ function commitInteractionSettlement(
     result,
     transcriptText: outcome.transcriptText,
     ui: action.ui,
-    // A form records the options its cycles showed, which its result cannot always tell.
-    ...(action.ui.kind === "form" ? { shownOptions: outcome.shownOptions ?? null } : {}),
+    // A form records the options its cycles showed, which its result cannot always tell, and the presentation its
+    // answers were shown in, which a later capture may replace.
+    ...(action.ui.kind === "form"
+      ? {
+          shownOptions: outcome.shownOptions ?? null,
+          temporalPresentation: outcome.temporalPresentation ?? null,
+        }
+      : {}),
   });
   // An image answer is a stored file, which `toJson` writes as a data URL.
   if (action.ui.kind === "image" && typeof result === "string")

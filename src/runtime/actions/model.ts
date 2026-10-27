@@ -19,6 +19,7 @@ import {
   type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
 import type { TemporalAnswer } from "../../interaction-answers.js";
+import type { PresentationSettings } from "../../temporal.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -546,6 +547,11 @@ export interface RuntimeInteractionActionSettlementSnapshot {
    * that returned `null`. Options of one cycle may share a value, so the result alone cannot tell which one was shown.
    */
   readonly shownOptions?: readonly (number | null)[] | null;
+  /**
+   * Only a form's: the date and time presentation its transcript showed the answers in; `null` for a form that sent no
+   * answers. A later capture may replace the session's presentation, so the summary is shown again in this one.
+   */
+  readonly temporalPresentation?: PresentationSettings | null;
 }
 
 export interface RuntimeChatPacingGateSettlementSnapshot {

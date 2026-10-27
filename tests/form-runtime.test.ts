@@ -343,10 +343,11 @@ test("submitting requires every required field and returns the answers once, wit
       completion.settlement.actionKind === "interaction" &&
       completion.settlement.ui.kind === "form",
   );
-  const { ui, result, shownOptions } = completion.settlement;
-  // The settlement records the option each cycle showed.
+  const { ui, result, shownOptions, temporalPresentation } = completion.settlement;
+  // The settlement records the option each cycle showed and the presentation of the answers.
   assert.deepEqual(shownOptions, [null, null, 0, 2, null, null, null, null, null, null]);
   const presentation = DEFAULT_TEMPORAL_CONTEXT.presentation;
+  assert.deepEqual(temporalPresentation, presentation);
   assert.deepEqual(
     formSummaryOf(ui, result, shownOptions, presentation)?.map((line) =>
       line.kind === "toggle" ? `${line.label} ${line.on}` : `${line.label}: ${line.value}`,
@@ -653,6 +654,19 @@ test("restore rejects form answers that its definition cannot hold", () => {
     const settlement = broken.lastSettlement as any;
     if (shownOptions === undefined) delete settlement.shownOptions;
     else settlement.shownOptions = shownOptions;
+    assert.equal(validateRuntimeSnapshot(broken, plan).valid, false, name);
+  }
+  // Its presentation must be the one its transcript shows the date in, and recorded at all.
+  for (const [name, presentation] of [
+    ["another one", { ...DEFAULT_TEMPORAL_CONTEXT.presentation, date: "{day}.{month}.{year}" }],
+    ["a malformed one", { date: "{day}" }],
+    ["none", undefined],
+  ] as const) {
+    const broken = structuredClone(submitted);
+    // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
+    const settlement = broken.lastSettlement as any;
+    if (presentation === undefined) delete settlement.temporalPresentation;
+    else settlement.temporalPresentation = presentation;
     assert.equal(validateRuntimeSnapshot(broken, plan).valid, false, name);
   }
 });

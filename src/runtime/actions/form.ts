@@ -29,7 +29,11 @@ import type {
   TypePlan,
 } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
-import type { TemporalContext } from "../../temporal.js";
+import {
+  presentationSettingsProblem,
+  type PresentationSettings,
+  type TemporalContext,
+} from "../../temporal.js";
 import { expandChoiceOptions } from "./choice-options.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import {
@@ -829,6 +833,7 @@ export type FormSubmission =
       readonly result: InteractionResultValue;
       readonly transcriptText: string;
       readonly shownOptions: readonly (number | null)[];
+      readonly temporalPresentation: PresentationSettings;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -840,7 +845,7 @@ export type FormSubmission =
 export function submitForm(
   ui: FormUi,
   state: RuntimeFormStateSnapshot,
-  presentation: TemporalContext["presentation"],
+  presentation: PresentationSettings,
 ): FormSubmission {
   const committed = commitEditor(ui, state);
   if (!committed.ok) return committed;
@@ -864,6 +869,7 @@ export function submitForm(
     result: formResult(ui, answers),
     transcriptText,
     shownOptions: formShownOptions(ui, values),
+    temporalPresentation: presentation,
   };
 }
 
@@ -935,7 +941,7 @@ export function formSummaryOf(
   ui: FormUi,
   result: unknown,
   shownOptions: unknown,
-  presentation: TemporalContext["presentation"],
+  presentation: PresentationSettings,
 ): readonly FormSummaryLine[] | null {
   const values = formValuesOf(ui, result, shownOptions);
   return values === null ? null : formSummaryLines(ui, values, presentation);
@@ -944,7 +950,7 @@ export function formSummaryOf(
 function formSummaryLines(
   ui: FormUi,
   values: readonly RuntimeFormValue[],
-  presentation: TemporalContext["presentation"],
+  presentation: PresentationSettings,
 ): readonly FormSummaryLine[] {
   return ui.fields.map((field, index): FormSummaryLine => {
     const value = values[index] ?? null;
@@ -1319,28 +1325,34 @@ function validFieldValue(field: FormField, value: unknown, unset: boolean): bool
 
 /**
  * Whether `result` is what this valid form definition can return, with a transcript that fits it: one answer per field,
- * by ID and in order, with only optional fields `null`.
+ * by ID and in order, with only optional fields `null`, and for submitted answers the summary of them in
+ * `temporalPresentation`.
  */
 export function validFormResult(
   ui: FormUi,
   result: unknown,
   transcriptText: unknown,
   shownOptions: unknown,
+  temporalPresentation: unknown,
   timedOut = false,
 ): boolean {
   // A form that returns `null` showed no options; one with answers shows, for each cycle, an option with its answer.
-  if (result === null ? shownOptions !== null : formValuesOf(ui, result, shownOptions) === null)
-    return false;
+  const values = result === null ? null : formValuesOf(ui, result, shownOptions);
+  if (result === null ? shownOptions !== null : values === null) return false;
   // At its time limit a form says nothing for the player, and returns `null` or its answers as its limit says.
   if (timedOut) {
-    if (ui.timeout === null || transcriptText !== null) return false;
+    if (ui.timeout === null || transcriptText !== null || temporalPresentation !== null)
+      return false;
     return (ui.timeout.onTimeout === "cancel") === (result === null);
   }
   // A cancelled form returns `null`, with its cancel button's text.
-  if (result === null) return ui.cancel !== null && transcriptText === ui.cancel.text;
-  // A submitted form's line shows a date or time answer in the player's presentation then, which a later capture may
-  // have replaced, so it is checked as text, as a date or time ask's line is.
-  return typeof transcriptText === "string";
+  if (result === null)
+    return ui.cancel !== null && transcriptText === ui.cancel.text && temporalPresentation === null;
+  if (values === null || presentationSettingsProblem(temporalPresentation) !== null) return false;
+  // EVIDENCE: validation: presentationSettingsProblem accepted the presentation above.
+  const presentation = temporalPresentation as PresentationSettings;
+  // A submitted form's line is the summary of its answers in the presentation they were shown in.
+  return transcriptText === formSummaryText(formSummaryLines(ui, values, presentation));
 }
 
 /**
