@@ -16,6 +16,11 @@ import {
 } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { Item } from "./items.js";
+import type { CorePass } from "./answers.js";
+import { NarrowingIndex } from "./narrowing.js";
+import { NarrowingEvents } from "./narrowing-events.js";
+import { NarrowingRoutes } from "./narrowing-routes.js";
+import type { StatementTree } from "./narrowing-statements.js";
 import { siteKey, stepName, type CoreProgram } from "./program.js";
 
 /*
@@ -25,7 +30,10 @@ import { siteKey, stepName, type CoreProgram } from "./program.js";
  * branch that tests it and always leaves (the way past the test is a branch entry of its own), and in the right operand
  * of an `and` or `or` whose left operand tests it. Guards are indexed per tested key, as definitions are: a read asks
  * its key and each prefix, a binary search each, never a root's other keys and never an `and` chain's other tests.
- * Stage 3b's narrowing definitions (§13, S10) join this index; until then every test is a guard.
+ * Stage 3b's narrowing definitions (§13, S10) join this index: built with the program's first one (`NarrowingIndex`, N1
+ * and N2's lists, and the statements with N3's shared layer, `StatementTree`), and asked per pass through `narrowings`
+ * (N2 with N5, N3).
+ * No consumer reads them yet (S10's second part): every test is still a guard.
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */
@@ -89,6 +97,10 @@ export class GuardIndex {
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
+  /** Stage 3b's statements with N3's shared layer, and its narrowing definitions and invalidations (§13). */
+  readonly statements: StatementTree;
+  readonly narrowing: NarrowingIndex;
+  #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
   public constructor(readonly program: CoreProgram) {
     const work = program.work;
@@ -147,6 +159,21 @@ export class GuardIndex {
         keys.push(key);
       }
     }
+    this.narrowing = NarrowingIndex.of(program);
+    this.statements = this.narrowing.statements;
+  }
+
+  /** Stage 3b's queries of this pass (§13): N2's events with N5's preserving stores, and N3's routes. */
+  public narrowings(pass: CorePass): {
+    readonly events: NarrowingEvents;
+    readonly routes: NarrowingRoutes;
+  } {
+    if (this.#queries === null)
+      this.#queries = {
+        events: new NarrowingEvents(pass, this.narrowing),
+        routes: new NarrowingRoutes(pass, this.narrowing, this.statements),
+      };
+    return this.#queries;
   }
 
   /**
