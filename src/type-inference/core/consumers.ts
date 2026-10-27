@@ -488,8 +488,9 @@ export class Consumers {
     receiver: boolean,
   ): boolean {
     const { program, exact, definitions } = this.pass;
-    // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner
-    let path: readonly string[] = [];
+    // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner (its steps
+    // gathered from the read outwards, then reversed once)
+    const steps: string[] = [];
     let at = node;
     let element = false;
     let owner: PlaceId | undefined;
@@ -499,11 +500,12 @@ export class Consumers {
       const step = measuresLength(projection.step) ? projection.step : stepName(projection.step);
       element ||= step === "element";
       owner ??= projection.owner;
-      path = joinSteps([step], path);
+      steps.push(step);
       at = projection.node ?? at;
       place = projection.owner;
       projection = program.projOf.get(place);
     }
+    const path = steps.reverse();
     const binding = program.occurrenceOf.get(place);
     const call = program.callOutOf.has(place) ? program.opOf.get(place) : undefined;
     const key =
