@@ -1966,11 +1966,19 @@ export class Contract {
     let at = key;
     let last: Identity;
     for (;;) {
-      // a copy cycle stops here
-      this.#keys.set(at, { id: `k${at}`, key: at, guarded: false, holder: this.#holderOfKey(at) });
+      // a copy cycle stops here (each identity's id, a key's text, charged as kept)
+      const placeholder = `k${at}`;
+      keepText(this.#work, placeholder.length);
+      this.#keys.set(at, {
+        id: placeholder,
+        key: at,
+        guarded: false,
+        holder: this.#holderOfKey(at),
+      });
       program.work.charge("invSteps");
       const top = this.#rootOfPlace(keyPlace(at));
       const rooted = keptKeyBelow(this.#work, top.key, keyPath(at));
+      keepText(this.#work, rooted.length + 1);
       let identity: Identity = {
         id: `k${rooted}`,
         key: rooted,
@@ -1997,7 +2005,8 @@ export class Contract {
           inner = keyBelow(entry.key, path);
           chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
         } else if (entry !== null && entry.value !== undefined) {
-          const within = joinSteps(entry.at ?? [], path);
+          // (the lifted holder's reference keeps it as its shift, charged as kept)
+          const within = keptSteps(this.#work, entry.at ?? [], path);
           const source = yield* this.#needValue(entry.value);
           identity = {
             id: this.#kept(`${source.id}@${pathText(within)}`),
@@ -2190,7 +2199,7 @@ export class Contract {
           parts.push(`${part}${below}`);
         }
         if (!parts.some((part) => part.startsWith("v"))) {
-          id = this.#internStructure(`${carried.name}(${parts.join(",")})`);
+          id = this.#internStructure(`${carried.name}(${this.#joined(parts, ",")})`);
           if (marked) this.#markedStructures.add(id);
         }
       }
@@ -2582,8 +2591,12 @@ export class Contract {
     const own = new Map<string, Set<Key>>();
     for (const below of definitions.keysBelow(sub)) {
       program.work.charge("invSteps");
-      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
-        own.set(keyPath(below)[projection.length]!, new Set([sub]));
+      if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d))) {
+        // (a step below the projection, its text charged where the layer first keeps it)
+        const step = keyPath(below)[projection.length]!;
+        if (!own.has(step)) keepText(this.#work, step.length);
+        own.set(step, new Set([sub]));
+      }
     }
     const layer = this.#layer(own, null);
     this.#projectedLayers.set(id, layer);

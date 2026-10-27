@@ -235,12 +235,21 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * a memo, and a stop's kept in a set of distinct ones, passed the scan above, which reads how a text is made, not what
  * keeps it (the deep-literal review's R3-B1). A path's copy by `slice` of one of the core's names for a path is kept
  * the same way (a task's strip below a literal's step, a split's rest in a memo: R5-B1, R6-B1). This scan is a tripwire
- * for these constructions in a member: such a text or copy made outside a kept helper's own arguments (judged by the
- * brackets around it, so a kept call beside it or in another branch charges nothing of it), then stored by `.set`,
- * `.add` or `.push` (as an argument, or inside an array or an object there) with no charge naming it before the store
- * (a kept helper, `keepText`, or the ledger's `charge` by its length), or stored as it is made. It misses a text or a
- * copy kept under another name, returned by a call (`#aliasKey`), or kept in an object after it was made; the account
- * of the walks' kept arrays (the pull request) is the evidence of what the core keeps.
+ * for these constructions in a member, each counted only outside a kept helper's own arguments (judged by the brackets
+ * around it, so a kept call beside it or in another branch charges nothing of it) and outside strings and comments.
+ * For locals, it follows a plain twin, a template of a path, a path's slice, or a call of a member whose return value
+ * holds a path's slice as its own value (to a fixed point across the core's files; a kept helper and a yield's value
+ * never), made as the local's own value (declared or assigned), into a `.set`, `.add` or `.push` that stores it
+ * (as an argument, or inside an array or an object there) with no charge naming it before the store (a kept helper,
+ * `keepText`, or the ledger's `charge` by its length). For constructions stored as they are made, it checks a path's
+ * slice anywhere in the stored argument, and a plain twin or a template of a path as the argument's own value (inside
+ * an array or an object there too). It misses a text or a copy kept under another name, returned by a call it does not
+ * follow (`#aliasKey`, `frame(root)`, an array built by `push`), handed to a member that keeps it (`#add`), or kept in
+ * an object after it was made. Its following of returns is by local assignment only, with these limits: a call stored
+ * as it is made (`memo.set(1, this.produce(path))`) is not followed; a member returning something of a slice
+ * (`path.slice(1).length`), or a slice it charged before returning it, counts as returning a slice; a charge naming a
+ * returned object covers all of it, though only one of its fields was charged. A tripwire, not a proof: the account of
+ * the walks' kept arrays (the pull request) is the evidence of what the core keeps.
  */
 const PLAIN_TWIN =
   /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf)\(/;
@@ -274,6 +283,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
+  "answers.ts #propertyNames inline": [
+    4,
+    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
+  ],
   "answers.ts #propertyNames slice": [
     3,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
@@ -293,6 +306,11 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "its base made by `keptKey`, which charges its size, with two numbers",
   ],
+  "contract.ts #structureWork inline": [
+    1,
+    "a carried value's structure parts, joined into its interned shape by `#joined`, which charges it",
+  ],
+  "definitions.ts prefixesOf inline": [1, "a helper itself, the plain twin of `keptPrefixes`"],
   "definitions.ts prefixesOf slice": [1, "a helper itself, the plain twin of `keptPrefixes`"],
   "exact-path.ts #forest id": [1, "a place, a callable and two positions"],
 };
@@ -487,7 +505,7 @@ function plainReturns(source: string, returning: ReadonlySet<string>): Set<strin
       const from = back.index + back[0].length;
       const to = statementEnd(text, from);
       const value = text.slice(from, to).trim();
-      if (value.startsWith("yield")) continue;
+      if (/^yield\b/.test(value)) continue;
       // (a kept helper charges what it returns)
       if (
         !KEPT_CALLEE.test(name) &&
@@ -559,10 +577,14 @@ function plainStores(
         record(`${file} ${name} ${local}`, at);
       }
     }
-    // a path's slice stored as it is made, outside a kept helper's call
+    // a construction stored as it is made, outside a kept helper's call: a path's slice anywhere in the stored argument;
+    // a plain twin or a template of a path as the argument's own value (inside an array or an object there too)
     for (const { at, ranges } of stores)
-      for (const [from, to] of ranges)
+      for (const [from, to] of ranges) {
         for (const _ of plainMade(from, to, [slice])) record(`${file} ${name} slice`, at);
+        for (const offset of plainMade(from, to, [PLAIN_TWIN, template]))
+          if (ownAt(text, from, offset)) record(`${file} ${name} inline`, at);
+      }
   }
   return found;
 }
@@ -646,6 +668,23 @@ test("the scan finds each form of construction", () => {
   );
 });
 
+test("the scan judges a slice charged only inside a kept helper's own brackets", () => {
+  // (each line's `strip.slice(1)`, its last one where there are two, and whether it is made outside a kept call)
+  const cases: readonly (readonly [string, boolean])[] = [
+    ["pending.push([keptSteps(work, path, []), strip.slice(1)]);", true],
+    ["memo.set(key, { path: keptSteps(work, path, []), strip: strip.slice(1) });", true],
+    ["pending.push([1, flag ? keptSlice(this.#work, strip, 1) : strip.slice(1)]);", true],
+    ["pending.push(keptSteps(work, strip.slice(1), []));", false],
+    ["pending.push([keptSteps(work, [...path], strip.slice(1))]);", false],
+    ["pending.push(keptSteps(work, path, []), [strip.slice(1)]);", true],
+    ['pending.push(keptText(work, "strip.slice(1)"), strip.slice(1));', true],
+  ];
+  assert.deepEqual(
+    cases.map(([line]) => plainAt(line, line.lastIndexOf("strip.slice(1)"))),
+    cases.map(([, plain]) => plain),
+  );
+});
+
 test("the scan finds a plain-made text kept uncharged", () => {
   const source = [
     "export class Probe {",
@@ -692,6 +731,7 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    memo.set(key, { path: keptSteps(work, path, []), strip: strip.slice(1) });",
     "    pending.push([1, flag ? keptSlice(this.#work, strip, 1) : strip.slice(1)]);",
     "    pending.push([keptSteps(work, path, []), keptSlice(this.#work, strip, 1)]);",
+    "    pending.push(keptSteps(work, strip.slice(1), []));",
     "  }",
     "  #within(strip: string[]) {",
     "    const tail = strip.slice(1);",
@@ -712,6 +752,19 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const reaching = this.#rest(path, 1);",
     "    return reaching;",
     "  }",
+    "  #yielded(path: string[]) {",
+    "    const yielded = path.slice(1);",
+    "    return yielded;",
+    "  }",
+    "  #given(path: string[]) {",
+    "    return yield this.#ask(path);",
+    "  }",
+    "  produced(path: string[]) {",
+    "    const answer = this.#yielded(path);",
+    "    this.#memo.set(3, answer);",
+    "    const asked = this.#given(path);",
+    "    this.#memo.set(4, asked);",
+    "  }",
     "  remember(path: string[]) {",
     "    let answer = this.#memo.get(1);",
     "    answer = this.#answer(path);",
@@ -719,6 +772,20 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const charged = this.#answer(path);",
     "    keptArray(this.#work, charged.rest);",
     "    this.#memo.set(2, charged);",
+    "  }",
+    "  #inline(path: string[]) {",
+    '    pending.push({ path: joinSteps(path, ["x"]) });',
+    '    pending.push([{ path: joinSteps(path, ["y"]) }]);',
+    '    pending.push({ path: keptSteps(work, path, ["x"]) });',
+    "  }",
+    "  #quotedSlice(path: string[]) {",
+    '    pending.push("path.slice(1)");',
+    "    pending.push('strip.slice(1)');",
+    "    pending.push(`path.slice(1)`);",
+    "    // pending.push(path.slice(1));",
+    "    /* memo.set(k, path.slice(0, 2)); */",
+    '    const label = "rest.slice(1)";',
+    "    list.push(label);",
     "  }",
     "  #joined(key: number[]) {",
     "    const longer = joinSteps(key, [1]);",
@@ -740,7 +807,7 @@ test("the scan finds a plain-made text kept uncharged", () => {
     size = returning.size;
     returning = plainReturns(source, returning);
   }
-  assert.deepEqual([...returning].sort(), ["#answer", "#rest"]);
+  assert.deepEqual([...returning].sort(), ["#answer", "#rest", "#yielded"]);
   assert.deepEqual(
     [...plainStores("probe.ts", source, returning)].map(([key, lines]) => `${key} ${lines.length}`),
     [
@@ -755,7 +822,9 @@ test("the scan finds a plain-made text kept uncharged", () => {
       "probe.ts #prefix slice 1",
       "probe.ts #beside slice 3",
       "probe.ts #within tail 2",
+      "probe.ts produced answer 1",
       "probe.ts remember answer 1",
+      "probe.ts #inline inline 2",
       "probe.ts #joined longer 1",
     ],
   );
