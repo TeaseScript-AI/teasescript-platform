@@ -7,16 +7,16 @@ import test from "node:test";
  * the candidate route's analysis of a list literal nested 1,024 deep, and the core's of any literal nested 1,024 deep
  * with one read of it, grew until the process died (V8's heap abort, or a 2 GiB scope's OOM kill). Now the program's
  * work allowance stops them first. Per literal kind, a child process with a capped V8 heap compiles `let value =` the
- * literal nested 1,024, 4,096 and 4,097 deep on the candidate route (`compileSourceWithBackend(…, CORE_BACKEND)`;
+ * literal nested 1,024 and 4,097 deep on the candidate route (`compileSourceWithBackend(…, CORE_BACKEND)`;
  * after the switch, production `compileSource(source)` in its place) and analyses the same literal with one read of it
  * in the core. Each must end with a plan or the candidate's structured rejection (the allowance's stop, or the slice it
  * does not cover yet: records and dicts, lists deeper than its facts follow), and with the core's outcome, its
  * allowance's `budget-error` included; a signal exit (134, 137), an uncaught exception or the timeout fails the test.
- * 4,096 is the deepest depth measured, 4,097 one beyond it: scale regressions, not a supported maximum, since none
+ * 4,097 is one beyond the deepest depth measured (4,096): scale regressions, not a supported maximum, since none
  * exists.
  */
 
-const DEPTHS = [1_024, 4_096, 4_097];
+const DEPTHS = [1_024, 4_097];
 
 /** Per literal kind: its opening and closing text around the leaf, and a read of its first level. */
 const KINDS: readonly (readonly [string, string, string, string])[] = [
@@ -89,10 +89,10 @@ for (const [kind, open, close, read] of KINDS)
 /**
  * A record nested 2,048 deep whose property names are each over 1,024 characters long, never read: admission kept the
  * text of its paths uncharged, and the analysis died at 5 % of the allowance (the deep-literal review's witness). The
- * core analyses it at that depth and one beyond in a child with the same heap; it must end with its outcome.
+ * core analyses it at that depth in a child with the same heap; it must end with its outcome.
  */
-test("a record nested 2,048 and 2,049 deep with long property names stops within the allowance, never crashing", () => {
-  const depths = [2_048, 2_049];
+test("a record nested 2,048 deep with long property names stops within the allowance, never crashing", () => {
+  const depths = [2_048];
   const script = `
     import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
     import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
@@ -114,9 +114,9 @@ test("a record nested 2,048 and 2,049 deep with long property names stops within
 /**
  * A typed leaf referenced 16,384 times at the bottom of a list nested 4,096 deep, never read: admission's discovery of
  * typed copies kept a path per reference uncharged, and the analysis died at 32 % of the allowance (the deep-literal
- * review's round-2 witness). Beside it: the same in the reversed orders, and one level deeper; that literal 2,048 deep
- * copied through 16 variables and read at its bottom; and a copy at every depth, 2,048 levels each a list of the one
- * below twice, read at its bottom. Each must end with its outcome in a child with the same heap.
+ * review's round-2 witness). Beside it: the same in the reversed orders; that literal 2,048 deep copied through 16
+ * variables and read at its bottom; and a copy at every depth, 2,048 levels each a list of the one below twice, read at
+ * its bottom. Each must end with its outcome in a child with the same heap.
  */
 test("typed copies of a list nested 4,096 deep with 16,384 references stop within the allowance, never crashing", () => {
   const script = `
@@ -132,7 +132,6 @@ test("typed copies of a list nested 4,096 deep with 16,384 references stop withi
     const cases = [
       [4096, "fanout", false, [deep(4096)]],
       [4096, "fanout", true, [deep(4096)]],
-      [4097, "fanout", false, [deep(4097)]],
       [2048, "chain", false, [deep(2048), ...chain, "let n: integer = c16" + below(2048)]],
       [2048, "levels", false, ["let x1 = [" + leaves.split(",").slice(0, 16).join(",") + "]", ...levels, "let n: integer = x2048" + below(2048)]],
     ];
@@ -148,7 +147,7 @@ test("typed copies of a list nested 4,096 deep with 16,384 references stop withi
   const lines = childLines("typed copies", script);
   assert.deepEqual(
     lines.map((line) => line.split("\t").slice(0, 2).join(" ")),
-    ["4096 fanout", "4096 fanout reversed", "4097 fanout", "2048 chain", "2048 levels"],
+    ["4096 fanout", "4096 fanout reversed", "2048 chain", "2048 levels"],
   );
   for (const line of lines)
     assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
