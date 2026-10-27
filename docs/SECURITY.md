@@ -140,8 +140,8 @@ capture. A recording contains exactly the sources the author requests; whether
 video includes microphone audio never depends on whether a microphone is already open. How
 brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs
 directly, which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or
-manifest field, remains open, as do capability declaration metadata, device switching, reload and restore, failure
-recovery, simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
+manifest field, remains open, as do capability declaration metadata, the microphone's device switching and failure
+recovery (the camera's are built: #909, #911), reload and restore, simultaneous-device policy, captured-media retention, encryption, and persistent collections; see
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags and frame permissions (the Player's screen wake lock needs `allow="screen-wake-lock"` in a
