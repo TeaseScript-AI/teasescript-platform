@@ -3202,6 +3202,8 @@ export class Consumers {
     member: string,
     use: "read" | "call",
   ): void {
+    // (a fresh finishing pass settled no default to find: `#run` answers `STOPPED`, so its walk could find nothing)
+    if (this.#finishing && !this.settled) return;
     const { program, definitions, lists, values, contract } = this.pass;
     const key = contract.copiedKey(owner);
     const source =
