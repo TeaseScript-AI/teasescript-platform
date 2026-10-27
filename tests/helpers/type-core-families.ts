@@ -1673,7 +1673,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * record of k fields, plain or written-typed. Every copy has the same stores by alias class (S6-CARRIERS §4.1), so its
  * hot paths are another's of one signature; as every alias class's sharing, this holds with the sharing on.
  */
-export const INHERITED_SHARED_FAMILIES: readonly WorkFamily[] = (["2", "typed"] as const).map(
+const INHERITED_SHARED_FAMILIES: readonly WorkFamily[] = (["2", "typed"] as const).map(
   (value): WorkFamily => ({
     name: `A4-inherited-replaced${value === "typed" ? "-typed" : ""}`,
     measures: `Sol's review r1 B3: k copies of a root of k written-typed fields, each replaced by a record of k ${value === "typed" ? "written-typed" : "plain"} fields`,
