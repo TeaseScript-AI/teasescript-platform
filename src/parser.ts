@@ -26,10 +26,12 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import {
   COMMANDS,
   commandFacts,
+  FOREIGN_FORMS,
   isAsk,
   isCommand,
   protectedNameMessage,
   TEASESCRIPT_PROTECTED_NAMES,
+  type ForeignForm,
   type StatementCommand,
   type ValueCommand,
 } from "./language-facts.js";
@@ -481,7 +483,9 @@ export class Parser {
         return yield* parseChild(parseFunctionDeclaration(this, null));
       case TokenKind.KeywordReturn:
         return parseReturnStatement(this);
-      default:
+      default: {
+        const foreign = this.foreignStatementWord();
+        if (foreign !== undefined) return yield* parseChild(this.#parseForeignStatement(foreign));
         if (isExpressionStart(this.peek())) {
           return this.#parseAssignmentOrExpressionStatement();
         }
@@ -492,6 +496,31 @@ export class Parser {
         );
         this.synchronizeStatement();
         return null;
+      }
+    }
+  }
+
+  /**
+   * A statement that starts with a word of another language (`foreignStatementWord`): reports the word, which the parse
+   * of the TeaseScript word then reads in its place.
+   */
+  *#parseForeignStatement(
+    word: NonNullable<ForeignForm["statement"]>,
+  ): ParseTask<Statement | null> {
+    this.reportForeignWord();
+    switch (word) {
+      case "function":
+        return yield* parseChild(parseFunctionDeclaration(this, null));
+      case "let":
+        return parseLetStatement(this);
+      case "say": {
+        const parts = yield* parseChild(parseSayParts(this, true));
+        return parts === null ? null : Object.freeze({ kind: "sayStatement", ...parts });
+      }
+      case "else if":
+        return yield* parseChild(parseIfStatement(this));
+      default:
+        return word satisfies never;
     }
   }
 
@@ -873,7 +902,7 @@ export class Parser {
     while (expression !== null) {
       const operator =
         this.#matchOperator(TokenKind.KeywordAnd) ??
-        this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo", "and", "if a and b { ... }");
+        this.#matchSymbol(TokenKind.Ampersand, "oneOrTwo");
       if (operator === null) break;
       this.skipContinuationNewlines();
       const mark = this.mark();
@@ -915,6 +944,19 @@ export class Parser {
       expression = yield* parseChild(this.#parseTypeTestTask(left));
     } else if (isComparisonKind(this.peek().kind)) {
       const operator = this.advance();
+      // `===` and `!==` of other languages, which are read as `==` and `!=`.
+      if (
+        (operator.kind === TokenKind.EqualEqual || operator.kind === TokenKind.BangEqual) &&
+        this.check(TokenKind.Equal) &&
+        this.peek().span.start.offset === operator.span.end.offset
+      ) {
+        const extra = this.advance();
+        this.reportSpan(
+          parserDiagnosticCode.foreignForm,
+          FOREIGN_FORMS.get(operator.lexeme + extra.lexeme)!.message,
+          spanFrom(operator.span, extra.span),
+        );
+      }
       this.skipContinuationNewlines();
       const leftQuotable = this.diagnostics.length === diagnosticCount;
       const right = yield* parseChild(
@@ -960,15 +1002,15 @@ export class Parser {
 
   /**
    * The operand after `symbol`, a comparison, `otherwise`, arithmetic, a range, or a sign, which `parse` reads, or
-   * `missing` without one. `not` binds more loosely than each of them (V30 §5), so `x == not a` has no operand after the
-   * `==`: `report` gives the one error for the `not`, and the rest is read as `x == (not a)`, so that nothing after it
-   * reports another error. `report` hears whether the operand is free of errors of its own, which the `??` of
-   * `x == not a ?? b` is not.
+   * `missing` without one: its message, or what reports it. `not` binds more loosely than each of them (V30 §5), so
+   * `x == not a` has no operand after the `==`: `report` gives the one error for the `not`, and the rest is read as
+   * `x == (not a)`, so that nothing after it reports another error. `report` hears whether the operand is free of errors
+   * of its own, which the `??` of `x == not a ?? b` is not.
    */
   *#parseOperand(
     symbol: string,
     parse: () => ParseTask<Expression | null>,
-    missing: string,
+    missing: string | ((mark: ParseMark) => void),
     report: (operators: readonly Token[], value: Expression, quotable: boolean) => void,
   ): ParseTask<Expression | null> {
     const operators: Token[] = [];
@@ -979,8 +1021,10 @@ export class Parser {
     const mark = this.mark();
     let value = yield* parseChild(parse());
     if (value === null) {
-      if (operators.length === 0) this.#reportMissingOperand(symbol, missing, mark);
-      else this.#reportMissingOperand("not", "Expected an expression after 'not'.", mark);
+      if (operators.length > 0)
+        this.#reportMissingOperand("not", "Expected an expression after 'not'.", mark);
+      else if (typeof missing === "string") this.#reportMissingOperand(symbol, missing, mark);
+      else missing(mark);
       return null;
     }
     if (operators.length === 0) return value;
@@ -1145,14 +1189,7 @@ export class Parser {
     let expression = yield* parseChild(this.#parseRange());
     while (expression !== null) {
       const word = this.#matchOperator(TokenKind.KeywordOtherwise);
-      const operator =
-        word ??
-        this.#matchSymbol(
-          TokenKind.Question,
-          "two",
-          "otherwise",
-          'let name = nickname otherwise "pet"',
-        );
+      const operator = word ?? this.#matchSymbol(TokenKind.Question, "two");
       if (operator === null) break;
       this.skipContinuationNewlines();
       const left = expression;
@@ -1315,6 +1352,7 @@ export class Parser {
   }
 
   *#parseUnaryArithmetic(): ParseTask<Expression | null> {
+    const before = this.tokens[this.current - 1];
     const operators: Token[] = [];
     while (this.check(TokenKind.Plus) || this.check(TokenKind.Minus)) {
       operators.push(this.advance());
@@ -1322,11 +1360,27 @@ export class Parser {
     }
     const sign = operators.at(-1);
     if (sign === undefined) return yield* parseChild(this.#parsePostfix());
+    // `count++` and `count--` of other languages: one sign that touches the same sign between values, with no value
+    // after it.
+    const increment =
+      operators.length === 1 &&
+      before?.kind === sign.kind &&
+      before.span.end.offset === sign.span.start.offset
+        ? FOREIGN_FORMS.get(before.lexeme + sign.lexeme)
+        : undefined;
     let expression = yield* parseChild(
       this.#parseOperand(
         sign.lexeme,
         () => this.#parseUnaryArithmetic(),
-        "Expected an expression after the unary operator.",
+        increment === undefined
+          ? "Expected an expression after the unary operator."
+          : (mark) =>
+              this.reportMissing(
+                mark,
+                parserDiagnosticCode.foreignForm,
+                increment.message,
+                spanFrom(before!.span, sign.span),
+              ),
         (nots) => this.#reportNotAfterArithmetic(sign.lexeme, nots),
       ),
     );
@@ -2025,11 +2079,11 @@ export class Parser {
     mark: ParseMark,
     code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
     message: string,
-    at?: Token,
+    at?: SourceSpan,
   ): void {
     if (this.diagnostics.length !== mark.diagnostics) return;
     if (at === undefined) this.reportInsertion(code, message);
-    else this.reportToken(code, message, at);
+    else this.reportSpan(code, message, at);
     if (this.unclosedLiterals !== mark.unclosedLiterals)
       this.shared.followUps.add(this.diagnostics.at(-1)!);
   }
@@ -2080,22 +2134,55 @@ export class Parser {
     return this.match(kind) ? this.previous().span : null;
   }
 
+  /**
+   * The TeaseScript word for the word of another language that comes next, as `function` for the `def` of
+   * `def countTo(n)`, where a name, a number, or text follows it on its line, which no statement takes after a name, or
+   * with `anyNext` whatever follows it (`FOREIGN_FORMS`).
+   */
+  public foreignStatementWord(anyNext = false): ForeignForm["statement"] {
+    const word = this.peek();
+    const next = this.peek(1).kind;
+    if (word.kind !== TokenKind.Identifier) return undefined;
+    if (
+      !anyNext &&
+      next !== TokenKind.Identifier &&
+      next !== TokenKind.NumberLiteral &&
+      next !== TokenKind.StringStart
+    )
+      return undefined;
+    return FOREIGN_FORMS.get(word.lexeme)?.statement;
+  }
+
+  /** Reports the word of another language that comes next (`foreignStatementWord`). */
+  public reportForeignWord(): void {
+    const word = this.peek();
+    this.reportToken(
+      parserDiagnosticCode.foreignForm,
+      FOREIGN_FORMS.get(word.lexeme)!.message,
+      word,
+    );
+  }
+
+  /** Skips the group that the opening delimiter next starts, to after its closing one, or else to the end of the line. */
+  public skipGroup(): void {
+    this.shared.closers ??= delimiterClosers(this.tokens);
+    const closer = this.shared.closers.get(this.current);
+    if (closer === undefined) this.synchronizeStatement();
+    else this.current = closer + 1;
+  }
+
   /** `not`, or `!`, which is reported and read as `not` (V30 §39). */
   public matchNot(): boolean {
-    return (
-      this.match(TokenKind.KeywordNot) ||
-      this.#matchSymbol(TokenKind.Bang, "one", "not", "if not a { ... }") !== null
-    );
+    return this.match(TokenKind.KeywordNot) || this.#matchSymbol(TokenKind.Bang, "one") !== null;
   }
 
   /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
   #matchSymbolicOr(): SourceSpan | null {
     if (!this.check(TokenKind.Pipe)) return null;
-    if (this.peek(1).kind === TokenKind.Pipe)
-      return this.#matchSymbol(TokenKind.Pipe, "oneOrTwo", "or", "if a or b { ... }");
+    if (this.peek(1).kind === TokenKind.Pipe) return this.#matchSymbol(TokenKind.Pipe, "oneOrTwo");
     const span = this.advance().span;
     this.reportSpan(
-      parserDiagnosticCode.symbolicOperator,
+      parserDiagnosticCode.foreignForm,
       "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
       span,
     );
@@ -2103,17 +2190,12 @@ export class Parser {
   }
 
   /**
-   * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once and returns the
-   * symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns `null` when it does not come
-   * next. The symbol is one token of `kind`, as `!`, one or two, as `&` or `&&`, or two that touch, as `??`, which is
-   * not the `?` of a type.
+   * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once
+   * (`FOREIGN_FORMS`) and returns the symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns
+   * `null` when it does not come next. The symbol is one token of `kind`, as `!`, one or two, as `&` or `&&`, or two
+   * that touch, as `??`, which is not the `?` of a type.
    */
-  #matchSymbol(
-    kind: TokenKind,
-    form: "one" | "oneOrTwo" | "two",
-    word: string,
-    example: string,
-  ): SourceSpan | null {
+  #matchSymbol(kind: TokenKind, form: "one" | "oneOrTwo" | "two"): SourceSpan | null {
     const first = this.peek();
     const second = this.peek(1);
     if (first.kind !== kind) return null;
@@ -2123,11 +2205,7 @@ export class Parser {
     const last = form !== "one" && second.kind === kind ? this.advance() : first;
     const symbol = last === first ? first.lexeme : first.lexeme + last.lexeme;
     const span = spanFrom(first.span, last.span);
-    this.reportSpan(
-      parserDiagnosticCode.symbolicOperator,
-      `TeaseScript writes '${word}' instead of '${symbol}': ${example}`,
-      span,
-    );
+    this.reportSpan(parserDiagnosticCode.foreignForm, FOREIGN_FORMS.get(symbol)!.message, span);
     return span;
   }
 

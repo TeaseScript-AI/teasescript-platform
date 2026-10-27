@@ -1,5 +1,6 @@
 import type { OwnedDiagnosticCode } from "../diagnostic-codes.js";
 import { DiagnosticSeverity, type Diagnostic } from "../diagnostics.js";
+import { FOREIGN_FORM_CODE } from "../language-facts.js";
 
 // The name pass's diagnostic codes, and which of its errors leave the type check its basis.
 
@@ -36,6 +37,7 @@ export const semanticCode = {
   noSpeaker: "TSV063",
   invalidRegex: "TSV064",
   invalidMediaForm: "TSV069",
+  foreignForm: FOREIGN_FORM_CODE,
 } as const satisfies Record<string, NamePassCode>;
 
 export type NamePassCode = OwnedDiagnosticCode<"name pass", "error">;

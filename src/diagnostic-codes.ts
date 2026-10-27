@@ -121,7 +121,17 @@ export const DIAGNOSTIC_CODES = {
   TSP034: entry(["parser"], "error", "Invalid timer form", DOCS.parser),
   TSP035: entry(["parser"], "error", "Invalid media or permanent button form", DOCS.parser),
   TSP036: entry(["parser"], "error", "Expected a storage key", DOCS.parser),
-  TSP037: entry(["parser"], "error", "Symbol where TeaseScript writes a word", DOCS.parser),
+  TSP037: {
+    ...entry(["lexer", "parser", "name pass"], "error", "Form from another language", DOCS.parser),
+    shared: {
+      parts: [
+        "a symbol of another language that is no token, as `;`, with the text of `FOREIGN_FORMS`",
+        "the same rule with the same text for a symbol that is a token, such as `&&`, a word that starts a " +
+          "statement, such as `def`, and a loop head in parentheses, each where the source fails without it",
+        "the same rule with the same text for a name that no declaration takes, such as `None` or `print(...)`",
+      ],
+    },
+  },
   TSP038: entry(["parser"], "error", "Invalid switch form", DOCS.parser),
   TSP039: entry(["parser"], "error", "Expected a label name or file path", DOCS.parser),
   TSP040: entry(["parser"], "error", "Invalid load form", DOCS.parser),

@@ -8,7 +8,14 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "./source.js";
-import { COMMANDS, commandFacts, type CommandFacts, KEYWORD_TOKENS } from "./language-facts.js";
+import {
+  COMMANDS,
+  commandFacts,
+  type CommandFacts,
+  FOREIGN_FORM_CODE,
+  FOREIGN_FORMS,
+  KEYWORD_TOKENS,
+} from "./language-facts.js";
 import { createToken, TokenKind, type Token } from "./token.js";
 
 export interface LexResult {
@@ -28,6 +35,7 @@ const diagnosticCodes = {
   unterminatedComment: "TSL007",
   physicalNewlineInString: "TSL008",
   unterminatedRegex: "TSL009",
+  foreignForm: FOREIGN_FORM_CODE,
 } as const satisfies Record<string, OwnedDiagnosticCode<"lexer", "error">>;
 
 /**
@@ -752,9 +760,11 @@ class Lexer {
   #scanInvalidCharacter(): void {
     const start = this.#position();
     const character = this.#advanceCodePoint();
+    // A symbol of another language, such as `;`, names what TeaseScript writes instead.
+    const foreign = FOREIGN_FORMS.get(character);
     this.#report(
-      diagnosticCodes.invalidCharacter,
-      `Invalid character ${JSON.stringify(character)}.`,
+      foreign === undefined ? diagnosticCodes.invalidCharacter : diagnosticCodes.foreignForm,
+      foreign?.message ?? `Invalid character ${JSON.stringify(character)}.`,
       start,
       this.#position(),
     );

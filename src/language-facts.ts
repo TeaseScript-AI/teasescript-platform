@@ -294,6 +294,73 @@ export const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([
   ["toTimestamp", "toAbsoluteDateTime"],
 ]);
 
+/** The code of a form of another language (`FOREIGN_FORMS`), which the lexer, the parser, and the name pass report. */
+export const FOREIGN_FORM_CODE = "TSP037";
+
+/**
+ * A form of another language that TeaseScript writes another way, which a compile error names. Each pass reports one
+ * only where the source fails without it, so that no script that compiles reads differently.
+ */
+export interface ForeignForm {
+  readonly message: string;
+  /** For a word that starts a statement, as `def` in `def countTo(n)`, the word that the parser reads in its place. */
+  readonly statement?: "function" | "let" | "say" | "else if";
+  /** Whether the name pass reports the form where no declaration takes the name, as `None` or `print(...)`. */
+  readonly name?: true;
+}
+
+function foreignForm(
+  written: string,
+  teaseScript: string,
+  example: string,
+  reads: Omit<ForeignForm, "message"> = {},
+): readonly [string, ForeignForm] {
+  return [
+    written,
+    {
+      message: `TeaseScript writes '${teaseScript}' instead of '${written}': ${example}`,
+      ...reads,
+    },
+  ];
+}
+
+/**
+ * The forms of other languages that TeaseScript writes another way, by how they are written. The parser reads a symbol
+ * as its word and goes on (V30 §39), and a statement word as the TeaseScript word.
+ */
+export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
+  foreignForm("&&", "and", "if a and b { ... }"),
+  foreignForm("&", "and", "if a and b { ... }"),
+  foreignForm("||", "or", "if a or b { ... }"),
+  foreignForm("!", "not", "if not a { ... }"),
+  foreignForm("??", "otherwise", 'let name = nickname otherwise "pet"'),
+  foreignForm("===", "==", "if a == b { ... }"),
+  foreignForm("!==", "!=", "if a != b { ... }"),
+  foreignForm("++", "+= 1", "count += 1"),
+  foreignForm("--", "-= 1", "count -= 1"),
+  [
+    ";",
+    { message: "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'." },
+  ],
+  foreignForm("for (...)", "for ... in", "for i in 0..3 { ... }"),
+  ...["def", "fn", "func", "fun"].map((word) =>
+    foreignForm(word, "function", "function countTo(n) { ... }", { statement: "function" }),
+  ),
+  ...["var", "local"].map((word) =>
+    foreignForm(word, "let", "let count = 1", { statement: "let" }),
+  ),
+  ...["elif", "elsif", "elseif"].map((word) =>
+    foreignForm(word, "else if", "if a { ... } else if b { ... }", { statement: "else if" }),
+  ),
+  foreignForm("print", "say", 'say "Hello"', { statement: "say", name: true }),
+  foreignForm("console.log", "say", 'say "Hello"', { name: true }),
+  ...["None", "nil", "undefined"].map((word) =>
+    foreignForm(word, "null", "let answer = null", { name: true }),
+  ),
+  foreignForm("True", "true", "let done = true", { name: true }),
+  foreignForm("False", "false", "let done = false", { name: true }),
+]);
+
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);
 

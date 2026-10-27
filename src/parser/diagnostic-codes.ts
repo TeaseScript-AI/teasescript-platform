@@ -1,5 +1,5 @@
 import type { OwnedDiagnosticCode } from "../diagnostic-codes.js";
-import { PROTECTED_NAME_CODE } from "../language-facts.js";
+import { FOREIGN_FORM_CODE, PROTECTED_NAME_CODE } from "../language-facts.js";
 
 // The parser's diagnostic codes.
 
@@ -39,7 +39,7 @@ export const parserDiagnosticCode = {
   invalidTimerForm: "TSP034",
   invalidMediaForm: "TSP035",
   expectedStorageKey: "TSP036",
-  symbolicOperator: "TSP037",
+  foreignForm: FOREIGN_FORM_CODE,
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
   invalidLoadForm: "TSP040",

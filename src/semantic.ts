@@ -39,6 +39,7 @@ import {
 import {
   COMMANDS,
   CORE_RUNTIME_BUILTINS,
+  FOREIGN_FORMS,
   KEYWORD_TOKENS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   PROTECTED_NAME_CODE,
@@ -1159,7 +1160,10 @@ export class SemanticValidator {
               `Builtin '${expression.name}' is not a first-class runtime value.`,
               expression.span,
             );
-          } else if (!this.#reportFileName(expression.name, expression.span)) {
+          } else if (
+            !this.#reportFileName(expression.name, expression.span) &&
+            !this.#reportForeignName(expression.name, expression.span)
+          ) {
             const renamed = RENAMED_VALUES.get(expression.name);
             this.report(
               semanticCode.unknownVariable,
@@ -1353,7 +1357,10 @@ export class SemanticValidator {
               `'${name}' is ${unboundValue(name, contextualSpeaker)}, not a callable function.`,
               expression.callee.span,
             );
-          } else if (!this.#reportFileName(name, expression.callee.span)) {
+          } else if (
+            !this.#reportFileName(name, expression.callee.span) &&
+            !this.#reportForeignName(name, expression.callee.span)
+          ) {
             // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text, and an
             // ask reads `askText prose("Name?")` as a question that calls `prose`, as `say` does.
             const hint =
@@ -1370,9 +1377,15 @@ export class SemanticValidator {
             );
           }
         } else if (method.kind === "propertyAccessExpression") {
-          yield* compileChild(
-            this.#validateExpressionTask(method.object, scope, contextualSpeaker),
-          );
+          const object = method.object;
+          // `console.log(...)` of another language, where no declaration takes `console`.
+          if (!(
+            object.kind === "identifier" &&
+            scope.resolve(object.name) === undefined &&
+            this.#root.resolve(object.name) === undefined &&
+            this.#reportForeignName(`${object.name}.${method.property.name}`, method.span)
+          ))
+            yield* compileChild(this.#validateExpressionTask(object, scope, contextualSpeaker));
           // No value has a method by an earlier name, so its call names the fix whatever the value is.
           const renamed = RENAMED_METHODS.get(method.property.name);
           if (renamed !== undefined)
@@ -1641,6 +1654,14 @@ export class SemanticValidator {
         : `Global function '${fn.name.name}' can be called from any file, so it cannot use '${name}' of this file. Make '${name}' a global, or pass it as a parameter.`,
       span,
     );
+    return true;
+  }
+
+  /** Reports a name of another language that no declaration takes, as `None` (`FOREIGN_FORMS`), or returns `false`. */
+  #reportForeignName(written: string, span: SourceSpan): boolean {
+    const foreign = FOREIGN_FORMS.get(written);
+    if (foreign?.name !== true) return false;
+    this.report(semanticCode.foreignForm, foreign.message, span);
     return true;
   }
 
