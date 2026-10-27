@@ -1661,6 +1661,40 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  {
+    name: "W32-copied-record",
+    measures:
+      "N3: k whole copies of one record under k branches, read at k fields: prefix kills shared, never per field",
+    program: (k) =>
+      main(
+        lines(
+          `let source = ${record(k, "1")}`,
+          "let box = source",
+          rows(k, () => "if flagHost { box = source }"),
+          rows(k, (i) => `repeat box.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "N3-wide-switch",
+    measures:
+      "N3: a switch of k cases each storing `null`, then k conditional repairs: each arm closed once, no rescans",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "switch hostValue {",
+          rows(k, (i) => `case ${i} { n = null }`),
+          "default { n = null }",
+          "}",
+          "repeat n {}",
+          rows(k, (i) => `if hostValue == ${i} { n = 2 }`),
+          "repeat n {}",
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**

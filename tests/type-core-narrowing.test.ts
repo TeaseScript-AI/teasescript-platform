@@ -40,7 +40,10 @@ function at(analysed: Analysed, marker: string, delta: number): string {
   const found = narrowingAt(analysed.pass, read(analysed, marker, delta));
   if (found === null) return "none";
   const form = found.g.form;
-  const kinds = form.kind === "is" || form.kind === "is-not" ? ` ${form.kinds.join("|")}` : "";
+  const kinds =
+    (form.kind === "is" || form.kind === "is-not") && form.kinds.length > 0
+      ? ` ${form.kinds.join("|")}`
+      : "";
   return `${form.kind}${kinds}${found.g.elements > 0 ? " element" : ""}: ${found.fails ?? "holds"}`;
 }
 
@@ -347,6 +350,17 @@ test("a narrowing's refined location is its stable path's text; a computed path,
         7,
         "none",
       ],
+      [
+        "through a value holding a reference (N8)",
+        [
+          "speaker s { rounds: 1 }",
+          "let p = s",
+          "if p.rounds is integer {\n s.rounds = null\n repeat p.rounds {} }",
+        ],
+        "repeat p.rounds",
+        7,
+        "is integer: unmodelled",
+      ],
     ],
     at,
   );
@@ -406,6 +420,48 @@ test("a collection test defines its element steps; a negative one none (N1)", ()
         "repeat xs[0]",
         7,
         "none",
+      ],
+      [
+        "a negative test keeps the list",
+        [...xs, "if xs is not integer[] { say xs }"],
+        "say xs",
+        4,
+        "is-not: holds",
+      ],
+      [
+        "it removes `null` only",
+        [...xs, "if xs is not integer[]? { say xs }"],
+        "say xs",
+        4,
+        "is-not null: holds",
+      ],
+      [
+        "the complement arm",
+        [...xs, "if xs is not integer[] { say 1 } else { repeat xs[0] {} }"],
+        "repeat xs[0]",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "`not` of a negative test",
+        [...xs, "if not (xs is not integer[]) { repeat xs[0] {} }"],
+        "repeat xs[0]",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "after a leaving negative test",
+        [...xs, "if xs is not integer[] { exit }", "repeat xs[0] {}"],
+        "repeat xs[0]",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "an element step's collection reordered (N2)",
+        [...xs, "if xs is integer[] { xs.reverse()\n repeat xs[0] {} }"],
+        "repeat xs[0]",
+        7,
+        "is integer element: branch",
       ],
     ],
     at,
@@ -632,6 +688,15 @@ test("N5: a preserving store to the location itself is no event in a loop; any o
   );
 });
 
+test("N5 evaluates a long preserving store without deepening the native stack", () => {
+  // 2,048 terms: a recursive evaluation overflowed Node's default stack here (Sol r1)
+  const long = pass(
+    'let n: number? = load("n", default: null)',
+    `if n != null { repeat 2 { say n\n n = n${" + 1".repeat(2_048)} } }`,
+  );
+  assert.equal(at(long, "say n", 4), "non-null: holds");
+});
+
 test("G's value is its input filtered by its form (N1)", () => {
   const scope = pass().pass.program.scope;
   const items = (...tags: readonly ItemTag[]): Item[] =>
@@ -767,6 +832,26 @@ test("N3 proves a route without a check, and refuses every corridor §13 closes"
       corridor("a header call", [...nullable, restore, "if restore() { repeat n {} }"], "none"),
       corridor("an earlier operand", [...nullable, restore, "say restore() + n"], "none", "+ n", 2),
       corridor("a later operand", [...nullable, restore, "say n + restore()"], "null", "say n", 4),
+      corridor(
+        "an argument",
+        [clear, "let a = 1", "if clear { a = null }", "function use(n) { repeat n {} }", "use(a)"],
+        "none",
+      ),
+      corridor("a `null` argument", ["function use(n) { repeat n {} }", "use(null)"], "none"),
+      corridor("an omitted default", ["function use(n = null) { repeat n {} }", "use()"], "null"),
+      corridor(
+        "a member through a reference",
+        [
+          clear,
+          "speaker s { rounds: 1 }",
+          "let p = s",
+          "if clear { p.rounds = null }",
+          "repeat p.rounds {}",
+        ],
+        "none",
+        "repeat p.rounds",
+        7,
+      ),
       corridor(
         "a sibling arm",
         [clear, "let n = 1", "if clear { n = null } else { repeat n {} }"],

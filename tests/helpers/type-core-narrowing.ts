@@ -87,7 +87,7 @@ export function routeAt(pass: CorePass, node: FlowNode, tag: ItemTag = "null"): 
   if (node.expression === undefined) return null;
   const path = stablePath(pass.program, node.file, node.expression);
   if (path === null || path.steps.some((step) => step.kind !== "property")) return null;
-  return pass.guards.narrowings(pass).routes.witness(pathKey(path), tag, node);
+  return pass.solver.run(pass.guards.narrowings(pass).routes.witness(pathKey(path), tag, node));
 }
 
 /** The reads of a pass's program: the live nodes of identifiers, properties and indexes, in source order. */
