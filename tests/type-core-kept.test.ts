@@ -245,11 +245,14 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * slice anywhere in the stored argument, and a plain twin or a template of a path as the argument's own value (inside
  * an array or an object there too). It misses a text or a copy kept under another name, returned by a call it does not
  * follow (`#aliasKey`, `frame(root)`, an array built by `push`), handed to a member that keeps it (`#add`), or kept in
- * an object after it was made. Its following of returns is by local assignment only, with these limits: a call stored
- * as it is made (`memo.set(1, this.produce(path))`) is not followed; a member returning something of a slice
- * (`path.slice(1).length`), or a slice it charged before returning it, counts as returning a slice; a charge naming a
- * returned object covers all of it, though only one of its fields was charged. A tripwire, not a proof: the account of
- * the walks' kept arrays (the pull request) is the evidence of what the core keeps.
+ * an object after it was made. It follows a call's result only through a local it is bound to: a call stored as it is
+ * made (`memo.set(1, this.produce(path))`, `pending.push(makeAnswer(path))`) is not followed, and a member returning a
+ * plain twin's array (`return joinSteps(path, ["x"])`) is no returning member. Conservatively, a member returning
+ * something of a slice (`path.slice(1).length`, stored as a number) or a slice it charged before returning it counts as
+ * returning a slice, and a charge naming a returned object covers all of it, though only one of its fields was charged;
+ * a quoted string holding `${path}`-like text counts as a template too.
+ * A tripwire, not a proof: the account of the walks' kept arrays (the pull request) is the evidence of what the core
+ * keeps.
  */
 const PLAIN_TWIN =
   /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf)\(/;
@@ -308,7 +311,7 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "contract.ts #structureWork inline": [
     1,
-    "a carried value's structure parts, joined into its interned shape by `#joined`, which charges it",
+    "a carried value's structure parts, joined into its interned shape, which `#keepText` charges whole",
   ],
   "definitions.ts prefixesOf inline": [1, "a helper itself, the plain twin of `keptPrefixes`"],
   "definitions.ts prefixesOf slice": [1, "a helper itself, the plain twin of `keptPrefixes`"],

@@ -2199,7 +2199,10 @@ export class Contract {
           parts.push(`${part}${below}`);
         }
         if (!parts.some((part) => part.startsWith("v"))) {
-          id = this.#internStructure(`${carried.name}(${this.#joined(parts, ",")})`);
+          // (the whole shape charged, its carrier's name with it: a property projection's is the author's name)
+          const shape = `${carried.name}(${parts.join(",")})`;
+          this.#keepText(shape.length);
+          id = this.#internStructure(shape);
           if (marked) this.#markedStructures.add(id);
         }
       }
