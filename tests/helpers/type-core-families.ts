@@ -3109,6 +3109,30 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
       );
     },
   },
+  {
+    name: "I1203-written-loads",
+    measures:
+      "#1203: k loads into a written `object[]` (defaults of their own fields, and a number that does not fit) and k into a written `integer[]`, a record added to the first, a field of each list's first element read k times",
+    // 97,092 / 194,520 units at k = 64, 128 (2.0217; reversed 2.0216; `main` 145,078 / 388,810, 2.70; 2.43 while a
+    // load landing in a written type was read at every field, before the lead lifted that exclusion on #1208)
+    program: (k) => {
+      const defaults = (i: number): string =>
+        [`{a${i}: 1}`, `{f0: {a${i}: 1}}`, "(askChoice [{a: 1}, {b: 2}])", `{a${i}: 1}`, "0"][
+          i % 5
+        ]!;
+      return main(
+        lines(
+          'let key = "k"',
+          `let box: object[] = [${Array.from({ length: k }, (_, i) => `load(${i % 2 === 0 ? "hostValue" : "key"}, default: ${defaults(i)})`).join(", ")}]`,
+          `let ints: integer[] = [${cells(k, "load(hostValue, default: 0)")}]`,
+          "box.add({f0: 1})",
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          rows(k, (i) => `repeat ints[0].f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  },
 ];
 
 /**

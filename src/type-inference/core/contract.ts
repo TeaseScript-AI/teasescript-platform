@@ -2485,18 +2485,14 @@ export class Contract {
     const charge = (): void => program.work.charge("invSteps");
     for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
       let writer: Writer | null = null;
-      // (F19's loads of a computed key, with no receiver and landing in no written type, whatever their defaults' class,
-      // which no read below their root consults: with the sharing off every value is read at each path)
+      // (F19's loads of a computed key with no receiver, whatever their defaults' class, which no read below their root
+      // consults, and wherever they land: the loads of one path land alike; with the sharing off every value is read at
+      // each path)
       let loads = sharing();
       for (const member of all) {
-        const { value } = list[member]!;
         writer = firstWriter(writer, cellWriter(list[member]!));
-        const c = program.opOf.get(value);
-        loads &&=
-          c?.kind === "load" &&
-          c.key === null &&
-          c.receiver === null &&
-          this.landsIn(value, []) === null;
+        const c = program.opOf.get(list[member]!.value);
+        loads &&= c?.kind === "load" && c.key === null && c.receiver === null;
       }
       this.#keep(2 + read.length + rest.length);
       const group = {

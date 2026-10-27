@@ -513,8 +513,13 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
       .map((key) => `load(${key}, default: ${fallback})`)
       .join(", ") +
     "]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n";
-  // per program its reads, each with the binding whose line holds the loads it holds and the kinds it answers
-  const programs: readonly (readonly [string, readonly (readonly [string, string, string])[]])[] = [
+  // per program its reads, each with the binding whose line holds the loads it holds and the kinds it answers, and
+  // the defaults whose compile errors stand each at its own
+  const programs: readonly (readonly [
+    source: string,
+    reads: readonly (readonly [string, string, string])[],
+    errors?: readonly string[],
+  ])[] = [
     [
       keyed("0"),
       [
@@ -545,6 +550,31 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
         ["box[2].field1", "box", "unknown"],
         ["box[1]", "box", "unknown"],
       ],
+    ],
+    // loads landing in a written type: one with fields (`object`), a dict's values, a scalar one, and defaults that do
+    // not fit it, each keeping its own error (the lead's ruling on #1208)
+    [
+      'let key = "k"\nlet box: object[] = [load(hostValue, default: {f0: 1}), load(key, default: {a1: 1}), load(hostValue, default: {f0: {g: 1}})]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n',
+      [
+        ["box[0].f0", "box", "unknown"],
+        ["box[1].f1", "box", "unknown"],
+        ["box[2]", "box", "unknown"],
+      ],
+    ],
+    [
+      'let d: object dict = dict{a: load(hostValue, default: {f0: 1}), b: load(hostValue, default: {f1: 2})}\nrepeat d["a"].f0 {}\nrepeat d["b"].f1 {}\nexit\n',
+      [
+        ['d["a"].f0', "d", "unknown"],
+        ['d["b"].f1', "d", "unknown"],
+      ],
+    ],
+    [
+      'let key = "k"\nlet box: integer[] = [load(hostValue, default: "zero"), load(hostValue, default: 0), load(key, default: "one")]\nrepeat box[0] {}\nrepeat box[1].f0 {}\nexit\n',
+      [
+        ["box[0]", "box", "unknown"],
+        ["box[1].f0", "box", "unknown"],
+      ],
+      ['"zero"', '"one"'],
     ],
     // loads of different defaults, each its own class, answer alike below their root (#1208 review r1 B1)
     [
@@ -610,7 +640,7 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
       [],
     ],
   ];
-  for (const [source, reads] of programs) {
+  for (const [source, reads, errors] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     const published = (sharing: boolean, reversed: boolean): string => {
@@ -626,7 +656,7 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
         const read = answers.graph.expressionAt({ file: 0, start, end: start + text.length });
         assert.ok(read !== undefined, text);
         // the sites of the loads on the binding's own line, from the source
-        const line = source.indexOf(`let ${list} =`);
+        const line = source.search(new RegExp(`let ${list}[ :]`));
         const own = [...source.slice(line, source.indexOf("\n", line)).matchAll(/load\(/g)].map(
           (match) => line + match.index,
         );
@@ -647,6 +677,15 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
         );
       }
       // every read's answer, its items whole with their ingress stores by their leaves
+      // each default that does not fit the written type keeps its own compile error, at that default
+      if (errors !== undefined)
+        assert.deepEqual(
+          answers.diagnostics
+            .filter((diagnostic) => diagnostic.class === "compile-error")
+            .map((diagnostic) => diagnostic.site.start),
+          errors.map((text) => source.indexOf(text)),
+          source,
+        );
       const occurrences = answers.graph.nodes.flatMap((node) => {
         const at = node.kind === "expression" ? answers.at(node) : null;
         if (at === null) return [];
