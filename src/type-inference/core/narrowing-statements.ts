@@ -1,5 +1,5 @@
 import type { Block, Statement, SwitchStatement } from "../../ast.js";
-import { joinParts } from "./budget.js";
+import { joinParts, keptParts } from "./budget.js";
 import type { FlowLoop, FlowNode, GuardUse } from "./flow-graph.js";
 import { Laminar } from "./narrowing.js";
 import { sortCost } from "./definitions.js";
@@ -103,7 +103,7 @@ export class StatementTree {
     const uses = new Map<string, GuardUse>();
     for (const use of [...flow.conditionUses, ...flow.switchUses]) {
       work.charge("indexSteps");
-      uses.set(joinParts(use.file, use.span.start.offset, use.span.end.offset), use);
+      uses.set(keptParts(work, use.file, use.span.start.offset, use.span.end.offset), use);
     }
     const loops = new Map<Statement, FlowLoop>();
     for (const loop of flow.loops) loops.set(loop.statement, loop);
@@ -204,7 +204,8 @@ export class StatementTree {
           }
           case "switchStatement": {
             this.#switches.set(
-              joinParts(
+              keptParts(
+                work,
                 file,
                 statement.subject.span.start.offset,
                 statement.subject.span.end.offset,

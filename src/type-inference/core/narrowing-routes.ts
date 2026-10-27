@@ -1,6 +1,6 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
+import { joinParts, keepText, type WorkLedger } from "./budget.js";
 import {
   keyPath,
   keyPlace,
@@ -128,8 +128,8 @@ export class NarrowingRoutes {
         break;
       }
       // (a query met again on its own chain proves nothing)
-      this.#witnesses.set(memo, null);
       keepText(this.#work, memo.length);
+      this.#witnesses.set(memo, null);
       const found = this.#examined(key, tag, node);
       const source = found === null ? false : this.#certificate(found, key, tag);
       if (found === null || source === false) {
@@ -492,7 +492,7 @@ export class NarrowingRoutes {
       layer,
       layer.calls,
     );
-    keptParts(this.#work, key, tag);
+    keepText(this.#work, memo.length);
     this.#candidates.set(memo, made);
     return made;
   }

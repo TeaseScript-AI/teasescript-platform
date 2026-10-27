@@ -6,8 +6,8 @@ import { caseValueKey } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinParts, keptParts, type WorkLedger } from "./budget.js";
-import { keptKey, keyBelow, keyOf, sortCost, type Key } from "./definitions.js";
+import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
+import { keyBelow, keyOf, sortCost, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
 import { selectsElement } from "./method-categories.js";
@@ -672,7 +672,6 @@ export class NarrowingIndex {
       if (at === null || !program.live(at)) return;
       const target = program.targetRoot(program.occurrenceOf.get(receiver) ?? receiver);
       const key = keyOf(target.root, path ?? target.path);
-      if (!found.has(key)) keptKey(work, target.root, path ?? target.path);
       const list = found.get(key);
       const entry: Invalidation = {
         node: at,
@@ -681,8 +680,10 @@ export class NarrowingIndex {
         owner: program.flow.ownerOf(at.region),
         inBlock: program.inBlockCode(at),
       };
-      if (list === undefined) found.set(key, [entry]);
-      else list.push(entry);
+      if (list === undefined) {
+        keepText(work, key.length);
+        found.set(key, [entry]);
+      } else list.push(entry);
     };
     for (const constraint of program.constraints) {
       work.charge("indexSteps");
@@ -713,7 +714,7 @@ export class NarrowingIndex {
         );
       }
     }
-    for (const [key, list] of found) {
+    for (const [collection, list] of found) {
       const positions: number[] = [];
       const texts = new Map<number, number[]>();
       const owners: (Callable | null)[] = [];
@@ -733,7 +734,7 @@ export class NarrowingIndex {
       work.charge("indexSteps", 2 * sortCost(positions.length));
       positions.sort((a, b) => a - b);
       for (const offsets of texts.values()) offsets.sort((a, b) => a - b);
-      this.#invalidations.set(key, { positions, texts, owners, inBlock });
+      this.#invalidations.set(collection, { positions, texts, owners, inBlock });
     }
   }
 
