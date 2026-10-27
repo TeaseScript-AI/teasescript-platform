@@ -91,11 +91,6 @@ import type { Work } from "./solver.js";
  * meets external data, admission's boundary check of its ingress (C9). Saves (C8) are the storage module's.
  */
 
-type Operation = Extract<ValueConstraint, { kind: "operation" }>;
-
-/** How long a chain of `+` a text-join example climbs (`Consumers.#chain`); a longer one is cut there. */
-const CHAIN_DEPTH = 256;
-
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
 const TEXT: ReadonlySet<ItemTag> = new Set(["string"]);
 const ITERABLE: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "range"]);
@@ -338,33 +333,6 @@ export class Consumers {
       consumer();
       this.rules.push(this.diagnostics.length);
     }
-    this.#settleChains();
-  }
-
-  /**
-   * A chain's example in one diagnostic only (#1195), so that its sentences stay as long as its operands: the first of
-   * its `+` diagnostics in source order writes it, any other the fix without an example.
-   */
-  #settleChains(): void {
-    const first = new Map<SourceSite, SourceSite>();
-    for (const diagnostic of this.diagnostics)
-      if (diagnostic.kind !== "written-type" && diagnostic.rule.rule === "operator") {
-        const { chain } = diagnostic.rule;
-        const known = chain === null ? undefined : first.get(chain);
-        if (
-          chain !== null &&
-          (known === undefined ||
-            diagnostic.site.file < known.file ||
-            (diagnostic.site.file === known.file && diagnostic.site.start < known.start))
-        )
-          first.set(chain, diagnostic.site);
-      }
-    this.diagnostics.forEach((diagnostic, index) => {
-      if (diagnostic.kind === "written-type" || diagnostic.rule.rule !== "operator") return;
-      const { rule } = diagnostic;
-      if (rule.chain === null || first.get(rule.chain) === diagnostic.site) return;
-      this.diagnostics[index] = { ...diagnostic, rule: { ...rule, chain: null } };
-    });
   }
 
   // ----------------------------------------------------------------------------------------- diagnostics
@@ -820,50 +788,6 @@ export class Consumers {
   }
 
   #directSites: Map<string, SourceSite> | null = null;
-
-  /** Each `+` by the operand it takes on its left, and each `+` its chain's outermost, made on first need (`#chain`). */
-  #plus: {
-    readonly byLeft: Map<PlaceId, Operation>;
-    readonly tops: Map<Operation, Operation>;
-  } | null = null;
-
-  /**
-   * The outermost `+` of the chain an operation stands in, through the left operands only, as a chain without
-   * parentheses is written (`"You have " + score + " points"`): the expression a text-join example rewrites (#1195),
-   * never opening an operand of its own. Once per chain, each step charged.
-   */
-  #chain(c: Operation): SourceSite {
-    const { program } = this.pass;
-    if (this.#plus === null) {
-      const byLeft = new Map<PlaceId, Operation>();
-      for (const constraint of program.constraints)
-        if (constraint.kind === "operation" && operatorOf(constraint) === "+") {
-          program.work.charge("indexSteps");
-          const left = constraint.arguments[0];
-          if (left !== undefined) byLeft.set(left, constraint);
-        }
-      this.#plus = { byLeft, tops: new Map() };
-    }
-    const { byLeft, tops } = this.#plus;
-    // the outermost, each step's own remembered
-    const climbed: Operation[] = [];
-    let top = c;
-    for (
-      let known = tops.get(top);
-      known === undefined && climbed.length < CHAIN_DEPTH;
-      known = tops.get(top)
-    ) {
-      program.work.charge("indexSteps");
-      climbed.push(top);
-      const outer = byLeft.get(top.result);
-      // (a left operand in parentheses is an operand of its own, never opened)
-      if (outer === undefined || program.textAt(outer.site).startsWith("(")) break;
-      top = outer;
-    }
-    top = tops.get(top) ?? top;
-    for (const step of climbed) tops.set(step, top);
-    return top.site;
-  }
 
   /**
    * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
@@ -2163,7 +2087,6 @@ export class Consumers {
     // D1: an operand's rule names the kinds its place takes; the operation's, none
     // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
     const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
-    const text = operands.some((items) => items.some((item) => item.tag === "string"));
     const rule = (index: number | null, pair: readonly ItemTag[] = []): DiagnosticRule => ({
       rule: "operator",
       operator: c.contract.name,
@@ -2176,7 +2099,6 @@ export class Consumers {
             ),
       operands: c.arguments.map((_, index) => operandSite(index)),
       pair,
-      chain: operator === "+" && text ? this.#chain(c) : null,
     });
     // an operand's items its domain takes; none for the operation
     const taken = (index: number | null): Item[] => {

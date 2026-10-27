@@ -110,11 +110,11 @@ const PORTS: readonly Port[] = [
     from: /^Show its elements with 'toList\(\)\.join\(\)' instead\.$/,
     to: (_, { subject }) => exact(`Show all its elements with '\${${subject}.toList().join()}'.`),
   },
-  // (an example only for a flat chain of simple pieces, which the repair test below runs; the current checker's
-  // `${value}` placeholder does not compile, so the sentence alone keeps the fix, docs/DIAGNOSTICS.md "Messages")
+  // (the sentence alone: an example written from the operands changed what some chains say, so the lead dropped it,
+  // #1195; the current checker's `${value}` placeholder does not compile, docs/DIAGNOSTICS.md "Messages")
   {
     from: /^Put the value in the text instead, as in "(.+)"\.$/,
-    to: () => /Put the value in the text instead(?:, as in '"[^']*"')?\./,
+    to: () => exact("Put the value in the text instead."),
   },
   // the current checker's fixes, code in single quotes, the value named
   {
@@ -449,33 +449,10 @@ test("the new checker keeps every fix the current checker gives, in the new form
 
 /**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
- * and structured values, each fix's family once, and for an example of a text join or of a property shown the lines
- * the repaired source says. A declaration's `= ...` keeps the source's own start value.
+ * and structured values, each fix's family once, and for an example of a property shown the lines the repaired source
+ * says. A declaration's `= ...` keeps the source's own start value.
  */
 const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
-  // the text join of a flat chain of simple pieces, also as a warning, text in a variable, a property, an inner chain
-  [
-    'let score = 3\nsay ⟦"You have " + score + " points"⟧\nexit\n',
-    /as in '([^']*)'/,
-    ["You have 3 points"],
-  ],
-  [
-    'function f(n) {\nsay ⟦"You have " + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n',
-    /as in '([^']*)'/,
-    ["You have 1 points", "You have 2 points"],
-  ],
-  [
-    'let prefix = "You have "\nlet n = 1\nsay ⟦prefix + n + " points"⟧\nexit\n',
-    /as in '([^']*)'/,
-    ["You have 1 points"],
-  ],
-  [
-    'function f(n) {\nlet prefix = "You have "\nsay ⟦prefix + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n',
-    /as in '([^']*)'/,
-    ["You have 1 points", "You have 2 points"],
-  ],
-  ['let box = {n: 2}\nsay ⟦"n is " + box.n⟧\nexit\n', /as in '([^']*)'/, ["n is 2"]],
-  ['let n = 1\nsay "a" + (⟦"b" + n⟧)\nexit\n', /as in '([^']*)'/, ["ab1"]],
   // date and time operators, composed operands grouped, also as a warning
   [
     'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay ⟦(t + 1 s) + 1 calendar day⟧\nexit\n',
@@ -581,9 +558,27 @@ test("the code each fix suggests compiles where it stands and runs, saying what 
   }
 });
 
-test("a text join or an object shown gives its fix without an example where no simple one exists (#1195)", () => {
+test("a text join gives its fix without an example, and an object shown one without a plain property (#1195)", () => {
   const cases: readonly (readonly [string, string])[] = [
-    // a sum in parentheses (never opened), with a text alternative, written over lines, text with `${...}`
+    // the decided chain, a parameter's warning, text in a variable, a numeric prefix, literals that would join into
+    // `${...}`, a sum in parentheses, a text alternative, a chain over lines, text with `${...}`
+    [
+      'let score = 3\nsay "You have " + score + " points"\nexit\n',
+      "Put the value in the text instead",
+    ],
+    [
+      'function f(n) {\nsay "You have " + n + " points"\n}\nf(1)\nf(2)\nexit\n',
+      "Put the value in the text instead",
+    ],
+    [
+      'let prefix = "You have "\nlet n = 1\nsay prefix + n + " points"\nexit\n',
+      "Put the value in the text instead",
+    ],
+    ['say 1 + 2 + " points"\nexit\n', "Put the value in the text instead"],
+    [
+      'let who = "Alice"\nlet n = 1\nsay "$" + "{who}" + n\nexit\n',
+      "Put the value in the text instead",
+    ],
     ['let n = 1\nsay "Sum: " + (n + 2)\nexit\n', "Put the value in the text instead"],
     [
       'let n: integer | string = 1\nsay "Sum: " + (n+2)\nexit\n',

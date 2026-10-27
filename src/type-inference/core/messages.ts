@@ -503,55 +503,6 @@ function parsedExpression(
     : null;
 }
 
-/** Whether an expression is a variable or a property path below one (`box.n`). */
-function variablePath(expression: Expression): boolean {
-  return (
-    expression.kind === "identifier" ||
-    (expression.kind === "propertyAccessExpression" && variablePath(expression.object))
-  );
-}
-
-/** Whether an expression is a simple piece of a text-join example: a variable or property path, a number, true or false. */
-function simplePiece(expression: Expression): boolean {
-  return (
-    variablePath(expression) ||
-    expression.kind === "numberLiteral" ||
-    expression.kind === "booleanLiteral"
-  );
-}
-
-/**
- * The text a chain of `+` writes instead, as in `"You have ${score} points"` (#1195's decided text): only for a chain on
- * one line, without parentheses, whose pieces are all simple (`simplePiece`) or one-line text without `${...}`, each
- * text written as it is and every other piece in `${...}`; `null` for any other, which takes the fix without an example.
- * No operand of the chain is opened: a sum in parentheses is one piece, and not a simple one.
- */
-function joinedText(code: string): string | null {
-  if (code.includes("\n")) return null;
-  const parsed = parsedExpression(code);
-  if (parsed === null) return null;
-  const pieces: Expression[] = [];
-  let at = parsed.expression;
-  while (at.kind === "binaryExpression" && at.operator === "+") {
-    pieces.push(at.right);
-    at = at.left;
-  }
-  pieces.push(at);
-  let text = "";
-  for (const piece of pieces.reverse()) {
-    if (
-      piece.kind === "stringLiteral" &&
-      piece.form === "singleLine" &&
-      piece.parts.every((part) => part.kind === "stringText")
-    )
-      text += piece.parts.map((part) => (part.kind === "stringText" ? part.raw : "")).join("");
-    else if (simplePiece(piece))
-      text += `\${${code.slice(piece.span.start.offset - parsed.at, piece.span.end.offset - parsed.at)}}`;
-    else return null;
-  }
-  return pieces.length < 2 ? null : `"${text}"`;
-}
-
 /** The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). */
 function temporalFix(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
@@ -677,7 +628,7 @@ function errorSentence(
     case "operator": {
       const other = joined(rule, kinds, []);
       if (other !== null)
-        return `'+' joins text only with other text, not with ${described(other)}. ${joinRepair(rule, source)}`;
+        return `'+' joins text only with other text, not with ${described(other)}. ${JOIN_FIX}`;
       return rule.operand
         ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, text, kinds, source)}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.` +
@@ -728,17 +679,11 @@ function joined(
   return other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind)) ? null : other;
 }
 
-/** The text-join fix (#1195's decided text): the chain's operands as one text. */
-function joinRepair(
-  rule: Extract<DiagnosticRule, { rule: "operator" }>,
-  source: MessageSource,
-): string {
-  // (the chain's example in its first diagnostic only, `Consumers.#settleChains`)
-  const example = rule.chain === null ? null : joinedText(source.text(rule.chain));
-  return example === null
-    ? "Put the value in the text instead."
-    : `Put the value in the text instead, as in '${example}'.`;
-}
+/**
+ * The text-join fix (#1195): the sentence alone. An example written from the source's operands changed what some chains
+ * say (a numeric prefix, text that joins into `${...}`), so the lead dropped it (#1195, after S8d's review r4).
+ */
+const JOIN_FIX = "Put the value in the text instead.";
 
 /** The kinds `${...}` shows as text. */
 const SHOWN_KINDS: ReadonlySet<ItemTag> = new Set([
@@ -907,7 +852,7 @@ function warningFix(
       break;
     case "operator": {
       // (the repairs of the error the values would be: a text join, a date and time conversion)
-      if (joined(rule, kinds, fits) !== null) return joinRepair(rule, source);
+      if (joined(rule, kinds, fits) !== null) return JOIN_FIX;
       const temporal = temporalFix(rule, text, kinds, source).trimStart();
       if (temporal !== "" || !rule.operand) return temporal;
       break;
