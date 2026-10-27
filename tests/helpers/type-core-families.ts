@@ -2244,7 +2244,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * S6-CARRIERS §4.5, §4.7 and S6c (TABLE r4.61, r4.69 (2)): k adds of one record to one list, a choice of k options of one
  * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
  * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source (a chain whose first link
- * is a direct alias, `get`s in reverse order, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
+ * is a direct alias, `get`s whose alias writers cross, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
  * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
  * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
@@ -2298,20 +2298,20 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // review r2 (S6c): the aliases in reverse order as `get`s, and a chain of aliases as options and as defaults
+  // reviews r2, r3 (S6c): `get`s of aliases whose writers cross, and a chain of aliases as options and as defaults
   {
-    name: "A8-same-source-reverse-alias-gets",
+    name: "A8-same-source-crossed-alias-gets",
     measures:
-      "S6c, A8: k `list_i.get(0, default: alias_i)` of aliases of one list and one record, in reverse order",
-    // 72,268 / 144,716 units at k = 64, 128 (2.0100; `main` 371,130 / 1,347,650, 3.64)
+      "S6c, A8: k `list_i.get(0, default: alias_(k-1-i))`, aliases of one list and one record whose writers cross",
+    // receivers' alias writers ascending, defaults' descending (review r3 B1): no value's writers all come first
     program: (k) =>
       main(
         lines(
           `let root = {${fields(k, () => "1")}}`,
           "let xs = [root]",
-          rows(k, (i) => `let alias${i} = root`),
           rows(k, (i) => `let list${i} = xs`),
-          `let box = [${Array.from({ length: k }, (_, i) => `list${k - 1 - i}.get(0, default: alias${k - 1 - i})`).join(", ")}]`,
+          rows(k, (i) => `let alias${i} = root`),
+          `let box = [${Array.from({ length: k }, (_, i) => `list${i}.get(0, default: alias${k - 1 - i})`).join(", ")}]`,
           rows(k, (i) => `repeat box[0].f${i} {}`),
           "exit",
         ),
