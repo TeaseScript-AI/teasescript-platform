@@ -5,6 +5,7 @@ import { compileProjectWithBackend } from "../src/compiler.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -15,6 +16,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  DIRECT_INGRESS_PROGRAMS,
   HELD_SHARING_FAULTS,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
@@ -108,6 +110,7 @@ function programs(): Program[] {
     out.push({ name: `repaired ${name}`, files });
   // S6c's programs: each discovery it shares beside what a coarser key would merge (`VALUE_SHARING_PROGRAMS`)
   for (const { name, files } of VALUE_SHARING_PROGRAMS) out.push({ name: `S6c ${name}`, files });
+  for (const { name, files } of DIRECT_INGRESS_PROGRAMS) out.push({ name: `#1196 ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
   // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
@@ -217,6 +220,46 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   );
   assert.deepEqual(differing, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
+});
+
+/**
+ * #1196: a read of a host global has a mixed class (`Contract.classOf`), so the values over it share their discovery
+ * where their answer holds no external data and read every member where it does, each naming its own leaf (C9). A lost
+ * leaf changes nothing the differential above publishes, so here every occurrence's answer, its items whole with their
+ * leaves, is the same with the sharing on and off, in both orders, over #1196's controls.
+ */
+test("every occurrence over host data names each ingress's leaf with the sharing on and off, in both orders (#1196)", () => {
+  const itemText = ({ ingress, writer, ...rest }: Item): string =>
+    JSON.stringify({
+      ...rest,
+      writer: writer === null ? null : writerKey(writer),
+      leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey).sort(),
+    });
+  const occurrences = (request: CoreAnalysisRequest): string => {
+    const answers = analyseCore(request);
+    return answers.graph.nodes
+      .flatMap((node) => {
+        const answer = answers.at(node);
+        return answer === null ? [] : [`${node.id} ${answer.items.map(itemText).join(" ")}`];
+      })
+      .join("\n");
+  };
+  const differing: string[] = [];
+  for (const { name, files } of DIRECT_INGRESS_PROGRAMS) {
+    const request = coreRequest(files, GLOBALS);
+    assert.ok(request !== null, `${name}: its files parse and resolve`);
+    for (const reversed of [false, true]) {
+      const run = (): string =>
+        reversed
+          ? withConsumerOrder(
+              (list) => [...list].reverse(),
+              () => withSolverSeam({ reverseWorklist: true }, () => occurrences(request)),
+            )
+          : occurrences(request);
+      if (run() !== withoutSharing(run)) differing.push(`${name}${reversed ? " (reversed)" : ""}`);
+    }
+  }
+  assert.deepEqual(differing, []);
 });
 
 /** S6's sharing faults that reorder their diagnostics (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing. */

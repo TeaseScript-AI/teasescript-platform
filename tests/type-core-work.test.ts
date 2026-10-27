@@ -14,6 +14,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  DIRECT_INGRESS_PROGRAMS,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
@@ -459,7 +460,11 @@ test("every alias member answers as its class does at every decided path, in bot
     ...VALUE_CLASS_SITES,
   ])
     for (const k of [2, 3, 5]) inBoth(`${family.name} at ${k}`, family.program(k));
-  for (const { name, files } of [...ORACLE_PROGRAMS, ...VALUE_SHARING_PROGRAMS])
+  for (const { name, files } of [
+    ...ORACLE_PROGRAMS,
+    ...VALUE_SHARING_PROGRAMS,
+    ...DIRECT_INGRESS_PROGRAMS,
+  ])
     inBoth(name, files);
   for (const record of readFixture()) {
     const request = coreRequest(record.files);
