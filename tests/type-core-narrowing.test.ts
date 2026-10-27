@@ -639,6 +639,13 @@ test("N2's events of ordinary keys: a store, a call where another callable store
         "non-null: holds",
       ],
       [
+        "control: `or`, the call before the test",
+        [...NULLABLE, WIPE, 'if wipe() or n == null { say "x" } else { repeat n {} }'],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
         "after a leaving branch",
         [...NULLABLE, WIPE, "if n == null or wipe() { exit }", REPEAT],
         REPEAT,
@@ -653,11 +660,25 @@ test("N2's events of ordinary keys: a store, a call where another callable store
         "non-null: holds",
       ],
       [
+        "control: leaving, the call before the test",
+        [...NULLABLE, WIPE, "if wipe() or n == null { exit }", REPEAT],
+        REPEAT,
+        7,
+        "non-null: holds",
+      ],
+      [
         "a `while` condition",
         [...NULLABLE, WIPE, "while n != null and wipe() { repeat n {}\n break }"],
         REPEAT,
         7,
         "non-null: call",
+      ],
+      [
+        "control: `while`, no call",
+        [...NULLABLE, WIPE, "while n != null and flagHost { repeat n {}\n break }"],
+        REPEAT,
+        7,
+        "non-null: holds",
       ],
       [
         "control: `while`, the call before",
@@ -676,6 +697,29 @@ test("N2's events of ordinary keys: a store, a call where another callable store
         REPEAT,
         7,
         "is integer: call",
+      ],
+      [
+        "control: the type test, no call",
+        [
+          FLAG,
+          "let n: number = 2",
+          "function halve { n = 0.5\n return true }",
+          "if n is integer and flagHost { repeat n {} }",
+        ],
+        REPEAT,
+        7,
+        "is integer: holds",
+      ],
+      [
+        "control: the type test, the call before",
+        [
+          "let n: number = 2",
+          "function halve { n = 0.5\n return true }",
+          "if halve() and n is integer { repeat n {} }",
+        ],
+        REPEAT,
+        7,
+        "is integer: holds",
       ],
       [
         "call, no owner outside",
