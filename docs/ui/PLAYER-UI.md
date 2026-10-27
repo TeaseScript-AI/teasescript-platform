@@ -478,9 +478,9 @@ stays stored while it is kept, also once no saved value references it. What is r
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
 answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
-is not kept, and in the normal room the session kept before is discarded, so a reload never goes on from an earlier
-point as if it were the current one; while the session runs or waits, a warning [notice](#player-notices) says that a
-reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
+is not kept, and the session kept before is discarded, in the debug room without its saved data and photos, so a
+reload never goes on from an earlier point as if it were the current one; while the session runs or waits, a warning
+[notice](#player-notices) says that a reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
 ([transfer](../DATA-AND-API.md#saved-data-transfer)); a session import replaces it ([Player Settings](#player-settings)).
 A script a host prepares without its plan, such as a development
 scenario, keeps none. The debug room has a start page of its own, with its restarts
