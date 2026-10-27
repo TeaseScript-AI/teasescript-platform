@@ -67,7 +67,15 @@ import {
   type RequiredKind,
 } from "./result.js";
 import type { ReadWork } from "./answers.js";
-import { joinParts, joinSteps, keepText, pathText, stepText, WORK_PER_NODE } from "./budget.js";
+import {
+  joinParts,
+  joinSteps,
+  keepText,
+  keptArray,
+  pathText,
+  stepText,
+  WORK_PER_NODE,
+} from "./budget.js";
 import type { Work } from "./solver.js";
 
 /*
@@ -673,29 +681,61 @@ export class Consumers {
   /**
    * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): every store that
    * brings it from above, a whole store or an add into a prefix of its path, brings it through a copy; a literal's own
-   * field there is a direct contribution (its stores at the path itself are its direct stores). Once per path.
+   * field there is a direct contribution (its stores at the path itself are its direct stores). Once per path; each
+   * prefix's stores sorted once into copies and the others (`#uncopied`), so a path asks the others alone.
    */
   #copiesOnly(root: PlaceId, path: readonly string[]): boolean {
-    const { definitions } = this.pass;
     const memoKey = joinParts(root, path);
     const known = this.#copied.get(memoKey);
     if (known !== undefined) return known;
     let only = true;
-    for (let length = 0; only && length < path.length; length += 1)
-      for (const d of definitions.byKey.get(keyOf(root, path.slice(0, length))) ?? []) {
+    for (let length = 0; only && length < path.length; length += 1) {
+      const stores = this.#uncopied(keyOf(root, path.slice(0, length)));
+      // (an element an add stores is its own direct contribution, a copy or not)
+      if (stores.adds && length + 1 === path.length) only = false;
+      for (const d of stores.others) {
         this.pass.program.work.charge("checks");
-        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
         if (!this.#broughtByCopy(d, path)) {
           only = false;
           break;
         }
       }
+    }
     keepText(this.pass.program.work, memoKey.length);
     this.#copied.set(memoKey, only);
     return only;
   }
 
   readonly #copied = new Map<string, boolean>();
+
+  /**
+   * The whole stores and adds into a key that bring what they store below it otherwise than as a whole copy (A2): a
+   * literal (its children decide, `#broughtByCopy`), any other value, an add of no element; and whether an add stores
+   * an element there. Once per key.
+   */
+  #uncopied(key: Key): { readonly others: readonly Definition[]; readonly adds: boolean } {
+    const { program, definitions } = this.pass;
+    let stores = this.#uncopiedOf.get(key);
+    if (stores === undefined) {
+      const others: Definition[] = [];
+      let adds = false;
+      for (const d of definitions.byKey.get(key) ?? []) {
+        program.work.charge("checks");
+        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
+        adds ||= d.kind === "add" && d.how === "element";
+        if ((d.kind === "add" && d.how !== "element") || !this.#isCopy(d.value)) others.push(d);
+      }
+      keepText(program.work, key.length);
+      stores = { others: keptArray(program.work, others), adds };
+      this.#uncopiedOf.set(key, stores);
+    }
+    return stores;
+  }
+
+  readonly #uncopiedOf = new Map<
+    Key,
+    { readonly others: readonly Definition[]; readonly adds: boolean }
+  >();
 
   /**
    * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
