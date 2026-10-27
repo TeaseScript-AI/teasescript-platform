@@ -18,6 +18,7 @@ import {
   DIRECT_INGRESS_PROGRAMS,
   INHERITED_FIELD_FAMILIES,
   MIXED_ADD_PRODUCTS,
+  NARROWING_FAMILIES,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
   VALUE_CLASS_SITES,
@@ -30,6 +31,7 @@ import {
   type WorkFamily,
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
+import { askEveryRead, narrowingPass } from "./helpers/type-core-narrowing.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -99,17 +101,25 @@ test("every sampled family's work grows with its program, not with a product of 
  */
 const COUNTER_DOUBLING = 2.35;
 
+/** A program's charged work, in total and by counter. */
+type Measured = Pick<Answers["budget"], "total" | "counts">;
+
 /**
  * The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order;
- * `unshared`: with the sharing of answers off.
+ * `unshared`: with the sharing of answers off; `measure`: the work of another run than the analysis's.
  */
-function steepCounters(families: readonly WorkFamily[], unshared = false): string[] {
+function steepCounters(
+  families: readonly WorkFamily[],
+  unshared = false,
+  measure: (at: Sized, reversed: boolean) => Measured = (at, reversed) =>
+    analysed(at, reversed, unshared).budget,
+): string[] {
   const steep: string[] = [];
   for (const family of families) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(at64, reversed, unshared).budget;
-      const large = analysed(at128, reversed, unshared).budget;
+      const small = measure(at64, reversed);
+      const large = measure(at128, reversed);
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
       const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
       const doubling = (before: number, after: number): number =>
@@ -132,6 +142,25 @@ function steepCounters(families: readonly WorkFamily[], unshared = false): strin
 
 test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant): the narrowing index built and every read's
+ * narrowing (N2 with N5) and route (N3) asked, as S10's second part's consumers will ask them, in source order and
+ * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
+ * the step's evidence, outside CI.
+ */
+test("every stage 3b family's index and queries grow with the program in either order (§13.3)", () => {
+  const measure = ({ name, request }: Sized, reversed: boolean): Measured => {
+    const pass = narrowingPass(request);
+    askEveryRead(pass, reversed);
+    assert.ok(
+      pass.program.work.total <= pass.program.work.allowance,
+      `${name}: within the allowance`,
+    );
+    return { total: pass.program.work.total, counts: pass.program.work.counts() };
+  };
+  assert.deepEqual(steepCounters(NARROWING_FAMILIES, false, measure), []);
 });
 
 /**

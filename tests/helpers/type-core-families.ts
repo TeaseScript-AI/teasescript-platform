@@ -1430,6 +1430,239 @@ export interface KnownProduct extends WorkFamily {
   readonly measured: number;
 }
 
+/** A k-field record's literal, every field `value`. */
+const record = (k: number, value: string): string => `{${fields(k, () => value)}}`;
+
+/**
+ * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant), as §13.3 defines them: each makes the
+ * narrowing index's construction or its queries a product of two program dimensions in some realization of it. They are
+ * measured with every read's narrowing and route asked (`tests/helpers/type-core-narrowing.ts`), since no consumer
+ * reads the index before S10's second part.
+ */
+export const NARROWING_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "W27",
+    measures: "N2: k narrowings of one key, k reads, one binary search each",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "if flagHost { n = null }",
+          rows(k, () => "if n != null { repeat n {} }"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W27-unsuccessful",
+    measures:
+      "N3: k null stores in leaving branches before k uses, the nearest candidate examined once",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          rows(k, () => "if flagHost { n = null\nexit }"),
+          rows(k, () => "repeat n {}"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W28",
+    measures: "N2: k nested tests on k path texts of one element key, k reads of the earliest path",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = [${cells(k, "1")}, null]`,
+          rows(k, (i) => `if xs[${i}] == null { exit }`),
+          rows(k, () => "repeat xs[0] {}"),
+          "exit",
+        ),
+      ),
+  },
+  ...(
+    [
+      ["W29", (i: number) => `xs[${i}] = 1`],
+      ["W29-same-path", (i: number) => `xs[i${i}] = 1`],
+    ] as const
+  ).map(([name, store]): WorkFamily => ({
+    name,
+    measures: "N5: k tests of `xs[i_j]` around a loop with k reads and k element stores, k × log",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = [${cells(k, "1")}, null]`,
+          rows(k, (i) => `let i${i} = ${i}`),
+          rows(k, (i) => `if xs[i${i}] == null { exit }`),
+          "repeat 2 {",
+          rows(k, (i) => `repeat xs[i${i}] {}`),
+          rows(k, store),
+          "}",
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "W29-scalar",
+    measures: "N5: k preserving stores to k scalar locations in one loop, one evaluation each",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let v${i} = 1\nif flagHost { v${i} = null }`),
+          rows(k, (i) => `if v${i} == null { exit }`),
+          "repeat 2 {",
+          rows(k, (i) => `repeat v${i} {}\nv${i} = v${i} + 1`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  ...(
+    [
+      ["W30", "!=", "and"],
+      ["W30-or", "==", "or"],
+    ] as const
+  ).map(([name, test, logical]): WorkFamily => ({
+    name,
+    measures: `N1, N2: one \`${logical}\` chain of k field tests, k reads in its last operand`,
+    program: (k) =>
+      main(
+        lines(
+          `let box = ${record(k, "1")}`,
+          rows(k, (i) => `if flagHost { box.f${i} = null }`),
+          `if ${rows(k, (i) => `box.f${i} ${test} null`).replaceAll("\n", ` ${logical} `)} ${logical} [${rows(k, (i) => `box.f${i} + 1`).replaceAll("\n", ", ")}].length > 0 { say "ready" }`,
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "W31",
+    measures:
+      "N2: k invalidations between k narrowings and k reads, one sorted list per collection",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = [${cells(k, "1")}, null]`,
+          rows(k, (i) => `if xs[${i}] == null { exit }`),
+          rows(k, () => "xs.sort()"),
+          rows(k, (i) => `repeat xs[${i}] {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W32",
+    measures: "N3: k whole stores of a record with null fields under k branches, read at k fields",
+    program: (k) =>
+      main(
+        lines(
+          `let rec = ${record(k, "1")}`,
+          rows(k, () => `if flagHost { rec = ${record(k, "null")} }`),
+          rows(k, (i) => `repeat rec.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...(
+    [
+      ["W33", () => "restore()", (i: number) => `repeat v${i} {}`],
+      ["W33-header", () => "if restore() > 0 { say 1 }", (i: number) => `repeat v${i} {}`],
+      ["W33-earlier-operand", () => "", (i: number) => `repeat restore() + v${i} {}`],
+    ] as const
+  ).map(([name, call, use]): WorkFamily => ({
+    name,
+    measures:
+      "N3: k optional scalars one function stores, k calls, k uses: one shared list of k call positions",
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let v${i} = 1`),
+          "function restore {",
+          rows(k, (i) => `v${i} = 1`),
+          "return 1",
+          "}",
+          "if flagHost {",
+          rows(k, (i) => `v${i} = null`),
+          "}",
+          rows(k, call),
+          rows(k, use),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "W34-record-chain",
+    measures:
+      "N3: k whole copies of a k-field record read at k fields, refused below the record's kinds",
+    program: (k) =>
+      main(
+        lines(
+          `let r0 = ${record(k, "1")}`,
+          `if flagHost { r0 = ${record(k, "null")} }`,
+          rows(k, (i) => `let r${i + 1} = r${i}`),
+          rows(k, (i) => `repeat r${k}.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-scalar-chain",
+    measures: "N3: a chain of k scalar copies, each read: one memoised query per copy",
+    program: (k) =>
+      main(
+        lines(
+          "let s0 = 1",
+          "if flagHost { s0 = null }",
+          rows(k, (i) => `let s${i + 1} = s${i}`),
+          rows(k, (i) => `repeat s${i + 1} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-scalar-fan",
+    measures: "N3: k scalar copies of one source, each read: one memoised query of the source",
+    program: (k) =>
+      main(
+        lines(
+          "let s = 1",
+          "if flagHost { s = null }",
+          rows(k, (i) => `let t${i} = s`),
+          rows(k, (i) => `repeat t${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-dead-fallback",
+    measures: "N3: a chain of k `otherwise null` copies over a dead fallback, each read",
+    program: (k) =>
+      main(
+        lines(
+          "let s0 = 1 otherwise null",
+          rows(k, (i) => `let s${i + 1} = s${i} otherwise null`),
+          rows(k, (i) => `repeat s${i + 1} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W34-tested-copies",
+    measures:
+      "§13.3 r4.36: a test on a field of the source before each whole copy, k copies read at k fields",
+    program: (k) =>
+      main(
+        lines(
+          `let box0 = ${record(k, "1")}`,
+          `if flagHost { box0 = ${record(k, "null")} }`,
+          rows(k, (i) => `if box${i}.f${i} != null { say 1 }\nlet box${i + 1} = box${i}`),
+          rows(k, (i) => `repeat box${k}.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+];
+
 /**
  * W34's two remaining combinations, gated known limits by the owner's decision (TABLE r4.45, PLAN §6b): more than four
  * sources tested at one path, each with more than four anchors in one tree, read there many times; and sources copied
