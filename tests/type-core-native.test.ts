@@ -158,3 +158,21 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
   const expected = { outcome: "warning-runtime-check", against: [["null"]] };
   assert.deepEqual([forward, reversed], [expected, expected]);
 });
+
+/** A place's operand regions merged per file (`GuardIndex.#placeOperands`): one test of a field, 130,000 of another. */
+test("130,000 tests of one field beside a test of another are analysed within the native stack", () => {
+  for (const operands of [10_000, 130_000]) {
+    const request = program([
+      "let root = {a: 1, b: 1, n: [1, hostValue][1]}",
+      `let ok = root.a is integer and ${rows(operands, "root.b is integer").join(" and ")} and true`,
+      "let box = root",
+      "repeat box.n {}",
+    ]);
+    const answers = analyseCore(request);
+    assert.deepEqual(
+      [answers.outcome, answers.diagnostics.length, answers.checks.length],
+      ["warning-runtime-check", 1, 2],
+      `${operands} operands`,
+    );
+  }
+});
