@@ -291,6 +291,14 @@ type Decision =
 type Host = "direct" | "named" | "index-held";
 
 const HOSTS: readonly Host[] = ["direct", "named", "index-held"];
+const DIRECT: readonly Host[] = ["direct"];
+
+/**
+ * Whether `WRITTEN_DOMAIN_MATRIX` and `V30_TYPE_MATRIX` are their whole products, else the factored samples the tests
+ * run (each matrix says what it keeps). The whole products are a laptop run outside CI: `WRITTEN_MATRICES_FULL=1 node
+ * tools/test-output-filter.mjs dist/tests/type-core-written.test.js dist/tests/type-core-sharing.test.js`.
+ */
+const FULL = process.env["WRITTEN_MATRICES_FULL"] === "1";
 
 /** One source: its place, the form it holds, what each level admits, the checked stores and which values fit. */
 export interface WrittenCase {
@@ -657,12 +665,28 @@ const seedsOf = (form: Form): readonly Decision[] =>
     : SEEDS.filter((seed) => !LIST_SEEDS.includes(seed));
 
 /**
+ * The forms whose rows also take the host value named or held at an index: where a host read lands is the decision's,
+ * not the transport's, so these cross it with a whole number, its optional and `null` alone, and with lists one and two
+ * deep, their element or the outer list optional and a list of `null`.
+ */
+const HOST_FORMS: ReadonlySet<string> = new Set([
+  "integer",
+  "integer?",
+  "null",
+  "integer[]",
+  "integer?[]",
+  "integer[][]",
+  "integer[]?",
+  "null[]",
+]);
+
+/**
  * The merged S6's B1 (the reviewer's written-domain matrix, rebuilt by axes): nine element domains (the four usual
  * scalars, each optional, and `null` alone) × list depths 0–3, the outermost list optional or not × the place written,
  * an early or a later copy, a copy at the end of a chain of two or three copies, a copy of the written list's element
  * (a typed index projection) or a copy of that copy, a copy of a place typed by each seed (`SEEDS`) × the host value
- * direct, named or held at an index; and a swap of a `null` intermediate (`nullSwap`) and a copy of a literal with `null`
- * beside its written copy (`literalNull`).
+ * direct, and for `HOST_FORMS` (every form with `FULL`) named or held at an index too; and a swap of a `null`
+ * intermediate (`nullSwap`) and a copy of a literal with `null` beside its written copy (`literalNull`).
  */
 export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -679,7 +703,8 @@ export const WRITTEN_DOMAIN_MATRIX: readonly WrittenCase[] = (() => {
         if (outerOptional) form = optional(form);
         for (const decision of [...DECISIONS, ...PROJECTIONS, ...seedsOf(form)]) {
           if (PROJECTIONS.includes(decision) && (outerOptional || depth === 0)) continue;
-          for (const host of HOSTS) out.push(writtenCase(form, decision, host));
+          for (const host of FULL || HOST_FORMS.has(formText(form)) ? HOSTS : DIRECT)
+            out.push(writtenCase(form, decision, host));
         }
       }
   out.push(nullSwap(), literalNull());
@@ -930,6 +955,9 @@ export const OBJECT_PROPERTY_MATRIX: readonly UnrestrictedCase[] = (() => {
 /** The decisions a composition takes (`compositionsOf`). */
 const COMPOSED: readonly Decision[] = ["written", "early copy", "later copy"];
 
+/** The decision of a name outside `CROSSED_NAMES`: the place written. */
+const WRITTEN: readonly Decision[] = ["written"];
+
 /**
  * Representative compositions of a type name `t` beyond `V30_TYPE_MATRIX`'s forms (Astra's M1), exactly these:
  * - unions `(T | U) set`, `(T | U) dict` (§13's valid examples b, c), `(T | U)[][]`, `(T | U)[][][]`, `(T | U)?`,
@@ -999,6 +1027,22 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
 }
 
 /**
+ * The names whose forms `V30_TYPE_MATRIX` also copies, projects, seeds and feeds named or held at an index: the whole
+ * number and the number, `null` alone, the unrestricted collections and `object`, which has no literal, so its copies
+ * carry host data on (`CARRIED`). A copy, a projection or a seed moves what a written type admits as a set of kinds,
+ * whatever their names; every other name's own kind, its check and its values are its forms', written and fed directly.
+ */
+const CROSSED_NAMES: ReadonlySet<string> = new Set([
+  "integer",
+  "number",
+  "null",
+  "list",
+  "set",
+  "dict",
+  "object",
+]);
+
+/**
  * V30 §13's written-type matrix (the orchestrator's instruction): every type name (the scalars, `null`, the
  * unrestricted `list`, `set`, `dict`, `object`, the program-control names) in each form §13 lists, `T`, `T?`, `T[]`,
  * `T set`, `T dict`, `T?[]`, `T[]?`, `T | U` and `(T | U)[]` (beside `string`, `integer` for a `string`), nested to depth
@@ -1006,10 +1050,12 @@ function compositionsOf(t: Form, u: Form, base: string): Form[] {
  * copy at the end of a chain of two or three copies, for a list form a copy of its element (a typed index projection)
  * or a copy of that copy × the host value direct, named or held at an index; for a form of depth one at most a copy of
  * a place typed by each seed (`SEEDS`), the host value direct; and representative compositions of the name
- * through the same depth (`compositionsOf`), written, an early and a later copy, the host value direct. `null?` is
- * `null`, so the forms that only make `null` optional are left out, while its optional collection layers (`null[]?`,
- * `null[]?[]`) remain. A union holding a whole collection beside another type is §13's compile error and has no form
- * here: `UNION_RULE_MATRIX` holds those.
+ * through the same depth (`compositionsOf`), written, an early and a later copy, the host value direct. The copies,
+ * projections, seeds and the host value named or held at an index are `CROSSED_NAMES`' (every name's with `FULL`); the
+ * other names' forms and compositions are written with the host value direct. `null?` is `null`, so the forms that
+ * only make `null` optional are left out, while its optional collection layers (`null[]?`, `null[]?[]`) remain. A
+ * union holding a whole collection beside another type is §13's compile error and has no form here:
+ * `UNION_RULE_MATRIX` holds those.
  */
 export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
   const out: WrittenCase[] = [];
@@ -1040,18 +1086,20 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
     // later copy, the host value direct
     // (each written text once: `null set?` is both an optional set of `null` and one of `null?`)
     const known = new Set(forms.map(formText));
+    const crossed = FULL || CROSSED_NAMES.has(base);
     for (const form of compositionsOf(t, other, base)) {
       if (known.has(formText(form))) continue;
       known.add(formText(form));
-      for (const decision of COMPOSED) out.push(writtenCase(form, decision, "direct"));
+      for (const decision of crossed ? COMPOSED : WRITTEN)
+        out.push(writtenCase(form, decision, "direct"));
     }
     for (const form of forms) {
       if (depthOf(form) > 3) continue;
       const list = form.kind === "collection" && form.collection === "list";
-      for (const decision of [...DECISIONS, ...(list ? PROJECTIONS : [])])
-        for (const host of HOSTS) out.push(writtenCase(form, decision, host));
+      for (const decision of crossed ? [...DECISIONS, ...(list ? PROJECTIONS : [])] : WRITTEN)
+        for (const host of crossed ? HOSTS : DIRECT) out.push(writtenCase(form, decision, host));
       // (the seeds with the host value direct: every placement of it is the written-domain matrix's)
-      if (depthOf(form) <= 1)
+      if (crossed && depthOf(form) <= 1)
         for (const decision of seedsOf(form)) out.push(writtenCase(form, decision, "direct"));
     }
   }
