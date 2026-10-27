@@ -24,6 +24,8 @@ A compiler diagnostic or runtime failure says what went wrong and why, naming th
 about it, in whole sentences without semicolons, and quotes source in single quotes, as in `'total / count'` (owner
 decision, 2026-10-09). A sentence that authors read uses no implementation terms, such as "compiler", "follow", or
 "store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27).
+Where a whole number is required, a value of type `number` is "a number that can have decimals", and the message names
+the line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27).
 
 ## Owners
 
