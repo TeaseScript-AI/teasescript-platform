@@ -1,6 +1,6 @@
 import { CONVERSIONS, isConversion, type ConversionResult } from "../../conversions.js";
-import { dictProperty } from "../../dict-operations.js";
-import { listProperty } from "../../list-methods.js";
+import { dictMethod, dictProperty } from "../../dict-operations.js";
+import { listMethod, listProperty } from "../../list-methods.js";
 import {
   CALENDAR_DURATION_PARTS,
   CLOCK_CONTRACTS,
@@ -22,17 +22,18 @@ import type { ValueKind } from "../../value-kinds.js";
  * already has is a new row here, with its language rules in the adapter layer (`consumers.ts`), and no change to the
  * core. A new mechanism (a new kind of definition, a new transfer, a new loop form, a new certainty rule) is a change to
  * the core. The rows are the model's (`points14.mjs`: `METHOD_RESULT`, `REMOVALS`, `SELECTIONS`, `ASKED`, the
- * conversions). The selections and the conversions come from the language's own tables (`list-methods.ts`,
- * `conversions.ts`); the methods cannot yet, as those contracts say only that a method changes its receiver's elements
- * (`ListMethod.changes`, the runtime's `effect-facts.ts`), not whether it adds, removes some or clears them, so
- * `tests/type-core-method-categories.test.ts` checks the methods' rows against the contracts instead.
+ * conversions). The selections, the conversions, and what a method does to its receiver's elements come from the
+ * language's own tables (`list-methods.ts`, `dict-operations.ts`, `conversions.ts`), which the compiler and the runtime
+ * read too, so a method that removes or clears is a row of its contracts alone; the other methods' results are rows
+ * here, which `tests/type-core-method-categories.test.ts` checks against the contracts.
  */
 
 /** What a method of a collection does and gives. */
 export interface MethodCategory {
   /**
-   * What it does to the elements of its receiver in place: `clears` leaves none (F6), `removes` may take any of them,
-   * so every remaining one is possible and none may remain (F7).
+   * What it does to the elements of its receiver in place, as its contracts say (`ListMethod.changes`,
+   * `DictMethod.changes`): `clears` leaves none (F6), `removes` may take any of them, so every remaining one is possible
+   * and none may remain (F7).
    */
   readonly receiver?: "clears" | "removes";
   readonly gives:
@@ -48,7 +49,7 @@ const declared = (...kinds: readonly ValueKind[]): MethodCategory => ({
   gives: { kind: "declared", kinds },
 });
 
-/** The methods of the built-in values the core models, by name. */
+/** The methods of the built-in values the core models that remove none of their receiver's elements, by name. */
 const METHODS: Readonly<Record<string, MethodCategory>> = {
   contains: declared("boolean"),
   count: declared("integer"),
@@ -61,19 +62,31 @@ const METHODS: Readonly<Record<string, MethodCategory>> = {
   sort: declared("null"),
   shuffle: declared("null"),
   reverse: declared("null"),
-  clear: { receiver: "clears", gives: { kind: "declared", kinds: ["null"] } },
-  remove: { receiver: "removes", gives: { kind: "removed", fromList: "null" } },
-  removeAt: { receiver: "removes", gives: { kind: "removed", fromList: "element" } },
-  removeFirst: { receiver: "removes", gives: { kind: "removed", fromList: "element" } },
-  removeLast: { receiver: "removes", gives: { kind: "removed", fromList: "element" } },
   toSet: { gives: { kind: "copy", into: "set", mayHoldNone: false } },
   toList: { gives: { kind: "copy", into: "list", mayHoldNone: false } },
   take: { gives: { kind: "copy", into: "list", mayHoldNone: true } },
   takeLast: { gives: { kind: "copy", into: "list", mayHoldNone: true } },
 };
 
-/** A method's category, or `undefined` for one the core does not model (its result is the runtime's). */
+/** F6: a method that clears its receiver gives `null`. */
+const CLEARS: MethodCategory = { receiver: "clears", gives: { kind: "declared", kinds: ["null"] } };
+
+/** F7: a method that removes gives what it removed, or `null` from a list or set where its list contract says so. */
+const REMOVES: Readonly<Record<"element" | "null", MethodCategory>> = {
+  element: { receiver: "removes", gives: { kind: "removed", fromList: "element" } },
+  null: { receiver: "removes", gives: { kind: "removed", fromList: "null" } },
+};
+
+/**
+ * A method's category, or `undefined` for one the core does not model (its result is the runtime's): a method that
+ * removes or clears its receiver's elements has its category from its contracts; one that adds them is a store into
+ * them (`collector.ts`).
+ */
 export function methodCategory(name: string): MethodCategory | undefined {
+  const list = listMethod(name);
+  const changes = list?.changes ?? dictMethod(name)?.changes;
+  if (changes === "clears") return CLEARS;
+  if (changes === "removes") return REMOVES[list?.result === "null" ? "null" : "element"];
   return Object.hasOwn(METHODS, name) ? METHODS[name] : undefined;
 }
 

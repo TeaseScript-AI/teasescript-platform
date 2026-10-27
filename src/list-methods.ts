@@ -47,10 +47,11 @@ export interface ListMethod {
   readonly named?: readonly string[];
   readonly result: ListMethodResult;
   /**
-   * Whether it changes its receiver in place: its `elements` (adds or removes some), or only their `order`, which only a
-   * list has. A change reaches every place that holds the receiver.
+   * What it does to its receiver in place: it `adds` elements, `removes` some or `clears` it, or only `reorders` its
+   * elements, which only a list has. A change reaches every place that holds the receiver. The type core reads it too
+   * (`methodCategory`).
    */
-  readonly changes?: "elements" | "order";
+  readonly changes?: "adds" | "removes" | "clears" | "reorders";
   /** The draw it takes from the session generator (see `RandomDrawKind`), which a debug trace names. */
   readonly draws?: "shuffle";
   /** Whether it can make a list or set longer than the longest it is made from, so the length limit applies (`TSR088`). */
@@ -91,7 +92,7 @@ export const LIST_METHODS = byName({
     receivers: BOTH,
     parameters: [value],
     result: "null",
-    changes: "elements",
+    changes: "adds",
     grows: true,
     decides: "element",
     summary:
@@ -102,7 +103,7 @@ export const LIST_METHODS = byName({
     receivers: LIST,
     parameters: [{ name: "other", kind: "list" }],
     result: "null",
-    changes: "elements",
+    changes: "adds",
     grows: true,
     decides: "elements",
     summary:
@@ -113,7 +114,7 @@ export const LIST_METHODS = byName({
     receivers: BOTH,
     parameters: [value],
     result: "null",
-    changes: "elements",
+    changes: "removes",
     summary:
       "Removes the first element equal (==) to value from a list, or the equal member from a set, and gives null. Without one, a list stays unchanged and the developer log has a warning, and a set stays unchanged.",
   },
@@ -122,7 +123,7 @@ export const LIST_METHODS = byName({
     receivers: LIST,
     parameters: [index],
     result: "element",
-    changes: "elements",
+    changes: "removes",
     summary:
       "Removes the element at a zero-based index and gives it; the elements after it move forward. An index the list does not have is an error, as for list[index].",
   },
@@ -131,7 +132,7 @@ export const LIST_METHODS = byName({
     receivers: LIST,
     parameters: [],
     result: "element",
-    changes: "elements",
+    changes: "removes",
     summary: "Removes the first element of the list and gives it. An empty list is an error.",
   },
   removeLast: {
@@ -139,7 +140,7 @@ export const LIST_METHODS = byName({
     receivers: LIST,
     parameters: [],
     result: "element",
-    changes: "elements",
+    changes: "removes",
     summary: "Removes the last element of the list and gives it. An empty list is an error.",
   },
   clear: {
@@ -147,7 +148,7 @@ export const LIST_METHODS = byName({
     receivers: BOTH,
     parameters: [],
     result: "null",
-    changes: "elements",
+    changes: "clears",
     summary: "Removes every element of a list or member of a set, and gives null.",
   },
   sort: {
@@ -156,7 +157,7 @@ export const LIST_METHODS = byName({
     notOnSet: setKeepsOrder("sort"),
     parameters: [],
     result: "null",
-    changes: "order",
+    changes: "reorders",
     summary:
       'Orders the list in place, ascending and stable, and gives null. The elements are all numbers, all text, which is ordered by Unicode code point so "B" comes before "a", all durations, all calendar durations of one family, all angles, or all date and time values of one kind.',
   },
@@ -166,7 +167,7 @@ export const LIST_METHODS = byName({
     notOnSet: setKeepsOrder("shuffle"),
     parameters: [],
     result: "null",
-    changes: "order",
+    changes: "reorders",
     draws: "shuffle",
     summary:
       "Puts the list in a uniformly random order in place with the session's random numbers, and gives null. A list of fewer than two elements draws nothing.",
@@ -177,7 +178,7 @@ export const LIST_METHODS = byName({
     notOnSet: setKeepsOrder("reverse"),
     parameters: [],
     result: "null",
-    changes: "order",
+    changes: "reorders",
     summary: "Puts the list's elements in reverse order in place, and gives null.",
   },
   contains: {
@@ -320,14 +321,18 @@ export function listMethod(name: string): ListMethod | undefined {
   return isListMethod(name) ? LIST_METHODS[name] : undefined;
 }
 
-/** Whether a call of `name` changes the elements of the list or set it is called on (see `ListMethod.changes`). */
+/**
+ * Whether a call of `name` changes the elements of the list or set it is called on: adds, removes, or clears them, not
+ * only their order (see `ListMethod.changes`).
+ */
 export function changesElements(name: string): boolean {
-  return listMethod(name)?.changes === "elements";
+  const changes = listMethod(name)?.changes;
+  return changes !== undefined && changes !== "reorders";
 }
 
 /** Whether a call of `name` reorders the list it is called on (see `ListMethod.changes`). */
 export function reordersList(name: string): boolean {
-  return listMethod(name)?.changes === "order";
+  return listMethod(name)?.changes === "reorders";
 }
 
 /**

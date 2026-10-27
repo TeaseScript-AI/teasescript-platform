@@ -31,8 +31,11 @@ export interface DictMethod {
   /** What it gives: `null`, a `boolean`, or the key's `value`, a copy for the place that keeps it, or the default. */
   readonly result: "null" | "boolean" | "value";
   readonly missing?: Exclude<MissingKey, "adds">;
-  /** Whether it removes entries in place. A change reaches every place that holds the dict. */
-  readonly changes?: "entries";
+  /**
+   * What it does to the dict's entries in place, in the words of `ListMethod.changes`: it `removes` some or `clears`
+   * them. A change reaches every place that holds the dict.
+   */
+  readonly changes?: "removes" | "clears";
   /**
    * How it may decide the value type of a dict that no value decided yet, which the compiler checks again when the
    * script runs (the call's `typeCheck`): the `default:` it gives.
@@ -65,7 +68,7 @@ export const DICT_METHODS = byName({
     parameters: [key],
     result: "value",
     missing: "fails",
-    changes: "entries",
+    changes: "removes",
     summary:
       "Removes the key and gives its value; the entries after it move up. A key the dict does not have is an error.",
   },
@@ -73,7 +76,7 @@ export const DICT_METHODS = byName({
     name: "clear",
     parameters: [],
     result: "null",
-    changes: "entries",
+    changes: "clears",
     summary: "Removes every entry of the dict, and gives null.",
   },
   get: {
