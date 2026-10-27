@@ -101,10 +101,9 @@ deliverable.
 
 Keep all text (documentation, comments, issues, pull requests, reviews, reports)
 as short as its meaning allows: every sentence, heading, example and repeated
-fact must earn its recurring reading cost. Never cut meaning, authority,
-conditions, order, exceptions or clarity to save words.
-
-Correct existing wording before appending an amendment. Use preservation-aware
+fact must earn its recurring reading cost. Correct existing wording before
+appending an amendment, and never cut meaning, authority, conditions, order,
+exceptions or clarity to save words. Use preservation-aware
 edits; full-file creation or replacement is only for a new file or intentional
 total replacement. Inspect the changed hunks from each coherent edit batch, run
 `git diff --check`, and run proportionate focused checks. Before commit, handoff,
