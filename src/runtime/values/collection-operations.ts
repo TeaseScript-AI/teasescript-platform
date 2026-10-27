@@ -1,4 +1,4 @@
-import { readCodePoint } from "../../code-points.js";
+import { compareCodePoints } from "../../code-points.js";
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import { withoutNegativeZero } from "../../conversions.js";
 import { compareAngles } from "../../angle.js";
@@ -109,17 +109,6 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
 
 function sortKey(value: SerializableRuntimeValue): number {
   return typeof value === "number" ? value : 0;
-}
-
-/** Compares texts by Unicode code point, independently of locale; UTF-16 order differs above U+FFFF. */
-function compareCodePoints(left: string, right: string): number {
-  for (let index = 0; index < left.length && index < right.length;) {
-    const leftPoint = readCodePoint(left, index);
-    const rightPoint = readCodePoint(right, index);
-    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
-    index += leftPoint > 0xffff ? 2 : 1;
-  }
-  return left.length - right.length;
 }
 
 /**
