@@ -3829,7 +3829,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-first-chain",
     measures: "F12, §8: a list nested k deep read through k `.first` into a written destination",
-    // 204,495 / 982,598 units at k = 64, 128 in both orders (4.9152); S6c measured 212,369 / 1,014,728 (4.8876):
+    // 204,495 / 982,598 units at k = 64, 128 in both orders (4.9150); S6c measured 212,369 / 1,014,728 (4.8876):
     // S8 runs fewer frames (2,180 against 10,181 at k = 128), so the literal walk's square, the same 114,212 / 642,491
     // units, is a larger share; `main` before S6c stops at the allowance from k = 20
     measured: 4.92,
