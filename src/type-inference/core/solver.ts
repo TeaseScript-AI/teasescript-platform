@@ -1,4 +1,10 @@
-import { checkReadDepth, joinParts, keepText, READ_DEPTH_LIMIT, type WorkLedger } from "./budget.js";
+import {
+  checkReadDepth,
+  joinParts,
+  keepText,
+  READ_DEPTH_LIMIT,
+  type WorkLedger,
+} from "./budget.js";
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*

@@ -333,7 +333,8 @@ function settledPhases(
             violating,
           });
           const owed = problems.filter(
-            (problem) => problem.startsWith("lost fallbackCheck|") || problem.startsWith("violating "),
+            (problem) =>
+              problem.startsWith("lost fallbackCheck|") || problem.startsWith("violating "),
           );
           if (marked !== undefined && owed.length > 0) {
             const at = source.indexOf(marked.text, source.indexOf(marked.after));
