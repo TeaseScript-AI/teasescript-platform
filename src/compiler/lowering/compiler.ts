@@ -490,14 +490,21 @@ export class InstructionCompiler {
             span: planSpan(statement.target.span),
           });
         }
-        // A compound assignment reads the current value before any instruction-emitting operand runs.
+        // A compound assignment reads the current value before any instruction-emitting operand runs. `+=` reads it
+        // through a reference, which holds a list until something may change it, so that a list nothing changed is
+        // joined in place instead of copied (`currentValueTemporaries` of the runtime).
         const current =
           statement.operator === "=" || !this.emitsInstructions(statement.value)
             ? null
-            : this.materializeExpression(
-                { plan: target.plan, temporaryIds: [] },
-                statement.target.span,
-              );
+            : statement.operator === "+="
+              ? this.prepareReferenceExpression(
+                  { plan: target.plan, temporaryIds: [] },
+                  statement.target.span,
+                )
+              : this.materializeExpression(
+                  { plan: target.plan, temporaryIds: [] },
+                  statement.target.span,
+                );
         const value = this.lowerExpression(statement.value);
         const assigned: ExpressionPlan =
           statement.operator === "="

@@ -417,9 +417,13 @@ permanent buttons, the Stage image, monotonic identities, bounded settlement rep
 time/completion operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
 server time integrity, and server persistence remain deferred.
 
-`items += [x]` on a plain variable appends in place. On a property, element, or dict value (`o.items += [i]`), or with
-a call of a script function or an ask on the right (`t += [f(i)]`), it copies the whole list, so a loop that grows a
-list that way takes time quadratic in its length. `.add(x)` and `.addAll(more)` append in place on every place.
+`items += more` appends copies of the elements of `more` in place, as `.addAll(more)` does, on a variable, a property,
+an element, or a dict value, also when `more` calls a script function or asks. Since the value read before the call is
+stored as it was ([V30 §14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)), it
+copies the whole list when the list may have changed meanwhile: when the call, a block that runs during it, or `more`
+itself assigns to the list, into it, or to what holds it, or changes in place a list, set, or dict that the same
+variable holds. A property of a speaker or handle, and `items = items + more` with a call or an ask in `more`, also
+copy the whole list.
 
 ## Owner-resolved future runtime semantics
 

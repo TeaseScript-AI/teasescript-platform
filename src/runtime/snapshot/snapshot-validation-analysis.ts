@@ -46,6 +46,8 @@ export interface SnapshotValidationAnalysis {
    * keeps a copy of its root ({@link collectPreparedReferenceTemporaries}).
    */
   readonly preparedReferenceTemporaries: ReadonlyMap<number, boolean>;
+  /** Of those, the ones an assignment joins with as its current value ({@link collectCurrentValueTemporaries}). */
+  readonly currentValueTemporaries: ReadonlySet<number>;
   readonly preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership;
   readonly loops: ReadonlyMap<number, PlannedLoop>;
   /** The variables each timer, media, or button block shares, as the instruction that creates its resource names them. */
@@ -156,6 +158,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     defaultBindingPositions,
     parameterNames,
     preparedReferenceTemporaries: collectPreparedReferenceTemporaries(plan),
+    currentValueTemporaries: collectCurrentValueTemporaries(plan),
     preparedSayTemporaryOwnership: collectPreparedSayTemporaryOwnership(plan),
     loops,
     handlerCaptures,
@@ -193,6 +196,24 @@ function collectPreparedReferenceTemporaries(plan: InstructionPlan): ReadonlyMap
       temporaries.get(temporaryId) === true || scan.calls || throughDerived.has(temporaryId);
     temporaries.set(temporaryId, keepsRoot);
     if (keepsRoot) for (const leaf of scan.leaves) temporaries.set(leaf, true);
+  }
+  return temporaries;
+}
+
+/**
+ * The references that `items += more` reads its current value through when a call or an ask in `more` runs first. Unlike
+ * a receiver, such a reference does not follow a change of that value: it is frozen before anything may change it, so
+ * the join gets the value as it was read, and a list nothing changed is joined in place (`appendAssigned`).
+ */
+function collectCurrentValueTemporaries(plan: InstructionPlan): ReadonlySet<number> {
+  const temporaries = new Set<number>();
+  for (const instruction of plan.instructions) {
+    if (
+      instruction?.kind === "assign" &&
+      instruction.value.kind === "binary" &&
+      instruction.value.left.kind === "preparedReference"
+    )
+      temporaries.add(instruction.value.left.temporaryId);
   }
   return temporaries;
 }

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { createFreshRuntimeSession } from "../src/index.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
@@ -116,6 +119,103 @@ test("+= on a list variable changes no copy or added list, and a join that does 
     result.snapshot.frames[0]!.bindings.find((binding) => binding.name === "items")?.value,
     { kind: "list", items: [1, 2, 3, 4] },
   );
+});
+
+test("+= on a property, element, or dict value appends, and with a call joins with the value read before it", () => {
+  // `items += more` stores `items + more` with `items` read before a call in `more` runs (V30 §14), whatever the call
+  // changes meanwhile.
+  assert.deepEqual(
+    said(
+      [
+        "let o = { items: [1], count: 0 }",
+        'let d = dict{"a": [1]}',
+        "let rows = [[0], [1]]",
+        "let t = [1]",
+        "function same(n) {\n    return n\n}",
+        "function grows(n) {\n    t.add(99)\n    return n\n}",
+        "function sets(n) {\n    t[0] = 50\n    return n\n}",
+        "function joins(n) {\n    t += [same(n * 10)]\n    return n\n}",
+        "function counts(n) {\n    o.count += 1\n    return n\n}",
+        "function deep(n) {\n    rows[0].add(7)\n    return n\n}",
+        "o.items += [1]",
+        'd["a"] += [2]',
+        "rows[1] += [5]",
+        "t += [grows(2)]",
+        "t += [sets(3)]",
+        "t += [joins(4)]",
+        // The element after the call changes the list when the join is evaluated, after its current value was read.
+        "t += [same(5), t.removeLast()]",
+        "o.items += [counts(6)]",
+        "rows += [[deep(8)]]",
+        "say o",
+        "say d",
+        "say rows",
+        "say t",
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "{ items: [1, 1, 6], count: 1 }",
+      'dict{ "a": [1, 2] }',
+      "[[0], [1, 5], [8]]",
+      "[1, 2, 3, 4, 5, 4]",
+    ],
+  );
+});
+
+test("+= on a property, element, or dict value, or with a call or an ask on the right, copies no whole list", () => {
+  // Diagnostic scale evidence, not a capacity contract (#1186): four additions copy as many list items, whatever the
+  // length of the list they add to.
+  const copied = (length: number, addition: string): number => {
+    const plan = compileValidPlan(
+      [
+        "let o = { items: [0] }",
+        'let d = dict{"a": [0]}',
+        "let rows = [[0]]",
+        "let t = [0]",
+        'let words = ["a"]',
+        "function same(n) {\n    return n\n}",
+        `repeat ${length} {`,
+        '    o.items.add(0)\n    d["a"].add(0)\n    rows[0].add(0)\n    t.add(0)\n    words.add("a")',
+        "}",
+        `repeat 4 {\n    ${addition}\n}`,
+        "exit",
+      ].join("\n"),
+    );
+    const session = createFreshRuntimeSession(plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    return withValidationTestStatistics((statistics) => {
+      session.run();
+      for (
+        let action = session.view().foregroundAction;
+        action?.kind === "interaction";
+        action = session.view().foregroundAction
+      ) {
+        session.completeAction({
+          actionId: action.actionId,
+          actionKind: "interaction",
+          interactionKind: "text",
+          payload: { kind: "submittedText", submittedText: "b" },
+        });
+        session.run();
+      }
+      assert.equal(session.view().status, "halted", addition);
+      return statistics().counts.copiedListItems ?? 0;
+    });
+  };
+  for (const addition of [
+    "o.items += [1]",
+    "o.items = o.items + [1]",
+    'd["a"] += [1]',
+    "rows[0] += [1]",
+    "t += [same(1)]",
+    "o.items += [same(1)]",
+    'words += [askText "Word?"]',
+  ])
+    assert.equal(copied(2_000, addition), copied(4, addition), addition);
 });
 
 test("joined and appended elements keep the list's element type", () => {

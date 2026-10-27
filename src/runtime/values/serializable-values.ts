@@ -18,6 +18,7 @@ import {
   type TimeFields,
 } from "../../temporal.js";
 import { isPlainRecord } from "./plain-data.js";
+import { recordValidationTestWork } from "../../validation-testing.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -292,11 +293,13 @@ export function cloneCapturedSerializableValue(
     }
     return cloned;
   };
+  let copiedItems = 0;
   while (work.length > 0) {
     const [source, target] = work.pop()!;
     if (source.kind === "list" || source.kind === "set") {
       // The clone starts with the source's items, so only a record is replaced by its own copy.
       const items = source.items;
+      copiedItems += items.length;
       // EVIDENCE: validation: work pairs each list or set source with its newly allocated clone of the same kind.
       const targetItems = (target as SerializableRuntimeList | SerializableRuntimeSet).items;
       // The length is read once: item arrays come in several V8 representations, so a load per round is megamorphic.
@@ -334,6 +337,7 @@ export function cloneCapturedSerializableValue(
       }
     }
   }
+  if (copiedItems > 0) recordValidationTestWork("copiedListItems", copiedItems);
   return root;
 }
 

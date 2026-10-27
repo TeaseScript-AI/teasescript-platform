@@ -209,3 +209,34 @@ export function evaluatedChildren(node: ExpressionPlan): readonly ExpressionPlan
   if (node.kind === "call") return node.arguments.map((argument) => argument.value);
   return expressionPlanChildren(node);
 }
+
+const changingExpressions = new WeakMap<ExpressionPlan, boolean>();
+
+/**
+ * Whether evaluating an expression may change a value in place, as `expressionEffects` says of each of its nodes, such
+ * as a list method that changes its receiver or a call whose effects the engine does not know. Results are cached per
+ * plan node, so nested checks stay linear.
+ */
+export function mayChangeValue(expression: ExpressionPlan): boolean {
+  // A node is decided after its children, which are pushed above it.
+  const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
+    { expression, children: null },
+  ];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (changingExpressions.has(current.expression)) continue;
+    if (expressionEffects(current.expression).changesValue) {
+      changingExpressions.set(current.expression, true);
+    } else if (current.children !== null) {
+      changingExpressions.set(
+        current.expression,
+        current.children.some((child) => changingExpressions.get(child) === true),
+      );
+    } else {
+      const children = evaluatedChildren(current.expression);
+      work.push({ expression: current.expression, children });
+      for (const child of children) work.push({ expression: child, children: null });
+    }
+  }
+  return changingExpressions.get(expression)!;
+}
