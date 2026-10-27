@@ -165,7 +165,8 @@ fixes what happens past them: no compile error for size or nesting.
 ### Accepted work products under the allowance
 
 These are not limits of their own: each shape below is a measured superlinear growth of the core's work that the Owner
-accepted as a gated known limit (TABLE rulings in the lead's design record, issue #512), and each reaches
+accepted as a gated known limit (the Owner's acceptance is dated in each row; the lead's design record outside the
+repository holds the rulings cited as supporting references), and each reaches
 `compiler.core-work-allowance` at the stated size, where the analysis stops as that row says. The gate is a regression
 check on the 64 → 128 doubling step in `tests/type-core-work.test.ts` (`KnownProduct.measured`, never a bound at larger
 sizes); a change to the mechanism re-measures and proposes the gate with its counts, never retunes it. A real script
@@ -173,12 +174,12 @@ that reaches one of these opens an issue; until then the row is the record.
 
 | Shape | Family and gate (`tests/helpers/type-core-families.ts`) | Growth per doubling; where the allowance is reached | Authority; trigger to reconsider |
 |---|---|---|---|
-| A chain of k places each copied from the previous one after its wrong-kind store: admission's passes × program | `A6-chain` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.92 | 3.91 at 64 → 128; the allowance at a chain of 487 | TABLE r4.49 (option A); a realistic script reaching the allowance through cascading rejections |
-| More than four sources tested at one path, each with more than four anchors in one tree, read there many times | `W34-known-tested-anchors`, gate 3.37 | 3.37 at 64 → 128 (3.62 at 128 → 256); the allowance between k = 512 and 1,024 (the lead's S4 measurement) | TABLE r4.45 (option A); a realistic script showing both dimensions |
-| Sources copied from more than four shared roots, stored at one path every copy reads | `W34-known-stored-roots`, gate 2.53 | 2.53 at 64 → 128 (2.82 at 128 → 256); the allowance beyond k ≈ 4,000 (the lead's S4 measurement) | TABLE r4.45 (option A); the same trigger |
-| k pairs of a conditional store below the copied path, then a whole copy | `A2-interleaved-conditional-copies` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.63 | 3.61; the allowance at k = 618 | TABLE r4.69 (option A); a realistic script with hundreds of such pairs in a straight line |
-| Copies of a global separated by calls of a function that stores it | `A2-copies-separated-by-storing-calls` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.48 | 3.47; the allowance at k = 1,129 | TABLE r4.71 (option A); the same trigger |
-| k nested own defaults (`null otherwise (…)`, `get(…, default: …)`, `load(…, default: …)`): admission's stop index keeps an evaluation key and an operation chain per nested operation, about k²/2 entries | `C9-nested-own-otherwise`, `-get`, `-load` (`ADMISSION_KNOWN_PRODUCTS`), gates 3.94 / 3.05 / 3.6 | 3.94 / 3.04 / 3.59; the allowance at k = 3,471 / 3,141 / 4,472 (realistic scripts nest about ten deep) | TABLE r4.78 (5), accepted as option A (r4.79); a realistic script whose nesting approaches the allowance; shared-prefix keys are the known fix |
+| A chain of k places each copied from the previous one after its wrong-kind store: admission's passes × program | `A6-chain` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.92 | 3.91 at 64 → 128; the allowance at a chain of 487 | Owner, 2026-10-25 (option A; supporting reference TABLE r4.49); a realistic script reaching the allowance through cascading rejections |
+| More than four sources tested at one path, each with more than four anchors in one tree, read there many times | `W34-known-tested-anchors`, gate 3.37 | 3.37 at 64 → 128 (3.62 at 128 → 256); the allowance between k = 512 and 1,024 (the lead's S4 measurement) | Owner, 2026-10-24 (option A; supporting reference TABLE r4.45); a realistic script showing both dimensions |
+| Sources copied from more than four shared roots, stored at one path every copy reads | `W34-known-stored-roots`, gate 2.53 | 2.53 at 64 → 128 (2.82 at 128 → 256); the allowance beyond k ≈ 4,000 (the lead's S4 measurement) | Owner, 2026-10-24 (option A; supporting reference TABLE r4.45); the same trigger |
+| k pairs of a conditional store below the copied path, then a whole copy | `A2-interleaved-conditional-copies` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.63 | 3.61; the allowance at k = 618 | Owner, 2026-10-26 (option A; supporting reference TABLE r4.69); a realistic script with hundreds of such pairs in a straight line |
+| Copies of a global separated by calls of a function that stores it | `A2-copies-separated-by-storing-calls` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.48 | 3.47; the allowance at k = 1,129 | Owner, 2026-10-26 (option A; supporting reference TABLE r4.71); the same trigger |
+| k nested own defaults (`null otherwise (…)`, `get(…, default: …)`, `load(…, default: …)`): admission's stop index keeps an evaluation key and an operation chain per nested operation, about k²/2 entries | `C9-nested-own-otherwise`, `-get`, `-load` (`ADMISSION_KNOWN_PRODUCTS`), gates 3.94 / 3.05 / 3.6 | 3.94 / 3.04 / 3.59; the allowance at k = 3,471 / 3,141 / 4,472 (realistic scripts nest about ten deep) | Owner, 2026-10-27 (option A; supporting references TABLE r4.78 (5), r4.79); a realistic script whose nesting approaches the allowance; shared-prefix keys are the known fix |
 
 ## Local playground tooling bounds
 
