@@ -194,31 +194,39 @@ function published({ program, request, bindings }: Prepared, reversed: boolean):
   });
 }
 
-test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders (TABLE r4.72)", (t) => {
+test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
   const all = programs();
   const differing: string[] = [];
   let runs = 0;
   // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
   const changed = new Map<string, boolean>();
+  // (the record a program publishes is in source order of its sites, the same in both orders: r4.86 (1))
+  const reordered: string[] = [];
   for (const program of all) {
     let ready: Prepared | undefined;
+    const records: string[] = [];
     for (const reversed of program.sourceOrderOnCi === true ? CI_ORDERS : [false, true]) {
       const input = `${reversed}|${JSON.stringify(program.files)}`;
       let differs = changed.get(input);
       if (differs === undefined) {
         runs += 1;
         const once = (ready ??= prepared(program));
-        differs = published(once, reversed) !== withoutSharing(() => published(once, reversed));
+        const text = published(once, reversed);
+        differs = text !== withoutSharing(() => published(once, reversed));
         changed.set(input, differs);
+        const { outcome, diagnostics, checks } = JSON.parse(text) as Record<string, unknown>;
+        records.push(JSON.stringify([outcome, diagnostics, checks]));
       }
       if (differs) differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
+    if (records.length === 2 && records[0] !== records[1]) reordered.push(program.name);
   }
   t.diagnostic(
     `${all.length} programs in ${runs} runs (each in both orders, the fixtures' and the matrices' in ` +
       `${CI_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
   );
   assert.deepEqual(differing, []);
+  assert.deepEqual(reordered, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
 
