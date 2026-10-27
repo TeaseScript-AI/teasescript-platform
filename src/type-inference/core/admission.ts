@@ -3029,7 +3029,11 @@ export class Admission {
    * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
    * kind fits it.
    */
-  public retained(place: PlaceId, path: readonly string[], seen = new Set<Key>()): ItemTag[] | null {
+  public retained(
+    place: PlaceId,
+    path: readonly string[],
+    seen = new Set<Key>(),
+  ): ItemTag[] | null {
     const { program } = this.pass;
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
@@ -3049,8 +3053,13 @@ export class Admission {
     if (levels !== undefined) return [...new Set([...levels].flatMap((level) => typeTags(level)))];
     for (const copy of into.get(place) ?? []) {
       this.pass.program.work.charge("checks");
-      if (copy.path.length > path.length || copy.path.some((step, at) => path[at] !== step)) continue;
-      const found = this.retained(copy.from, joinSteps(copy.strip, path.slice(copy.path.length)), seen);
+      if (copy.path.length > path.length || copy.path.some((step, at) => path[at] !== step))
+        continue;
+      const found = this.retained(
+        copy.from,
+        joinSteps(copy.strip, path.slice(copy.path.length)),
+        seen,
+      );
       if (found !== null) return found;
     }
     return null;
