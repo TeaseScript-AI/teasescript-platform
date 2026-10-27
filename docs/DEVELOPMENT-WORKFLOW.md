@@ -144,8 +144,8 @@ Classify every actionable finding in plain language:
 Labels such as `bug`, `contract violation`, `security issue`, or `missing edge
 case` do not establish severity without the concrete reason.
 
-Fix a confirmed finding in its own pull request when it belongs there; otherwise, also after the merge, record it in
-an open issue linked to the review.
+Fix confirmed in-scope findings in the reviewed pull request before merge; track all others, including post-merge
+findings, in open issues linked to the review.
 
 ### Proportional review lenses
 
