@@ -2620,9 +2620,7 @@ export class Consumers {
       key === null ? null : this.#defaultSource(key, program.occNode.get(owner) ?? node);
     if (source === null) return;
     const reaching = lists.reachingDef(source.key, source.at);
-    const fallback = (definitions.candidates.get(source.key) ?? []).find(
-      (candidate) => candidate.d.how === "parameter default",
-    );
+    const fallback = definitions.defaultOf(keyPlace(source.key));
     if (
       fallback !== undefined &&
       reaching !== null &&
@@ -2630,7 +2628,7 @@ export class Consumers {
       (reaching.def.how === "argument" || reaching.def.how === "parameter default") &&
       lists.eventBetween(source.key, reaching.def.node, source.at) === null
     ) {
-      const items = this.#run(values.valueItems(fallback.d.value!, fallback.d.node, []));
+      const items = this.#run(values.valueItems(fallback.value!, fallback.node, []));
       if (items.length > 0 && items.every((item) => item.tag === "null"))
         this.#error(
           "member-read",
