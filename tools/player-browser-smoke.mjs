@@ -1191,6 +1191,14 @@ async function packageScenario(cdp, origin) {
     true,
     "The Player did not start with the technical details collapsed",
   );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-composer-shell]')?.checkVisibility({ visibilityProperty: true }) ?? false`,
+    ),
+    false,
+    "The Player showed the composer behind a Tease that cannot start",
+  );
 
   await navigate(cdp, `${origin}/player/?package=broken`);
   await waitFor(cdp, `!!document.querySelector('[data-script-failure-technical-toggle]')`);

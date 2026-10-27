@@ -572,7 +572,7 @@ async function toggleFullscreen() {
       <slot v-else name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">
-      <PlayerComposition :start-page="onStartPage && !failure">
+      <PlayerComposition :start-page="onStartPage">
         <template #topbar>
           <PlayerTopBar
             :title="title"

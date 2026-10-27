@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronDown, Download } from "@lucide/vue";
+import { Download } from "@lucide/vue";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 import Dialog from "@/components/ui/dialog/Dialog.vue";
 import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
@@ -196,17 +196,10 @@ function uses(photo: (typeof photos.value)[number]): string {
           <Alert v-if="prepared.problem" variant="destructive">
             <AlertDescription>{{ prepared.problem }}</AlertDescription>
           </Alert>
-          <Collapsible>
-            <CollapsibleTrigger as-child>
-              <Button
-                variant="outline"
-                class="min-h-11 w-full justify-between"
-                data-debug-export-preview-toggle
-              >
-                What the file contains
-                <ChevronDown />
-              </Button>
-            </CollapsibleTrigger>
+          <Collapsible class="grid">
+            <CollapsibleDisclosure data-debug-export-preview-toggle>
+              What the file contains
+            </CollapsibleDisclosure>
             <CollapsibleContent>
               <div class="grid gap-2 pt-2">
                 <ul class="grid gap-1" data-debug-export-parts>

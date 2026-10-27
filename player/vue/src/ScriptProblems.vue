@@ -17,11 +17,9 @@ export interface ScriptFailure {
 </script>
 
 <script setup lang="ts">
-import { ChevronDown, ChevronUp } from "@lucide/vue";
-import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import CollapsibleDisclosure from "@/components/ui/collapsible/CollapsibleDisclosure.vue";
 
 // Shown instead of Start when the script cannot run (PLAYER-UI "Session start and user activation"): a sentence for the
 // player, and what the creator needs to fix collapsed below it, as in the error dialog, rather than an empty Player.
@@ -43,18 +41,9 @@ function location(problem: ScriptProblem): string {
         <h2 id="script-failure-title" class="text-base font-semibold">{{ failure.title }}</h2>
         <p class="text-sm" data-script-failure-summary>{{ failure.summary }}</p>
       </div>
-      <Collapsible
-        v-if="failure.problems.length > 0"
-        v-slot="{ open: expanded }"
-        class="flex min-h-0 flex-col gap-2"
-      >
-        <CollapsibleTrigger as-child>
-          <Button variant="outline" class="min-h-11 w-full justify-between" data-script-failure-technical-toggle>
-            Technical details
-            <component :is="expanded ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent class="min-h-0 overflow-y-auto">
+      <Collapsible v-if="failure.problems.length > 0" class="flex min-h-0 flex-col gap-2">
+        <CollapsibleDisclosure data-script-failure-technical-toggle>Technical details</CollapsibleDisclosure>
+        <CollapsibleContent class="min-h-0 overflow-y-auto rounded-md bg-muted p-3">
           <ol class="flex flex-col gap-3 wrap-anywhere" data-script-failure-technical>
             <li v-for="(problem, index) in failure.problems" :key="index" class="flex flex-col gap-0.5">
               <span v-if="problem.path" class="font-mono text-sm text-muted-foreground">{{ location(problem) }}</span>
