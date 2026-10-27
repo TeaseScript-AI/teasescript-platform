@@ -1484,6 +1484,159 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   },
 ];
 
+/** k whole copies of `root`: each of the one before it (a chain), or each of `root` (a fan-out). */
+const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
+  rows(k, (i) => `let a${i} = ${form === "chain" && i > 0 ? `a${i - 1}` : "root"}`);
+
+/**
+ * A4 through copies' work (the owner's reviewer's F1 on #1049, TABLE r4.80): a root of k fields, each a copy of one
+ * written binding, and k whole copies of it with no field read, as a chain, a fan-out and one destination stored k
+ * times; k objects with a written field, one other field of each stored into one list a copy then reads (his second
+ * witness: the scan resumed, never taken again); and their controls: plain fields, one dimension fixed, one field read,
+ * the root changed between its copies, each copy storing its own field, the root copied into itself at another path. A
+ * copy costs its own divergences, never its source's every field (r4.51); each is gated with the sharing off too.
+ */
+export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
+  ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
+    name: `A4-inherited-${form}`,
+    measures: `A4 through copies, r4.80: a root of k written-typed fields and a ${form} of k whole copies, no field read`,
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          copiesOf(k, form),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "A4-inherited-repeated",
+    measures:
+      "A4 through copies, r4.80: a root of k written-typed fields stored k times into one destination",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          "let a = root",
+          rows(k, () => "a = root"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-objects",
+    measures:
+      "A4 through copies, r4.80 (2): k records with a written field, another field of each stored into one list, read through a copy",
+    program: (k) =>
+      main(
+        lines(
+          "let copy = []",
+          "let out = []",
+          "let typed: integer = 1",
+          rows(k, (i) => `let a${i} = {n: hostValue, p: typed}`),
+          rows(k, (i) => `out = [a${i}.n]`),
+          "out = [1]",
+          "copy = out",
+          "repeat copy[0] {}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-plain-chain",
+    measures:
+      "r4.80's control: a root of k plain fields and a chain of k whole copies, no written type",
+    program: (k) =>
+      main(lines(`let root = {${fields(k, () => "1")}}`, copiesOf(k, "chain"), "exit")),
+  },
+  {
+    name: "A4-inherited-narrow-chain",
+    measures: "r4.80's control: a root of four written-typed fields and a chain of k whole copies",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(4, () => "typed")}}`,
+          copiesOf(k, "chain"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-few-copies",
+    measures: "r4.80's control: a root of k written-typed fields and a chain of four whole copies",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          copiesOf(4, "chain"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-read",
+    measures: "r4.80's control: A4-inherited-chain with one field of the last copy read",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          copiesOf(k, "chain"),
+          `let shown: integer = a${k - 1}.f0`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-changed-root",
+    measures:
+      "r4.80's control: A4-inherited-fan-out with host data stored into one field of the root between its copies",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          rows(k >> 1, (i) => `let a${i} = root`),
+          "root.f0 = hostValue",
+          rows(k - (k >> 1), (i) => `let b${i} = root`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-own-fields",
+    measures: "r4.80's control: A4-inherited-chain with each copy storing its own field",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          rows(k, (i) => `let a${i} = ${i > 0 ? `a${i - 1}` : "root"}\na${i}.f${i} = 2`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-self-copy",
+    measures:
+      "r4.80's control: a root of k written-typed fields copied into itself at another path (`root.q = root`), then k whole copies",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          "root.q = root",
+          copiesOf(k, "fan-out"),
+          "exit",
+        ),
+      ),
+  },
+];
+
 /**
  * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
@@ -2163,6 +2316,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  ...INHERITED_FIELD_FAMILIES,
 ];
 
 /** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
