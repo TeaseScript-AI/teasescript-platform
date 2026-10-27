@@ -351,7 +351,7 @@ test("where the compiler cannot see the type, the same mistakes fail at runtime"
     ],
     [
       "say [dynamic(90 deg), dynamic(3)].sort()",
-      "TSV043",
+      "TSR060",
       "sort() needs elements of one kind, but this list has angles and numbers.",
     ],
     [

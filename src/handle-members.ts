@@ -17,7 +17,7 @@ import {
   timerDisplayMessage,
 } from "./handle-rules.js";
 import type { SerializableRuntimeValue } from "./runtime/values/serializable-values.js";
-import { valueKindOf } from "./value-kinds.js";
+import { VALUE_KINDS, valueKindOf } from "./value-kinds.js";
 
 /** The kinds of handles, as the compiler names their types. */
 export const HANDLE_KINDS = Object.freeze([
@@ -70,8 +70,8 @@ export interface HandleProperty {
   readonly read: "computed";
   /**
    * How a script assigns it, or absent when it is read-only: the type of the value it takes, which the compiler checks
-   * as it checks any place's type, and the runtime with the message of `assignedTypeMessage`, both as `TSV041`. Where it
-   * has a domain, the domain alone decides at runtime, with the code of the handle (`HandleContract.code`).
+   * as it checks any place's type, and the runtime with the message of `assignedTypeMessage`, both as `TSV041`; then a
+   * value of that type outside its domain, with the code of the handle (`HandleContract.code`).
    */
   readonly assign?:
     | { readonly type: "duration" | "string"; readonly domain?: undefined }
@@ -421,17 +421,19 @@ export function handleMemberMessage(
   return `${noun} property '${name}' cannot be assigned. You can assign ${orList(assignable)}.`;
 }
 
-/** The fix for a value of another type than a handle property without a domain takes, a duration or text. */
-export function assignedTypeFix(type: "duration" | "string"): string {
+/** The fix for a value of another type than a handle property takes: a duration, text, or a number. */
+export function assignedTypeFix(type: HandleValueType): string {
   return type === "duration"
     ? " Use a duration, such as '10 s'."
-    : " Convert it with toString(...) first.";
+    : type === "string"
+      ? " Use text, such as '\"Done\"'."
+      : " Use a number, such as '0.5'.";
 }
 
 /**
- * That a value, described as `given`, is not of the type that the property `name` of a kind of handle takes without a
- * domain, a duration or text, assigned through `receiver` as written, such as `t`, or `null`. The compiler says it of
- * the place as of any other (`TSV041`), with this fix where it knows no better one.
+ * That a value, described as `given`, is not of the type that the property `name` of a kind of handle takes, assigned
+ * through `receiver` as written, such as `t`, or `null`. The compiler says it of the place as of any other (`TSV041`),
+ * with this fix where it knows no better one.
  */
 export function assignedTypeMessage(
   kind: HandleKind,
@@ -439,8 +441,8 @@ export function assignedTypeMessage(
   given: string,
   receiver: string | null,
 ): string {
-  const type = handleProperty(kind, name)?.assign?.type === "duration" ? "duration" : "string";
-  return `'${receiver ?? "this object"}.${name}' holds ${type === "duration" ? "a duration" : "text (string)"}, so it cannot be set to ${given}.${assignedTypeFix(type)}`;
+  const type = handleProperty(kind, name)!.assign!.type;
+  return `'${receiver ?? "this object"}.${name}' holds ${VALUE_KINDS[type].description}, so it cannot be set to ${given}.${assignedTypeFix(type)}`;
 }
 
 function capitalized(text: string): string {

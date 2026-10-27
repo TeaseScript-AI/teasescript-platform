@@ -9,6 +9,7 @@ import { angleStatisticMessage } from "./angle.js";
 import type { ListFunctionName } from "./language-facts.js";
 import { percentageFailure, type NumberDomain } from "./numeric-functions.js";
 import {
+  familyOf,
   ORDERED_FAMILIES,
   orderedFamily,
   VALUE_KINDS,
@@ -260,6 +261,16 @@ export function listValueMessage(
 ): string {
   if (kind === "angle") return angleStatisticMessage(name);
   return `${name}(...) needs ${describeKinds(kinds)}${x ? " as x values" : ""}, not ${given}.${kind === "calendarDuration" ? " A calendar day or month has no fixed length." : ""}`;
+}
+
+/** A `predict` x, described as `given`, of a kind that no line starts at. */
+export function predictPositionMessage(given: string): string {
+  return `predict(...) needs a number, date, datetime, or absolute date and time as its x, not ${given}.`;
+}
+
+/** A `predict` x, described as `given`, of another kind than the line's start, which is `start`. */
+export function predictStartMessage(start: ValueKind, given: string): string {
+  return `predict(...) needs ${VALUE_KINDS[familyOf(start)].description} as its x, like the line's start, not ${given}.`;
 }
 
 /** A list function `name` whose `by:` or other option names `key`, a property that an object of the list lacks. */

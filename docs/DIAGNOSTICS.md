@@ -244,7 +244,7 @@ code each.
   - type checker: the same rule with the same text for method calls, `script(...)`, and the other built-ins
 - `TSV034`, `TSV037`, `TSV059`
   - type checker: a member that a timer handle, media handle, or camera view does not have, a property it cannot assign, and a value outside a property's domain (`handle-members.ts`)
-  - runtime: the same rules with the same texts where the handle or the value is not known when the script is compiled
+  - runtime: the same rules with the same texts for a property it cannot assign and a value outside a property's domain, where the handle is not known when the script is compiled
 - `TSV041`
   - type checker: every value that does not fit its place, among them a handle property of another type (`assignedTypeMessage`)
   - runtime: the same rule with the same text for a handle property, where the handle is not known when the script is compiled

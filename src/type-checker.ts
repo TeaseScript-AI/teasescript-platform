@@ -832,6 +832,8 @@ interface Place {
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
   readonly verb: string;
+  /** How the message describes the rejected value: `describeValue`, or the kind alone where the runtime says it too. */
+  readonly describe?: ((value: StaticType) => string) | undefined;
   /** The suggestion appended to the message, given the rejected value. */
   readonly fix: (value: StaticType, expression: Expression | null) => string;
 }
@@ -3133,7 +3135,7 @@ export class TypeChecker {
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${this.#copyNote(place.widening, place.type)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${(place.describe ?? describeValue)(value)}.${this.#widenedNote(expression)}${this.#copyNote(place.widening, place.type)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
   }
@@ -3626,6 +3628,7 @@ export class TypeChecker {
         : undefined;
     // Only an object's property has a first value that a fix may give another type; a handle's has a fixed type, which
     // the runtime names as the compiler does (`assignedTypeMessage`).
+    const handle = all.every((member) => isHandleKind(member.kind));
     return propertyPlace(
       type,
       label,
@@ -3635,10 +3638,16 @@ export class TypeChecker {
       objectLabel !== null && all.every((member) => member.kind === "object")
         ? { kind: "property", label }
         : null,
-      all.every((member) => isHandleKind(member.kind)) &&
-        (isScalar(type, "duration") || isScalar(type, "string"))
-        ? assignedTypeFix(isScalar(type, "duration") ? "duration" : "string")
+      handle
+        ? assignedTypeFix(
+            isScalar(type, "duration")
+              ? "duration"
+              : isScalar(type, "string")
+                ? "string"
+                : "number",
+          )
         : undefined,
+      handle ? describeKind : undefined,
     );
   }
 
@@ -6386,7 +6395,14 @@ export class TypeChecker {
       return UNKNOWN_TYPE;
     }
     if (method === "removeAt" && listReceiver)
-      this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+      this.#checkIndex(
+        value,
+        callee.object,
+        values[0]!,
+        expression.arguments[0]!.value,
+        false,
+        false,
+      );
     // As for a dict, the default may decide the element type of a list that no value decided yet (V30 §16), before
     // anything reads the element.
     const listDefault = expression.arguments[1];
@@ -6600,11 +6616,11 @@ export class TypeChecker {
   ): CompileTask<void> {
     const type = yield* compileChild(this.#expressionTask(argument, scope));
     const kinds = members(type).map((member) => resolved(member).kind);
-    this.#reportUnless(type, isList, argument, (given) =>
+    this.#reportUnless(type, isList, argument, () =>
       listArgumentMessage(
         "addAll",
         "list",
-        given,
+        describeKind(nonNullTypeForUse(type)),
         kinds.includes("set") ? "set" : kinds.includes("range") ? "range" : "other",
       ),
     );
@@ -7376,7 +7392,7 @@ export class TypeChecker {
    * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
    * member of a union must be the same one. An object has fixed properties, so it points to a dict. A list index below
    * 0 is an error, but not for a list's `get` (`belowZero`), which gives its default for it; one that is not whole has
-   * the error of that.
+   * the error of that. The message names an index `written` in brackets, and not an argument such as of `removeAt`.
    */
   #checkIndex(
     object: StaticType,
@@ -7384,6 +7400,7 @@ export class TypeChecker {
     index: StaticType,
     expression: Expression,
     belowZero = false,
+    written = true,
   ): void {
     const known = members(nonNullType(object)).filter(isKnown).map(resolved);
     // Also on a receiver that may be null or is not known: no list has an element below 0.
@@ -7394,7 +7411,7 @@ export class TypeChecker {
         (member) => !isKnown(member) || resolved(member).kind === "list",
       )
     )
-      this.#checkNegativeIndex(expression, objectExpression, true);
+      this.#checkNegativeIndex(expression, objectExpression, written);
     if (known.length > 0 && known.every((member) => member.kind === "object")) {
       const key = staticChoiceValue(expression)?.value;
       const name = expressionLabel(objectExpression);
@@ -9260,9 +9277,11 @@ function propertyPlace(
   widening: PlacePath | undefined,
   declared: Declared,
   otherType = " Use a separate property for a value of another type.",
+  describe?: (value: StaticType) => string,
 ): Place {
   return {
     type,
+    describe,
     widening,
     // No type can be written for a property.
     inferred: "part",

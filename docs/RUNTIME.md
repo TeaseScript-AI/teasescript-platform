@@ -1699,8 +1699,8 @@ The instruction's first run checks its operands, with the compiler's code `TSV04
 needs text, the file calls a stored file of the session (`TSR059` for other text, as for `fileToBase64`), `password:`
 and `key:` text, an encrypt call's `password:` also `true` or `false`, `publicKey:` a public key, a list of them,
 `true`, or `false`, and `timeLock:` an `absoluteDateTime`, `true`, or `false`; an encrypt call whose openers are all
-`false`, or whose `publicKey:` list is empty while `password:` and `timeLock:` are `false`, fails too. More than 594
-public keys fail with `TSR059`. Its openers written `true`, or each when it writes none,
+`false` fails too. One whose `publicKey:` list is empty while `password:` and `timeLock:` are `false`, and more than
+594 public keys, fail with `TSR059`. Its openers written `true`, or each when it writes none,
 are its `choices`, which the lock dialog asks for; a chosen time lock is suggested 7 days after the session clock's
 current moment (`TSR064` without a clock). `decryptText` needs text (`TSV043`), and gives the default at once for text
 that is not Base64, read as `fromBase64` reads it. Otherwise it
@@ -1893,7 +1893,7 @@ that the compiler also checks fails with the compiler's code and text, also for 
 | `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
 | `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
 | `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command, or a handle's time, with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, a message's text, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
+| `TSR050` | A command, or a handle's time, with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
 | `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
 | `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
 | `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
@@ -1901,8 +1901,8 @@ that the compiler also checks fails with the compiler's code and text, also for 
 | `TSR055` | Retired: a `save` of a value that exists only in this session now fails with `TSV043`. | Save plain data, and recreate the session value after loading. |
 | `TSR057` | A regex value that cannot be compiled. _Defect._ | Report it. |
 | `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion. | Convert or check the value, or declare a type that includes it. |
-| `TSR059` | A built-in argument that the compiler does not check, such as a text that `fileToBase64` does not know as a stored file, more public keys than a lock holds, or `min` of values of several kinds. | Pass a value the message names. |
-| `TSR060` | A weight of `randomWeighted` that is not a number. | Make each weight a number. |
+| `TSR059` | A built-in argument that the compiler does not check, such as a text that `fileToBase64` does not know as a stored file, more public keys than a lock holds or an empty list of them, a `predict` line whose properties are not numbers, or `min` of values of several kinds. | Pass a value the message names. |
+| `TSR060` | A `sort()` of elements of several kinds, or of calendar durations of different kinds, or a weight of `randomWeighted` that is not a number. | Make the elements one kind the operation takes. |
 | `TSR061` | A dict without the key that is read. | Check with `contains(...)` first, or use `get(key, default: value)`. |
 | `TSR062` | A dict key that is not text. | Write the key as text. |
 | `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range. | Use a date and time in the range the message gives. |

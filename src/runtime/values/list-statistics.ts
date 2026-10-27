@@ -25,6 +25,8 @@ import {
   type MinMaxName,
   type StatisticName,
   missingPropertyMessage,
+  predictPositionMessage,
+  predictStartMessage,
 } from "../../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../../random-functions.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
@@ -62,7 +64,7 @@ import {
   isRange,
   isTemporal,
 } from "./value-predicates.js";
-import { describeValue, familyOf, VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
+import { describeValue, valueKindOf } from "../../value-kinds.js";
 import { isTemporalKind } from "../../temporal-builtins.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -499,8 +501,9 @@ function predict(
     (intercept !== undefined && isDuration(intercept)) !== durations ||
     startKind === undefined
   )
+    // The compiler checks that the line is an object with the three properties, not their values.
     throw fault(
-      "TSV043",
+      slope !== undefined && intercept !== undefined && start !== undefined ? "TSR059" : "TSV043",
       `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(line)}.`,
       span,
     );
@@ -513,14 +516,19 @@ function predict(
     offset = whole(unitsFrom(start, x));
     if (start.kind !== "date") perDay = BigInt(MS_PER_DAY);
   }
-  if (offset === undefined)
+  if (offset === undefined) {
+    // As the compiler checks it: an x of a kind that no line starts at first, then one of another kind than the start.
+    const xKind = kindOf(x);
     throw fault(
       "TSV043",
       isAngle(x)
         ? angleStatisticMessage("predict")
-        : `predict(...) needs ${VALUE_KINDS[familyOf(valueKindOf(start!))].description} as its x, like the line's start, not ${describeValue(x)}.`,
+        : xKind === undefined || !LIST_FUNCTION_CONTRACTS.predict.positions.includes(xKind)
+          ? predictPositionMessage(describeValue(x))
+          : predictStartMessage(valueKindOf(start!), describeValue(x)),
       span,
     );
+  }
   const value = quotient(
     add(multiply(exact(interceptAmount), whole(perDay)), multiply(exact(slopeAmount), offset)),
     whole(perDay),

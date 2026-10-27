@@ -269,7 +269,7 @@ test("sort, min, and max order date and time values of one kind", () => {
   const mixedSort = failureOf(
     `${DYNAMIC}let mixed = [dynamic(toDate("2026-10-04")), dynamic(toTime("14:30"))]\nmixed.sort()\nexit`,
   );
-  assert.equal(mixedSort?.code, "TSV043");
+  assert.equal(mixedSort?.code, "TSR060");
   assert.equal(
     mixedSort?.message,
     "sort() needs elements of one kind, but this list has dates and times.",

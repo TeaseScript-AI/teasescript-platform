@@ -69,7 +69,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
       );
     if (kind !== undefined && itemKind !== kind)
       throw fault(
-        "TSV043",
+        "TSR060",
         `sort() needs elements of one kind, but this list has ${VALUE_KINDS[kind].plural} and ${VALUE_KINDS[itemKind].plural}.`,
         span,
       );
@@ -85,7 +85,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     families.delete("zero");
     if (families.size > 1 || families.has("mixed"))
       throw fault(
-        "TSV043",
+        "TSR060",
         "sort() orders calendar durations of one kind only: months, days, or exact time.",
         span,
       );

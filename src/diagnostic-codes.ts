@@ -236,8 +236,8 @@ export const DIAGNOSTIC_CODES = {
       parts: [
         "a member that a timer handle does not have, a property it cannot assign, and a value " +
           "outside a property's domain (`handle-members.ts`)",
-        "the same rules with the same texts where the handle or the value is not known when " +
-          "the script is compiled",
+        "the same rules with the same texts for a property it cannot assign and a value " +
+          "outside a property's domain, where the handle is not known when the script is compiled",
       ],
     },
   },
@@ -249,8 +249,8 @@ export const DIAGNOSTIC_CODES = {
       parts: [
         "a member that a media handle does not have, a property it cannot assign, and a value " +
           "outside a property's domain (`handle-members.ts`)",
-        "the same rules with the same texts where the handle or the value is not known when " +
-          "the script is compiled",
+        "the same rules with the same texts for a property it cannot assign and a value " +
+          "outside a property's domain, where the handle is not known when the script is compiled",
       ],
     },
   },
@@ -361,8 +361,9 @@ export const DIAGNOSTIC_CODES = {
       parts: [
         "a member that a camera view does not have, a property it cannot assign, and a value " +
           "outside a property's domain (`handle-members.ts`)",
-        "the same rules with the same texts where the camera view or the value is not known " +
-          "when the script is compiled",
+        "the same rules with the same texts for a property it cannot assign and a value " +
+          "outside a property's domain, where the camera view is not known when the script is " +
+          "compiled",
       ],
     },
   },
@@ -548,7 +549,7 @@ export const DIAGNOSTIC_CODES = {
   TSR057: entry(["runtime"], "error", "Regex value that cannot be compiled (defect)", DOCS.runtime),
   TSR058: entry(["runtime"], "error", "Value that does not fit its type", DOCS.runtime),
   TSR059: entry(["runtime"], "error", "Built-in argument that cannot be used", DOCS.runtime),
-  TSR060: entry(["runtime"], "error", "Weight that is not a number", DOCS.runtime),
+  TSR060: entry(["runtime"], "error", "Collection elements of the wrong kind", DOCS.runtime),
   TSR061: entry(["runtime"], "error", "Missing dict key", DOCS.runtime),
   TSR062: entry(["runtime"], "error", "Dict key that is not text", DOCS.runtime),
   TSR063: entry(["runtime"], "error", "Date or time out of range", DOCS.runtime),

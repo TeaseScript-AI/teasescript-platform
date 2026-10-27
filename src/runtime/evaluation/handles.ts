@@ -484,8 +484,7 @@ export function readHandleProperty<Kind extends HandleKind>(
 /**
  * The property `name` of a handle of `kind` that `value` may be assigned to through `receiver` (see `HANDLE_MEMBERS`),
  * with the compiler's code and text for the same problem: the handle's code (`HandleContract.code`) for one that cannot
- * be assigned and for a value outside its domain, and `TSV041` for a value of another type than one without a domain
- * takes.
+ * be assigned and for a value outside its domain, and `TSV041` for a value of another type than it takes.
  */
 function assignedHandleProperty<Kind extends HandleKind>(
   evaluator: Evaluator,
@@ -499,17 +498,23 @@ function assignedHandleProperty<Kind extends HandleKind>(
   if (!isAssignableHandleProperty(kind, name))
     throw fault(code, handleMemberMessage(kind, name, "assign"), span);
   const { type, domain } = handleProperty(kind, name)!.assign!;
-  if (domain !== undefined) {
-    if (!domain.accepts(value))
-      throw fault(
-        code,
-        domain.message(domain.shows === "choice" ? shownChoice(value) : describeShownValue(value)),
-        span,
-      );
-  } else if (type === "duration" ? !isAnyDuration(value) : typeof value !== "string")
+  // The type first, then the domain, as the compiler checks them.
+  if (
+    type === "duration"
+      ? !isAnyDuration(value)
+      : type === "string"
+        ? typeof value !== "string"
+        : typeof value !== "number"
+  )
     throw fault(
       "TSV041",
       assignedTypeMessage(kind, name, describeValue(value), receiverLabel(evaluator, receiver)),
+      span,
+    );
+  if (domain !== undefined && !domain.accepts(value))
+    throw fault(
+      code,
+      domain.message(domain.shows === "choice" ? shownChoice(value) : describeShownValue(value)),
       span,
     );
   return name;

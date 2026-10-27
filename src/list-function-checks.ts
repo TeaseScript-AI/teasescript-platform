@@ -16,9 +16,10 @@ import {
   listValueKind,
   type ListValueKind,
   missingPropertyMessage,
+  predictPositionMessage,
+  predictStartMessage,
 } from "./list-function-rules.js";
 import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
-import { familyOf, VALUE_KINDS } from "./value-kinds.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
 import type { OperationProblem } from "./operation-checks.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
@@ -386,7 +387,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
       context,
       isScalar(other, "angle")
         ? angleStatisticMessage(name)
-        : `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeKind(other)}.`,
+        : predictPositionMessage(describeKind(other)),
       x,
     );
     return UNKNOWN_TYPE;
@@ -428,12 +429,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
       startKind === "integer" || startKind === "number"
         ? isAssignable(NUMBER_TYPE, xType)
         : isAssignable({ kind: "scalar", name: startKind }, xType);
-    if (!fits)
-      problem(
-        context,
-        `${name}(...) needs ${VALUE_KINDS[familyOf(startKind)].description} as its x, like the line's start, not ${describeKind(xType)}.`,
-        x,
-      );
+    if (!fits) problem(context, predictStartMessage(startKind, describeKind(xType)), x);
   }
   const amount = intercept === undefined ? undefined : knownKind(intercept);
   return amount === "duration"

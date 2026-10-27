@@ -762,7 +762,7 @@ test("public keys and keys are checked when they compile and when they run", () 
         "'key:' of decryptText(...) takes an unlock key as text (string), not a whole number (integer).",
     },
     {
-      code: "TSV043",
+      code: "TSR059",
       message:
         "encryptText(...) has no way to open, because 'publicKey:' holds no key and 'password:' and 'timeLock:' are false, so nothing could ever open it. Give one of them a value, or true to let the player choose.",
     },

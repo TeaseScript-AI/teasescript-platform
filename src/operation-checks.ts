@@ -339,7 +339,7 @@ function argumentProblems(
       problems.push(
         nullCheckProblem(value, type, needed) ?? {
           kind: "invalidOperand",
-          message: argumentTypeMessage(member, parameter, describeValue(type)),
+          message: argumentTypeMessage(member, parameter, describeKind(type)),
           span: value.span,
           ...(text || searches ? {} : { widened: value }),
           fix: argumentFix(parameter, argumentKind(type)),
@@ -526,8 +526,9 @@ function lockProblems(
           (decrypts || option === "key" || !isScalar(candidate, "boolean")),
       )
     ) {
-      // A public key list names the element it holds, as the runtime finds it.
-      const list = candidates.every((candidate) => candidate.kind === "list");
+      // A public key list, which the option takes, names the element it holds, as the runtime finds it.
+      const list =
+        option === "publicKey" && candidates.every((candidate) => candidate.kind === "list");
       const element = list ? candidates.find((candidate) => candidate.kind === "list") : undefined;
       problems.push({
         kind: "invalidOperand",
@@ -1208,7 +1209,7 @@ function argumentKindProblems(
     // The first kind the count may be that is not a whole number, such as the number in `number?`.
     const other = members(type).find((member) => !isAssignable(INTEGER_TYPE, member));
     if (other !== undefined)
-      return problem(listArgumentMessage(method.name, "count", describeValue(other), "other"));
+      return problem(listArgumentMessage(method.name, "count", describeKind(other), "other"));
     const count = known(argument);
     const message = typeof count === "number" ? countProblem(method.name, count) : undefined;
     return message === undefined ? [] : problem(message);
@@ -1230,7 +1231,7 @@ function argumentKindProblems(
       : kinds.some((member) => member.kind === "range")
         ? "range"
         : "other";
-  return problem(listArgumentMessage(method.name, kind, describeValue(type), other));
+  return problem(listArgumentMessage(method.name, kind, describeKind(type), other));
 }
 
 /**
@@ -1339,7 +1340,7 @@ function sortProblem(element: StaticType): string | undefined {
   };
   const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
   if (unsortable !== undefined)
-    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(unsortable)}.`;
+    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeKind(unsortable)}.`;
   const families = new Set(candidates.map(familyOfType));
   return families.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`

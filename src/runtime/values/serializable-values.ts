@@ -371,7 +371,10 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
   return findRuntimeIdentity(value) !== null;
 }
 
-/** The first value with an identity in `value`, a speaker reference or a handle, which exist only in the session. */
+/**
+ * The first value with an identity in `value`, a speaker reference or a handle, which exist only in the session: in
+ * the order the value is written, as the compiler meets the parts of its type, so a message names the same one.
+ */
 export function findRuntimeIdentity(
   value: SerializableRuntimeValue,
 ): SerializableRuntimeValue | null {
@@ -380,16 +383,20 @@ export function findRuntimeIdentity(
     const current = work.pop()!;
     if (typeof current !== "object" || current === null) continue;
     if (hasIdentity(valueKindOf(current))) return current;
+    // Pushed last first, so that the first part is taken next.
     switch (current.kind) {
       case "list":
       case "set":
-        for (const item of current.items) work.push(item);
+        for (let index = current.items.length - 1; index >= 0; index -= 1)
+          work.push(current.items[index]!);
         break;
       case "object":
-        for (const property of current.properties) work.push(property.value);
+        for (let index = current.properties.length - 1; index >= 0; index -= 1)
+          work.push(current.properties[index]!.value);
         break;
       case "dict":
-        for (const entry of current.entries) work.push(entry.value);
+        for (let index = current.entries.length - 1; index >= 0; index -= 1)
+          work.push(current.entries[index]!.value);
         break;
       default:
         break;

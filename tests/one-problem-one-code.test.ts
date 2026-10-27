@@ -214,6 +214,29 @@ test("a problem that the compiler and the runtime both find has the compiler's c
       'let h = timer async 10 s\nh.remaining = "wrong"',
       `${D}let t = timer async 10 s\nlet h = dynamic(t)\nh.remaining = "wrong"`,
     ],
+    // A collection is named by its kind, which the runtime knows too.
+    [
+      "let h = timer async 10 s\nh.remaining = [1]",
+      `${D}let t = timer async 10 s\nlet h = dynamic(t)\nh.remaining = [1]`,
+    ],
+    ['say "abc".split([1])', `${D}say "abc".split(dynamic([1]))`],
+    ["say [1].take([1])", `${D}say [1].take(dynamic([1]))`],
+    ["let xs = [1]\nxs.addAll(set[2])", `${D}let xs = [1]\nxs.addAll(dynamic(set[2]))`],
+    ["let xs = [[1]]\nxs.sort()", `${D}let xs = dynamic([[1]])\nxs.sort()`],
+    [
+      'let r = encryptText("hi", password: ["p"], publicKey: false, timeLock: false)',
+      `${D}let r = encryptText("hi", password: dynamic(["p"]), publicKey: false, timeLock: false)`,
+    ],
+    // An argument is not an index written in brackets, so neither names it.
+    [
+      "let items = [1, 2]\nlet i = -2\nitems.removeAt(i)",
+      `${D}let items = [1, 2]\nlet i = dynamic(-2)\nitems.removeAt(i)`,
+    ],
+    // Of several values that exist only in the session, the first as written.
+    [
+      'let t = timer async 10 s\nlet m = say "Hi", instant\nsave { a: t, b: m } as "k"',
+      `${D}let t = timer async 10 s\nlet m = say "Hi", instant\nsave dynamic({ a: t, b: m }) as "k"`,
+    ],
   ]) {
     const compiled = diagnostics(known!);
     assert.equal(compiled.length, 1, known);

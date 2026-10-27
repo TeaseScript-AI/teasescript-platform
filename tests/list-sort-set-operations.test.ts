@@ -310,7 +310,7 @@ test("misuse the compiler can see is a compile error", () => {
 test("values the compiler cannot know are checked at runtime", () => {
   assert.deepEqual(
     failure(`${DYNAMIC}let items = dynamic([1])\nitems.add("a")\nitems.sort()\nexit`),
-    ["TSV043", "sort() needs elements of one kind, but this list has numbers and texts."],
+    ["TSR060", "sort() needs elements of one kind, but this list has numbers and texts."],
   );
   assert.deepEqual(failure(`${DYNAMIC}let items = dynamic([true])\nitems.sort()\nexit`), [
     "TSV043",

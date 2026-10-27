@@ -313,7 +313,7 @@ test("+ does not convert: text or a list with another kind is a compile error th
     "addAll() needs a list, not a whole number (integer).",
   ]);
   assert.deepEqual(message("let counts = [1]\ncounts.addAll(set[2])"), [
-    "addAll() needs a list, not a set (integer set). Copy a set into a list with toList() first.",
+    "addAll() needs a list, not a set. Copy a set into a list with toList() first.",
   ]);
   assert.deepEqual(message("let seen = set[1]\nseen.addAll([2])"), [
     "Sets have no method 'addAll'.",

@@ -237,8 +237,9 @@ function startLock(
     openers.timeLockMs === null &&
     openers.publicKeys.length === 0
   )
+    // The compiler sees openers written false, not an empty list of public keys.
     throw new RuntimeFault(
-      "TSV043",
+      operands.publicKey === false ? "TSV043" : "TSR059",
       `${call}(...) has no way to open, because ${
         operands.publicKey === false
           ? "'password:', 'publicKey:', and 'timeLock:' are all false"
