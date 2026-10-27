@@ -61,7 +61,7 @@ test("each form of another language is one error that names the TeaseScript form
       'let a = 1\nif a !== 1 { say "x" }\nexit',
       [["TSP037", writes("!=", "!==", "if a != b { ... }"), "!=="]],
     ],
-    ["let i = 0\ni++\nexit", [["TSP037", writes("+= 1", "++", "count += 1"), "++"]]],
+    ["let i = 0\ni++\ni = 2\nexit", [["TSP037", writes("+= 1", "++", "count += 1"), "++"]]],
     ["let i = 0\ni--\nexit", [["TSP037", writes("-= 1", "--", "count -= 1"), "--"]]],
     ['let a = 1;\nsay "${a}"\nexit', [["TSP037", SEMICOLON, ";"]]],
     [

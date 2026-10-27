@@ -1364,20 +1364,22 @@ export class Parser {
 
   *#parseUnaryArithmetic(): ParseTask<Expression | null> {
     const before = this.tokens[this.current - 1];
+    // `count++` and `count--` of other languages: one sign that touches the same sign between values, with no value
+    // after it. A line goes on after a binary operator but not after a sign (V30 §1), so this sign ends its line.
+    const touching =
+      before !== undefined &&
+      this.peek().kind === before.kind &&
+      before.span.end.offset === this.peek().span.start.offset;
     const operators: Token[] = [];
     while (this.check(TokenKind.Plus) || this.check(TokenKind.Minus)) {
       operators.push(this.advance());
-      this.skipContinuationNewlines();
+      if (!touching || operators.length > 1) this.skipContinuationNewlines();
     }
     const sign = operators.at(-1);
     if (sign === undefined) return yield* parseChild(this.#parsePostfix());
-    // `count++` and `count--` of other languages: one sign that touches the same sign between values, with no value
-    // after it.
     const increment =
-      operators.length === 1 &&
-      before?.kind === sign.kind &&
-      before.span.end.offset === sign.span.start.offset
-        ? FOREIGN_FORMS.get(before.lexeme + sign.lexeme)
+      touching && operators.length === 1
+        ? FOREIGN_FORMS.get(before!.lexeme + sign.lexeme)
         : undefined;
     let expression = yield* parseChild(
       this.#parseOperand(
