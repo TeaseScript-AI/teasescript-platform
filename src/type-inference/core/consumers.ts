@@ -41,13 +41,18 @@ import {
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, siteKey, stepName, type ValueConstraint } from "./program.js";
+import { codeOf } from "./messages.js";
 import {
+  contextOf,
   elementStep,
   explainingItem,
   offendingKinds,
   provenanceOf,
+  type ContextDetail,
   type CoreDiagnostic,
+  type CountUse,
   type DiagnosticKind,
+  type DiagnosticRule,
   type Obligation,
   type ObligationKind,
   type RequiredKind,
@@ -241,7 +246,7 @@ export class Consumers {
   public check(): void {
     this.#admittedStores();
     this.admission.ingressStores();
-    this.admission.literalElements(this.#order, (site) => this.#error("written-target", site));
+    this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found));
     this.#operations();
     this.#uses();
     this.#receivers();
@@ -255,18 +260,134 @@ export class Consumers {
     return { file: site.file, start: site.start, end: site.end };
   }
 
-  #error(kind: DiagnosticKind, site: SourceSite): void {
-    this.diagnostics.push({ class: "compile-error", kind, site: this.#site(site) });
+  /** An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code). */
+  #error(
+    kind: DiagnosticKind,
+    site: SourceSite,
+    rule: DiagnosticRule,
+    kinds: readonly ItemTag[],
+  ): void {
+    this.diagnostics.push({
+      class: "compile-error",
+      kind,
+      code: codeOf(rule),
+      site: this.#site(site),
+      rule,
+      kinds: [...new Set(kinds)],
+    });
   }
 
-  #warning(kind: DiagnosticKind, site: SourceSite, item: Item, obligation: Obligation): void {
+  /** A warning of `rule` explained by `item`; `receiver`, a member's receiver as its context sentence names it. */
+  #warning(
+    kind: DiagnosticKind,
+    site: SourceSite,
+    item: Item,
+    obligation: Obligation,
+    rule: DiagnosticRule,
+    receiver: ContextDetail["receiver"] = null,
+  ): void {
     this.diagnostics.push({
       class: "warning-runtime-check",
       kind,
+      code: codeOf(rule),
       site: this.#site(site),
-      provenance: provenanceOf(item),
+      rule,
+      kinds: [item.tag],
+      provenance: provenanceOf(item, this.#detail(item, site, rule, receiver)),
       obligation,
     });
+  }
+
+  /**
+   * What a warning's context word's sentence names (D1, `ContextDetail`), from the warned expression's own node: the
+   * function it is in where the value comes from outside it (`call`) or is a parameter of it (`deferred-parameter`), the
+   * label its line is entered at (`label`), the block it is in (`handler`), the place a later store decides (`later`),
+   * the receiver it reads a member of (`member`, `missing`, `unmodelled`). Only the warning's word asks.
+   */
+  #detail(
+    item: Item,
+    site: SourceSite,
+    rule: DiagnosticRule,
+    receiver: ContextDetail["receiver"],
+  ): ContextDetail {
+    const { program } = this.pass;
+    const word = contextOf(item);
+    const detail = {
+      outside: false,
+      callable: null,
+      label: null,
+      handler: null,
+      later: null,
+      receiver: null,
+    } satisfies ContextDetail;
+    const node = program.exprAt(site);
+    switch (word) {
+      case "unknown":
+        return { ...detail, outside: isExternal(item) };
+      case "later":
+        return rule.rule === "store" && rule.decider !== null
+          ? { ...detail, later: { place: rule.into, kinds: rule.type, decider: rule.decider } }
+          : detail;
+      case "label": {
+        const boundary = node === null ? null : program.dom.edom(node);
+        return boundary?.statement?.kind === "labelStatement"
+          ? { ...detail, label: boundary.statement.name.name }
+          : detail;
+      }
+      case "handler":
+        return {
+          ...detail,
+          handler: node === null ? null : (program.handlerOf(node)?.handler ?? null),
+        };
+      case "call":
+      case "deferred-parameter": {
+        const callable = node === null ? null : program.callableAt(node);
+        if (callable?.kind !== "function") return detail;
+        // `call`: a value set outside the function the read is in; a variable of the function changed by a call
+        // between its store and the read has no function to name
+        const value = program.placeBySite.get(siteKey(site));
+        const root =
+          value === undefined
+            ? null
+            : program.targetRoot(program.occurrenceOf.get(value) ?? value).root;
+        const declared = root === null ? null : program.place(root).site;
+        const inside =
+          declared !== null &&
+          declared.file === site.file &&
+          declared.start >= callable.declaration.span.start.offset &&
+          declared.end <= callable.declaration.span.end.offset;
+        return word === "call" && inside
+          ? detail
+          : { ...detail, callable: callable.declaration.name.name };
+      }
+      case "member":
+      case "missing":
+      case "unmodelled": {
+        if (receiver !== null) return { ...detail, receiver };
+        const value = program.placeBySite.get(siteKey(site));
+        // a speaker's field read by its name (F19a)
+        const speaker = value === undefined ? undefined : program.places[value]?.kind;
+        if (speaker?.kind === "speakerProperty")
+          return {
+            ...detail,
+            receiver: { text: speaker.speaker, kinds: ["speaker"], member: speaker.name },
+          };
+        const projection = value === undefined ? undefined : program.projOf.get(value);
+        const owner = projection === undefined ? undefined : program.places[projection.owner]?.site;
+        if (projection === undefined || owner === null || owner === undefined || node === null)
+          return detail;
+        return {
+          ...detail,
+          receiver: {
+            text: program.textAt(owner),
+            kinds: this.#kindsOf(projection.owner, node).map((found) => found.tag),
+            member: propertyName(projection.step),
+          },
+        };
+      }
+      default:
+        return detail;
+    }
   }
 
   #obligation(
@@ -279,8 +400,14 @@ export class Consumers {
     return { kind, target, against, on, site: this.#site(site), boundary: false };
   }
 
-  /** A store's `copy-type` warning against the destination's kinds (C1). */
-  #storeWarning(site: SourceSite, label: string, item: Item, against: readonly ItemTag[]): void {
+  /** A store's `copy-type` warning against the destination's kinds (C1, C10's `rule`). */
+  #storeWarning(
+    site: SourceSite,
+    label: string,
+    item: Item,
+    against: readonly ItemTag[],
+    rule: DiagnosticRule,
+  ): void {
     this.#warning(
       "written-target",
       site,
@@ -292,6 +419,7 @@ export class Consumers {
         against.map((tag) => requiredKind(tag)),
         `validate the stored value of ${label} against ${against.join("|")}`,
       ),
+      rule,
     );
   }
 
@@ -302,9 +430,197 @@ export class Consumers {
     item: Item,
     on: string,
     target: string,
+    rule: DiagnosticRule,
     against: readonly RequiredKind[] = ["non-null"],
+    receiver: ContextDetail["receiver"] = null,
   ): void {
-    this.#warning(kind, site, item, this.#obligation("null-check", site, target, against, on));
+    this.#warning(
+      kind,
+      site,
+      item,
+      this.#obligation("null-check", site, target, against, on),
+      rule,
+      receiver,
+    );
+  }
+
+  /**
+   * A store's destination in the source's own text (D2): its variable, a parameter's name, a function's result as
+   * `f()`, each property step as `.p` and each element or entry step as `[i]` or `[key]`.
+   */
+  #placeText(root: PlaceId, path: readonly string[]): string {
+    const { program } = this.pass;
+    const kind = program.place(root).kind;
+    let text =
+      kind.kind === "binding" || kind.kind === "parameter"
+        ? kind.name
+        : kind.kind === "result"
+          ? `${program.functionOf(kind.fn).name}()`
+          : program.place(root).label;
+    for (const step of path)
+      text += step === "element" ? "[i]" : step === "entry" ? "[key]" : `.${propertyName(step)}`;
+    return text;
+  }
+
+  /**
+   * The first direct read or store of a place's path in source order (ADR 0021 rule 1.1): where an error about a property
+   * that reached the place only through copies of whole objects is reported, the copy its related site (A2, r4.75 (4)).
+   */
+  #firstDirect(root: PlaceId, path: readonly string[]): SourceSite | null {
+    const { program, definitions } = this.pass;
+    if (this.#directSites === null) {
+      const sites = new Map<string, SourceSite>();
+      const earliest = (key: string, site: SourceSite | null): void => {
+        program.work.charge("indexSteps");
+        if (site === null) return;
+        const known = sites.get(key);
+        if (
+          known === undefined ||
+          site.file < known.file ||
+          (site.file === known.file && site.start < known.start)
+        ) {
+          if (known === undefined) keepText(program.work, key.length);
+          sites.set(key, site);
+        }
+      };
+      for (const c of program.constraints)
+        if (c.kind === "project") {
+          const { root: owner, path: steps } = program.targetRoot(c.into);
+          earliest(joinParts(owner, steps), c.site);
+        }
+      for (const d of definitions.storeDefs)
+        if (d.kind === "whole" && d.path.length > 0)
+          earliest(
+            joinParts(d.place, d.path),
+            d.into === undefined ? d.site : this.#own(d.into, d.site),
+          );
+      this.#directSites = sites;
+    }
+    return this.#directSites.get(joinParts(root, path)) ?? null;
+  }
+
+  #directSites: Map<string, SourceSite> | null = null;
+  #literalStores: Map<PlaceId, Definition> | null = null;
+
+  /**
+   * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
+   * direct read or store: an error a copy brings into it (`site` a copy's read), where the property's type came through
+   * a copy too (`viaCopy`), is reported there, the copy its related site; any other error stays at `site`.
+   */
+  #deferred(
+    site: SourceSite,
+    root: PlaceId,
+    path: readonly string[],
+    viaCopy: boolean,
+  ): { readonly site: SourceSite; readonly brought: SourceSite | null } {
+    const { program } = this.pass;
+    const value = program.placeBySite.get(siteKey(site));
+    const last = path.at(-1);
+    const kept = { site, brought: null };
+    if (
+      !viaCopy ||
+      value === undefined ||
+      !program.occurrenceOf.has(value) ||
+      last === undefined ||
+      last === "element" ||
+      last === "entry"
+    )
+      return kept;
+    const first = this.#firstDirect(root, path);
+    return first === null ? kept : { site: first, brought: site };
+  }
+
+  /** Whether the store that decided a place's type gave it at `path` through a copy of a whole value (A2). */
+  #decidedViaCopy(decider: Definition | null, root: PlaceId, path: readonly string[]): boolean {
+    if (decider === null || decider.place !== root) return false;
+    const inserted = decider.kind === "add" && decider.how === "element" ? 1 : 0;
+    return (
+      (decider.kind === "whole" || inserted === 1) &&
+      this.#throughCopy(decider, path.slice(decider.path.length + inserted))
+    );
+  }
+
+  /**
+   * Whether a store's value reaches `rest` through a copy of a whole value: its literals' first elements and properties
+   * followed step by step until a variable's read with steps left, never a literal's own value there.
+   */
+  #throughCopy(d: Definition, rest: readonly string[]): boolean {
+    const { program } = this.pass;
+    let value = d.value;
+    for (const step of rest) {
+      if (value === undefined) return false;
+      if (program.occurrenceOf.has(value)) return true;
+      value = this.admission.literalChildren(value, step)[0]?.value;
+    }
+    return false;
+  }
+
+  /**
+   * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
+   * error at the offending element, or where a copy brought it into a property, A2's at the property's first direct read
+   * or store.
+   */
+  #mixed(
+    site: SourceSite,
+    found: Parameters<Parameters<Admission["literalElements"]>[1]>[1],
+  ): void {
+    const { program, definitions } = this.pass;
+    const owner = program.cellOwner.get(found.cell);
+    const literal = owner?.kind === "cell" ? owner.owner : undefined;
+    const cell = program.place(found.cell).kind;
+    const step = cell.kind === "cell" ? cell.step : "element";
+    // the place the literal is stored into, through which a later read reaches the property
+    if (this.#literalStores === null) {
+      this.#literalStores = new Map();
+      for (const d of definitions.storeDefs) {
+        program.work.charge("indexSteps");
+        if (d.kind === "whole" && d.value !== undefined && !this.#literalStores.has(d.value))
+          this.#literalStores.set(d.value, d);
+      }
+    }
+    const store =
+      literal === undefined || found.path.length === 0
+        ? undefined
+        : this.#literalStores.get(literal);
+    // (the literal's first element decides its elements' type, A2's decider)
+    const decider = definitions.cellDefs.get(found.cell)?.[0];
+    if (store !== undefined && decider !== undefined && this.#throughCopy(decider, found.path)) {
+      const path = joinSteps(store.path, [step], found.path);
+      const deferred = this.#deferred(site, store.place, path, true);
+      if (deferred.brought !== null) {
+        this.#error(
+          "written-target",
+          deferred.site,
+          {
+            rule: "store",
+            into: this.#placeText(store.place, path),
+            type: found.decided,
+            written: false,
+            decider: null,
+            brought: deferred.brought,
+          },
+          found.kinds,
+        );
+        return;
+      }
+    }
+    const node = literal === undefined ? null : program.place(literal).kind;
+    this.#error(
+      "written-target",
+      site,
+      {
+        rule: "mixed",
+        collection:
+          node?.kind === "value" && node.node === "setLiteral"
+            ? "set"
+            : step === "entry"
+              ? "dict"
+              : "list",
+        path: found.path.map(propertyName),
+        type: found.decided,
+      },
+      found.kinds,
+    );
   }
 
   // ------------------------------------------------------------------------------------------- names
@@ -437,6 +753,15 @@ export class Consumers {
       const fitting = (item: Item): boolean =>
         item.tag === "unknown" ||
         (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
+      // D1: the sentence's rule, the place in its own text and the store that decided its type
+      const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
+        rule: "store",
+        into: this.#placeText(root, path),
+        type: tags,
+        written,
+        decider: decider?.site ?? null,
+        brought,
+      });
       // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
       // an opaque value C5's obligation at its access (A7)
@@ -457,7 +782,7 @@ export class Consumers {
               .filter((item) => isExternal(item) && !admission.ownIngress(item, d, at));
             const against = admission.admitted(root, path);
             for (const { item } of offendingKinds(named))
-              this.#storeWarning(site, label, item, against);
+              this.#storeWarning(site, label, item, against, rule());
             // C9: the named data's own ingress keeps its boundary, as at a decided store
             for (const item of named)
               admission.boundaryFor(
@@ -507,7 +832,7 @@ export class Consumers {
         const nulls = items.filter((item) => item.tag === "null");
         // A6: a store of a rejection cycle is a possibility
         if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
-          this.#storeWarning(d.site, label, { ...bad[0]!, cert: "pos" }, tags);
+          this.#storeWarning(d.site, label, { ...bad[0]!, cert: "pos" }, tags, rule());
           return;
         }
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
@@ -528,18 +853,31 @@ export class Consumers {
               )
             : null;
         if (wrong !== null) {
-          this.#error("written-target", program.place(wrong.value!).site ?? d.site);
+          this.#error(
+            "written-target",
+            program.place(wrong.value!).site ?? d.site,
+            rule(),
+            this.#kindsOf(wrong.value!, d.node).map((item) => item.tag),
+          );
           admission.reject(d, root, path);
           return;
         }
         // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
         // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
         if (bad.length > 0 && d !== decider && !items.some(fitting)) {
-          this.#error(
-            "written-target",
+          const { site, brought } = this.#deferred(
             admission.siteAt(d, at, (elements) =>
               deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
             ),
+            root,
+            path,
+            !written && this.#decidedViaCopy(decider, root, path),
+          );
+          this.#error(
+            "written-target",
+            site,
+            rule(brought),
+            bad.map((item) => item.tag),
           );
           admission.reject(d, root, path);
           return;
@@ -565,6 +903,8 @@ export class Consumers {
           this.#error(
             "written-target",
             admission.siteAt(d, at, (elements) => elements.length > 0 && !elements.some(fitsAny)),
+            rule(),
+            items.map((item) => item.tag),
           );
           admission.reject(d, root, path);
           return;
@@ -618,6 +958,7 @@ export class Consumers {
             label,
             later(item),
             nullableTags,
+            rule(),
           );
         // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
         // a typed default holds keeps its own boundary (TABLE r4.66 (2))
@@ -652,6 +993,8 @@ export class Consumers {
                 admission.siteAt(d, at, (elements) =>
                   elements.some((element) => element.tag === "null" && element.cert === "def"),
                 ),
+                rule(),
+                ["null"],
               );
               admission.reject(d, root, path);
             } else
@@ -661,6 +1004,7 @@ export class Consumers {
                 later(item),
                 `check that the value is not null before ${label} holds it`,
                 label,
+                rule(),
                 tags.map(requiredKind),
               );
       };
@@ -926,12 +1270,17 @@ export class Consumers {
         : withoutEmpty(this.#run(values.valueItems(value, node, rest)));
     const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));
     const what = c.kind === "fallback" ? "the fallback" : "the default";
+    const rule: DiagnosticRule = {
+      rule: "fallback",
+      fallback: c.kind === "fallback",
+      type: against,
+    };
     // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written
     // destination admits `unknown`; its host data meets its boundary
     const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
     if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
       for (const { item } of offendingKinds(unknowns))
-        this.#storeWarning(site, label, item, against);
+        this.#storeWarning(site, label, item, against, rule);
       this.admission.boundariesAt(
         fallback,
         this.#obligation(
@@ -955,27 +1304,34 @@ export class Consumers {
     // r4.35); else both definite and incompatible, no kind of the fallback fitting (r4.46): an error at the fallback;
     // possible: one warning and check per offending kind
     const element = this.#offendingElement(value, node, rest, fitsKind);
-    if (element !== null) this.#error("written-target", element);
+    if (element !== null) this.#error("written-target", element.site, rule, element.kinds);
     else if (
       direct.filter(concrete).every((item) => item.cert === "def") &&
       off.every((item) => item.cert === "def") &&
       !fallback.some((item) => concrete(item) && fitsKind(item.tag))
     )
-      this.#error("written-target", site);
-    else for (const { item } of offendingKinds(off)) this.#storeWarning(site, label, item, against);
+      this.#error(
+        "written-target",
+        site,
+        rule,
+        off.map((item) => item.tag),
+      );
+    else
+      for (const { item } of offendingKinds(off))
+        this.#storeWarning(site, label, item, against, rule);
     return false;
   }
 
   /**
    * A8, r4.35: the innermost element of a fallback's literals at `rest` whose kinds are definite and none fits, in source
-   * order; `null` at the fallback itself or where no literal holds one.
+   * order, with its kinds; `null` at the fallback itself or where no literal holds one.
    */
   #offendingElement(
     value: PlaceId,
     node: FlowNode,
     rest: readonly string[],
     fitsKind: (tag: ItemTag) => boolean,
-  ): SourceSite | null {
+  ): { readonly site: SourceSite; readonly kinds: readonly ItemTag[] } | null {
     const { program, values } = this.pass;
     const pending: [PlaceId, FlowNode, number][] = rest.length === 0 ? [] : [[value, node, 0]];
     while (pending.length > 0) {
@@ -996,8 +1352,10 @@ export class Consumers {
           items.length > 0 &&
           items.every((item) => item.cert === "def" && concrete(item)) &&
           !items.some((item) => fitsKind(item.tag))
-        )
-          return program.place(child.value!).site;
+        ) {
+          const site = program.place(child.value!).site;
+          return site === null ? null : { site, kinds: items.map((item) => item.tag) };
+        }
       }
     }
     return null;
@@ -1012,6 +1370,7 @@ export class Consumers {
           node,
           c.site,
           name === "removeAt" ? "removeAt" : `the count of ${name}`,
+          name,
         );
       if (name === "remove") {
         // C12: a dict's key is text; where the receiver may also be a list or a set (or unknown), whose `remove` takes
@@ -1024,6 +1383,7 @@ export class Consumers {
             c.site,
             TEXT,
             "a dict key at remove",
+            { rule: "key" },
             ["string"],
             "operator",
             "operand",
@@ -1040,14 +1400,24 @@ export class Consumers {
     // C3
     if (family === "logic") {
       for (const argument of c.arguments)
-        this.#consume(argument, node, c.site, BOOLEAN, name, ["boolean"]);
+        this.#consume(argument, node, c.site, BOOLEAN, name, { rule: "boolean", operator: name }, [
+          "boolean",
+        ]);
       return;
     }
     if (family === "interpolation") {
       // C11, F26b: the value and every element of a list must be showable; a list is an element selection
       const value = c.arguments[0];
       if (value === undefined) return;
-      this.#consume(value, node, c.site, new Set([...SHOWN, "list"]), "${...}", [...SHOWN, "list"]);
+      this.#consume(
+        value,
+        node,
+        c.site,
+        new Set([...SHOWN, "list"]),
+        "${...}",
+        { rule: "shown", element: false },
+        [...SHOWN, "list"],
+      );
       if (this.#kindsOf(value, node).some((item) => item.tag === "list")) {
         this.#consume(
           value,
@@ -1055,6 +1425,7 @@ export class Consumers {
           c.site,
           new Set(SHOWN),
           "an element in ${...}",
+          { rule: "shown", element: true },
           SHOWN,
           "operator",
           "operand",
@@ -1109,6 +1480,18 @@ export class Consumers {
         (taking.length > 0 ? taking : rows).map((row) => row.operands[index]!),
       ).map((tag) => requiredKind(tag));
     };
+    // D1: an operand's rule names the kinds its place takes; the operation's, none
+    const rule = (index: number | null): DiagnosticRule => ({
+      rule: "operator",
+      operator: c.contract.name,
+      operand: index !== null,
+      domain:
+        index === null
+          ? []
+          : domain(index).filter(
+              (kind): kind is ValueKind => kind !== "unknown" && kind !== "non-null",
+            ),
+    });
     // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
     const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
     const operandText = (index: number): string => program.textAt(operandSite(index));
@@ -1135,8 +1518,21 @@ export class Consumers {
       const offending = operands.flatMap((items, index) =>
         items.every((item) => !rows.some((row) => matches(row, index, item.tag))) ? [index] : [],
       );
-      if (offending.length === 0) this.#error("operator", c.site);
-      else for (const index of offending) this.#error("operator", operandSite(index));
+      if (offending.length === 0)
+        this.#error(
+          "operator",
+          c.site,
+          rule(null),
+          operands.map((items) => items[0]!.tag),
+        );
+      else
+        for (const index of offending)
+          this.#error(
+            "operator",
+            operandSite(index),
+            rule(index),
+            operands[index]!.map((item) => item.tag),
+          );
       return;
     }
     const owe = (
@@ -1144,6 +1540,7 @@ export class Consumers {
       site: SourceSite,
       target: string,
       against: readonly RequiredKind[],
+      index: number | null,
     ): void =>
       this.#warning(
         "operator",
@@ -1156,6 +1553,7 @@ export class Consumers {
           against,
           `check the operand of ${c.contract.name} when it runs`,
         ),
+        rule(index),
       );
     // the kind obligations (§4: one per offending kind of an operand; every operand that may be null owes its own
     // null-check below, S4). §3.4, §10.5 (r4.10): in each failing combination without a null, an operand whose kind no
@@ -1202,10 +1600,10 @@ export class Consumers {
       if (unknown !== undefined) offend(index, unknown);
     });
     for (const [index, item] of offending.values())
-      owe(item, operandSite(index), operandText(index), domain(index));
+      owe(item, operandSite(index), operandText(index), domain(index), index);
     if (operation !== null) {
       const [item, against] = operation;
-      owe(item, c.site, program.textAt(c.site), against);
+      owe(item, c.site, program.textAt(c.site), against, null);
     }
     operands.forEach((items, index) => {
       const nullItem = items.find((item) => item.tag === "null");
@@ -1222,6 +1620,7 @@ export class Consumers {
           domain(index),
           `check that ${label} is not null before ${c.contract.name}`,
         ),
+        rule(index),
       );
     });
   }
@@ -1236,6 +1635,7 @@ export class Consumers {
         c.site,
         c.step === "entry" ? DICT : ITERABLE,
         "the iterable of for",
+        { rule: "iterable", entries: c.step === "entry" },
         ["list", "set", "dict"],
         "member-read",
         "null-check",
@@ -1246,7 +1646,9 @@ export class Consumers {
     // an index step (`xs[i]`) is no object's member; a property named `index` is (Astra B1)
     const indexStep = c.step === "index";
     if (!indexStep && typeof c.step !== "object") return;
-    if (typeof c.step === "object") this.#defaultNull(c.owner, node, c.site);
+    const receiverText = this.pass.program.textAt(this.#own(c.owner, c.site));
+    const member = indexStep ? "[i]" : `.${propertyName(property)}`;
+    if (typeof c.step === "object") this.#defaultNull(c.owner, node, c.site, member, "read");
     // §3.3: every receiver kind has the member, and every source the property
     {
       const quiet = this.#quietKinds(c.owner);
@@ -1313,14 +1715,29 @@ export class Consumers {
         quietOwner.every((tag) => tag === "object") &&
         !owners.some((item) => item.guarded === true)
       ) {
-        this.#error("member-read", c.site);
+        this.#error(
+          "member-read",
+          c.site,
+          { rule: "absent", receiver: receiverText, property: propertyName(property), store: null },
+          [],
+        );
         return;
       }
       if (missing.length > 0) extra.push([missing[0]!, `has .${property} before the read`]);
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
-    this.#memberChecks(c.site, label, owners, takes, `.${property}`, "read", extra);
+    this.#memberChecks(
+      c.site,
+      label,
+      owners,
+      takes,
+      `.${property}`,
+      "read",
+      receiverText,
+      member,
+      extra,
+    );
   }
 
   /** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
@@ -1347,8 +1764,17 @@ export class Consumers {
         `check that ${label} is a value with .${name} before the call`,
       ),
     );
-    this.#defaultNull(receiver, node, site);
-    this.#memberChecks(site, label, kinds, (tag) => hasMethod(tag, name), `.${name}()`, "call");
+    this.#defaultNull(receiver, node, site, `.${name}()`, "call");
+    this.#memberChecks(
+      site,
+      label,
+      kinds,
+      (tag) => hasMethod(tag, name),
+      `.${name}()`,
+      "call",
+      this.pass.program.textAt(this.#own(receiver, site)),
+      `.${name}()`,
+    );
   }
 
   /**
@@ -1363,9 +1789,17 @@ export class Consumers {
     kinds: readonly Item[],
     takes: (tag: ItemTag) => boolean,
     what: string,
-    use: string,
+    use: "read" | "call" | "store",
+    receiver: string,
+    member: string,
     extra: readonly Offending[] = [],
   ): void {
+    const rule: DiagnosticRule = { rule: "member", receiver, member, use };
+    const detail = {
+      text: receiver,
+      kinds: kinds.map((item) => item.tag),
+      member: member.replace(/^\.|\(\)$/g, ""),
+    };
     const nulls = kinds.filter((item) => item.tag === "null");
     const others = kinds.filter((item) => item.tag !== "null");
     const lacking = others.filter(
@@ -1376,7 +1810,12 @@ export class Consumers {
       items.length === kinds.length &&
       items.every((item) => item.cert === "def");
     if (definite(nulls) || definite(lacking)) {
-      this.#error("member-read", site);
+      this.#error(
+        "member-read",
+        site,
+        rule,
+        (definite(nulls) ? nulls : lacking).map((item) => item.tag),
+      );
       return;
     }
     const has = `has ${what} before the ${use}`;
@@ -1396,7 +1835,16 @@ export class Consumers {
         ]),
     ];
     for (const [item, on] of [...offending, ...extra])
-      this.#nullWarning("member-read", site, item, `check that ${label} ${on}`, label);
+      this.#nullWarning(
+        "member-read",
+        site,
+        item,
+        `check that ${label} ${on}`,
+        label,
+        rule,
+        ["non-null"],
+        detail,
+      );
   }
 
   /** C6: an element selection needs an element: M held by the contract, or by the exact value. */
@@ -1430,6 +1878,11 @@ export class Consumers {
       ) ?? makeItem("list");
     const target = this.#keyLabel(value);
     const against = [...new Set(collections.map((found) => found.tag))];
+    const rule: DiagnosticRule = {
+      rule: "selection",
+      collection: this.pass.program.textAt(this.#own(value, site)),
+      member: what,
+    };
     this.#warning(
       "member-read",
       site,
@@ -1441,6 +1894,7 @@ export class Consumers {
         (against.length > 0 ? against : ["list" as const]).map((tag) => requiredKind(tag)),
         `check that ${target} is not empty before ${what}`,
       ),
+      rule,
     );
   }
 
@@ -1457,6 +1911,7 @@ export class Consumers {
     site: SourceSite,
     need: ReadonlySet<ItemTag>,
     what: string,
+    rule: DiagnosticRule,
     against: readonly ItemTag[],
     kind: DiagnosticKind = "operator",
     obligationKind: ObligationKind = "operand",
@@ -1484,7 +1939,12 @@ export class Consumers {
       bad.length === items.length &&
       items.every((item) => item.cert === "def" && item.tag !== "unknown")
     ) {
-      this.#error(kind, at);
+      this.#error(
+        kind,
+        at,
+        rule,
+        items.map((item) => item.tag),
+      );
       return;
     }
     const label = this.#keyLabel(value);
@@ -1507,6 +1967,7 @@ export class Consumers {
           required,
           on(obliged),
         ),
+        rule,
       );
     const nullItem = bad.find((item) => item.tag === "null");
     if (nullItem !== undefined) owe(nullItem, "null-check");
@@ -1527,9 +1988,11 @@ export class Consumers {
     node: FlowNode,
     site: SourceSite,
     what: string,
+    use: CountUse,
     soft: Item | boolean = false,
   ): void {
     const { program, values } = this.pass;
+    const rule: DiagnosticRule = { rule: "count", use };
     const owedBy = typeof soft === "object" ? soft : null;
     // §3.3: a whole number on every run
     if (owedBy === null) {
@@ -1554,7 +2017,12 @@ export class Consumers {
       offending.length === items.length &&
       items.every((item) => item.cert === "def" && item.tag !== "unknown")
     ) {
-      this.#error("integer-use", at);
+      this.#error(
+        "integer-use",
+        at,
+        rule,
+        items.map((item) => item.tag),
+      );
       return;
     }
     // S4, §4: the null owes its null-check, every other offending kind its integer check
@@ -1570,6 +2038,7 @@ export class Consumers {
           ["integer"],
           `check that the ${what} is ${on} when it runs`,
         ),
+        rule,
       );
     const nullItem = offending.find((item) => item.tag === "null");
     if (nullItem !== undefined) owe(nullItem, "null-check", "not null");
@@ -1618,6 +2087,7 @@ export class Consumers {
         site,
         TEXT,
         `a dict key at ${what}`,
+        { rule: "key" },
         ["string"],
         "operator",
         "operand",
@@ -1626,7 +2096,14 @@ export class Consumers {
       );
     }
     if (other !== undefined)
-      this.#integerOnly(index, node, site, what, soft ? (get ? (unknown ?? other) : true) : false);
+      this.#integerOnly(
+        index,
+        node,
+        site,
+        what,
+        get ? "get" : "index",
+        soft ? (get ? (unknown ?? other) : true) : false,
+      );
   }
 
   /**
@@ -1682,7 +2159,13 @@ export class Consumers {
     return found;
   }
 
-  #defaultNull(owner: PlaceId, node: FlowNode, site: SourceSite): void {
+  #defaultNull(
+    owner: PlaceId,
+    node: FlowNode,
+    site: SourceSite,
+    member: string,
+    use: "read" | "call",
+  ): void {
     const { program, definitions, lists, values, contract } = this.pass;
     const key = contract.copiedKey(owner);
     const source =
@@ -1701,7 +2184,12 @@ export class Consumers {
     ) {
       const items = this.#run(values.valueItems(fallback.d.value!, fallback.d.node, []));
       if (items.length > 0 && items.every((item) => item.tag === "null"))
-        this.#error("member-read", site);
+        this.#error(
+          "member-read",
+          site,
+          { rule: "member", receiver: program.textAt(this.#own(owner, site)), member, use },
+          ["null"],
+        );
     }
   }
 
@@ -1747,18 +2235,27 @@ export class Consumers {
             ["integer"],
             `check that the ${what} is a whole number when it runs`,
           ),
+          { rule: "count", use: what === "index" ? "index" : "repeat" },
         );
         continue;
       }
       if (what === "condition")
-        this.#consume(place, node, site, BOOLEAN, "a condition", ["boolean"]);
+        this.#consume(
+          place,
+          node,
+          site,
+          BOOLEAN,
+          "a condition",
+          { rule: "boolean", operator: null },
+          ["boolean"],
+        );
       else if (what === "dict key")
-        this.#consume(place, node, site, TEXT, "a dict key", ["string"]);
+        this.#consume(place, node, site, TEXT, "a dict key", { rule: "key" }, ["string"]);
       else if (what === "index") {
         const projection = this.#indexProjection(use.span, use.file);
         if (projection !== undefined) this.#indexUse(projection, place, node, site, what);
-        else this.#integerOnly(place, node, site, what);
-      } else this.#integerOnly(place, node, site, what);
+        else this.#integerOnly(place, node, site, what, "index");
+      } else this.#integerOnly(place, node, site, what, "repeat");
     }
   }
 
@@ -1876,6 +2373,14 @@ export class Consumers {
           : property === "element"
             ? "an element store"
             : `a store of .${property === null ? property : propertyName(property)}`;
+      // D1: the receiver in its own text, and the member as the access writes it
+      const receiverText = owner !== undefined ? program.textAt(this.#own(owner, d.site)) : label;
+      const member =
+        d.kind === "add"
+          ? `.${method ?? "add"}()`
+          : property === "element"
+            ? "[i]"
+            : `.${property === null ? "" : propertyName(property)}`;
       // C5c, ADR 1.4: a store of a property into objects: every known source lacks it, an error at the literal; some
       // lacks it, its member obligation; every source has it, nothing
       const extra: Offending[] = [];
@@ -1888,7 +2393,17 @@ export class Consumers {
         const alone = receiver.every((item) => item.tag === "object");
         // never an error under a guard of the receiver (§3.2)
         if (presence.state === "none" && alone && !receiver.some((item) => item.guarded === true)) {
-          this.#error("member-read", presence.literal ?? d.site);
+          this.#error(
+            "member-read",
+            presence.literal ?? d.site,
+            {
+              rule: "absent",
+              receiver: receiverText,
+              property: propertyName(property),
+              store: presence.literal === null ? null : at,
+            },
+            [],
+          );
           continue;
         }
         if (presence.state !== "all")
@@ -1897,7 +2412,7 @@ export class Consumers {
             `has .${propertyName(property)} before the store`,
           ]);
       }
-      this.#memberChecks(at, label, receiver, takes, what, "store", extra);
+      this.#memberChecks(at, label, receiver, takes, what, "store", receiverText, member, extra);
     }
   }
 
@@ -1946,6 +2461,14 @@ export class Consumers {
           ? `check that ${speaker} is not null and has .${c.property}`
           : `check that ${speaker} is not null and has writable .${c.property}`,
         speaker,
+        {
+          rule: "member",
+          receiver: speaker,
+          member: `.${c.property}`,
+          use: c.kind === "speakerRead" ? "read" : "store",
+        },
+        ["non-null"],
+        { text: speaker, kinds: ["speaker"], member: c.property },
       );
     }
   }

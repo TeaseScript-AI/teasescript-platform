@@ -131,7 +131,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV009` | Chained range | error | name pass |
 | `TSV010` | Invalid range bound or empty range | error | type checker |
 | `TSV011` | Invalid wait, timer, repeat count, pacing, or timeout | error or warning | type checker |
-| `TSV012` | Invalid `for` loop source | error | type checker |
+| `TSV012` | Invalid `for` loop source | error or warning | type checker |
 | `TSV013` | Duplicate function | error | name pass |
 | `TSV014` | Duplicate parameter | error | name pass |
 | `TSV015` | Required parameter after a default | error | name pass |
@@ -157,7 +157,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV039` | Invalid prefill | error | type checker |
 | `TSV040` | List where text is shown | error | type checker |
 | `TSV041` | Type mismatch | error or warning | type checker |
-| `TSV042` | Value that cannot be shown | error | type checker |
+| `TSV042` | Value that cannot be shown | error or warning | type checker |
 | `TSV043` | Unsupported operand, method, or property | error or warning | type checker, plan analysis |
 | `TSV044` | Mixed types | error | type checker |
 | `TSV045` | Negative list index | error | type checker |
@@ -189,6 +189,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV072` | `call` of the running file | error | plan analysis |
 | `TSV073` | `call` that may start the running file | warning | plan analysis |
 | `TSV074` | `goto` that may lead to a file of declarations only | warning | plan analysis |
+| `TSV075` | Union with a whole list, set, or dict beside another type | error | type checker |
 
 ## Tags (TST)
 

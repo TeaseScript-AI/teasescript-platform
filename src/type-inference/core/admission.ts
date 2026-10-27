@@ -3534,11 +3534,21 @@ export class Admission {
    * one type at every path their known structure gives, a copy's or a call's its source's (F2): the earliest element's,
    * or a copy of a written binding's written type (A4), unless the literal lands directly in a written place, whose
    * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
-   * (r4.35) and is rejected: later uses see the earliest element's type (A6).
+   * (r4.35) and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
+   * store, the literal's cell, the path, the earliest element's kinds there and the offending element's (D1).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
-    error: (site: SourceSite) => void,
+    error: (
+      site: SourceSite,
+      found: {
+        readonly d: Definition;
+        readonly cell: PlaceId;
+        readonly path: readonly string[];
+        readonly decided: readonly ItemTag[];
+        readonly kinds: readonly ItemTag[];
+      },
+    ) => void,
   ): void {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
@@ -3617,7 +3627,13 @@ export class Admission {
                 offends(at, [...new Set(deciding(items).map((item) => item.tag))]),
               )
             : null;
-        error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site));
+        error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
+          d,
+          cell,
+          path,
+          decided: first.get(at)!.tags,
+          kinds: [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))],
+        });
         this.reject(d, cell, path);
       };
       // a named literal's elements are compared at those paths, a literal's own elements at their structure's; per source

@@ -186,7 +186,7 @@ export const DIAGNOSTIC_CODES = {
     "Invalid wait, timer, repeat count, pacing, or timeout",
     DOCS.values,
   ),
-  TSV012: entry(["type checker"], "error", "Invalid `for` loop source", DOCS.values),
+  TSV012: entry(["type checker"], ["error", "warning"], "Invalid `for` loop source", DOCS.values),
   TSV013: entry(["name pass"], "error", "Duplicate function", DOCS.values),
   TSV014: entry(["name pass"], "error", "Duplicate parameter", DOCS.values),
   TSV015: entry(["name pass"], "error", "Required parameter after a default", DOCS.values),
@@ -238,7 +238,7 @@ export const DIAGNOSTIC_CODES = {
   TSV039: entry(["type checker"], "error", "Invalid prefill", DOCS.values),
   TSV040: entry(["type checker"], "error", "List where text is shown", DOCS.values),
   TSV041: entry(["type checker"], ["error", "warning"], "Type mismatch", DOCS.values),
-  TSV042: entry(["type checker"], "error", "Value that cannot be shown", DOCS.values),
+  TSV042: entry(["type checker"], ["error", "warning"], "Value that cannot be shown", DOCS.values),
   TSV043: {
     ...entry(
       ["type checker", "plan analysis"],
@@ -324,6 +324,12 @@ export const DIAGNOSTIC_CODES = {
     ["plan analysis"],
     "warning",
     "`goto` that may lead to a file of declarations only",
+    DOCS.values,
+  ),
+  TSV075: entry(
+    ["type checker"],
+    "error",
+    "Union with a whole list, set, or dict beside another type",
     DOCS.values,
   ),
 

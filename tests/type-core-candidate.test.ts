@@ -229,11 +229,13 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
  * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
  */
 test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
-  const kinds: Readonly<Record<string, string>> = {
-    TSV041: "written-target",
-    TSV011: "integer-use",
-    TSV043: "integer-use",
+  // the codes of each record kind's rules on the route (D3): a store's or a literal's, a count's or an index's, a member's
+  const codes: Readonly<Record<string, readonly string[]>> = {
+    "written-target": ["TSV041", "TSV044"],
+    "integer-use": ["TSV011", "TSV043"],
+    "member-read": ["TSV043"],
   };
+  const routed = new Set(Object.values(codes).flat());
   const accepted: string[] = [];
   const outside = new Map<string, number>();
   const classes = new Map<string, number>();
@@ -259,27 +261,46 @@ test("every positive-list record the candidate route reaches plans and runs as i
     accepted.push(record.name);
     assert.equal(record.files.length, 1, `${record.name}: one file`);
     const source = record.files[0]!.source;
-    // records: the diagnostics at their whole sites, the obligations exactly, alike on the one-file route
+    // records: the diagnostics at their whole sites, each with a code of its kind's rules (D2, D3), the obligations
+    // exactly, alike on the one-file route
+    const reported = (compiled: Pick<CompilationResult, "diagnostics">) =>
+      compiled.diagnostics.filter((diagnostic) => routed.has(diagnostic.code));
     const diagnosed = (compiled: Pick<CompilationResult, "diagnostics">): string[] =>
-      compiled.diagnostics
-        .filter((diagnostic) => kinds[diagnostic.code] !== undefined)
+      reported(compiled)
         .map(
           (diagnostic) =>
-            `${diagnostic.severity} ${diagnostic.code === "TSV043" && diagnostic.message.includes("property or member") ? "member-read" : kinds[diagnostic.code]} ` +
-            `${diagnostic.span.start.offset}:${diagnostic.message.includes("property or member") ? diagnostic.span.start.offset : diagnostic.span.end.offset}`,
+            `${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset} ` +
+            diagnostic.message,
         )
         .sort();
+    const site = (severity: string, start: number, end: number) => `${severity} ${start}:${end}`;
     assert.deepEqual(
-      diagnosed(result),
+      reported(result)
+        .map((diagnostic) =>
+          site(diagnostic.severity, diagnostic.span.start.offset, diagnostic.span.end.offset),
+        )
+        .sort(),
       record.expected.diagnostics
-        .map(
-          (diagnostic) =>
-            `${diagnostic.class === "compile-error" ? "error" : "warning"} ${diagnostic.kind} ` +
-            `${diagnostic.site.offset}:${diagnostic.kind === "member-read" ? diagnostic.site.offset : diagnostic.site.end}`,
+        .map((diagnostic) =>
+          site(
+            diagnostic.class === "compile-error" ? "error" : "warning",
+            diagnostic.site.offset,
+            diagnostic.site.end,
+          ),
         )
         .sort(),
       record.name,
     );
+    for (const diagnostic of reported(result))
+      assert.ok(
+        record.expected.diagnostics.some(
+          (expected) =>
+            expected.site.offset === diagnostic.span.start.offset &&
+            expected.site.end === diagnostic.span.end.offset &&
+            codes[expected.kind]?.includes(diagnostic.code) === true,
+        ),
+        `${record.name}: ${diagnostic.code} at ${diagnostic.span.start.offset}`,
+      );
     const request = coreRequest(record.files);
     assert.ok(request !== null, record.name);
     assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
@@ -857,8 +878,8 @@ test("admission's decided types and C9's boundary checks compile and run on the 
     ],
     // A8 (the owner's F2): a named list in a literal brings its elements' type, as a literal one does; whole numbers
     // with numbers
-    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV041@41"], null, []],
-    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV041@43"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [a, b]\nexit\n', ["error TSV044@41"], null, []],
+    ['let a = [1]\nlet b = ["bad"]\nlet xs = [[a], [b]]\nexit\n', ["error TSV044@43"], null, []],
     ['let a = [1]\nlet b = ["bad"]\nlet xs = a\nxs = b\nexit\n', ["error TSV041@44"], null, []],
     ['let a = [1]\nlet b = [2.5]\nlet xs = [a, b]\nsay "after"\nexit\n', [], [], [[2, null]]],
     // C9: external data stored whole into a written collection, checked there with its elements
@@ -1162,12 +1183,20 @@ test("parentheses answer for their content: a parenthesised count and index read
   // on the candidate route: the content's site, the kinds the core names, and the check at the content
   const count = inBothOrders(() => candidate("repeat ((2.5)) {}\nexit\n").diagnostics);
   assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
-  assert.match(count[0]!.message, /but '2\.5' is a number\.$/);
+  assert.equal(
+    count[0]!.message,
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round it with " +
+      "floor(...), round(...), or ceil(...) first.",
+  );
   const listed = inBothOrders(
     () => candidate("let xs = [1, 2]\nlet y = xs[(0.5)]\nexit\n").diagnostics,
   );
   assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
-  assert.match(listed[0]!.message, /but '0\.5' is a number\.$/);
+  assert.equal(
+    listed[0]!.message,
+    "A list index must be a whole number (integer), but '0.5' is a number. Round it with floor(...), round(...), " +
+      "or ceil(...) first.",
+  );
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
   assert.deepEqual(sited(host), ["warning TSV011@9"]);
   assert.ok(host.plan !== null);
@@ -1221,10 +1250,10 @@ test("a projection of a literal carries its elements' types and host data on the
   // A8 through the projection, direct and named; A2 across a change of the named list; C1 and C9 at the store, before
   // any later effect
   for (const [source, diagnostics] of [
-    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV041@20"]],
+    ['let xs = [[[1]][0], [["bad"]][0]]\nsay "AFTER"\nexit\n', ["error TSV044@20"]],
     [
       'let v1 = [1]\nlet v2 = ["bad"]\nlet xs = [[v1][0], [v2][0]]\nsay "AFTER"\nexit\n',
-      ["error TSV041@49"],
+      ["error TSV044@49"],
     ],
     [
       'let a = [1]\nlet xs = []\nxs = [[a][0], [[1]][0]]\na = ["bad"]\nxs = [[a][0], [[1]][0]]\nexit\n',

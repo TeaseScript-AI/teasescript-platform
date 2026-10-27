@@ -13,7 +13,8 @@ import { propertyName } from "./program.js";
 /**
  * The structured result of the coarse core (checkpoint 9, TABLE §3.4, §4, §10.5): the outcome, the diagnostics with
  * their writers, context words and obligations, and the runtime checks; and the record the tests compare with the
- * expectation set. A diagnostic here is its class, kind and site: messages and codes come with the sentences (D1–D3).
+ * expectation set. A diagnostic carries its class, kind, site, code and rule, with what its sentences name; `messages.ts`
+ * composes them (D1–D3). The record the set compares holds no sentence.
  */
 
 export type DiagnosticClass = "compile-error" | "warning-runtime-check";
@@ -53,7 +54,99 @@ export interface Provenance {
   /** The writer of the item that explains the offending kind, when it has one (F28). */
   readonly writers: readonly Writer[];
   readonly context: ContextWord;
+  /** What the context word's sentence names, where the core knows it at the warning (`messages.ts`, D1). */
+  readonly detail: ContextDetail;
 }
+
+/**
+ * What a context word's sentence names beside the warned expression's own text (D1, the drafts of
+ * `fable-3a-cp9-context-words.md`), each where the warning's own site shows it, else `null`: whether the value comes
+ * from outside the script (`unknown`, a word warnings without another one carry too), the function the
+ * expression is in (`call`), the label its line is entered at (`label`), the block it is in (`handler`), the place a
+ * later store decides and that store (`later`), and the receiver it reads a member of (`member`, `missing`,
+ * `unmodelled`).
+ */
+export interface ContextDetail {
+  /** `unknown`: the value comes from outside the script (host data, a typeless `load` or `fromJson`, F19). */
+  readonly outside: boolean;
+  readonly callable: string | null;
+  readonly label: string | null;
+  readonly handler: "button" | "timer" | "media" | null;
+  readonly later: {
+    readonly place: string;
+    readonly kinds: readonly ItemTag[];
+    readonly decider: SourceSite;
+  } | null;
+  readonly receiver: {
+    readonly text: string;
+    readonly kinds: readonly ItemTag[];
+    readonly member: string;
+  } | null;
+}
+
+/** A count or an index (C2): what uses it. */
+export type CountUse = "repeat" | "index" | "get" | "removeAt" | "take" | "takeLast";
+
+/**
+ * The rule a diagnostic's consumer applies (TABLE §4), with what its sentence names, in the source's own text (D2: the
+ * target names stay in the obligation): `messages.ts` gives each its code and its sentences (D1, D3).
+ */
+export type DiagnosticRule =
+  /** C1, C7, A8, A9: a store, an argument or a return into `into`, of a written or a decided type. */
+  | {
+      readonly rule: "store";
+      readonly into: string;
+      readonly type: readonly ItemTag[];
+      readonly written: boolean;
+      /** The store that decided the type (A2), where none is written. */
+      readonly decider: SourceSite | null;
+      /** A2's deferred field (ADR 0021 rule 1.1): the copy or store that brought the value of another kind. */
+      readonly brought: SourceSite | null;
+    }
+  /** C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for. */
+  | { readonly rule: "fallback"; readonly fallback: boolean; readonly type: readonly ItemTag[] }
+  | { readonly rule: "count"; readonly use: CountUse }
+  /** C3: a condition (`operator` null), or an operand of `and`, `or`, `not`. */
+  | { readonly rule: "boolean"; readonly operator: string | null }
+  /** C4: an operand of an operator, with the kinds it takes there, or the operation where no operand alone offends. */
+  | {
+      readonly rule: "operator";
+      readonly operator: string;
+      readonly operand: boolean;
+      readonly domain: readonly ItemTag[];
+    }
+  /** C11: a value `${...}` shows, or an element of a list it shows. */
+  | { readonly rule: "shown"; readonly element: boolean }
+  /** C12: a dict key. */
+  | { readonly rule: "key" }
+  /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
+  | { readonly rule: "iterable"; readonly entries: boolean }
+  /** C5a–c, F19a, ADR 1.5: a member of `receiver` (`.n`, `.add()`, `[...]`) at a read, a call or a store. */
+  | {
+      readonly rule: "member";
+      readonly receiver: string;
+      readonly member: string;
+      readonly use: "read" | "call" | "store";
+    }
+  /**
+   * C5c, ADR 1.4: a property no source of `receiver` has: a read's at the read; a store's at the object that lacks it,
+   * `store` the store through the member.
+   */
+  | {
+      readonly rule: "absent";
+      readonly receiver: string;
+      readonly property: string;
+      readonly store: SourceSite | null;
+    }
+  /** C6: an element selection (`.first`, `.removeLast()`, `${...}`) of `collection`. */
+  | { readonly rule: "selection"; readonly collection: string; readonly member: string }
+  /** ADR 0021 1.3, A8: a literal's elements, at `path` below them, of one type: the earliest element's, `type`. */
+  | {
+      readonly rule: "mixed";
+      readonly collection: "list" | "set" | "dict";
+      readonly path: readonly string[];
+      readonly type: readonly ItemTag[];
+    };
 
 /**
  * A written type that V30 §13 does not allow: a union that holds a whole list, set or dict beside another type
@@ -62,6 +155,7 @@ export interface Provenance {
 export interface WrittenTypeError {
   readonly class: "compile-error";
   readonly kind: "written-type";
+  readonly code: CoreCode;
   /** The whole written type. */
   readonly site: SourceSite;
   /** The offending union, the first in source order. */
@@ -70,14 +164,30 @@ export interface WrittenTypeError {
   readonly suggestion: string | null;
 }
 
-/** An error, a written type's error, or a warning with its explanation and its one obligation (§4). */
+/** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
+export type CoreCode = "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075";
+
+/**
+ * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
+ * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
+ */
 export type CoreDiagnostic =
-  | { readonly class: "compile-error"; readonly kind: DiagnosticKind; readonly site: SourceSite }
+  | {
+      readonly class: "compile-error";
+      readonly kind: DiagnosticKind;
+      readonly code: CoreCode;
+      readonly site: SourceSite;
+      readonly rule: DiagnosticRule;
+      readonly kinds: readonly ItemTag[];
+    }
   | WrittenTypeError
   | {
       readonly class: "warning-runtime-check";
       readonly kind: DiagnosticKind;
+      readonly code: CoreCode;
       readonly site: SourceSite;
+      readonly rule: DiagnosticRule;
+      readonly kinds: readonly ItemTag[];
       readonly provenance: Provenance;
       readonly obligation: Obligation;
     };
@@ -146,9 +256,9 @@ export function offendingKinds(items: readonly Item[]): OffendingKind[] {
   return [...groups.values()];
 }
 
-/** A warning's provenance (F28): the writer of the item that explains it and its context word. */
-export function provenanceOf(item: Item): Provenance {
-  return { writers: item.writer === null ? [] : [item.writer], context: contextOf(item) };
+/** A warning's provenance (F28): the writer of the item that explains it, its context word and the word's detail. */
+export function provenanceOf(item: Item, detail: ContextDetail): Provenance {
+  return { writers: item.writer === null ? [] : [item.writer], context: contextOf(item), detail };
 }
 
 /**

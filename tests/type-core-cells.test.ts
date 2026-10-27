@@ -44,8 +44,9 @@ test("the core gives the expected record for every record of the cells it comple
     "the adapters' records (S9b)": 9,
     "stage 3b's cells (S10)": 653,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
+    "site moved to the first direct read or store by TABLE r4.75 (4); set correction pending": 5,
   });
-  assert.equal(asserted.length, 1_318);
+  assert.equal(asserted.length, 1_313);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -2923,12 +2924,13 @@ test("a named collection in a literal or an add brings its elements' types to th
     ["inline lists", `let xs = [[1], ["bad"]]${after}`, "compile-error", [16]],
     ["an inline add", `let xs = [[1]]\nxs.add(["bad"])${after}`, "compile-error", [22]],
     ["inline records", `let xs = [{n: 1}, {n: "bad"}]${after}`, "compile-error", [22]],
-    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12)
+    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12): reached only through
+    // copies, at its first direct read, the copy `b` its related site (ADR 0021 rule 1.1, r4.75 (4))
     [
       "records, a field read",
       `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}${after}`,
       "compile-error",
-      [47],
+      [57],
     ],
     [
       "a record beside a literal one",

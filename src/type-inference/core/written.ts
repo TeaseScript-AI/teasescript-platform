@@ -150,6 +150,7 @@ function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null
     : {
         class: "compile-error",
         kind: "written-type",
+        code: "TSV075",
         site: siteOf(file, type.span),
         union: siteOf(file, first.span),
         suggestion: suggestionFor(first),

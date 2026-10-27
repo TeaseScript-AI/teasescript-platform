@@ -372,7 +372,8 @@ const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 /**
  * Programs whose receiver gains a reference kind only round its own cycle (r4.44), whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
- * control, with their diagnostics (a class `warning-runtime-check` unless written). A return that may not fit the result
+ * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access, TABLE
+ * §3.4). A return that may not fit the result
  * its function's first return decides owes C1's check (A2, F23), at the result and at each path of the first return's
  * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5) and is rejected, so
  * the result's use sees the first return's record (A6, F23).
@@ -383,8 +384,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     `${NARRATOR}function g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nfunction f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nrepeat f(false) {}\nexit`,
     [
       "integer-use f(false)",
-      "member-read g(false)",
-      "member-read g(true)",
+      "member-read g(false).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
     ],
   ],
@@ -393,8 +394,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     `${NARRATOR}function f(flag: boolean) {\n  if flag { return g(true).custom }\n  return g(false).custom\n}\nfunction g(flag: boolean) {\n  if flag { return {custom: narrator} }\n  return f(true)\n}\nrepeat f(false) {}\nexit`,
     [
       "integer-use f(false)",
-      "member-read g(false)",
-      "member-read g(true)",
+      "member-read g(false).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
     ],
   ],
@@ -404,7 +405,7 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read f(true)",
+      "member-read f(true).removeFirst()",
       "member-read f(true).removeFirst()",
       "written-target f(true).removeFirst()",
     ],
@@ -415,8 +416,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read g(true)",
-      "member-read g(true)",
+      "member-read g(true).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
       "written-target f(true)",
       "written-target g(true).custom",
@@ -429,8 +430,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read f(true)",
-      "member-read f(true)",
+      "member-read f(true).custom",
+      "member-read f(true).custom",
       "written-target f(true).custom",
     ],
   ],
@@ -440,8 +441,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read g(true)",
-      "member-read g(true)",
+      "member-read g(true).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
       "written-target f(true)",
       "written-target g(true).custom",
@@ -455,8 +456,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read g(true)",
-      "member-read g(true)",
+      "member-read g(true).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
       "written-target f(true)",
       "written-target g(true).custom",
@@ -468,8 +469,8 @@ const REFERENCE_CYCLES: readonly (readonly [string, string, readonly string[]])[
     [
       "integer-use f(false)",
       "integer-use f(false)",
-      "member-read g(true)",
-      "member-read g(true)",
+      "member-read g(true).custom",
+      "member-read g(true).custom",
       "written-target f(true)",
       "written-target f(true)",
       "written-target g(true).custom",
@@ -545,9 +546,10 @@ test("an external value read below its record without a cycle keeps its reasons 
       .map((d) => `${d.kind} ${d.class} ${source.slice(d.site.start, d.site.end)}`)
       .sort();
   });
+  // (the member read at the whole access, its receiver included, TABLE §3.4)
   const want = [
     "integer-use warning-runtime-check f(true).custom.custom",
-    "member-read warning-runtime-check f(true).custom",
+    "member-read warning-runtime-check f(true).custom.custom",
   ];
   assert.deepEqual(got, [want, want]);
   const record = compactAnalysis(request);

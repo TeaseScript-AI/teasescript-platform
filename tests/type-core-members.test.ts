@@ -294,8 +294,9 @@ test("every member a receiver kind has answers its declared result to a consumer
             : use.collection;
           const label = inner;
           const collection = itemsAt(inner);
+          // (the member check at the whole access, its parentheses included, TABLE §3.4)
           if (unknown(collection))
-            expected.push(`null-check ${label} [non-null] @${siteOf(inner)}`);
+            expected.push(`null-check ${label} [non-null] @${siteOf(use.value)}`);
           if (unknown(collection) || value.some((item) => item.tag === "empty"))
             expected.push(`empty-check ${label} [list] @${siteOf(use.value)}`);
           // a collection's element is never nothing either, so an empty answer cannot hide its consumer's check

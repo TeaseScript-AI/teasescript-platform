@@ -20,20 +20,32 @@ import {
   outcomeOf,
   provenanceOf,
   targetName,
+  type ContextDetail,
   type CoreDiagnostic,
   type CoreResult,
   type DiagnosticKind,
+  type DiagnosticRule,
   type Obligation,
 } from "../src/type-inference/core/result.js";
+import type { SourceSite } from "../src/type-inference/graph.js";
 import { itemScope } from "./helpers/type-core-items.js";
 import {
   compactRecord,
   readCompactRecord,
   recordDifferences,
-  type CompactCheck,
   type CompactRecord,
   type CompactSite,
 } from "./helpers/type-core-records.js";
+
+/** A context word's detail where the word's sentence names nothing more. */
+const NO_DETAIL: ContextDetail = {
+  outside: false,
+  callable: null,
+  label: null,
+  handler: null,
+  later: null,
+  receiver: null,
+};
 
 // The core's structured result (TABLE §3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
 // owe their own diagnostics, how targets are named, and the record the tests compare with the expectation set.
@@ -84,10 +96,15 @@ test("an unknown whose word comes first explains an obligation, and its writer i
   );
   assert.equal(explainingItem([external, unknown(REASON.external, 7)]), external);
   assert.equal(explainingItem([]), undefined);
-  assert.deepEqual(provenanceOf(opaque), { writers: [opaque.writer], context: "unmodelled" });
-  assert.deepEqual(provenanceOf(makeItem("null", null, { cert: "pos" })), {
+  assert.deepEqual(provenanceOf(opaque, NO_DETAIL), {
+    writers: [opaque.writer],
+    context: "unmodelled",
+    detail: NO_DETAIL,
+  });
+  assert.deepEqual(provenanceOf(makeItem("null", null, { cert: "pos" }), NO_DETAIL), {
     writers: [],
     context: "unknown",
+    detail: NO_DETAIL,
   });
 });
 
@@ -126,6 +143,13 @@ test("a target names a selection or index `element`, a dict's value `entry` (§1
 
 const at = (start: number, end: number, file = 0) => ({ file, start, end });
 
+/** A diagnostic's rule where the record does not show it: the record holds no sentence. */
+const RULE: DiagnosticRule = { rule: "count", use: "repeat" };
+
+function error(kind: DiagnosticKind, site: SourceSite): CoreDiagnostic {
+  return { class: "compile-error", kind, code: "TSV011", site, rule: RULE, kinds: [] };
+}
+
 function warning(
   kind: DiagnosticKind,
   item: Item,
@@ -134,8 +158,11 @@ function warning(
   return {
     class: "warning-runtime-check",
     kind,
+    code: "TSV011",
     site: obligation.site,
-    provenance: provenanceOf(item),
+    rule: RULE,
+    kinds: [item.tag],
+    provenance: provenanceOf(item, NO_DETAIL),
     obligation: { ...obligation, boundary: false },
   };
 }
@@ -161,7 +188,7 @@ const RECORDS: readonly {
     // let local = 1.5 / global n = local, default: 1 / repeat n {} / exit
     name: "cp9-cells/F1a/executable",
     paths: ["main.tease"],
-    result: result([{ class: "compile-error", kind: "integer-use", site: at(52, 53) }]),
+    result: result([error("integer-use", at(52, 53))]),
     expected: {
       outcome: "compile-error",
       diagnostics: [
@@ -282,7 +309,7 @@ test("an external ingress merged with an opaque unknown keeps both reasons and r
     const [merged] = mergeItems(order, scope);
     assert.equal(merged?.reasons, REASON.external | REASON.opaque);
     assert.ok(merged?.ingress !== undefined);
-    assert.equal(provenanceOf(merged!).context, "unknown");
+    assert.equal(provenanceOf(merged!, NO_DETAIL).context, "unknown");
     const record = coreRecord(
       result([
         warning("operator", merged!, {
@@ -418,7 +445,7 @@ test("the comparison counts each check, compares whole sites, and asserts only t
       "extra check copy-type meter [integer|null] boundary main.tease:30-36 ×1",
     ],
   );
-  // a member read's diagnostic and the null-check at its site compare by their start (`startOnly`), anything else whole
+  // a member read's diagnostic and its null-check compare whole too (TABLE §3.4, r4.62): the receiver's span alone differs
   const member: CompactRecord = {
     outcome: "warning-runtime-check",
     diagnostics: [
@@ -442,7 +469,7 @@ test("the comparison counts each check, compares whole sites, and asserts only t
   };
   const receiver = <T extends { readonly site: CompactSite }>(entry: T): T => ({
     ...entry,
-    site: { ...entry.site, end: entry.site.offset === 20 ? 25 : entry.site.end + 1 },
+    site: { ...entry.site, end: 25 },
   });
   assert.deepEqual(
     recordDifferences(member, {
@@ -450,36 +477,11 @@ test("the comparison counts each check, compares whole sites, and asserts only t
       diagnostics: member.diagnostics.map(receiver),
       checks: member.checks.slice(0, 1).map(receiver).concat(member.checks.slice(1)),
     }),
-    [],
-  );
-  assert.deepEqual(recordDifferences(member, { ...member, checks: member.checks.map(receiver) }), [
-    "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
-    "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
-  ]);
-  // only C5's null-check: a destination's own null-check at the member read's start (C1's) compares whole (Codex r20 H3)
-  const destination: CompactCheck = {
-    kind: "null-check",
-    target: "n",
-    against: ["integer"],
-    boundary: false,
-    site: { file: "main.tease", offset: 20, end: 40 },
-  };
-  const both: CompactRecord = { ...member, checks: [...member.checks, destination] };
-  assert.deepEqual(
-    recordDifferences(both, {
-      ...both,
-      checks: [...member.checks, { ...destination, site: { ...destination.site, end: 41 } }],
-    }),
     [
-      "missing check null-check n [integer] main.tease:20-40 ×1",
-      "extra check null-check n [integer] main.tease:20-41 ×1",
-    ],
-  );
-  assert.deepEqual(
-    recordDifferences(both, { ...both, checks: [...member.checks.map(receiver), destination] }),
-    [
-      "missing check copy-type meter [integer|null] boundary main.tease:12-17 ×1",
-      "extra check copy-type meter [integer|null] boundary main.tease:12-18 ×1",
+      "missing diagnostic member-read warning-runtime-check main.tease:20-28 ×1",
+      "extra diagnostic member-read warning-runtime-check main.tease:20-25 ×1",
+      "missing check null-check value [non-null] main.tease:20-28 ×1",
+      "extra check null-check value [non-null] main.tease:20-25 ×1",
     ],
   );
   assert.throws(
@@ -503,9 +505,9 @@ test("the comparison counts each check, compares whole sites, and asserts only t
 });
 
 test("the outcome is the worst class among the diagnostics", () => {
-  const error: CoreDiagnostic = { class: "compile-error", kind: "operator", site: at(0, 1) };
+  const failed = error("operator", at(0, 1));
   const caution = RECORDS[2]!.result.diagnostics[0]!;
   assert.equal(outcomeOf([]), "valid");
   assert.equal(outcomeOf([caution]), "warning-runtime-check");
-  assert.equal(outcomeOf([caution, error]), "compile-error");
+  assert.equal(outcomeOf([caution, failed]), "compile-error");
 });

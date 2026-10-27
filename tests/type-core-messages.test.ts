@@ -1,0 +1,344 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
+import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
+import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+
+/*
+ * The sentences of the coarse core's diagnostics (D1–D3, TABLE r4.53, `core/messages.ts`): each consumer's and
+ * obligation's first sentence as an error and as a warning, with its rule's code, and each context word's second
+ * sentence on the set's record for that word. The sentences are the owner's: a change here is a change of what an author
+ * reads.
+ */
+
+const records = readFixture();
+
+/** Each diagnostic of a project's analysis: `E` or `W`, its code, its site's text, and its message. */
+function messages(files: readonly SourceFile[]): string[] {
+  return reported(files).map(
+    ({ error, code, site, message }) => `${error ? "E" : "W"} ${code} '${site}': ${message}`,
+  );
+}
+
+function reported(files: readonly SourceFile[]) {
+  const request = coreRequest(files);
+  assert.ok(request !== null, "the files parse and resolve");
+  const source = messageSource(files.map((file) => file.source));
+  return analyseCore(request).diagnostics.map((diagnostic) => ({
+    error: diagnostic.class === "compile-error",
+    code: diagnostic.code,
+    site: source.text(diagnostic.site),
+    message: coreMessage(diagnostic, source),
+  }));
+}
+
+const main = (source: string): SourceFile[] => [{ path: "main.tease", source }];
+
+const CHECKED = "so the script checks it when it runs.";
+const OUTSIDE = (name: string): string =>
+  `'${name}' comes from outside the script, so its kind is known only when the script runs.`;
+const COUNT = "A repeat count must be a whole number (integer) of at least 0";
+const ROUND = "Round it with floor(...), round(...), or ceil(...) first.";
+
+test("each context word's sentence says why the compiler could not decide, on the set's record for the word (D1, §3.4)", () => {
+  const word = (name: string, expected: readonly string[]): void => {
+    const record = records.find((found) => found.name === name);
+    assert.ok(record !== undefined, name);
+    assert.deepEqual(messages(record.files), expected, name);
+  };
+  const count = `W TSV011 'n': ${COUNT}, but 'n' may be a number here, ${CHECKED}`;
+  word("cp9-cells/X4/entered-label", [
+    `${count} This line is also reached by 'goto again', and 'n' may change before that jump.`,
+  ]);
+  word("cp9-cells/A7/later-decider", [
+    "W TSV041 'source.removeAt(0)': 'copy' holds a whole number (integer), but 'source.removeAt(0)' may be text " +
+      `(string) here, ${CHECKED} 'copy' holds whole numbers from line 3 on, but the value copied here may be ` +
+      "something else.",
+  ]);
+  word("cp9-cells/F11/missing", [
+    "W TSV043 'room.count': The compiler cannot tell whether 'room' has property 'count' here, so the script checks " +
+      "'room.count' when it runs. 'room' may hold an object that has no 'count' property.",
+  ]);
+  word("cp9-cells/X6/branch-event", [
+    `${count} 'n' is set inside an 'if' or another branch, so which value reaches this line depends on the choice.`,
+  ]);
+  word("cp9-cells/O13/captured-entry", [
+    `${count} 'n' is set outside 'use', before 'use' is called.`,
+  ]);
+  // a file the script calls has no function to name
+  word("cp9-cells/O9/file-call", [
+    `${count} 'n' may be changed by a function or a file the script calls before this line.`,
+  ]);
+  word("cp9-cells/r46/m3/sol-m3x/X1/changed", [`${count} This line never runs.`]);
+  word("cp9-cells/F21/multiple", [
+    `${count} 'use' is called from more than one place, so 'n' may hold another kind in each call.`,
+  ]);
+  word("cp9-cells/O15/block-local", [
+    `${count} This block runs when the button is pressed, and 'n' may change inside it before this line.`,
+  ]);
+  // a read outside the block a store is in
+  word("cp9-cells/H7/timer", [
+    `W TSV041 'n': 'copy' is declared as a whole number (integer), but 'n' may be a number here, ${CHECKED} A ` +
+      "button, timer, or media block may run before this line and change 'n'.",
+  ]);
+  word("cp9-cells/r46/m3/sol-m3x/X5/changed", [
+    `${count} 'n' is set before this loop, so the compiler does not follow which value reaches this line in each round.`,
+  ]);
+  word("cp9-cells/X3/element", [
+    `W TSV011 'xs[0]': ${COUNT}, but 'xs[0]' may be a number here, ${CHECKED} 'xs[0]' is a list element, and the ` +
+      "compiler knows what kinds the list holds, not which element holds which.",
+  ]);
+  word("cp9-cells/r46/m3/astra-m3/external-receiver/index-store", [
+    "W TSV043 'value[0]': The compiler cannot tell whether 'value' has elements here, so the script checks " +
+      `'value[0]' when it runs. ${OUTSIDE("value")}`,
+  ]);
+  const speaker =
+    "The compiler cannot tell whether 'player' has property 'n' here, so the script checks 'player.n' when it runs. " +
+    "'player' is a speaker, and its properties are checked when the script runs.";
+  word("cp9-cells/F19a/direct", [
+    `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another kind here, ${CHECKED} The compiler ` +
+      "does not follow 'player.n', so it is checked when the script runs.",
+    `W TSV043 'player.n': ${speaker}`,
+    `W TSV043 'player.n': ${speaker}`,
+  ]);
+});
+
+test("each consumer's first sentence, as an error and as a warning, with its rule's code (D1, D3)", () => {
+  const cases: readonly (readonly [string, readonly string[]])[] = [
+    // C1, ADR 0021 rule 1.1: a written type, a decided one with its line and a written union, a possible value
+    [
+      "let n: integer = 1.5\nexit\n",
+      [
+        `E TSV041 '1.5': 'n' is declared as a whole number (integer), so it cannot take a number. ${ROUND}`,
+      ],
+    ],
+    [
+      'let n = 1\nn = "text"\nexit\n',
+      [
+        "E TSV041 '\"text\"': 'n' holds a whole number (integer) since line 1, so it cannot take text (string). " +
+          "To allow both, write its type as 'integer | string'.",
+      ],
+    ],
+    [
+      "let n: integer = 1\nn = null\nexit\n",
+      [
+        "E TSV041 'null': 'n' is declared as a whole number (integer), so it cannot take null. To allow both, " +
+          "write its type as 'integer | null'.",
+      ],
+    ],
+    [
+      "let n: integer = hostValue\nexit\n",
+      [
+        "W TSV041 'hostValue': 'n' is declared as a whole number (integer), but 'hostValue' may be a value of " +
+          `another kind here, ${CHECKED} ${OUTSIDE("hostValue")}`,
+      ],
+    ],
+    // C2
+    ["repeat 2.5 {}\nexit\n", [`E TSV011 '2.5': ${COUNT}, but '2.5' is a number. ${ROUND}`]],
+    [
+      "let xs = [1, 2]\nlet y = xs[0.5]\nexit\n",
+      [
+        `E TSV043 '0.5': A list index must be a whole number (integer), but '0.5' is a number. ${ROUND}`,
+      ],
+    ],
+    [
+      "let xs = [1, 2]\nxs.removeAt(1.5)\nexit\n",
+      [
+        `E TSV043 '1.5': removeAt() needs a whole number (integer), but '1.5' is a number. ${ROUND}`,
+      ],
+    ],
+    [
+      "let xs = [1, 2]\nlet ys = xs.take(hostValue)\nexit\n",
+      [
+        "W TSV043 'hostValue': take() needs a whole number (integer), but 'hostValue' may be a value of another " +
+          `kind here, ${CHECKED} ${OUTSIDE("hostValue")}`,
+      ],
+    ],
+    // C3
+    [
+      'if 1 { say "x" }\nexit\n',
+      [
+        "E TSV043 '1': A condition must be true or false (boolean), but '1' is a whole number (integer).",
+      ],
+    ],
+    [
+      "let y = not 1\nexit\n",
+      ["E TSV043 '1': 'not' needs true or false (boolean), but '1' is a whole number (integer)."],
+    ],
+    [
+      'let ok = hostValue\nif ok { say "x" }\nexit\n',
+      [
+        "W TSV043 'ok': A condition must be true or false (boolean), but 'ok' may be a value of another kind " +
+          `here, ${CHECKED} ${OUTSIDE("ok")}`,
+      ],
+    ],
+    // C4: the offending operand, else the operation
+    [
+      'let x = "s" - 1\nexit\n',
+      ["E TSV043 '\"s\"': '-' needs a number, but '\"s\"' is text (string)."],
+    ],
+    [
+      "let x = hostValue - 1\nexit\n",
+      [
+        "W TSV043 'hostValue': '-' needs a number, but 'hostValue' may be a value of another kind here, " +
+          `${CHECKED} ${OUTSIDE("hostValue")}`,
+      ],
+    ],
+    // C5a–c: a null receiver, a kind without the member, a property no source has at a read and at a store (ADR 1.4)
+    [
+      "let x = null\nsay x.length\nexit\n",
+      [
+        "E TSV043 'x.length': 'x' is null here, so it has no property 'length'. Store a value in it first.",
+      ],
+    ],
+    [
+      "let x = null\nx.add(1)\nexit\n",
+      [
+        "E TSV043 'x.add(1)': 'x' is null here, so it has no method 'add'. Store a value in it first.",
+      ],
+    ],
+    [
+      "let n = 1\nsay n.length\nexit\n",
+      [
+        "E TSV043 'n.length': A whole number (integer) has no property 'length', so 'n.length' cannot be used.",
+      ],
+    ],
+    [
+      "let x = {n: 1}\nsay x.other\nexit\n",
+      ["E TSV043 'x.other': 'x' has no property 'other'. Add 'other' to its object first."],
+    ],
+    [
+      "let x = {n: 1}\nx.other = 2\nexit\n",
+      [
+        "E TSV043 '{n: 1}': This object has no property 'other', so 'x.other' on line 2 cannot set it. Add " +
+          "'other' to this object.",
+      ],
+    ],
+    // C6
+    [
+      "let xs = []\nsay xs.first\nexit\n",
+      [
+        "W TSV043 'xs.first': 'xs' may be empty here, so the script checks '.first' when it runs. Check " +
+          "'xs.length' first to be sure.",
+      ],
+    ],
+    // C10
+    [
+      'say (1 otherwise "x")\nexit\n',
+      [
+        "E TSV041 '\"x\"': The fallback '\"x\"' is text (string), but the value it stands in for is a number. " +
+          "Use null or a value of that kind instead.",
+      ],
+    ],
+    [
+      'let x = toInteger("3", default: "x")\nexit\n',
+      [
+        "E TSV041 '\"x\"': The default '\"x\"' is text (string), but the value it stands in for is a number. " +
+          "Use null or a value of that kind instead.",
+      ],
+    ],
+    // C11
+    [
+      'say "${{a: 1}}"\nexit\n',
+      [
+        "E TSV042 '{a: 1}': '${...}' cannot show an object. It shows text, numbers, true, false, null, durations, " +
+          "angles, date and time values, script references, and regexes, and selects one element of a list.",
+      ],
+    ],
+    [
+      'let s = "${hostValue}"\nexit\n',
+      [
+        "W TSV042 'hostValue': '${...}' shows its value as text, but 'hostValue' may be a value of another kind " +
+          `here, ${CHECKED} ${OUTSIDE("hostValue")}`,
+      ],
+    ],
+    // C12
+    [
+      "let d = dict{a: 1}\nsay d[1]\nexit\n",
+      ["E TSV043 '1': A dict key is text (string), but '1' is a whole number (integer)."],
+    ],
+    // C13's iterable
+    [
+      "for x in 1 { }\nexit\n",
+      [
+        "E TSV012 '1': A 'for' loop goes through a list, set, dict, or range, but '1' is a whole number (integer).",
+      ],
+    ],
+    // ADR 0021 1.3, A8: a literal's elements of one type
+    [
+      'let a = [1, "x"]\nexit\n',
+      [
+        "E TSV044 '\"x\"': This list mixes a number and text (string). A list holds one type, so use values of " +
+          "one type in it.",
+      ],
+    ],
+    [
+      'let a = [{n: 1}, {n: "x"}]\nexit\n',
+      [
+        "E TSV044 '\"x\"': This list mixes elements whose 'n' is a number with elements whose 'n' is text " +
+          "(string). A list holds one type, so use values of one type in it.",
+      ],
+    ],
+    // ADR 0021 rule 1.1 (A2, r4.75 (4)): a property only copies bring, at its first direct read, naming the copy
+    [
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}\nexit\n',
+      [
+        "E TSV041 'xs[0].n': 'xs[i].n' holds a number, but 'b' on line 3 brings text (string) into it. Use a " +
+          "separate property for a value of another type.",
+      ],
+    ],
+    // V30 §13: a union holding a whole collection beside another type, with V30's suggestion where it has one
+    [
+      "let h: integer | string[] = 1\nexit\n",
+      [
+        "E TSV075 'integer | string[]': A union cannot hold a whole list, set, or dict beside another type, but " +
+          "'integer | string[]' does. Write '(integer | string)[]' instead.",
+      ],
+    ],
+    [
+      "let f: integer[] | string[] = []\nexit\n",
+      [
+        "E TSV075 'integer[] | string[]': A union cannot hold a whole list, set, or dict beside another type, but " +
+          "'integer[] | string[]' does. Write the union inside the collection instead.",
+      ],
+    ],
+  ];
+  for (const [source, expected] of cases)
+    assert.deepEqual(messages(main(source)), expected, source);
+});
+
+test("every sentence of the set's records keeps the form: code in single quotes, no semicolon, the word never shown (D1)", (t) => {
+  let count = 0;
+  for (const record of records) {
+    if (heldBack(record) !== null) continue;
+    for (const { message: text } of reported(record.files)) {
+      count += 1;
+      // (code is quoted whole, so outside the quotes no semicolon, backquote or double quote stands)
+      assert.ok(!/[;`"]/.test(text.replace(/'[^']*'/g, "")), `${record.name}: ${text}`);
+      assert.ok(!/dead-code|deferred-parameter|unmodelled/.test(text), `${record.name}: ${text}`);
+      assert.ok(text.endsWith("."), `${record.name}: ${text}`);
+    }
+  }
+  t.diagnostic(`${count} sentences of the positive list`);
+});
+
+test("the developer warning for JSON that does not fit fromJson's expected type keeps the form (TSW020, TABLE r4.77 (5))", () => {
+  const integer = { kind: "integer" } as const;
+  assert.equal(
+    jsonKindMismatch("x", integer),
+    "'fromJson(...)' reads this JSON as a whole number (integer), but it is text (string), so the call gives its " +
+      "default.",
+  );
+  assert.equal(
+    jsonFieldMismatch({ path: ["age"], found: "x", type: integer }),
+    "'fromJson(...)' reads 'age' of this JSON as a whole number (integer), but it is text (string), so the call " +
+      "takes 'age' from its default.",
+  );
+  assert.equal(
+    jsonFieldMismatch({ path: ["age"], found: undefined, type: integer }),
+    "'fromJson(...)' reads 'age' of this JSON as a whole number (integer), but the JSON has no 'age', so the call " +
+      "takes 'age' from its default.",
+  );
+});
