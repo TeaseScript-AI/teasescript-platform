@@ -113,6 +113,8 @@ export class NarrowingRoutes {
   readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
+  /** The parameters a call binds an argument to, by key (an omitted default's certificate, N3), made once. */
+  #arguments: ReadonlySet<Key> | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
 
@@ -215,7 +217,7 @@ export class NarrowingRoutes {
     key: Key,
     tag: ItemTag,
   ): boolean | { readonly key: Key; readonly tag: ItemTag; readonly node: FlowNode } {
-    const { program, definitions, lists } = this.pass;
+    const { program, lists } = this.pass;
     const d = found.def;
     program.work.charge("exactQueries");
     // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a single-site
@@ -241,10 +243,7 @@ export class NarrowingRoutes {
     }
     if (literalTag(program, value) === tag) {
       // a parameter's default is selected where the call omits the argument: its one call site binds none
-      return (
-        d.how !== "parameter default" ||
-        !(definitions.byKey.get(d.key) ?? []).some((other) => other.how === "argument")
-      );
+      return d.how !== "parameter default" || !this.#argued().has(d.key);
     }
     const c = program.opOf.get(value);
     // `load(key, default: …)`: storage may lack the key on any run (the storage premise)
@@ -262,6 +261,19 @@ export class NarrowingRoutes {
     // a scalar copy whose source read has a certified witness
     const read = this.#scalarRead(value);
     return read === null ? false : { key: read.key, tag, node: read.node };
+  }
+
+  /** The keys of the parameters some call binds an argument to: one walk of the transfers, made once per pass. */
+  #argued(): ReadonlySet<Key> {
+    if (this.#arguments !== null) return this.#arguments;
+    const { definitions, program } = this.pass;
+    const argued = new Set<Key>();
+    for (const d of definitions.transferDefs) {
+      program.work.charge("indexSteps");
+      if (d.how === "argument") argued.add(d.key);
+    }
+    this.#arguments = argued;
+    return argued;
   }
 
   /** A read of a stable path without element steps: its key and node. */
