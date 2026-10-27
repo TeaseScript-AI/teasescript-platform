@@ -97,7 +97,7 @@ the line that brings them; elsewhere "a number" stays the general word (owner de
 | `TSP034` | Invalid timer form | error | parser |
 | `TSP035` | Invalid media or permanent button form | error | parser |
 | `TSP036` | Expected a storage key | error | parser |
-| `TSP037` | Symbol where TeaseScript writes a word | error | parser |
+| `TSP037` | Form from another language | error | lexer, parser, name pass |
 | `TSP038` | Invalid switch form | error | parser |
 | `TSP039` | Expected a label name or file path | error | parser |
 | `TSP040` | Invalid load form | error | parser |
@@ -229,6 +229,10 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 A shared code is one problem that each owner finds in another place and reports with the same text. Two problems need a
 code each.
 
+- `TSP037`
+  - lexer: a symbol of another language that is no token, as `;`, with the text of `FOREIGN_FORMS`
+  - parser: the same rule with the same text for a symbol that is a token, such as `&&`, a word that starts a statement, such as `def`, and a loop head in parentheses, each where the source fails without it
+  - name pass: the same rule with the same text for a name that no declaration takes, such as `None` or `print(...)`
 - `TSV001`
   - parser: a declaration whose name is a keyword or another protected name, where it reads the name
   - name pass: the same rule with the same text (`protectedNameMessage`) where it finds such a declaration, and a name that is already in use

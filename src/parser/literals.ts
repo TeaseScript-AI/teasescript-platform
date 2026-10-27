@@ -297,7 +297,7 @@ function* parseStringInterpolation(
       mark,
       parserDiagnosticCode.unsupportedStringExpression,
       "Expected a supported expression inside the string interpolation.",
-      parser.peek(),
+      parser.peek().span,
     );
     parser.synchronizeInterpolation();
     parser.match(TokenKind.InterpolationEnd);

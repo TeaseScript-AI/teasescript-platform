@@ -19,6 +19,7 @@ import type {
   SwitchTypeTest,
   WhileStatement,
 } from "../ast.js";
+import { FOREIGN_FORMS } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -164,6 +165,12 @@ export function* parseIfStatement(parser: Parser): ParseTask<IfStatement | null>
     elseBlock = parser.check(TokenKind.KeywordIf)
       ? yield* parseChild(parseIfStatement(parser))
       : yield* parseChild(parser.parseBlock());
+    if (elseBlock === null) return null;
+  } else if (parser.foreignStatementWord(parser.current === beforePotentialElse) === "else if") {
+    // `elif` of another language, on the line of the `}`, where no statement may start, or before a condition: it is
+    // read as `else if`.
+    parser.reportForeignWord();
+    elseBlock = yield* parseChild(parseIfStatement(parser));
     if (elseBlock === null) return null;
   } else {
     parser.current = beforePotentialElse;
@@ -382,6 +389,24 @@ export function* parseRepeatStatement(parser: Parser): ParseTask<RepeatStatement
 
 export function* parseForStatement(parser: Parser): ParseTask<ForStatement | null> {
   const keyword = parser.advance();
+  // The head in parentheses of other languages, as in `for (let i = 0; i < 3; i++)`. The block after it still parses,
+  // also on the next line, so that its statements report nothing more.
+  if (parser.check(TokenKind.LeftParenthesis)) {
+    parser.skipGroup();
+    parser.reportSpan(
+      parserDiagnosticCode.foreignForm,
+      FOREIGN_FORMS.get("for (...)")!.message,
+      spanFrom(keyword.span, parser.previous().span),
+    );
+    const afterHead = parser.current;
+    parser.skipContinuationNewlines();
+    if (parser.check(TokenKind.LeftBrace)) yield* parseChild(parser.parseBlock());
+    else {
+      parser.current = afterHead;
+      parser.synchronizeStatement();
+    }
+    return null;
+  }
   // An `in` here is the one after the loop variable, which is missing.
   if (!parser.checkDeclarationName() || parser.check(TokenKind.KeywordIn)) {
     parser.reportInsertion(
