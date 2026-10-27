@@ -159,8 +159,14 @@ function prepared(program: Program): Prepared {
   return { program, request, bindings };
 }
 
-/** What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection. */
-function published({ program, request, bindings }: Prepared, reversed: boolean): string {
+/**
+ * What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection; and the
+ * record alone (its outcome, diagnostics and checks).
+ */
+function published(
+  { program, request, bindings }: Prepared,
+  reversed: boolean,
+): { readonly text: string; readonly record: string } {
   const ordered = <T>(callback: () => T): T =>
     reversed
       ? withConsumerOrder(
@@ -185,13 +191,12 @@ function published({ program, request, bindings }: Prepared, reversed: boolean):
       return { outside: error.what };
     }
   })();
-  return JSON.stringify({
+  const record = {
     outcome: answers.outcome,
     diagnostics: answers.diagnostics,
     checks: answers.checks,
-    admitted,
-    lowered,
-  });
+  };
+  return { text: JSON.stringify({ ...record, admitted, lowered }), record: JSON.stringify(record) };
 }
 
 test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
@@ -211,11 +216,10 @@ test("the core's sharing of answers is output-neutral for every family, witness 
       if (differs === undefined) {
         runs += 1;
         const once = (ready ??= prepared(program));
-        const text = published(once, reversed);
-        differs = text !== withoutSharing(() => published(once, reversed));
+        const shared = published(once, reversed);
+        differs = shared.text !== withoutSharing(() => published(once, reversed)).text;
         changed.set(input, differs);
-        const { outcome, diagnostics, checks } = JSON.parse(text) as Record<string, unknown>;
-        records.push(JSON.stringify([outcome, diagnostics, checks]));
+        records.push(shared.record);
       }
       if (differs) differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
