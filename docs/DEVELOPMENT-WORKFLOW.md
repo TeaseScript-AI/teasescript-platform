@@ -25,6 +25,8 @@ problem, reopening it if work remains. Ground a diagnosis in reproduction, sourc
 Labels, described on GitHub:
 
 - one orchestrator label: `platform`, `V2 compiler` or `importer`;
+- one area label for the issue's main subject: `area:playroom`, `area:runtime`, `area:compiler`, `area:language`,
+  `area:editor`, `area:website` or `area:tooling`; another area it touches goes in its scope;
 - while a question the owner has not yet decided is open: `owner: blocking` (work waits) or `owner: input` (nothing
   waits), plus `owner: parked` when the owner has said not now. An issue without one can be finished without asking
   the owner; a task that only waits on a decision issue says "Depends on #N" instead;
