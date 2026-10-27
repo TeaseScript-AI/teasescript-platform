@@ -2605,6 +2605,8 @@ export class Admission {
       work.charge("indexSteps");
       covered = index!.opaque.at.has(keptText(this.#work, read.strip.slice(0, length)));
     }
+    // (the asked groups taken, each charged, then the listed ones not among them)
+    if (run.served.length > 0) work.charge("indexSteps", run.served.length);
     const groups = [...run.served];
     const seen = new Set<Group>(groups);
     for (const { groups: landing } of run.lands.values())
@@ -3142,8 +3144,12 @@ export class Admission {
     );
   }
 
-  /** The paths of a place a group of its copies lands at or below a prefix (`#meeting`), its own path with them. */
+  /**
+   * The paths of a place a group of its copies lands at or below a prefix (`#meeting`), its own path with them; each
+   * asking charged, a group away from the prefix too (the walks over every asked group, #1188).
+   */
   #groupBelow(group: Group, prefix: readonly string[]): (readonly string[])[] {
+    this.pass.program.work.charge("indexSteps");
     const out: (readonly string[])[] = [];
     let under: readonly string[];
     if (isPrefix(group.path, prefix))
