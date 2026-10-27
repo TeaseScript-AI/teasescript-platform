@@ -2243,8 +2243,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
 /**
  * S6-CARRIERS §4.5, §4.7 and S6c (TABLE r4.61, r4.69 (2)): k adds of one record to one list, a choice of k options of one
  * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
- * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source, and adds of a few
- * sources in turn (review r1). The value side reads each class once per field (S6c: a run of adds of one
+ * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source, in either order and
+ * chained, and adds of one source after a different first add or in two blocks (reviews r1, r2). Adds of several
+ * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
  * `Contract.readClass`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
  */
@@ -2331,6 +2332,44 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // review r2 (S6c): the aliases in reverse order as `get`s, and a chain of aliases as options and as defaults
+  {
+    name: "A8-same-source-reverse-alias-gets",
+    measures:
+      "S6c, A8: k `list_i.get(0, default: alias_i)` of aliases of one list and one record, in reverse order",
+    // 72,268 / 144,716 units at k = 64, 128 (2.0100; `main` 371,130 / 1,347,650, 3.64)
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          rows(k, (i) => `let alias${i} = root`),
+          rows(k, (i) => `let list${i} = xs`),
+          `let box = [${Array.from({ length: k }, (_, i) => `list${k - 1 - i}.get(0, default: alias${k - 1 - i})`).join(", ")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  ...(["choices", "gets"] as const).map((use) => ({
+    name: `A8-same-source-chained-alias-${use}`,
+    measures: `S6c, A8: k aliases of one k-field record, each of the one before, as ${use === "choices" ? "options of one choice" : "\`get\` defaults in one literal"}, every field read`,
+    // 47,447 / 94,966 and 72,526 / 145,230 units at k = 64, 128 (2.0078, 2.0099; `main` 3.46, 3.64)
+    program: (k: number) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let xs = [root]",
+          "let alias0 = root",
+          rows(k - 1, (i) => `let alias${i + 1} = alias${i}`),
+          use === "choices"
+            ? `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: alias${i}}`).join(", ")}`
+            : `let box = [${Array.from({ length: k }, (_, i) => `xs.get(0, default: alias${i})`).join(", ")}]`,
+          rows(k, (i) => (use === "choices" ? `repeat box.f${i} {}` : `repeat box[0].f${i} {}`)),
+          "exit",
+        ),
+      ),
+  })),
   // Astra r5 B2: the same with a root of unknown-bearing fields, whose adds and options admission reads at every field:
   // an add's class and a choice's options of one snapshot read once (S6-CARRIERS §4.5)
   {
@@ -2351,25 +2390,32 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // review r1 (S6c): adds of a few sources in turn, and of stable aliases of one source
+  // review r1/r2 (S6c): adds of one source after a different first add, and in two blocks, each a run of one class
   ...(
     [
-      ["A5-alternating-adds-unknown", ["root", "other"]],
-      ["A5-cycling-adds-unknown", ["root", "other", "third", "other"]],
+      [
+        "A5-preface-then-same-adds-unknown",
+        (k: number) => ["other", ...Array.from({ length: k }, () => "root")],
+      ],
+      [
+        "A5-two-blocks-adds-unknown",
+        (k: number) => Array.from({ length: k }, (_, i) => (i < k / 2 ? "root" : "other")),
+      ],
     ] as const
-  ).map(([name, cycle]) => ({
+  ).map(([name, sources]) => ({
     name,
-    measures: `S6c, A5: k adds of ${cycle.length === 2 ? "two" : "three"} k-field records of host data in turn, every field read`,
-    // 198,730 / 399,779 and 218,821 / 440,430 units at k = 64, 128 (2.0191, 2.0201; `main` 3.22, 3.22)
+    measures: `S6c, A5: adds of two k-field records of host data, ${name.includes("preface") ? "one of the first, then k of the second" : "k / 2 of each in two blocks"}, every field read`,
+    // 153,001 / 307,875 and 161,051 / 324,558 units at k = 64, 128 (2.0240, 2.0231; `main` 3.36, 3.36)
     program: (k: number) =>
       main(
         lines(
           "let raw = hostValue",
           `let root = {${fields(k, () => "[1, raw][1]")}}`,
           `let other = {${fields(k, () => "[2, raw][1]")}}`,
-          `let third = {${fields(k, () => '["s", raw][1]')}}`,
           "let xs = []",
-          rows(k, (i) => `xs.add(${cycle[i % cycle.length]})`),
+          sources(k)
+            .map((source) => `xs.add(${source})`)
+            .join("\n"),
           rows(k, (i) => `repeat xs[0].f${i} {}`),
           "exit",
         ),
@@ -2621,7 +2667,9 @@ export const ORACLE_PROGRAMS: readonly {
  * written, optional and null-only domains through parentheses, removals, dict projections and call results beside the
  * shared values, the path end; and review r1's: stable aliases around a store, in reverse order, stored again, written,
  * chained, guarded, read in a function, of a projection or host data, beside direct reads, as `get` defaults; adds of
- * a few sources in turn, broken by a store, a test or a call, a late class, nine classes, a long window. Each of the
+ * a few sources in turn, broken by a store, a test or a call, a late class, nine classes, a long run; and review r2's:
+ * two families in a written union list, where an equal window of classes is no equal answer (its B4), a chain of
+ * aliases one of which is taken under a test, `get`s whose receivers' and defaults' alias writers cross. Each of the
  * first 49 was checked against a
  * build with that key made coarser (the PR's mutation table). The sharing differential and the member-answer oracle
  * run them in both orders.
@@ -3610,6 +3658,87 @@ export const VALUE_SHARING_PROGRAMS: readonly {
       "xs.addAll(os)",
       "xs.addAll(rs)",
       "repeat xs[0].f0 {}",
+    ],
+    [
+      "chain: two families in a written union list, a window repeating",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+    ],
+    [
+      "chain: the same with a random element",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.random, null].first",
+      "chosen = 1",
+    ],
+    [
+      "chain: two families, admitted only",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(b)",
+      "xs.add(b)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+    ],
+    [
+      "chain: a run of one family after two in a union list",
+      "let a = 1.5",
+      'let b = "s"',
+      "let xs: (number | string)[] = []",
+      "xs.add(b)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "xs.add(a)",
+      "let chosen = [xs.first, null].first",
+      "chosen = 1",
+    ],
+    [
+      "alias: a chain of aliases, one taken under a test",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let a0 = root",
+      "if root.f0 is integer {",
+      "  let a1 = a0",
+      "  let a2 = a1",
+      '  let box = askChoice {text: "0", value: a0}, {text: "1", value: a1}, {text: "2", value: a2}',
+      "  repeat box.f0 {}",
+      "}",
+    ],
+    [
+      "alias: get receivers and defaults with crossing writers",
+      "let raw = hostValue",
+      "let root = {f0: [1, raw][1]}",
+      "let xs = [root]",
+      "let a0 = root",
+      "let l1 = xs",
+      "let a1 = root",
+      "let l0 = xs",
+      "let box = [l0.get(0, default: a0), l1.get(0, default: a1), l1.get(0, default: a0)]",
+      "repeat box[0].f0 {}",
     ],
   ] as const
 ).map(([name, ...source]) => ({
