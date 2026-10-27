@@ -5332,7 +5332,10 @@ say as mistressVera "Kneel."
 say as mistressVera "You will obey your ${speaker.title}."
 ```
 
-During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
+During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that
+message. An ask inside the message has its own speaker: without its own `as`, as in
+`say as mistressVera "Hi ${askText("Your name?")}"`, it uses the default speaker
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)).
 
 `say as player "..."` is the player's own message. It appears on the player's side, as a clicked button's answer does,
 with no name and no avatar, and with the ordinary reading time. A clicked button and an answer to an ask are messages of
@@ -6507,7 +6510,8 @@ exit
 - `tags` lists the file's tags for selection, separated by commas: a plain tag in quotes, `"chastity"`, or a tag with a
   number without quotes, `punishment: 4` (not `"punishment: 4"`).
 - `keywords` lists text in quotes for the future website catalog search. Only the keywords of `main.tease` are used,
-  and they never affect selection.
+  and they never affect selection. Surrounding spaces are removed. An empty keyword is error `TSH013`; a keyword listed
+  more than once counts once, with warning `TSH014`.
 - The header is metadata, not YAML: indentation has no meaning, and it runs no code and reads no variables.
 
 ### Tags
