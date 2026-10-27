@@ -2549,7 +2549,8 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
  * TABLE r4.85: one family per site of the value side's discovery that a class reached only by `Contract.classOf` keys,
  * each of one source read at k fields (the PR's inventory; the other sites' families are `ADMISSION_SAME_SOURCES` and
  * `ADMISSION_INGRESS_PRESETS`): a choice's computed options (review r4 B1) and its literal ones, a literal's `get`s
- * whose defaults are `get`s, and adds of literals of host data (the exact add chain's runs and the prefix's entries).
+ * whose defaults are `get`s, adds of literals of host data (the exact add chain's runs and the prefix's entries), and a
+ * literal's parses of host data (#1196).
  */
 export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
@@ -2678,6 +2679,33 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // #1196: a literal's parses of one host input with one default, each its own ingress, by the input's form: a read of
+  // a host global, its projection and its element, which had no class (the leaf is the read's own), against a named
+  // input and constant text, the controls. 47,078 / 94,472, 50,606 / 101,520 and 62,122 / 124,778 units at k = 64, 128
+  // in both orders (2.0130, 2.0118, 2.0140; `main` 83,099 / 240,253, 86,307 / 246,661 and 95,968 / 266,208, 2.90, 2.87,
+  // 2.78: each parse read at each field); the controls 2.0136 and 2.0122 on both
+  ...(
+    [
+      ["direct", "hostValue"],
+      ["projected", "hostValue.text"],
+      ["indexed", "[hostValue][0]"],
+      ["named", "raw"],
+      ["constant", '"{}"'],
+    ] as const
+  ).map(([form, input]): WorkFamily => ({
+    name: `I1196-${form}-input-parses`,
+    measures: `#1196: a literal of k \`fromJson(${input}, default: seed, files: false)\` of one k-field record, every field read`,
+    program: (k) =>
+      main(
+        lines(
+          ...(form === "named" ? ["let raw = hostValue"] : []),
+          `let seed = {${fields(k, () => "1")}}`,
+          `let box = [${cells(k, `fromJson(${input}, default: seed, files: false)`)}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**
@@ -4550,6 +4578,126 @@ export const VALUE_SHARING_PROGRAMS: readonly {
       'ys.add(askChoice {text: "x", value: root})',
       'ys.add(askChoice {text: "x", value: root})',
       "repeat ys[0].f0 {}",
+    ],
+  ] as const
+).map(([name, ...source]) => ({
+  name,
+  files: [{ path: "main.tease", source: `${source.join("\n")}\nexit\n` }],
+}));
+
+const parsed = (input: string, fallback: string | null = "seed"): string =>
+  `fromJson(${input}${fallback === null ? "" : `, default: ${fallback}`}, files: false)`;
+
+/**
+ * #1196's controls: values over reads of host data in one literal, choice or run of adds, each beside what a coarser
+ * class would merge: a parse without a default (open) and a default with a field of host data, every form of input,
+ * another default, a written destination, a guard of the input, a store of the default between parses, literals of one
+ * and of two host reads, records holding host data and adds of host reads. Each keeps its own leaves, diagnostics and
+ * checks: the sharing differential and the leaf comparison (`type-core-sharing.test.ts`) run them in both orders.
+ */
+export const DIRECT_INGRESS_PROGRAMS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = (
+  [
+    [
+      "open: a parse without a default among parses of one default",
+      "let seed = {f0: 1, f1: 1}",
+      `let box = [${parsed("hostValue")}, ${parsed("hostValue", null)}, ${parsed("hostValue")}]`,
+      "repeat box[0].f0 {}",
+      "let n: integer = box[0].f1",
+    ],
+    [
+      "open: a default's field of host data",
+      "let seed = {f0: 1, f1: [1, hostValue][1]}",
+      `let box = [${parsed("hostValue")}, ${parsed("hostValue.text")}, ${parsed("hostValue")}]`,
+      "repeat box[0].f0 {}",
+      "let n: integer = box[0].f1",
+    ],
+    [
+      "inputs: direct, projected, indexed, named, constant and computed",
+      "let raw = hostValue",
+      "let seed = {f0: 1, f1: 1}",
+      `let box = [${["hostValue", "hostValue.text", "[hostValue][0]", "raw", '"{}"', 'hostValue otherwise "{}"', "hostValue"].map((input) => parsed(input)).join(", ")}]`,
+      "repeat box[0].f0 {}",
+      "let n: integer = box[0].f1",
+    ],
+    [
+      "defaults: two of one shape and another kind",
+      "let a = {f0: 1}",
+      "let b = {f0: 2.5}",
+      `let box = [${parsed("hostValue", "a")}, ${parsed("hostValue", "b")}, ${parsed("hostValue", "a")}]`,
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "written: parses landing in a written list beside unwritten ones",
+      "let seed = [1]",
+      `let ws: number[][] = [${parsed("hostValue")}, ${parsed("hostValue")}]`,
+      `let w: number[] = ${parsed("hostValue")}`,
+      `let box = [${parsed("hostValue")}, ws[0], w, ${parsed("hostValue")}]`,
+      "let n: integer = box[0][0]",
+    ],
+    [
+      "guarded: parses of a tested host field beside one outside the test",
+      "let seed = {f0: 1}",
+      `let outside = ${parsed("hostValue.t")}`,
+      "if hostValue.t is string {",
+      `  let box = [${parsed("hostValue.t")}, outside, ${parsed("hostValue.t")}, ${parsed("hostValue")}]`,
+      "  repeat box[0].f0 {}",
+      "}",
+    ],
+    [
+      "stored: a call storing the default between parses",
+      "global seed = {f0: 1}",
+      "function bump {",
+      "  seed.f0 = 2.5",
+      '  return "{}"',
+      "}",
+      `let box = [${parsed("hostValue")}, ${parsed("bump()")}, ${parsed("hostValue")}]`,
+      "let n: integer = box[0].f0",
+    ],
+    [
+      "stored: the default stored between two literals of parses",
+      "let seed = {f0: 1}",
+      `let one = [${parsed("hostValue")}, ${parsed("hostValue")}]`,
+      "seed.f0 = 2.5",
+      `let two = [${parsed("hostValue")}, ${parsed("hostValue")}]`,
+      "let n: integer = one[0].f0",
+      "let m: integer = two[0].f0",
+    ],
+    [
+      "literals of one and of two host reads, and one beside a known element",
+      "let box = [[hostValue][0], [hostValue, hostValue][1], [hostValue, 1][0], [hostValue][0]]",
+      "let n: integer = box[0]",
+    ],
+    [
+      "choice: records holding host data, one with a second host field",
+      "let seed = {f0: 1}",
+      'let box = askChoice {text: "a", value: {g: hostValue, s: seed}}, {text: "b", value: {g: hostValue, h: hostValue.t, s: seed}}, {text: "c", value: {g: hostValue, s: seed}}',
+      "repeat box.s.f0 {}",
+      "let n: integer = box.g",
+    ],
+    [
+      "adds: parses of host data, one of another default and one without",
+      "let seed = {f0: 1, f1: 1}",
+      "let other = {f0: 2.5, f1: 1}",
+      "let gathered = []",
+      `gathered.add(${parsed("hostValue")})`,
+      `gathered.add(${parsed("hostValue")})`,
+      `gathered.add(${parsed("hostValue", "other")})`,
+      `gathered.add(${parsed("hostValue")})`,
+      `gathered.add(${parsed("hostValue", null)})`,
+      "let n: integer = gathered.last.f0",
+      "let m: integer = gathered[0].f1",
+    ],
+    [
+      "adds: host reads in a run",
+      "let gathered = []",
+      "gathered.add(hostValue)",
+      "gathered.add(hostValue)",
+      "gathered.add(hostValue.t)",
+      "gathered.add(hostValue)",
+      "let n: integer = gathered[0]",
     ],
   ] as const
 ).map(([name, ...source]) => ({
