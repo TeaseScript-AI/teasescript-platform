@@ -3964,13 +3964,29 @@ export class Contract {
   }
 
   /**
-   * The leaf naming an ingress value (S6-CARRIERS §3.1): every ingress's, where it lands being admission's; else
-   * `undefined`, external data created where no ingress is, loose.
+   * The ingress a value is, or the one its projections read (`hostValue.n`, `hostValue[0].n`: its answer is that
+   * ingress's data at their steps, so its leaf is the ingress's, #1210); `null` for none.
+   */
+  public ingressOf(value: PlaceId): PlaceId | null {
+    const { definitions, program } = this.pass;
+    let at = value;
+    while (!definitions.ingress.has(at)) {
+      const projection = program.projOf.get(at);
+      if (projection === undefined || projection.step === "iteration") return null;
+      at = projection.owner;
+    }
+    return at;
+  }
+
+  /**
+   * The leaf naming an ingress value or a projection of one (`ingressOf`, S6-CARRIERS §3.1): every ingress's, where it
+   * lands being admission's; else `undefined`, external data created where no ingress is, loose.
    */
   #ingressLeaf(value: PlaceId): IngressNode | undefined {
-    const { definitions, program } = this.pass;
-    const site = program.places[value]?.site;
-    if (!definitions.ingress.has(value) || site === null || site === undefined) return undefined;
+    const { program } = this.pass;
+    const ingress = this.ingressOf(value);
+    const site = ingress === null ? null : program.places[ingress]?.site;
+    if (site === null || site === undefined) return undefined;
     return program.scope.ingress.leaf(ingressLeaf(program, site));
   }
 
@@ -4164,8 +4180,9 @@ export class Contract {
         }
         // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
         const snapshot = this.readSnapshot(value)!;
-        // (k reads of one host global are one entry as well, by their snapshot, their leaves unioned: an occurrence
-        // stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1, Codex r23 F1)
+        // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their leaves
+        // unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1,
+        // Codex r23 F1, #1210)
         const leaf = this.#ingressLeaf(value);
         const id = this.#kept(
           !sharing() ? `${path}|v${value}` : `${path}|${leaf === undefined ? source.id : snapshot}`,
@@ -4286,7 +4303,9 @@ export class Contract {
       const path = this.#pathTexts[at]!;
       parts.push(this.#kindsPart(at, index.terms.get(path)));
       for (const entry of index.reads.get(path) ?? []) {
-        if (entry.ingress !== undefined) plain = false;
+        // (an ingress occurrence is its own source; a projection of one reads its key, its leaf unioned in the entry)
+        if (entry.ingress !== undefined && this.pass.definitions.ingress.has(entry.value))
+          plain = false;
         parts.push(this.#kept(`r${(yield* this.#needValue(entry.value)).id}`));
       }
       for (const entry of index.others.get(path) ?? []) {

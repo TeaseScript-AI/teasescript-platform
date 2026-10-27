@@ -3133,6 +3133,28 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
       );
     },
   },
+  // #1210: a literal of k projections of one host read, bare or in records, read at k typed fields. Each keeps its own
+  // leaf and its own landing stop, while the literal's entry, its elements' identity and their conflict class stay
+  // shared (Codex review r1 B1: a fresh identity per projection read each element at each field in admission's
+  // `literalElements`, 3.01 and 3.14). 34,422 / 68,854 and 52,186 / 104,378 units at k = 64, 128 in both orders
+  // (2.0074, 2.0050; `main` 33,152 / 66,048 and 51,044 / 101,828: each keeps its own exact entry and stop)
+  ...(
+    [
+      ["bare", "hostValue.root", "box[0]"],
+      ["record", "{q: hostValue.root}", "box[0].q"],
+    ] as const
+  ).map(([form, member, receiver]): WorkFamily => ({
+    name: `I1210-${form}-projected-reads`,
+    measures: `#1210: a literal of k \`${member}\`, read at k typed fields of \`${receiver}\``,
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${cells(k, member)}]`,
+          rows(k, (i) => `let n${i}: integer = ${receiver}.f${i}`),
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**

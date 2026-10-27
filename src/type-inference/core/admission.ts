@@ -5825,12 +5825,14 @@ export class Admission {
       const pathKey = keptText(this.#work, path);
       // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
       // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
-      // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1)
+      // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
+      // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
       if (
         sharing() &&
         path.length > 0 &&
         map === stops.values &&
-        this.#sourceOf(current) !== null
+        this.#sourceOf(current) !== null &&
+        contract.ingressOf(current) === null
       ) {
         const identity = keptParts(
           this.#work,
