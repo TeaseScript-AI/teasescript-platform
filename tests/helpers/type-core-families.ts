@@ -1496,8 +1496,9 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * the root changed between its copies, each copy storing its own field, those copies held in one literal, cycles of
  * copies the root feeds held in one literal, each copy replaced by another record, the chain closed into a cycle, the
  * root copied into itself at another path; review r3's shapes (a read stored into each copy's own field, literals
- * holding the root read into one list, copies replaced by aliases that store their own field) and the design review's
- * (two roots met with a small record each, a chain's last copy read at every field). A copy costs its own divergences,
+ * holding the root read into one list, copies replaced by aliases that store their own field), the design review's
+ * and review r5's (two roots met with a narrow projection each, a chain's last copy read at every field, a chain of own
+ * fields copied beside a small record each). A copy costs its own divergences,
  * never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
@@ -1734,17 +1735,30 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-two-roots-and-one",
     measures:
-      "Sol's design review B2: k places each copying two roots of k written-typed fields, then storing one of k small records",
+      "Sol's design review B2 and review r5: k places each copying two roots of k written-typed fields, then one of k narrow projections of a wide written record",
     program: (k) =>
       main(
         lines(
           "let typed: integer = 1",
           `let root = {${fields(k, () => "typed")}, extra: 1}`,
           `let other = {${fields(k, () => "typed")}, extra: 1}`,
-          rows(
-            k,
-            (i) => `let small${i} = {extra: 2}\nlet c${i} = root\nc${i} = other\nc${i} = small${i}`,
-          ),
+          `let packed = {${Array.from({ length: k }, (_, i) => `p${i}: {extra: typed, tiny: typed}`).join(", ")}}`,
+          rows(k, (i) => `let c${i} = root\nc${i} = other\nc${i} = packed.p${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-chain-and-one",
+    measures:
+      "Sol's review r5: a chain of k whole copies of a root, each storing its own plain field, its last copy copied by k places that each also take one of k small written records",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {f0: typed, f1: typed, extra: 1, ${fields(k, () => "1", "x")}}`,
+          rows(k, (i) => `let a${i} = ${i > 0 ? `a${i - 1}` : "root"}\na${i}.x${i} = 2`),
+          rows(k, (i) => `let s${i} = {tiny: typed}\nlet c${i} = a${k - 1}\nc${i} = s${i}`),
           "exit",
         ),
       ),
