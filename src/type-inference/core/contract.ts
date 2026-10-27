@@ -683,8 +683,8 @@ export class Contract {
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
   ];
-  /** Per class of computed-key loads on either side, their answer below their root (`#loadsBelow`). */
-  readonly #loadsBelowOf = new WeakMap<OtherGroup, readonly Item[]>();
+  /** Per literal path's computed values on either side (`#othersAt`), its computed-key loads below their root. */
+  readonly #loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly #choiceOptions = [
     new Map<PlaceId, readonly ChoiceGroup[]>(),
@@ -4386,9 +4386,14 @@ export class Contract {
               ),
             ),
           );
-        for (const group of this.#othersAt(index.others.get(path), false)) {
+        const groups = this.#othersAt(index.others.get(path), false);
+        // (below their root the path's classes of computed-key loads answer together, where the first one stands)
+        let placed = false;
+        for (const group of groups) {
           if (group.loads && length < rest.length) {
-            for (const item of yield* this.#loadsBelow(group, node, after(), false)) out.push(item);
+            if (!placed)
+              for (const item of yield* this.#loadsBelow(groups, after(), false)) out.push(item);
+            placed = true;
             continue;
           }
           const from = out.length;
@@ -4415,9 +4420,14 @@ export class Contract {
           for (const entry of index.exact.get(path) ?? [])
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
-        for (const group of this.#othersAt(others, true)) {
+        const groups = this.#othersAt(others, true);
+        let placed = false;
+        for (const group of groups) {
           if (group.loads && length < rest.length) {
-            for (const item of yield* this.#loadsBelow(group, node, after(), true)) out.push(item);
+            if (!placed)
+              for (const item of yield* this.#loadsBelow(groups, after(), true, node))
+                out.push(item);
+            placed = true;
             continue;
           }
           const from = out.length;
@@ -4486,33 +4496,36 @@ export class Contract {
   }
 
   /**
-   * #1203: a class of computed-key loads below its root (`OtherGroup.loads`) on either side, its members' answers merged,
-   * made once per pass at its first read there and taken at every later one for a step: each load's value there is F19's
-   * host data whatever the path and the node (on the value side its one demand below the root, `Values.#operationItems`),
-   * naming its own ingress (C9), so the merge keeps every member's leaf. The root, with a `null` default's `null`, is
-   * read member by member.
+   * #1203: below their root, a literal path's classes of computed-key loads (`OtherGroup.loads`) on either side, their
+   * members' answers merged, made once per pass at their first read there and taken at every later one for a step. Each
+   * load's value there is F19's host data whatever the path, the node and the default (on the value side its one demand
+   * below the root, `Values.#operationItems`), naming its own ingress (C9), so the merge keeps every member's leaf, and
+   * loads of different defaults answer together. The root, with a `null` default's `null`, is read member by member.
    */
   *#loadsBelow(
-    group: OtherGroup,
-    node: FlowNode | null,
+    groups: readonly OtherGroup[],
     after: readonly string[],
     exact: boolean,
+    node: FlowNode | null = null,
   ): Work<readonly Item[]> {
     const { program, values } = this.pass;
     program.work.charge("invSteps");
-    const known = this.#loadsBelowOf.get(group);
+    const known = this.#loadsBelowOf.get(groups);
     if (known !== undefined) return known;
     const items: Item[] = [];
-    for (const members of [group.read, group.rest])
-      for (const entry of members) {
-        const answer = exact
-          ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
-          : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
-        for (const item of answer) items.push(item);
-      }
+    for (const group of groups) {
+      if (!group.loads) continue;
+      for (const members of [group.read, group.rest])
+        for (const entry of members) {
+          const answer = exact
+            ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
+            : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
+          for (const item of answer) items.push(item);
+        }
+    }
     const below = mergeItems(items, program.scope);
     this.#keep(1 + below.length);
-    this.#loadsBelowOf.set(group, below);
+    this.#loadsBelowOf.set(groups, below);
     return below;
   }
 
