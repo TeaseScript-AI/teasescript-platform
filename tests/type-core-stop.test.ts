@@ -407,6 +407,13 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
       [host(2, 3)],
       [host("bad", 3)],
     ],
+    // a domain is not the value's kinds (TABLE r4.105): `integer?` copied where the value is only `null` imposes no
+    // family on the fallback, so a text fallback still runs (Codex r9's B1)
+    [
+      'let v: integer? = null\nlet a = {v:v}\nlet b = a\nlet c = b.v\nsay c otherwise hostValue\nsay "AFTER"\nexit\n',
+      [host("bad", 3)],
+      [],
+    ],
   ]);
 });
 
@@ -516,6 +523,42 @@ test("after a stop a read through a cycle of copies that would grow its path fin
 });
 
 /**
+ * Read as the value for a fixed need, a domain says nothing of emptiness (TABLE r4.105): a copied written list that may
+ * be empty keeps its selection's empty check at the settled walk's ends, in both orders. A call statement is outside
+ * the candidate route: through the analysis.
+ */
+test("a stop keeps the empty check of a selection read through a copied written list", () => {
+  const source =
+    'let grow: boolean = hostValue\nlet a: integer[] = []\nif grow { a.add(2) }\nlet b = a\nsay b.first\nsay "AFTER"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const at = source.indexOf("b.first");
+  const owed = (answers: Answers): boolean =>
+    [...answers.diagnostics, ...answers.budget.deferred].some(
+      (d) => d.code === "TSV043" && d.site.start === at && d.site.end === at + "b.first".length,
+    );
+  for (const reversed of [false, true]) {
+    const analyse = (allowance?: number): Answers => {
+      const run = (): Answers => analyseCore(request);
+      const ordered = (): Answers =>
+        reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), run),
+            )
+          : run();
+      return allowance === undefined ? ordered() : withTestAllowance(allowance, ordered);
+    };
+    assert.ok(owed(analyse()), `unstopped, reversed: ${reversed}`);
+    const walk = phaseEnds(analyse().budget.total, (allowance) => {
+      const { stoppedIn, settled } = analyse(allowance).budget;
+      return settled ? stoppedIn : null;
+    }).get("walk");
+    assert.ok(walk !== undefined, `reversed: ${reversed}`);
+    for (const allowance of walk) assert.ok(owed(analyse(allowance)), `${reversed} @${allowance}`);
+  }
+});
+
+/**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
  * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
  * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the
@@ -531,6 +574,12 @@ test("a stop after admission settled marks an inferred list's default it leaves 
       ],
       [
         "let anchor = 4\nlet value = anchor otherwise hostValue\nlet items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay value\nexit\n",
+        [host(2, 3)],
+        [host("bad", 3)],
+      ],
+      // a copied domain that admits `null` leaves the family undecided (TABLE r4.105): marked, not imposed
+      [
+        'let items: integer?[] = [2,null]\nlet a = {xs: items}\nlet b = a\nsay b.xs.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
         [host(2, 3)],
         [host("bad", 3)],
       ],

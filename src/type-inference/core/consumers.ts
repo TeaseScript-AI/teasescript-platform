@@ -41,6 +41,7 @@ import {
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import {
+  EMPTY,
   firstWriter,
   makeItem,
   REASON,
@@ -379,9 +380,14 @@ export class Consumers {
    * come from the same consumers as an unstopped analysis's (TABLE r4.99). In the finishing path it reads what is
    * settled (`#finishingRead`), `STOPPED` only where nothing is.
    */
-  #valueItems(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
+  #valueItems(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement = false,
+  ): readonly Item[] {
     return this.#finishing
-      ? this.#finishingRead(value, node, rest)
+      ? this.#finishingRead(value, node, rest, requirement)
       : this.#run(this.pass.values.valueItems(value, node, rest));
   }
 
@@ -391,9 +397,16 @@ export class Consumers {
    * there stands); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
    * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
    * decided, or a copy's through the copy forest, `Admission.retained`); `STOPPED` (`unknown` with the reason `budget`)
-   * only where none of these decides it, so its consumer owes its check when the script runs.
+   * only where none of these decides it, so its consumer owes its check when the script runs. A written or retained type
+   * is a domain, not the value's kinds (revision 15, r4.105): read as the value for a fixed need, possibly empty at an
+   * element; for a `requirement` that follows from the value's kinds (C10's family) only as one family without `null`.
    */
-  #finishingRead(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
+  #finishingRead(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement = false,
+  ): readonly Item[] {
     const { contract, values } = this.pass;
     const own = rest.length === 0 ? this.#literalKind(value) : null;
     if (own !== null) return own;
@@ -414,9 +427,21 @@ export class Consumers {
     const term = written === null ? null : termAt(written, rest);
     const tags =
       term !== null ? typeTags(term) : this.settled ? (this.#retainedRead(value, rest) ?? []) : [];
-    return tags.length === 0 || tags.includes("unknown")
-      ? STOPPED
-      : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    // a domain, not the value's kinds (S3 §5 revision 15): a requirement that follows from the value's kinds (C10's
+    // family) takes them from it only where every value in it gives the same: one family without `null` gives it, `null`
+    // only none; any other leaves it undecided
+    if (requirement && !tags.includes("unknown")) {
+      const families = new Set(
+        tags.filter((tag) => tag !== "null").map((tag) => (tag === "integer" ? "number" : tag)),
+      );
+      if (tags.length > 0 && families.size === 0) return [makeItem("null", null, { cert: "pos" })];
+      if (families.size !== 1 || tags.includes("null")) return STOPPED;
+    }
+    if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
+    const items = tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
+    const step = rest.at(-1) ?? this.pass.program.projOf.get(value)?.step;
+    return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
   }
 
   /** The admitted type admission retained at a read's key path and `rest` (`Admission.retained`), else `null`. */
@@ -2112,7 +2137,8 @@ export class Consumers {
         this.#fallbackFits(
           c,
           node,
-          (rest) => withoutEmpty(this.#valueItems(c.receiver, node, joinSteps(["element"], rest))),
+          (rest) =>
+            withoutEmpty(this.#valueItems(c.receiver, node, joinSteps(["element"], rest), true)),
           c.fallback,
         );
         continue;
@@ -2121,7 +2147,7 @@ export class Consumers {
         this.#fallbackFits(
           c,
           node,
-          (rest) => withoutEmpty(this.#valueItems(c.left, node, rest)),
+          (rest) => withoutEmpty(this.#valueItems(c.left, node, rest, true)),
           c.right,
         );
         continue;
@@ -2937,6 +2963,8 @@ export class Consumers {
     if (
       elements.length > 0 &&
       !elements.some((item) => item.tag === "empty") &&
+      // (an element contract a stop left unsettled says nothing of emptiness)
+      !elements.some(unsettledItem) &&
       !this.#run(contract.contractOfValue(value)).some((item) => item.tag === "unknown")
     ) {
       this.#skip(value);
