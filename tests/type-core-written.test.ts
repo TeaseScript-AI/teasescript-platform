@@ -695,3 +695,97 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
   );
   assert.notEqual(nesting.outcome, "budget-error");
 });
+
+/**
+ * TABLE r4.80 (the owner's reviewer's F1 on #1049): a field a copy inherits a written type at is decided where the copy's
+ * own store reaches it, whatever no read asks, in every layer: a misfitting value stored into it is an error at that
+ * value; host data stored into it owes its check there, against the inherited type, which the candidate plan holds at
+ * the store and which stops a forbidden value before anything is said. For a copy, a copy of a copy and a second copy
+ * of the root, in both orders, with the sharing on and off. A `fromJson` call is outside the candidate route: its
+ * decision is the host value's.
+ */
+test("a copy's inherited written field is decided at the copy's own store in every layer (TABLE r4.80)", () => {
+  const span = (source: string, text: string, from = 0): string => {
+    const start = source.indexOf(text, from);
+    assert.ok(start >= 0, `${JSON.stringify(text)} in ${JSON.stringify(source)}`);
+    return `${start}:${start + text.length}`;
+  };
+  for (const copies of [
+    "let a = root",
+    "let first = root\nlet a = first",
+    "let other = root\nlet a = root",
+  ]) {
+    const prefix = `let typed: integer = 1\nlet root = {f: typed, g: typed}\n${copies}\n`;
+    const wrong = `${prefix}a.f = "x"\nexit\n`;
+    const host = `${prefix}a.f = hostValue\nsay "stored"\nexit\n`;
+    const parsed = `${prefix}a.f = fromJson(hostValue)\nexit\n`;
+    const store = prefix.length;
+    for (const shared of [true, false]) {
+      const decided = (source: string) =>
+        inBothOrders(() => {
+          const run = (): Answers =>
+            analyseCore(coreRequest([{ path: "main.tease", source }], GLOBALS)!);
+          const answers = shared ? run() : withoutSharing(run);
+          return {
+            outcome: answers.outcome,
+            diagnostics: answers.diagnostics.map(
+              (found) => `${found.class} ${found.kind} ${found.site.start}:${found.site.end}`,
+            ),
+            boundaries: answers.checks
+              .filter((check) => check.boundary)
+              .map(
+                (check) =>
+                  `${check.target} [${sorted(check.against).join(",")}] ${check.site.start}:${check.site.end}`,
+              ),
+          };
+        });
+      const mode = `${JSON.stringify(copies)}${shared ? "" : " (no sharing)"}`;
+      assert.deepEqual(
+        decided(wrong),
+        {
+          outcome: "compile-error",
+          diagnostics: [`compile-error written-target ${span(wrong, '"x"', store)}`],
+          boundaries: [],
+        },
+        mode,
+      );
+      const at = span(host, "hostValue", store);
+      assert.deepEqual(
+        decided(host),
+        {
+          outcome: "warning-runtime-check",
+          diagnostics: [`warning-runtime-check written-target ${at}`],
+          boundaries: [`a.f [integer] ${at}`],
+        },
+        mode,
+      );
+      const call = span(parsed, "fromJson(hostValue)", store);
+      assert.deepEqual(
+        decided(parsed),
+        {
+          outcome: "warning-runtime-check",
+          diagnostics: [`warning-runtime-check written-target ${call}`],
+          boundaries: [`a.f [integer] ${call}`],
+        },
+        mode,
+      );
+      const compile = (): InstructionPlan | null =>
+        compileSourceWithBackend(host, { globals: GLOBALS }, CORE_BACKEND).plan;
+      const plan = shared ? compile() : withoutSharing(compile);
+      assert.ok(plan !== null, mode);
+      assert.deepEqual(checksOf(plan), [`${span(host, "a.f = hostValue", store)} integer`], mode);
+      const fits = runGlobals(plan, { hostValue: 5 });
+      assert.deepEqual(
+        [fits.status, fits.failure, fits.said.map(({ text }) => text)],
+        ["halted", null, ["stored"]],
+        mode,
+      );
+      const misfits = runGlobals(plan, { hostValue: "x" });
+      assert.deepEqual(
+        [misfits.status, misfits.failure, misfits.said],
+        ["failed", `TSR058@${at}`, []],
+        mode,
+      );
+    }
+  }
+});
