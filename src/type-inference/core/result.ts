@@ -309,6 +309,8 @@ export interface RecordDiagnostic {
   /** A written type's error: its offending union and V30's suggestion (`WrittenTypeError`). */
   readonly union?: RecordSite;
   readonly suggestion?: string | null;
+  /** The copy that brought a copied property's rejected kind (ADR 0021 rule 1.1, TABLE r4.75 (4)). */
+  readonly related?: RecordSite;
 }
 
 /**
@@ -350,7 +352,9 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
           site: site(diagnostic.site),
           ...(diagnostic.kind === "written-type"
             ? { union: site(diagnostic.union), suggestion: diagnostic.suggestion }
-            : {}),
+            : diagnostic.rule.rule === "store" && diagnostic.rule.brought !== null
+              ? { related: site(diagnostic.rule.brought) }
+              : {}),
         }
       : {
           class: diagnostic.class,

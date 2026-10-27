@@ -1,4 +1,4 @@
-# The core's compact fixture (M4 steps S0, S6 and S6b)
+# The core's compact fixture (M4 steps S0, S6, S6b and S8)
 
 Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fable/m4/s0-brief.md`, lead Fable): the
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
@@ -18,6 +18,25 @@ regenerate S6's committed fixture").
   their ends before.
 - The converter rewrote the same 197 gate records (193 prefixed files and the four collection records) and the same 2
   deferred records.
+
+## Refresh to the set's revision r481 `8992e5c3…` (M4 step S8)
+
+Builder for M4 step S8 (lead Fable). `cells.jsonl` is regenerated from the set's revision r481
+`8992e5c3e81dd74b…` (2,013 gate records; the notes `revision-r481-changes.md`) by the commands of the S6b refresh below,
+with the set's tooling as r481 published it: `convert.py` `25a3b7152cd55fe8…`, `verify.py` `3ff9a41683540cc2…`,
+`collection-rewrites.json` `981e40ee…`. `cells-deferred.jsonl` is unchanged (`77b11b86eae67cf7…`, 9 records).
+- `verify.py --preservation`: 2,013 of 2,013 gate records the same, every diagnostic, expression, obligation, check
+  and N10 writer span.
+- Against `81b3a0c4…`: 32 records added, 5 changed, none removed. Changed: the copied-field error of
+  `cp9-cells/s4/s6/owner/bound/record-kind-read/literal` and `…/insert` and of `cp9-cells/r42/copy/first-read-after-conflict`,
+  `…/first-store-after-conflict` and `…/access-before-later-copy` moves to the first direct read or store, with the
+  copy as the diagnostic's optional `related` site (TABLE r4.75 (4)). Added: the 32 `cp9-cells/s9b/f18-held/…`
+  records of S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)), held by that prefix until S9b.
+- A diagnostic may carry `related: {file, offset, end}`, the whole copy that brought the rejected kind; the reader keeps
+  it and the comparison compares it with the diagnostic (`tests/helpers/type-core-records.ts`). No other record has it.
+- Held at this revision (`heldBack`, `tests/helpers/type-core-fixture.ts`; their counts pinned in the cells test): the
+  adapters' 9, stage 3b's 653, S9b's F18 shapes 32, and `cp9-cells/F16/invalid-datetime-difference`, whose operator
+  site §3.4 puts at its right operand (r4.62); 1,318 records compare whole.
 
 ## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 

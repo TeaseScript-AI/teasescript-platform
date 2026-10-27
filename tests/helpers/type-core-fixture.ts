@@ -36,15 +36,6 @@ function texts(value: unknown, where: string): string[] {
   });
 }
 
-/** The records whose copied-property error the set sites at the copy (TABLE r4.75 (4)). */
-const FIRST_DIRECT: ReadonlySet<string> = new Set([
-  "cp9-cells/s4/s6/owner/bound/record-kind-read/literal",
-  "cp9-cells/s4/s6/owner/bound/record-kind-read/insert",
-  "cp9-cells/r42/copy/first-read-after-conflict",
-  "cp9-cells/r42/copy/first-store-after-conflict",
-  "cp9-cells/r42/copy/access-before-later-copy",
-]);
-
 /**
  * Why a record is held back from the positive list, named by its cell or by its name, or `null` for an asserted record:
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
@@ -54,10 +45,9 @@ export function heldBack(record: FixtureRecord): string | null {
   // unchanged until its maintainer corrects this start as well as its end (r4.62).
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
     return "operator site awaiting set correction (TABLE §3.4, r4.62)";
-  // ADR 0021 rule 1.1: a property that reaches a place only through copies is checked at its first direct read or
-  // store, the copy that brought the other type its related site; the set still sites these errors at the copy
-  if (FIRST_DIRECT.has(record.name))
-    return "site moved to the first direct read or store by TABLE r4.75 (4); set correction pending";
+  // S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)): a named default's call-site answer and a copy of a written type as
+  // `fromJson`'s and `load`'s receiving context, which the core's rule takes with S9b
+  if (record.name.startsWith("cp9-cells/s9b/f18-held/")) return "S9b's F18 shapes (r4.81 (1))";
   // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
   if (record.owner === "adapter") return "the adapters' records (S9b)";
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and

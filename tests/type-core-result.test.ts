@@ -484,6 +484,28 @@ test("the comparison counts each check, compares whole sites, and asserts only t
       "extra check null-check value [non-null] main.tease:20-25 ×1",
     ],
   );
+  // a copied property's error compares its related copy too (TABLE r4.75 (4)), read as the fixture writes it
+  const copied = readCompactRecord({
+    outcome: "compile-error",
+    diagnostics: [
+      {
+        kind: "written-target",
+        class: "compile-error",
+        site: { file: "main.tease", offset: 55, end: 62 },
+        context: null,
+        related: { file: "main.tease", offset: 45, end: 46 },
+      },
+    ],
+    checks: [],
+  });
+  const unrelated: CompactRecord = {
+    ...copied,
+    diagnostics: copied.diagnostics.map(({ related: _related, ...rest }) => rest),
+  };
+  assert.deepEqual(recordDifferences(copied, unrelated), [
+    "missing diagnostic written-target compile-error main.tease:55-62 related main.tease:45-46 ×1",
+    "extra diagnostic written-target compile-error main.tease:55-62 ×1",
+  ]);
   assert.throws(
     () =>
       readCompactRecord({

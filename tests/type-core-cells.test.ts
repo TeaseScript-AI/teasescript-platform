@@ -34,7 +34,7 @@ function analysed(record: FixtureRecord): CompactRecord {
 }
 
 test("the core gives the expected record for every record of the cells it completes", (t) => {
-  // the classes held back at the set's revision `81b3a0c4…`, so a refresh that moves records between them shows
+  // the classes held back at the set's revision `8992e5c3…` (r481), so a refresh that moves records between them shows
   const held = new Map<string, number>();
   for (const record of records) {
     const reason = heldBack(record);
@@ -44,9 +44,9 @@ test("the core gives the expected record for every record of the cells it comple
     "the adapters' records (S9b)": 9,
     "stage 3b's cells (S10)": 653,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
-    "site moved to the first direct read or store by TABLE r4.75 (4); set correction pending": 5,
+    "S9b's F18 shapes (r4.81 (1))": 32,
   });
-  assert.equal(asserted.length, 1_313);
+  assert.equal(asserted.length, 1_318);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
