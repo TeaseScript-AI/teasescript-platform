@@ -3071,6 +3071,68 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // #1203: k loads of a computed key, one class, each read below its root at every field (F19: host data whatever the
+  // path), the issue's shape and every key form beside every default
+  {
+    name: "I1203-computed-loads",
+    measures: "#1203: a list of k `load(hostValue, default: 0)`, a field of its first read k times",
+    // 36,641 / 73,481 units at k = 64, 128 in both orders (2.0132; `main` 56,667 / 154,499, 2.74: each load read at
+    // each field)
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${cells(k, "load(hostValue, default: 0)")}]`,
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "I1203-computed-load-forms",
+    measures:
+      "#1203: a list of k loads whose keys are a host value, a variable, a property, an element and a sum, their defaults `null`, a number, records of their own fields (a class each) and a choice of a list's buttons (no class), then a record added (the contract side), a field of its first read k times",
+    // 56,979 / 113,229 units at k = 64, 128 in both orders (2.0130; `main` 85,065 / 226,755, 2.70; 2.32 with one
+    // answer per class of loads, a class per default, #1208 review r1; `mergeItems` 3.11 where a load needs its
+    // default's class, review r3)
+    program: (k) => {
+      const keys = ["hostValue", "key", "names.key", "keys[0]", 'key + "1"'];
+      const defaults = (i: number): string =>
+        ["null", "0", `{a${i}: 1}`, `{f0: {a${i}: 1}}`, "(askChoice [1, 2])"][(i * 2) % 5]!;
+      return main(
+        lines(
+          'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]',
+          `let box = [${Array.from({ length: k }, (_, i) => `load(${keys[i % 5]}, default: ${defaults(i)})`).join(", ")}]`,
+          "box.add({f0: 1})",
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  },
+  {
+    name: "I1203-written-loads",
+    measures:
+      "#1203: k loads into a written `object[]` (defaults of their own fields, and a number that does not fit) and k into a written `integer[]`, a record added to the first, a field of each list's first element read k times",
+    // 97,092 / 194,520 units at k = 64, 128 (2.0217; reversed 2.0216; `main` 145,078 / 388,810, 2.70; 2.43 while a
+    // load landing in a written type was read at every field, before the lead lifted that exclusion on #1208)
+    program: (k) => {
+      const defaults = (i: number): string =>
+        [`{a${i}: 1}`, `{f0: {a${i}: 1}}`, "(askChoice [{a: 1}, {b: 2}])", `{a${i}: 1}`, "0"][
+          i % 5
+        ]!;
+      return main(
+        lines(
+          'let key = "k"',
+          `let box: object[] = [${Array.from({ length: k }, (_, i) => `load(${i % 2 === 0 ? "hostValue" : "key"}, default: ${defaults(i)})`).join(", ")}]`,
+          `let ints: integer[] = [${cells(k, "load(hostValue, default: 0)")}]`,
+          "box.add({f0: 1})",
+          rows(k, (i) => `repeat box[0].f${i} {}`),
+          rows(k, (i) => `repeat ints[0].f${i} {}`),
+          "exit",
+        ),
+      );
+    },
+  },
 ];
 
 /**
