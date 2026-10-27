@@ -450,10 +450,18 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** The groups of one class `Contract.#othersAt` keeps apart where their alias writers are incomparable. */
+const CLASS_GROUPS = 4;
+
 /** A read's class (`Contract.readClass`), and the writer of the alias it reads, which its answer takes. */
 interface ReadClass {
   readonly cls: string | null;
   readonly writer: Writer | null;
+  /**
+   * For a read of an alias with no steps and no guard, the class of the read its alias's chain ends at, which a read of
+   * an alias of it takes in its place: a chain of guard-free aliases of one source is one class.
+   */
+  readonly base: string | null;
 }
 
 /** Computed values of a literal at a path that answer alike (`#othersAt`): the first, and the earliest cell writer. */
@@ -2063,20 +2071,28 @@ export class Contract {
       projection = program.projOf.get(current);
     }
     const binding = program.occurrenceOf.get(current);
-    if (fresh || binding === undefined) return { cls: null, writer: null };
+    if (fresh || binding === undefined) return { cls: null, writer: null, base: null };
     const read = [
       steps.reverse().join(" "),
       guards.guardedRead(value) ? "g" : "",
       guards.guardedBelowRead(value).join(" "),
     ] as const;
-    const source =
-      alias === null ? null : (this.#readClasses[exact ? 1 : 0]!.get(alias.source)?.cls ?? null);
-    if (alias !== null && source !== null)
-      return { cls: keptParts(this.#work, "a", source, ...read), writer: alias.writer };
+    // (an alias of an alias read with no steps and no guard reads what that one reads: one class for the chain)
+    const source = alias === null ? undefined : this.#readClasses[exact ? 1 : 0]!.get(alias.source);
+    const base = source?.base ?? source?.cls ?? null;
+    if (alias !== null && base !== null) {
+      const plain = read.every((part) => part === "");
+      return {
+        cls: keptParts(this.#work, "a", base, ...read),
+        writer: alias.writer,
+        base: plain ? base : null,
+      };
+    }
     const snapshot = exact ? this.readSnapshot(value) : "";
     return {
       cls: snapshot === null ? null : keptParts(this.#work, binding, ...read, snapshot),
       writer: null,
+      base: null,
     };
   }
 
@@ -2150,8 +2166,9 @@ export class Contract {
    * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
    * once per list and side: values of one class (`contractClass`; on the value side `Values.valueClass`) answer alike at
    * every path, so the first stands for them, the earliest writer for its kinds (each value's kinds take its cell's
-   * writer, F28); a value whose reads' alias writers come earlier than the first's (`#inputWriters`) stands for its own
-   * group, and any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
+   * writer, F28). Reads of aliases of one source differ by their alias's writer only (`aliasWriter`), so a group's
+   * first is a value whose reads' alias writers come first; a value whose writers are earlier in some read and later in
+   * another stands for a group of its own (up to four of a class), and any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
    * contributions (§3.4's several elements) stays the list's.
    */
   #othersAt(list: readonly ValueEntry[] | undefined, exact: boolean): readonly OtherGroup[] {
@@ -2173,28 +2190,38 @@ export class Contract {
       // (on the contract side a value without its cell's writer apart from one with it)
       const key =
         cls === null ? null : keptParts(this.#work, cls, exact || writer !== null ? "w" : "");
-      // (a value joins its class's first group whose reads' alias writers come no later than its own, so that group's
-      // first stands for it: the earliest writer for each kind, `aliasWriter`)
+      // (a value joins a group of its class whose first's reads' alias writers come no later than its own, or takes the
+      // first's place where its own all come earlier, so a group's first writes first for each kind, `aliasWriter`; a
+      // value that is neither stands for a group of its own, up to `CLASS_GROUPS` of a class)
       const writers = key === null ? [] : this.#inputWriters(entry.value, exact);
-      const at =
-        key === null
-          ? undefined
-          : (byClass.get(key) ?? []).find((position) =>
-              groups[position]!.writers.every(
-                (first, index) =>
-                  first === writers[index] ||
-                  (first !== null && firstWriter(first, writers[index] ?? null) === first),
-              ),
-            );
-      if (at !== undefined) {
-        const into = groups[at]!;
-        groups[at] = { ...into, writer: firstWriter(into.writer, writer) };
-        continue;
+      const notLater = (a: readonly (Writer | null)[], b: readonly (Writer | null)[]): boolean =>
+        a.every(
+          (first, index) =>
+            first === b[index] ||
+            (first !== null && firstWriter(first, b[index] ?? null) === first),
+        );
+      const positions = key === null ? undefined : byClass.get(key);
+      let joined = false;
+      for (const position of positions ?? []) {
+        program.work.charge("invSteps");
+        const into = groups[position]!;
+        if (notLater(into.writers, writers))
+          groups[position] = { ...into, writer: firstWriter(into.writer, writer) };
+        else if (notLater(writers, into.writers))
+          groups[position] = {
+            value: entry.value,
+            g: entry.g,
+            writer: firstWriter(into.writer, writer),
+            writers,
+          };
+        else continue;
+        joined = true;
+        break;
       }
+      if (joined) continue;
       if (key !== null) {
-        const positions = byClass.get(key);
         if (positions === undefined) byClass.set(key, [groups.length]);
-        else positions.push(groups.length);
+        else if (positions.length < CLASS_GROUPS) positions.push(groups.length);
       }
       this.#keep(2);
       groups.push({ value: entry.value, g: entry.g, writer, writers });
