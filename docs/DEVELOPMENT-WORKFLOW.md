@@ -16,10 +16,11 @@ An issue describes one coherent outcome: a bug, task, change or decision; bundle
 Record unfinished work in an issue promptly (recording does not schedule it; an accepted known limit or a decided option
 with no planned work is documented where it applies instead, and gets an issue only when something reaches it), using
 the relevant headings of the [issue forms](../.github/ISSUE_TEMPLATE/) and omitting empty ones. Write for a reader
-without the project's working notes: plain words and a small example first, internal references (TABLE, PLAN, notes)
-only as supporting links, and only durable links (no `/tmp` paths). An incomplete report is welcome. Search open and
-closed issues first and add evidence to the one tracking the same problem, reopening it if work remains. Ground a
-diagnosis in reproduction, source or logs, and mark hypotheses as such.
+without the project's working notes: plain words and a small example first (a TeaseScript example must compile, unless
+it shows the error in question), internal references (TABLE, PLAN, notes) only as supporting links, and only durable
+links (no `/tmp` paths). An incomplete report is welcome. End it with a line `Filed by:` naming who wrote it, for
+example `orchestrator 2 (platform)`. Search open and closed issues first and add evidence to the one tracking the same
+problem, reopening it if work remains. Ground a diagnosis in reproduction, source or logs, and mark hypotheses as such.
 
 Labels, described on GitHub:
 

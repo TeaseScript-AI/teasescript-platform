@@ -6,7 +6,9 @@ TeaseScript is built by its owner with a team of agents. This page is for report
 
 - Use an issue form: **Bug**, **Task or feature request**, or **Decision**. Only the first field is required, and a
   blank issue is fine too.
-- Lead with what goes wrong and when you run into it; put logs and diagnosis last.
+- Lead with what goes wrong and when you run into it; put logs and diagnosis last. A TeaseScript example must
+  compile, unless it shows the error in question.
+- End with a line `Filed by:` naming who you are.
 - Search open and closed issues first; add evidence to the issue tracking the same problem, reopening it or filing a
   linked follow-up if work remains.
 - With `gh`, use the forms' headings in the same order ([`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/)), and set
