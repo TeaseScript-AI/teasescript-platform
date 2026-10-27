@@ -16,6 +16,8 @@ import {
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   ORACLE_PROGRAMS,
+  READ_CHAIN_PRODUCTS,
+  VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
   W34_VARIANTS,
   W44_VARIANTS,
@@ -39,7 +41,9 @@ import {
 /*
  * The sharing differential (TABLE r4.72): S6's sharing of answers between equivalent values (alias classes and chains
  * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) is an optimization, so it is output-neutral: for
+ * data's, §3.1; a literal's entries for the reads of one key, TABLE §8) and S6c's (a choice's options, a run of adds
+ * and a literal's computed values by their read classes, a prefix's entries of one shape) is an optimization, so it is
+ * output-neutral: for
  * every program below, in both orders, the published diagnostics, the owed checks, every binding's admitted type at its
  * root and its element (the decider's site with it) and the candidate route's lowered plan (or its rejection) are
  * byte-identical with the sharing on and off (`withoutSharing`). Any difference fails the test. On CI (GitHub Actions
@@ -88,11 +92,14 @@ function programs(): Program[] {
     ADMISSION_KNOWN_PRODUCTS,
     ADMISSION_SAME_SOURCES,
     ADMISSION_INGRESS_PRESETS,
+    READ_CHAIN_PRODUCTS,
   ])
     for (const family of families)
       for (const k of [2, 3])
         out.push({ name: `${family.name} at ${k}`, files: family.program(k) });
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
+  // S6c's programs: each discovery it shares beside what a coarser key would merge (`VALUE_SHARING_PROGRAMS`)
+  for (const { name, files } of VALUE_SHARING_PROGRAMS) out.push({ name: `S6c ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
   // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
