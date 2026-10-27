@@ -97,10 +97,11 @@ test("each context word's sentence says why the compiler could not decide, on th
   const speaker =
     "The compiler cannot tell whether 'player' has property 'n' here, so the script checks 'player.n' when it runs. " +
     "'player' is a speaker, and its properties are checked when the script runs.";
+  // (in source order of their sites: the store's member read first, r4.86 (1))
   word("cp9-cells/F19a/direct", [
+    `W TSV043 'player.n': ${speaker}`,
     `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another kind here, ${CHECKED} The compiler ` +
       "does not follow 'player.n', so it is checked when the script runs.",
-    `W TSV043 'player.n': ${speaker}`,
     `W TSV043 'player.n': ${speaker}`,
   ]);
 });

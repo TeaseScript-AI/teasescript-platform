@@ -50,6 +50,7 @@ import {
   type CoreAnalysisRequest,
 } from "./program.js";
 import {
+  checksBySite,
   outcomeOf,
   type CoreDiagnostic,
   type CoreOutcome,
@@ -424,6 +425,27 @@ function dynamicWhy(reasons: number): DynamicWhy {
   return (reasons & REASON.external) !== 0 ? "host" : "unknown member";
 }
 
+/**
+ * A published list in source order of its items' sites (file, start, end): at one site in the order the consumers run
+ * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
+ * the sharing on or off (TABLE r4.86 (1)).
+ */
+function bySite<T extends { readonly site: SourceSite }>(
+  list: readonly { readonly item: T; readonly rule: number }[],
+): T[] {
+  return list
+    .map(({ item, rule }) => ({ item, rule, text: JSON.stringify(item) }))
+    .sort(
+      (a, b) =>
+        a.item.site.file - b.item.site.file ||
+        a.item.site.start - b.item.site.start ||
+        a.item.site.end - b.item.site.end ||
+        a.rule - b.rule ||
+        (a.text < b.text ? -1 : a.text > b.text ? 1 : 0),
+    )
+    .map(({ item }) => item);
+}
+
 /** The collector's known-value links: each linked read's site key, with its initializer's site. */
 function initializersOf(program: CoreProgram): Map<string, SourceSite> {
   const links = new Map<string, SourceSite>();
@@ -537,24 +559,42 @@ class CoreAnswers implements Answers {
     this.graph = program.flow;
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
-    this.diagnostics = exhausted === null ? [...written, ...consumers.diagnostics] : [];
+    // published in source order of their sites, at one site the written types' errors first, then each consumer's in
+    // the order they run (TABLE r4.86 (1))
+    const rules = new Map<CoreDiagnostic, number>();
+    let rule = 0;
+    consumers.diagnostics.forEach((diagnostic, index) => {
+      while (rule < consumers.rules.length && index >= consumers.rules[rule]!) rule += 1;
+      rules.set(diagnostic, 1 + rule);
+    });
+    this.diagnostics =
+      exhausted === null
+        ? bySite(
+            [...written, ...consumers.diagnostics].map((item) => ({
+              item,
+              rule: rules.get(item) ?? 0,
+            })),
+          )
+        : [];
     this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
-    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes
-    const checks: Obligation[] = [];
+    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes: in source order of their
+    // sites, at one site the warnings' obligations in the diagnostics' order, then the others (`checksBySite`)
+    const owned: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
       if (diagnostic.class === "warning-runtime-check") {
-        checks.push(diagnostic.obligation);
+        owned.push(diagnostic.obligation);
         const at = siteKey(diagnostic.obligation.site);
         const list = this.#obligations.get(at);
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
+    const others: { readonly item: Obligation; readonly rule: number }[] = [];
     if (exhausted === null) {
       for (const list of consumers.admission.boundaries.values())
-        for (const check of list) checks.push(check);
-      for (const check of consumers.admission.readChecks) checks.push(check);
+        for (const item of list) others.push({ item, rule: 0 });
+      for (const item of consumers.admission.readChecks) others.push({ item, rule: 1 });
     }
-    this.checks = checks;
+    this.checks = checksBySite(owned, bySite(others));
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
     // after a stop the ledger is spent: nothing more is computed, so no binding is published as deferred

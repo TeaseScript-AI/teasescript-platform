@@ -7,6 +7,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -15,6 +16,7 @@ import {
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   DIRECT_INGRESS_PROGRAMS,
+  INHERITED_FIELD_FAMILIES,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
@@ -53,14 +55,19 @@ function sized(family: WorkFamily, k: number): Sized {
   return { name, request };
 }
 
-/** A fresh analysis of a family's program, in the source order or with the consumers' and the solver's orders reversed. */
-function analysed({ name, request }: Sized, reversed = false): Answers {
-  const answers = reversed
-    ? withConsumerOrder(
-        (list) => [...list].reverse(),
-        () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
-      )
-    : analyseCore(request);
+/**
+ * A fresh analysis of a family's program, in the source order or with the consumers' and the solver's orders reversed,
+ * with the sharing of answers on or off (`withoutSharing`).
+ */
+function analysed({ name, request }: Sized, reversed = false, unshared = false): Answers {
+  const run = (): Answers =>
+    reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
+        )
+      : analyseCore(request);
+  const answers = unshared ? withoutSharing(run) : run();
   assert.notEqual(answers.outcome, "budget-error", `${name}: within the allowance`);
   return answers;
 }
@@ -92,16 +99,19 @@ test("every sampled family's work grows with its program, not with a product of 
  */
 const COUNTER_DOUBLING = 2.35;
 
-/** The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order. */
-function steepCounters(families: readonly WorkFamily[]): string[] {
+/**
+ * The families of `families` whose total or a counter of at least 200 units grows faster than linearly, either order;
+ * `unshared`: with the sharing of answers off.
+ */
+function steepCounters(families: readonly WorkFamily[], unshared = false): string[] {
   const steep: string[] = [];
   for (const family of families) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
-      const small = analysed(at64, reversed).budget;
-      const large = analysed(at128, reversed).budget;
+      const small = analysed(at64, reversed, unshared).budget;
+      const large = analysed(at128, reversed, unshared).budget;
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
       if (doubling(small.total, large.total) > DOUBLING)
@@ -260,6 +270,18 @@ test("every admission family's work and each of its counters grow with the progr
     }
   }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
+ * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
+ * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source
+ * of 6,153 syntax nodes that reached the allowance), completes within the default allowance.
+ */
+test("the inherited-field families grow with the program with the sharing off, and the 1,024 chain completes", () => {
+  assert.deepEqual(steepCounters(INHERITED_FIELD_FAMILIES, true), []);
+  const chain = INHERITED_FIELD_FAMILIES.find((family) => family.name === "A4-inherited-chain")!;
+  assert.equal(analysed(sized(chain, 1_024)).outcome, "valid");
 });
 
 /**

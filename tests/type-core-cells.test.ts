@@ -740,11 +740,11 @@ test("external data in a choice's options or in a literal is warned at its own e
     sited("let chosen: integer = askChoice {text: hostValue.label, value: hostValue.field}\nexit"),
     [
       "warning-runtime-check",
-      "written-target@63",
       "member-read@39",
+      "written-target@63",
       "member-read@63",
-      "copy-type@63",
       "null-check@39",
+      "copy-type@63",
       "null-check@63",
     ],
   );
@@ -754,11 +754,11 @@ test("external data in a choice's options or in a literal is warned at its own e
     ),
     [
       "warning-runtime-check",
-      "written-target@71",
       "member-read@40",
+      "written-target@71",
       "member-read@71",
-      "copy-type@71",
       "null-check@40",
+      "copy-type@71",
       "null-check@71",
     ],
   );
@@ -768,11 +768,11 @@ test("external data in a choice's options or in a literal is warned at its own e
     ),
     [
       "warning-runtime-check",
-      "written-target@72",
       "member-read@41",
+      "written-target@72",
       "member-read@72",
-      "copy-type@72",
       "null-check@41",
+      "copy-type@72",
       "null-check@72",
     ],
   );
@@ -797,11 +797,11 @@ test("external data in a choice's options or in a literal is warned at its own e
     [
       "warning-runtime-check",
       "written-target@12",
-      "written-target@54",
       "member-read@12",
+      "written-target@54",
       "copy-type@12",
-      "copy-type@54",
       "null-check@12",
+      "copy-type@54",
     ],
   );
 });

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../src/compiler.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, coreResult } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
@@ -17,7 +18,7 @@ import {
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   DIRECT_INGRESS_PROGRAMS,
-  HELD_SHARING_FAULTS,
+  REORDERING_SHARING_FAULTS,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
@@ -159,8 +160,20 @@ function prepared(program: Program): Prepared {
   return { program, request, bindings };
 }
 
-/** What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection. */
-function published({ program, request, bindings }: Prepared, reversed: boolean): string {
+/** Two sites as (file index, start, end), in source order. */
+function compareSites(a: readonly number[], b: readonly number[]): number {
+  return a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+}
+
+/**
+ * What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection; the
+ * record alone (its outcome, diagnostics and checks, and the same serialized); and whether each of its lists is in
+ * source order of its sites (r4.86 (1)).
+ */
+function published(
+  { program, request, bindings }: Prepared,
+  reversed: boolean,
+): { readonly text: string; readonly record: string; readonly sited: boolean } {
   const ordered = <T>(callback: () => T): T =>
     reversed
       ? withConsumerOrder(
@@ -185,40 +198,74 @@ function published({ program, request, bindings }: Prepared, reversed: boolean):
       return { outside: error.what };
     }
   })();
-  return JSON.stringify({
+  const record = {
     outcome: answers.outcome,
     diagnostics: answers.diagnostics,
     checks: answers.checks,
-    admitted,
-    lowered,
-  });
+  };
+  const paths = program.files.map((file) => file.path);
+  const serialized = coreRecord(coreResult(answers), paths);
+  const sitesOf = (
+    list: readonly {
+      readonly site: { readonly file: number; readonly start: number; readonly end: number };
+    }[],
+  ) => list.map(({ site }) => [site.file, site.start, site.end]);
+  const recordSites = (
+    list: readonly {
+      readonly site: { readonly file: string; readonly offset: number; readonly end: number };
+    }[],
+  ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
+  const sited = [
+    sitesOf(answers.diagnostics),
+    sitesOf(answers.checks),
+    recordSites(serialized.diagnostics),
+    recordSites(serialized.runtimeChecks),
+  ].every((sites) =>
+    sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
+  );
+  return {
+    text: JSON.stringify({ ...record, admitted, lowered }),
+    record: JSON.stringify({ record, serialized }),
+    sited,
+  };
 }
 
-test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders (TABLE r4.72)", (t) => {
+test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
   const all = programs();
   const differing: string[] = [];
   let runs = 0;
   // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
   const changed = new Map<string, boolean>();
+  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders:
+  // r4.86 (1))
+  const reordered: string[] = [];
+  const unsited: string[] = [];
   for (const program of all) {
     let ready: Prepared | undefined;
+    const records: string[] = [];
     for (const reversed of program.sourceOrderOnCi === true ? CI_ORDERS : [false, true]) {
       const input = `${reversed}|${JSON.stringify(program.files)}`;
       let differs = changed.get(input);
       if (differs === undefined) {
         runs += 1;
         const once = (ready ??= prepared(program));
-        differs = published(once, reversed) !== withoutSharing(() => published(once, reversed));
+        const shared = published(once, reversed);
+        differs = shared.text !== withoutSharing(() => published(once, reversed)).text;
         changed.set(input, differs);
+        records.push(shared.record);
+        if (!shared.sited) unsited.push(`${program.name}${reversed ? " (reversed)" : ""}`);
       }
       if (differs) differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
+    if (records.length === 2 && records[0] !== records[1]) reordered.push(program.name);
   }
   t.diagnostic(
     `${all.length} programs in ${runs} runs (each in both orders, the fixtures' and the matrices' in ` +
       `${CI_ORDERS.length}; one run per exact input and order), with the sharing on and off`,
   );
   assert.deepEqual(differing, []);
+  assert.deepEqual(reordered, []);
+  assert.deepEqual(unsited, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
 
@@ -262,18 +309,24 @@ test("every occurrence over host data names each ingress's leaf with the sharing
   assert.deepEqual(differing, []);
 });
 
-/** S6's sharing faults that reorder their diagnostics (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing. */
-test(
-  "S6's held sharing faults are output-neutral in both orders",
-  { todo: "Depends on #1059 (diagnostics published in source order), TABLE r4.83 (4)" },
-  () => {
-    const differing: string[] = [];
-    for (const program of HELD_SHARING_FAULTS) {
-      const once = prepared(program);
-      for (const reversed of [false, true])
-        if (published(once, reversed) !== withoutSharing(() => published(once, reversed)))
-          differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+/**
+ * S6's sharing faults that reordered their diagnostics on `main` (`REORDERING_SHARING_FAULTS`, TABLE r4.83 (4)): published in
+ * source order of their sites (r4.86 (1)), the same with the sharing on and off, and in both orders.
+ */
+test("S6's sharing faults that reordered their diagnostics are output-neutral in both orders", () => {
+  const differing: string[] = [];
+  const reordered: string[] = [];
+  for (const program of REORDERING_SHARING_FAULTS) {
+    const once = prepared(program);
+    const records: string[] = [];
+    for (const reversed of [false, true]) {
+      const shared = published(once, reversed);
+      if (shared.text !== withoutSharing(() => published(once, reversed)).text)
+        differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
+      records.push(shared.record);
     }
-    assert.deepEqual(differing, []);
-  },
-);
+    if (records[0] !== records[1]) reordered.push(program.name);
+  }
+  assert.deepEqual(differing, []);
+  assert.deepEqual(reordered, []);
+});

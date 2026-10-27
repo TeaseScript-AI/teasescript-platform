@@ -92,14 +92,305 @@ interface InheritedCopy {
 }
 
 /**
+ * A4 through copies' landings (`groups`, r4.75 (1)): where copies of written types land in each place, and the copies of
+ * inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
+ * copies' sources' landed paths below their strips, asked of those sources, never made per copy (TABLE r4.80). A cycle
+ * of copies has its members' landed paths made once, as the landing within it brings them.
+ */
+interface Inheritance {
+  /** Per place, the paths copies of written types land at in it (their elements too), with each type at the path. */
+  readonly seeds: ReadonlyMap<PlaceId, ReadonlyMap<string, ReadonlySet<TypeTerm>>>;
+  /** Per place, the copies of inheriting places that land in it, each distinct one once. */
+  readonly into: ReadonlyMap<PlaceId, readonly InheritedCopy[]>;
+  /** Per place, the paths its copies land at (their own paths), each once (`#landed`). */
+  readonly owned: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  /** The places in a cycle of copies, by cycle (`cyclesOf`). */
+  readonly cycleOf: ReadonlyMap<PlaceId, number>;
+  /** Per member of a cycle of copies, its landed paths. */
+  readonly cycles: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  /**
+   * Per member of a cycle of whole copies with no written type of its own that whole copies of one place outside it
+   * feed, that place: the member lands that place's paths and its own root, asked of it (`#copiesOf`).
+   */
+  readonly fed: ReadonlyMap<PlaceId, PlaceId>;
+  /** The places copies join, each one's sources' before its own (`cyclesOf`). */
+  readonly order: readonly (readonly PlaceId[])[];
+}
+
+/**
+ * The copies a place answers through (`#passThrough`): each place whose only store at its root is one whole copy of an
+ * unwritten inheriting place, by that place (its parent), with the keys below its root it stores at, which stop it
+ * answering as its parent there; each tree of them in depth-first order (entry and last entry below), and per key the
+ * places storing at it (`Storing`).
+ */
+interface CopyForest {
+  readonly parent: ReadonlyMap<PlaceId, PlaceId>;
+  readonly stores: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  /** Per place, its keys' prefixes' texts, its root's too: whether it stores at or below a path (`#landsThrough`). */
+  readonly under: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  readonly top: ReadonlyMap<PlaceId, PlaceId>;
+  readonly depth: ReadonlyMap<PlaceId, number>;
+  readonly entry: ReadonlyMap<PlaceId, number>;
+  readonly exit: ReadonlyMap<PlaceId, number>;
+  readonly storing: ReadonlyMap<string, Storing>;
+  /** Per key, the places storing at it or below it (`#landedBelow`). */
+  readonly beneath: ReadonlyMap<string, Storing>;
+}
+
+/**
+ * A place's contents beside its landings (`#looseOf`): the paths of its own stores' literals and other values, each with
+ * what lies below it for the latter, and its copies' sources' such contents, each where the copy lands it.
+ */
+interface Loose {
+  readonly points: readonly (readonly string[])[];
+  readonly below: readonly (readonly string[])[];
+  readonly from: readonly { readonly copy: InheritedCopy; readonly loose: Loose }[];
+}
+
+const NO_LOOSE: Loose = { points: [], below: [], from: [] };
+
+/**
+ * A place's own contributions besides its copies of inheriting places (`#ownStructure`): its literals' and constants'
+ * paths, other values' paths with what lies below them, and its reads of other places' keys (a copy of a place that
+ * inherits nothing, a call's result) with where each stands.
+ */
+interface OwnStructure {
+  readonly points: readonly (readonly string[])[];
+  /** Each point's store and the path within its value (`#localMisfits`), beside `points`. */
+  readonly sources: readonly PointSource[];
+  readonly below: readonly (readonly string[])[];
+  readonly reads: readonly { readonly at: readonly string[]; readonly source: Key }[];
+}
+
+/**
+ * What a place holds at and below a path (`#identity`, TABLE r4.86 (2)): the place and path whose landings and contents
+ * these are, beside the own contributions of the places stepped through on the way (`locals`, at rests below the path).
+ */
+interface Identity {
+  readonly root: PlaceId;
+  readonly strip: readonly string[];
+  readonly locals: Locals | null;
+}
+
+/** A literal's or constant's store and the path within its value (`OwnStructure.points`, `Locals.points`). */
+interface PointSource {
+  readonly d: Definition;
+  readonly at: readonly string[];
+}
+
+/** One stepped-through place's own contributions below the asked path, then the rest of the way's (`Identity`). */
+interface Locals {
+  /** Literals and constants: another kind may stand there; and each one's store (`#localMisfits`). */
+  readonly points: readonly (readonly string[])[];
+  readonly sources: readonly PointSource[];
+  /** Any other value, and what lies below it. */
+  readonly below: readonly (readonly string[])[];
+  readonly next: Locals | null;
+  /** The whole chain's count of points and prefixes, and its points' and prefixes' texts (persistent, shared tails). */
+  readonly size: number;
+  readonly pointTexts: Treap | null;
+  readonly belowTexts: Treap | null;
+}
+
+/** A persistent treap of texts (`Locals`): each insert copies its path, so chains sharing a tail share its texts. */
+interface Treap {
+  readonly key: string;
+  readonly priority: number;
+  readonly left: Treap | null;
+  readonly right: Treap | null;
+}
+
+/** A place's copies of one identity at one path, with the locals of their ways (`#meeting`). */
+interface Group {
+  /** Its identity's key with its path (`#meeting`). */
+  readonly id: string;
+  readonly root: PlaceId;
+  readonly strip: readonly string[];
+  readonly path: readonly string[];
+  readonly locals: Set<Locals>;
+}
+
+/** A place's read of another place's key, by what that key holds (`#meeting`). */
+interface Held {
+  readonly root: PlaceId;
+  readonly strip: readonly string[];
+  readonly at: readonly string[];
+  readonly locals: Locals | null;
+}
+
+/** A configuration of a place's groups in `#meeting`'s order: a node of their prefix trie. */
+interface Configuration {
+  readonly id: number;
+  readonly next: Map<string, Configuration>;
+  /** What its last group adds to the meeting of the groups before it (`#joined`). */
+  readonly added: readonly (readonly string[])[];
+  /** Per read identity and path, what the read meets of these groups (`#readMeets`). */
+  readonly reads: Map<string, readonly (readonly string[])[]>;
+  /** Per path, the distinct written types the asked groups of this prefix land there (`#localsShared`). */
+  readonly terms: Map<string, ReadonlyMap<string, TypeTerm | null>>;
+}
+
+/** The groups of one `#meeting` call: those it listed, by their landings and contents, and those it asks. */
+interface Running {
+  readonly lands: Map<string, { readonly path: readonly string[]; readonly groups: Group[] }>;
+  /** The listed landings' texts by every prefix's text. */
+  readonly under: Map<string, string[]>;
+  /** The listed groups' contents beside their landings: points, and prefixes they may hold anything below. */
+  readonly points: Map<string, Group[]>;
+  readonly below: Map<string, Group[]>;
+  /** The groups asked: those another place holds too (`#meeting`), or the one a pair asks. */
+  readonly served: Group[];
+  readonly loose: ReadonlyMap<PlaceId, Loose>;
+  /** Per path the call tested its groups at (`#tested`), what it has accounted there. */
+  readonly accounts: Map<string, Account>;
+  /** Per path, the distinct written types its groups land there, as far as taken (`#termsOf`). */
+  readonly terms: Map<string, { landers: number; readonly found: Map<string, TypeTerm | null> }>;
+}
+
+/**
+ * What `#tested` has accounted at one path: the listed landers and holders taken so far (by their lists' lengths), the
+ * terms and contents found, by what they admit, and whether they may not meet.
+ */
+interface Account {
+  landers: number;
+  points: number;
+  readonly below: number[];
+  readonly contented: Set<Group>;
+  readonly terms: Map<string, TypeTerm | null>;
+  readonly contents: Map<string, readonly Item[]>;
+  met: boolean;
+}
+
+/** A place's contents beside its landings by prefix (`#looseIndex`). */
+interface LooseIndex {
+  /** Each point, prefix and source's copy under every prefix of its path (the path's own text included). */
+  readonly points: Map<string, (readonly string[])[]>;
+  readonly below: Map<string, (readonly string[])[]>;
+  readonly from: Map<string, Loose["from"][number][]>;
+  /** The prefixes' texts, and the sources' copies by their own paths. */
+  readonly belowTexts: Set<string>;
+  readonly fromAt: Map<string, Loose["from"][number][]>;
+}
+
+/** Entries by path (`#byPath`): each under every prefix of its path (the path's own text included), and at its path. */
+interface ByPath<T> {
+  readonly under: ReadonlyMap<string, readonly T[]>;
+  readonly at: ReadonlyMap<string, readonly T[]>;
+}
+
+const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
+
+/**
+ * A place's own contributions by path (`#ownIndex`, `OwnStructure`), selected at, above or below a path by its
+ * prefixes, never listed for each path (`#stepOf`, `#readMeets`; Astra's review r2 B2): its reads (by their sources)
+ * and then its other values, and its points with their stores, each in their order.
+ */
+interface OwnIndex {
+  readonly opaque: ByPath<OwnOpaque>;
+  readonly points: ByPath<OwnPoint>;
+}
+
+/** A read (by its source) or any other value of a place's own, at its path (`OwnIndex`). */
+interface OwnOpaque {
+  readonly path: readonly string[];
+  readonly read: Key | null;
+}
+
+/** A literal or constant of a place's own, at its path, with its store (`OwnIndex`). */
+interface OwnPoint {
+  readonly path: readonly string[];
+  readonly source: PointSource;
+}
+
+/** A fed cycle's members' own contributions and stores taken again, member by member (`#cycleIndex`). */
+interface CycleIndex extends OwnIndex {
+  readonly retaken: ByPath<readonly string[]>;
+}
+
+/** A root's contents beside its landings below a strip, as rests from it (`#flatLoose`). */
+interface FlatLoose {
+  readonly points: (readonly string[])[];
+  readonly below: (readonly string[])[];
+  readonly pointTexts: Set<string>;
+  readonly belowTexts: Set<string>;
+}
+
+/** A locals chain's paths where a configuration's shared groups land, kept only where a node adds one (`#localsShared`). */
+interface LocalsMet {
+  readonly paths: readonly (readonly string[])[];
+  readonly next: LocalsMet | null;
+}
+
+const NO_LOCALS_MET: LocalsMet = { paths: [], next: null };
+
+/** Places of a copy forest by entry, with the greatest last entry below over each range (a max segment tree). */
+interface Storing {
+  readonly places: readonly PlaceId[];
+  readonly entries: readonly number[];
+  readonly exits: readonly number[];
+}
+
+/**
+ * The last index at or before `last` whose value is at least `least`, in a max segment tree over `size` leaves (`tree`,
+ * leaves from `size`), or -1.
+ */
+function lastAtLeast(tree: readonly number[], size: number, last: number, least: number): number {
+  // (the leaves at or before `last`, right to left, each subtree skipped whole where its greatest is too small)
+  let node = size + last;
+  if (tree[node]! >= least) return last;
+  // climb while the node is a left child or its left sibling holds none, then take that sibling's last one
+  while (node > 1 && (node % 2 === 0 || tree[node - 1]! < least)) node >>= 1;
+  if (node <= 1) return -1;
+  node -= 1;
+  while (node < size) node = tree[2 * node + 1]! >= least ? 2 * node + 1 : 2 * node;
+  return node - size;
+}
+
+/** Whether a treap holds a text (`Locals`). */
+function treapHas(treap: Treap | null, key: string): boolean {
+  for (let at = treap; at !== null; at = key < at.key ? at.left : at.right)
+    if (at.key === key) return true;
+  return false;
+}
+
+/** A treap with a text, its path copied (a text's priority its hash, so the shape is the texts' own). */
+function treapWith(treap: Treap | null, key: string): Treap {
+  if (treap === null) {
+    let priority = 2166136261;
+    for (let index = 0; index < key.length; index += 1)
+      priority = Math.imul(priority ^ key.charCodeAt(index), 16777619);
+    return { key, priority: priority >>> 0, left: null, right: null };
+  }
+  if (key === treap.key) return treap;
+  if (key < treap.key) {
+    const left = treapWith(treap.left, key);
+    return left.priority > treap.priority
+      ? { ...left, right: { ...treap, left: left.right } }
+      : { ...treap, left };
+  }
+  const right = treapWith(treap.right, key);
+  return right.priority > treap.priority
+    ? { ...right, left: { ...treap, right: right.left } }
+    : { ...treap, right };
+}
+
+/** Whether `path` starts with `prefix` (or is it). */
+function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
+  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
+}
+
+/**
  * The cycles of places a graph of copies holds (Tarjan's strongly connected components, with an explicit stack): each
- * place in one, a place copied into itself too, by the cycle's number.
+ * place in one, a place copied into itself too, by the cycle's number; and every component of the graph, each place's
+ * sources' before its own.
  */
 function cyclesOf(
   edges: ReadonlyMap<PlaceId, readonly InheritedCopy[]>,
   work: { charge(counter: "indexSteps", units?: number): void },
-): Map<PlaceId, number> {
+): { readonly cycleOf: Map<PlaceId, number>; readonly order: readonly (readonly PlaceId[])[] } {
   const out = new Map<PlaceId, number>();
+  // (Tarjan's components come a place's copies' first)
+  const components: PlaceId[][] = [];
   const order = new Map<PlaceId, number>();
   const low = new Map<PlaceId, number>();
   const stack: PlaceId[] = [];
@@ -153,16 +444,28 @@ function cyclesOf(
       work.charge("indexSteps", targets.length);
       if (members.length > 1 || targets.includes(frame.place))
         for (const member of members) out.set(member, frame.place);
+      components.push(members);
     }
   }
-  return out;
+  return { cycleOf: out, order: components.reverse() };
 }
 
-/** `#inheritedAt`'s signal: a scan needs another place's inherited type first, taken before it is scanned again. */
-class Unresolved extends Error {
-  public constructor(readonly key: Key) {
-    super(`unresolved ${key}`);
-  }
+/**
+ * A computation that may need an unwritten place's inherited type at a path first (`#inheritedAt`): it yields that place
+ * and path's key and is resumed with the type, so a scan that waits on another stops where it stands and goes on from
+ * there, never taken again from its start.
+ */
+type Inheriting<T> = Generator<Key, T, TypeTerm | null>;
+
+/** `#inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
+interface Waiting {
+  readonly key: Key;
+  readonly steps: Inheriting<{
+    readonly copied: TypeTerm | null;
+    readonly nullable: boolean;
+  } | null> | null;
+  /** Its cycle of decisions when it stopped (`#cycleOf`): a scan whose cycle grew meanwhile is taken again. */
+  cycle: string;
 }
 
 /**
@@ -522,6 +825,77 @@ export interface Decision {
   readonly published: boolean;
 }
 
+/** A path's stores: the direct ones and the prefixes whole stores or adds reach (`#inputs`). */
+type Inputs = {
+  readonly direct: readonly Candidate[];
+  readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
+};
+
+/** A decision before it is recorded and its candidates taken (`#decided`). */
+interface Decided {
+  readonly key: Key;
+  /** The decided kinds; `null` where nothing is checked; with `unknown` where an unrestricted part decides nothing. */
+  readonly tags: readonly ItemTag[] | null;
+  readonly nullable: boolean;
+  readonly byWritten: boolean;
+  /** Whether the place's own written type decides (A1). */
+  readonly own: boolean;
+  /** A written parameter's or result's (A9, C7). */
+  readonly transfer: boolean;
+  readonly permitsNull: boolean;
+  readonly decider: Definition | null;
+  readonly site: SourceSite | null;
+  readonly published: boolean;
+}
+
+/** A decision's fields where nothing is checked (`#decided`). */
+const NOTHING = {
+  nullable: true,
+  byWritten: false,
+  permitsNull: false,
+  decider: null,
+  site: null,
+  published: false,
+} as const;
+
+/** Whether items hold one a decision does not admit (A5: an offending kind; a `null` where none is admitted). */
+function offending(items: readonly Item[], decision: Decided): boolean {
+  const tags = decision.tags ?? [];
+  return items.some((item) =>
+    item.tag === "null"
+      ? !decision.nullable
+      : item.tag === "unknown"
+        ? contributes(item)
+        : item.tag !== "empty" && !tags.some((tag) => fits(item.tag, tag, decision.byWritten)),
+  );
+}
+
+/**
+ * Whether contents may meet a written type at a path whatever stands first there (`#meeting`): each item fits it (a
+ * `null` where it admits one, an unknown no external or opaque data), and where the contents' definite kinds decide
+ * first (A2), each kind the type admits fits each of them; a written type unrestricted there admits everything, none
+ * (`null`) nothing known.
+ */
+function compatible(items: readonly Item[], term: TypeTerm | null): boolean {
+  if (term === null) return false;
+  const tags = typeTags(term);
+  if (tags.includes("unknown")) return true;
+  const kinds = tags.filter((tag) => tag !== "null");
+  const decides = new Set<ItemTag>();
+  for (const item of items) {
+    if (item.tag === "null") {
+      if (!tags.includes("null")) return false;
+    } else if (item.tag === "unknown") {
+      if (contributes(item)) return false;
+    } else if (item.tag !== "empty") {
+      if (!kinds.some((kind) => fits(item.tag, kind, true))) return false;
+      if (item.cert === "def") decides.add(item.tag);
+    }
+  }
+  for (const kind of kinds) for (const tag of decides) if (!fits(kind, tag, false)) return false;
+  return true;
+}
+
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
@@ -576,6 +950,8 @@ export class Admission {
   readonly #inherited = new Map<Key, TypeTerm | null>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`#cut`): a union-find. */
   readonly #cycles = new Map<Key, Key>();
+  /** Each cycle's size, by its root (`#cycleOf`). */
+  readonly #cycleSizes = new Map<Key, number>();
   /**
    * The deepest path a written type can reach through copies (`#inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
@@ -643,6 +1019,66 @@ export class Admission {
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
   #groups: { readonly root: PlaceId; readonly path: readonly string[] }[] | null = null;
+  /** A4 through copies' landings (`#inheritance`), and per place and path whether its copies land it (`#landed`). */
+  #inherits: Inheritance | null = null;
+  readonly #landedPaths = new Map<string, boolean>();
+  /** Per place copies land in, the landed paths whose contents may not fit (`#hotSets`). */
+  #hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
+  /** The copies places answer through (`#passThrough`), once per pass. */
+  #forest: CopyForest | null = null;
+  /** Per class, its eligible member per tested key asked while the groups are made (`#eligibleAt`). */
+  readonly #eligibleWhileGrouping = new Map<Definition, Map<string, Definition | null>>();
+  /** Per group identity, how many places hold it (`#countIdentities`). */
+  readonly #identityPlaces = new Map<string, number>();
+  /** The prefix trie of the configurations of places' shared groups (`#meeting`), and its nodes' count. */
+  readonly #configurations: Configuration = {
+    id: 0,
+    next: new Map(),
+    added: [],
+    reads: new Map(),
+    terms: new Map(),
+  };
+  #configurationCount = 1;
+  /** Per locals node, per configuration of shared groups and place path, its chain's paths there (`#localsShared`). */
+  readonly #localsMet = new Map<Locals, Map<string, LocalsMet>>();
+  /** Per root and strip, its contents beside its landings (`#flatLoose`). */
+  readonly #flatLooses = new Map<string, FlatLoose>();
+  readonly #looseIndexes = new WeakMap<Loose, LooseIndex>();
+  /** Per place and path, what it holds there (`#identity`); per place, its own contributions (`#ownStructure`). */
+  readonly #identities = new Map<string, Identity>();
+  readonly #owns = new Map<PlaceId, OwnStructure | null>();
+  /**
+   * Per own structure, per place and per fed cycle (its members' list), what stands where (`#stepOf`); per place, its
+   * copies' positions by path (`#copiesAlong`); per cycle's landing, its paths by path (`#landedBelow`).
+   */
+  readonly #ownIndexes = new WeakMap<OwnStructure, OwnIndex>();
+  readonly #retakenIndexes = new Map<PlaceId, ByPath<readonly string[]>>();
+  readonly #cycleIndexes = new WeakMap<readonly PlaceId[], CycleIndex>();
+  readonly #copyIndexes = new Map<
+    PlaceId,
+    { readonly list: readonly InheritedCopy[]; readonly index: ByPath<number> }
+  >();
+  readonly #cycleLandings = new WeakMap<ReadonlySet<string>, ByPath<readonly string[]>>();
+  #cycleMembers: Map<number, PlaceId[]> | null = null;
+  readonly #forwards = new Map<
+    PlaceId,
+    { readonly root: PlaceId; readonly strip: readonly string[] }
+  >();
+  /** Per place, its seeds' paths at or below each prefix (`#seedsUnder`), and its stores taken again (`#retakenOf`). */
+  readonly #seedIndex = new Map<PlaceId, Map<string, string[]>>();
+  #retakenByPlace: Map<PlaceId, (readonly string[])[]> | null = null;
+  /** Per root and strip, the paths copies land in it at or below the strip (`#landedList`). */
+  readonly #landingLists = new Map<string, readonly string[]>();
+  /** Per place, its contents beside its landings (`Loose`, `#hotSets`); per root and strip, what it holds (`#contentsOf`). */
+  #loose: ReadonlyMap<PlaceId, Loose> | null = null;
+  readonly #contents = new Map<string, FlatLoose>();
+  /** Per root `#hotSets` did not take, its own structure as contents beside landings (`#contentsOf`), `null` for none. */
+  readonly #ownLooses = new Map<PlaceId, Loose | null>();
+  /** Per literal landing, the paths copies land in its place below it, by every prefix's text (`#landedIndex`). */
+  readonly #landedIndexes = new Map<string, ReadonlyMap<string, (readonly string[])[]>>();
+  /** Per key, its decision before it is recorded (`#decided`); the keys `decide` took (`#lazily`). */
+  readonly #decisions = new Map<Key, Decided | null>();
+  readonly #attempted = new Set<Key>();
   #landings: LandingIndex | null = null;
 
   public constructor(
@@ -755,13 +1191,15 @@ export class Admission {
    * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
    * literal, a parameter's default), at every collection level: `#scan`'s copied type, with the place's own `null`
    * where its decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
-   * that needs another place's type first stops (`Unresolved`) and is taken again after it, so a chain of copies never
-   * deepens the native stack. A scan that needs the very place and path whose own scan is waiting closes a cycle of
-   * copies: those waiting from there on are joined (`#cycles`), and a copy between two of them carries no written type
-   * (`#cut`): a cycle of copies decides nothing written, whichever of its places is asked first. A place at another path
-   * is no cycle (`a.q = a`: `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`#reach`) a place
-   * inherits only what its path's prefix there leaves below it (an unrestricted part), so a copy nesting a place in
-   * itself never deepens without end.
+   * that needs another place's type first is suspended where it stands (`Inheriting`) and goes on from there once that
+   * type is known, so a chain of copies never deepens the native stack and a scanned prefix is never scanned again for a
+   * sibling resolved later (the owner's reviewer's F1 on #1049, TABLE r4.80). A scan that needs the very place and path
+   * whose own scan is waiting closes a cycle of copies: those waiting from there on are joined (`#cycles`), and a copy
+   * between two of them carries no written type (`#cut`): a cycle of copies decides nothing written, whichever of its
+   * places is asked first. A scan whose own cycle grew while it waited is taken again from its start, since the cut may
+   * now drop a copy it already read; nothing else changes what it read. A place at another path is no cycle (`a.q = a`:
+   * `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`#reach`) a place inherits only what its path's
+   * prefix there leaves below it (an unrestricted part), so a copy nesting a place in itself never deepens without end.
    */
   #inheritedAt(place: PlaceId, path: readonly string[]): TypeTerm | null {
     if (path.length > this.#reach) {
@@ -771,46 +1209,74 @@ export class Admission {
     const key = keyOf(place, path);
     const known = this.#inherited.get(key);
     if (known !== undefined) return known;
-    if (this.#resolving) throw new Unresolved(key);
+    // (a resolution resolves every key its scans wait on itself, so none starts inside another)
+    if (this.#resolving)
+      throw new Error(`The inherited type of '${key}' was asked while resolving.`);
     this.#resolving = true;
     try {
-      const pending: Key[] = [key];
+      const scan = (next: Key): Waiting => {
+        const [place, path] = [keyPlace(next), keyPath(next)];
+        // (a place that answers through a copy above it asks that copy's place, nothing scanned)
+        const through = this.#passThrough(place, path);
+        if (through !== place)
+          return {
+            key: next,
+            steps: this.#answerOf(keptKey(this.#work, through, path)),
+            cycle: "",
+          };
+        const inputs = this.#inputs(place, path);
+        return {
+          key: next,
+          steps: inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next),
+          cycle: "",
+        };
+      };
+      const pending: Waiting[] = [scan(key)];
       // (the positions of the waiting scans, and the last cycle closed)
       const waiting = new Map<Key, number>([[key, 0]]);
       let closed = "";
+      // (the type the top scan waited on, given to it as it goes on)
+      let given: TypeTerm | null = null;
+      // the top scan's type is taken, the scan below it goes on, or is taken again where its cycle grew meanwhile
+      const resolved = (term: TypeTerm | null): void => {
+        const done = pending.pop()!;
+        keepText(this.#work, done.key.length);
+        this.#inherited.set(done.key, term);
+        waiting.delete(done.key);
+        const below = pending.at(-1);
+        if (below !== undefined && below.cycle !== this.#cycleOf(below.key))
+          pending[pending.length - 1] = scan(below.key);
+        given = term;
+      };
       while (pending.length > 0) {
-        const next = pending[pending.length - 1]!;
-        try {
-          const inputs = this.#inputs(keyPlace(next), keyPath(next));
-          const found = inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next);
-          keepText(this.#work, next.length);
-          this.#inherited.set(
-            next,
-            found === null ? null : optionalOf(found.copied, found.nullable),
-          );
-          pending.pop();
-          waiting.delete(next);
-        } catch (error) {
-          if (!(error instanceof Unresolved)) throw error;
-          const from = waiting.get(error.key);
-          if (from !== undefined) {
-            const cycle = joinParts(next, error.key);
-            // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
-            if (cycle === closed) {
-              keepText(this.#work, next.length);
-              this.#inherited.set(next, null);
-              pending.pop();
-              waiting.delete(next);
-              continue;
-            }
-            closed = cycle;
-            for (let index = from; index < pending.length; index += 1)
-              this.#join(pending[index]!, error.key);
+        const top = pending.at(-1)!;
+        // (a key no store reaches finds nothing)
+        const step =
+          top.steps === null ? { done: true as const, value: null } : top.steps.next(given);
+        given = null;
+        if (step.done === true) {
+          resolved(step.value === null ? null : optionalOf(step.value.copied, step.value.nullable));
+          continue;
+        }
+        const needed = step.value;
+        const from = waiting.get(needed);
+        if (from !== undefined) {
+          const cycle = joinParts(top.key, needed);
+          // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
+          if (cycle === closed) {
+            resolved(null);
             continue;
           }
-          waiting.set(error.key, pending.length);
-          pending.push(error.key);
+          closed = cycle;
+          for (let index = from; index < pending.length; index += 1)
+            this.#join(pending[index]!.key, needed);
+          // (its cycle grew: taken again, as every scan it joined is when it goes on)
+          pending[pending.length - 1] = scan(top.key);
+          continue;
         }
+        top.cycle = this.#cycleOf(top.key);
+        waiting.set(needed, pending.length);
+        pending.push(scan(needed));
       }
     } finally {
       this.#resolving = false;
@@ -819,20 +1285,261 @@ export class Admission {
   }
 
   /**
+   * What `from` inherits at `path` (`#inheritedAt`) as a scan asks it: known, or the key it waits on yielded, past the
+   * deepest path a written type reaches its path's prefix there.
+   */
+  *#inheritedSteps(from: PlaceId, path: readonly string[]): Inheriting<TypeTerm | null> {
+    if (path.length > this.#reach) {
+      const above = yield* this.#inheritedSteps(from, path.slice(0, this.#reach));
+      return above === null ? null : permittedAt(above, path.slice(this.#reach));
+    }
+    const key = keyOf(from, path);
+    const known = this.#inherited.get(key);
+    return known !== undefined ? known : yield key;
+  }
+
+  /**
    * The written type a copy of `from` at `path` carries into the decision of `into`: what `from` inherits there
    * (`#inheritedAt`), none where the two wait on each other through copies (`#cut`).
    */
-  #inheritedInto(from: PlaceId, path: readonly string[], into: Key | null): TypeTerm | null {
+  *#inheritedInto(
+    from: PlaceId,
+    path: readonly string[],
+    into: Key | null,
+  ): Inheriting<TypeTerm | null> {
     // (past the deepest path a written type reaches, the place's path there is what it waits on, `#inheritedAt`)
     const source = keyOf(from, path.length > this.#reach ? path.slice(0, this.#reach) : path);
     if (into !== null && this.#cut(into, source)) return null;
-    const term = this.#inheritedAt(from, path);
+    const term = yield* this.#inheritedSteps(from, path);
     return into !== null && this.#cut(into, source) ? null : term;
+  }
+
+  /** A computation run outside a resolution: each inherited type it waits on resolved by `#inheritedAt` first. */
+  #drive<T>(steps: Inheriting<T>): T {
+    let given: TypeTerm | null = null;
+    for (;;) {
+      const step = steps.next(given);
+      if (step.done === true) return step.value;
+      given = this.#inheritedAt(keyPlace(step.value), keyPath(step.value));
+    }
+  }
+
+  /** Another key's inherited type as a scan's answer (`#inheritedAt`'s `#passThrough`): known, or waited on. */
+  *#answerOf(
+    key: Key,
+  ): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
+    const known = this.#inherited.get(key);
+    const term = known !== undefined ? known : yield key;
+    return term === null ? null : { copied: term, nullable: false };
+  }
+
+  /**
+   * The place whose inherited type a place's is at a path (`#inheritedAt`, r4.75 (1)): a place whose only store on the
+   * path is one whole copy of an unwritten inheriting place, outside every cycle of copies, inherits there what that
+   * place does (its scan finds the copy, whose type is that place's, and nothing beside it); so a chain of such copies
+   * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
+   * directly, never every copy above it (the reviewer's control of a copy's own contribution, TABLE r4.80).
+   */
+  #passThrough(place: PlaceId, path: readonly string[]): PlaceId {
+    const forest = this.#copyForest();
+    if (!forest.parent.has(place)) return place;
+    const own = forest.stores.get(place);
+    const lists: (Storing | undefined)[] = [];
+    for (let length = 1; length <= path.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      const text = keptText(this.#work, path.slice(0, length));
+      if (own?.has(text) === true) return place;
+      lists.push(forest.storing.get(text));
+    }
+    return this.#nearest(place, lists);
+  }
+
+  /**
+   * The place whose landed paths at or below `prefix` a place's are, besides its own root (`#landedBelow`): a place
+   * that answers through its parent lands nothing of its own but below its keys, so a chain of them lands what its
+   * nearest member storing at, above or below the prefix lands, or its top.
+   */
+  #landsThrough(place: PlaceId, prefix: readonly string[]): PlaceId {
+    const forest = this.#copyForest();
+    if (!forest.parent.has(place)) return place;
+    const own = forest.stores.get(place);
+    const lists: (Storing | undefined)[] = [];
+    for (let length = 1; length <= prefix.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      const text = keptText(this.#work, prefix.slice(0, length));
+      if (own?.has(text) === true) return place;
+      lists.push(forest.storing.get(text));
+    }
+    // (a key of its own at or below the prefix, from its keys' prefixes: never a scan of its keys, Astra's review B2)
+    const text = keptText(this.#work, prefix);
+    this.pass.program.work.charge("indexSteps");
+    if (forest.under.get(place)?.has(text) === true) return place;
+    lists.push(forest.beneath.get(text));
+    return this.#nearest(place, lists);
+  }
+
+  /** The deepest place above `place` in its copy tree among the lists' places (`Storing`), else its tree's top. */
+  #nearest(place: PlaceId, lists: readonly (Storing | undefined)[]): PlaceId {
+    const forest = this.#copyForest();
+    const work = this.pass.program.work;
+    let found = forest.top.get(place)!;
+    const entry = forest.entry.get(place)!;
+    for (const storing of lists) {
+      if (storing === undefined) continue;
+      work.charge("indexSteps", Math.ceil(Math.log2(storing.places.length + 1)) + 1);
+      // (the last place entered at or before it whose subtree holds it: entries sorted, last entries in a tree)
+      let low = 0;
+      let high = storing.entries.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (storing.entries[middle]! <= entry) low = middle + 1;
+        else high = middle;
+      }
+      if (low === 0) continue;
+      const index = lastAtLeast(storing.exits, storing.exits.length >> 1, low - 1, entry);
+      if (index < 0) continue;
+      const at = storing.places[index]!;
+      if (at !== place && forest.depth.get(at)! > forest.depth.get(found)!) found = at;
+    }
+    return found;
+  }
+
+  /** The copies places answer through (`CopyForest`), once per pass. */
+  #copyForest(): CopyForest {
+    if (this.#forest !== null) return this.#forest;
+    const { program, definitions, lists } = this.pass;
+    const work = program.work;
+    const { cycleOf } = this.#inheritance();
+    // each place's keys with stores or candidates below its root
+    const keys = new Map<PlaceId, Set<string>>();
+    for (const map of [definitions.byKey, definitions.candidates] as const)
+      for (const key of map.keys()) {
+        work.charge("indexSteps");
+        const path = keyPath(key);
+        if (path.length === 0) continue;
+        let own = keys.get(keyPlace(key));
+        if (own === undefined) keys.set(keyPlace(key), (own = new Set()));
+        own.add(keptText(this.#work, path));
+      }
+    const parent = new Map<PlaceId, PlaceId>();
+    const children = new Map<PlaceId, PlaceId[]>();
+    for (const place of this.#inheriting) {
+      work.charge("indexSteps");
+      if (cycleOf.has(place) || writtenOf(program.place(place).kind) !== null) continue;
+      const stores = definitions.byKey.get(keyOf(place, [])) ?? [];
+      const d = stores.length === 1 ? stores[0]! : null;
+      const source =
+        d !== null &&
+        d.kind === "whole" &&
+        d.value !== undefined &&
+        d.how !== "argument" &&
+        d.how !== "parameter default" &&
+        lists.live(d)
+          ? program.occurrenceOf.get(d.value)
+          : undefined;
+      if (
+        source === undefined ||
+        !this.#inheriting.has(source) ||
+        writtenOf(program.place(source).kind) !== null
+      )
+        continue;
+      parent.set(place, source);
+      const list = children.get(source);
+      if (list === undefined) children.set(source, [place]);
+      else list.push(place);
+    }
+    const top = new Map<PlaceId, PlaceId>();
+    const depth = new Map<PlaceId, number>();
+    const entry = new Map<PlaceId, number>();
+    const exit = new Map<PlaceId, number>();
+    let clock = 0;
+    for (const start of children.keys()) {
+      if (parent.has(start)) continue;
+      const frames: { readonly place: PlaceId; next: number }[] = [{ place: start, next: 0 }];
+      top.set(start, start);
+      depth.set(start, 0);
+      entry.set(start, clock++);
+      while (frames.length > 0) {
+        const frame = frames.at(-1)!;
+        const below = children.get(frame.place) ?? [];
+        work.charge("indexSteps");
+        if (frame.next < below.length) {
+          const child = below[frame.next++]!;
+          top.set(child, start);
+          depth.set(child, depth.get(frame.place)! + 1);
+          entry.set(child, clock++);
+          frames.push({ place: child, next: 0 });
+          continue;
+        }
+        exit.set(frame.place, clock - 1);
+        frames.pop();
+      }
+    }
+    const stores = new Map<PlaceId, Set<string>>();
+    const under = new Map<PlaceId, Set<string>>();
+    // (per key, the places storing at it; and at it or below it, each key's prefixes, the root's too, once per place)
+    const at = new Map<string, PlaceId[]>();
+    const below = new Map<string, PlaceId[]>();
+    const put = (map: Map<string, PlaceId[]>, text: string, place: PlaceId): void => {
+      work.charge("indexSteps");
+      const list = map.get(text);
+      if (list === undefined) map.set(text, [place]);
+      else if (list.at(-1) !== place) list.push(place);
+    };
+    for (const place of entry.keys()) {
+      const own = keys.get(place);
+      if (own === undefined) continue;
+      stores.set(place, own);
+      const prefixes = new Set<string>([""]);
+      for (const text of own) {
+        put(at, text, place);
+        const steps = splitPath(text);
+        for (let length = 1; length <= steps.length; length += 1)
+          prefixes.add(keptText(this.#work, steps.slice(0, length)));
+      }
+      for (const text of prefixes) put(below, text, place);
+      under.set(place, prefixes);
+    }
+    // (each list by entry, the last entries below its places the leaves of a max segment tree)
+    const index = (map: Map<string, PlaceId[]>): Map<string, Storing> => {
+      const out = new Map<string, Storing>();
+      for (const [text, places] of map) {
+        work.charge("indexSteps", places.length + sortCost(places.length));
+        places.sort((a, b) => entry.get(a)! - entry.get(b)!);
+        let size = 1;
+        while (size < places.length) size <<= 1;
+        const exits = Array<number>(2 * size).fill(-1);
+        places.forEach((place, position) => (exits[size + position] = exit.get(place)!));
+        for (let node = size - 1; node >= 1; node -= 1)
+          exits[node] = Math.max(exits[2 * node]!, exits[2 * node + 1]!);
+        out.set(text, { places, entries: places.map((place) => entry.get(place)!), exits });
+      }
+      return out;
+    };
+    this.#forest = {
+      parent,
+      stores,
+      under,
+      top,
+      depth,
+      entry,
+      exit,
+      storing: index(at),
+      beneath: index(below),
+    };
+    return this.#forest;
   }
 
   /** Whether two decisions wait on each other through copies (`#cycles`). */
   #cut(a: Key, b: Key): boolean {
     return this.#cycles.has(a) && this.#cycles.has(b) && this.#root(a) === this.#root(b);
+  }
+
+  /** A decision's cycle as it stands (`#cycles`): its root and size, empty outside every cycle. */
+  #cycleOf(key: Key): string {
+    if (!this.#cycles.has(key)) return "";
+    const root = this.#root(key);
+    return `${this.#cycleSizes.get(root)!}:${root}`;
   }
 
   #root(key: Key): Key {
@@ -847,10 +1554,17 @@ export class Admission {
   }
 
   #join(a: Key, b: Key): void {
-    for (const key of [a, b]) if (!this.#cycles.has(key)) this.#cycles.set(key, key);
+    for (const key of [a, b])
+      if (!this.#cycles.has(key)) {
+        this.#cycles.set(key, key);
+        this.#cycleSizes.set(key, 1);
+      }
     const x = this.#root(a);
     const y = this.#root(b);
-    if (x !== y) this.#cycles.set(x, y);
+    if (x === y) return;
+    this.#cycles.set(x, y);
+    this.#cycleSizes.set(y, this.#cycleSizes.get(y)! + this.#cycleSizes.get(x)!);
+    this.#cycleSizes.delete(x);
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
@@ -1018,8 +1732,7 @@ export class Admission {
       if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
       paths.add(keptPathText(this.#work, key));
     }
-    // A1, A8: a written collection's elements at every depth; A4: a copied written type's paths, where the copy lands
-    // and below, whether a read asks for them or not
+    // A1, A8: a written collection's elements at every depth
     for (const place of program.places) {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
@@ -1031,83 +1744,37 @@ export class Admission {
       )
         paths.add(keptText(this.#work, path));
     }
-    const copied = new Map<Key, Set<TypeTerm>>();
-    // (per place and path, the rests below it of the paths copies of written types land at in the place: all of them,
-    // and its base ones, those its own written copies and its copies from outside its cycle of places bring)
-    const below = { all: new Map<string, Set<string>>(), base: new Map<string, Set<string>>() };
-    const land = (place: PlaceId, path: readonly string[], base: boolean): boolean => {
-      let grew = false;
-      for (const rests of base ? [below.all, below.base] : [below.all]) {
-        const own = keptParts(this.#work, place, "=", path);
-        if (rests.has(own)) continue;
-        rests.set(own, new Set());
-        grew = true;
-        for (let length = 0; length < path.length; length += 1) {
-          work.charge("indexSteps");
-          const prefix = keptParts(this.#work, place, path.slice(0, length));
-          let found = rests.get(prefix);
-          if (found === undefined) rests.set(prefix, (found = new Set()));
-          found.add(keptText(this.#work, path.slice(length)));
-        }
-      }
+    const at = (place: PlaceId): Set<string> => {
       let paths = roots.get(place);
       if (paths === undefined) roots.set(place, (paths = new Set()));
-      paths.add(keptText(this.#work, path));
-      return grew;
+      return paths;
     };
-    for (const { place, path, term } of this.#a4Copies) {
-      // (once per landing path and written type: k copies of one binding into one literal are one)
-      const at = keptKey(this.#work, place, path);
-      let terms = copied.get(at);
-      if (terms === undefined) copied.set(at, (terms = new Set()));
-      work.charge("indexSteps");
-      if (terms.has(term)) continue;
-      terms.add(term);
-      land(place, path, true);
-      for (
-        let step = ["element"];
-        termAt(term, step) !== null;
-        step = joinSteps(step, ["element"])
-      ) {
-        work.charge("indexSteps");
-        land(place, joinSteps(path, step), true);
-      }
+    // A4: a copied written type's paths, where the copy lands and below (A8: its elements)
+    const { seeds, into, order } = this.#inheritance();
+    for (const [place, paths] of seeds) {
+      const own = at(place);
+      for (const text of paths.keys()) own.add(text);
     }
-    // A4 through copies: a copy of a place that may inherit a written type lands at its path, and below it at the paths
-    // copies of written types land at in that place, sources before their copies; within a cycle of places (a place
-    // copied into itself, `a = {p: a}`) it brings the place's base paths only, and a copy that adds or takes a step
-    // keeps them out of its own base, so no path grows by going round
-    const bySource = new Map<PlaceId, InheritedCopy[]>();
-    for (const copy of this.#a4Inherits) {
-      const list = bySource.get(copy.from);
-      if (list === undefined) bySource.set(copy.from, [copy]);
-      else list.push(copy);
-    }
-    const cycleOf = cyclesOf(bySource, work);
-    // (each source queued once at a time: taken again only where its paths grew after it was taken)
-    const sources = [...bySource.keys()];
-    const queued = new Set(sources);
-    for (let index = 0; index < sources.length; index += 1) {
-      queued.delete(sources[index]!);
-      for (const { place, path, from, strip } of bySource.get(sources[index]!)!) {
-        work.charge("indexSteps");
-        const cycle = cycleOf.get(from);
-        const across = cycle === undefined || cycle !== cycleOf.get(place);
-        // (within a cycle a whole copy, no step added or taken, carries the base paths on as base: they keep their
-        // length going round, so a cycle of whole copies brings each member every one, Sol's round 4 B1)
-        const keeps = across || (path.length === 0 && strip.length === 0);
-        let grew = land(place, path, keeps);
-        const rests = (across ? below.all : below.base).get(joinParts(from, strip));
-        for (const rest of [...(rests ?? [])]) {
+    // A4 through copies (r4.75 (1)): a copy of a place that may inherit a written type lands at its own path; below it,
+    // where copies of written types land in that place, it is decided with the copy only where the place's contents may
+    // not fit (`#hotSets`: a store's host data or other kinds, two copies of different sources meeting, a store taken again),
+    // and where an answer asks otherwise (`#lazily`), so a copy costs its own divergences, never its source's every
+    // path (the owner's reviewer's F1 on #1049, TABLE r4.80; r4.51)
+    const hots = this.#hotSets();
+    for (const component of order)
+      for (const place of component) {
+        const copies = into.get(place);
+        if (copies === undefined) continue;
+        const own = at(place);
+        for (const { path } of copies) {
           work.charge("indexSteps");
-          grew = land(place, joinSteps(path, splitPath(rest)), keeps) || grew;
+          own.add(keptText(this.#work, path));
         }
-        if (grew && bySource.has(place) && !queued.has(place)) {
-          queued.add(place);
-          sources.push(place);
+        for (const path of hots.get(place) ?? []) {
+          work.charge("indexSteps");
+          own.add(keptText(this.#work, path));
         }
       }
-    }
     const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     for (const [root, paths] of roots)
       for (const path of paths) groups.push({ root, path: keptSplit(this.#work, path) });
@@ -1115,130 +1782,1932 @@ export class Admission {
     return groups;
   }
 
+  /** A4 through copies' landings (`Inheritance`), once per pass. */
+  #inheritance(): Inheritance {
+    if (this.#inherits !== null) return this.#inherits;
+    const work = this.pass.program.work;
+    const seeds = new Map<PlaceId, Map<string, Set<TypeTerm>>>();
+    // (once per landing path and written type: k copies of one binding into one literal are one)
+    const copied = new Map<Key, Set<TypeTerm>>();
+    for (const { place, path, term } of this.#a4Copies) {
+      const key = keptKey(this.#work, place, path);
+      let terms = copied.get(key);
+      if (terms === undefined) copied.set(key, (terms = new Set()));
+      work.charge("indexSteps");
+      if (terms.has(term)) continue;
+      terms.add(term);
+      let paths = seeds.get(place);
+      if (paths === undefined) seeds.set(place, (paths = new Map()));
+      // (each element level with the written type there)
+      let step: readonly string[] = [];
+      for (let level: TypeTerm | null = term; level !== null; level = termAt(term, step)) {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, joinSteps(path, step));
+        let levels = paths.get(text);
+        if (levels === undefined) paths.set(text, (levels = new Set()));
+        levels.add(level);
+        step = joinSteps(step, ["element"]);
+      }
+    }
+    const into = new Map<PlaceId, InheritedCopy[]>();
+    const owned = new Map<PlaceId, Set<string>>();
+    const bySource = new Map<PlaceId, InheritedCopy[]>();
+    const distinct = new Set<string>();
+    for (const copy of this.#a4Inherits) {
+      const list = bySource.get(copy.from);
+      if (list === undefined) bySource.set(copy.from, [copy]);
+      else list.push(copy);
+      work.charge("indexSteps");
+      const id = keptParts(this.#work, copy.place, copy.path, copy.from, copy.strip);
+      if (distinct.has(id)) continue;
+      distinct.add(id);
+      const own = into.get(copy.place);
+      if (own === undefined) into.set(copy.place, [copy]);
+      else own.push(copy);
+      let paths = owned.get(copy.place);
+      if (paths === undefined) owned.set(copy.place, (paths = new Set()));
+      paths.add(keptText(this.#work, copy.path));
+    }
+    const { cycleOf, order } = cyclesOf(bySource, work);
+    const cycles = new Map<PlaceId, Set<string>>();
+    const fed = new Map<PlaceId, PlaceId>();
+    this.#inherits = { seeds, into, owned, cycleOf, cycles, fed, order };
+    // a cycle's landed paths, sources before it: a copy from outside it brings its own path and every path landed below
+    // its strip, as base; within it a copy brings its source's base paths only, kept base by a whole copy alone, so no
+    // path grows by going round (Sol's round 4 B1)
+    for (const component of order) {
+      const cycle = cycleOf.get(component[0]!);
+      if (cycle === undefined) continue;
+      const brings = (copy: InheritedCopy, land: (path: readonly string[]) => void): void => {
+        land(copy.path);
+        for (const text of this.#landedBelow(copy.from, copy.strip)) {
+          const steps = splitPath(text);
+          if (steps.length > copy.strip.length)
+            land(keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)));
+        }
+      };
+      // (a cycle of whole copies: each member's base paths reach every other's whole, so its members land one set, their
+      // own, their copies' from outside, and the root each whole copy lands)
+      // (fed by whole copies of one place outside it, nothing written of its own: that place's landings, asked of it,
+      // Sol's review r2's independent cycles)
+      if (this.#wholeCycle(component) && component.every((member) => !seeds.has(member))) {
+        const feeding = new Set<PlaceId>();
+        let whole = true;
+        for (const member of component)
+          for (const copy of into.get(member) ?? []) {
+            work.charge("indexSteps");
+            if (cycleOf.get(copy.from) === cycle) continue;
+            feeding.add(copy.from);
+            whole &&= copy.path.length === 0 && copy.strip.length === 0;
+          }
+        if (whole && feeding.size === 1) {
+          const source = [...feeding][0]!;
+          for (const member of component) fed.set(member, source);
+          continue;
+        }
+      }
+      if (this.#wholeCycle(component)) {
+        const shared = new Set<string>([""]);
+        const land = (path: readonly string[]): void => {
+          work.charge("indexSteps");
+          shared.add(keptText(this.#work, path));
+        };
+        for (const member of component) {
+          for (const text of seeds.get(member)?.keys() ?? []) land(splitPath(text));
+          for (const copy of into.get(member) ?? [])
+            if (cycleOf.get(copy.from) !== cycle) brings(copy, land);
+        }
+        for (const member of component) cycles.set(member, shared);
+        continue;
+      }
+      const all = new Map<PlaceId, Set<string>>();
+      // (each member's base paths in the order they came, so a copy reads only those it has not read)
+      const base = new Map<PlaceId, { readonly paths: Set<string>; readonly list: string[] }>();
+      for (const member of component) {
+        const own = [...(seeds.get(member)?.keys() ?? [])];
+        all.set(member, new Set(own));
+        base.set(member, { paths: new Set(own), list: own });
+      }
+      // a path landed in a member, kept base by a copy that keeps it; whether its base grew
+      const land = (member: PlaceId, path: readonly string[], keeps: boolean): boolean => {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, path);
+        all.get(member)!.add(text);
+        const kept = base.get(member)!;
+        if (!keeps || kept.paths.has(text)) return false;
+        kept.paths.add(text);
+        kept.list.push(text);
+        return true;
+      };
+      const outgoing = new Map<PlaceId, InheritedCopy[]>();
+      for (const member of component)
+        for (const copy of into.get(member) ?? []) {
+          if (cycleOf.get(copy.from) !== cycle) {
+            brings(copy, (path) => land(member, path, true));
+            continue;
+          }
+          const list = outgoing.get(copy.from);
+          if (list === undefined) outgoing.set(copy.from, [copy]);
+          else list.push(copy);
+        }
+      // (a member taken again only where its base paths grew; each copy reads its source's from where it stopped)
+      const read = new Map<InheritedCopy, number>();
+      const queue = [...component];
+      const queued = new Set(queue);
+      for (let index = 0; index < queue.length; index += 1) {
+        const from = queue[index]!;
+        queued.delete(from);
+        for (const copy of outgoing.get(from) ?? []) {
+          const keeps = copy.path.length === 0 && copy.strip.length === 0;
+          let grew = land(copy.place, copy.path, keeps);
+          const list = base.get(from)!.list;
+          for (let at = read.get(copy) ?? 0; at < list.length; at += 1) {
+            const steps = splitPath(list[at]!);
+            if (steps.length > copy.strip.length && isPrefix(copy.strip, steps))
+              grew =
+                land(
+                  copy.place,
+                  keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)),
+                  keeps,
+                ) || grew;
+          }
+          read.set(copy, list.length);
+          if (grew && !queued.has(copy.place)) {
+            queued.add(copy.place);
+            queue.push(copy.place);
+          }
+        }
+      }
+      for (const member of component) cycles.set(member, all.get(member)!);
+    }
+    return this.#inherits;
+  }
+
+  /** Whether a cycle of copies holds only whole copies within it (no step added or taken), its members' one landing. */
+  #wholeCycle(component: readonly PlaceId[]): boolean {
+    const { into, cycleOf } = this.#inheritance();
+    const work = this.pass.program.work;
+    const cycle = cycleOf.get(component[0]!);
+    return component.every((member) =>
+      (into.get(member) ?? []).every((copy) => {
+        work.charge("indexSteps");
+        return (
+          cycleOf.get(copy.from) !== cycle || (copy.path.length === 0 && copy.strip.length === 0)
+        );
+      }),
+    );
+  }
+
+  /**
+   * The copies a place lands through (`#landed`, `#landedBelow`): its own, or, for a member of a cycle a place outside it
+   * feeds (`Inheritance.fed`), one whole copy of that place.
+   */
+  #copiesOf(place: PlaceId): readonly InheritedCopy[] {
+    const { into, fed } = this.#inheritance();
+    const source = fed.get(place);
+    return source === undefined
+      ? (into.get(place) ?? [])
+      : [{ place, path: [], from: source, strip: [] }];
+  }
+
+  /**
+   * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
+   * their strips, on an explicit stack, each place and path asked once.
+   */
+  #landed(place: PlaceId, path: readonly string[]): boolean {
+    const { seeds, owned, cycleOf, cycles, fed } = this.#inheritance();
+    const work = this.pass.program.work;
+    const memo = this.#landedPaths;
+    const frames: {
+      readonly key: string;
+      readonly path: readonly string[];
+      readonly copies: readonly InheritedCopy[];
+      next: number;
+    }[] = [];
+    // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one;
+    // a place that answers through its parent answers as the copy it answers through (`#passThrough`)
+    const open = (place: PlaceId, steps: readonly string[]): boolean | null => {
+      const at = steps.length === 0 ? place : this.#passThrough(place, steps);
+      const key = keptParts(this.#work, at, steps);
+      const known = memo.get(key);
+      if (known !== undefined) return known;
+      work.charge("indexSteps");
+      const text = pathText(steps);
+      const found =
+        cycleOf.has(at) && !fed.has(at)
+          ? cycles.get(at)!.has(text)
+          : seeds.get(at)?.has(text) === true ||
+            owned.get(at)?.has(text) === true ||
+            (fed.has(at) && steps.length === 0) ||
+            null;
+      if (found !== null) memo.set(key, found);
+      // (its copies above the path, looked up by its prefixes, Astra's review r2 B2)
+      else frames.push({ key, path: steps, copies: this.#copiesAlong(at, steps, false), next: 0 });
+      return found;
+    };
+    const first = open(place, path);
+    if (first !== null) return first;
+    const key = frames[0]!.key;
+    let answer: boolean | null = null;
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      if (answer === true) {
+        memo.set(frame.key, true);
+        frames.pop();
+        continue;
+      }
+      if (frame.next >= frame.copies.length) {
+        memo.set(frame.key, false);
+        frames.pop();
+        answer = false;
+        continue;
+      }
+      const copy = frame.copies[frame.next++]!;
+      answer = open(
+        copy.from,
+        keptSteps(this.#work, copy.strip, frame.path.slice(copy.path.length)),
+      );
+    }
+    return memo.get(key)!;
+  }
+
+  /**
+   * The paths copies land in a place at or below `prefix` (`Inheritance`), each once: its own landings and, through each
+   * copy, its source's at or below the copy's strip, written where the copy lands them; on an explicit stack, each
+   * source, prefix and way of writing its paths once.
+   */
+  #landedBelow(place: PlaceId, prefix: readonly string[]): string[] {
+    const { cycleOf, fed } = this.#inheritance();
+    const work = this.pass.program.work;
+    const out = new Set<string>();
+    const seen = new Set<string>();
+    // a task: a place, the prefix its paths are taken at or below, and how its path is written in the place asked:
+    // its first `drop` steps replaced by `prepend`
+    const tasks: {
+      readonly place: PlaceId;
+      readonly below: readonly string[];
+      readonly drop: number;
+      readonly prepend: readonly string[];
+    }[] = [{ place, below: prefix, drop: 0, prepend: [] }];
+    while (tasks.length > 0) {
+      const task = tasks.pop()!;
+      const id = keptParts(this.#work, task.place, task.below, task.drop, task.prepend);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const add = (path: readonly string[]): void => {
+        if (isPrefix(task.below, path))
+          out.add(keptText(this.#work, joinSteps(task.prepend, path.slice(task.drop))));
+      };
+      const emit = (path: readonly string[]): void => {
+        work.charge("indexSteps");
+        add(path);
+      };
+      // (a place that lands through its parent lands its root and what the copy it lands through does, `#landsThrough`)
+      const through = this.#landsThrough(task.place, task.below);
+      if (through !== task.place) {
+        emit([]);
+        tasks.push({ ...task, place: through });
+        continue;
+      }
+      // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
+      // for each prefix, Astra's review r2 B2)
+      if (cycleOf.has(task.place) && !fed.has(task.place)) {
+        const landing = this.#cycleLanding(task.place);
+        for (const path of landing.under.get(keptText(this.#work, task.below)) ?? []) emit(path);
+        continue;
+      }
+      for (const text of this.#seedsUnder(task.place, task.below)) emit(splitPath(text));
+      for (const copy of this.#copiesAlong(task.place, task.below, true)) {
+        add(copy.path);
+        // (the source's paths at or below the strip, those the prefix asks for)
+        const below = isPrefix(copy.path, task.below)
+          ? keptSteps(this.#work, copy.strip, task.below.slice(copy.path.length))
+          : isPrefix(task.below, copy.path)
+            ? copy.strip
+            : null;
+        if (below === null) continue;
+        tasks.push(
+          task.drop <= copy.path.length
+            ? {
+                place: copy.from,
+                below,
+                drop: copy.strip.length,
+                prepend: keptSteps(this.#work, task.prepend, copy.path.slice(task.drop)),
+              }
+            : {
+                place: copy.from,
+                below,
+                drop: copy.strip.length + task.drop - copy.path.length,
+                prepend: task.prepend,
+              },
+        );
+      }
+    }
+    return [...out];
+  }
+
+  /**
+   * Per place copies land in, the landed paths a copy decides with its store (`groups`): those where the place's
+   * contents may hold a kind its decision there does not admit (`#hotAt`), among its candidates: where its written types
+   * land (a written binding's own host data, which each copy carries on: C9 r4.50 (1)), its own stores' host data,
+   * other values and literals (`#ownStructure`), the hot paths of the sources it copies where it lands them, and where
+   * two of its copies or written types meet (`#meeting`); and each store taken again (A6). Elsewhere a copy's
+   * contents fit what its source's decision admits, so its decision there owes nothing; a copy that only copies one
+   * source, whole, stands for that source's (TABLE r4.80). Sources first; a cycle's members test every landed path.
+   */
+  #hotSets(): ReadonlyMap<PlaceId, readonly (readonly string[])[]> {
+    if (this.#hots !== null) return this.#hots;
+    const { seeds, into, cycleOf, cycles, order } = this.#inheritance();
+    const work = this.pass.program.work;
+    const hots = new Map<PlaceId, readonly (readonly string[])[]>();
+    this.#countIdentities(order);
+    // (the source a copy that only copies one source whole stands for, and a bound on each place's landed paths)
+    const origins = new Map<PlaceId, PlaceId>();
+    // (each place's contents beside its landings, and a bound on its landed paths)
+    const loose = new Map<PlaceId, Loose>();
+    const retaken = new Map<PlaceId, (readonly string[])[]>();
+    for (const key of this.#retaken.keys()) {
+      work.charge("indexSteps");
+      const list = retaken.get(keyPlace(key));
+      if (list === undefined) retaken.set(keyPlace(key), [keptPath(this.#work, key)]);
+      else list.push(keptPath(this.#work, key));
+    }
+    // (a copy's source's hot paths at or below its strip, from an index of each hot set: never the whole set for each
+    // copy, Astra's review r2 B2)
+    const indexed = new Map<readonly (readonly string[])[], ByPath<readonly string[]>>();
+    const hotUnder = (copy: InheritedCopy): readonly (readonly string[])[] => {
+      work.charge("indexSteps");
+      const list = hots.get(copy.from) ?? [];
+      let index = indexed.get(list);
+      if (index === undefined) indexed.set(list, (index = this.#byPath(list, (path) => path)));
+      return index.under.get(keptText(this.#work, copy.strip)) ?? [];
+    };
+    for (const component of order) {
+      if (cycleOf.has(component[0]!)) {
+        const cycle = cycleOf.get(component[0]!);
+        // (a cycle's contents, its members' and those its copies from outside bring, flow round it: one for all its
+        // members, everything below each where its copies add or take steps, Sol's review r2 B1)
+        const owns = component.map((member) => this.#ownStructure(member));
+        const outside = component.flatMap((member) =>
+          (into.get(member) ?? []).filter((copy) => {
+            work.charge("indexSteps");
+            return cycleOf.get(copy.from) !== cycle;
+          }),
+        );
+        const contents = this.#looseOf(owns, outside, loose, !this.#wholeCycle(component));
+        if (this.#wholeCycle(component)) {
+          // a cycle of whole copies holds what all its members' stores and its copies from outside bring, at its one
+          // landing: its candidates the members', and a path hot where any member's contents may not fit there
+          // (its landing: one set, or the place outside it that feeds it, asked)
+          const shared = cycles.get(component[0]!);
+          const lands = (path: readonly string[]): boolean =>
+            shared === undefined ? this.#landed(component[0]!, path) : shared.has(pathText(path));
+          const candidates = new Map<string, readonly string[]>();
+          const put = (path: readonly string[]): void => {
+            work.charge("indexSteps");
+            candidates.set(keptText(this.#work, path), path);
+          };
+          const types = new Map<string, Set<TypeTerm>>();
+          const classes = new Map<string, InheritedCopy>();
+          for (const [index, member] of component.entries()) {
+            work.charge("indexSteps");
+            for (const [text, levels] of seeds.get(member) ?? []) {
+              put(keptSplit(this.#work, text));
+              let found = types.get(text);
+              if (found === undefined) types.set(text, (found = new Set()));
+              for (const level of levels) found.add(level);
+            }
+            const own = owns[index]!;
+            for (const path of own?.points ?? []) if (lands(path)) put(path);
+            // (its other values and its reads, everything landed below each)
+            for (const prefixes of [own?.below ?? [], (own?.reads ?? []).map(({ at }) => at)])
+              for (const prefix of prefixes)
+                for (const text of this.#landedBelow(member, prefix))
+                  put(keptSplit(this.#work, text));
+            for (const copy of into.get(member) ?? []) {
+              if (cycleOf.get(copy.from) === cycle) continue;
+              const origin = origins.get(copy.from) ?? copy.from;
+              const id = keptParts(this.#work, origin, copy.path, copy.strip);
+              if (!classes.has(id))
+                classes.set(id, origin === copy.from ? copy : { ...copy, from: origin });
+            }
+          }
+          for (const copy of classes.values())
+            for (const path of hotUnder(copy)) {
+              work.charge("indexSteps");
+              put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+            }
+          // (two written types at one path of the cycle's landing: each of its paths tested)
+          if (
+            shared !== undefined &&
+            ([...types.values()].some((levels) => levels.size > 1) || classes.size > 1)
+          )
+            for (const text of shared) put(keptSplit(this.#work, text));
+          const hot: (readonly string[])[] = [];
+          for (const path of candidates.values())
+            if (component.some((member) => this.#hotAt(member, path))) hot.push(path);
+          for (const member of component)
+            for (const path of retaken.get(member) ?? []) if (lands(path)) hot.push(path);
+          for (const member of component) {
+            hots.set(member, hot);
+            origins.set(member, member);
+            loose.set(member, contents);
+          }
+          continue;
+        }
+        // (a cycle whose copies add or take steps: every landed path of each member tested, and each store taken
+        // again kept, Sol's review r1 B4)
+        for (const member of component) {
+          const hot: (readonly string[])[] = [];
+          for (const text of cycles.get(member)!) {
+            const path = keptSplit(this.#work, text);
+            if (this.#hotAt(member, path)) hot.push(path);
+          }
+          for (const path of retaken.get(member) ?? [])
+            if (cycles.get(member)!.has(pathText(path))) hot.push(path);
+          hots.set(member, hot);
+          origins.set(member, member);
+          loose.set(member, contents);
+        }
+        continue;
+      }
+      const place = component[0]!;
+      const copies = into.get(place) ?? [];
+      // its copies, a copy of a place standing for one source by that source
+      const classes = new Map<string, InheritedCopy>();
+      for (const copy of copies) {
+        work.charge("indexSteps");
+        const origin = origins.get(copy.from) ?? copy.from;
+        const id = keptParts(this.#work, origin, copy.path, copy.strip);
+        if (!classes.has(id))
+          classes.set(id, origin === copy.from ? copy : { ...copy, from: origin });
+      }
+      const own = this.#ownStructure(place);
+      loose.set(place, this.#looseOf([own], copies, loose));
+      const only = classes.size === 1 ? [...classes.values()][0]! : null;
+      if (
+        only !== null &&
+        own === null &&
+        !seeds.has(place) &&
+        !retaken.has(place) &&
+        only.path.length === 0 &&
+        only.strip.length === 0
+      ) {
+        origins.set(place, only.from);
+        hots.set(place, hots.get(only.from) ?? []);
+        continue;
+      }
+      const candidates = new Map<string, readonly string[]>();
+      const put = (path: readonly string[]): void => {
+        work.charge("indexSteps");
+        candidates.set(keptText(this.#work, path), path);
+      };
+      for (const copy of copies)
+        for (const path of hotUnder(copy)) {
+          work.charge("indexSteps");
+          put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+        }
+      for (const text of seeds.get(place)?.keys() ?? []) put(keptSplit(this.#work, text));
+      for (const path of own?.points ?? []) if (this.#landed(place, path)) put(path);
+      for (const prefix of own?.below ?? [])
+        for (const text of this.#landedBelow(place, prefix)) put(keptSplit(this.#work, text));
+      for (const path of this.#meeting(copies, own?.reads ?? [], loose)) put(path);
+      const hot: (readonly string[])[] = [];
+      for (const path of candidates.values()) if (this.#hotAt(place, path)) hot.push(path);
+      for (const path of retaken.get(place) ?? []) if (this.#landed(place, path)) hot.push(path);
+      hots.set(place, hot);
+    }
+    this.#hots = hots;
+    this.#loose = loose;
+    return hots;
+  }
+
+  /**
+   * A place's own contributions besides its copies of inheriting places (`#hotSets`, `OwnStructure`): each store's
+   * literals and constants at their paths (another kind may stand there), its reads of other places' keys and calls'
+   * results with where they stand (`#meeting` tests them, once per configuration), and any other value at its path with
+   * what lies below it (host data through an operation: anything); a written binding's copy stands where it lands
+   * (`#hotSets`). `null` where there is none.
+   */
+  #ownStructure(place: PlaceId): OwnStructure | null {
+    const known = this.#owns.get(place);
+    if (known !== undefined) return known;
+    const { definitions } = this.pass;
+    const work = this.pass.program.work;
+    const copies = new Set<string>();
+    for (const copy of this.#inheritance().into.get(place) ?? [])
+      copies.add(keptParts(this.#work, copy.path, copy.from, copy.strip));
+    const points: (readonly string[])[] = [];
+    const sources: PointSource[] = [];
+    const below: (readonly string[])[] = [];
+    const reads: { readonly at: readonly string[]; readonly source: Key }[] = [];
+    const root = keyOf(place, []);
+    for (const key of [root, ...definitions.keysBelow(root)])
+      for (const d of definitions.byKey.get(key) ?? []) {
+        work.charge("indexSteps");
+        if (d.kind === "const") {
+          points.push(d.path);
+          sources.push({ d, at: [] });
+        }
+        if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
+        const base =
+          d.kind === "add" && d.how !== "elements"
+            ? keptSteps(this.#work, d.path, ["element"])
+            : d.path;
+        this.#ownOf(d, d.value, base, copies, { points, sources, below, reads });
+      }
+    const found =
+      points.length === 0 && below.length === 0 && reads.length === 0
+        ? null
+        : { points, sources, below, reads };
+    this.#owns.set(place, found);
+    return found;
+  }
+
+  /**
+   * One store's value's own contributions standing at `base` in its place (`#ownStructure`, `#elementsMeet`), put in
+   * `out`; `copied` hears of each copy the place's copies list (`copies`), which stands for its source's contents.
+   */
+  #ownOf(
+    d: Definition,
+    value: PlaceId,
+    base: readonly string[],
+    copies: ReadonlySet<string>,
+    out: {
+      readonly points: (readonly string[])[];
+      readonly sources: PointSource[];
+      readonly below: (readonly string[])[];
+      readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
+    },
+    copied?: (at: readonly string[], from: PlaceId, strip: readonly string[]) => void,
+  ): void {
+    const work = this.pass.program.work;
+    const stops = this.#stopsOf(value, d.node);
+    // (a copy the place's copies list stands for its source's contents, its value with it)
+    const copying = new Set<string>();
+    for (const list of stops.written.values())
+      for (const stop of list) {
+        work.charge("indexSteps");
+        if (stop.from === null) continue;
+        const at = keptSteps(this.#work, base, stop.path);
+        if (copies.has(keptParts(this.#work, at, stop.from, stop.strip))) {
+          copying.add(keptParts(this.#work, stop.path, stop.value));
+          copied?.(at, stop.from, stop.strip);
+        } else out.below.push(at);
+      }
+    for (const list of stops.values.values())
+      for (const stop of list) {
+        work.charge("indexSteps");
+        if (copying.has(keptParts(this.#work, stop.path, stop.value))) continue;
+        const at = keptSteps(this.#work, base, stop.path);
+        const source = stop.deep ? null : this.#sourceOf(stop.value);
+        const kinds = this.#quietKinds(stop.value);
+        if (source !== null)
+          out.reads.push({ at, source: keptKeyBelow(this.#work, source, stop.strip) });
+        else if (
+          kinds !== null &&
+          kinds.every((tag) => SCALAR.has(tag) || tag === "null") &&
+          stop.strip.length === 0
+        ) {
+          out.points.push(at);
+          out.sources.push({ d, at: stop.path });
+        } else out.below.push(at);
+      }
+    for (const list of stops.literals.values())
+      for (const stop of list) {
+        work.charge("indexSteps");
+        out.points.push(keptSteps(this.#work, base, stop.path));
+        out.sources.push({ d, at: stop.path });
+      }
+  }
+
+  /**
+   * Where a place's copies of different identities (`#identity`: what they land and hold, whichever place they come
+   * from), or its reads, may meet a written type another of its copies lands (`#hotSets`, TABLE r4.86 (2); Sol's reviews
+   * r4–r7). A group identity another place holds too is shared (`#identityPlaces`). The shared groups, widest first
+   * (landings and contents), walk a prefix trie of configurations (`Configuration`): what each adds to the shared groups
+   * before it once for every place holding that prefix (`#joined`), each read and way's locals once per configuration
+   * (`#readMeets`, `#localsShared`). The unshared groups are listed only at their one place, with the shared groups
+   * asked, and the reads and locals meet them there (`#localsListed`). So a shared contribution is listed once per
+   * configuration of the shared groups, never for a place's own groups, and no group pair is expanded beyond the trie.
+   */
+  #meeting(
+    copies: readonly InheritedCopy[],
+    reads: OwnStructure["reads"],
+    loose: ReadonlyMap<PlaceId, Loose>,
+  ): readonly (readonly string[])[] {
+    const work = this.pass.program.work;
+    const groups = new Map<string, Group>();
+    for (const copy of copies) {
+      work.charge("indexSteps");
+      const { root, strip, locals } = this.#identity(copy.from, copy.strip);
+      const id = keptParts(this.#work, root, strip, copy.path);
+      let group = groups.get(id);
+      if (group === undefined)
+        groups.set(id, (group = { id, root, strip, path: copy.path, locals: new Set() }));
+      if (locals !== null) group.locals.add(locals);
+    }
+    if (groups.size === 0 || (groups.size === 1 && reads.length === 0)) return [];
+    const unshared: Group[] = [];
+    const shared: Group[] = [];
+    for (const group of [...groups.values()].sort((a, b) =>
+      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    ))
+      ((this.#identityPlaces.get(group.id) ?? 0) > 1 ? shared : unshared).push(group);
+    // (the shared groups widest first, by their landings and contents beside them, then by identity)
+    const size = (group: Group): number =>
+      this.#landingSize(group.root, group.strip) + this.#flatSize(group, loose);
+    shared.sort((a, b) => size(b) - size(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    work.charge("indexSteps", 2 * (groups.size + sortCost(groups.size)));
+    const out = new Map<string, readonly string[]>();
+    const put = (list: readonly (readonly string[])[]): void => {
+      for (const path of list) {
+        work.charge("indexSteps");
+        out.set(keptText(this.#work, path), path);
+      }
+    };
+    // the shared groups walk the configurations: what each adds to the groups before it, once for every place holding
+    // that prefix; each read and way's locals once per configuration
+    const run: Running = {
+      lands: new Map(),
+      under: new Map(),
+      points: new Map(),
+      below: new Map(),
+      served: [],
+      loose,
+      accounts: new Map(),
+      terms: new Map(),
+    };
+    let node = this.#configurations;
+    let served = node;
+    let first = true;
+    for (const group of shared) {
+      let next = node.next.get(group.id);
+      const known = next !== undefined;
+      if (next === undefined) {
+        const added = first ? [] : this.#joined(group, run, loose);
+        next = {
+          id: this.#configurationCount++,
+          next: new Map(),
+          added,
+          reads: new Map(),
+          terms: new Map(),
+        };
+        node.next.set(group.id, next);
+      }
+      if (known || first) {
+        run.served.push(group);
+        served = next;
+      }
+      first = false;
+      put(next.added);
+      node = next;
+    }
+    const ways: { readonly chain: Locals; readonly base: readonly string[] }[] = [];
+    for (const group of [...shared, ...unshared])
+      for (const chain of group.locals) ways.push({ chain, base: group.path });
+    const held: Held[] = [];
+    for (const read of reads) {
+      work.charge("indexSteps");
+      const { root, strip, locals } = this.#identity(
+        keyPlace(read.source),
+        keptPath(this.#work, read.source),
+      );
+      held.push({ root, strip, at: read.at, locals });
+      if (locals !== null) ways.push({ chain: locals, base: read.at });
+    }
+    if (shared.length > 0) {
+      for (const read of held) {
+        const id = keptParts(this.#work, read.root, read.strip, read.at);
+        let found = node.reads.get(id);
+        if (found === undefined) node.reads.set(id, (found = this.#readMeets(read, run)));
+        put(found);
+      }
+      for (const { chain, base } of ways) this.#localsShared(chain, base, served, run, put);
+    }
+    // the unshared groups, listed at their one place with the shared groups asked; the reads and locals against them
+    const own: Running = {
+      lands: new Map(),
+      under: new Map(),
+      points: new Map(),
+      below: new Map(),
+      served: shared,
+      loose,
+      accounts: new Map(),
+      terms: new Map(),
+    };
+    for (const group of unshared) put(this.#joined(group, own, loose));
+    for (const read of held) {
+      const touched = new Map<string, readonly string[]>();
+      for (const text of own.under.get(keptText(this.#work, read.at)) ?? []) {
+        work.charge("indexSteps");
+        touched.set(text, own.lands.get(text)!.path);
+      }
+      put(this.#tested(touched, own, read, new Map()));
+    }
+    for (const { chain, base } of ways) put(this.#localsListed(chain, base, own));
+    return [...out.values()];
+  }
+
+  /**
+   * The places of the pass holding each group identity (`#meeting`: a group one place holds is listed there), counted
+   * once over the places whose copies meet (`#hotSets`' order).
+   */
+  #countIdentities(order: readonly (readonly PlaceId[])[]): void {
+    const { into, cycleOf } = this.#inheritance();
+    const work = this.pass.program.work;
+    for (const component of order) {
+      if (cycleOf.has(component[0]!)) continue;
+      const seen = new Set<string>();
+      for (const copy of into.get(component[0]!) ?? []) {
+        work.charge("indexSteps");
+        const { root, strip } = this.#identity(copy.from, copy.strip);
+        const id = keptParts(this.#work, root, strip, copy.path);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        this.#identityPlaces.set(id, (this.#identityPlaces.get(id) ?? 0) + 1);
+      }
+    }
+  }
+
+  /** How many points and prefixes a group's root holds beside its landings below its strip (`#flatLoose`). */
+  #flatSize(group: Group, loose: ReadonlyMap<PlaceId, Loose>): number {
+    const flat = this.#flatLoose(group.root, group.strip, loose);
+    return flat.points.length + flat.below.length;
+  }
+
+  /**
+   * Where a group meets the groups listed before it and the groups asked (`#meeting`), listing it (`Running`): every
+   * path it lands, its contents beside its landings (`Loose`, `#flatLoose`) where another group lands, and every landed
+   * path below where those contents are opaque; of those, where a written type landed there may not meet the contents
+   * there (`#tested`).
+   */
+  #joined(group: Group, run: Running, loose: ReadonlyMap<PlaceId, Loose>): (readonly string[])[] {
+    const work = this.pass.program.work;
+    const touched = new Map<string, readonly string[]>();
+    const lands = this.#groupBelow(group, group.path);
+    for (const path of lands) {
+      work.charge("indexSteps");
+      const text = keptText(this.#work, path);
+      touched.set(text, path);
+      let entry = run.lands.get(text);
+      if (entry === undefined) run.lands.set(text, (entry = { path, groups: [] }));
+      entry.groups.push(group);
+      // (an index of the listed landings by every prefix, for the opaque contents above them)
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        const at = keptText(this.#work, path.slice(0, length));
+        const list = run.under.get(at);
+        if (list === undefined) run.under.set(at, [text]);
+        else list.push(text);
+      }
+    }
+    const flat = this.#flatLoose(group.root, group.strip, loose);
+    // (a group is listed once per call and its flattened points and prefixes are unique, so each mark is new)
+    const mark = (map: Map<string, Group[]>, text: string): void => {
+      const found = map.get(text);
+      if (found === undefined) map.set(text, [group]);
+      else found.push(group);
+    };
+    for (const rest of flat.points) {
+      work.charge("indexSteps");
+      const path = keptSteps(this.#work, group.path, rest);
+      const text = keptText(this.#work, path);
+      mark(run.points, text);
+      if (this.#landsAny(run, path, text)) touched.set(text, path);
+    }
+    for (const rest of flat.below) {
+      work.charge("indexSteps");
+      const prefix = keptSteps(this.#work, group.path, rest);
+      mark(run.below, keptText(this.#work, prefix));
+      for (const path of this.#landedUnder(run, prefix))
+        touched.set(keptText(this.#work, path), path);
+    }
+    return this.#tested(touched, run, null, run.accounts);
+  }
+
+  /**
+   * What a read meets of a configuration (`#meeting`): its source's own structure where it is smaller than the landings
+   * below the read and holds nothing opaque above it (its points where a group lands them, every landed path below its
+   * opaque values), else every landed path at or below the read, never a group's whole landing beyond it; tested with
+   * the read's contents beside the groups' (`#tested`).
+   */
+  #readMeets(read: Held, run: Running): (readonly string[])[] {
+    const work = this.pass.program.work;
+    const touched = new Map<string, readonly string[]>();
+    const take = (paths: readonly (readonly string[])[]): void => {
+      for (const path of paths) touched.set(keptText(this.#work, path), path);
+    };
+    const own = this.#ownStructure(read.root);
+    const index = own === null ? null : this.#ownIndex(own);
+    let covered = index === null;
+    for (let length = 0; length <= read.strip.length && !covered; length += 1) {
+      work.charge("indexSteps");
+      covered = index!.opaque.at.has(keptText(this.#work, read.strip.slice(0, length)));
+    }
+    // (the asked groups taken, each charged, then the listed ones not among them)
+    if (run.served.length > 0) work.charge("indexSteps", run.served.length);
+    const groups = [...run.served];
+    const seen = new Set<Group>(groups);
+    for (const { groups: landing } of run.lands.values())
+      for (const group of landing) {
+        work.charge("indexSteps");
+        if (seen.has(group)) continue;
+        seen.add(group);
+        groups.push(group);
+      }
+    if (
+      covered ||
+      own!.points.length + own!.below.length + own!.reads.length >=
+        this.#landingsBelow(groups, read.at)
+    )
+      take(this.#landedUnder(run, read.at));
+    else {
+      // (its points, other values and reads at or below the read's strip, from its index: never all for each read)
+      const text = keptText(this.#work, read.strip);
+      for (const { path: point } of index!.points.under.get(text) ?? []) {
+        work.charge("indexSteps");
+        const path = keptSteps(this.#work, read.at, point.slice(read.strip.length));
+        if (this.#landsAny(run, path, keptText(this.#work, path))) take([path]);
+      }
+      const opaque = index!.opaque.under.get(text) ?? [];
+      for (const reads of [false, true])
+        for (const { path: prefix, read: source } of opaque) {
+          if ((source !== null) !== reads) continue;
+          work.charge("indexSteps");
+          take(
+            this.#landedUnder(run, keptSteps(this.#work, read.at, prefix.slice(read.strip.length))),
+          );
+        }
+    }
+    // (a fresh account: the read's contents stand beside the groups' at each path)
+    return this.#tested(touched, run, read, new Map());
+  }
+
+  /**
+   * Where a way's locals stand where a listed group lands (`#meeting`): its points there, every listed landing below its
+   * opaque values; each decided at the place (its contents are its own). The chain walked, or the listed landings at or
+   * below the way's path looked up in the chain's texts (`Locals`), whichever is the shorter.
+   */
+  #localsListed(chain: Locals, base: readonly string[], run: Running): (readonly string[])[] {
+    const work = this.pass.program.work;
+    const out: (readonly string[])[] = [];
+    const listed = run.under.get(keptText(this.#work, base)) ?? [];
+    if (listed.length === 0) return out;
+    if (chain.size <= listed.length)
+      for (let local: Locals | null = chain; local !== null; local = local.next) {
+        const node = local;
+        node.points.forEach((point, at) => {
+          work.charge("indexSteps");
+          const path = keptSteps(this.#work, base, point);
+          const text = keptText(this.#work, path);
+          if (
+            run.lands.has(text) &&
+            this.#localMisfits(node.sources[at]!, this.#termsOf(run, path, text))
+          )
+            out.push(path);
+        });
+        for (const prefix of local.below) {
+          work.charge("indexSteps");
+          for (const text of run.under.get(
+            keptText(this.#work, keptSteps(this.#work, base, prefix)),
+          ) ?? [])
+            out.push(run.lands.get(text)!.path);
+        }
+      }
+    else
+      for (const text of listed) {
+        work.charge("indexSteps");
+        const path = run.lands.get(text)!.path;
+        if (this.#localsHold(chain, path.slice(base.length))) out.push(path);
+      }
+    return out;
+  }
+
+  /**
+   * Where a way's locals stand where a shared group of a configuration lands (`#meeting`): its points there, every
+   * landed path below its opaque values; each decided at the place (its contents are its own). Against the groups asked
+   * (`served`, a prefix of the order): once per locals node, served configuration and place path, a chain's nodes shared
+   * by every way through them. Against the shared groups the call listed: their landings at or below the way's path,
+   * each looked up in the chain's texts (`Locals`), or the chain walked where it is the shorter.
+   */
+  #localsShared(
+    chain: Locals,
+    base: readonly string[],
+    served: Configuration,
+    run: Running,
+    put: (list: readonly (readonly string[])[]) => void,
+  ): void {
+    const work = this.pass.program.work;
+    const key = keptParts(this.#work, served.id, base);
+    const pending: Locals[] = [];
+    let at: Locals | null = chain;
+    let met: LocalsMet | null = null;
+    for (; at !== null; at = at.next) {
+      work.charge("indexSteps");
+      const known = this.#localsMet.get(at)?.get(key);
+      if (known !== undefined) {
+        met = known;
+        break;
+      }
+      pending.push(at);
+    }
+    // (the asked groups' written types at a path, once per served configuration)
+    const servedTerms = (path: readonly string[]): ReadonlyMap<string, TypeTerm | null> => {
+      const text = keptText(this.#work, path);
+      let terms = served.terms.get(text);
+      if (terms === undefined) {
+        const found = new Map<string, TypeTerm | null>();
+        for (const group of run.served) this.#termOf(group, path, found, true);
+        served.terms.set(text, (terms = found));
+      }
+      return terms;
+    };
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const local = pending[index]!;
+      const found: (readonly string[])[] = [];
+      local.points.forEach((point, at) => {
+        work.charge("indexSteps");
+        const path = keptSteps(this.#work, base, point);
+        if (this.#localMisfits(local.sources[at]!, servedTerms(path))) found.push(path);
+      });
+      for (const prefix of local.below) {
+        work.charge("indexSteps");
+        const under = keptSteps(this.#work, base, prefix);
+        for (const group of run.served)
+          for (const path of this.#groupBelow(group, under)) found.push(path);
+      }
+      // (only the nodes that add a path are kept on the way)
+      if (found.length > 0) met = { paths: found, next: met };
+      let byKey = this.#localsMet.get(local);
+      if (byKey === undefined) this.#localsMet.set(local, (byKey = new Map()));
+      byKey.set(key, met ?? NO_LOCALS_MET);
+    }
+    for (let way = met; way !== null && way !== NO_LOCALS_MET; way = way.next) put(way.paths);
+    // the groups this call listed: their landings at or below the way's path, in the chain's texts
+    const listed = run.under.get(keptText(this.#work, base)) ?? [];
+    if (listed.length === 0) return;
+    const out: (readonly string[])[] = [];
+    if (chain.size <= listed.length)
+      for (let local: Locals | null = chain; local !== null; local = local.next) {
+        const node = local;
+        node.points.forEach((point, at) => {
+          work.charge("indexSteps");
+          const path = keptSteps(this.#work, base, point);
+          const text = keptText(this.#work, path);
+          if (
+            run.lands.has(text) &&
+            this.#localMisfits(node.sources[at]!, this.#termsOf(run, path, text))
+          )
+            out.push(path);
+        });
+        for (const prefix of local.below) {
+          work.charge("indexSteps");
+          for (const text of run.under.get(
+            keptText(this.#work, keptSteps(this.#work, base, prefix)),
+          ) ?? [])
+            out.push(run.lands.get(text)!.path);
+        }
+      }
+    else
+      for (const text of listed) {
+        work.charge("indexSteps");
+        const path = run.lands.get(text)!.path;
+        const rest = path.slice(base.length);
+        let held = treapHas(chain.pointTexts, pathText(rest));
+        for (let length = 0; length <= rest.length && !held; length += 1) {
+          work.charge("indexSteps");
+          held = treapHas(chain.belowTexts, pathText(rest.slice(0, length)));
+        }
+        if (held) out.push(path);
+      }
+    put(out);
+  }
+
+  /**
+   * Whether a way's local, a literal or constant stored on the way, may not meet a written type landed at the place's
+   * path (`#localsShared`, `#localsListed`): its own value against each distinct landed type, so a local that fits is
+   * no candidate (its contents are its own; the others' meet the groups by themselves).
+   */
+  #localMisfits(source: PointSource, terms: ReadonlyMap<string, TypeTerm | null>): boolean {
+    if (terms.size === 0) return false;
+    if (terms.has("")) return true;
+    const items = this.valueAt(source.d, source.at);
+    for (const term of terms.values()) {
+      this.pass.program.work.charge("checks");
+      if (!compatible(items, term!)) return true;
+    }
+    return false;
+  }
+
+  /** The distinct written types a call's groups land at a place's path (`Running`): the asked ones once, the listed as they grow. */
+  #termsOf(
+    run: Running,
+    path: readonly string[],
+    text: string,
+  ): ReadonlyMap<string, TypeTerm | null> {
+    let account = run.terms.get(text);
+    if (account === undefined) {
+      account = { landers: 0, found: new Map() };
+      run.terms.set(text, account);
+      for (const group of run.served) this.#termOf(group, path, account.found, true);
+    }
+    const landing = run.lands.get(text)?.groups ?? [];
+    for (; account.landers < landing.length; account.landers += 1)
+      this.#termOf(landing[account.landers]!, path, account.found, false);
+    return account.found;
+  }
+
+  /** A group's written type at a place's path, by what it admits, where it lands it (`#termsOf`). */
+  #termOf(
+    group: Group,
+    path: readonly string[],
+    found: Map<string, TypeTerm | null>,
+    ask: boolean,
+  ): void {
+    this.pass.program.work.charge("checks");
+    if (ask && !this.#groupLands(group, path)) return;
+    const term = this.#inheritedAt(
+      group.root,
+      keptSteps(this.#work, group.strip, path.slice(group.path.length)),
+    );
+    found.set(term === null ? "" : typeTags(term).join("|"), term);
+  }
+
+  /** Whether a chain's locals hold a rest from its way's path: a point there, or an opaque value at or above it. */
+  #localsHold(chain: Locals, rest: readonly string[]): boolean {
+    if (treapHas(chain.pointTexts, pathText(rest))) return true;
+    for (let length = 0; length <= rest.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      if (treapHas(chain.belowTexts, pathText(rest.slice(0, length)))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Of these paths, where a written type landed there may not meet the contents there whatever stands first
+   * (`compatible`): the terms of the groups landing a path, the contents (their roots' contracts) of the groups landing
+   * or holding contents there (`Loose`) and of the read, if any. Each path's account (`Account`) takes each group once:
+   * the asked ones when it is opened, the listed ones as their lists grow.
+   */
+  #tested(
+    touched: ReadonlyMap<string, readonly string[]>,
+    run: Running,
+    read: Held | null,
+    accounts: Map<string, Account>,
+  ): (readonly string[])[] {
+    const { contract } = this.pass;
+    const work = this.pass.program.work;
+    const out: (readonly string[])[] = [];
+    const describe = (items: readonly Item[]): string =>
+      items.map((item) => `${item.tag}:${item.cert}:${item.reasons}`).join(",");
+    for (const [text, path] of touched) {
+      let account = accounts.get(text);
+      const opened = account === undefined;
+      if (account === undefined) {
+        account = {
+          landers: 0,
+          points: 0,
+          below: Array<number>(path.length + 1).fill(0),
+          contented: new Set(),
+          terms: new Map(),
+          contents: new Map(),
+          met: false,
+        };
+        accounts.set(text, account);
+      }
+      if (account.met) continue;
+      const found = account;
+      const term = (group: Group): void => {
+        work.charge("checks");
+        const at = this.#inheritedAt(
+          group.root,
+          keptSteps(this.#work, group.strip, path.slice(group.path.length)),
+        );
+        found.terms.set(at === null ? "" : typeTags(at).join("|"), at);
+      };
+      const content = (key: Key): void => {
+        work.charge("checks");
+        const items = withoutEmpty(this.#run(contract.contractOf(key)));
+        const described = describe(items);
+        keepText(this.#work, described.length);
+        found.contents.set(described, items);
+      };
+      const holds = (group: Group): void => {
+        if (found.contented.has(group)) return;
+        found.contented.add(group);
+        content(
+          keptKey(this.#work, group.root, joinSteps(group.strip, path.slice(group.path.length))),
+        );
+      };
+      if (opened) {
+        // (the asked groups, once: they land, hold, or neither)
+        for (const group of run.served) {
+          work.charge("indexSteps");
+          if (this.#groupLands(group, path)) {
+            term(group);
+            holds(group);
+          } else if (this.#flatHolds(group, path, run.loose)) holds(group);
+        }
+        if (read !== null && isPrefix(read.at, path))
+          content(
+            keptKey(this.#work, read.root, joinSteps(read.strip, path.slice(read.at.length))),
+          );
+      }
+      // (the listed ones beyond what the account has taken)
+      const landing = run.lands.get(text)?.groups ?? [];
+      for (; found.landers < landing.length; found.landers += 1) {
+        const group = landing[found.landers]!;
+        term(group);
+        holds(group);
+      }
+      const points = run.points.get(text) ?? [];
+      for (; found.points < points.length; found.points += 1) holds(points[found.points]!);
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        const below = run.below.get(keptText(this.#work, path.slice(0, length))) ?? [];
+        for (; found.below[length]! < below.length; found.below[length]! += 1)
+          holds(below[found.below[length]!]!);
+      }
+      if (found.terms.size === 0) continue;
+      let meets = !found.terms.has("");
+      for (const at of found.terms.values())
+        for (const items of found.contents.values()) {
+          if (!meets) break;
+          work.charge("checks");
+          meets = compatible(items, at);
+        }
+      if (!meets) {
+        found.met = true;
+        out.push(path);
+      }
+    }
+    return out;
+  }
+
+  /** Whether a group of a call lands a place's path (`Running`): listed by its landings, else asked. */
+  #landsAny(run: Running, path: readonly string[], text: string): boolean {
+    if (run.lands.has(text)) return true;
+    for (const group of run.served) {
+      this.pass.program.work.charge("indexSteps");
+      if (this.#groupLands(group, path)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * A place's contents beside its landings by prefix (`#flatLoose`): its points, prefixes and sources' copies under every
+   * prefix of their paths, its prefixes' texts, and its copies by their own paths; once per node.
+   */
+  #looseIndex(loose: Loose): LooseIndex {
+    const known = this.#looseIndexes.get(loose);
+    if (known !== undefined) return known;
+    const work = this.pass.program.work;
+    const index: LooseIndex = {
+      points: new Map(),
+      below: new Map(),
+      belowTexts: new Set(),
+      from: new Map(),
+      fromAt: new Map(),
+    };
+    const under = <T>(map: Map<string, T[]>, path: readonly string[], item: T): void => {
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, path.slice(0, length));
+        const list = map.get(text);
+        if (list === undefined) map.set(text, [item]);
+        else list.push(item);
+      }
+    };
+    for (const point of loose.points) under(index.points, point, point);
+    for (const prefix of loose.below) {
+      under(index.below, prefix, prefix);
+      index.belowTexts.add(keptText(this.#work, prefix));
+    }
+    for (const entry of loose.from) {
+      under(index.from, entry.copy.path, entry);
+      const text = keptText(this.#work, entry.copy.path);
+      const list = index.fromAt.get(text);
+      if (list === undefined) index.fromAt.set(text, [entry]);
+      else list.push(entry);
+    }
+    this.#looseIndexes.set(loose, index);
+    return index;
+  }
+
+  /** Whether a group's root holds contents beside its landings at a place's path (`#flatLoose`). */
+  #flatHolds(group: Group, path: readonly string[], loose: ReadonlyMap<PlaceId, Loose>): boolean {
+    if (!isPrefix(group.path, path)) return false;
+    const flat = this.#flatLoose(group.root, group.strip, loose);
+    const rest = path.slice(group.path.length);
+    if (flat.pointTexts.has(pathText(rest))) return true;
+    for (let length = 0; length <= rest.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      if (flat.belowTexts.has(pathText(rest.slice(0, length)))) return true;
+    }
+    return false;
+  }
+
+  /** The landed paths of a call's groups at or below a place's prefix (`Running`): listed by the index, else asked. */
+  #landedUnder(run: Running, prefix: readonly string[]): (readonly string[])[] {
+    const out: (readonly string[])[] = [];
+    for (const text of run.under.get(keptText(this.#work, prefix)) ?? []) {
+      this.pass.program.work.charge("indexSteps");
+      out.push(run.lands.get(text)!.path);
+    }
+    for (const group of run.served)
+      for (const path of this.#groupBelow(group, prefix)) out.push(path);
+    return out;
+  }
+
+  /**
+   * A root's contents beside its landings below a strip (`Loose`), flattened to rests from the strip: its points, and the
+   * prefixes below which it may hold anything; through its sources' contents, each node, strip and rest once. Once per
+   * root and strip.
+   */
+  #flatLoose(
+    root: PlaceId,
+    strip: readonly string[],
+    loose: ReadonlyMap<PlaceId, Loose>,
+  ): FlatLoose {
+    const key = keptParts(this.#work, root, strip);
+    const known = this.#flatLooses.get(key);
+    if (known !== undefined) return known;
+    const work = this.pass.program.work;
+    const flat: FlatLoose = { points: [], below: [], pointTexts: new Set(), belowTexts: new Set() };
+    const seen = new Set<string>();
+    const ids = new Map<Loose, number>();
+    const tasks: {
+      readonly loose: Loose;
+      readonly strip: readonly string[];
+      readonly rest: readonly string[];
+    }[] = [{ loose: loose.get(root) ?? NO_LOOSE, strip, rest: [] }];
+    const point = (rest: readonly string[]): void => {
+      const text = keptText(this.#work, rest);
+      if (flat.pointTexts.has(text)) return;
+      flat.pointTexts.add(text);
+      flat.points.push(rest);
+    };
+    const under = (rest: readonly string[]): void => {
+      const text = keptText(this.#work, rest);
+      if (flat.belowTexts.has(text)) return;
+      flat.belowTexts.add(text);
+      flat.below.push(rest);
+    };
+    while (tasks.length > 0) {
+      const task = tasks.pop()!;
+      if (task.loose === NO_LOOSE) continue;
+      let id = ids.get(task.loose);
+      if (id === undefined) ids.set(task.loose, (id = ids.size));
+      const at = keptParts(this.#work, id, task.strip, task.rest);
+      if (seen.has(at)) continue;
+      seen.add(at);
+      // (the node's entries at, above and below the strip, from its index: never every entry for each strip)
+      const index = this.#looseIndex(task.loose);
+      const text = keptText(this.#work, task.strip);
+      for (const each of index.points.get(text) ?? []) {
+        work.charge("indexSteps");
+        point(keptSteps(this.#work, task.rest, each.slice(task.strip.length)));
+      }
+      for (const prefix of index.below.get(text) ?? []) {
+        work.charge("indexSteps");
+        under(keptSteps(this.#work, task.rest, prefix.slice(task.strip.length)));
+      }
+      // (a source's own copies' contents, the two steps composed: theirs, then this one's)
+      for (const { copy: inner, loose: from } of index.from.get(text) ?? []) {
+        work.charge("indexSteps");
+        tasks.push({
+          loose: from,
+          strip: inner.strip,
+          rest: keptSteps(this.#work, task.rest, inner.path.slice(task.strip.length)),
+        });
+      }
+      for (let length = 0; length < task.strip.length; length += 1) {
+        work.charge("indexSteps");
+        const above = keptText(this.#work, task.strip.slice(0, length));
+        if (index.belowTexts.has(above)) under(task.rest);
+        for (const { copy: inner, loose: from } of index.fromAt.get(above) ?? []) {
+          work.charge("indexSteps");
+          tasks.push({
+            loose: from,
+            strip: keptSteps(this.#work, inner.strip, task.strip.slice(inner.path.length)),
+            rest: task.rest,
+          });
+        }
+      }
+    }
+    this.#flatLooses.set(key, flat);
+    return flat;
+  }
+
+  /**
+   * A bound on the paths a place's groups land at or below a prefix (`#readMeets`): a group's whole landing where the prefix
+   * is above its path, else its root's seeds there (an index lookup) where copies land nothing in it, else its landing.
+   */
+  #landingsBelow(groups: readonly Group[], prefix: readonly string[]): number {
+    const { into, cycleOf } = this.#inheritance();
+    let total = 0;
+    for (const group of groups) {
+      this.pass.program.work.charge("indexSteps");
+      if (isPrefix(prefix, group.path)) total += this.#landingSize(group.root, group.strip);
+      else if (isPrefix(group.path, prefix))
+        total +=
+          (into.get(group.root)?.length ?? 0) === 0 && !cycleOf.has(group.root)
+            ? this.#seedsUnder(
+                group.root,
+                keptSteps(this.#work, group.strip, prefix.slice(group.path.length)),
+              ).length
+            : this.#landingSize(group.root, group.strip);
+    }
+    return total;
+  }
+
+  /** How many paths copies land in a root at or below a strip, and the strip (`#meeting`'s order). */
+  #landingSize(root: PlaceId, strip: readonly string[]): number {
+    return 1 + this.#landedList(root, strip).length;
+  }
+
+  /** The paths copies land in a root at or below a strip (`#landedBelow`), once per root and strip. */
+  #landedList(root: PlaceId, strip: readonly string[]): readonly string[] {
+    const key = keptParts(this.#work, root, strip);
+    let found = this.#landingLists.get(key);
+    if (found === undefined) this.#landingLists.set(key, (found = this.#landedBelow(root, strip)));
+    return found;
+  }
+
+  /** Whether a group of a place's copies lands a path of the place (`#meeting`): its own path, or its root below. */
+  #groupLands(group: Group, path: readonly string[]): boolean {
+    if (!isPrefix(group.path, path)) return false;
+    return (
+      path.length === group.path.length ||
+      this.#landed(group.root, keptSteps(this.#work, group.strip, path.slice(group.path.length)))
+    );
+  }
+
+  /**
+   * The paths of a place a group of its copies lands at or below a prefix (`#meeting`), its own path with them; each
+   * asking charged, a group away from the prefix too (the walks over every asked group, #1188).
+   */
+  #groupBelow(group: Group, prefix: readonly string[]): (readonly string[])[] {
+    this.pass.program.work.charge("indexSteps");
+    const out: (readonly string[])[] = [];
+    let under: readonly string[];
+    if (isPrefix(group.path, prefix))
+      under = keptSteps(this.#work, group.strip, prefix.slice(group.path.length));
+    else if (isPrefix(prefix, group.path)) under = group.strip;
+    else return out;
+    if (prefix.length <= group.path.length) out.push(group.path);
+    for (const text of this.#landedBelow(group.root, under)) {
+      const steps = splitPath(text);
+      if (steps.length > group.strip.length)
+        out.push(keptSteps(this.#work, group.path, steps.slice(group.strip.length)));
+    }
+    return out;
+  }
+
+  /**
+   * What a place holds at and below a path (`Identity`, TABLE r4.86 (2)): where one copy or read reaching the path is
+   * all that brings it there (`#stepOf`), what that copy's or read's source holds at its strip, step by step, with each
+   * stepped-through place's own contributions below the path; else the place itself. Once per place and path, on an
+   * explicit walk (a place met again ends it: a cycle of reads may grow the path).
+   */
+  #identity(place: PlaceId, strip: readonly string[]): Identity {
+    const work = this.pass.program.work;
+    const steps: {
+      readonly key: string;
+      readonly points: readonly (readonly string[])[];
+      readonly sources: readonly PointSource[];
+      readonly below: readonly (readonly string[])[];
+    }[] = [];
+    const walked = new Set<PlaceId>();
+    const asked = keptParts(this.#work, place, strip);
+    let at = place;
+    let under = strip;
+    let found: Identity;
+    for (;;) {
+      // (through places that hold all of one source, and a chain of copies storing nothing at, above or below the path)
+      const whole = this.#forwarded(at);
+      if (whole.root !== at) {
+        at = whole.root;
+        under = keptSteps(this.#work, whole.strip, under);
+      }
+      at = this.#landsThrough(at, under);
+      const key = keptParts(this.#work, at, under);
+      const known = this.#identities.get(key);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      const step = walked.has(at) ? null : this.#stepOf(at, under);
+      walked.add(at);
+      if (step === null) {
+        found = { root: at, strip: under, locals: null };
+        this.#identities.set(key, found);
+        break;
+      }
+      steps.push({ key, points: step.points, sources: step.sources, below: step.below });
+      at = step.from;
+      under = step.strip;
+    }
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      work.charge("indexSteps");
+      const { key, points, sources, below } = steps[index]!;
+      const locals =
+        points.length === 0 && below.length === 0
+          ? found.locals
+          : this.#localsNode(points, sources, below, found.locals);
+      found = { root: found.root, strip: found.strip, locals };
+      this.#identities.set(key, found);
+    }
+    this.#identities.set(asked, found);
+    return found;
+  }
+
+  /** A locals node before a chain, with the chain's texts beside its own (`Locals`), each insert charged. */
+  #localsNode(
+    points: readonly (readonly string[])[],
+    sources: readonly PointSource[],
+    below: readonly (readonly string[])[],
+    next: Locals | null,
+  ): Locals {
+    const work = this.pass.program.work;
+    // (each insert keeps a path of the treap's depth, about the log of the chain's size)
+    const depth = 1 + Math.ceil(Math.log2(1 + (next?.size ?? 0) + points.length + below.length));
+    let pointTexts = next?.pointTexts ?? null;
+    let belowTexts = next?.belowTexts ?? null;
+    for (const point of points) {
+      work.charge("indexSteps", depth);
+      pointTexts = treapWith(pointTexts, keptText(this.#work, point));
+    }
+    for (const prefix of below) {
+      work.charge("indexSteps", depth);
+      belowTexts = treapWith(belowTexts, keptText(this.#work, prefix));
+    }
+    return {
+      points,
+      sources,
+      below,
+      next,
+      size: (next?.size ?? 0) + points.length + below.length,
+      pointTexts,
+      belowTexts,
+    };
+  }
+
+  /**
+   * The place and path a place holds all of (`#identity`): through a place whose one contribution is one whole copy or
+   * read at its root, nothing else of its own, outside every cycle, its source's; else the place itself. Once per place,
+   * on an explicit walk.
+   */
+  #forwarded(place: PlaceId): { readonly root: PlaceId; readonly strip: readonly string[] } {
+    const { into, seeds, cycleOf } = this.#inheritance();
+    const work = this.pass.program.work;
+    const chain: { readonly place: PlaceId; readonly strip: readonly string[] }[] = [];
+    const walked = new Set<PlaceId>();
+    let at = place;
+    let found: { readonly root: PlaceId; readonly strip: readonly string[] } | undefined;
+    for (;;) {
+      found = this.#forwards.get(at);
+      if (found !== undefined) break;
+      work.charge("indexSteps");
+      const copies = into.get(at) ?? [];
+      const own = this.#ownStructure(at);
+      let step: { readonly from: PlaceId; readonly strip: readonly string[] } | null = null;
+      if (
+        !walked.has(at) &&
+        !cycleOf.has(at) &&
+        !seeds.has(at) &&
+        this.#retakenOf(at).length === 0
+      ) {
+        if (copies.length === 1 && own === null && copies[0]!.path.length === 0)
+          step = { from: copies[0]!.from, strip: copies[0]!.strip };
+        else if (
+          copies.length === 0 &&
+          own !== null &&
+          own.points.length === 0 &&
+          own.below.length === 0 &&
+          own.reads.length === 1 &&
+          own.reads[0]!.at.length === 0
+        )
+          step = {
+            from: keyPlace(own.reads[0]!.source),
+            strip: keptPath(this.#work, own.reads[0]!.source),
+          };
+      }
+      walked.add(at);
+      if (step === null) {
+        found = { root: at, strip: [] };
+        this.#forwards.set(at, found);
+        break;
+      }
+      chain.push({ place: at, strip: step.strip });
+      at = step.from;
+    }
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      work.charge("indexSteps");
+      const step = chain[index]!;
+      found = { root: found.root, strip: keptSteps(this.#work, found.strip, step.strip) };
+      this.#forwards.set(step.place, found);
+    }
+    return found;
+  }
+
+  /**
+   * One step of `#identity`: the source and strip a place's one copy or read reaching a path brings there, with the
+   * place's own contributions below the path (rests from it); a fed cycle's member steps to its feeder with every
+   * member's contributions; `null` where the place holds more there: another cycle's member,
+   * a written type of its own landing at or below it, a store taken again there, another copy or read reaching it or one
+   * below it, any other value above it.
+   */
+  #stepOf(
+    place: PlaceId,
+    strip: readonly string[],
+  ): {
+    readonly from: PlaceId;
+    readonly strip: readonly string[];
+    readonly points: readonly (readonly string[])[];
+    readonly sources: readonly PointSource[];
+    readonly below: readonly (readonly string[])[];
+  } | null {
+    const { cycleOf, fed } = this.#inheritance();
+    const work = this.pass.program.work;
+    work.charge("indexSteps");
+    // (what stands at, above or below the strip, looked up by its prefixes in indexes of the place's stores, copies and
+    // own contributions: never each of them for each strip, Astra's review r2 B2)
+    const texts: string[] = [];
+    for (let length = 0; length <= strip.length; length += 1) {
+      work.charge("indexSteps");
+      texts.push(keptText(this.#work, strip.slice(0, length)));
+    }
+    const text = texts.at(-1)!;
+    const crosses = (index: ByPath<unknown>): boolean =>
+      index.under.has(text) || texts.some((prefix) => index.at.has(prefix));
+    const points: (readonly string[])[] = [];
+    const sources: PointSource[] = [];
+    const below: (readonly string[])[] = [];
+    // (the place's contributions below the path, as rests from it: reads and other values, then points)
+    const collect = (index: OwnIndex): void => {
+      for (const { path } of index.opaque.under.get(text) ?? []) {
+        work.charge("indexSteps");
+        if (path.length > strip.length) below.push(keptSlice(this.#work, path, strip.length));
+      }
+      for (const { path, source } of index.points.under.get(text) ?? []) {
+        work.charge("indexSteps");
+        points.push(keptSlice(this.#work, path, strip.length));
+        sources.push(source);
+      }
+    };
+    const feeder = fed.get(place);
+    if (feeder !== undefined) {
+      // a member of a cycle of whole copies one place outside it feeds: that place's landings, with every member's own
+      // contributions below the path (the cycle's contents flow round it)
+      const index = this.#cycleIndex(place);
+      if (crosses(index.retaken) || texts.some((prefix) => index.opaque.at.has(prefix)))
+        return null;
+      collect(index);
+      return { from: feeder, strip, points, sources, below };
+    }
+    if (cycleOf.has(place) || this.#seedsUnder(place, strip).length > 0) return null;
+    if (crosses(this.#retakenIndex(place))) return null;
+    const { list, index: copies } = this.#copyIndex(place);
+    if ((copies.under.get(text)?.length ?? 0) > (copies.at.get(text)?.length ?? 0)) return null;
+    // the one copy or read reaching the path, at or above it (a second one, or any other value there, holds more)
+    let from: PlaceId | null = null;
+    let at: readonly string[] = [];
+    let reaching = 0;
+    for (const prefix of texts)
+      for (const position of copies.at.get(prefix) ?? []) {
+        work.charge("indexSteps");
+        if ((reaching += 1) > 1) return null;
+        const copy = list[position]!;
+        from = copy.from;
+        at = keptSteps(this.#work, copy.strip, strip.slice(copy.path.length));
+      }
+    const own = this.#ownStructure(place);
+    const index = own === null ? null : this.#ownIndex(own);
+    for (const prefix of index === null ? [] : texts)
+      for (const { path, read } of index!.opaque.at.get(prefix) ?? []) {
+        work.charge("indexSteps");
+        if (read === null || (reaching += 1) > 1) return null;
+        from = keyPlace(read);
+        at = keptSteps(this.#work, keptPath(this.#work, read), strip.slice(path.length));
+      }
+    if (reaching !== 1 || from === null) return null;
+    if (index !== null) collect(index);
+    return { from, strip: at, points, sources, below };
+  }
+
+  /** The members of a place's cycle of copies (`Inheritance.order`), once per pass. */
+  #membersOf(place: PlaceId): readonly PlaceId[] {
+    const { cycleOf, order } = this.#inheritance();
+    if (this.#cycleMembers === null) {
+      this.#cycleMembers = new Map();
+      for (const component of order) {
+        this.pass.program.work.charge("indexSteps");
+        const cycle = cycleOf.get(component[0]!);
+        if (cycle !== undefined) this.#cycleMembers.set(cycle, [...component]);
+      }
+    }
+    return this.#cycleMembers.get(cycleOf.get(place)!) ?? [place];
+  }
+
+  /** Entries by path (`ByPath`): each under every prefix of its path, its own text included, and at its path. */
+  #byPath<T>(entries: readonly T[], pathOf: (entry: T) => readonly string[]): ByPath<T> {
+    if (entries.length === 0) return NO_PATHS;
+    const work = this.pass.program.work;
+    const under = new Map<string, T[]>();
+    const at = new Map<string, T[]>();
+    const put = (map: Map<string, T[]>, text: string, entry: T): void => {
+      const list = map.get(text);
+      if (list === undefined) map.set(text, [entry]);
+      else list.push(entry);
+    };
+    for (const entry of entries) {
+      const path = pathOf(entry);
+      let text = "";
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        text = keptText(this.#work, path.slice(0, length));
+        put(under, text, entry);
+      }
+      put(at, text, entry);
+    }
+    return { under, at };
+  }
+
+  /** A place's own contributions by path (`OwnIndex`), once per own structure. */
+  #ownIndex(own: OwnStructure): OwnIndex {
+    let found = this.#ownIndexes.get(own);
+    if (found === undefined) {
+      const opaque: OwnOpaque[] = [];
+      const points: OwnPoint[] = [];
+      this.#ownEntries(own, opaque, points);
+      found = {
+        opaque: this.#byPath(opaque, ({ path }) => path),
+        points: this.#byPath(points, ({ path }) => path),
+      };
+      this.#ownIndexes.set(own, found);
+    }
+    return found;
+  }
+
+  /** A place's own contributions as `OwnIndex`'s entries: in `opaque` its reads, then its other values; its points. */
+  #ownEntries(own: OwnStructure, opaque: OwnOpaque[], points: OwnPoint[]): void {
+    for (const { at, source } of own.reads) opaque.push({ path: at, read: source });
+    for (const path of own.below) opaque.push({ path, read: null });
+    own.points.forEach((path, index) => points.push({ path, source: own.sources[index]! }));
+  }
+
+  /** A place's stores taken again by path (`#stepOf`), once per place. */
+  #retakenIndex(place: PlaceId): ByPath<readonly string[]> {
+    let found = this.#retakenIndexes.get(place);
+    if (found === undefined)
+      this.#retakenIndexes.set(
+        place,
+        (found = this.#byPath(this.#retakenOf(place), (path) => path)),
+      );
+    return found;
+  }
+
+  /** A place's copies (`#copiesOf`) with their positions by path (`ByPath`), once per place. */
+  #copyIndex(place: PlaceId): {
+    readonly list: readonly InheritedCopy[];
+    readonly index: ByPath<number>;
+  } {
+    let found = this.#copyIndexes.get(place);
+    if (found === undefined) {
+      const list = this.#copiesOf(place);
+      const positions = list.map((_, position) => position);
+      found = { list, index: this.#byPath(positions, (position) => list[position]!.path) };
+      this.#copyIndexes.set(place, found);
+    }
+    return found;
+  }
+
+  /**
+   * A place's copies whose paths stand above a path (strictly), and with `under` those at or below it too, in the
+   * copies' order (`#landed`, `#landedBelow`): the path's prefixes looked up, never every copy for each path, or the
+   * copies tested where they are no more than the prefixes; each copy taken or tested charged here.
+   */
+  #copiesAlong(place: PlaceId, path: readonly string[], under: boolean): readonly InheritedCopy[] {
+    const work = this.pass.program.work;
+    const copies = this.#copiesOf(place);
+    if (copies.length <= path.length + 1) {
+      // (no more copies than the path has prefixes: each tested, as cheap as the lookups)
+      const out: InheritedCopy[] = [];
+      for (const copy of copies) {
+        work.charge("indexSteps");
+        if (
+          (copy.path.length < path.length && isPrefix(copy.path, path)) ||
+          (under && isPrefix(path, copy.path))
+        )
+          out.push(copy);
+      }
+      return out;
+    }
+    const { list, index } = this.#copyIndex(place);
+    const positions: number[] = [];
+    for (let length = 0; length <= path.length; length += 1) {
+      work.charge("indexSteps");
+      const text = keptText(this.#work, path.slice(0, length));
+      const found =
+        length < path.length ? index.at.get(text) : under ? index.under.get(text) : undefined;
+      for (const position of found ?? []) {
+        work.charge("indexSteps");
+        positions.push(position);
+      }
+    }
+    if (positions.length > 1) {
+      work.charge("indexSteps", sortCost(positions.length));
+      positions.sort((a, b) => a - b);
+    }
+    return positions.map((position) => list[position]!);
+  }
+
+  /** A member of a cycle of copies' landed paths by path (`Inheritance.cycles`, `#landedBelow`), once per landing. */
+  #cycleLanding(place: PlaceId): ByPath<readonly string[]> {
+    const landing = this.#inheritance().cycles.get(place)!;
+    let found = this.#cycleLandings.get(landing);
+    if (found === undefined) {
+      const paths: (readonly string[])[] = [];
+      for (const text of landing) paths.push(keptSplit(this.#work, text));
+      this.#cycleLandings.set(landing, (found = this.#byPath(paths, (path) => path)));
+    }
+    return found;
+  }
+
+  /** A fed cycle's members' own contributions and stores taken again by path (`CycleIndex`), once per cycle. */
+  #cycleIndex(place: PlaceId): CycleIndex {
+    const members = this.#membersOf(place);
+    let found = this.#cycleIndexes.get(members);
+    if (found === undefined) {
+      const retaken: (readonly string[])[] = [];
+      const opaque: OwnOpaque[] = [];
+      const points: OwnPoint[] = [];
+      for (const member of members) {
+        this.pass.program.work.charge("indexSteps");
+        for (const path of this.#retakenOf(member)) retaken.push(path);
+        const own = this.#ownStructure(member);
+        if (own !== null) this.#ownEntries(own, opaque, points);
+      }
+      found = {
+        retaken: this.#byPath(retaken, (path) => path),
+        opaque: this.#byPath(opaque, ({ path }) => path),
+        points: this.#byPath(points, ({ path }) => path),
+      };
+      this.#cycleIndexes.set(members, found);
+    }
+    return found;
+  }
+
+  /** A place's seeds' paths at or below a prefix (`Inheritance.seeds`), from an index of every seed's prefixes. */
+  #seedsUnder(place: PlaceId, prefix: readonly string[]): readonly string[] {
+    const own = this.#inheritance().seeds.get(place);
+    if (own === undefined) return [];
+    let index = this.#seedIndex.get(place);
+    if (index === undefined) {
+      this.#seedIndex.set(place, (index = new Map()));
+      for (const text of own.keys()) {
+        const steps = keptSplit(this.#work, text);
+        for (let length = 0; length <= steps.length; length += 1) {
+          this.pass.program.work.charge("indexSteps");
+          const at = keptText(this.#work, steps.slice(0, length));
+          const list = index.get(at);
+          if (list === undefined) index.set(at, [text]);
+          else list.push(text);
+        }
+      }
+    }
+    return index.get(pathText(prefix)) ?? [];
+  }
+
+  /** A place's paths whose stores are taken again (A6, `#retaken`), once per pass. */
+  #retakenOf(place: PlaceId): readonly (readonly string[])[] {
+    if (this.#retakenByPlace === null) {
+      const byPlace = new Map<PlaceId, (readonly string[])[]>();
+      for (const key of this.#retaken.keys()) {
+        this.pass.program.work.charge("indexSteps");
+        const list = byPlace.get(keyPlace(key));
+        if (list === undefined) byPlace.set(keyPlace(key), [keptPath(this.#work, key)]);
+        else list.push(keptPath(this.#work, key));
+      }
+      this.#retakenByPlace = byPlace;
+    }
+    return this.#retakenByPlace.get(place) ?? [];
+  }
+
+  /**
+   * A place's contents beside its landings (`Loose`), its sources' before: its own stores' (`#ownStructure`) and its
+   * copies' sources'; a place that only copies one source whole, nothing of its own, holds that source's.
+   */
+  #looseOf(
+    owns: readonly (OwnStructure | null)[],
+    copies: readonly InheritedCopy[],
+    loose: ReadonlyMap<PlaceId, Loose>,
+    everything = false,
+  ): Loose {
+    const from: { readonly copy: InheritedCopy; readonly loose: Loose }[] = [];
+    const seen = new Set<string>();
+    for (const copy of copies) {
+      const of = loose.get(copy.from);
+      if (of === undefined || of === NO_LOOSE) continue;
+      this.pass.program.work.charge("indexSteps");
+      const id = keptParts(this.#work, copy.from, copy.path, copy.strip);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      from.push({ copy, loose: of });
+    }
+    const points: (readonly string[])[] = [];
+    const below: (readonly string[])[] = everything ? [[]] : [];
+    for (const own of owns) {
+      if (own === null) continue;
+      this.pass.program.work.charge(
+        "indexSteps",
+        own.points.length + own.below.length + own.reads.length,
+      );
+      points.push(...own.points);
+      below.push(...own.below);
+      for (const { at } of own.reads) below.push(at);
+    }
+    if (points.length === 0 && below.length === 0 && from.length === 0) return NO_LOOSE;
+    const whole = from[0]?.copy;
+    if (
+      points.length === 0 &&
+      below.length === 0 &&
+      from.length === 1 &&
+      whole !== undefined &&
+      whole.path.length === 0 &&
+      whole.strip.length === 0
+    )
+      return from[0]!.loose;
+    return { points, below, from };
+  }
+
+  /** Whether a place's contents at a path hold a kind its decision there does not admit (`#hotSets`, A5). */
+  #hotAt(place: PlaceId, path: readonly string[]): boolean {
+    const found = this.#decided(place, path);
+    if (found === null || found.tags === null || found.tags.includes("unknown")) return false;
+    return offending(withoutEmpty(this.#run(this.pass.contract.contractOf(found.key))), found);
+  }
+
+  /**
+   * A path copies land in a place that `groups` left out, decided where an answer asks for it (`decide`'s `lazily`):
+   * its contents fit, so its decision owes nothing, and its answer is the one deciding it with the copy gives.
+   */
+  #lazily(place: PlaceId, path: readonly string[]): void {
+    if (this.#attempted.has(keyOf(place, path)) || !this.#landed(place, path)) return;
+    this.decide(place, path, true);
+  }
+
+  /**
+   * Under the member-answer oracle (`withMemberOracle`), after the decisions: every path copies land that `groups` left
+   * out, compared as a decided one is, so the oracle covers each landed path as when every one was decided.
+   */
+  public compareLanded(): void {
+    if (memberOracle === null) return;
+    for (const place of this.#inheritance().into.keys())
+      for (const text of this.#landedBelow(place, [])) {
+        const path = splitPath(text);
+        if (this.#attempted.has(keyOf(place, path))) continue;
+        const inputs = this.#inputs(place, path);
+        if (inputs !== null) this.#compareMembers(place, path, inputs.prefixes);
+      }
+  }
+
   /**
    * The decision of one place at one path (§5), or `null` where nothing is checked: no store reaches it, it lies below
    * a reference (F19a), a settled family needs no scan (A3), or nothing decides. The decision is recorded for the
-   * boundary checks' `against` (C9).
+   * boundary checks' `against` (C9). `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
+   * it (`#lazily`): recorded, its candidates owe nothing (`#hotSets`) and are not taken.
    */
-  public decide(root: PlaceId, path: readonly string[]): Decision | null {
+  public decide(root: PlaceId, path: readonly string[], lazily = false): Decision | null {
     const { program, definitions, lists, contract } = this.pass;
     const work = program.work;
-    const place = program.place(root);
+    const key = keptKey(this.#work, root, path);
+    this.#attempted.add(key);
     const inputs = this.#inputs(root, path);
     if (inputs === null) return null;
     const { direct, prefixes } = inputs;
-    if (memberOracle !== null) this.#compareMembers(root, path, prefixes);
-    const key = keptKey(this.#work, root, path);
-    const written = writtenOf(place.kind);
-    const term = written === null ? null : permittedAt(written, path);
-    // A9, C7: every argument and return into a written parameter or result is a candidate
-    const transfer =
-      term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
-    // F19a: below a reference nothing is admitted
-    if (path.length > 0 && this.#run(contract.refReceiver(key))) {
-      work.charge("checksSkipped");
-      return null;
-    }
-    if (path.length > 0 && term === null) {
-      // A3: a settled family needs no scan, where no store on the path was rejected
-      const clean = this.#clean(root, path);
-      const kinds = clean ? withoutEmpty(this.#run(contract.contractOf(key))) : [];
-      if (
-        clean &&
-        kinds.every((item) => item.tag !== "unknown") &&
-        family(kinds.map((item) => item.tag))
-      ) {
-        work.charge("checksSkipped");
-        return null;
-      }
-    }
-    const writtenTags = term === null ? null : typeTags(term);
-    let nullable = writtenTags === null ? true : writtenTags.includes("null");
-    let tags: ItemTag[] | null =
-      writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
-    let byWritten = writtenTags !== null;
-    let permitsNull = false;
-    let decider: Definition | null = null;
-    let deciderSite: SourceSite | null = null;
-    let published = false;
-    // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
-    if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
-      let plain = true;
-      const all: ItemTag[] = [];
-      for (const { d, at } of direct) {
-        work.charge("checks");
-        // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
-        if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
-        const kinds = at.length === 0 ? this.#quietKinds(d.value) : null;
-        if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
-          plain = false;
-          break;
-        }
-        all.push(...kinds);
-      }
-      if (plain && family(all)) {
-        work.charge("checksSkipped");
-        return null;
-      }
-    }
-    // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
-    // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
-    // decides (A4), and a store rejected there is decided again (A6)
-    if (
-      tags === null &&
-      this.#clean(root, path) &&
-      !withoutEmpty(this.#run(contract.contractOf(key))).some((item) => concrete(item))
-    ) {
-      work.charge("checksSkipped");
-      return null;
-    }
-    if (tags === null) {
-      const found = this.#scan(direct, prefixes, key);
-      if (found !== null)
-        ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
-      else {
-        // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
-        // kinds are the type the place is published with, so external data a store brings into it owes its check
-        // there, named as well as inline (`published`)
-        const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
-        if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
-          tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
-          deciderSite = this.#concreteSite(direct, prefixes);
-          published = true;
-        }
-      }
-    }
-    if (tags === null) return null;
-    if (byWritten && writtenTags === null) this.#inheritsWritten.add(key);
+    if (memberOracle !== null && !lazily) this.#compareMembers(root, path, prefixes);
+    const found = this.#decided(root, path, inputs);
+    if (found === null || found.tags === null) return null;
+    const { nullable, byWritten, permitsNull, decider, transfer, published } = found;
+    if (byWritten && !found.own) this.#inheritsWritten.add(key);
     else this.#inheritsWritten.delete(key);
     // an unrestricted written part, or a copy's, decides nothing: every kind fits there, no store owes it anything
-    if (tags.includes("unknown")) {
+    if (found.tags.includes("unknown")) {
       this.#unrestricted.add(key);
       work.charge("checksSkipped");
       return null;
     }
-    // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
-    // number possible solely through external data admits nothing (r4.36)
-    if (
-      !byWritten &&
-      tags.includes("integer") &&
-      withoutEmpty(this.#run(contract.contractOf(key))).some(admitsNumber)
-    )
-      tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
+    const tags = found.tags;
     this.decided.set(key, tags);
     this.#nullable.set(key, nullable);
     if (permitsNull) this.#permitsNull.add(key);
     else this.#permitsNull.delete(key);
-    this.#deciderSites.set(key, deciderSite);
-    const decidedTags = tags;
-    const offends = (items: readonly Item[]): boolean =>
-      items.some((item) =>
-        item.tag === "null"
-          ? !nullable
-          : item.tag === "unknown"
-            ? contributes(item)
-            : item.tag !== "empty" && !decidedTags.some((tag) => fits(item.tag, tag, byWritten)),
-      );
+    this.#deciderSites.set(key, found.site);
+    if (lazily) return null;
+    const offends = (items: readonly Item[]): boolean => offending(items, found);
     // A5: the direct stores, and the prefixes' whole stores whose source's contract at the path holds an offending kind
     const candidates = new Map<string, Candidate>();
     work.charge("checks", direct.length);
@@ -1313,12 +3782,139 @@ export class Admission {
       root,
       path,
       label: this.pathLabel(root, path),
-      tags: decidedTags,
+      tags,
       written: byWritten,
-      own: writtenTags !== null,
+      own: found.own,
       nullable,
       decider,
       candidates: ordered,
+      published,
+    };
+  }
+
+  /**
+   * A place's decision at a path as `decide` takes it (§5), unrecorded and without its candidates: `null` where no store
+   * reaches the path; `tags` `null` where nothing is checked, with `unknown` where an unrestricted part decides nothing.
+   * Once per key and pass, so the paths `groups` tests (`#hotAt`) and their decisions share it.
+   */
+  #decided(
+    root: PlaceId,
+    path: readonly string[],
+    inputs = this.#inputs(root, path),
+  ): Decided | null {
+    const key = keptKey(this.#work, root, path);
+    const known = this.#decisions.get(key);
+    if (known !== undefined) return known;
+    const found = inputs === null ? null : this.#decision(root, path, key, inputs);
+    this.#decisions.set(key, found);
+    return found;
+  }
+
+  #decision(root: PlaceId, path: readonly string[], key: Key, inputs: Inputs): Decided {
+    const { program, lists, contract } = this.pass;
+    const work = program.work;
+    const place = program.place(root);
+    const { direct, prefixes } = inputs;
+    const written = writtenOf(place.kind);
+    const term = written === null ? null : permittedAt(written, path);
+    const none = { key, own: term !== null, transfer: false, tags: null } as const;
+    // A9, C7: every argument and return into a written parameter or result is a candidate
+    const transfer =
+      term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
+    // F19a: below a reference nothing is admitted
+    if (path.length > 0 && this.#run(contract.refReceiver(key))) {
+      work.charge("checksSkipped");
+      return { ...NOTHING, ...none };
+    }
+    if (path.length > 0 && term === null) {
+      // A3: a settled family needs no scan, where no store on the path was rejected
+      const clean = this.#clean(root, path);
+      const kinds = clean ? withoutEmpty(this.#run(contract.contractOf(key))) : [];
+      if (
+        clean &&
+        kinds.every((item) => item.tag !== "unknown") &&
+        family(kinds.map((item) => item.tag))
+      ) {
+        work.charge("checksSkipped");
+        return { ...NOTHING, ...none };
+      }
+    }
+    const writtenTags = term === null ? null : typeTags(term);
+    let nullable = writtenTags === null ? true : writtenTags.includes("null");
+    let tags: ItemTag[] | null =
+      writtenTags === null ? null : writtenTags.filter((tag) => tag !== "null");
+    let byWritten = writtenTags !== null;
+    let permitsNull = false;
+    let decider: Definition | null = null;
+    let deciderSite: SourceSite | null = null;
+    let published = false;
+    // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
+    if (tags === null && path.length === 0 && !this.#a4Keys.has(keyOf(root, []))) {
+      let plain = true;
+      const all: ItemTag[] = [];
+      for (const { d, at } of direct) {
+        work.charge("checks");
+        // a multi-site argument decides nothing (F21); a single-site one is the parameter's start value
+        if (d.how === "argument" && !lists.singleSite(d.fn)) continue;
+        const kinds = at.length === 0 ? this.#quietKinds(d.value) : null;
+        if (kinds === null || !kinds.every((tag) => SCALAR.has(tag) || tag === "null")) {
+          plain = false;
+          break;
+        }
+        all.push(...kinds);
+      }
+      if (plain && family(all)) {
+        work.charge("checksSkipped");
+        return { ...NOTHING, ...none };
+      }
+    }
+    // A2: a path whose contract holds no kind (an unknown, a null) has no definite contribution to decide it, and no
+    // store needs a scan (the contract holds every live store's kinds); a copy of a written binding on the path still
+    // decides (A4), and a store rejected there is decided again (A6)
+    if (
+      tags === null &&
+      this.#clean(root, path) &&
+      !withoutEmpty(this.#run(contract.contractOf(key))).some((item) => concrete(item))
+    ) {
+      work.charge("checksSkipped");
+      return { ...NOTHING, ...none };
+    }
+    if (tags === null) {
+      const found = this.#drive(this.#scan(direct, prefixes, key));
+      if (found !== null)
+        ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
+      else {
+        // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
+        // kinds are the type the place is published with, so external data a store brings into it owes its check
+        // there, named as well as inline (`published`)
+        const kinds = withoutEmpty(this.#run(contract.contractOf(key)));
+        if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
+          tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
+          deciderSite = this.#concreteSite(direct, prefixes);
+          published = true;
+        }
+      }
+    }
+    if (tags === null) return { ...NOTHING, ...none };
+    // the decided family (ADR 1.2): an integer decider with a number admitted at the path decides numbers (r4.28); a
+    // number possible solely through external data admits nothing (r4.36)
+    if (
+      !tags.includes("unknown") &&
+      !byWritten &&
+      tags.includes("integer") &&
+      withoutEmpty(this.#run(contract.contractOf(key))).some(admitsNumber)
+    )
+      tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
+    return {
+      key,
+      own: writtenTags !== null,
+      transfer,
+      tags,
+      nullable,
+      byWritten,
+      permitsNull,
+      decider,
+      site: deciderSite,
       published,
     };
   }
@@ -1391,13 +3987,7 @@ export class Admission {
    * default none, F21) and the prefixes of the path whole stores or adds reach; `null` for a literal's own cell or
    * property, and where none reaches it.
    */
-  #inputs(
-    root: PlaceId,
-    path: readonly string[],
-  ): {
-    readonly direct: readonly Candidate[];
-    readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
-  } | null {
+  #inputs(root: PlaceId, path: readonly string[]): Inputs | null {
     const { program, definitions } = this.pass;
     const place = program.place(root);
     if (
@@ -1428,11 +4018,11 @@ export class Admission {
    * with what it decides: a lazy merge of the direct stores and the prefixes' whole stores and adds, each read only as
    * far as the scan goes; `null` where none decides.
    */
-  #scan(
+  *#scan(
     direct: readonly Candidate[],
     prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
     into: Key,
-  ): {
+  ): Inheriting<{
     readonly tags: ItemTag[];
     readonly nullable: boolean;
     readonly byWritten: boolean;
@@ -1442,7 +4032,7 @@ export class Admission {
     readonly copied: TypeTerm | null;
     readonly decider: Definition;
     readonly site: SourceSite | null;
-  } | null {
+  } | null> {
     const { program, lists } = this.pass;
     const work = program.work;
     const seen = new Map<string, Item[]>();
@@ -1494,7 +4084,8 @@ export class Admission {
       const d = scans[best]!.ds[position]!;
       const at = scans[best]!.at(position);
       work.charge("checks", scans.length);
-      const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at, into);
+      const first =
+        d.value === undefined ? null : yield* this.#earliestDecider(d.value, d.node, at, into);
       const copied = first?.term ?? null;
       if (copied !== null) {
         // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
@@ -1585,6 +4176,7 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
+    this.#lazily(place, path);
     const key = keyOf(place, path);
     // (a copy of an unrestricted written part admits every kind, as the part itself: never what is stored)
     if (this.#unrestricted.has(key)) return ["unknown"];
@@ -1605,6 +4197,7 @@ export class Admission {
 
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
+    this.#lazily(place, path);
     return this.#inheritsWritten.has(keyOf(place, path));
   }
 
@@ -1614,6 +4207,7 @@ export class Admission {
    * definite contribution found here, once, where an answer asks for it.
    */
   public deciderAt(place: PlaceId, path: readonly string[]): SourceSite | null {
+    this.#lazily(place, path);
     const key = keyOf(place, path);
     if (!this.#deciderSites.has(key)) {
       const inputs = this.#inputs(place, path);
@@ -1623,7 +4217,7 @@ export class Admission {
         key,
         inputs === null || below
           ? null
-          : (this.#scan(inputs.direct, inputs.prefixes, key)?.site ?? null),
+          : (this.#drive(this.#scan(inputs.direct, inputs.prefixes, key))?.site ?? null),
       );
     }
     return this.#deciderSites.get(key)!;
@@ -1715,6 +4309,18 @@ export class Admission {
         deepest = key;
         break;
       }
+    }
+    // (while the groups are made, a path `#hotSets` tests asks its chain by itself: the index wants every decided path,
+    // which the groups give once made; each chain's answer is the index's, Sol's review r1 B1)
+    if (this.#groups === null) {
+      let chains = this.#eligibleWhileGrouping.get(representative);
+      if (chains === undefined)
+        this.#eligibleWhileGrouping.set(representative, (chains = new Map()));
+      if (!chains.has(deepest)) {
+        keepText(this.#work, deepest.length);
+        chains.set(deepest, this.#eligibleBy(representative, [deepest]));
+      }
+      return chains.get(deepest)!;
     }
     let index = this.#eligible.get(representative);
     if (index === undefined) {
@@ -2526,7 +5132,8 @@ export class Admission {
   /**
    * The paths below a collection literal's elements that its own literals give or admission decides where the literal
    * lands (a read's path, A2): there a named element's fields are compared too (TABLE q12: a field is copy-only until
-   * a literal or a read reaches it).
+   * a literal or a read reaches it); beside them, where copies land there and two elements may hold something
+   * (`#elementsMeet`).
    */
   #sharedPaths(landing: Key | null, list: readonly Definition[]): (readonly string[])[] {
     const { program } = this.pass;
@@ -2590,6 +5197,311 @@ export class Admission {
         }
     }
     return this.#below.get(key) ?? [];
+  }
+
+  /**
+   * The paths copies land below a collection literal's landing where one of its elements may offend another
+   * (`literalElements`, F2), each with the elements holding something there, the only ones asked. Taken from the landings, never from the paths `groups` decides: the comparison is owed whether
+   * admission decides a path or not, and after an element is rejected there (Astra's review B1). An element holds by
+   * what it stands for (`#identity`): a copy of an inheriting place or a read of another place's key by its root and
+   * strip, which lands that root's written types and holds its contents beside them (`#contentsOf`), each way's locals
+   * beside what its identity lands, and the element's own points and other values. A path is owed where two of them
+   * stand: two holders of contents, contents and a landed type, or two landed types that differ (an identity's contents
+   * fit what it lands, so identities landing one type there agree). The widest identity is asked, never listed; each
+   * other holder is listed, or where it is wider than that identity and than the landings below it, those are listed
+   * and looked up in it. Below an opaque value the landings are looked up in the place's index, or walked where its
+   * copies are too few to cost the widest identity's landings.
+   */
+  #elementsMeet(
+    landing: Key,
+    list: readonly Definition[],
+  ): { readonly path: readonly string[]; readonly holders: readonly Definition[] }[] {
+    const work = this.pass.program.work;
+    this.#hotSets();
+    const place = keyPlace(landing);
+    const base = keptPath(this.#work, landing);
+    const into = this.#inheritance().into.get(place) ?? [];
+    const copies = new Set<string>();
+    for (const copy of into) copies.add(keptParts(this.#work, copy.path, copy.from, copy.strip));
+    type Holder = {
+      readonly key: string;
+      readonly at: readonly string[];
+      readonly root: PlaceId;
+      readonly strip: readonly string[];
+      readonly contents: FlatLoose;
+      readonly size: number;
+      /** The elements standing for it. */
+      readonly elements: number[];
+    };
+    const identities = new Map<string, Holder>();
+    const ways: {
+      readonly at: readonly string[];
+      readonly chain: Locals;
+      readonly by: Holder;
+      readonly element: number;
+    }[] = [];
+    const own: {
+      readonly key: string;
+      readonly points: readonly (readonly string[])[];
+      readonly below: readonly (readonly string[])[];
+    }[] = [];
+    const hold = (
+      element: number,
+      at: readonly string[],
+      from: PlaceId,
+      strip: readonly string[],
+    ): void => {
+      work.charge("indexSteps");
+      const { root, strip: under, locals } = this.#identity(from, strip);
+      const key = keptParts(this.#work, root, under, at);
+      let found = identities.get(key);
+      if (found === undefined) {
+        const contents = this.#contentsOf(root, under);
+        const size =
+          this.#landingSize(root, under) + contents.points.length + contents.below.length;
+        identities.set(
+          key,
+          (found = { key, at, root, strip: under, contents, size, elements: [] }),
+        );
+      }
+      if (found.elements.at(-1) !== element) found.elements.push(element);
+      if (locals !== null) ways.push({ at, chain: locals, by: found, element });
+    };
+    for (const [index, d] of list.entries()) {
+      const points: (readonly string[])[] = [];
+      const below: (readonly string[])[] = [];
+      const reads: { readonly at: readonly string[]; readonly source: Key }[] = [];
+      this.#ownOf(d, d.value!, base, copies, { points, sources: [], below, reads }, (...copy) =>
+        hold(index, ...copy),
+      );
+      for (const read of reads)
+        hold(index, read.at, keyPlace(read.source), keptPath(this.#work, read.source));
+      own.push({ key: `e${index}`, points, below });
+    }
+    if (identities.size + ways.length + own.length < 2) return [];
+    let widest: Holder | null = null;
+    for (const holder of identities.values())
+      if (widest === null || holder.size > widest.size) widest = holder;
+    const bound = widest?.size ?? 0;
+    // (per path, the written type each identity landing it lands there, and the holders of contents there; per holder,
+    // its elements)
+    const met = new Map<
+      string,
+      {
+        readonly path: readonly string[];
+        readonly types: Map<string, string>;
+        readonly held: Set<string>;
+      }
+    >();
+    const elements = new Map<string, readonly number[]>();
+    for (const holder of identities.values()) elements.set(holder.key, holder.elements);
+    const at = (path: readonly string[]) => {
+      work.charge("indexSteps");
+      if (path.length <= base.length) return null;
+      const text = keptText(this.#work, path);
+      let found = met.get(text);
+      if (found === undefined) met.set(text, (found = { path, types: new Map(), held: new Set() }));
+      return found;
+    };
+    const holds = (path: readonly string[], key: string): void => {
+      at(path)?.held.add(key);
+    };
+    const lands = (holder: Holder, path: readonly string[]): boolean =>
+      isPrefix(holder.at, path) &&
+      path.length > holder.at.length &&
+      this.#landed(holder.root, keptSteps(this.#work, holder.strip, path.slice(holder.at.length)));
+    const landedType = (holder: Holder, path: readonly string[]): string => {
+      work.charge("checks");
+      const term = this.#inheritedAt(
+        holder.root,
+        keptSteps(this.#work, holder.strip, path.slice(holder.at.length)),
+      );
+      return term === null ? "" : typeTags(term).join("|");
+    };
+    const opaque: {
+      readonly prefix: readonly string[];
+      readonly key: string;
+      readonly by: Holder | null;
+    }[] = [];
+    for (const holder of identities.values()) {
+      if (holder === widest) continue;
+      for (const text of this.#landedList(holder.root, holder.strip)) {
+        const steps = keptSplit(this.#work, text);
+        if (steps.length <= holder.strip.length) continue;
+        const path = keptSteps(this.#work, holder.at, steps.slice(holder.strip.length));
+        at(path)?.types.set(holder.key, landedType(holder, path));
+      }
+      const { points, below } = holder.contents;
+      const landed =
+        points.length + below.length > bound ? this.#landedIndex(landing, holder.at) : null;
+      if (landed !== null && landed.length < points.length + below.length) {
+        for (const path of landed)
+          if (
+            this.#contentHolds(holder.contents, path.slice(holder.at.length)) &&
+            !lands(holder, path)
+          )
+            holds(path, holder.key);
+      } else {
+        for (const point of points) holds(keptSteps(this.#work, holder.at, point), holder.key);
+        for (const prefix of below)
+          opaque.push({
+            prefix: keptSteps(this.#work, holder.at, prefix),
+            key: holder.key,
+            by: holder,
+          });
+      }
+    }
+    for (const [index, { at: from, chain, by, element }] of ways.entries()) {
+      const key = `w${index}`;
+      elements.set(key, [element]);
+      const landed = chain.size > bound ? this.#landedIndex(landing, from) : null;
+      if (landed !== null && landed.length < chain.size) {
+        for (const path of landed)
+          if (this.#localsHold(chain, path.slice(from.length)) && !lands(by, path))
+            holds(path, key);
+      } else
+        for (let node: Locals | null = chain; node !== null; node = node.next) {
+          for (const point of node.points) {
+            const path = keptSteps(this.#work, from, point);
+            if (!lands(by, path)) holds(path, key);
+          }
+          for (const prefix of node.below)
+            opaque.push({ prefix: keptSteps(this.#work, from, prefix), key, by });
+        }
+    }
+    for (const [index, { key, points, below }] of own.entries()) {
+      elements.set(key, [index]);
+      for (const point of points) holds(point, key);
+      for (const prefix of below) opaque.push({ prefix, key, by: null });
+    }
+    // (an opaque value holds every landed path below it, but where its own identity lands)
+    const walk = !this.#landedIndexes.has(landing) && opaque.length * (into.length + 1) <= bound;
+    for (const { prefix, key, by } of opaque) {
+      const paths = walk
+        ? this.#landedBelow(place, prefix).map((text) => keptSplit(this.#work, text))
+        : this.#landedIndex(landing, prefix);
+      for (const path of paths) {
+        work.charge("indexSteps");
+        if (by === null || !lands(by, path)) holds(path, key);
+      }
+    }
+    const out: { readonly path: readonly string[]; readonly holders: readonly Definition[] }[] = [];
+    for (const { path, types, held } of met.values()) {
+      if (widest !== null && isPrefix(widest.at, path) && path.length > widest.at.length) {
+        if (lands(widest, path)) types.set(widest.key, landedType(widest, path));
+        else if (this.#contentHolds(widest.contents, path.slice(widest.at.length)))
+          held.add(widest.key);
+      }
+      if (
+        !(held.size > 1 || (held.size > 0 && types.size > 0) || new Set(types.values()).size > 1) ||
+        !this.#landed(place, path)
+      )
+        continue;
+      const holders = new Set<number>();
+      for (const key of [...types.keys(), ...held]) {
+        work.charge("indexSteps");
+        for (const element of elements.get(key)!) holders.add(element);
+      }
+      out.push({
+        path: keptSlice(this.#work, path, base.length),
+        holders: [...holders].sort((a, b) => a - b).map((element) => list[element]!),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * What a root holds beside its landings below a strip, as rests from it (`#elementsMeet`): its contents beside its
+   * landings (`#flatLoose`) where `#hotSets` took them; else its own structure's points, and everything below its other
+   * values and reads, or below the strip where one stands above it or it has none (a parameter, a call's result, as
+   * `#readMeets`), from its own structure indexed once by prefix (`#looseIndex`). Once per root and strip.
+   */
+  #contentsOf(root: PlaceId, strip: readonly string[]): FlatLoose {
+    const loose = this.#loose!;
+    if (loose.has(root)) return this.#flatLoose(root, strip, loose);
+    const key = keptParts(this.#work, root, strip);
+    const known = this.#contents.get(key);
+    if (known !== undefined) return known;
+    const work = this.pass.program.work;
+    const flat: FlatLoose = { points: [], below: [], pointTexts: new Set(), belowTexts: new Set() };
+    const under = (rest: readonly string[]): void => {
+      const text = keptText(this.#work, rest);
+      if (flat.belowTexts.has(text)) return;
+      flat.belowTexts.add(text);
+      flat.below.push(rest);
+    };
+    let own = this.#ownLooses.get(root);
+    if (own === undefined) {
+      const structure = this.#ownStructure(root);
+      if (structure === null) own = null;
+      else {
+        work.charge("indexSteps", structure.below.length + structure.reads.length);
+        const below: (readonly string[])[] = [];
+        for (const prefix of structure.below) below.push(prefix);
+        for (const { at } of structure.reads) below.push(at);
+        own = { points: structure.points, below, from: [] };
+      }
+      this.#ownLooses.set(root, own);
+    }
+    if (own === null) under([]);
+    else {
+      const index = this.#looseIndex(own);
+      const text = keptText(this.#work, strip);
+      for (const point of index.points.get(text) ?? []) {
+        work.charge("indexSteps");
+        const rest = keptSlice(this.#work, point, strip.length);
+        const at = keptText(this.#work, rest);
+        if (flat.pointTexts.has(at)) continue;
+        flat.pointTexts.add(at);
+        flat.points.push(rest);
+      }
+      for (const prefix of index.below.get(text) ?? []) {
+        work.charge("indexSteps");
+        under(keptSlice(this.#work, prefix, strip.length));
+      }
+      for (let length = 0; length < strip.length; length += 1) {
+        work.charge("indexSteps");
+        if (index.belowTexts.has(keptText(this.#work, strip.slice(0, length)))) under([]);
+      }
+    }
+    this.#contents.set(key, flat);
+    return flat;
+  }
+
+  /** Whether contents beside landings (`FlatLoose`) hold a rest: a point there, or an opaque value at or above it. */
+  #contentHolds(flat: FlatLoose, rest: readonly string[]): boolean {
+    if (flat.pointTexts.has(pathText(rest))) return true;
+    for (let length = 0; length <= rest.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      if (flat.belowTexts.has(pathText(rest.slice(0, length)))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The paths copies land in a literal landing's place strictly below it, at or below a path (`#elementsMeet`): indexed
+   * once per landing by every prefix of each.
+   */
+  #landedIndex(landing: Key, path: readonly string[]): readonly (readonly string[])[] {
+    let index = this.#landedIndexes.get(landing);
+    if (index === undefined) {
+      const work = this.pass.program.work;
+      const base = keyPath(landing);
+      const built = new Map<string, (readonly string[])[]>();
+      for (const text of this.#landedList(keyPlace(landing), base)) {
+        const steps = keptSplit(this.#work, text);
+        if (steps.length <= base.length) continue;
+        for (let length = base.length; length <= steps.length; length += 1) {
+          work.charge("indexSteps");
+          const prefix = keptText(this.#work, steps.slice(0, length));
+          const list = built.get(prefix);
+          if (list === undefined) built.set(prefix, [steps]);
+          else list.push(steps);
+        }
+      }
+      this.#landedIndexes.set(landing, (index = built));
+    }
+    return index.get(pathText(path)) ?? [];
   }
 
   /** A literal's term at one step: an object's property by its step, a collection's element; built once per literal. */
@@ -2985,12 +5897,12 @@ export class Admission {
    * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
    * nothing on the path decides.
    */
-  #earliestDecider(
+  *#earliestDecider(
     value: PlaceId,
     node: FlowNode,
     at: readonly string[],
     into: Key | null,
-  ): { readonly term: TypeTerm | null; readonly site: SourceSite | null } | null {
+  ): Inheriting<{ readonly term: TypeTerm | null; readonly site: SourceSite | null } | null> {
     const { program, values } = this.pass;
     const stops = this.#stopsOf(value, node);
     const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
@@ -3011,7 +5923,7 @@ export class Admission {
         const term =
           stop.from === null
             ? permittedAt(stop.term!, rest)
-            : this.#inheritedInto(stop.from, rest, into);
+            : yield* this.#inheritedInto(stop.from, rest, into);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
         if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
@@ -3594,12 +6506,25 @@ export class Admission {
           program.work.charge("checks", classes.length);
           const representatives = kinds.map((kind) => firstOf.get(kind)!);
           const kept: (readonly string[])[] = [];
-          for (const path of this.#pathsBelow(representatives[0]!.value!, [
+          const listed = this.#pathsBelow(representatives[0]!.value!, [
             ...this.#sharedPaths(landing, representatives),
             ...representatives.slice(1).flatMap((d) => this.#pathsBelow(d.value!, [])),
-          ])) {
+          ]);
+          // (beside them the landed paths where two elements meet, each asked of the elements holding it, Astra's
+          // review B1)
+          const asked: {
+            readonly path: readonly string[];
+            readonly holders: readonly Definition[];
+          }[] = listed.map((path) => ({ path, holders: representatives }));
+          if (landing !== null) {
+            const texts = new Set<string>();
+            for (const path of listed) texts.add(keptText(this.#work, path));
+            for (const met of this.#elementsMeet(landing, representatives))
+              if (!texts.has(keptText(this.#work, met.path))) asked.push(met);
+          }
+          for (const { path, holders } of asked) {
             const kinds = new Set<ItemTag>();
-            for (const d of representatives) {
+            for (const d of holders) {
               program.work.charge("checks");
               for (const item of withoutEmpty(
                 this.#run(contract.contractOfValueAt(d.value!, path)),
@@ -3667,7 +6592,7 @@ export class Admission {
             const copied =
               identity === null
                 ? null
-                : (this.#earliestDecider(d.value, d.node, path, null)?.term ?? null);
+                : (this.#drive(this.#earliestDecider(d.value, d.node, path, null))?.term ?? null);
             const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {
