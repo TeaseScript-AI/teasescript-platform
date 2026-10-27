@@ -2122,6 +2122,16 @@ export class Admission {
       if (list === undefined) retaken.set(keyPlace(key), [keptPath(this.#work, key)]);
       else list.push(keptPath(this.#work, key));
     }
+    // (a copy's source's hot paths at or below its strip, from an index of each hot set: never the whole set for each
+    // copy, Astra's review r2 B2)
+    const indexed = new Map<readonly (readonly string[])[], ByPath<readonly string[]>>();
+    const hotUnder = (copy: InheritedCopy): readonly (readonly string[])[] => {
+      work.charge("indexSteps");
+      const list = hots.get(copy.from) ?? [];
+      let index = indexed.get(list);
+      if (index === undefined) indexed.set(list, (index = this.#byPath(list, (path) => path)));
+      return index.under.get(keptText(this.#work, copy.strip)) ?? [];
+    };
     for (const component of order) {
       if (cycleOf.has(component[0]!)) {
         const cycle = cycleOf.get(component[0]!);
@@ -2173,10 +2183,9 @@ export class Admission {
             }
           }
           for (const copy of classes.values())
-            for (const path of hots.get(copy.from) ?? []) {
+            for (const path of hotUnder(copy)) {
               work.charge("indexSteps");
-              if (isPrefix(copy.strip, path))
-                put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+              put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
             }
           // (two written types at one path of the cycle's landing: each of its paths tested)
           if (
@@ -2244,10 +2253,9 @@ export class Admission {
         candidates.set(keptText(this.#work, path), path);
       };
       for (const copy of copies)
-        for (const path of hots.get(copy.from) ?? []) {
+        for (const path of hotUnder(copy)) {
           work.charge("indexSteps");
-          if (isPrefix(copy.strip, path))
-            put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+          put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
         }
       for (const text of seeds.get(place)?.keys() ?? []) put(keptSplit(this.#work, text));
       for (const path of own?.points ?? []) if (this.#landed(place, path)) put(path);
