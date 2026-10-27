@@ -2,8 +2,9 @@
 
 **Status:** Accepted
 **Decision source:** Owner decisions in issues #504 and #536 (dicts) (2026-10-04); §6: Owner decision, 2026-10-07; the
-rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25; where an integer is required (rule
-1.2): Owner decision of 2026-10-27 (#1173, #1174)
+rules for the new type checker (O4): Owner decisions of 2026-10-19 to 2026-10-25; where an integer is required and
+what a read of a `number` place gives (rules 1.2, 1.3, 1.5, and 5.2): Owner decisions of 2026-10-27 (#1173, #1174,
+#1181, and #1187, which applies #1181's principle)
 
 The current compiler and runtime still apply the rules this file held before the O4 decisions until the compiler
 switches to the new type checker, as V30's transition note says.
@@ -42,32 +43,35 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
    type is an error that names both places. This is the ordinary rule applied to the first real value, not a general
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes
-   `count` an `integer?`. A variable without a type annotation (declared by `let` or as a loop variable) whose type is
-   `integer` is likewise inferred from all its assignments: it is a `number` when any of them can store a non-whole
-   number, wherever that assignment is. With `let speed = 1` and `speed = speed * 1.5`, `speed` is a `number`; with
-   `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such a variable
-   widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
+   `count` an `integer?`. A variable or parameter without a type annotation (declared by `let`, as a loop variable, or
+   as a function parameter) whose type is `integer` is likewise inferred from all its assignments: it is a `number` when
+   any of them can store a non-whole number, wherever that assignment is. A parameter's assignments also include the
+   arguments of all its calls and its default (rule 1.5). With `let speed = 1` and `speed = speed * 1.5`, `speed` is a
+   `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such
+   a variable widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
    `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A declared type stays strict, such as `integer`,
-   `integer[]`, or `integer set`. A read sees what the variable holds at that point, except where an integer is
-   required: there the place's type decides, not the values that can reach that read, and a `number`, also a place of
-   type `number`, is a compile error (owner decision of 2026-10-27). An integer is required at an integer-only use,
-   which is a repeat count, a list index, the index of a list's `get`, the position of `removeAt`, or the count of
-   `take` or `takeLast`, and by a written `integer` place that a value is stored into: a variable, parameter, or result
-   with a written `integer` type, an element of a written `integer[]` or `integer set`, or a value of a written
-   `integer dict`. A place widened by this rule is a `number` wherever the non-whole value comes from, also at a read
-   before the store that brings it: after `let speed = 1`, `let count: integer = speed` before `speed = speed * 1.5` is
-   an error. So is a place with a written `number` type: `repeat n {}` after `let n: number = 1` is an error. The error
-   names the line that makes the place a `number`; at an integer-only use it suggests `round`, `floor`, or `ceil`, or a
-   separate variable for the non-whole value, and a store keeps the suggestions of rule 2.2. Only a type test such as
-   `if n is integer` narrows such a place to `integer` (rules 4–5), never an assignment of a whole number. A value the
-   compiler cannot know is not rejected (rule 1.7): at an integer-only use, it is warned and checked when the script
-   runs.
+   `integer[]`, or `integer set`. A read of a `number` place is a `number`, wherever the non-whole value comes from and
+   also before the store that brings it, unless a type test narrows it: a copy (`let j = i`), an operation (`i + 1`),
+   and an argument (`use(i)`) of it are `number`s. The owner's principle (2026-10-27): an integer becomes a number where
+   needed, once it is a number it is no longer an integer, and a copy copies what it is. Every place that requires a
+   whole number checks the value's type, and a `number` there is a compile error. V30 §12 lists these places: the
+   integer-only uses, such as a repeat count, a list index, or a range bound in `for`, and a written `integer` place
+   that a value is stored into: a variable, parameter, or result with a written `integer` type, an element of a written
+   `integer[]` or `integer set`, or a value of a written `integer dict`. So after `let speed = 1`,
+   `let count: integer = speed` before `speed = speed * 1.5` is an error, and so is `repeat n {}` after
+   `let n: number = 1`. The error names the line that makes the place a `number`; at an integer-only use it suggests
+   `round`, `floor`, or `ceil`, or a separate variable for the non-whole value, and a store keeps the suggestions of
+   rule 2.2. Only a type test such as `if n is integer` narrows a `number` to `integer` (rules 4–5), never an
+   assignment (rule 5.2). A value the compiler cannot know is not rejected (rule 1.7): where an integer is required, it
+   is warned and checked when the script runs.
 3. An empty list or set takes its element type from the earliest element added or assigned. A list or set literal has
    one element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`, and the earliest
    element's type counts for later uses. The values of a dict follow the same rules. A copy is a new value:
-   `let b = a` starts with what `a` holds at that moment, so a copy of a list with elements carries their type, and
-   then takes its type from its own stores; a copy of a variable with a written type keeps that type (V30 §12).
+   `let b = a` starts with what `a` holds at that moment, each value with the type it has in `a`: a copy of a `number`
+   place is a `number` (rule 1.2), and a copy of a list with elements carries their type, while a copy of an empty list
+   carries none. The copy then takes its type from its own stores; a copy of a variable with a written type keeps that
+   type (V30 §12).
 4. An object property behaves like a variable: the object literal declares it once with a start value, and it keeps a
    type by rule 1.1. Storing a property that the literal lacks is a compile error that points to the literal, or to a
    dict for names known only when the script runs; `null` in the literal means "not known yet". Objects with different
@@ -80,9 +84,11 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    result. Annotated parameters and result types, written `function f(x: T): R`, are checked. A parameter without an
    annotation needs no type, also when it has a default: the compiler works out once, from the body, what the function
    requires of it, returns, and changes, and checks every call against that. Each call types the parameter from its
-   argument, a `null` argument included, so `shake(0.5)` is valid for `function shake(times = 1)`; calls are never
-   combined into one parameter type. A default is only the value used for an omitted argument, and it is checked once,
-   at the function. Where the compiler cannot show that a call fits, the value is checked when the script runs. A
+   argument, a `null` argument included, so `shake(0.5)` is valid for `function shake(times = 1)`. Calls are combined
+   only by rule 1.2: when any call's argument or the default can be a non-whole number, the parameter is a `number`, not
+   an `integer`, in every call, so with `shake(0.5)` anywhere, `repeat times {}` in the body is an error at the
+   `repeat` that names the line of `shake(0.5)`. A default is the value used for an omitted argument, and it is checked
+   once, at the function. Where the compiler cannot show that a call fits, the value is checked when the script runs. A
    returned value of unknown type makes the result unknown; the known returned values must still agree.
 6. "Earliest" is source order: the files in project order, `main.tease` first and then the others by path, each from
    top to bottom, wherever the store is, also in a function body or a timer, media, or button block. A declaration's
@@ -194,9 +200,10 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 1. After a test, the compiler knows the narrower type in `if`/`else` branches, in the right operand of `and`/`or`, in a
    `while` body, and after an early `return`, `exit`, `break`, or `continue`. `x != null` and `x == null` narrow like
    `x is not null` and `x is null`.
-2. An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-   `reward` is known to be an `integer`. Where an integer is required, a place of type `number` stays a `number` after
-   an assignment of a whole number (rule 1.2).
+2. An assignment narrows the variable to the assigned value's type, but never a `number` to `integer`: directly after
+   `let reward: integer | string = 10`, `reward` is known to be an `integer`, and after `let n: number? = null` and
+   `n = 1`, `n` is known to be a `number`. Only a type test such as `n is integer` narrows a `number` to `integer`
+   (rule 1.2).
 3. Tests can overlap, because an integer is also a number. An `else` branch keeps only what the test provably excludes.
 4. A check on a stable path narrows like a check on a variable: a variable followed by properties, fixed indexes or
    keys, or indexes and keys held in plain variables, as in `rooms[i].door.locked`, where each read selects the same
@@ -267,9 +274,10 @@ union would be an inferred union (rule 3.4).
 - The O4 rules change what compiles when the compiler switches to the new type checker; scripts that rely on a
   property added by assignment, a union of whole collections, a mixed fallback, or two kinds in one place need a
   literal with every property, a union inside the collection, or a written union.
-- Where an integer is required, a place of type `number` is an error even where it holds a whole number, as
-  `repeat speed {}` before `speed = speed * 1.5` or `repeat n {}` after `let n: number = 1`: the author rounds, keeps
-  the non-whole value in a separate variable, or tests with `is integer`.
+- Where an integer is required, a `number` is an error even where it holds a whole number, as `repeat speed {}` before
+  `speed = speed * 1.5`, `repeat j {}` after `let j = speed`, `repeat n {}` after `let n: number = 1`, or
+  `repeat times {}` in `function shake(times = 1)` when a call passes `0.5`: the author rounds, keeps the non-whole
+  value in a separate variable, or tests with `is integer`.
 
 ## Alternatives considered
 
@@ -316,6 +324,11 @@ union would be an inferred union (rule 3.4).
   and mainstream typed languages check a use against the type; its results were hard to explain, such as a warning for
   `repeat n {}` inside `repeat 3 { ... }` after `let n = 1.5` and `n = 1`; an ignored warning ends the player's
   session; and the fix, rounding or a separate variable, is simple.
+- A copy, an operation, or an argument of a `number` place that is an `integer` where only whole numbers can reach that
+  read, and the type check kept to the uses this rule listed before (#1181 options 1B and 2B): one rule per place is
+  simpler, by the owner's principle in rule 1.2.
+- A parameter typed `integer` or `number` per call (#1187 option B), so that `show(2)` stays valid beside `show(1.5)`
+  and an unused default never widens: a parameter would follow another rule than a variable.
 - A parameter typed from its default, as a `let` is from its start value (the earlier rule 1.5): `shake(0.5)` was an
   error for `function shake(times = 1)`, although an integer becomes a number where that is needed.
 - The button values of an `askChoice` in its answer's type, known until the variable changes (the earlier V30 §19

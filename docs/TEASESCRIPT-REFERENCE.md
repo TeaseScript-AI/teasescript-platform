@@ -139,8 +139,9 @@ let missing = null
 **Syntax:** `let name = value` · `let name: T = value` · `name = value` · `+=` · `-=`
 
 - **Gives:** a variable (see [Copies](#copies)). Without a declared type, the first non-null value decides the type
-  (`null`, `[]`, `set[]` leave it open); an `integer` variable that any assignment gives a fraction is a `number`, so
-  where an integer is required it fails, also before that assignment.
+  (`null`, `[]`, `set[]` leave it open); an `integer` variable that any assignment gives a fraction is a `number`, also
+  before that assignment, and so are its copies, sums and arguments; where an integer is required, a `number` fails,
+  even a whole one.
 - **Fails:** a missing start value; redeclaring a visible name; assigning an undeclared name or another type.
 - **Status:** Implemented. Type rule ahead: storing `null` later makes an inferred variable optional; today that needs
   a declared `T?` · [§12](specifications/accepted-syntaxes-v30.md#12-variable-declarations)
@@ -318,8 +319,9 @@ if count < 3 { goto again }
 - **Gives:** a function visible in its own file; it may wait, ask and call itself. `return` alone, or reaching the
   end, gives `null`.
 - **Fails:** `()` without parameters; a result that does not fit `R`; today, a function inside another.
-- **Status:** Implemented. Type rule ahead: an untyped parameter takes each call's argument type; today its default
-  fixes the type · [§11](specifications/accepted-syntaxes-v30.md#11-function-definitions)
+- **Status:** Implemented. Type rule ahead: an untyped parameter takes each call's argument type, but is a `number` in
+  every call when any call or its default gives it a fraction; today its default fixes the type ·
+  [§11](specifications/accepted-syntaxes-v30.md#11-function-definitions)
 
 ```tease
 function add(left: number, right: number = 1): number {

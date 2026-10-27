@@ -1067,16 +1067,20 @@ Rules:
 - Default values use `name = value`.
 - Required parameters must come before parameters with defaults.
 - An annotated parameter keeps its type; every argument and default must fit it.
-- A parameter without an annotation needs no type, also when it has a default. A default is only the value used when
-  the argument is omitted: an omitted argument counts as the default, and the default is checked once, at the
-  function, against what the body needs, so `function shout(name = null) { say name.length }` is a compile error in the
+- A parameter without an annotation needs no type, also when it has a default. A default is the value used when the
+  argument is omitted: an omitted argument counts as the default, and the default is checked once, at the function,
+  against what the body needs, so `function shout(name = null) { say name.length }` is a compile error in the
   function, not at each `shout()`.
 - The compiler works out once, from the body, what the function requires of each parameter without an annotation, what
   it returns, and what it changes, and checks every call against that. Each call types such a parameter from its
-  argument, a `null` argument included, and the calls are never combined into one parameter type: inside each call's
-  use of the body, the parameter and the variables that depend on it follow [§12](#12-variable-declarations) for that
-  call's arguments. With `function shake(times = 1)`, `shake(0.5)` is valid, and `times` is a `number` in that call.
-  Where the compiler cannot show that a call fits, the call compiles and the value is checked when the script runs:
+  argument, a `null` argument included: inside each call's use of the body, the parameter and the variables that
+  depend on it follow [§12](#12-variable-declarations) for that call's arguments. The calls are combined only where a
+  non-whole number widens the parameter, as any assignment widens a variable (owner decision, 2026-10-27): when any
+  call's argument or the default can be a non-whole number, the parameter is a `number`, not an `integer`, in every
+  call. With `function shake(times = 1)`, `shake(0.5)` is valid and makes `times` a `number` in every call, also in
+  `shake()` and `shake(2)`, so a `repeat times { ... }` in the body is a compile error there that names the line of
+  `shake(0.5)`. Where the compiler cannot show that a call fits, the call compiles and the value is checked when the
+  script runs:
 
   ```text
   function dec(x) {
@@ -1171,20 +1175,30 @@ picks.add("three")    // compile error
   `default: null` also makes a place optional when the value's other types are unknown:
   `[fromJson(t, default: null), 1]` is a list of `integer?`, so using an element where an integer is required needs a
   check or `otherwise`. The compiler infers no other combination of types.
-- A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
-  number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
-  declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read sees what the variable holds at
-  that point: where it can have received only whole numbers so far, it is an `integer` there. Where an integer is
-  required, the place's type decides instead (owner decision, 2026-10-27): a `number`, also a place of type `number`, is
-  a compile error there, wherever the non-whole value comes from and also at a read before the store that brings it. An
-  integer is required by a repeat count, a list index, the index of a list's `get`, the position of `removeAt`, the
-  count of `take` and `takeLast`, and a written `integer` place that a value is stored into: a variable, parameter, or
-  result with a written `integer` type, an element of a written `integer[]` or `integer set`, or a value of a written
-  `integer dict`. The compile error names the line that makes the place a `number`. `floor`, `round`, `ceil`, or
-  `toInteger` makes a value whole, a separate variable can keep the non-whole value, and a type test such as
-  `if n is integer` narrows the place ([§13](#type-tests-and-narrowing)); an assignment of a whole number does not. A
-  repeat count, index, position, or count whose type the compiler cannot know gives a warning, and the value is checked
-  to be whole when the script runs ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
+- A variable or parameter without a type whose type is `integer` is a `number` when any of its assignments can store a
+  non-whole number, wherever that assignment is. A parameter's assignments also include the arguments of all its calls
+  and its default ([§11](#11-function-definitions)). The elements and properties inside such a variable widen by the
+  same rule. A declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read of a `number` place
+  is a `number`, wherever the non-whole value comes from and also before the store that brings it (owner decision,
+  2026-10-27): a copy (`let j = i`), an operation (`i + 1`), and an argument (`use(i)`) of it are `number`s. Every place
+  that requires a whole number checks the value's type: a `number` there is a compile error, also one that holds a
+  whole number when the script runs. An integer is required by:
+
+  - a repeat count, and the count of media `repeat: n times` ([§22](#audio-and-video));
+  - a list index, the index of a list's `get`, the position of `removeAt`, and the count of `take` and `takeLast`;
+  - the start and end of `substring`, the count of text `repeat`, and the length of `padStart` and `padEnd`;
+  - the `decimals:` of `round`, and the exponent of `pow` with a base that the compiler can see is negative;
+  - the amount of `calendar days` and `calendar months` ([§35](#durations));
+  - a range bound in `for`, `randomInteger`, `toList`, `wait`, and `timer` ([§6](#6-range-semantics));
+  - the `askInteger` prefill, and the start of an `integer` field of `askForm`;
+  - a written `integer` place that a value is stored into: a variable, parameter, or result with a written `integer`
+    type, an element of a written `integer[]` or `integer set`, or a value of a written `integer dict`.
+
+  The compile error names the line that makes the place a `number`. `floor`, `round`, `ceil`, or `toInteger` makes a
+  value whole, a separate variable can keep the non-whole value, and a type test such as `if n is integer` narrows the
+  place ([§13](#type-tests-and-narrowing)); an assignment does not. Where an integer is required, a value whose type
+  the compiler cannot know gives a warning, and it is checked to be whole when the script runs
+  ([§13](#compile-errors-warnings-and-checks-when-the-script-runs)):
 
   ```text
   let speed = 1
@@ -1193,10 +1207,12 @@ picks.add("three")    // compile error
   let rounds = 0
   rounds += 1                  // rounds stays an integer
   let i = 0
-  say items[i]                 // compile error: line 8 makes i a number
+  let j = i                    // j is a number, a copy of a number
+  say items[i]                 // compile error: line 9 makes i a number
   i = i / 2
   let n: number = 1
-  repeat n { say "Again" }     // compile error: line 9 makes n a number
+  n = 3                        // n stays a number
+  repeat n { say "Again" }     // compile error: line 10 makes n a number
   let prices = [1, 2]
   prices.add(2.5)              // prices is a number[]
   ```
@@ -1221,8 +1237,9 @@ picks.add("three")    // compile error
   or in another file. A read inside an expression sees the value at that point of evaluation, as the runtime does. A
   copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with what the source holds
   at that moment and then takes its type from its own stores, so after `let a = []` and `let b = a`, both `b.add(1)`
-  and `a.add("s")` are valid. A copy of a source with contents carries them: after `let a = [1]` and `let b = a`,
-  `b.add("s")` is a compile error, as after `let b = [1]`. A copy of a variable with a written type keeps that type:
+  and `a.add("s")` are valid. A copy carries what the source holds, with the type it has in the source: after
+  `let a = [1]` and `let b = a`, `b.add("s")` is a compile error, as after `let b = [1]`, and after `let i = 1`,
+  `let j = i`, and `i = i / 2`, `j` is a `number`, as `i` is. A copy of a variable with a written type keeps that type:
   after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
 - A value whose type the compiler cannot know, such as untyped storage or host data, decides nothing and is not
   rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
@@ -1508,9 +1525,10 @@ if saved is not integer {
 let level: integer = saved   // valid: saved is an integer here
 ```
 
-- An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
-  `reward` is an `integer`. Where an integer is required, a place of type `number` stays a `number` after an assignment
-  of a whole number ([§12](#12-variable-declarations)).
+- An assignment narrows the variable to the assigned value's type, but never a `number` to `integer`: directly after
+  `let reward: integer | string = 10`, `reward` is an `integer`, and after `let n: number? = null` and `n = 1`, `n` is
+  a `number`. Only a type test such as `n is integer` narrows a `number` to `integer`
+  ([§12](#12-variable-declarations)).
 - Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
   `is integer` is still a `number`.
 - A check on a stable path narrows like a check on a variable. A path is a variable followed by properties
@@ -3345,7 +3363,8 @@ Rules:
   hand.
 - Clearing the field never falls back to the prefill; a blank answer is rejected and asked again.
 - The prefill must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
-  `prefill: "${count}"` to offer a number as text. A non-whole `askInteger` prefill is an error, never rounded.
+  `prefill: "${count}"` to offer a number as text. An `askInteger` prefill of type `number` is an error, never rounded
+  ([§12](#12-variable-declarations)).
 - A prefill that is `null` or blank text (empty or only whitespace) when the input opens prefills nothing: the field
   starts empty, as without `prefill:`. A prefill can therefore come from a value that may not exist yet, such as
   `askText "Your name?", prefill: load("name", default: "")` on a first play. A prefill known at compile time to be
@@ -3750,9 +3769,9 @@ Repeat:
 - `repeat: 60 s` repeats for 60 seconds of active playback and may end mid-pass;
 - `repeat: false`, or no repeat, plays one pass.
 
-A count is a whole number of at least one and a duration is exact and greater than zero. A plain number such as
-`repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
-indefinite repetition.
+A count is an `integer` of at least one ([§12](#12-variable-declarations)) and a duration is exact and greater than
+zero. A plain number such as `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or
+a duration but not indefinite repetition.
 
 Like every statement, media and camera statements run only once the reading time of a paced message before them has
 ended or been skipped, also in timer and cue blocks ([message reading time](#message-presentation-defaults-and-overrides)).
