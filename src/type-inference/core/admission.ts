@@ -3095,7 +3095,7 @@ export class Admission {
           continue;
         pending.push({
           place: copy.from,
-          path: joinSteps(copy.strip, at.path.slice(copy.path.length)),
+          path: keptSteps(this.#work, copy.strip, at.path.slice(copy.path.length)),
           copied: true,
         });
       }
