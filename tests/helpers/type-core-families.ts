@@ -1495,8 +1495,10 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * witness: the scan resumed, never taken again); and their controls: plain fields, one dimension fixed, one field read,
  * the root changed between its copies, each copy storing its own field, those copies held in one literal, cycles of
  * copies the root feeds held in one literal, each copy replaced by another record, the chain closed into a cycle, the
- * root copied into itself at another path. A copy costs its own divergences, never its source's every field (r4.51); each is gated
- * with the sharing off too.
+ * root copied into itself at another path; review r3's shapes (a read stored into each copy's own field, literals
+ * holding the root read into one list, copies replaced by aliases that store their own field) and the design review's
+ * (two roots met with a small record each, a chain's last copy read at every field). A copy costs its own divergences,
+ * never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
@@ -1677,6 +1679,87 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
           `let root = {${fields(k, () => "typed")}, extra: 1}`,
           rows(k, (i) => `let a${i} = root\na${i}.extra = 2`),
           `let out = [${Array.from({ length: k }, (_, i) => `a${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-own-read",
+    measures:
+      "Sol's review r3 B2: k whole copies of a root of k written-typed fields, each storing a read of one plain binding into its own field",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          "let value = 2",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          rows(k, (i) => `let a${i} = root\na${i}.f${i} = value`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-projected-fan-in",
+    measures:
+      "Sol's review r3 B2: k literals each holding a root of k written-typed fields and storing a plain field, their held roots read into one list",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          rows(k, (i) => `let a${i} = {p: root}\na${i}.extra = 2`),
+          `let out = [${Array.from({ length: k }, (_, i) => `a${i}.p`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  ...(["2", "typed"] as const).map((value): WorkFamily => ({
+    name: `A4-inherited-replaced-aliases${value === "typed" ? "-typed" : ""}`,
+    measures: `Sol's review r3 B2: k copies of a root of k written-typed fields, each storing a plain field, then replaced by one of k aliases of a record of k ${value === "typed" ? "written-typed" : "plain"} fields, each alias storing a plain field`,
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          `let other = {${fields(k, () => value)}, extra: 1}`,
+          rows(
+            k,
+            (i) =>
+              `let b${i} = other\nb${i}.extra = 2\nlet a${i} = root\na${i}.extra = 2\na${i} = b${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "A4-inherited-two-roots-and-one",
+    measures:
+      "Sol's design review B2: k places each copying two roots of k written-typed fields, then storing one of k small records",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, extra: 1}`,
+          `let other = {${fields(k, () => "typed")}, extra: 1}`,
+          rows(
+            k,
+            (i) => `let small${i} = {extra: 2}\nlet c${i} = root\nc${i} = other\nc${i} = small${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-chain-read-fields",
+    measures:
+      "Sol's design review B3: a chain of k whole copies of a root of k written-typed fields, its last copy's every field read into one list",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          copiesOf(k, "chain"),
+          `let out = [${Array.from({ length: k }, (_, i) => `a${k - 1}.f${i}`).join(", ")}]`,
           "exit",
         ),
       ),
