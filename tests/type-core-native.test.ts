@@ -174,8 +174,11 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
  * four tested side sources append one span.
  */
 
-/** A spread regression's program analysed at each size in a child with a 100 KiB stack: its outcome, diagnostics, checks. */
-function spreadCase(name: string, sizes: readonly number[]): unknown[] {
+/** A spread regression's program analysed at each size in a child with a 100 KiB stack. */
+/** A spread regression's result at one size: the analysis's outcome, its diagnostics and its checks. */
+type SpreadResult = readonly [string, number, number];
+
+function spreadCase(name: string, sizes: readonly number[]): SpreadResult[] {
   // (each program resolves, so a child's failure is its size's)
   const program = SPREAD_PROGRAMS[name];
   assert.ok(program !== undefined && coreRequest([{ path: "main.tease", source: program(3) }]));
@@ -186,7 +189,7 @@ function spreadCase(name: string, sizes: readonly number[]): unknown[] {
     import {SPREAD_PROGRAMS} from ${url("./helpers/type-core-spreads.js")};
     for (const size of ${JSON.stringify(sizes)}) {
       const answers = analyseCore(coreRequest([{path: "main.tease", source: SPREAD_PROGRAMS[${JSON.stringify(name)}](size)}]));
-      console.log(JSON.stringify([answers.outcome, answers.diagnostics.length, answers.checks.length]));
+      console.log([answers.outcome, answers.diagnostics.length, answers.checks.length].join(" "));
     }
   `;
   const child = spawnSync(
@@ -199,7 +202,10 @@ function spreadCase(name: string, sizes: readonly number[]): unknown[] {
   return child.stdout
     .trim()
     .split("\n")
-    .map((line) => JSON.parse(line) as unknown);
+    .map((line): SpreadResult => {
+      const [outcome = "", diagnostics = "", checks = ""] = line.split(" ");
+      return [outcome, Number(diagnostics), Number(checks)];
+    });
 }
 
 const SPREAD_SIZES = [5_000, 30_000];
