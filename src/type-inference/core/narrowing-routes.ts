@@ -308,7 +308,10 @@ export class NarrowingRoutes {
 
   /**
    * The end of the block a definition's open writer side reaches (N3 (a)): from its statement up, each block's
-   * statements after the one left open; out of a loop's body only where its header leaves it, its header open.
+   * statements after the one left open; out of a loop's body only where its header leaves it, its header open. N3's "no
+   * back edge between" is the read never before the candidate in a body they share: a round's end that reaches the code
+   * after the loop is the route out of it (the set's `3b/loop/nested/changed` errs on a `null` stored in an inner loop's
+   * body and read after it); a loop only a `break` leaves stops the writer side.
    */
   #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
     for (let level = chain.length - 1; level >= 0; level -= 1) {

@@ -461,6 +461,19 @@ test("N2's events: a mutator, a helper holding one, a block holding one, never a
         "non-null: handler",
       ],
       [
+        "a helper only a block runs: the block's, not a call's",
+        [
+          xs,
+          "function flip { xs.reverse() }",
+          "function other { say 1 }",
+          "timer async 1 s { flip() }",
+          "if xs[0] != null { other()\n repeat xs[0] {} }",
+        ],
+        read,
+        7,
+        "non-null: handler",
+      ],
+      [
         "another narrowing",
         [xs, "let m = 1", "if xs[0] != null { if m != null { repeat xs[0] {} } }"],
         read,
