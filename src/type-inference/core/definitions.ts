@@ -230,6 +230,10 @@ export class DefinitionIndex {
   readonly #keysBelow = new Map<Key, Key[]>();
   readonly #foreignAt = new Set<Key>();
   readonly #foreignBelow = new Set<Key>();
+  /** The sites of each asked holder's own writers (`hasWriter`), gathered on its first question. */
+  readonly #writerSites = new Map<Key, ReadonlySet<string>>();
+  /** Each parameter's default (`defaultOf`), kept as `#parameterDefaults` makes it. */
+  readonly #defaultOf = new Map<PlaceId, Definition>();
   /** The dominator positions of every live call site's call-in and call-out outside block code, sorted (X6). */
   readonly sitePositions: readonly number[];
   #serial = 0;
@@ -542,6 +546,8 @@ export class DefinitionIndex {
         });
         this.#candidate(d, d.key);
         this.transferDefs.push(d);
+        this.program.work.charge("indexSteps");
+        this.#defaultOf.set(parameter, d);
       }
     }
   }
@@ -735,6 +741,39 @@ export class DefinitionIndex {
   /** The writer of a whole store or an add (F28): its kind and the site its diagnostics sit at. */
   public writerOf(d: Definition): Writer | null {
     return d.kind === "whole" || d.kind === "add" ? this.program.writer(d.how, d.site) : null;
+  }
+
+  /**
+   * Whether `writer` is the writer of one of `holder`'s own stores (`writerOf`), matched by its site, since a writer is
+   * made fresh for each ask: a step per question, and on a holder's first question its writers' sites, a step per
+   * definition, kept for the pass.
+   */
+  public hasWriter(holder: Key, writer: SourceSite): boolean {
+    const work = this.program.work;
+    work.charge("indexSteps");
+    let sites = this.#writerSites.get(holder);
+    if (sites === undefined) {
+      const mine = this.byKey.get(holder);
+      if (mine === undefined) return false;
+      work.charge("indexSteps", mine.length);
+      keepText(work, holder.length);
+      const made = new Set<string>();
+      for (const d of mine) {
+        const own = this.writerOf(d);
+        if (own !== null) made.add(siteKey(own));
+      }
+      this.#writerSites.set(holder, (sites = made));
+    }
+    return sites.has(siteKey(writer));
+  }
+
+  /**
+   * A parameter's default, the one definition `#parameterDefaults` makes for it (its `defaults` hold one per
+   * parameter), or `undefined` where it has none: a step per question.
+   */
+  public defaultOf(parameter: PlaceId): Definition | undefined {
+    this.program.work.charge("indexSteps");
+    return this.#defaultOf.get(parameter);
   }
 }
 

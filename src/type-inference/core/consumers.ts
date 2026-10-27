@@ -488,8 +488,9 @@ export class Consumers {
     receiver: boolean,
   ): boolean {
     const { program, exact, definitions } = this.pass;
-    // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner
-    let path: readonly string[] = [];
+    // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner (its steps
+    // gathered from the read outwards, then reversed once)
+    const steps: string[] = [];
     let at = node;
     let element = false;
     let owner: PlaceId | undefined;
@@ -499,11 +500,12 @@ export class Consumers {
       const step = measuresLength(projection.step) ? projection.step : stepName(projection.step);
       element ||= step === "element";
       owner ??= projection.owner;
-      path = joinSteps([step], path);
+      steps.push(step);
       at = projection.node ?? at;
       place = projection.owner;
       projection = program.projOf.get(place);
     }
+    const path = steps.reverse();
     const binding = program.occurrenceOf.get(place);
     const call = program.callOutOf.has(place) ? program.opOf.get(place) : undefined;
     const key =
@@ -533,16 +535,7 @@ export class Consumers {
         // the object lacking the property is one the receiver's own stores hold (not one a copy brings)
         const lacking = item.writer;
         if (binding === undefined || lacking === null) return false;
-        const holder = keyOf(binding, receiver ? path : path.slice(0, -1));
-        return (definitions.byKey.get(holder) ?? []).some((d) => {
-          const writer = definitions.writerOf(d);
-          return (
-            writer !== null &&
-            writer.file === lacking.file &&
-            writer.start === lacking.start &&
-            writer.end === lacking.end
-          );
-        });
+        return definitions.hasWriter(keyOf(binding, receiver ? path : path.slice(0, -1)), lacking);
       }
       case "unmodelled": {
         const holder = receiver ? value : owner;
@@ -2629,9 +2622,7 @@ export class Consumers {
       key === null ? null : this.#defaultSource(key, program.occNode.get(owner) ?? node);
     if (source === null) return;
     const reaching = lists.reachingDef(source.key, source.at);
-    const fallback = (definitions.candidates.get(source.key) ?? []).find(
-      (candidate) => candidate.d.how === "parameter default",
-    );
+    const fallback = definitions.defaultOf(keyPlace(source.key));
     if (
       fallback !== undefined &&
       reaching !== null &&
@@ -2639,7 +2630,7 @@ export class Consumers {
       (reaching.def.how === "argument" || reaching.def.how === "parameter default") &&
       lists.eventBetween(source.key, reaching.def.node, source.at) === null
     ) {
-      const items = this.#run(values.valueItems(fallback.d.value!, fallback.d.node, []));
+      const items = this.#run(values.valueItems(fallback.value!, fallback.node, []));
       if (items.length > 0 && items.every((item) => item.tag === "null"))
         this.#error(
           "member-read",

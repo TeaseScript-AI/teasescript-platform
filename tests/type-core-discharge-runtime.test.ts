@@ -269,6 +269,25 @@ test("a store of a property its object may lack requires it, in three layers, in
   ]);
 });
 
+test("each read of a property one conditional replacement lacks is checked where it reads, in three layers, in both orders (C5c, #1167)", () => {
+  const source =
+    "let flag: boolean = hostValue\nlet room = {n: 1}\nroom = {n: 1}\nroom = {n: 1}\n" +
+    'if flag { room = {other: 0} }\nsay room.n\nsay room.n\nsay "DONE"\nexit\n';
+  const reads = [at(source, "room.n"), at(source, "room.n", 1)];
+  const known = decision(source);
+  for (const read of reads) {
+    assert.ok(known.diagnostics.includes(`warning-runtime-check member-read @${read}`), read);
+    assert.ok(known.checks.includes(`null-check room [non-null] @${read}`), read);
+  }
+  // the read's own check is the runtime's, on both plans: no S7 content
+  const plan = candidatePlan(source);
+  assert.deepEqual(contentOf(plan), []);
+  for (const each of [plan, legacyPlan(source)]) {
+    assert.deepEqual(ran(runWith(each, false)), halted(["1", "1", "DONE"]));
+    assert.deepEqual(ran(runWith(each, true)), failed(`TSR017@${reads[0]}`));
+  }
+});
+
 test("a list get rejects an index that is no whole number, in three layers, in both orders (C2, S3 §4)", () => {
   const source = 'let xs = [1, 2]\nlet v = xs.get(hostValue, default: 0)\nsay "AFTER"\nexit\n';
   const index = at(source, "hostValue");

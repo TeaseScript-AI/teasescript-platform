@@ -4,6 +4,7 @@ import test from "node:test";
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -120,6 +121,117 @@ function steepCounters(families: readonly WorkFamily[]): string[] {
 
 test("every W34, W44 and W45 variant's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters([...W34_VARIANTS, ...W44_VARIANTS, ...W45_VARIANTS]), []);
+});
+
+/**
+ * #1167's shapes, each asking one question per read of one place, read k times: an object replaced k times, once
+ * conditionally by one that lacks `n`, then `room.n` read k times, each warning's `missing` word asking whether the
+ * object lacking `n` is one of `room`'s own stores; and an unwritten parameter's property read k times in a function
+ * called k times, a valid script, each read asking for the parameter's default (ADR 1.5's null default). `own`: how many
+ * of its warnings are its reads' own `missing`.
+ */
+const READ_AGAIN: readonly (WorkFamily & {
+  readonly outcome: string;
+  readonly own: (k: number) => number;
+})[] = [
+  {
+    name: "missing-read-again",
+    measures:
+      "#1167: each warning's `missing` word asks whether the receiver's own store lacks `n`",
+    outcome: "warning-runtime-check",
+    own: (k) => k,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let flag: boolean = hostValue",
+          "let room = {n: 1}",
+          ...Array.from({ length: k }, () => "room = {n: 1}"),
+          "if flag { room = {other: 0} }",
+          ...Array.from({ length: k }, () => "say room.n"),
+          'say "DONE"',
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "parameter-read-again",
+    measures:
+      "#1167: each read of an unwritten parameter's property asks for the parameter's default",
+    outcome: "valid",
+    own: () => 0,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "function show(item) {",
+          ...Array.from({ length: k }, () => "  say item.name"),
+          "}",
+          ...Array.from({ length: k }, (_, i) => `show({name: "n${i}"})`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+];
+
+/**
+ * Each read's question is answered by an index built once (`hasWriter`, `defaultOf`): searching `room`'s k stores again
+ * per warning made k² `writerOf` visits, and searching the k calls' arguments for the default again per read k²
+ * candidate visits, none of them charged. In either order the total, the indexes' steps and the `writerOf` visits,
+ * counted by wrapping `writerOf` for these analyses only, grow with the program, so a search through `writerOf` is caught
+ * whether or not it is charged. (X2's `rdWalk` carries its log factor on the first shape, at 2.35: k reads lift through
+ * k stores of one key.)
+ */
+test("a question asked by every read of one place, read k times, takes work that grows with the program (#1167)", () => {
+  const original = DefinitionIndex.prototype.writerOf;
+  let visits = 0;
+  DefinitionIndex.prototype.writerOf = function (this: DefinitionIndex, d) {
+    visits += 1;
+    return original.call(this, d);
+  };
+  const steep: string[] = [];
+  try {
+    for (const family of READ_AGAIN) {
+      const sizes = [64, 128].map((k) => ({ k, at: sized(family, k) }));
+      for (const reversed of [false, true]) {
+        const [small, large] = sizes.map(({ k, at }) => {
+          visits = 0;
+          const answers = analysed(at, reversed);
+          assert.equal(answers.outcome, family.outcome, at.name);
+          const own = answers.diagnostics.filter(
+            (found) =>
+              found.class === "warning-runtime-check" &&
+              found.provenance.context === "missing" &&
+              found.provenance.detail.direct,
+          );
+          assert.equal(own.length, family.own(k), `${at.name}: its reads' own warnings`);
+          return { counts: answers.budget.counts, total: answers.budget.total, visits };
+        });
+        const scale =
+          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+        const doubling = (before: number, after: number): number =>
+          (2 * (after / Math.max(1, before))) / scale;
+        const name = `${family.name}${reversed ? " reversed" : ""}`;
+        if (doubling(small!.total, large!.total) > DOUBLING)
+          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+        for (const [what, before, after] of [
+          [
+            "indexSteps",
+            small!.counts.get("indexSteps") ?? 0,
+            large!.counts.get("indexSteps") ?? 0,
+          ],
+          ["writerOf visits", small!.visits, large!.visits],
+        ] as const)
+          if (doubling(before, after) > COUNTER_DOUBLING)
+            steep.push(`${name} ${what}: ${doubling(before, after).toFixed(3)}`);
+      }
+    }
+  } finally {
+    DefinitionIndex.prototype.writerOf = original;
+  }
+  assert.deepEqual(steep, []);
 });
 
 /**
