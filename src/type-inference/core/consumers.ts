@@ -51,6 +51,7 @@ import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
 import { codeOf, pathPhrase } from "./messages.js";
+import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import {
   contextOf,
   elementStep,
@@ -65,6 +66,8 @@ import {
   type Obligation,
   type ObligationKind,
   type RequiredKind,
+  type StoreRoot,
+  type StoreStep,
 } from "./result.js";
 import type { ReadWork } from "./answers.js";
 import {
@@ -356,8 +359,9 @@ export class Consumers {
   }
 
   /**
-   * A warning of `rule` explained by `item`; `receiver`, a member's receiver as its context sentence names it, `read`
-   * the value whose read the word is (a member's receiver; else the value at `site`).
+   * A warning of `rule` explained by `item`; `fits`, the value's items that the rule takes (its fixes' types);
+   * `receiver`, a member's receiver as its context sentence names it, `read` the value whose read the word is (a
+   * member's receiver; else the value at `site`).
    */
   #warning(
     kind: DiagnosticKind,
@@ -365,6 +369,7 @@ export class Consumers {
     item: Item,
     obligation: Obligation,
     rule: DiagnosticRule,
+    fits: readonly Item[],
     receiver: ContextDetail["receiver"] = null,
     read?: PlaceId,
   ): void {
@@ -377,6 +382,7 @@ export class Consumers {
       kinds: [item.tag],
       provenance: provenanceOf(item, this.#detail(item, site, rule, receiver, read)),
       obligation,
+      fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
     });
   }
 
@@ -572,13 +578,14 @@ export class Consumers {
     return { kind, target, against, on, site: this.#site(site), boundary: false };
   }
 
-  /** A store's `copy-type` warning against the destination's kinds (C1, C10's `rule`). */
+  /** A store's `copy-type` warning against the destination's kinds (C1, C10's `rule`); `fits` as `#warning`'s. */
   #storeWarning(
     site: SourceSite,
     label: string,
     item: Item,
     against: readonly ItemTag[],
     rule: DiagnosticRule,
+    fits: readonly Item[],
   ): void {
     this.#warning(
       "written-target",
@@ -592,10 +599,11 @@ export class Consumers {
         `validate the stored value of ${label} against ${against.join("|")}`,
       ),
       rule,
+      fits,
     );
   }
 
-  /** S4: a possible null owes a null-check at every consumer, against what the place needs. */
+  /** S4: a possible null owes a null-check at every consumer, against what the place needs; `fits` as `#warning`'s. */
   #nullWarning(
     kind: DiagnosticKind,
     site: SourceSite,
@@ -603,6 +611,7 @@ export class Consumers {
     on: string,
     target: string,
     rule: DiagnosticRule,
+    fits: readonly Item[],
     against: readonly RequiredKind[] = ["non-null"],
     receiver: ContextDetail["receiver"] = null,
     read?: PlaceId,
@@ -613,6 +622,7 @@ export class Consumers {
       item,
       this.#obligation("null-check", site, target, against, on),
       rule,
+      fits,
       receiver,
       read,
     );
@@ -633,6 +643,56 @@ export class Consumers {
           ? `${program.functionOf(kind.fn).name}()`
           : program.place(root).label;
     return pathPhrase({ code: name }, path);
+  }
+
+  /**
+   * A store's root as a fix declares it (ADR 0021 rule 1.1): a variable by its `let` or `global`, a parameter with its
+   * default as written where it is a number or `true`/`false`, a function's result; `null` for any other place.
+   */
+  #storeRoot(root: PlaceId): StoreRoot | null {
+    const { program } = this.pass;
+    const kind = program.place(root).kind;
+    if (kind.kind === "binding")
+      return kind.declared === "let" || kind.declared === "global"
+        ? { kind: kind.declared, name: kind.name, start: null }
+        : null;
+    if (kind.kind === "result")
+      return { kind: "result", name: program.functionOf(kind.fn).name, start: null };
+    if (kind.kind !== "parameter") return null;
+    const declared = program.functionRegion(kind.fn)?.declaration.parameters[kind.index];
+    let start: Expression | null = declared?.defaultValue ?? null;
+    while (start?.kind === "parenthesizedExpression") start = start.expression;
+    return {
+      kind: "parameter",
+      name: kind.name,
+      start:
+        start === null
+          ? null
+          : start.kind === "numberLiteral"
+            ? start.raw
+            : start.kind === "booleanLiteral"
+              ? String(start.value)
+              : "...",
+    };
+  }
+
+  /** The names of the properties a value's or a key's objects have (S3 §1), in the order the search finds them. */
+  #propertiesOf(start: PropertyNamesTask): string[] {
+    return [...propertyNames(this.pass, (work) => this.#run(work), start)];
+  }
+
+  /** The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it. */
+  #storeSteps(root: PlaceId, path: readonly string[]): StoreStep[] {
+    return path.map((step, index): StoreStep => {
+      if (step === "entry") return { collection: "dict" };
+      if (step !== "element") return { property: propertyName(step) };
+      const above = withoutEmpty(
+        this.#run(this.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
+      ).map((item) => item.tag);
+      return {
+        collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list",
+      };
+    });
   }
 
   /**
@@ -673,6 +733,50 @@ export class Consumers {
   }
 
   #directSites: Map<string, SourceSite> | null = null;
+
+  /** The `+` operations by their result and by each operand they take, made on a `+` diagnostic's first need. */
+  #plus: {
+    readonly byResult: Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>;
+    readonly byOperand: Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>;
+  } | null = null;
+
+  /**
+   * The operands of the chain of `+` an operation stands in, left to right (#1195's text join: `"You have " + score +
+   * " points"` as one text): an operand that is a `+` with text among its own operands is opened, any other kept whole.
+   */
+  #chain(c: Extract<ValueConstraint, { kind: "operation" }>): SourceSite[] {
+    const { program } = this.pass;
+    if (this.#plus === null) {
+      const byResult = new Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>();
+      const byOperand = new Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>();
+      for (const constraint of program.constraints)
+        if (constraint.kind === "operation" && operatorOf(constraint) === "+") {
+          byResult.set(constraint.result, constraint);
+          for (const argument of constraint.arguments) byOperand.set(argument, constraint);
+        }
+      this.#plus = { byResult, byOperand };
+    }
+    const { byResult, byOperand } = this.#plus;
+    let top = c;
+    for (let depth = 0; depth < 256; depth += 1) {
+      const outer = byOperand.get(top.result);
+      if (outer === undefined) break;
+      top = outer;
+    }
+    const leaves = (
+      operation: Extract<ValueConstraint, { kind: "operation" }>,
+      depth: number,
+    ): SourceSite[] =>
+      operation.arguments.flatMap((argument) => {
+        const inner = byResult.get(argument);
+        if (inner !== undefined && depth < 256) {
+          const opened = leaves(inner, depth + 1);
+          if (opened.some((site) => program.textAt(site).startsWith('"'))) return opened;
+        }
+        return [this.#own(argument, operation.site)];
+      });
+    return leaves(top, 0);
+  }
 
   /**
    * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
@@ -1048,6 +1152,8 @@ export class Consumers {
               written: false,
               decider: null,
               brought: copy ?? site,
+              root: this.#storeRoot(store.place),
+              steps: this.#storeSteps(store.place, question.path),
             },
             found.kinds,
           );
@@ -1204,14 +1310,21 @@ export class Consumers {
       const fitting = (item: Item): boolean =>
         item.tag === "unknown" ||
         (concrete(item) && tags.some((tag) => fits(item.tag, tag, written)));
-      // D1: the sentence's rule, the place in its own text and the store that decided its type
+      // D1: the sentence's rule, the place in its own text, its type (optional where it holds null too, ADR 0021 rule
+      // 1.2) and the store that decided it
+      const named = (): readonly ItemTag[] =>
+        written || !admission.admitted(root, path).includes("null")
+          ? nullableTags
+          : [...tags, "null"];
       const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
         rule: "store",
         into: this.#placeText(root, path),
-        type: tags,
+        type: named(),
         written,
         decider: decider?.site ?? null,
         brought,
+        root: this.#storeRoot(root),
+        steps: this.#storeSteps(root, path),
       });
       // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
@@ -1228,12 +1341,13 @@ export class Consumers {
             const site = admission.namedExternalSite(d, at);
             // (an equivalent copy holds what its representative holds: none of them owes it)
             if (site === null) break;
-            const named = admission
-              .valueAt(d, at)
-              .filter((item) => isExternal(item) && !admission.ownIngress(item, d, at));
+            const value = admission.valueAt(d, at);
+            const named = value.filter(
+              (item) => isExternal(item) && !admission.ownIngress(item, d, at),
+            );
             const against = admission.admitted(root, path);
             for (const { item } of offendingKinds(named))
-              this.#storeWarning(site, label, item, against, rule());
+              this.#storeWarning(site, label, item, against, rule(), value.filter(fitting));
             // C9: the named data's own ingress keeps its boundary, as at a decided store
             for (const item of named)
               admission.boundaryFor(
@@ -1283,7 +1397,14 @@ export class Consumers {
         const nulls = items.filter((item) => item.tag === "null");
         // A6: a store of a rejection cycle is a possibility
         if (bad.length > 0 && d !== decider && admission.cycling.has(d.uid)) {
-          this.#storeWarning(d.site, label, { ...bad[0]!, cert: "pos" }, tags, rule());
+          this.#storeWarning(
+            d.site,
+            label,
+            { ...bad[0]!, cert: "pos" },
+            tags,
+            rule(),
+            items.filter(fitting),
+          );
           return;
         }
         // A8: a collection literal stored into a written element type admits each element by the scalar rule: a
@@ -1412,6 +1533,7 @@ export class Consumers {
             later(item),
             nullableTags,
             rule(),
+            items.filter(fitting),
           );
         // C9: at the ingress store (an addAll's at its elements' destination); and each external item's, so named data
         // a typed default holds keeps its own boundary (TABLE r4.66 (2))
@@ -1458,6 +1580,7 @@ export class Consumers {
                 `check that the value is not null before ${label} holds it`,
                 label,
                 rule(),
+                items.filter(fitting),
                 tags.map(requiredKind),
               );
       };
@@ -1683,7 +1806,7 @@ export class Consumers {
     written: boolean,
     label: string,
   ): boolean {
-    const { program, values, contract } = this.pass;
+    const { program, values, contract, definitions } = this.pass;
     const site = program.places[value]?.site;
     if (site === null || site === undefined || !("result" in c)) return false;
     const direct = directAt(rest);
@@ -1729,13 +1852,23 @@ export class Consumers {
       rule: "fallback",
       fallback: c.kind === "fallback",
       type: against,
+      // (the declaration the value lands in directly, where a written type is)
+      root:
+        into === null || rest.length > 0
+          ? null
+          : ((root) => (root === undefined ? null : this.#storeRoot(root.place)))(
+              (definitions.byValue.get(c.result) ?? []).find(
+                (d) => d.kind === "whole" && d.path.length === 0,
+              ),
+            ),
     };
+    const fitting = fallback.filter((item) => concrete(item) && fitsKind(item.tag));
     // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written
     // destination admits `unknown`; its host data meets its boundary
     const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
     if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
       for (const { item } of offendingKinds(unknowns))
-        this.#storeWarning(site, label, item, against, rule);
+        this.#storeWarning(site, label, item, against, rule, fitting);
       this.admission.boundariesAt(
         fallback,
         this.#obligation(
@@ -1773,7 +1906,7 @@ export class Consumers {
       );
     else
       for (const { item } of offendingKinds(off))
-        this.#storeWarning(site, label, item, against, rule);
+        this.#storeWarning(site, label, item, against, rule, fitting);
     return false;
   }
 
@@ -1864,23 +1997,28 @@ export class Consumers {
       // C11, F26b: the value and every element of a list must be showable; a list is an element selection
       const value = c.arguments[0];
       if (value === undefined) return;
+      const kinds = this.#kindsOf(value, node);
+      // (an object's first property, which its sentence shows instead)
+      const property = kinds.some((item) => item.tag === "object")
+        ? (this.#propertiesOf({ value, path: [] })[0] ?? null)
+        : null;
       this.#consume(
         value,
         node,
         c.site,
         new Set([...SHOWN, "list"]),
         "${...}",
-        { rule: "shown", element: false },
+        { rule: "shown", element: false, property },
         [...SHOWN, "list"],
       );
-      if (this.#kindsOf(value, node).some((item) => item.tag === "list")) {
+      if (kinds.some((item) => item.tag === "list")) {
         this.#consume(
           value,
           node,
           c.site,
           new Set(SHOWN),
           "an element in ${...}",
-          { rule: "shown", element: true },
+          { rule: "shown", element: true, property: null },
           SHOWN,
           "operator",
           "operand",
@@ -1936,6 +2074,8 @@ export class Consumers {
       ).map((tag) => requiredKind(tag));
     };
     // D1: an operand's rule names the kinds its place takes; the operation's, none
+    // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
+    const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
     const rule = (index: number | null): DiagnosticRule => ({
       rule: "operator",
       operator: c.contract.name,
@@ -1946,9 +2086,15 @@ export class Consumers {
           : domain(index).filter(
               (kind): kind is ValueKind => kind !== "unknown" && kind !== "non-null",
             ),
+      operands: c.arguments.map((_, index) => operandSite(index)),
+      chain: operator === "+" ? this.#chain(c) : [],
     });
-    // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
-    const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
+    // an operand's items its domain takes; none for the operation
+    const taken = (index: number | null): Item[] => {
+      if (index === null) return [];
+      const kinds = domain(index);
+      return operands[index]!.filter((item) => kinds.some((kind) => kind === item.tag));
+    };
     const operandText = (index: number): string => program.textAt(operandSite(index));
     // C9: external data at an operand is validated where it came in (host data at the operand)
     operands.forEach((items, index) =>
@@ -2009,6 +2155,7 @@ export class Consumers {
           `check the operand of ${c.contract.name} when it runs`,
         ),
         rule(index),
+        taken(index),
       );
     // the kind obligations (§4: one per offending kind of an operand; every operand that may be null owes its own
     // null-check below, S4). §3.4, §10.5 (r4.10): in each failing combination without a null, an operand whose kind no
@@ -2076,6 +2223,7 @@ export class Consumers {
           `check that ${label} is not null before ${c.contract.name}`,
         ),
         rule(index),
+        taken(index),
       );
     });
   }
@@ -2173,7 +2321,13 @@ export class Consumers {
         this.#error(
           "member-read",
           c.site,
-          { rule: "absent", receiver: receiverText, property: propertyName(property), store: null },
+          {
+            rule: "absent",
+            receiver: receiverText,
+            property: propertyName(property),
+            store: null,
+            properties: this.#propertiesOf({ value: c.owner, path: [] }),
+          },
           [],
         );
         return;
@@ -2293,6 +2447,8 @@ export class Consumers {
           `is a ${MEMBER_KINDS.filter((kind) => takes(kind)).join("|") || "value"} with ${what} before the ${use}`,
         ]),
     ];
+    // (a reference's members are the runtime's: a speaker or handle is a kind a test narrows to, with no fallback)
+    const having = others.filter((item) => REFERENCE.has(item.tag) || takes(item.tag));
     for (const [item, on] of [...offending, ...extra])
       this.#nullWarning(
         "member-read",
@@ -2301,6 +2457,7 @@ export class Consumers {
         `check that ${label} ${on}`,
         label,
         rule,
+        having,
         ["non-null"],
         detail,
         receiverPlace,
@@ -2355,6 +2512,7 @@ export class Consumers {
         `check that ${target} is not empty before ${what}`,
       ),
       rule,
+      [],
     );
   }
 
@@ -2428,6 +2586,7 @@ export class Consumers {
           on(obliged),
         ),
         rule,
+        items.filter((item) => need.has(item.tag)),
       );
     const nullItem = bad.find((item) => item.tag === "null");
     if (nullItem !== undefined) owe(nullItem, "null-check");
@@ -2499,6 +2658,7 @@ export class Consumers {
           `check that the ${what} is ${on} when it runs`,
         ),
         rule,
+        items.filter((item) => item.tag === "integer"),
       );
     const nullItem = offending.find((item) => item.tag === "null");
     if (nullItem !== undefined) owe(nullItem, "null-check", "not null");
@@ -2694,6 +2854,7 @@ export class Consumers {
             `check that the ${what} is a whole number when it runs`,
           ),
           { rule: "count", use: what === "index" ? "index" : "repeat" },
+          [],
         );
         continue;
       }
@@ -2859,6 +3020,7 @@ export class Consumers {
               receiver: receiverText,
               property: propertyName(property),
               store: presence.literal === null ? null : at,
+              properties: this.#propertiesOf({ key: d.recv! }),
             },
             [],
           );
@@ -2936,6 +3098,7 @@ export class Consumers {
           member: `.${c.property}`,
           use: c.kind === "speakerRead" ? "read" : "store",
         },
+        [],
         ["non-null"],
         { text: speaker, kinds: ["speaker"], member: c.property },
       );

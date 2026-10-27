@@ -7,31 +7,17 @@ import {
   checkNesting,
   joinParts,
   joinSteps,
-  pathText,
   splitPath,
-  stepText,
   type BudgetLimit,
   type WorkCounter,
 } from "./budget.js";
 import { Consumers } from "./consumers.js";
-import { carried, type Dispatch } from "./carriers.js";
-import {
-  Contract,
-  heldReference,
-  typeTags,
-  termAt,
-  writtenOf,
-  type ContractFacts,
-} from "./contract.js";
-import { dictList } from "./method-categories.js";
+import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import { Contract, typeTags, termAt, writtenOf, type ContractFacts } from "./contract.js";
 import {
   DefinitionIndex,
   DefinitionLists,
-  keyBelow,
   keyOf,
-  keyPath,
-  keyPlace,
-  recordPath,
   type Definition,
   type Key,
 } from "./definitions.js";
@@ -43,7 +29,6 @@ import { HandlerIndex } from "./handlers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import {
   CoreProgram,
-  propertyName,
   propertyStep,
   siteKey,
   stepName,
@@ -524,12 +509,6 @@ class StoppedAnswers implements Answers {
   }
 }
 
-/** A task of a property name search (`CoreAnswers.#propertyNames`): a value at a path, a key, or a literal at a path. */
-type PropertyNamesTask =
-  | { readonly value: PlaceId; readonly path: readonly string[] }
-  | { readonly key: Key }
-  | { readonly literal: PlaceId; readonly path: readonly string[] };
-
 class CoreAnswers implements Answers {
   readonly outcome: CoreOutcome;
   readonly diagnostics: readonly CoreDiagnostic[];
@@ -781,100 +760,8 @@ class CoreAnswers implements Answers {
     };
   }
 
-  /**
-   * The names of a value's known properties (S3 §1): those the keys below its sources store, and those the objects of
-   * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
-   * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
-   * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
-   * reads and calls standing at its path or above it.
-   */
   #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
-    const { program, contract, definitions } = this.#pass;
-    const names = new Set<string>();
-    const pending: PropertyNamesTask[] = [start];
-    const seen = new Set<string>();
-    const dispatch: Dispatch = {
-      kinds: (of) => new Set(this.#run(contract.contractOfValue(of)).map((item) => item.tag)),
-      reference: (receiver) => heldReference(this.#run(contract.valueReceiver(receiver))),
-    };
-    while (pending.length > 0) {
-      const task = pending.pop()!;
-      const id =
-        "key" in task
-          ? joinParts("k", task.key)
-          : "literal" in task
-            ? joinParts(`l${task.literal}`, task.path)
-            : joinParts(`v${task.value}`, task.path);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      if ("value" in task) {
-        const { path } = task;
-        const at = task.value;
-        const source = contract.copiedKey(at) ?? contract.resultKey(at);
-        // r4.46 (2): through a dict's `values` the projections are followed (a dict's values are its elements)
-        // (a choice's selected value is read as its record's `value` or `text`, as the literal's records say: V30 §19)
-        if (source !== null && !keyPath(source).some((step) => dictList(step) !== undefined)) {
-          pending.push({ key: keyBelow(source, recordPath(path)) });
-          continue;
-        }
-        if (program.hasOf.has(at)) {
-          pending.push({ literal: at, path: recordPath(path) });
-          continue;
-        }
-        // the carrier table's operands, after the value side's decisions (`carriers.ts`: F12, F27, r4.46 (2), F17b,
-        // C10, F10, F7, a list's `+`, V30 §19's choice; nothing through an operation that keeps its own value, F19a)
-        for (const [operand, rest] of carried(program, at, path, dispatch))
-          pending.push({ value: operand, path: rest });
-        continue;
-      }
-      if ("literal" in task) {
-        const index = contract.literalIndex(task.literal);
-        const at = pathText(task.path);
-        for (const object of index.objects.get(at)?.list ?? [])
-          for (const name of object.names) names.add(propertyName(name));
-        // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
-        // prefixes, or by the stands of a map that has fewer (a deep path beside few stands, a shallow one beside many)
-        for (const map of [index.reads, index.others])
-          if (map.size > task.path.length + 1)
-            for (let depth = 0, stand = ""; depth <= task.path.length; depth += 1) {
-              if (depth > 0)
-                stand = depth === 1 ? task.path[0]! : stepText(stand, task.path[depth - 1]!);
-              for (const entry of map.get(stand) ?? [])
-                pending.push({ value: entry.value, path: task.path.slice(depth) });
-            }
-          else
-            for (const [stand, entries] of map) {
-              const depth = splitPath(stand).length;
-              if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
-              for (const entry of entries)
-                pending.push({ value: entry.value, path: task.path.slice(depth) });
-            }
-        continue;
-      }
-      const key = task.key;
-      const place = keyPlace(key);
-      const path = keyPath(key);
-      for (const below of definitions.keysBelow(key)) {
-        const step = keyPath(below)[path.length];
-        if (step !== undefined && step !== "element") names.add(propertyName(step));
-      }
-      for (let length = 0; length <= path.length; length += 1) {
-        const rest = path.slice(length);
-        const stores = contract.prefixStores(keyOf(place, path.slice(0, length)));
-        // the sources' own stores below their roots
-        for (const sub of contract.subSources(stores)) pending.push({ key: keyBelow(sub, rest) });
-        for (const entry of stores.list) {
-          const at = joinSteps(entry.at ?? [], rest);
-          if (entry.key !== undefined) pending.push({ key: keyBelow(entry.key, at) });
-          else if (entry.value !== undefined) pending.push({ value: entry.value, path: at });
-          // an added value stands at the collection's element, an `addAll`'s at its own (as `entryAt` reads it), never
-          // at the collection itself
-          else if (entry.elem !== undefined && rest[0] === "element")
-            pending.push({ value: entry.elem, path: joinSteps(entry.at ?? [], rest.slice(1)) });
-        }
-      }
-    }
-    return names;
+    return propertyNames(this.#pass, (work) => this.#run(work), start);
   }
 
   public view(node: FlowNode): CoreView {
