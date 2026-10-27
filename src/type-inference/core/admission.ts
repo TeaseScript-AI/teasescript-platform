@@ -110,6 +110,47 @@ interface Inheritance {
   readonly order: readonly (readonly PlaceId[])[];
 }
 
+/**
+ * The copies a place answers through (`#passThrough`): each place whose only store at its root is one whole copy of an
+ * unwritten inheriting place, by that place (its parent), with the keys below its root it stores at, which stop it
+ * answering as its parent there; each tree of them in depth-first order (entry and last entry below), and per key the
+ * places storing at it (`Storing`).
+ */
+interface CopyForest {
+  readonly parent: ReadonlyMap<PlaceId, PlaceId>;
+  readonly stores: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  readonly top: ReadonlyMap<PlaceId, PlaceId>;
+  readonly depth: ReadonlyMap<PlaceId, number>;
+  readonly entry: ReadonlyMap<PlaceId, number>;
+  readonly exit: ReadonlyMap<PlaceId, number>;
+  readonly storing: ReadonlyMap<string, Storing>;
+  /** Per key, the places storing at it or below it (`#landedBelow`). */
+  readonly beneath: ReadonlyMap<string, Storing>;
+}
+
+/** Places of a copy forest by entry, with the greatest last entry below over each range (a max segment tree). */
+interface Storing {
+  readonly places: readonly PlaceId[];
+  readonly entries: readonly number[];
+  readonly exits: readonly number[];
+}
+
+/**
+ * The last index at or before `last` whose value is at least `least`, in a max segment tree over `size` leaves (`tree`,
+ * leaves from `size`), or -1.
+ */
+function lastAtLeast(tree: readonly number[], size: number, last: number, least: number): number {
+  // (the leaves at or before `last`, right to left, each subtree skipped whole where its greatest is too small)
+  let node = size + last;
+  if (tree[node]! >= least) return last;
+  // climb while the node is a left child or its left sibling holds none, then take that sibling's last one
+  while (node > 1 && (node % 2 === 0 || tree[node - 1]! < least)) node >>= 1;
+  if (node <= 1) return -1;
+  node -= 1;
+  while (node < size) node = tree[2 * node + 1]! >= least ? 2 * node + 1 : 2 * node;
+  return node - size;
+}
+
 /** Whether `path` starts with `prefix` (or is it). */
 function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
   return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
@@ -734,6 +775,8 @@ export class Admission {
   readonly #landedPaths = new Map<string, boolean>();
   /** Per place copies land in, the landed paths whose contents may not fit (`#hotSets`). */
   #hots: ReadonlyMap<PlaceId, readonly (readonly string[])[]> | null = null;
+  /** The copies places answer through (`#passThrough`), once per pass. */
+  #forest: CopyForest | null = null;
   /** Per key, its decision before it is recorded (`#decided`); the keys `decide` took (`#lazily`). */
   readonly #decisions = new Map<Key, Decided | null>();
   readonly #attempted = new Set<Key>();
@@ -873,7 +916,16 @@ export class Admission {
     this.#resolving = true;
     try {
       const scan = (next: Key): Waiting => {
-        const inputs = this.#inputs(keyPlace(next), keyPath(next));
+        const [place, path] = [keyPlace(next), keyPath(next)];
+        // (a place that answers through a copy above it asks that copy's place, nothing scanned)
+        const through = this.#passThrough(place, path);
+        if (through !== place)
+          return {
+            key: next,
+            steps: this.#answerOf(keptKey(this.#work, through, path)),
+            cycle: "",
+          };
+        const inputs = this.#inputs(place, path);
         return {
           key: next,
           steps: inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next),
@@ -971,6 +1023,209 @@ export class Admission {
       if (step.done === true) return step.value;
       given = this.#inheritedAt(keyPlace(step.value), keyPath(step.value));
     }
+  }
+
+  /** Another key's inherited type as a scan's answer (`#inheritedAt`'s `#passThrough`): known, or waited on. */
+  *#answerOf(
+    key: Key,
+  ): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
+    const known = this.#inherited.get(key);
+    const term = known !== undefined ? known : yield key;
+    return term === null ? null : { copied: term, nullable: false };
+  }
+
+  /**
+   * The place whose inherited type a place's is at a path (`#inheritedAt`, r4.75 (1)): a place whose only store on the
+   * path is one whole copy of an unwritten inheriting place, outside every cycle of copies, inherits there what that
+   * place does (its scan finds the copy, whose type is that place's, and nothing beside it); so a chain of such copies
+   * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
+   * directly, never every copy above it (the reviewer's control of a copy's own contribution, TABLE r4.80).
+   */
+  #passThrough(place: PlaceId, path: readonly string[]): PlaceId {
+    const forest = this.#copyForest();
+    if (!forest.parent.has(place)) return place;
+    const own = forest.stores.get(place);
+    const lists: (Storing | undefined)[] = [];
+    for (let length = 1; length <= path.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      const text = keptText(this.#work, path.slice(0, length));
+      if (own?.has(text) === true) return place;
+      lists.push(forest.storing.get(text));
+    }
+    return this.#nearest(place, lists);
+  }
+
+  /**
+   * The place whose landed paths at or below `prefix` a place's are, besides its own root (`#landedBelow`): a place
+   * that answers through its parent lands nothing of its own but below its keys, so a chain of them lands what its
+   * nearest member storing at, above or below the prefix lands, or its top.
+   */
+  #landsThrough(place: PlaceId, prefix: readonly string[]): PlaceId {
+    const forest = this.#copyForest();
+    if (!forest.parent.has(place)) return place;
+    const own = forest.stores.get(place);
+    const lists: (Storing | undefined)[] = [];
+    for (let length = 1; length <= prefix.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      const text = keptText(this.#work, prefix.slice(0, length));
+      if (own?.has(text) === true) return place;
+      lists.push(forest.storing.get(text));
+    }
+    for (const text of own ?? []) {
+      this.pass.program.work.charge("indexSteps");
+      if (isPrefix(prefix, splitPath(text))) return place;
+    }
+    lists.push(forest.beneath.get(keptText(this.#work, prefix)));
+    return this.#nearest(place, lists);
+  }
+
+  /** The deepest place above `place` in its copy tree among the lists' places (`Storing`), else its tree's top. */
+  #nearest(place: PlaceId, lists: readonly (Storing | undefined)[]): PlaceId {
+    const forest = this.#copyForest();
+    const work = this.pass.program.work;
+    let found = forest.top.get(place)!;
+    const entry = forest.entry.get(place)!;
+    for (const storing of lists) {
+      if (storing === undefined) continue;
+      work.charge("indexSteps", Math.ceil(Math.log2(storing.places.length + 1)) + 1);
+      // (the last place entered at or before it whose subtree holds it: entries sorted, last entries in a tree)
+      let low = 0;
+      let high = storing.entries.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (storing.entries[middle]! <= entry) low = middle + 1;
+        else high = middle;
+      }
+      if (low === 0) continue;
+      const index = lastAtLeast(storing.exits, storing.exits.length >> 1, low - 1, entry);
+      if (index < 0) continue;
+      const at = storing.places[index]!;
+      if (at !== place && forest.depth.get(at)! > forest.depth.get(found)!) found = at;
+    }
+    return found;
+  }
+
+  /** The copies places answer through (`CopyForest`), once per pass. */
+  #copyForest(): CopyForest {
+    if (this.#forest !== null) return this.#forest;
+    const { program, definitions, lists } = this.pass;
+    const work = program.work;
+    const { cycleOf } = this.#inheritance();
+    // each place's keys with stores or candidates below its root
+    const keys = new Map<PlaceId, Set<string>>();
+    for (const map of [definitions.byKey, definitions.candidates] as const)
+      for (const key of map.keys()) {
+        work.charge("indexSteps");
+        const path = keyPath(key);
+        if (path.length === 0) continue;
+        let own = keys.get(keyPlace(key));
+        if (own === undefined) keys.set(keyPlace(key), (own = new Set()));
+        own.add(keptText(this.#work, path));
+      }
+    const parent = new Map<PlaceId, PlaceId>();
+    const children = new Map<PlaceId, PlaceId[]>();
+    for (const place of this.#inheriting) {
+      work.charge("indexSteps");
+      if (cycleOf.has(place) || writtenOf(program.place(place).kind) !== null) continue;
+      const stores = definitions.byKey.get(keyOf(place, [])) ?? [];
+      const d = stores.length === 1 ? stores[0]! : null;
+      const source =
+        d !== null &&
+        d.kind === "whole" &&
+        d.value !== undefined &&
+        d.how !== "argument" &&
+        d.how !== "parameter default" &&
+        lists.live(d)
+          ? program.occurrenceOf.get(d.value)
+          : undefined;
+      if (
+        source === undefined ||
+        !this.#inheriting.has(source) ||
+        writtenOf(program.place(source).kind) !== null
+      )
+        continue;
+      parent.set(place, source);
+      const list = children.get(source);
+      if (list === undefined) children.set(source, [place]);
+      else list.push(place);
+    }
+    const top = new Map<PlaceId, PlaceId>();
+    const depth = new Map<PlaceId, number>();
+    const entry = new Map<PlaceId, number>();
+    const exit = new Map<PlaceId, number>();
+    let clock = 0;
+    for (const start of children.keys()) {
+      if (parent.has(start)) continue;
+      const frames: { readonly place: PlaceId; next: number }[] = [{ place: start, next: 0 }];
+      top.set(start, start);
+      depth.set(start, 0);
+      entry.set(start, clock++);
+      while (frames.length > 0) {
+        const frame = frames.at(-1)!;
+        const below = children.get(frame.place) ?? [];
+        work.charge("indexSteps");
+        if (frame.next < below.length) {
+          const child = below[frame.next++]!;
+          top.set(child, start);
+          depth.set(child, depth.get(frame.place)! + 1);
+          entry.set(child, clock++);
+          frames.push({ place: child, next: 0 });
+          continue;
+        }
+        exit.set(frame.place, clock - 1);
+        frames.pop();
+      }
+    }
+    const stores = new Map<PlaceId, Set<string>>();
+    // (per key, the places storing at it; and at it or below it, each key's prefixes, the root's too, once per place)
+    const at = new Map<string, PlaceId[]>();
+    const below = new Map<string, PlaceId[]>();
+    const put = (map: Map<string, PlaceId[]>, text: string, place: PlaceId): void => {
+      work.charge("indexSteps");
+      const list = map.get(text);
+      if (list === undefined) map.set(text, [place]);
+      else if (list.at(-1) !== place) list.push(place);
+    };
+    for (const place of entry.keys()) {
+      const own = keys.get(place);
+      if (own === undefined) continue;
+      stores.set(place, own);
+      const prefixes = new Set<string>([""]);
+      for (const text of own) {
+        put(at, text, place);
+        const steps = splitPath(text);
+        for (let length = 1; length <= steps.length; length += 1)
+          prefixes.add(keptText(this.#work, steps.slice(0, length)));
+      }
+      for (const text of prefixes) put(below, text, place);
+    }
+    // (each list by entry, the last entries below its places the leaves of a max segment tree)
+    const index = (map: Map<string, PlaceId[]>): Map<string, Storing> => {
+      const out = new Map<string, Storing>();
+      for (const [text, places] of map) {
+        work.charge("indexSteps", places.length + sortCost(places.length));
+        places.sort((a, b) => entry.get(a)! - entry.get(b)!);
+        let size = 1;
+        while (size < places.length) size <<= 1;
+        const exits = Array<number>(2 * size).fill(-1);
+        places.forEach((place, position) => (exits[size + position] = exit.get(place)!));
+        for (let node = size - 1; node >= 1; node -= 1)
+          exits[node] = Math.max(exits[2 * node]!, exits[2 * node + 1]!);
+        out.set(text, { places, entries: places.map((place) => entry.get(place)!), exits });
+      }
+      return out;
+    };
+    this.#forest = {
+      parent,
+      stores,
+      top,
+      depth,
+      entry,
+      exit,
+      storing: index(at),
+      beneath: index(below),
+    };
+    return this.#forest;
   }
 
   /** Whether two decisions wait on each other through copies (`#cycles`). */
@@ -1334,8 +1589,10 @@ export class Admission {
       readonly path: readonly string[];
       next: number;
     }[] = [];
-    // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one
-    const open = (at: PlaceId, steps: readonly string[]): boolean | null => {
+    // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one;
+    // a place that answers through its parent answers as the copy it answers through (`#passThrough`)
+    const open = (place: PlaceId, steps: readonly string[]): boolean | null => {
+      const at = steps.length === 0 ? place : this.#passThrough(place, steps);
       const key = keptParts(this.#work, at, steps);
       const known = memo.get(key);
       if (known !== undefined) return known;
@@ -1408,6 +1665,13 @@ export class Admission {
         if (isPrefix(task.below, path))
           out.add(keptText(this.#work, joinSteps(task.prepend, path.slice(task.drop))));
       };
+      // (a place that lands through its parent lands its root and what the copy it lands through does, `#landsThrough`)
+      const through = this.#landsThrough(task.place, task.below);
+      if (through !== task.place) {
+        emit([]);
+        tasks.push({ ...task, place: through });
+        continue;
+      }
       if (cycleOf.has(task.place)) {
         for (const text of cycles.get(task.place)!) emit(splitPath(text));
         continue;
