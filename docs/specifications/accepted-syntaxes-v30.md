@@ -1,6 +1,7 @@
 # Script Language Syntax Decisions
 
 ## Table of contents
+
 This table is generated from the current section order.
 
 - [Status legend](#status-legend)
@@ -49,6 +50,7 @@ This table is generated from the current section order.
 - [Remaining open decisions](#remaining-open-decisions)
 
 ## Status legend
+
 - **Accepted**: approved
 - **Provisional**: direction chosen, details still open
 - **Rejected**: not part of the language
@@ -62,6 +64,7 @@ are written in this document: [§8](#regexes), [§11](#11-function-definitions),
 that checker.
 
 ## Delimiter roles
+
 **Status:** Accepted
 
 The existing accepted forms use these delimiter pairs consistently. This section records that convention; it does not
@@ -82,6 +85,7 @@ Future syntax should reuse these established roles rather than assign a delimite
 materially unrelated delimiter role requires its own explicit accepted syntax decision.
 
 ## 1. Statement termination
+
 **Status:** Accepted
 
 TeaseScript does not use semicolons. A newline ends a complete statement:
@@ -214,6 +218,7 @@ Physical newlines are valid only in block strings. They do not terminate the sur
 behavior is defined under [Strings and interpolation](#8-strings-and-interpolation).
 
 ## 2. Literal values
+
 **Status:** Accepted
 
 ```text
@@ -223,6 +228,7 @@ null
 ```
 
 ## 3. Numeric types
+
 **Status:** Accepted
 
 ```text
@@ -358,6 +364,7 @@ The listed spellings are case-sensitive. Abbreviations use the exact capitalizat
 The engine uses canonical SI values internally: meters for length, kilograms for mass, cubic meters or an equivalent exact SI volume representation for volume, and kelvin for absolute temperature calculations. The documented aliases and plural forms map to the same unit definitions. Automatic display scaling and rounding affect presentation only.
 
 ## 4. Arithmetic operators
+
 **Status:** Accepted
 
 ```text
@@ -438,6 +445,7 @@ let index = randomInteger(0..items.length)
 The range itself defines whether the upper bound is inclusive or exclusive. `randomInteger(...)` therefore needs no separate minimum/maximum boundary convention. Its bounds are whole numbers ([§6](#6-range-semantics)).
 
 ### Weighted choice
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `randomWeighted` chooses with a chance in proportion to a weight. Given a dict, it returns one of its keys, weighted by
@@ -455,6 +463,7 @@ one draw of the session RNG. An empty dict or list is runtime error `TSR018`, a 
 or no weight above 0 is a compile error when the compiler can see it.
 
 ### Random distributions
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 ```text
@@ -467,14 +476,16 @@ let reps = round(randomPert(5, 10, 20))    // from 5 through 20, most likely nea
   at least 0. Each call makes two draws of the session RNG.
 - `randomBeta(alpha, beta)` draws a number from 0 through 1 from the beta distribution, for `alpha` and `beta` above 0.
 - `randomPert(min, mostLikely, max)` draws from `min` through `max`, most often near `mostLikely`, from the PERT
-  distribution: `min + (max - min) × randomBeta(1 + 4 × (mostLikely - min) / (max - min), 1 + 4 × (max - mostLikely) /
-  (max - min))`, for `min <= mostLikely <= max`. With `min` equal to `max` it returns `min`.
+  distribution:
+  `min + (max - min) × randomBeta(1 + 4 × (mostLikely - min) / (max - min), 1 + 4 × (max - mostLikely) / (max - min))`,
+  for `min <= mostLikely <= max`. With `min` equal to `max` it returns `min`.
 - `randomBeta` and `randomPert` sample by rejection: a call makes at least 6 draws, about 6 to 8 on average, and at
   most 386. The number depends only on the parameters and the draws, so replay and checkpoint resume repeat it.
 - Each returns a `number`. Invalid parameters are a compile error when the compiler can see them, and runtime error
   `TSR039` otherwise; a `randomNormal` result too large to represent is `TSR036`.
 
 ## 5. Logical and comparison operators
+
 **Status:** Accepted
 
 Use readable word operators:
@@ -576,6 +587,7 @@ not (score == 5)
 Parentheses may always override the normal precedence.
 
 ## 6. Range semantics
+
 **Status:** Accepted (whole-number bounds of `for` and `randomInteger`: Owner decision, 2026-10-07)
 
 Ranges use Rust-style bounds:
@@ -632,6 +644,7 @@ most 1,000,000 numbers; a larger range is a compile error where the compiler can
 `TSR045` otherwise.
 
 ## 7. Conditions and blocks
+
 **Status:** Accepted
 
 Curly braces delimit blocks. Parentheses around conditions are optional.
@@ -661,6 +674,7 @@ Rules:
   a compile error that suggests a comparison such as `count > 0`.
 
 ## 8. Strings and interpolation
+
 **Status:** Accepted
 
 Strings use double quotes. The single-line form supports interpolation:
@@ -799,22 +813,22 @@ let parts = "red,green,blue".split(",")   // ["red", "green", "blue"]
 say toString(7).padStart(3, "0")          // 007
 ```
 
-| Operation | Result |
-| --- | --- |
-| `text.length` | the number of characters, counted as Unicode code points |
-| `text.contains(part)` | `true` when `part` occurs in `text` |
-| `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
-| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `null` when `part` does not occur |
-| `text.count(part)` | how many times `part` occurs, counted from the start without overlap: `"banana".count("ana")` is `1` (owner decision, 2026-10-15) |
-| `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
-| `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
-| `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
-| `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
-| `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
-| `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
-| `text.reverse()` | the text with its characters in reverse order, counted as Unicode code points (owner decision, 2026-10-13) |
-| `text.repeat(count)` | the text repeated `count` times |
-| `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged |
+| Operation                                                  | Result                                                                                                                            |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `text.length`                                              | the number of characters, counted as Unicode code points                                                                          |
+| `text.contains(part)`                                      | `true` when `part` occurs in `text`                                                                                               |
+| `text.startsWith(part)`, `text.endsWith(part)`             | `true` when `text` starts or ends with `part`                                                                                     |
+| `text.indexOf(part)`, `text.lastIndexOf(part)`             | the position of the first or last occurrence of `part`, or `null` when `part` does not occur                                      |
+| `text.count(part)`                                         | how many times `part` occurs, counted from the start without overlap: `"banana".count("ana")` is `1` (owner decision, 2026-10-15) |
+| `text.substring(start)`, `text.substring(start, end)`      | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text                             |
+| `text.split(separator)`                                    | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters                      |
+| `text.replace(search, replacement)`                        | the text with every occurrence of `search` replaced                                                                               |
+| `text.trim()`, `text.trimStart()`, `text.trimEnd()`        | the text without whitespace at both ends, at the start, or at the end                                                             |
+| `text.uppercase()`, `text.lowercase()`                     | the text in upper or lower case                                                                                                   |
+| `text.uppercaseFirst()`                                    | the text with its first character in upper case and the rest unchanged                                                            |
+| `text.reverse()`                                           | the text with its characters in reverse order, counted as Unicode code points (owner decision, 2026-10-13)                        |
+| `text.repeat(count)`                                       | the text repeated `count` times                                                                                                   |
+| `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged       |
 
 Rules:
 
@@ -829,6 +843,7 @@ Rules:
       say path.substring(slash + 1)
   }
   ```
+
 - Searching and replacing compare text literally and case-sensitively. A `replace` search text, a `count` part, and a
   padding `fill` must be non-empty.
 - Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
@@ -842,11 +857,12 @@ Rules:
   longer text, such as `repeat`, `padStart`, `replace`, `uppercase`, `escapeMarkup`, joining with `+`, `"${...}"`,
   `join`, the notation of a script reference, the descriptions of `askForm`, or `say` of a value, raises runtime error
   `TSR084` instead. Its message names the operation and, where it is known before the text is built, how long the text
-  would be: `Text too long: repeat(9007199254740991) would make about 9,007,199,254,740,991 characters, but a text can
-  hold at most about 536 million.` An error message that quotes text from the script cuts it after 1,024 characters
-  with `…`.
+  would be:
+  `Text too long: repeat(9007199254740991) would make about 9,007,199,254,740,991 characters, but a text can hold at most about 536 million.`
+  An error message that quotes text from the script cuts it after 1,024 characters with `…`.
 
 ### Regexes
+
 **Status:** Accepted (Owner decision, 2026-10-13)
 
 A regex is a pattern that text can match. Regexes use the RE2 dialect, which matches in time proportional to the text,
@@ -879,18 +895,18 @@ A regex literal is the pattern between two slashes, followed by its flags:
 
 These text operations take a regex:
 
-| Operation | Result |
-| --- | --- |
-| `text.matches(regex)` | `true` when the regex matches the whole text |
-| `text.contains(regex)` | `true` when the regex matches somewhere in the text |
-| `text.find(regex)` | the text of the first match, or `null` |
-| `text.capture(regex)` | a `string?[]?`: `null` without a match, otherwise the whole match at index 0 followed by each group in the order of its opening parenthesis; a group that did not take part is `null`, and an empty one is `""` |
-| `text.indexOf(regex)` | the position of the first match, or `null` |
-| `text.findAll(regex)` | a `string[]` of every match, or `[]` |
-| `text.count(regex)` | the number of matches, as `text.findAll(regex).length` (owner decision, 2026-10-15) |
-| `text.lastIndexOf(regex)` | the position of the last match, or `null` |
-| `text.split(regex)` | a `string[]` of the parts between matches |
-| `text.replace(regex, replacement)` | the text with every match replaced |
+| Operation                          | Result                                                                                                                                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text.matches(regex)`              | `true` when the regex matches the whole text                                                                                                                                                                    |
+| `text.contains(regex)`             | `true` when the regex matches somewhere in the text                                                                                                                                                             |
+| `text.find(regex)`                 | the text of the first match, or `null`                                                                                                                                                                          |
+| `text.capture(regex)`              | a `string?[]?`: `null` without a match, otherwise the whole match at index 0 followed by each group in the order of its opening parenthesis; a group that did not take part is `null`, and an empty one is `""` |
+| `text.indexOf(regex)`              | the position of the first match, or `null`                                                                                                                                                                      |
+| `text.findAll(regex)`              | a `string[]` of every match, or `[]`                                                                                                                                                                            |
+| `text.count(regex)`                | the number of matches, as `text.findAll(regex).length` (owner decision, 2026-10-15)                                                                                                                             |
+| `text.lastIndexOf(regex)`          | the position of the last match, or `null`                                                                                                                                                                       |
+| `text.split(regex)`                | a `string[]` of the parts between matches                                                                                                                                                                       |
+| `text.replace(regex, replacement)` | the text with every match replaced                                                                                                                                                                              |
 
 - The first match is the leftmost one, and of alternatives the first that matches there: `"ab".find(/a|ab/)` is
   `"a"`. `matches` tests the whole text, also with `m`: `"a\nb".matches(/^a$/m)` is `false`.
@@ -918,6 +934,7 @@ These text operations take a regex:
   "5 USD".replace(/(\d+) USD/, "$$$1")                                 // "$5"
   "ab".replace(/(a)/, "$2")                                            // compile error: the regex has 1 group
   ```
+
 - Every operation with a regex may do a fixed amount of work, the [regex work
   limit](../RESOURCE-LIMITS.md#retained-poc-policies-and-defaults). The work counts what RE2 does and what the
   operation builds, not time, so an operation ends the same way on every device. One that needs more fails with
@@ -937,6 +954,7 @@ is over the regex limits, gives the default. The default is evaluated only when 
 2026-10-16).
 
 ## 9. Commands
+
 **Status:** Accepted
 
 Engine-provided commands may omit parentheses and receive one expression:
@@ -957,6 +975,7 @@ in parentheses, `say("Strokes: 0", instant)` ([Updatable messages](#updatable-me
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
 ## 10. Function calls and arguments
+
 **Status:** Accepted
 
 Normal and user-defined functions are called directly with parentheses:
@@ -1010,6 +1029,7 @@ Rules:
 - A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and profile-change operation labels such as `save:` without permitting those words as variable or function identifiers.
 
 ## 11. Function definitions
+
 **Status:** Accepted
 
 Without parameters:
@@ -1095,6 +1115,7 @@ punish(3)
 - Its name is unique in the package, like that of a global ([§12](#global-variables)).
 
 ## 12. Variable declarations
+
 **Status:** Accepted
 
 Declare with `let`:
@@ -1222,6 +1243,7 @@ picks.add("three")    // compile error
   The warning names the source of the unknown value. When that source is not such a `load`, as for host data,
   `fromJson(…, default: null)`, or a computed key, it names that source instead and advises only a written type for
   the place.
+
 - A value stored into a place may read a part of that place, and the read sees the part as it is before the store:
   after `let state = { n: "s", divisor: null }`, `state = { n: hostValue / state.divisor, divisor: 4 }` divides by the
   `null` that `divisor` still holds, which is a compile error. Where the value comes from a function that reads a part
@@ -1274,6 +1296,7 @@ local value is a compile error that names the global, explains that it needs a v
 and shows both fixes: `, default: 0`, or `global attempts = 0` and a later `attempts = localCount`.
 
 ### Constants
+
 **Status:** Accepted (Owner decisions, 2026-10-19 and 2026-10-20); not yet implemented, planned after the O4
 type-checker switch.
 
@@ -1355,6 +1378,7 @@ compile error that names both fixes: `global`, or a start value that exists at s
 belongs to `load` is not affected.
 
 ## 13. Explicit types
+
 **Status:** Accepted
 
 Explicit types are allowed and encouraged for editor tooling:
@@ -1421,7 +1445,7 @@ let l: list | integer = []                     // compile error
 let m: (integer[] | string[])[] = []           // compile error: also inside another list
 let n: (integer | string[]) dict = dict{}      // compile error: also as a dict's value type
 function o(x: integer | string[]) { }          // compile error: also for a parameter
-function p(): integer[] | string { return "a" } // compile error: also for a result
+function p: integer[] | string { return "a" }  // compile error: also for a result
 ```
 
 ### Union types
@@ -1539,6 +1563,7 @@ if box.n != null {
 ```
 
 ### Compile errors, warnings, and checks when the script runs
+
 **Status:** Accepted (owner decisions, 2026-10-19, 2026-10-21, 2026-10-23, 2026-10-25, and 2026-10-27)
 
 Valid code always compiles. Valid code meets the language's syntax, type, and required-check rules, and a compile
@@ -1653,12 +1678,12 @@ fits when every element or value fits, and an object fits when each known proper
 
 `toString`, `toNumber`, `toInteger`, and `toBoolean` convert these values:
 
-| Conversion | Converts | Result |
-| --- | --- | --- |
-| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, angles, date and time values, script references, and regexes | the same text as `"${value}"` |
-| `toNumber(value)` | numbers, and number text | a `number` |
-| `toInteger(value)` | numbers, and number text | an `integer` |
-| `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
+| Conversion         | Converts                                                                                                           | Result                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| `toString(value)`  | text, numbers, `true` and `false`, `null`, durations, angles, date and time values, script references, and regexes | the same text as `"${value}"` |
+| `toNumber(value)`  | numbers, and number text                                                                                           | a `number`                    |
+| `toInteger(value)` | numbers, and number text                                                                                           | an `integer`                  |
+| `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"`                                                             | a `boolean`                   |
 
 - Number text is what `askNumber` accepts: an optional sign, digits with an optional decimal point, and an optional
   exponent, such as `2.5`, `-3`, `.5`, or `1e3`. Surrounding whitespace is ignored, also around `"true"` and `"false"`.
@@ -1705,6 +1730,7 @@ let boundedLevel = max(1, min(level, 10))
 ```
 
 ### JSON and Base64
+
 **Status:** Accepted (Owner decision, 2026-10-13; the expected type and defaults: owner decisions, 2026-10-19 and
 2026-10-20)
 
@@ -1721,16 +1747,16 @@ fromBase64(text, default: value)
 
 `toJson` writes a value as compact JSON text:
 
-| Value | JSON |
-| --- | --- |
-| text, `integer`, `number`, `true` and `false`, `null` | the same |
-| list, set | an array, a set in its order |
-| dict, object | an object, in key order |
-| `date`, `time`, `datetime` | ISO text, as `.toISO()` gives it |
-| `absoluteDateTime` | ISO text in UTC, ending in `Z` |
-| `duration` | its number of milliseconds |
-| `angle` | its number of degrees |
-| `speaker` | an object with a copy of its properties |
+| Value                                                 | JSON                                    |
+| ----------------------------------------------------- | --------------------------------------- |
+| text, `integer`, `number`, `true` and `false`, `null` | the same                                |
+| list, set                                             | an array, a set in its order            |
+| dict, object                                          | an object, in key order                 |
+| `date`, `time`, `datetime`                            | ISO text, as `.toISO()` gives it        |
+| `absoluteDateTime`                                    | ISO text in UTC, ending in `Z`          |
+| `duration`                                            | its number of milliseconds              |
+| `angle`                                               | its number of degrees                   |
+| `speaker`                                             | an object with a copy of its properties |
 
 A `calendarDuration`, `range`, `script`, `regex`, `timer`, `media`, `messageHandle`, or permanent button cannot be
 written: that is a compile error where the types show it, and a runtime error otherwise.
@@ -1806,6 +1832,7 @@ let plain = toJson(preset, files: false)          // references stay text
 ```
 
 ### Hashes
+
 **Status:** Accepted (Owner decisions, 2026-10-13)
 
 ```text
@@ -1844,6 +1871,7 @@ of them. A value that the script chooses itself with `random` can be recovered f
 random generator is deterministic.
 
 ### Encryption
+
 **Status:** Accepted (Owner decisions, 2026-10-13 and 2026-10-14)
 
 ```text
@@ -1928,19 +1956,20 @@ short step that locks or opens is not interrupted; a due block runs once it is d
 or password field never becomes a script value.
 
 ### Numeric functions
+
 **Status:** Accepted (Owner decision, 2026-10-07; `pow` always returns a `number`: Owner decision, 2026-10-22)
 
 These functions take numbers and return a number:
 
-| Function | Result |
-| --- | --- |
-| `abs(value)` | the distance from 0: `abs(-2.5)` is `2.5` |
-| `sign(value)` | `-1`, `0`, or `1` |
-| `sqrt(value)` | the square root |
-| `pow(base, exponent)` | the base raised to the exponent |
-| `mod(value, divisor)` | the remainder with the sign of the divisor: `mod(-1, 3)` is `2`, where `-1 % 3` is `-1` |
-| `clamp(value, min, max)` | the value, raised to `min` or lowered to `max`: `clamp(15, 1, 10)` is `10` |
-| `round(value, decimals: n)` | the value rounded to `n` decimal places |
+| Function                    | Result                                                                                  |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| `abs(value)`                | the distance from 0: `abs(-2.5)` is `2.5`                                               |
+| `sign(value)`               | `-1`, `0`, or `1`                                                                       |
+| `sqrt(value)`               | the square root                                                                         |
+| `pow(base, exponent)`       | the base raised to the exponent                                                         |
+| `mod(value, divisor)`       | the remainder with the sign of the divisor: `mod(-1, 3)` is `2`, where `-1 % 3` is `-1` |
+| `clamp(value, min, max)`    | the value, raised to `min` or lowered to `max`: `clamp(15, 1, 10)` is `10`              |
+| `round(value, decimals: n)` | the value rounded to `n` decimal places                                                 |
 
 `pi` is the number π, `3.141592653589793`. Like the functions, it is a protected name ([§38](#protected-engine-names)).
 
@@ -1971,18 +2000,19 @@ round(pi * 2 * 2, decimals: 2)   // 12.57
   factorial, `gcd`, bitwise operations, and general number formatting.
 
 ### Exponentials, logarithms, and angles
+
 **Status:** Accepted (Owner decision, 2026-10-07; angles with a unit: Owner decision, 2026-10-16)
 
-| Function | Result |
-| --- | --- |
-| `exp(value)` | e raised to the value |
-| `ln(value)` | the natural logarithm, for a value above 0 |
-| `log10(value)` | the logarithm to base 10, for a value above 0: `log10(1000)` is `3` |
-| `sin(angle)`, `cos(angle)`, `tan(angle)` | the sine, cosine, or tangent of an angle |
-| `asin(value)`, `acos(value)` | the angle of a sine or cosine from -1 through 1 |
-| `atan(value)` | the angle of a tangent, above -90° and below 90° |
-| `atan2(y, x)` | the angle of the direction from the origin to the point (x, y), above -180° and up to 180° |
-| `toDeg(angle)`, `toRad(angle)` | the size of an angle as a number of degrees or of radians |
+| Function                                 | Result                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `exp(value)`                             | e raised to the value                                                                      |
+| `ln(value)`                              | the natural logarithm, for a value above 0                                                 |
+| `log10(value)`                           | the logarithm to base 10, for a value above 0: `log10(1000)` is `3`                        |
+| `sin(angle)`, `cos(angle)`, `tan(angle)` | the sine, cosine, or tangent of an angle                                                   |
+| `asin(value)`, `acos(value)`             | the angle of a sine or cosine from -1 through 1                                            |
+| `atan(value)`                            | the angle of a tangent, above -90° and below 90°                                           |
+| `atan2(y, x)`                            | the angle of the direction from the origin to the point (x, y), above -180° and up to 180° |
+| `toDeg(angle)`, `toRad(angle)`           | the size of an angle as a number of degrees or of radians                                  |
 
 An angle is a value of type `angle`: a number with the unit `deg` (`degree`, `degrees`) or `rad` (`radian`,
 `radians`), such as `90 deg`, `pi rad`, or `heading deg`. The unit may not touch the number: `90deg` is an error;
@@ -2021,6 +2051,7 @@ round(exp(1), decimals: 5)   // 2.71828
   `0.001`, is exactly that power.
 
 ## 14. Scope
+
 **Status:** Accepted
 
 `let` uses lexical block scope.
@@ -2054,6 +2085,7 @@ if secondCondition {
 ```
 
 ### Variables in timer, media, and button blocks
+
 **Status:** Accepted (Owner decision on #627, 2026-10-05; [ADR 0024](../decisions/0024-shared-block-variables.md))
 
 A timer expiry block, media block, or permanent button block uses the variables around it like any nested block: the
@@ -2092,6 +2124,7 @@ function challenge {
 - A function called from a block sees its own variables and those of its file, never those of the block.
 
 ## 15. Objects
+
 **Status:** Accepted
 
 Object literals use named properties:
@@ -2162,6 +2195,7 @@ property set to `null` differs from a missing property:
 Custom structured type declarations are not required in the initial language. Advanced developers may extend the engine through TypeScript libraries.
 
 ## 16. Lists
+
 **Status:** Accepted
 
 List literals keep commas between elements:
@@ -2435,6 +2469,7 @@ queue.addAll(nextRound)           // queue itself grows
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
 ### Parts of a list
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `take(count)` and `takeLast(count)` return a new list of the first or the last `count` elements, in order, and leave
@@ -2450,6 +2485,7 @@ save recent.takeLast(20) as "pushups"
 ```
 
 ### Finding a value in a list
+
 **Status:** Accepted (Owner decision, 2026-10-12)
 
 `indexOf(value)` and `lastIndexOf(value)` return the index of the first or the last element equal (`==`) to `value`,
@@ -2474,6 +2510,7 @@ Sets have none of the three: a set has no indexes, and it holds each member once
 `count(value)` would.
 
 ### Reading an element with a default
+
 **Status:** Accepted (Owner decision, 2026-10-12; the `default:`: owner decisions, 2026-10-19)
 
 `get(index, default: value)` returns the element at `index`, or `value` when the list has no such position: an `index`
@@ -2499,6 +2536,7 @@ let card = deck.get(turn, default: null) // a string?, checked before it is used
 Sets have no `get`: a set has no positions, and `contains(value)` says whether it holds a value.
 
 ### Statistics
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `sum`, `average`, `median`, `percentile`, and `stddev` describe the values of a list, and `min` and `max` also take one
@@ -2520,8 +2558,8 @@ max(scores)             // 18
   ([§35](#35-date-time-and-durations)). With `by:`, the values are a property of a list of objects:
   `median(sessions, by: "count")`.
 - `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
-  ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion. `percentile(list,
-  50)` is the median, the middle value or the average of the two middle values.
+  ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion.
+  `percentile(list, 50)` is the median, the middle value or the average of the two middle values.
 - `stddev` is the sample standard deviation: the square root of the summed squared distances to the average, divided by
   the number of values minus 1.
 - `sum`, `min`, and `max` of integers are integers; `average`, `median`, `percentile`, and `stddev` of numbers are
@@ -2546,6 +2584,7 @@ if recent.length > 0 {
 ```
 
 ### Trends
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `linearRegression` fits the straight line that comes closest to the points of a list, by least squares, and `predict`
@@ -2577,6 +2616,7 @@ let expected = predict(trend, toDate("2026-10-31"))
   runtime errors otherwise (`TSR060`, and `TSR059` for `predict`).
 
 ## 17. Return statements
+
 **Status:** Accepted
 
 Functions may perform actions without returning a value:
@@ -2628,6 +2668,7 @@ With a return-type annotation, every returned value must fit the annotation, and
 value needs an optional result type such as `number?`.
 
 ## 18. Null and optional values
+
 **Status:** Accepted
 
 `null` represents a missing or cancelled result:
@@ -2667,6 +2708,7 @@ none for a value that an assignment or a method changes, such as `items` in `ite
 copy, nor for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
 
 ### Fallback with `otherwise`
+
 **Status:** Accepted (Owner decision on #850, 2026-10-12; the fallback's type: owner decisions, 2026-10-19)
 
 `a otherwise b` evaluates `a` once and gives it unless it is `null`; then it evaluates and gives `b`. It does not assign
@@ -2698,17 +2740,18 @@ let answer = nickname otherwise askText "Name?"
   the result, and a chain or an interpolation needs no parentheses. A unit belongs to the number it follows: in
   `delay otherwise 5 s`, the fallback is `5 s`, so a number of seconds with a fallback is `(delay otherwise 5) s`.
 - A value that the compiler knows can never be `null`, also one narrowed by a check, gets warning `TSV062`, because
-  its fallback is never used. The message names what to remove, such as `'count' is never null here, so the fallback
-  after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the warning goes on the first `otherwise` whose
-  left side can no longer be `null`, as `otherwise "x"` in `nickname otherwise "pet" otherwise "x"`, and names every
-  fallback from there. A value of unknown type, such as loaded data, and a value that depends on a parameter without a
-  type get no warning.
+  its fallback is never used. The message names what to remove, such as
+  `'count' is never null here, so the fallback after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the
+  warning goes on the first `otherwise` whose left side can no longer be `null`, as `otherwise "x"` in
+  `nickname otherwise "pet" otherwise "x"`, and names every fallback from there. A value of unknown type, such as
+  loaded data, and a value that depends on a parameter without a type get no warning.
 - A fallback does not catch an error: `items[5] otherwise 0` still fails when the list has no position 5, and
   `toys[key] otherwise 0` when the dict has no such key. When the element can never be `null`, the warning names the
   read that has a default instead, `items.get(5, default: 0)` ([§16](#reading-an-element-with-a-default),
   [§40](#40-dictionaries)).
 
 ### Defaults follow the same rule
+
 **Status:** Accepted (owner decisions, 2026-10-19 and 2026-10-20)
 
 Every `default:` follows the rule of `otherwise`: the default has the type of the value it stands in for, or is `null`,
@@ -2754,6 +2797,7 @@ let photo = decryptFile(locked, default: 0)                 // compile error: no
 ```
 
 ## 19. Choices
+
 **Status:** Accepted
 
 `askChoice` shows one button per option and returns the value of the selected button. A button shows its text; its
@@ -2850,6 +2894,7 @@ let next = askChoice 6, 7, 8, 9, prefill: level
   a button as `{ value: "prefill", text: "..." }`.
 
 ## 20. Input functions
+
 **Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
 2026-10-05; an ask's starting answer is `prefill:`: Owner decision on #512, 2026-10-08)
 
@@ -2909,6 +2954,7 @@ let name = askText("What is your name?")
 `askText(...)` only completes when non-empty valid text has been entered and returns `string`.
 
 ### Password input
+
 **Status:** Accepted (Owner decisions, 2026-10-13 and 2026-10-14)
 
 ```text
@@ -3121,14 +3167,14 @@ evaluate them again.
 
 A field is a starting value or a descriptor object. A start decides the field's kind:
 
-| Start | Field |
-|---|---|
-| `true` or `false` | a toggle; returns `boolean` |
-| a list | a cycle through the list's options, starting at the first; returns the option's value |
-| an `integer` or a `number` | a number typed in the composer: `5` gives an `integer` field, `5.0` a `number` field |
-| text | text typed in the composer; ISO-looking text stays text |
-| a `date`, `time`, or `datetime` | the matching value typed in the composer |
-| an object | a descriptor |
+| Start                           | Field                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `true` or `false`               | a toggle; returns `boolean`                                                           |
+| a list                          | a cycle through the list's options, starting at the first; returns the option's value |
+| an `integer` or a `number`      | a number typed in the composer: `5` gives an `integer` field, `5.0` a `number` field  |
+| text                            | text typed in the composer; ISO-looking text stays text                               |
+| a `date`, `time`, or `datetime` | the matching value typed in the composer                                              |
+| an object                       | a descriptor                                                                          |
 
 A descriptor has `value:` (the start), `text:` (the label, by default the field's name or key), `type:`, `options:`,
 `optional:`, `min:`, `max:`, `hint:`, `background:`, and `description:`. `type:` is `"boolean"`, `"cycle"`, `"integer"`,
@@ -3284,12 +3330,12 @@ let answer = askBoolean("Continue?", prefill: true)
 let day = askDate("Which date?", prefill: getDate())
 ```
 
-| Function | `prefill:` value |
-|---|---|
-| `askText(...)`, `askTyping(...)` | `string` with a non-whitespace character |
-| `askNumber(...)` | `number` or `integer` |
-| `askInteger(...)` | `integer` |
-| `askBoolean(...)` | `boolean` |
+| Function                                           | `prefill:` value                            |
+| -------------------------------------------------- | ------------------------------------------- |
+| `askText(...)`, `askTyping(...)`                   | `string` with a non-whitespace character    |
+| `askNumber(...)`                                   | `number` or `integer`                       |
+| `askInteger(...)`                                  | `integer`                                   |
+| `askBoolean(...)`                                  | `boolean`                                   |
 | `askDate(...)`, `askTime(...)`, `askDateTime(...)` | `date`, `time`, and `datetime` respectively |
 
 Rules:
@@ -3544,23 +3590,23 @@ Rules:
 
 Default invalid messages:
 
-| Function | Default `invalidMessage` |
-|---|---|
-| `askNumber(...)` | `"That is wrong. I asked for a number."` |
-| `askNumbers(...)` | `"That is wrong. Every value must be a number."` |
-| `askInteger(...)` | `"That is wrong. I asked for a whole number."` |
-| `askIntegers(...)` | `"That is wrong. Every value must be a whole number."` |
-| `askDate(...)` | `"That is wrong. I asked for a date."` |
-| `askTime(...)` | `"That is wrong. I asked for a time."` |
-| `askDateTime(...)` | `"That is wrong. I asked for a date and time."` |
-| `askFile(...)` | `"That file is not valid."` |
-| `askFiles(...)` | `"One or more files are not valid."` |
-| `askFolder(...)` | `"That folder is not valid."` |
-| `askImage(...)` | `"That image is not valid."` |
-| `askVideo(...)` | `"That video is not valid."` |
-| `askAudio(...)` | `"That audio is not valid."` |
-| `askChoice(...)` or `askBoolean(...)`, typed text that matches no button | `"That is wrong. Type the exact text of one button, or use the buttons above."` |
-| `askChoice(...)` or `askBoolean(...)`, typed text that matches more than one button | `"More than one button has this text. Use the buttons above."` |
+| Function                                                                            | Default `invalidMessage`                                                        |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `askNumber(...)`                                                                    | `"That is wrong. I asked for a number."`                                        |
+| `askNumbers(...)`                                                                   | `"That is wrong. Every value must be a number."`                                |
+| `askInteger(...)`                                                                   | `"That is wrong. I asked for a whole number."`                                  |
+| `askIntegers(...)`                                                                  | `"That is wrong. Every value must be a whole number."`                          |
+| `askDate(...)`                                                                      | `"That is wrong. I asked for a date."`                                          |
+| `askTime(...)`                                                                      | `"That is wrong. I asked for a time."`                                          |
+| `askDateTime(...)`                                                                  | `"That is wrong. I asked for a date and time."`                                 |
+| `askFile(...)`                                                                      | `"That file is not valid."`                                                     |
+| `askFiles(...)`                                                                     | `"One or more files are not valid."`                                            |
+| `askFolder(...)`                                                                    | `"That folder is not valid."`                                                   |
+| `askImage(...)`                                                                     | `"That image is not valid."`                                                    |
+| `askVideo(...)`                                                                     | `"That video is not valid."`                                                    |
+| `askAudio(...)`                                                                     | `"That audio is not valid."`                                                    |
+| `askChoice(...)` or `askBoolean(...)`, typed text that matches no button            | `"That is wrong. Type the exact text of one button, or use the buttons above."` |
+| `askChoice(...)` or `askBoolean(...)`, typed text that matches more than one button | `"More than one button has this text. Use the buttons above."`                  |
 
 `askText(...)` refuses a blank answer with `"That is wrong. I asked for some text."` (owner decision, 2026-10-16).
 
@@ -3603,6 +3649,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askFile(...)`, `askFiles(...)`, `askImage(...)`, `askVideo(...)`, `askAudio(...)`, and `askFolder(...)` default to `allowSkip: false`.
 
 ## 21. Blocking button
+
 **Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)
 
 `showButton` displays a button and blocks normal script execution until the user clicks it or an optional timeout is
@@ -3637,6 +3684,7 @@ Rules:
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
 ## 22. Stage image, audio, and video
+
 **Status:** Accepted (Owner decisions on [#445](https://github.com/TeaseScript-AI/teasescript-platform/issues/445)). The
 parser, compiler, deterministic runtime, and checkpoint foundation for image, audio, and video is implemented; the
 Player shows images and plays audio (#446), and browser video playback is planned.
@@ -3840,6 +3888,7 @@ image, the camera view, and timers are unaffected. Without a running or paused s
   time without a running Player does not advance media. Restore does not imply cross-device handoff.
 
 ### Future layered scene
+
 **Status:** Accepted V30 direction, extended with [pixels and image size](#pixels-and-image-size) (Owner decision on
 [#617](https://github.com/TeaseScript-AI/teasescript-platform/issues/617)); not implemented. Background and overlay
 layers, their coordinate space, movement, blur, drawings, edited copies, and transitions remain separate from the Stage
@@ -4021,6 +4070,7 @@ showBackgroundImage(
 ```
 
 ## 23. Loops
+
 **Status:** Accepted (`for key, value`: Owner decision on #627, 2026-10-05)
 
 ```text
@@ -4088,6 +4138,7 @@ for item in items {
 ```
 
 ## 24. Comments
+
 **Status:** Accepted
 
 ```text
@@ -4101,6 +4152,7 @@ for item in items {
 ```
 
 ## 25. Persistent storage and keys
+
 **Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; required default, load types, and wrong
 stored values: Owner decision, 2026-10-07; an object default per field: owner decision, 2026-10-20)
 
@@ -4241,6 +4293,7 @@ save score in player.score
 ```
 
 ## 26. Labels and goto
+
 **Status:** Accepted
 
 ```text
@@ -4265,6 +4318,7 @@ Rules:
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
+
 **Status:** Accepted (Owner decisions on PR #443, 2026-09-30)
 
 One `timer` concept covers blocking and asynchronous countdowns. `wait` is the shorthand for a hidden blocking
@@ -4390,6 +4444,7 @@ decision, 2026-10-11).
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
 ### `noInterrupts` blocks
+
 **Status:** Accepted (Owner decision, 2026-10-20); not yet implemented, planned after the O4 type-checker switch.
 
 Timer, media, and permanent-button blocks do not interrupt the code inside a `noInterrupts` block; they wait until it
@@ -4443,6 +4498,7 @@ say "Go on.", instant        // "Time is up." at 10 s, then "Go on." at 12 s
   early or twice.
 
 ### Timeline cues and self-handle (planned)
+
 **Status:** Accepted direction; not implemented. It follows the timer foundation separately.
 
 ```text
@@ -4492,6 +4548,7 @@ A `wait` after a paced message starts when the message's reading time ends, so i
 timing, say the message `instant` (owner decision, 2026-10-11).
 
 ## 28. Permanent buttons
+
 **Status:** Accepted (inactive while the handler runs: Owner decision on #610; `persist:` on the command: Owner
 decision on #627; both 2026-10-05)
 
@@ -4571,6 +4628,7 @@ Cleanup:
 - Every permanent button disappears on `exit`.
 
 ## 29. Script files and paths
+
 **Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
 A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
@@ -4653,6 +4711,7 @@ Rules:
 - There is no `run` and no automatic selection of a next file; the script states every transfer.
 
 ## 30. Script endings
+
 **Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
 End the current file and return to the file that called it:
@@ -4710,6 +4769,7 @@ Static analysis should warn, but not necessarily fail compilation, when:
   checked.
 
 ## 31. Popups and system notifications
+
 **Status:** Accepted
 
 ### Popup
@@ -4753,6 +4813,7 @@ if t < 5 min {
 ```
 
 ### Export text
+
 **Status:** Accepted (Owner decision, 2026-10-13)
 
 ```text
@@ -4780,6 +4841,7 @@ notify "Task completed"
 Permission handling and unsupported environments are runtime implementation details.
 
 ## 32. Switch statements
+
 **Status:** Accepted
 
 ```text
@@ -4843,6 +4905,7 @@ function describe(answer: integer | string?) {
   only returns `"yes"` or `"no"` ([§19](#19-choices)).
 
 ## 33. Browser API: file, folder, camera, and URL references
+
 **Status:** Accepted
 
 File, folder, and camera APIs return engine-managed string references or `null` when cancelled:
@@ -4915,6 +4978,7 @@ after a reload without its photo. A string is a usable media reference only when
 it; a well-formed string, including one returned by `load`, grants no access by itself.
 
 ### Stored files
+
 **Status:** Accepted (Owner decisions, 2026-10-13)
 
 ```text
@@ -4934,11 +4998,11 @@ recorded result without asking the store again. The Base64 text may be as long a
 
 A file's type comes from its first bytes, never from a file name or the type in a data URL:
 
-| Kind | Types |
-| --- | --- |
+| Kind  | Types                |
+| ----- | -------------------- |
 | Image | JPEG, PNG, GIF, WebP |
-| Audio | MP3, Ogg, WAV, M4A |
-| Video | MP4, WebM |
+| Audio | MP3, Ogg, WAV, M4A   |
+| Video | MP4, WebM            |
 
 Any other file is `application/octet-stream`. A stored file of any other type, such as SVG or HTML, is never shown or
 played: a script can only store it, pass it along, or turn it back into Base64. This rule is about stored files, whose
@@ -4955,6 +5019,7 @@ if picture != null {
 ```
 
 ## 34. Runtime warnings and recoverable values
+
 **Status:** Accepted
 
 Using a possibly null value without an explicit check, where its non-null type is required, is a compile error
@@ -5013,6 +5078,7 @@ Recovered errors should record:
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
 ## 35. Date, time, and durations
+
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `absoluteDateTime` values, their conversions,
 fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, exact and calendar
 durations ([ADR 0026](../decisions/0026-unified-time-semantics.md)), and date and time input
@@ -5020,14 +5086,14 @@ durations ([ADR 0026](../decisions/0026-unified-time-semantics.md)), and date an
 
 TeaseScript has two kinds of time:
 
-| Type | Meaning |
-| --- | --- |
-| `date` | A local calendar date without a zone, such as `2026-10-04` |
-| `time` | A local clock time without a zone, such as `14:30` |
-| `datetime` | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
-| `absoluteDateTime` | A fixed moment in UTC, like Unix time |
-| `duration` | Exact elapsed time in milliseconds; a day is 24 hours |
-| `calendarDuration` | Whole calendar months, whole calendar days, and an exact offset |
+| Type               | Meaning                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `date`             | A local calendar date without a zone, such as `2026-10-04`                                                                                                   |
+| `time`             | A local clock time without a zone, such as `14:30`                                                                                                           |
+| `datetime`         | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
+| `absoluteDateTime` | A fixed moment in UTC, like Unix time                                                                                                                        |
+| `duration`         | Exact elapsed time in milliseconds; a day is 24 hours                                                                                                        |
+| `calendarDuration` | Whole calendar months, whole calendar days, and an exact offset                                                                                              |
 
 Use local values for "what clock time" and "which day", and `absoluteDateTime` for "how long ago" and "how much time
 passed".
@@ -5063,13 +5129,13 @@ Local text has no offset; absolute text requires `Z` or an offset. Fractions hav
 known at compile time and is not a valid value is a compile error, also when a `default:` is given; other text follows
 the [§13](#13-explicit-types) conversion rules.
 
-| Conversion | Converts |
-| --- | --- |
-| `toDate(value)` | date text, a `date`, or the date of a `datetime` |
-| `toTime(value)` | time text, a `time`, or the clock time of a `datetime` |
-| `toDateTime(value)` | datetime text or a `datetime` |
-| `toDateTime(date, time)` | a `date` and a `time` combined |
-| `toAbsoluteDateTime(value)` | absolute text or an `absoluteDateTime` |
+| Conversion                  | Converts                                               |
+| --------------------------- | ------------------------------------------------------ |
+| `toDate(value)`             | date text, a `date`, or the date of a `datetime`       |
+| `toTime(value)`             | time text, a `time`, or the clock time of a `datetime` |
+| `toDateTime(value)`         | datetime text or a `datetime`                          |
+| `toDateTime(date, time)`    | a `date` and a `time` combined                         |
+| `toAbsoluteDateTime(value)` | absolute text or an `absoluteDateTime`                 |
 
 Local and absolute values convert through the player's current zone:
 
@@ -5106,10 +5172,10 @@ the year's first Thursday, so 2024-12-30 is week 1 of 2025 and 2021-01-01 is wee
 
 ### Durations
 
-| Kind | Units | Meaning |
-| --- | --- | --- |
-| Exact (`duration`) | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours`, `d`/`day`/`days`, `w`/`week`/`weeks` | Elapsed time: `1 day` is always 24 hours and `1 week` 168 hours |
-| Calendar (`calendarDuration`) | `calendar` before `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same clock time that many dates, weeks, months, or years later, never a fixed number of hours |
+| Kind                          | Units                                                                                                                                         | Meaning                                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Exact (`duration`)            | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours`, `d`/`day`/`days`, `w`/`week`/`weeks` | Elapsed time: `1 day` is always 24 hours and `1 week` 168 hours                                   |
+| Calendar (`calendarDuration`) | `calendar` before `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years`                                             | The same clock time that many dates, weeks, months, or years later, never a fixed number of hours |
 
 A unit follows a number literal, a name, a member such as `p.delay` or `list[i]`, a call, or parentheses, and gives the
 number before it that unit: `count s`, `(count / 2) min`, `randomInteger(5..=10) s`, `count * 1 h`, and
@@ -5147,13 +5213,13 @@ is a compile error when its type is known, and otherwise a runtime error.
 
 No operator reads a time zone.
 
-| Operation | Result |
-| --- | --- |
-| `date ± calendar duration` with a zero exact offset | Months, then days |
-| `datetime ± calendar duration` with a zero exact offset | The same clock time on the date that many months, then days, later |
-| `absoluteDateTime ± duration` | Elapsed time |
-| `date - date` | A calendar duration of whole calendar days, such as `5 calendar days` |
-| `absoluteDateTime - absoluteDateTime` | The elapsed duration |
+| Operation                                               | Result                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------- |
+| `date ± calendar duration` with a zero exact offset     | Months, then days                                                     |
+| `datetime ± calendar duration` with a zero exact offset | The same clock time on the date that many months, then days, later    |
+| `absoluteDateTime ± duration`                           | Elapsed time                                                          |
+| `date - date`                                           | A calendar duration of whole calendar days, such as `5 calendar days` |
+| `absoluteDateTime - absoluteDateTime`                   | The elapsed duration                                                  |
 
 Every other combination is an error that names a route that works: `date ± duration` uses calendar units, as in
 `getDate() + 1 calendar day`; `datetime ± duration` and `datetime - datetime` convert to `absoluteDateTime` for elapsed
@@ -5202,6 +5268,7 @@ Temporal values and durations can be list and set elements; a set compares kind 
 kind distinct from the others and from text: local values without an offset, absolute values as moments in UTC.
 
 ## 36. Scheduling
+
 **Status:** Wanted capability; final syntax, authority, and Player UI deferred
 
 Scheduled events and deadlines target absolute wall-clock moments and may become due while no Player is running.
@@ -5212,6 +5279,7 @@ require a separate design. The earlier `schedule datetime { ... }` and `cancelSc
 final author syntax. See [`OPEN-DECISIONS.md`](../OPEN-DECISIONS.md).
 
 ## 37. Dynamic speaker terms
+
 **Status:** Accepted
 
 Dynamic speaker terms are built-in and custom properties attached to a speaker. A character may represent a person, a fictional character, a robot, or another entity that can participate in the tease.
@@ -5264,7 +5332,10 @@ say as mistressVera "Kneel."
 say as mistressVera "You will obey your ${speaker.title}."
 ```
 
-During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
+During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that
+message. An ask inside the message has its own speaker: without its own `as`, as in
+`say as mistressVera "Hi ${askText("Your name?")}"`, it uses the default speaker
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)).
 
 `say as player "..."` is the player's own message. It appears on the player's side, as a clicked button's answer does,
 with no name and no avatar, and with the ordinary reading time. A clicked button and an answer to an ask are messages of
@@ -5550,15 +5621,15 @@ The initial engine presets use:
 
 Setting `gender` fills the default values of the derived terms below:
 
-| Property | Male default | Female default |
-|---|---|---|
-| `maleFemale` | `"male"` | `"female"` |
-| `manWoman` | `"man"` | `"woman"` |
-| `boyGirl` | `"boy"` | `"girl"` |
-| `heShe` | `"he"` | `"she"` |
-| `himHer` | `"him"` | `"her"` |
-| `hisHer` | `"his"` | `"her"` |
-| `himselfHerself` | `"himself"` | `"herself"` |
+| Property         | Male default | Female default |
+| ---------------- | ------------ | -------------- |
+| `maleFemale`     | `"male"`     | `"female"`     |
+| `manWoman`       | `"man"`      | `"woman"`      |
+| `boyGirl`        | `"boy"`      | `"girl"`       |
+| `heShe`          | `"he"`       | `"she"`        |
+| `himHer`         | `"him"`      | `"her"`        |
+| `hisHer`         | `"his"`      | `"her"`        |
+| `himselfHerself` | `"himself"`  | `"herself"`    |
 
 Examples:
 
@@ -5589,19 +5660,19 @@ and the terms it sets explicitly. Script assignments then change the player with
 
 The confirmed anatomical and arousal terms are:
 
-| Property | Male default | Female default | Intended use |
-|---|---|---|---|
-| `penisVagina` | `"penis"` | `"vagina"` | General or more formal genital wording. `vagina` follows common-language usage here. |
-| `cockPussy` | `"cock"` | `"pussy"` | General informal genital wording. |
-| `penisClitoris` | `"penis"` | `"clitoris"` | More formal reference to the primary organ being stimulated. |
-| `cockClit` | `"cock"` | `"clit"` | Informal stimulation target, especially with dynamic action terms. |
-| `glansClitoris` | `"glans"` | `"clitoris"` | More focused reference to a highly sensitive area; a practical text pair rather than perfectly symmetrical terminology. |
-| `ballsLabia` | `"balls"` | `"labia"` | Contextual reference to a sensitive external area; not an anatomical-homology claim. |
-| `scrotumVulva` | `"scrotum"` | `"vulva"` | Broad external-region wording; not a direct organ-to-organ equivalence. |
-| `foreskinClitoralHood` | `"foreskin"` | `"clitoral hood"` | Covering tissue that can be referenced in similar instructions. |
-| `chestBreasts` | `"chest"` | `"breasts"` | Broad profile-dependent chest or breast wording. |
-| `nippleBreast` | `"nipple"` | `"breast"` | More focused arousal wording when the intended instruction contrasts a nipple-focused male phrase with a broader breast-focused female phrase. |
-| `hardWet` | `"hard"` | `"wet"` | Contextual arousal wording for questions or warm-up instructions, not an exact physiological measurement. |
+| Property               | Male default | Female default    | Intended use                                                                                                                                   |
+| ---------------------- | ------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `penisVagina`          | `"penis"`    | `"vagina"`        | General or more formal genital wording. `vagina` follows common-language usage here.                                                           |
+| `cockPussy`            | `"cock"`     | `"pussy"`         | General informal genital wording.                                                                                                              |
+| `penisClitoris`        | `"penis"`    | `"clitoris"`      | More formal reference to the primary organ being stimulated.                                                                                   |
+| `cockClit`             | `"cock"`     | `"clit"`          | Informal stimulation target, especially with dynamic action terms.                                                                             |
+| `glansClitoris`        | `"glans"`    | `"clitoris"`      | More focused reference to a highly sensitive area; a practical text pair rather than perfectly symmetrical terminology.                        |
+| `ballsLabia`           | `"balls"`    | `"labia"`         | Contextual reference to a sensitive external area; not an anatomical-homology claim.                                                           |
+| `scrotumVulva`         | `"scrotum"`  | `"vulva"`         | Broad external-region wording; not a direct organ-to-organ equivalence.                                                                        |
+| `foreskinClitoralHood` | `"foreskin"` | `"clitoral hood"` | Covering tissue that can be referenced in similar instructions.                                                                                |
+| `chestBreasts`         | `"chest"`    | `"breasts"`       | Broad profile-dependent chest or breast wording.                                                                                               |
+| `nippleBreast`         | `"nipple"`   | `"breast"`        | More focused arousal wording when the intended instruction contrasts a nipple-focused male phrase with a broader breast-focused female phrase. |
+| `hardWet`              | `"hard"`     | `"wet"`           | Contextual arousal wording for questions or warm-up instructions, not an exact physiological measurement.                                      |
 
 Examples:
 
@@ -5632,15 +5703,15 @@ Scripts use those as ordinary text.
 
 Actions and anatomical targets remain separate so the same terms can be recombined without creating complete phrase keywords for every tense and instruction.
 
-| Property | Male default | Female default | Grammatical use |
-|---|---|---|---|
-| `strokeRub` | `"stroke"` | `"rub"` | Base or imperative form. |
-| `strokingRubbing` | `"stroking"` | `"rubbing"` | Continuous or gerund form. |
-| `wankRub` | `"wank"` | `"rub"` | Alternative informal base or imperative form. |
-| `wankingRubbing` | `"wanking"` | `"rubbing"` | Alternative informal continuous form. |
-| `strokedRubbed` | `"stroked"` | `"rubbed"` | Past-tense form. |
-| `wankedRubbed` | `"wanked"` | `"rubbed"` | Alternative informal past-tense form. |
-| `strokerMasturbator` | `"stroker"` | `"masturbator"` | Agent noun for the person performing the action. |
+| Property             | Male default | Female default  | Grammatical use                                  |
+| -------------------- | ------------ | --------------- | ------------------------------------------------ |
+| `strokeRub`          | `"stroke"`   | `"rub"`         | Base or imperative form.                         |
+| `strokingRubbing`    | `"stroking"` | `"rubbing"`     | Continuous or gerund form.                       |
+| `wankRub`            | `"wank"`     | `"rub"`         | Alternative informal base or imperative form.    |
+| `wankingRubbing`     | `"wanking"`  | `"rubbing"`     | Alternative informal continuous form.            |
+| `strokedRubbed`      | `"stroked"`  | `"rubbed"`      | Past-tense form.                                 |
+| `wankedRubbed`       | `"wanked"`   | `"rubbed"`      | Alternative informal past-tense form.            |
+| `strokerMasturbator` | `"stroker"`  | `"masturbator"` | Agent noun for the person performing the action. |
 
 Examples:
 
@@ -6003,6 +6074,7 @@ Locally encrypted image references identify files available to the player's runt
 The exact current-state API, chastity-window API, hygiene library, lock request payload, and detailed account result objects remain open.
 
 ## 38. Keywords and protected built-ins
+
 **Status:** Accepted
 
 TeaseScript distinguishes grammar keywords from protected engine names.
@@ -6228,6 +6300,7 @@ So does `choose`, which names `askChoice` ([§19](#19-choices)), and `removePerm
 button's `remove()` ([§28](#28-permanent-buttons)).
 
 ### Debug mode
+
 **Status:** Accepted (Owner decision, 2026-10-07)
 
 `debugMode` is a protected, read-only `boolean`: `true` while the host runs the session in Debug, otherwise `false`. A
@@ -6242,6 +6315,7 @@ if answer == line or debugMode {
 ```
 
 ## 39. Rejected and reserved syntax
+
 **Status:** Accepted
 
 The following are not part of accepted TeaseScript syntax.
@@ -6347,6 +6421,7 @@ They are not currently executable syntax. Media and timers are controlled throug
 `available when` is reserved for future requirements or suitability metadata and is not executable syntax.
 
 ## 40. Dictionaries
+
 **Status:** Accepted (#536; the `default:` of `get`: owner decisions, 2026-10-19)
 
 A dict is a lookup table from text keys to values of one type, for names known only when the script runs. An object
@@ -6407,6 +6482,7 @@ for name, toy in toys { ... }           // the keys with a copy of each value
 Deferred: keys other than text, merging dicts, and sorted dicts.
 
 ## 41. Headers and tags
+
 **Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))
 
 ### File header
@@ -6434,7 +6510,8 @@ exit
 - `tags` lists the file's tags for selection, separated by commas: a plain tag in quotes, `"chastity"`, or a tag with a
   number without quotes, `punishment: 4` (not `"punishment: 4"`).
 - `keywords` lists text in quotes for the future website catalog search. Only the keywords of `main.tease` are used,
-  and they never affect selection.
+  and they never affect selection. Surrounding spaces are removed. An empty keyword is error `TSH013`; a keyword listed
+  more than once counts once, with warning `TSH014`.
 - The header is metadata, not YAML: indentation has no meaning, and it runs no code and reads no variables.
 
 ### Tags
@@ -6519,6 +6596,7 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   ([§33](#33-browser-api-file-folder-camera-and-url-references)).
 
 ## Remaining open decisions
+
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.
 
 Resolved in this revision:

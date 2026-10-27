@@ -124,8 +124,9 @@ state from GitHub.
 - Product scope and current implementation focus: [`docs/PRODUCT.md`](docs/PRODUCT.md)
 - Architecture and component boundaries: [`CURRENT-DESIGN.md`](CURRENT-DESIGN.md) and
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- Accepted syntax baseline and implemented language subset:
-  [`docs/specifications/accepted-syntaxes-v30.md`](docs/specifications/accepted-syntaxes-v30.md) and
+- Accepted syntax baseline:
+  [`docs/specifications/accepted-syntaxes-v30.md`](docs/specifications/accepted-syntaxes-v30.md); the status of each
+  construct: the [syntax reference](docs/TEASESCRIPT-REFERENCE.md); language design intent and boundaries:
   [`docs/TEASESCRIPT.md`](docs/TEASESCRIPT.md)
 - Runtime, actions, checkpoints, and current internal formats: [`docs/RUNTIME.md`](docs/RUNTIME.md)
 - Engine primitives and libraries: [`docs/LIBRARIES.md`](docs/LIBRARIES.md)

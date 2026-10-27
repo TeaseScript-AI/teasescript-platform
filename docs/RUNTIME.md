@@ -166,9 +166,10 @@ Completion semantics are:
   arrives later returns `alreadySettled` with that settlement;
 - `showPopup` ([V30 §31](specifications/accepted-syntaxes-v30.md#31-popups-and-system-notifications)) is a `popup`
   interaction whose UI holds its message and button text, `OK` without `buttonText:`, both shown text that a computed
-  form evaluates once, in written order, before the popup opens. Used as a value it returns its elapsed waiting time as
-  `showButton` does; used as a statement it has no result. Only `{ kind: "activate" }`, the player closing it,
-  completes it: the settlement has no transcript text, and only `actionCompleted` is published;
+  form evaluates once, in written order, before the popup opens. The call form also takes the message first, without
+  `message:`. Used as a value it returns its elapsed waiting time as `showButton` does; used as a statement it has no
+  result. Only `{ kind: "activate" }`, the player closing it, completes it: the settlement has no transcript text, and
+  only `actionCompleted` is published;
 - `openUrl` ([V30 §33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references))
   is a `url` interaction whose UI holds the canonical web address, the text of its button (`buttonText:`, "Open link"
   by default), and `alwaysButton` (`false` by default). The address must be text that parses as an absolute `http:` or
@@ -416,6 +417,10 @@ permanent buttons, the Stage image, monotonic identities, bounded settlement rep
 time/completion operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
 server time integrity, and server persistence remain deferred.
 
+`items += [x]` on a plain variable appends in place. On a property, element, or dict value (`o.items += [i]`), or with
+a call of a script function or an ask on the right (`t += [f(i)]`), it copies the whole list, so a loop that grows a
+list that way takes time quadratic in its length. `.add(x)` and `.addAll(more)` append in place on every place.
+
 ## Owner-resolved future runtime semantics
 
 These owner decisions are independent of final Player visual tuning but are not implemented capability or accepted
@@ -566,7 +571,10 @@ activation's root is `frames[0]`.
   or for an expiry, cue, or finish block the one that started the timer or media. Timers record that root as
   `rootScopeId`, media with blocks as `handlerRootScopeId`, and queued blocks as `rootScopeId`. A root that leaves the
   stack stays in `retainedScopes` while such a block can still run, and is dropped at the next transfer after that; a
-  `goto` from such a block brings its activation back in place of the innermost one.
+  `goto` from such a block brings its activation back in place of the innermost one. The root stays whole: while a
+  block of a persistent timer or button, or of media, that a file started can still run, a `goto` to another file keeps
+  all of that file's top-level variables, also those no block uses. Trimming them would need a reachability analysis,
+  deferred in #512.
 - A transfer that leaves an activation removes its non-persistent timers, as [Timers and scene
   time](#timers-and-scene-time) describes; `exit` also clears activations and retained roots.
 

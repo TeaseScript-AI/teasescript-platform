@@ -125,7 +125,7 @@ and breaking changes remain acceptable.
     its canonical document and apply it consistently.
   - **Trigger:** Start after the syntax work of tracker #512 has landed, so messages for the settled syntax are reviewed
     once, and before Alpha testing with authors.
-  - **Reference:** Tracker #512, the diagnostic catalog in [`TEASESCRIPT.md`](../TEASESCRIPT.md), and
+  - **Reference:** Tracker #512, the diagnostic catalog in [`DIAGNOSTICS.md`](../DIAGNOSTICS.md), and
     [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
 
 - [ ] **Cross-origin Player host contract**
