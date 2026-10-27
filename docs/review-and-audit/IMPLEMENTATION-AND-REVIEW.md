@@ -127,8 +127,8 @@ separately assigned [`AUDIT.md`](AUDIT.md).
   over-compression), debuggability, KISS, YAGNI, useful DRY, fragmentation, and dependency cost.
 - **Tests and evidence:** suitable layers, assertions, independently derived or explicitly scoped regression oracles,
   diagnostics, reproducibility, negative paths, whether each new or materially changed test protects a real obligation
-  rather than temporary implementation state, whether a cheaper form would prove the same, and proof of the claim
-  rather than a green total.
+  rather than temporary implementation state, whether a cheaper form would prove the same
+  ([test admission](../TESTING.md#test-admission-and-consolidation)), and proof of the claim rather than a green total.
 - **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, current-status impact, consolidation, and safe, token-efficient
   compactness.
