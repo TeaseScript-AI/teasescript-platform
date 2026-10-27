@@ -169,6 +169,27 @@ interface KeyReach {
   readonly next: Map<string, KeyReach>;
 }
 
+/**
+ * Where a literal lands (A2): the place, the node above (a literal's own landing) and the step below it, the key path
+ * made once when first asked, and the nodes below by step, so sibling literals at one step share one node.
+ */
+interface Landing {
+  readonly id: number;
+  readonly place: PlaceId;
+  readonly above: Landing | null;
+  readonly step: string;
+  path: readonly string[] | null;
+  readonly below: Map<string, Landing>;
+}
+
+/** A mixed literal's question at a landing and a path below it (A2), answered once for every element that asks it. */
+interface LandingQuestion {
+  readonly path: readonly string[];
+  readonly copiesOnly: boolean;
+  first: SourceSite | null | undefined;
+  into: string | null;
+}
+
 const LITERAL_NODES: ReadonlySet<string> = new Set([
   "objectLiteral",
   "listLiteral",
@@ -876,29 +897,106 @@ export class Consumers {
   /**
    * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
    * itself, an added element one step below), or the literals around it (a collection's cell as `element`, an object's
-   * property by name) put it at; `null` where nothing stores it.
+   * property by name) put it at; `null` where nothing stores it. Each literal is placed once, from the nearest literal
+   * above it already placed.
    */
-  #landingOf(
-    literal: PlaceId,
-  ): { readonly place: PlaceId; readonly path: readonly string[] } | null {
+  #landingOf(literal: PlaceId): Landing | null {
     const { program, definitions } = this.pass;
-    const steps: string[] = [];
+    const known = this.#landings.get(literal);
+    if (known !== undefined) return known;
+    const chain: { readonly literal: PlaceId; readonly step: string }[] = [];
+    let node: Landing | null = null;
     for (let at = literal; ;) {
+      const placed = this.#landings.get(at);
+      if (placed !== undefined) {
+        node = placed;
+        break;
+      }
       program.work.charge("checks");
       const d = (definitions.byValue.get(at) ?? []).find(
         (each) => each.kind === "whole" || each.kind === "add",
       );
-      if (d === undefined) return null;
+      if (d === undefined) {
+        this.#landings.set(at, null);
+        break;
+      }
       const owner = d.kind === "whole" ? program.cellOwner.get(d.place) : undefined;
       if (owner === undefined) {
-        const base =
+        const path =
           d.kind === "add" && d.how !== "elements" ? joinSteps(d.path, ["element"]) : d.path;
-        return { place: d.place, path: joinSteps(base, steps.reverse()) };
+        node = {
+          id: this.#landingCount++,
+          place: d.place,
+          above: null,
+          step: "",
+          path,
+          below: new Map(),
+        };
+        this.#landings.set(at, node);
+        break;
       }
       const kind = program.place(d.place).kind;
-      steps.push(kind.kind === "property" ? propertyStep(kind.name) : "element");
+      chain.push({
+        literal: at,
+        step: kind.kind === "property" ? propertyStep(kind.name) : "element",
+      });
       at = owner.owner;
     }
+    for (let at = chain.length - 1; at >= 0; at -= 1) {
+      const { literal: link, step } = chain[at]!;
+      if (node !== null) {
+        let next: Landing | undefined = node.below.get(step);
+        if (next === undefined) {
+          next = {
+            id: this.#landingCount++,
+            place: node.place,
+            above: node,
+            step,
+            path: null,
+            below: new Map(),
+          };
+          node.below.set(step, next);
+        }
+        node = next;
+      }
+      this.#landings.set(link, node);
+    }
+    return node;
+  }
+
+  readonly #landings = new Map<PlaceId, Landing | null>();
+  #landingCount = 0;
+
+  /** A mixed literal's question at its landing and a path below it: the key path and whether only copies bring it. */
+  #landingQuestion(node: Landing, below: readonly string[]): LandingQuestion | null {
+    const memoKey = joinParts(node.id, below);
+    let question = this.#questions.get(memoKey);
+    if (question === undefined) {
+      keepText(this.pass.program.work, memoKey.length);
+      const path = joinSteps(this.#landingPath(node), ["element"], below);
+      const last = path.at(-1);
+      question =
+        last === undefined || last === "element" || last === "entry"
+          ? null
+          : { path, copiesOnly: this.#copiesOnly(node.place, path), first: undefined, into: null };
+      this.#questions.set(memoKey, question);
+    }
+    return question;
+  }
+
+  readonly #questions = new Map<string, LandingQuestion | null>();
+
+  /** A landing's key path, made once: its steps up to the nearest landing that has its path, below that path. */
+  #landingPath(node: Landing): readonly string[] {
+    if (node.path !== null) return node.path;
+    const steps: string[] = [];
+    let at: Landing = node;
+    while (at.path === null) {
+      steps.push(at.step);
+      at = at.above!;
+    }
+    node.path = keptArray(this.pass.program.work, joinSteps(at.path, steps.reverse()));
+    return node.path;
   }
 
   /**
@@ -921,31 +1019,30 @@ export class Consumers {
     if (store !== null) {
       // (a key's steps: a dict value is an `element`, as `targetRoot` makes it)
       const below = found.path.map((at) => (at === "entry" ? "element" : at));
-      const path = joinSteps(store.path, ["element"], below);
       const reach = found.d.value === undefined ? null : this.#valueReach(found.d.value, below);
-      // (the offending element and every other contribution through whole copies)
-      const deferred = this.#deferred(
-        site,
-        store.place,
-        path,
-        reach !== null && reach.brought && this.#copiesOnly(store.place, path),
-        () => reach?.copy ?? null,
-      );
-      if (deferred.brought !== null) {
-        this.#error(
-          "written-target",
-          deferred.site,
-          {
-            rule: "store",
-            into: this.#placeText(store.place, path),
-            type: found.decided,
-            written: false,
-            decider: null,
-            brought: deferred.brought,
-          },
-          found.kinds,
-        );
-        return;
+      // (the offending element and every other contribution through whole copies; each landing's question once)
+      const question = reach !== null && reach.brought ? this.#landingQuestion(store, below) : null;
+      if (question !== null && question.copiesOnly) {
+        if (question.first === undefined)
+          question.first = this.#firstDirect(store.place, question.path);
+        const copy = reach!.copy === null ? null : (program.places[reach!.copy]?.site ?? null);
+        if (question.first !== null) {
+          question.into ??= this.#placeText(store.place, question.path);
+          this.#error(
+            "written-target",
+            question.first,
+            {
+              rule: "store",
+              into: question.into,
+              type: found.decided,
+              written: false,
+              decider: null,
+              brought: copy ?? site,
+            },
+            found.kinds,
+          );
+          return;
+        }
       }
     }
     const node = literal === undefined ? null : program.place(literal).kind;
