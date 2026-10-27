@@ -17,7 +17,7 @@ import {
   unknownItem,
   withOwnSelection,
 } from "./contract.js";
-import { joinParts, joinSteps, keepText, keptParts } from "./budget.js";
+import { joinParts, joinSteps, keepText } from "./budget.js";
 import { keyOf, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
 import { belowSelected, withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
@@ -72,8 +72,6 @@ export type ReadRoute = "exact" | "contract";
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
-  /** Per computed value, its value class (`valueClass`). */
-  readonly #classes = new Map<PlaceId, string | null>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -179,40 +177,27 @@ export class Values {
   }
 
   /**
-   * S6c: what a computed value's exact answer at every path rests on, as one text (`Contract.readClass` for a read): a
-   * `get` by its receiver's and its default's reads and whether its default runs, and alone (`getProof`), an
-   * `otherwise` by its operands' reads and whether its fallback runs only where the left is null; each at the
-   * operation's own node, so where it has none, `null`, as for any other value or an operand that is no read. Once per
-   * value.
+   * S6c: what a computed value's exact answer rests on beside its operands, as a part of its class
+   * (`Contract.classOf`): a `get`'s whether its default runs, and alone (`getProof`), an `otherwise`'s whether its
+   * fallback runs only where the left is null; each at the operation's own node, so where it has none, or for any other
+   * value, `null`.
    */
-  public valueClass(value: PlaceId): string | null {
-    const known = this.#classes.get(value);
-    if (known !== undefined) return known;
-    const { program, contract } = this.pass;
+  public proofOf(value: PlaceId): string | null {
+    const { program } = this.pass;
     const c = program.opOf.get(value);
     const at = c === undefined ? null : program.exprAt(c.site);
-    let cls: string | null = null;
-    if (c === undefined) cls = contract.readClass(value, true);
-    else if (at !== null && (c.kind === "get" || c.kind === "fallback")) {
-      const [first, second] = c.kind === "get" ? [c.receiver, c.fallback] : [c.left, c.right];
-      const [a, b] = [contract.readClass(first, true), contract.readClass(second, true)];
-      let proof: string;
-      if (c.kind === "get") {
-        const { reached, only } = getProof(program, c, at);
-        proof = `${reached ? "r" : ""}${only ? "o" : ""}`;
-      } else {
-        const rightAt = program.exprAt(program.places[c.right]?.site ?? c.site);
-        proof =
-          rightAt === null
-            ? "-"
-            : at.predecessors.length === 1 && at.predecessors[0] === rightAt
-              ? "d"
-              : "";
-      }
-      if (a !== null && b !== null) cls = keptParts(program.work, c.kind, a, b, proof);
+    if (at === null || c === undefined) return null;
+    if (c.kind === "get") {
+      const { reached, only } = getProof(program, c, at);
+      return `${reached ? "r" : ""}${only ? "o" : ""}`;
     }
-    this.#classes.set(value, cls);
-    return cls;
+    if (c.kind !== "fallback") return null;
+    const rightAt = program.exprAt(program.places[c.right]?.site ?? c.site);
+    return rightAt === null
+      ? "-"
+      : at.predecessors.length === 1 && at.predecessors[0] === rightAt
+        ? "d"
+        : "";
   }
 
   /** The value of a place at a node, read at the path `rest` below it. */

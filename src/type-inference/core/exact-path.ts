@@ -1185,11 +1185,12 @@ export class ExactPath {
   /**
    * S6c: the add whose value D's answer is at every path (`#defVal`): D itself, or, where D stands fourth or later in a
    * run of adds of one class, the run's third. In a run each add's exact read of its receiver before it is the add
-   * before it at every path (`#repeats`) and each adds a read of one class (`readClass`: equal items at every path, a
-   * later writer), so each answers as the one before with that read merged in once more: past the run's first add its
-   * kinds hold the read's, and one merge more settles their certainty (`alternatives`), whatever came before the run;
-   * the earliest writer stands for each kind. So k adds of one source read at k fields walk at most three adds per
-   * field, never the chain. Once per add, on an explicit walk.
+   * before it at every path (`#repeats`) and each adds a value of one class (`Contract.classOf`: equal items at every
+   * path apart from writers, each a later one: an add's own writer stands for every kind it adds, and a literal's
+   * absences lie in the add's own text), so each answers as the one before with that value merged in once more: past
+   * the run's first add its kinds hold the value's, and one merge more settles their certainty (`alternatives`),
+   * whatever came before the run; the earliest writer stands for each kind. So k adds of one source read at k fields
+   * walk at most three adds per field, never the chain. Once per add, on an explicit walk.
    */
   #repeatOf(d: Definition): Definition {
     if (d.kind !== "add" || !sharing()) return d;
@@ -1216,8 +1217,8 @@ export class ExactPath {
   }
 
   /**
-   * S6c: the add D repeats, or `null`: D and the add P before it add, in one mode, reads of one class
-   * (`Contract.readClass`, never an ingress: equal items at every path) to one receiver key, whose exact read before D
+   * S6c: the add D repeats, or `null`: D and the add P before it add, in one mode, values of one class
+   * (`Contract.classOf`, never an ingress: equal items at every path) to one receiver key, whose exact read before D
    * is P at every path (P with no rest at the key: every key below it is P's below it, an event below it being one of
    * the key's own, X6), no guard of the key, a prefix or a key below holds D (no mark), and P's writer comes first.
    */
@@ -1238,8 +1239,8 @@ export class ExactPath {
       p.loop !== undefined
     )
       return null;
-    const cls = contract.readClass(d.value, true);
-    if (cls === null || contract.readClass(p.value, true) !== cls) return null;
+    const cls = contract.classOf(d.value, true);
+    if (cls === null || contract.classOf(p.value, true) !== cls) return null;
     if (guards.narrowed(key, d.node) || guards.guardedBelow(key, d.node).length > 0) return null;
     const [first, later] = [definitions.writerOf(p), definitions.writerOf(d)];
     if (first !== null && later !== null && firstWriter(first, later) !== first) return null;
