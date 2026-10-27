@@ -146,7 +146,7 @@ export type DiagnosticRule =
     }
   /** C6: an element selection (`.first`, `.removeLast()`, `${...}`) of `collection`. */
   | { readonly rule: "selection"; readonly collection: string; readonly member: string }
-  /** ADR 0021 1.3, A8: a literal's elements, at `path` below them, of one type: the earliest element's, `type`. */
+  /** ADR 0021 1.3, A8: a literal's elements, at `path` below them (key steps), of one type: the earliest element's. */
   | {
       readonly rule: "mixed";
       readonly collection: "list" | "set" | "dict";

@@ -3012,6 +3012,23 @@ test("a property only copies of whole objects bring errs at its first direct rea
       'let a = {n: 1}\nlet c = a\nsay c.n\nlet wrong = "bad"\nc.n = wrong\nexit',
       ["wrong"],
     ],
+    // copies inside literals that wrap them, the copy named
+    [
+      "copies through literal wrappers",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = {box: {inner: a}}\nc = {box: {inner: b}}\nsay c.box.inner.n\nexit',
+      ["c.box.inner.n (b)"],
+    ],
+    [
+      "elements wrapping copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: b}]\nsay xs[0].inner.n\nexit',
+      ["xs[0].inner.n (b)"],
+    ],
+    // a literal's own field is its own contribution, whatever it copies
+    [
+      "a literal's field copied from a property",
+      'let a = {n: 1}\nlet c = {n: a.n}\nc = {n: "bad"}\nsay c.n\nexit',
+      ['"bad"'],
+    ],
     // a literal of the destination gives the property itself, so the copy's error stays at the copy
     [
       "a literal's field beside the copies",
@@ -3042,30 +3059,53 @@ test("a property only copies of whole objects bring errs at its first direct rea
 });
 
 test("the copied-property check grows with the program, not with its copies times its fields (A2, ADR 0021 rule 1.1)", () => {
-  // k copies of a record with k fields, a record of k other-typed fields added, each field read: one error per field
-  const program = (k: number): string => {
-    const fields = (value: string): string =>
-      Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
-    const reads = Array.from({ length: k }, (_, i) => `say "\${xs[0].f${i}}"`).join("\n");
-    return (
-      `let good = {${fields("1")}}\nlet bad = {${fields('"x"')}}\n` +
-      `let xs = [${Array.from({ length: k }, () => "good").join(", ")}]\nxs.add(bad)\n${reads}\nexit`
-    );
-  };
-  const work = (k: number): { total: number; nodes: number } => {
-    const request = coreRequest([{ path: "main.tease", source: program(k) }]);
-    assert.ok(request !== null);
-    const answers = analyseCore(request);
-    assert.equal(
-      answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
-      k,
-    );
-    return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
-  };
-  const small = work(32);
-  const large = work(64);
-  // the work ratio per doubling of the source, against `type-core-work.test.ts`'s criterion (2 for linear work)
-  assert.ok((2 * (large.total / small.total)) / (large.nodes / small.nodes) <= 2.15);
+  // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
+  // copies as a list's elements, as stores into one variable, and wrapped in literals
+  const fields = (k: number, value: string): string =>
+    Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
+  const records = (k: number): string =>
+    `let good = {${fields(k, "1")}}\nlet bad = {${fields(k, '"x"')}}\n`;
+  const reads = (k: number, read: string): string =>
+    Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
+  const copies = (k: number, copy: string): string =>
+    Array.from({ length: k }, () => copy).join(", ");
+  const shapes: readonly (readonly [string, (k: number) => string])[] = [
+    [
+      "elements",
+      (k) =>
+        `${records(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
+    ],
+    [
+      "stores",
+      (k) =>
+        `${records(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
+        `${reads(k, "c")}\nexit`,
+    ],
+    [
+      "wrapped elements",
+      (k) =>
+        `${records(k)}let xs = [${copies(k, "{inner: good}")}]\nxs.add({inner: bad})\n` +
+        `${reads(k, "xs[0].inner")}\nexit`,
+    ],
+  ];
+  for (const [name, program] of shapes) {
+    const work = (k: number): { total: number; nodes: number } => {
+      const request = coreRequest([{ path: "main.tease", source: program(k) }]);
+      assert.ok(request !== null, name);
+      const answers = analyseCore(request);
+      assert.equal(
+        answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
+        k,
+        name,
+      );
+      return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
+    };
+    const small = work(32);
+    const large = work(64);
+    // the work ratio per doubling of the source, against `type-core-work.test.ts`'s criterion (2 for linear work)
+    const doubling = (2 * (large.total / small.total)) / (large.nodes / small.nodes);
+    assert.ok(doubling <= 2.15, `${name}: ${doubling.toFixed(3)}`);
+  }
 });
 
 test("a written expected type holds a default to its own kinds at every depth, known or possible (C10, the owner's F3)", () => {

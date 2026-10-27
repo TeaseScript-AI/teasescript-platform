@@ -578,7 +578,7 @@ export class Consumers {
         : kind.kind === "result"
           ? `${program.functionOf(kind.fn).name}()`
           : program.place(root).label;
-    return pathPhrase({ code: name }, path.map(propertyName));
+    return pathPhrase({ code: name }, path);
   }
 
   /**
@@ -623,20 +623,26 @@ export class Consumers {
 
   /**
    * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
-   * direct read or store, the copy that brought the other type its related site; any other error stays at `site`.
-   * `eligible`: the error is that property's, its offending contribution a whole copy (`#copiesOnly`).
+   * direct read or store, the copy that brought the other type its related site (`copy`, else `site`); any other error
+   * stays at `site`. `eligible`: the error is that property's, its offending contribution through whole copies.
    */
   #deferred(
     site: SourceSite,
     root: PlaceId,
     path: readonly string[],
     eligible: boolean,
+    copy: () => PlaceId | null,
   ): { readonly site: SourceSite; readonly brought: SourceSite | null } {
     const last = path.at(-1);
     const kept = { site, brought: null };
     if (!eligible || last === undefined || last === "element" || last === "entry") return kept;
     const first = this.#firstDirect(root, path);
-    return first === null ? kept : { site: first, brought: site };
+    if (first === null) return kept;
+    const brought = copy();
+    return {
+      site: first,
+      brought: (brought === null ? null : this.pass.program.places[brought]?.site) ?? site,
+    };
   }
 
   /**
@@ -656,27 +662,98 @@ export class Consumers {
   }
 
   /**
-   * Whether a store brings what it stores at `path` below its destination through a whole copy: its value a copy, or a
-   * literal whose every child at the next step is one (each literal's children asked once).
+   * Whether a store brings what it stores at `path` below its destination through whole copies (`#throughCopies`).
    */
   #broughtByCopy(d: Definition, path: readonly string[]): boolean {
     const inserted = d.kind === "add" && d.how === "element" ? 1 : 0;
     if (d.value === undefined || (d.kind !== "whole" && inserted === 0)) return false;
     const rest = path.slice(d.path.length + inserted);
     if (rest.length === 0 || d.path.some((step, at) => path[at] !== step)) return false;
-    if (this.#isCopy(d.value)) return true;
-    const memoKey = joinParts(d.value, rest[0]!);
-    let copies = this.#childCopies.get(memoKey);
-    if (copies === undefined) {
-      const children = this.admission.literalChildren(d.value, rest[0]!);
-      copies = children.length > 0 && children.every((child) => this.#isCopy(child.value));
-      keepText(this.pass.program.work, memoKey.length);
-      this.#childCopies.set(memoKey, copies);
-    }
-    return copies;
+    return this.#throughCopies(d.value, rest);
   }
 
-  readonly #childCopies = new Map<string, boolean>();
+  /**
+   * Whether what `value` holds at `steps`, the property the last one names, comes through whole copies (A2): the value
+   * a copy, or a literal in which, at some prefix short of the property, only copies stand, through literals alone (a
+   * literal that gives the property itself gives its own field).
+   */
+  #throughCopies(value: PlaceId, steps: readonly string[]): boolean {
+    if (this.#isCopy(value)) return true;
+    for (let length = 1; length < steps.length; length += 1) {
+      const frontier = this.#literalFrontier(value, steps, length);
+      if (frontier === null) return false;
+      if (frontier.literals.length === 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The one whole copy that brings what `value` holds at `steps` (A2's related site): the value itself, or the only
+   * copy its literals hold on the way; `null` where several copies bring it.
+   */
+  #oneCopy(value: PlaceId, steps: readonly string[]): PlaceId | null {
+    if (this.#isCopy(value)) return value;
+    let copy: PlaceId | null = null;
+    for (let length = 1; length < steps.length; length += 1) {
+      const frontier = this.#literalFrontier(value, steps, length);
+      if (frontier === null || frontier.copies.length > 1) return null;
+      if (frontier.copies.length === 1) {
+        if (copy !== null) return null;
+        copy = frontier.copies[0]!;
+      }
+      if (frontier.literals.length === 0) return copy;
+    }
+    return null;
+  }
+
+  /**
+   * What a literal value holds at the first `length` of `steps` (A2's walk through wrappers such as
+   * `{box: {inner: a}}`): the literals there and the copies that stand beside them; `null` where a value there is
+   * neither. Once per value and prefix, each from the prefix above it, so paths that share a prefix share its walk.
+   */
+  #literalFrontier(
+    value: PlaceId,
+    steps: readonly string[],
+    length: number,
+  ): { readonly literals: readonly PlaceId[]; readonly copies: readonly PlaceId[] } | null {
+    const { program } = this.pass;
+    if (!program.hasOf.has(value)) return null;
+    let frontier: {
+      readonly literals: readonly PlaceId[];
+      readonly copies: readonly PlaceId[];
+    } | null = { literals: [value], copies: [] };
+    for (let at = 1; at <= length && frontier !== null; at += 1) {
+      const memoKey = joinParts(value, steps.slice(0, at));
+      const known = this.#frontiers.get(memoKey);
+      if (known !== undefined) {
+        frontier = known;
+        continue;
+      }
+      const literals: PlaceId[] = [];
+      const copies: PlaceId[] = [];
+      let other = false;
+      for (const literal of frontier.literals) {
+        for (const child of this.admission.literalChildren(literal, steps[at - 1]!)) {
+          if (this.#isCopy(child.value)) copies.push(child.value!);
+          else if (child.value !== undefined && program.hasOf.has(child.value))
+            literals.push(child.value);
+          else other = true;
+        }
+        if (other) break;
+      }
+      keepText(program.work, memoKey.length);
+      frontier = other
+        ? null
+        : { literals: keptArray(program.work, literals), copies: keptArray(program.work, copies) };
+      this.#frontiers.set(memoKey, frontier);
+    }
+    return frontier;
+  }
+
+  readonly #frontiers = new Map<
+    string,
+    { readonly literals: readonly PlaceId[]; readonly copies: readonly PlaceId[] } | null
+  >();
 
   /**
    * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): every store that
@@ -766,12 +843,15 @@ export class Consumers {
         : this.#literalStores.get(literal);
     if (store !== undefined) {
       const path = joinSteps(store.path, [step], found.path);
-      // (the offending element and every other contribution a whole copy)
+      // (the offending element and every other contribution through whole copies)
       const deferred = this.#deferred(
         site,
         store.place,
         path,
-        this.#isCopy(found.d.value) && this.#copiesOnly(store.place, path),
+        found.d.value !== undefined &&
+          this.#throughCopies(found.d.value, found.path) &&
+          this.#copiesOnly(store.place, path),
+        () => this.#oneCopy(found.d.value!, found.path),
       );
       if (deferred.brought !== null) {
         this.#error(
@@ -802,7 +882,7 @@ export class Consumers {
             : step === "entry"
               ? "dict"
               : "list",
-        path: found.path.map(propertyName),
+        path: found.path,
         type: found.decided,
       },
       found.kinds,
@@ -1061,6 +1141,11 @@ export class Consumers {
               d.place === root &&
               this.#broughtByCopy(d, path) &&
               this.#copiesOnly(root, path),
+            () =>
+              this.#oneCopy(
+                d.value!,
+                path.slice(d.path.length + (d.kind === "add" && d.how === "element" ? 1 : 0)),
+              ),
           );
           this.#error(
             "written-target",

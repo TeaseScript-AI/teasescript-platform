@@ -4,6 +4,7 @@ import { LIST_INDEX_RULE, logicalOperandRule } from "../../operand-rules.js";
 import { isScalarKind } from "../../static-types.js";
 import { VALUE_KINDS } from "../../value-kinds.js";
 import { REFERENCE } from "./contract.js";
+import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
   ContextDetail,
@@ -146,7 +147,8 @@ function plural(kinds: readonly ItemTag[]): string {
 /**
  * A path below a place in words (D2: source text, never code the source does not hold): its properties as code after
  * the place's own (`'box.a.n'`), and each element or dict value step in words (`'n' of an element of 'xs'`). `root`: the
- * place's code, or words for a place the source has no name for (`its elements`).
+ * place's code, or words for a place the source has no name for (`its elements`); `steps`: a key's steps, a property
+ * named as an internal step quoted (`propertyStep`), so `x.element` stays a property.
  */
 export function pathPhrase(
   root: { readonly code: string } | { readonly words: string },
@@ -160,7 +162,10 @@ export function pathPhrase(
     if (step === "element" || step === "entry") {
       phrase = `${step === "entry" ? "a value" : "an element"} of ${named()}`;
       chain = "";
-    } else chain = chain === "" ? step : chain + "." + step;
+    } else {
+      const name = propertyName(step);
+      chain = chain === "" ? name : chain + "." + name;
+    }
   return named();
 }
 
@@ -389,8 +394,9 @@ function originSentence(word: ContextWord, name: string): string {
       return `${from} a store that the compiler does not follow from round to round of a loop.`;
     case "member":
       return `${from} a list element or another part of a value that the compiler follows together with the rest.`;
+    // (the word also covers an object's own `first` and opaque operations: no reference is established)
     case "unmodelled":
-      return `${from} a property of a speaker or another reference, which is checked when the script runs.`;
+      return `The compiler does not follow '${name}', so it is checked when the script runs.`;
   }
 }
 

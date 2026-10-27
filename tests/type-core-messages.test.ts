@@ -296,6 +296,21 @@ test("each consumer's first sentence, as an error and as a warning, with its rul
           "holds one type, so use values of one type in it.",
       ],
     ],
+    // a property named as an internal step stays a property
+    [
+      'let x = {element: 1}\nx.element = "bad"\nexit\n',
+      [
+        "E TSV041 '\"bad\"': 'x.element' holds a whole number (integer) since line 1, so it cannot take text " +
+          "(string). Use a separate variable for a value of another type.",
+      ],
+    ],
+    [
+      'let a = [{entry: 1}, {entry: "bad"}]\nexit\n',
+      [
+        "E TSV044 '\"bad\"': This list mixes a number and text (string) in 'entry' of its elements. A list holds " +
+          "one type, so use values of one type in it.",
+      ],
+    ],
     // a store into an element names the element in words, never an index the source does not have
     [
       'let n = [1]\nn[0] = "x"\nexit\n',
@@ -449,6 +464,17 @@ test("a word that came with its value from another line names that value's origi
     "c.ok",
     from("c.ok", "a property that an object may lack."),
   );
+  // an object's own `first` is not followed either, and no reference is claimed for it
+  count(
+    "let x = {first: 1.5}\nrepeat x.first {}\nexit\n",
+    "x.first",
+    "The compiler does not follow 'x.first', so it is checked when the script runs.",
+  );
+  count(
+    "let x = {first: 1.5}\nlet c = x.first\nrepeat c {}\nexit\n",
+    "c",
+    "The compiler does not follow 'c', so it is checked when the script runs.",
+  );
   // a reference union: each warning names its own kind
   const member =
     "The compiler cannot tell whether 'x' has property 'n' here, so the script checks 'x.n' when it runs.";
@@ -462,11 +488,8 @@ test("a word that came with its value from another line names that value's origi
       `${member} 'x' is a speaker, and its properties are checked when the script runs.`,
       `${member} 'x' is a timer handle, and its properties are checked when the script runs.`,
       `${member} ${OUTSIDE("x")}`,
-      `${COUNT}, but 'd' may be a value of another kind here, ${CHECKED} ` +
-        from(
-          "d",
-          "a property of a speaker or another reference, which is checked when the script runs.",
-        ),
+      `${COUNT}, but 'd' may be a value of another kind here, ${CHECKED} The compiler does not follow 'd', so it ` +
+        "is checked when the script runs.",
     ],
   );
 });
