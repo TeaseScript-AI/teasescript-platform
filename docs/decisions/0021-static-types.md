@@ -45,10 +45,10 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes
    `count` an `integer?`. A variable or parameter without a type annotation (declared by `let`, as a loop variable, or
    as a function parameter) whose type is `integer` is likewise inferred from all its assignments: it is a `number` when
-   any of them can store a non-whole number, wherever that assignment is. A parameter's assignments are the arguments
-   of all its calls and its default (rule 1.5). With `let speed = 1` and `speed = speed * 1.5`, `speed` is a `number`;
-   with `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such a
-   variable widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
+   any of them can store a non-whole number, wherever that assignment is. A parameter's assignments also include the
+   arguments of all its calls and its default (rule 1.5). With `let speed = 1` and `speed = speed * 1.5`, `speed` is a
+   `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. The elements and properties inside such
+   a variable widen by the same rule: with `let prices = [1, 2]` and `prices.add(2.5)`, `prices` is a `number[]`, and
    `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A declared type stays strict, such as `integer`,
    `integer[]`, or `integer set`. A read of a `number` place is a `number`, wherever the non-whole value comes from and
    also before the store that brings it, unless a type test narrows it: a copy (`let j = i`), an operation (`i + 1`),

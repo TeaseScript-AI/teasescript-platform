@@ -1176,10 +1176,10 @@ picks.add("three")    // compile error
   `[fromJson(t, default: null), 1]` is a list of `integer?`, so using an element where an integer is required needs a
   check or `otherwise`. The compiler infers no other combination of types.
 - A variable or parameter without a type whose type is `integer` is a `number` when any of its assignments can store a
-  non-whole number, wherever that assignment is. A parameter's assignments are the arguments of all its calls and its
-  default ([§11](#11-function-definitions)). The elements and properties inside such a variable widen by the same rule.
-  A declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read of a `number` place is a
-  `number`, wherever the non-whole value comes from and also before the store that brings it (owner decision,
+  non-whole number, wherever that assignment is. A parameter's assignments also include the arguments of all its calls
+  and its default ([§11](#11-function-definitions)). The elements and properties inside such a variable widen by the
+  same rule. A declared type, such as `integer`, `integer[]`, or `integer set`, stays strict. A read of a `number` place
+  is a `number`, wherever the non-whole value comes from and also before the store that brings it (owner decision,
   2026-10-27): a copy (`let j = i`), an operation (`i + 1`), and an argument (`use(i)`) of it are `number`s. Every place
   that requires a whole number checks the value's type: a `number` there is a compile error, also one that holds a
   whole number when the script runs. An integer is required by:
@@ -1187,7 +1187,7 @@ picks.add("three")    // compile error
   - a repeat count, and the count of media `repeat: n times` ([§22](#audio-and-video));
   - a list index, the index of a list's `get`, the position of `removeAt`, and the count of `take` and `takeLast`;
   - the start and end of `substring`, the count of text `repeat`, and the length of `padStart` and `padEnd`;
-  - the `decimals:` of `round`;
+  - the `decimals:` of `round`, and the amount of `calendar days` and `calendar months` ([§35](#durations));
   - a range bound in `for`, `randomInteger`, `toList`, `wait`, and `timer` ([§6](#6-range-semantics));
   - the `askInteger` prefill, and the start of an `integer` field of `askForm`;
   - a written `integer` place that a value is stored into: a variable, parameter, or result with a written `integer`
