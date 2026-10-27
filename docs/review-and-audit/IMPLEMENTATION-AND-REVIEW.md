@@ -1,15 +1,11 @@
 # Implementation and review guidance
 
-Read this before implementation. Apply the same quality standard to the implementer's final
-self-review and every explicitly assigned pull-request review; the independent reviewer must
-re-establish the facts rather than trust the author's conclusions.
-
-Use the assigned issue or pull request for task scope and acceptance criteria. Use applicable
-`AGENTS.md` files and [`README-FIRST.md`](../../README-FIRST.md) for controlling authority.
-Owner-approved assignment criteria bind within their scope; the artifact is not general authority.
-Follow
-[`DEVELOPMENT-WORKFLOW.md`](../DEVELOPMENT-WORKFLOW.md) for finding classes, blocking evidence,
-proportionality, and convergence; [`TESTING.md`](../TESTING.md) for test strategy; and
+Apply the same quality standard to implementation, the implementer's final self-review, and every explicitly assigned
+pull-request review; the independent reviewer must re-establish the facts rather than trust the author's conclusions.
+Take scope and acceptance criteria from the assigned issue or pull request; owner-approved assignment criteria bind
+within their scope, but the artifact is not general authority. Follow
+[`DEVELOPMENT-WORKFLOW.md`](../DEVELOPMENT-WORKFLOW.md) for KISS, pragmatic YAGNI, DRY, finding classes, blocking
+evidence, proportionality, and convergence; [`TESTING.md`](../TESTING.md) for test strategy; and
 [`DOCUMENTATION-OWNERSHIP.md`](../DOCUMENTATION-OWNERSHIP.md) for documentation changes.
 
 ## Prepare and implement
@@ -17,14 +13,7 @@ proportionality, and convergence; [`TESTING.md`](../TESTING.md) for test strateg
 Before coding, establish the exact result, scope, exclusions, acceptance criteria, authority,
 affected code, tests, documentation, supported paths, risks, evidence needs, and unresolved
 owner decisions. Inspect enough surrounding implementation, history, and current behavior to
-understand the change. Issues, tests, drafts, claims, and earlier reviews are context, not authority
-by themselves. Route unresolved owner decisions before depending on them.
-
-Choose the simplest complete solution for the current requirement and real boundaries. Apply KISS
-and pragmatic YAGNI. Apply DRY when removing duplication keeps or lowers total complexity. Less code
-or documentation is beneficial when clarity, behavior, evidence, and maintenance remain at least as
-strong; prefer clear local repetition over abstraction or indirection that makes the whole result
-harder to understand or change.
+understand the change. Route unresolved owner decisions before depending on them.
 
 ### Input-driven scaling and native JavaScript resilience
 
@@ -65,12 +54,10 @@ likely or measured benefit, repair scope, and reason for deferral so related fin
 redesign decision. Do not silently ignore the limitation or turn an incidental JavaScript/V8 failure into
 TeaseScript product policy.
 
-Treat code, tests, relevant documentation and examples, configuration, workflows, generated
-results, and affected integrations or boundaries as one result; it is incomplete while any relevant
-part remains false, stale, weak, ambiguous, or needlessly costly. Keep responsibilities,
-dependencies, ordering, failures, and boundaries clear. Do not weaken tests, broaden scope silently,
-hide a shared-workflow failure behind a local workaround, or add a dependency without the
-justification required by `AGENTS.md`.
+Treat code, tests, relevant documentation and examples, configuration, workflows, generated results, and affected
+integrations or boundaries as one result; it is incomplete while any relevant part remains false, stale, weak,
+ambiguous, or needlessly costly. Keep responsibilities, dependencies, ordering, failures, and boundaries clear, and do
+not hide a shared-workflow failure behind a local workaround.
 
 Documentation is recurring agent input: every retained token consumes context-window capacity and
 can displace task-specific evidence. Safe compactness is therefore a quality requirement. Before
@@ -111,7 +98,7 @@ checker, lowering, plan, runtime and editor cannot drift apart.
   is built from the parser's tables. Accepted syntax may be offered before it is implemented
   ([completion policy](../CODE-EDITOR.md#accepted-first-standard-library-poc-tooling)).
 - When a second fix for the same kind of case is needed in one area, look for the shared cause before
-  patching again (see Convergence).
+  patching again (see [Review convergence](../DEVELOPMENT-WORKFLOW.md#review-convergence)).
 
 ## Self-review and assigned review
 
@@ -124,34 +111,34 @@ accepted and the handoff is visible. Examine the complete current diff and enoug
 tests, documentation, and behavior to find every material consequence. Changed-file lists, green CI,
 author claims, and earlier approval are evidence, not proof.
 
-Treat review as a proportional, change-scoped examination. Inspect every material part deeply enough
-to support the landing decision without audit-only ceremony or unrelated cleanup. Apply the relevant
-lenses below; not every lens applies equally, and preference alone is not a blocker. On changed scalable
-paths, independently apply the input-driven scaling and native-JavaScript lens above; small fixtures and
-green CI do not by themselves prove that valid large or complex input avoids accidental amplification or
-native failure. On changes that encode a language rule or predict runtime behavior, apply the one-home
-lens above. Escalate uncertainty that cannot be bounded through a separately assigned
-[`AUDIT.md`](AUDIT.md).
+Treat review as a proportional, change-scoped examination. Inspect every material part deeply enough to support the
+landing decision without audit-only ceremony or unrelated cleanup. Apply only the lenses below that are relevant to the
+changed behavior; they are not a rigid checklist, and preference alone is not a blocker. Ask whether a reasonable future
+maintainer could understand and safely change the result. On changed scalable paths, independently apply the
+input-driven scaling and native-JavaScript lens above; small fixtures and green CI do not by themselves prove that valid
+large or complex input avoids accidental amplification or native failure. On changes that encode a language rule or
+predict runtime behavior, apply the one-home lens above. Escalate uncertainty that cannot be bounded through a
+separately assigned [`AUDIT.md`](AUDIT.md).
 
-- **Requirements and paths:** accepted behavior, scope, failures, indirect effects, and real
-  supported or trusted paths.
-- **Design and maintenance:** ownership, coherent boundaries, ordering, state, persistence,
-  compatibility, readability, debuggability, KISS, YAGNI, useful DRY, fragmentation, and dependency
-  cost.
+- **Requirements and paths:** accepted behavior, scope and scope expansion, correctness, failures,
+  indirect effects, and real supported or trusted paths.
+- **Design and maintenance:** architecture, ownership, dependency direction, coherent boundaries,
+  ordering, state, determinism, serialization, persistence, compatibility, readability (including
+  over-compression), debuggability, KISS, YAGNI, useful DRY, fragmentation, and dependency cost.
 - **Tests and evidence:** suitable layers, assertions, independently derived or explicitly scoped regression oracles,
   diagnostics, reproducibility, negative paths, whether each new or materially changed test protects a real obligation
   rather than temporary implementation state, whether a cheaper form would prove the same, and proof of the claim
   rather than a green total.
 - **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
-  details, stale or competing text, consolidation, and safe, token-efficient compactness.
+  details, stale or competing text, current-status impact, consolidation, and safe, token-efficient
+  compactness.
 - **Boundaries and cost:** reachable trust boundaries, realistic workloads, input-driven scaling,
   native-JavaScript failure modes, unbounded work, hot paths, and proportionate security, performance,
   and resource scrutiny without speculative hardening or premature micro-optimization.
 - **Diff hygiene:** accidental scope, generated residue, debug artifacts, secrets, stale text, and
   undocumented public or compatibility commitments.
 
-Run the applicable configured verification required by `AGENTS.md` and
-[`TESTING.md`](../TESTING.md), including `git diff --check`. Use focused temporary negative probes
+Use focused temporary negative probes
 when test infrastructure is a substantial part of the change or material doubt remains about
 whether relied-on checks detect representative defects for the intended reason. Probe only in
 disposable local or isolated test state. Never commit, push, or expose probes to shared or
@@ -166,15 +153,6 @@ The review comment records the exact head, comparison base, scope, blockers and 
 findings, checks and outcomes, including failures, warnings, skips, unavailable checks, remaining
 uncertainty, and whether the change can land. Landing requires no blocker and sufficient evidence
 for the complete result.
-
-### Convergence
-
-When sibling findings and isolated repairs stop reducing uncertainty, report non-convergence and the
-common invariant or coverage gap. The implementer adopts, or the reviewer recommends or requires,
-the smallest systematic repair or evidence method that can establish completeness. Material scope,
-redesign, issue split, or execution-strategy changes require the applicable owner or coordinator
-decision; unbounded uncertainty may require a separately assigned audit. No fixed count applies, and
-repeated one-off patches do not prove convergence.
 
 ## Compact working checklist
 

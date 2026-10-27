@@ -25,11 +25,9 @@ owner decisions recorded in a canonical source. Propose durable rules separately
 with evidence; after owner approval, record them canonically before treating
 them as authority.
 
-Durable repository responsibility must not depend on a persistent agent identity.
-Issue, branch, and pull-request assignments are temporary; agents do not become
-owners by implementing, reviewing, or coordinating work. Durable rules must be
-recoverable from their canonical repository source or accepted authority. See
-`docs/DOCUMENTATION-OWNERSHIP.md`.
+Issue, branch, and pull-request assignments are temporary; agents do not become owners by implementing, reviewing, or
+coordinating work. Durable responsibility and rules must be recoverable from their canonical repository source or
+accepted authority, not from an agent identity (`docs/DOCUMENTATION-OWNERSHIP.md`).
 
 Before the next write after context loss or compaction, session resumption, a
 changed branch or pull-request head, or a transition between implementation,
@@ -58,20 +56,13 @@ outside the repository.
 
 ## Requirements, simplicity, and review
 
-Use the authority hierarchy in `README-FIRST.md` before treating a statement as
-a permanent requirement or blocker. KISS is primary. Pragmatic YAGNI applies
-KISS to future-facing complexity. DRY is subordinate to both: use one canonical
-source plus references only when that is the simpler complete solution, and
-prefer limited local repetition when it is clearer without creating competing
-authority, duplicated moving facts, or unnecessary recurring context.
+Use the authority hierarchy in `README-FIRST.md` before treating a statement as a permanent requirement or blocker. KISS
+is primary, pragmatic YAGNI applies KISS to future-facing complexity, and DRY is subordinate to both.
 
-Follow the requirement/decision classifications, finding classes, evidence
-rules, proportional review lenses, and escalation guidance in
-`docs/DEVELOPMENT-WORKFLOW.md`. A blocker needs a supported public or trusted
-path, a concrete consequence, and reproducible evidence. Prefer the smallest
-complete repair; do not turn a local defect into a framework, compatibility
-layer, public contract, or unrelated hardening campaign without a separate
-owner decision.
+Follow `docs/DEVELOPMENT-WORKFLOW.md` for these principles, the requirement/decision classifications, finding classes,
+evidence rules, and escalation guidance. A blocker needs a supported public or trusted path, a concrete consequence, and
+reproducible evidence. Prefer the smallest complete repair; do not turn a local defect into a framework, compatibility
+layer, public contract, or unrelated hardening campaign without a separate owner decision.
 
 These proportionality rules do not weaken accepted behavior, deterministic
 execution, serializable checkpoints, or validation at real external, host,

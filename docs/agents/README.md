@@ -13,9 +13,8 @@ technical capabilities and environment constraints, not by product, model, vendo
    If not, and the verified patch route applies, add
    [`PUBLICATION-CONSTRAINED.md`](PUBLICATION-CONSTRAINED.md).
 
-Select exactly one source/workspace route: direct repository or connector-local. Add the
-publication-constrained overlay only after a concrete publication restriction is verified. Do not load every
-capability guide by default.
+Select exactly one source/workspace route (1 or 2). Add the publication-constrained overlay only after a concrete
+publication restriction is verified; do not load every capability guide by default.
 
 ## Route summary
 
@@ -27,7 +26,6 @@ capability guide by default.
 
 ## Shared rules
 
-All capability routes inherit universal authority, scope, KISS, review, documentation ownership, testing, and
-Git rules from the repository start route. A focused guide must not redefine those rules. When technical
-capabilities, branch/head, or permitted publication writes change, reselect the applicable capability route
-before the next write. Task changes follow `README-FIRST.md`.
+All capability routes inherit universal authority, scope, KISS, review, documentation ownership, testing, and Git rules
+from the repository start route. A focused guide must not redefine those rules. Reselect the route as `AGENTS.md`
+requires before each write; task changes follow `README-FIRST.md`.
