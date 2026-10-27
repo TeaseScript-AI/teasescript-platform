@@ -12,18 +12,20 @@ tested patch result.
 
 ## Issue sizing
 
-An issue describes one coherent outcome: a bug, a task, a change or a decision. Bundle small related items in one issue
-with a checklist.
+An issue describes one coherent outcome: a bug, task, change or decision; bundle small related items with a checklist.
+Record unfinished work in an issue promptly (recording does not schedule it), using the relevant headings of the
+[issue forms](../.github/ISSUE_TEMPLATE/) and omitting empty ones; an incomplete report is welcome. Search open and
+closed issues first and add evidence to the one tracking the same problem, reopening it if work remains. Ground a
+diagnosis in reproduction, source or logs, and mark hypotheses as such.
 
-The agent creating or substantially refining an issue should include:
+Labels, described on GitHub: one orchestrator label (`platform`, `V2 compiler`, `importer`); `owner: blocking` or
+`owner: input` while the owner must decide; `in progress` while an agent works on it; `spare capacity` for ready,
+low-priority work; `needs triage` until an orchestrator is assigned. With `gh`, set the type and labels (`--type`,
+`--label`); triage fills any gap. Change labels only when the state changes.
 
-- the observed problem, requested outcome, or design goal;
-- evidence, reproduction, or relevant source references;
-- explicit scope and exclusions;
-- acceptance criteria;
-- when proposing future-facing infrastructure, the concrete scheduled
-  consumer, accepted boundary that must be correct when first introduced, or
-  difficult-to-reverse boundary problem that justifies implementing it now.
+Before implementation, the issue states the problem or goal, evidence, scope and exclusions, and acceptance criteria.
+Future-facing infrastructure also needs a concrete scheduled consumer, an accepted boundary that must be correct when
+first introduced, or a difficult-to-reverse boundary problem.
 
 Prefer separate issues when each can be implemented, tested, reviewed, and merged safely on its own. A proposed
 implementation phase must also be dependency-closed for behavior it introduces: if ordinary successful execution

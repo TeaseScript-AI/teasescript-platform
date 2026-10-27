@@ -1,0 +1,28 @@
+name: Task or feature request
+description: Planned work, or something new the product should do.
+type: Task
+labels:
+  - needs triage
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be achieved, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included, and what is not.
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: How to tell that the work is complete.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and related work
+      description: What must happen first, and related issues or pull requests.
