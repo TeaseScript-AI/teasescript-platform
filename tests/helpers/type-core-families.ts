@@ -1751,14 +1751,18 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-chain-and-one",
     measures:
-      "Sol's review r5: a chain of k whole copies of a root, each storing its own plain field, its last copy copied by k places that each also take one of k small written records",
+      "Sol's reviews r5 and r6: a chain of k whole copies of a root of two written-typed and k plain fields, each storing its own plain field, its last copy copied by k places that each also take one of k records of three written-typed fields",
     program: (k) =>
       main(
         lines(
           "let typed: integer = 1",
           `let root = {f0: typed, f1: typed, extra: 1, ${fields(k, () => "1", "x")}}`,
           rows(k, (i) => `let a${i} = ${i > 0 ? `a${i - 1}` : "root"}\na${i}.x${i} = 2`),
-          rows(k, (i) => `let s${i} = {tiny: typed}\nlet c${i} = a${k - 1}\nc${i} = s${i}`),
+          rows(
+            k,
+            (i) =>
+              `let s${i} = {o0: typed, o1: typed, o2: typed}\nlet c${i} = a${k - 1}\nc${i} = s${i}`,
+          ),
           "exit",
         ),
       ),
