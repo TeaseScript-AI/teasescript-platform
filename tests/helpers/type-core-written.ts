@@ -1061,6 +1061,8 @@ export const V30_TYPE_MATRIX: readonly WrittenCase[] = (() => {
 /** A source of V30 §13's union rule (`UNION_RULE_MATRIX`): one written type at one place. */
 export interface UnionRuleCase {
   readonly name: string;
+  /** Where the type is written: a holder (`UNION_PLACES`), or a nesting inside a variable's type (`UNION_NESTINGS`). */
+  readonly placement: string;
   readonly source: string;
   /**
    * Its one diagnostic, a compile error at the written type (`start:end`) naming the offending union (`start:end`) and
@@ -1087,12 +1089,12 @@ const UNION_PLACES: readonly (readonly [string, (type: string, value: string) =>
 ];
 
 /** The places inside another type, at a variable: a list or set element, a dict value, an optional, a list's list. */
-const UNION_NESTINGS: readonly ((of: Form) => Form)[] = [
-  (of) => collection("list", of),
-  (of) => collection("set", of),
-  (of) => collection("dict", of),
-  (of) => optional(of),
-  (of) => collection("list", collection("list", of)),
+const UNION_NESTINGS: readonly (readonly [string, (of: Form) => Form])[] = [
+  ["a list's element", (of) => collection("list", of)],
+  ["a set's element", (of) => collection("set", of)],
+  ["a dict's value", (of) => collection("dict", of)],
+  ["an optional", (of) => optional(of)],
+  ["a list's list's element", (of) => collection("list", collection("list", of))],
 ];
 
 /** An empty value of a form's first whole collection, else `null`: a value that every form here admits. */
@@ -1165,12 +1167,14 @@ export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
   const places = [
     ...UNION_PLACES.map(([place, line], index) => ({
       place,
+      placement: place,
       line,
       around: (of: Form) => of,
       every: index === 0,
     })),
-    ...UNION_NESTINGS.map((around) => ({
+    ...UNION_NESTINGS.map(([nesting, around]) => ({
       place: "a variable",
+      placement: `a variable, inside ${nesting}`,
       line: UNION_PLACES[0]![1],
       around,
       every: false,
@@ -1178,7 +1182,7 @@ export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
   ];
   const out: UnionRuleCase[] = [];
   const sources = new Set<string>();
-  for (const { place, line, around, every } of places)
+  for (const { place, placement, line, around, every } of places)
     for (const whole of wholes) {
       const besides = [
         ...(every ? everyName : representatives),
@@ -1210,6 +1214,7 @@ export const UNION_RULE_MATRIX: readonly UnionRuleCase[] = (() => {
         const unionStart = start + type.indexOf(unionText);
         out.push({
           name: `${place}: ${type}`,
+          placement,
           source,
           error: valid
             ? null

@@ -7,10 +7,11 @@ import { analyseCore, coreResult, type Answers } from "../src/type-inference/cor
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
-import { coreRecord } from "../src/type-inference/core/result.js";
+import { coreRecord, type WrittenTypeError } from "../src/type-inference/core/result.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
@@ -36,8 +37,9 @@ import {
  * that brings a host value to a decided level, nothing else. Whether the candidate route takes a source is each row's
  * own axis (`executable`): a row it takes must plan and run, a row it does not is checked in the decision layer alone.
  * Each exact source is analysed, planned and run once per mode, and every row that holds it is compared with that.
- * V30 §13's union rule (`UNION_RULE_MATRIX`, its examples) is a compile error with no plan: the decision layer and the
- * candidate route's rejection.
+ * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
+ * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads the
+ * declarations alone), each placement's first error and valid control in the decision layer too.
  */
 
 function inBothOrders<T>(run: () => T): T {
@@ -343,10 +345,12 @@ test("V30 §13's written types, each form and copy, admit what they permit in ev
   assert.deepEqual(wrong, []);
 });
 
-/**
- * A request's outcome and every diagnostic, sorted, each `class kind start:end`; a written type's error as
- * `written-type start:end union start:end suggests …` (`WrittenTypeError`).
- */
+/** A written type's error as `written-type start:end union start:end suggests …` (`WrittenTypeError`). */
+const errorText = (found: WrittenTypeError): string =>
+  `written-type ${found.site.start}:${found.site.end} union ${found.union.start}:${found.union.end} ` +
+  `suggests ${found.suggestion}`;
+
+/** A request's outcome and every diagnostic, sorted, each `class kind start:end`, a written type's error `errorText`. */
 function writtenErrors(request: CoreAnalysisRequest) {
   const answers = analyseCore(request);
   return {
@@ -354,8 +358,7 @@ function writtenErrors(request: CoreAnalysisRequest) {
     diagnostics: answers.diagnostics
       .map((found) =>
         found.kind === "written-type"
-          ? `written-type ${found.site.start}:${found.site.end} union ${found.union.start}:${found.union.end} ` +
-            `suggests ${found.suggestion}`
+          ? errorText(found)
           : `${found.class} ${found.kind} ${found.site.start}:${found.site.end}`,
       )
       .sort(),
@@ -566,31 +569,38 @@ test("V30 §13's union examples: f–p one compile error at the written type nam
   });
 });
 
+/**
+ * The rule reads the written types alone: no solver order or sharing reaches it, and the analysis reports its errors as
+ * they are (`analyseCore`), which each placement's first error and first valid control show in both orders.
+ */
 test("V30 §13's union rule at every place and depth: one compile error at the written type naming the union (r4.75 (3))", (t) => {
   const wrong: string[] = [];
   let errors = 0;
+  const analysed = new Set<string>();
   for (const c of UNION_RULE_MATRIX) {
     const request = requestOf(c.source);
-    const seen = inBothOrders(() => writtenErrors(request));
     const expected =
       c.error === null
-        ? { outcome: "valid", diagnostics: [] }
-        : {
-            outcome: "compile-error",
-            diagnostics: [
-              `written-type ${c.error.site} union ${c.error.union} suggests ${c.error.suggestion}`,
-            ],
-          };
+        ? []
+        : [`written-type ${c.error.site} union ${c.error.union} suggests ${c.error.suggestion}`];
     if (c.error !== null) errors += 1;
-    if (JSON.stringify(seen) !== JSON.stringify(expected))
-      wrong.push(`${c.name}: ${JSON.stringify(seen)}`);
-    if (routeTakes(c.source)) wrong.push(`${c.name}: the candidate route takes it`);
+    const found = writtenTypeErrors(request.files.map((file) => file.program)).map(errorText);
+    if (JSON.stringify(found) !== JSON.stringify(expected))
+      wrong.push(`${c.name}: ${JSON.stringify(found)}`);
+    const sample = `${c.placement}, ${c.error === null ? "valid" : "error"}`;
+    if (analysed.has(sample)) continue;
+    analysed.add(sample);
+    const seen = inBothOrders(() => writtenErrors(request));
+    const outcome = c.error === null ? "valid" : "compile-error";
+    if (JSON.stringify(seen) !== JSON.stringify({ outcome, diagnostics: expected }))
+      wrong.push(`${c.name} (analysed): ${JSON.stringify(seen)}`);
   }
   t.diagnostic(
-    `${UNION_RULE_MATRIX.length} sources (${errors} errors, ${UNION_RULE_MATRIX.length - errors} valid controls), ` +
-      "both orders; the candidate route takes none (a written union is outside its slice until S10)",
+    `${UNION_RULE_MATRIX.length} sources (${errors} errors, ${UNION_RULE_MATRIX.length - errors} valid controls) ` +
+      `at the check, ${analysed.size} of them (a first error and valid control per placement) analysed in both orders`,
   );
   assert.deepEqual(wrong, []);
+  assert.equal(analysed.size, 2 * new Set(UNION_RULE_MATRIX.map((c) => c.placement)).size);
 });
 
 test("a copy of an unannotated source has its whole-source type, a later fraction or null included (Q1, ADR 0021 1.1, 1.2, r4.28)", (t) => {
