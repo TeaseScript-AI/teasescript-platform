@@ -198,6 +198,16 @@ export function keepsOwn(program: CoreProgram, value: PlaceId, dispatch: Dispatc
   );
 }
 
+/** Whether a value is an `askChoice`'s answer. */
+function isChoice(program: CoreProgram, value: PlaceId): boolean {
+  const c = program.opOf.get(value);
+  return (
+    c?.kind === "operation" &&
+    c.contract.family === "interaction" &&
+    interactionCategory(c.contract.name)?.kind === "options"
+  );
+}
+
 /**
  * The values a value carries, each with the path into it its own value is read at (`strip`: the path below it still to
  * read), its role and its evaluation position, after the value side's decisions: nothing where the operation keeps its
@@ -210,6 +220,14 @@ export function carried(
   dispatch: Dispatch,
 ): readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[] {
   if (keepsOwn(program, value, dispatch)) return [];
+  if (isChoice(program, value)) {
+    // r4.93: a choice's answer is a scalar button (V30 §19, TSV029), so an outer choice's rows reach it once: its
+    // `#value` row as the button itself, its `#text` row the same button again, its element rows nothing
+    const selection = (step: string | undefined): boolean =>
+      step === SELECTED_VALUE || step === SELECTED_TEXT;
+    if (strip[0] === SELECTED_TEXT || (strip[0] === "element" && selection(strip[1]))) return [];
+    if (strip[0] === SELECTED_VALUE) return carried(program, value, strip.slice(1), dispatch);
+  }
   const elements = strip.length === 0 || strip[0] === "element";
   const out: (readonly [PlaceId, readonly string[], CarrierRole, number])[] = [];
   let kinds: ReadonlySet<ItemTag> | null = null;
