@@ -3076,7 +3076,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
     name: "I1203-computed-loads",
     measures: "#1203: a list of k `load(hostValue, default: 0)`, a field of its first read k times",
-    // 36,637 / 73,477 units at k = 64, 128 in both orders (2.0133; `main` 56,667 / 154,499, 2.74: each load read at
+    // 36,641 / 73,481 units at k = 64, 128 in both orders (2.0132; `main` 56,667 / 154,499, 2.74: each load read at
     // each field)
     program: (k) =>
       main(
@@ -3091,7 +3091,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     name: "I1203-computed-load-forms",
     measures:
       "#1203: a list of k loads whose keys are a host value, a variable, a property, an element and a sum, their defaults `null`, a number and records of their own fields (a class each), then a record added (the contract side), a field of its first read k times",
-    // 56,125 / 111,210 units at k = 64, 128 in both orders (2.0149; `main` 84,215 / 224,740, 2.71; 2.27 with one
+    // 56,129 / 111,214 units at k = 64, 128 in both orders (2.0149; `main` 84,215 / 224,740, 2.71; 2.27 with one
     // answer per class of loads, a class per default, #1208 review r1 B1)
     program: (k) => {
       const keys = ["hostValue", "key", "names.key", "keys[0]", 'key + "1"'];

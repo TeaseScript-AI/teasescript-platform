@@ -685,6 +685,12 @@ export class Contract {
   ];
   /** Per literal path's computed values on either side (`#othersAt`), its computed-key loads below their root. */
   readonly #loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
+  /**
+   * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`#othersAt`),
+   * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of
+   * them stands, which answer there together (`#loadsBelow`), so no read passes them one by one.
+   */
+  readonly #othersBelowOf = new WeakMap<readonly OtherGroup[], readonly (OtherGroup | null)[]>();
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly #choiceOptions = [
     new Map<PlaceId, readonly ChoiceGroup[]>(),
@@ -2474,6 +2480,8 @@ export class Contract {
       });
     }
     const groups: OtherGroup[] = [];
+    const below: (OtherGroup | null)[] = [];
+    let summarised = false;
     const charge = (): void => program.work.charge("invSteps");
     for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
       let writer: Writer | null = null;
@@ -2486,15 +2494,23 @@ export class Contract {
         loads &&= c?.kind === "load" && c.key === null;
       }
       this.#keep(2 + read.length + rest.length);
-      groups.push({
+      const group = {
         read: read.map((member) => list[member]!),
         rest: rest.map((member) => list[member]!),
         writer,
         mixed,
         loads,
-      });
+      };
+      groups.push(group);
+      if (!loads) below.push(group);
+      else if (!summarised) below.push(null);
+      summarised ||= loads;
     }
     memo.set(list, groups);
+    if (summarised) {
+      this.#keep(1 + below.length);
+      this.#othersBelowOf.set(groups, below);
+    }
     return groups;
   }
 
@@ -4387,13 +4403,11 @@ export class Contract {
             ),
           );
         const groups = this.#othersAt(index.others.get(path), false);
-        // (below their root the path's classes of computed-key loads answer together, where the first one stands)
-        let placed = false;
-        for (const group of groups) {
-          if (group.loads && length < rest.length) {
-            if (!placed)
-              for (const item of yield* this.#loadsBelow(groups, after(), false)) out.push(item);
-            placed = true;
+        for (const group of length < rest.length
+          ? (this.#othersBelowOf.get(groups) ?? groups)
+          : groups) {
+          if (group === null) {
+            for (const item of yield* this.#loadsBelow(groups, after(), false)) out.push(item);
             continue;
           }
           const from = out.length;
@@ -4421,13 +4435,11 @@ export class Contract {
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
         const groups = this.#othersAt(others, true);
-        let placed = false;
-        for (const group of groups) {
-          if (group.loads && length < rest.length) {
-            if (!placed)
-              for (const item of yield* this.#loadsBelow(groups, after(), true, node))
-                out.push(item);
-            placed = true;
+        for (const group of length < rest.length
+          ? (this.#othersBelowOf.get(groups) ?? groups)
+          : groups) {
+          if (group === null) {
+            for (const item of yield* this.#loadsBelow(groups, after(), true, node)) out.push(item);
             continue;
           }
           const from = out.length;
