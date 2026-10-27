@@ -31,17 +31,26 @@ import {
 import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
-import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "./items.js";
+import {
+  firstWriter,
+  makeItem,
+  REASON,
+  type ContextWord,
+  type Item,
+  type ItemTag,
+  type Writer,
+} from "./items.js";
 import {
   builtinResult,
   conversionCategory,
   dictList,
+  measuresLength,
   selectsElement,
 } from "./method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, siteKey, stepName, type ValueConstraint } from "./program.js";
-import { codeOf } from "./messages.js";
+import { codeOf, pathPhrase } from "./messages.js";
 import {
   contextOf,
   elementStep,
@@ -277,7 +286,10 @@ export class Consumers {
     });
   }
 
-  /** A warning of `rule` explained by `item`; `receiver`, a member's receiver as its context sentence names it. */
+  /**
+   * A warning of `rule` explained by `item`; `receiver`, a member's receiver as its context sentence names it, `read`
+   * the value whose read the word is (a member's receiver; else the value at `site`).
+   */
   #warning(
     kind: DiagnosticKind,
     site: SourceSite,
@@ -285,6 +297,7 @@ export class Consumers {
     obligation: Obligation,
     rule: DiagnosticRule,
     receiver: ContextDetail["receiver"] = null,
+    read?: PlaceId,
   ): void {
     this.diagnostics.push({
       class: "warning-runtime-check",
@@ -293,26 +306,36 @@ export class Consumers {
       site: this.#site(site),
       rule,
       kinds: [item.tag],
-      provenance: provenanceOf(item, this.#detail(item, site, rule, receiver)),
+      provenance: provenanceOf(item, this.#detail(item, site, rule, receiver, read)),
       obligation,
     });
   }
 
   /**
-   * What a warning's context word's sentence names (D1, `ContextDetail`), from the warned expression's own node: the
-   * function it is in where the value comes from outside it (`call`) or is a parameter of it (`deferred-parameter`), the
-   * label its line is entered at (`label`), the block it is in (`handler`), the place a later store decides (`later`),
-   * the receiver it reads a member of (`member`, `missing`, `unmodelled`). Only the warning's word asks.
+   * What a warning's context word's sentence names (D1, `ContextDetail`), where the word is the warned read's own
+   * (`direct`, `#directWord`), from that read's node: the function it is in where the value comes from outside it
+   * (`call`) or is a parameter of it (`deferred-parameter`), the label its line is entered at (`label`), the block it
+   * is in (`handler`), the receiver it reads a member of (`member`, `missing`, `unmodelled`); and the place a later
+   * store decides (`later`, A7's, at the store). Only the warning's word asks.
    */
   #detail(
     item: Item,
     site: SourceSite,
     rule: DiagnosticRule,
     receiver: ContextDetail["receiver"],
+    read: PlaceId | undefined,
   ): ContextDetail {
     const { program } = this.pass;
     const word = contextOf(item);
+    const node = program.exprAt(site);
+    const value = read ?? program.placeBySite.get(siteKey(site));
+    const direct =
+      word === "later" ||
+      // a reference's member the check itself names (F19a: a speaker's field by its name has no receiver place)
+      (word === "unmodelled" && receiver?.kinds.some((kind) => REFERENCE.has(kind)) === true) ||
+      (value !== undefined && this.#directWord(word, item, value, node, read !== undefined));
     const detail = {
+      direct,
       outside: false,
       callable: null,
       label: null,
@@ -320,7 +343,7 @@ export class Consumers {
       later: null,
       receiver: null,
     } satisfies ContextDetail;
-    const node = program.exprAt(site);
+    if (!direct && word !== "unknown") return detail;
     switch (word) {
       case "unknown":
         return { ...detail, outside: isExternal(item) };
@@ -345,7 +368,6 @@ export class Consumers {
         if (callable?.kind !== "function") return detail;
         // `call`: a value set outside the function the read is in; a variable of the function changed by a call
         // between its store and the read has no function to name
-        const value = program.placeBySite.get(siteKey(site));
         const root =
           value === undefined
             ? null
@@ -364,7 +386,6 @@ export class Consumers {
       case "missing":
       case "unmodelled": {
         if (receiver !== null) return { ...detail, receiver };
-        const value = program.placeBySite.get(siteKey(site));
         // a speaker's field read by its name (F19a)
         const speaker = value === undefined ? undefined : program.places[value]?.kind;
         if (speaker?.kind === "speakerProperty")
@@ -387,6 +408,95 @@ export class Consumers {
       }
       default:
         return detail;
+    }
+  }
+
+  /**
+   * Whether `item`'s word arose at the read of `value` at `node` itself (D1: a sentence names only what its word
+   * establishes), not in a value the read copies, projects, or takes from a call or an operation: an event word where
+   * the read's own exact path fails with it (§3.4's X1–X7), `member` there or at an element read, `deferred-parameter`
+   * at a parameter of the function the read is in, `missing` where a store of the receiver itself is the object that
+   * lacks the property, `unmodelled` where the receiver holds a reference or at a speaker's field. The receiver:
+   * `value` itself where `receiver` says it is a member access's receiver, else the owner the read projects.
+   */
+  #directWord(
+    word: ContextWord,
+    item: Item,
+    value: PlaceId,
+    node: FlowNode | null,
+    receiver: boolean,
+  ): boolean {
+    const { program, exact, definitions } = this.pass;
+    // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner
+    let path: readonly string[] = [];
+    let at = node;
+    let element = false;
+    let owner: PlaceId | undefined;
+    let place = value;
+    for (let projection = program.projOf.get(place); projection !== undefined;) {
+      if (projection.step === "iteration") return false;
+      const step = measuresLength(projection.step) ? projection.step : stepName(projection.step);
+      element ||= step === "element";
+      owner ??= projection.owner;
+      path = joinSteps([step], path);
+      at = projection.node ?? at;
+      place = projection.owner;
+      projection = program.projOf.get(place);
+    }
+    const binding = program.occurrenceOf.get(place);
+    const call = program.callOutOf.has(place) ? program.opOf.get(place) : undefined;
+    const key =
+      binding !== undefined
+        ? keyOf(binding, path)
+        : call?.kind === "call"
+          ? keyOf(program.functionOf(call.fn).result, path)
+          : null;
+    const reached =
+      key === null || at === null ? null : exact.exactPath(key, program.occNode.get(place) ?? at);
+    const own = reached !== null && "fail" in reached ? reached.fail : null;
+    switch (word) {
+      case "deferred-parameter": {
+        if (own === null || binding === undefined || node === null) return false;
+        const root = program.targetRoot(binding).root;
+        const callable = program.callableAt(node);
+        const declared = program.place(root).site;
+        return (
+          program.places[root]?.kind.kind === "parameter" &&
+          callable?.kind === "function" &&
+          declared !== null &&
+          declared.start >= callable.declaration.span.start.offset &&
+          declared.end <= callable.declaration.span.end.offset
+        );
+      }
+      case "missing": {
+        // the object lacking the property is one the receiver's own stores hold (not one a copy brings)
+        const lacking = item.writer;
+        if (binding === undefined || lacking === null) return false;
+        const holder = keyOf(binding, receiver ? path : path.slice(0, -1));
+        return (definitions.byKey.get(holder) ?? []).some((d) => {
+          const writer = definitions.writerOf(d);
+          return (
+            writer !== null &&
+            writer.file === lacking.file &&
+            writer.start === lacking.start &&
+            writer.end === lacking.end
+          );
+        });
+      }
+      case "unmodelled": {
+        const holder = receiver ? value : owner;
+        return (
+          REFERENCE.has(item.tag) ||
+          program.speakerPlaces.has(value) ||
+          (holder !== undefined &&
+            node !== null &&
+            this.#kindsOf(holder, node).some((found) => REFERENCE.has(found.tag)))
+        );
+      }
+      case "member":
+        return own === "member" || element;
+      default:
+        return own === word;
     }
   }
 
@@ -433,6 +543,7 @@ export class Consumers {
     rule: DiagnosticRule,
     against: readonly RequiredKind[] = ["non-null"],
     receiver: ContextDetail["receiver"] = null,
+    read?: PlaceId,
   ): void {
     this.#warning(
       kind,
@@ -441,25 +552,25 @@ export class Consumers {
       this.#obligation("null-check", site, target, against, on),
       rule,
       receiver,
+      read,
     );
   }
 
   /**
-   * A store's destination in the source's own text (D2): its variable, a parameter's name, a function's result as
-   * `f()`, each property step as `.p` and each element or entry step as `[i]` or `[key]`.
+   * A store's destination as its sentence names it (D2): the source's own text for its variable, a parameter's name, a
+   * function's result as `f()`, and its properties; an element or a dict value in words (`'n' of an element of 'xs'`),
+   * never as code the source does not hold.
    */
   #placeText(root: PlaceId, path: readonly string[]): string {
     const { program } = this.pass;
     const kind = program.place(root).kind;
-    let text =
+    const name =
       kind.kind === "binding" || kind.kind === "parameter"
         ? kind.name
         : kind.kind === "result"
           ? `${program.functionOf(kind.fn).name}()`
           : program.place(root).label;
-    for (const step of path)
-      text += step === "element" ? "[i]" : step === "entry" ? "[key]" : `.${propertyName(step)}`;
-    return text;
+    return pathPhrase({ code: name }, path.map(propertyName));
   }
 
   /**
@@ -504,56 +615,87 @@ export class Consumers {
 
   /**
    * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
-   * direct read or store: an error a copy brings into it (`site` a copy's read), where the property's type came through
-   * a copy too (`viaCopy`), is reported there, the copy its related site; any other error stays at `site`.
+   * direct read or store, the copy that brought the other type its related site; any other error stays at `site`.
+   * `eligible`: the error is that property's, its offending contribution a whole copy (`#copiesOnly`).
    */
   #deferred(
     site: SourceSite,
     root: PlaceId,
     path: readonly string[],
-    viaCopy: boolean,
+    eligible: boolean,
   ): { readonly site: SourceSite; readonly brought: SourceSite | null } {
-    const { program } = this.pass;
-    const value = program.placeBySite.get(siteKey(site));
     const last = path.at(-1);
     const kept = { site, brought: null };
-    if (
-      !viaCopy ||
-      value === undefined ||
-      !program.occurrenceOf.has(value) ||
-      last === undefined ||
-      last === "element" ||
-      last === "entry"
-    )
-      return kept;
+    if (!eligible || last === undefined || last === "element" || last === "entry") return kept;
     const first = this.#firstDirect(root, path);
     return first === null ? kept : { site: first, brought: site };
   }
 
-  /** Whether the store that decided a place's type gave it at `path` through a copy of a whole value (A2). */
-  #decidedViaCopy(decider: Definition | null, root: PlaceId, path: readonly string[]): boolean {
-    if (decider === null || decider.place !== root) return false;
-    const inserted = decider.kind === "add" && decider.how === "element" ? 1 : 0;
-    return (
-      (decider.kind === "whole" || inserted === 1) &&
-      this.#throughCopy(decider, path.slice(decider.path.length + inserted))
-    );
-  }
-
   /**
-   * Whether a store's value reaches `rest` through a copy of a whole value: its literals' first elements and properties
-   * followed step by step until a variable's read with steps left, never a literal's own value there.
+   * Whether a value is a whole copy of another place's: a variable's read, or a projection of one (`bundle.left`,
+   * `xs[0]`), never a literal, a call or an operation.
    */
-  #throughCopy(d: Definition, rest: readonly string[]): boolean {
+  #isCopy(value: PlaceId | undefined): boolean {
     const { program } = this.pass;
-    let value = d.value;
-    for (const step of rest) {
-      if (value === undefined) return false;
-      if (program.occurrenceOf.has(value)) return true;
-      value = this.admission.literalChildren(value, step)[0]?.value;
+    let at = value;
+    for (let depth = 0; at !== undefined && depth < 256; depth += 1) {
+      if (program.occurrenceOf.has(at)) return true;
+      const projection = program.projOf.get(at);
+      if (projection === undefined || projection.step === "iteration") return false;
+      at = projection.owner;
     }
     return false;
   }
+
+  /**
+   * Whether a store brings what it stores at `path` below its destination through a whole copy: its value a copy, or a
+   * literal whose every child at the next step is one (each literal's children asked once).
+   */
+  #broughtByCopy(d: Definition, path: readonly string[]): boolean {
+    const inserted = d.kind === "add" && d.how === "element" ? 1 : 0;
+    if (d.value === undefined || (d.kind !== "whole" && inserted === 0)) return false;
+    const rest = path.slice(d.path.length + inserted);
+    if (rest.length === 0 || d.path.some((step, at) => path[at] !== step)) return false;
+    if (this.#isCopy(d.value)) return true;
+    const memoKey = joinParts(d.value, rest[0]!);
+    let copies = this.#childCopies.get(memoKey);
+    if (copies === undefined) {
+      const children = this.admission.literalChildren(d.value, rest[0]!);
+      copies = children.length > 0 && children.every((child) => this.#isCopy(child.value));
+      keepText(this.pass.program.work, memoKey.length);
+      this.#childCopies.set(memoKey, copies);
+    }
+    return copies;
+  }
+
+  readonly #childCopies = new Map<string, boolean>();
+
+  /**
+   * Whether a property reaches a place only through copies of whole objects (ADR 0021 rule 1.1, A2): every store that
+   * brings it from above, a whole store or an add into a prefix of its path, brings it through a copy; a literal's own
+   * field there is a direct contribution (its stores at the path itself are its direct stores). Once per path.
+   */
+  #copiesOnly(root: PlaceId, path: readonly string[]): boolean {
+    const { definitions } = this.pass;
+    const memoKey = joinParts(root, path);
+    const known = this.#copied.get(memoKey);
+    if (known !== undefined) return known;
+    let only = true;
+    for (let length = 0; only && length < path.length; length += 1)
+      for (const d of definitions.byKey.get(keyOf(root, path.slice(0, length))) ?? []) {
+        this.pass.program.work.charge("checks");
+        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
+        if (!this.#broughtByCopy(d, path)) {
+          only = false;
+          break;
+        }
+      }
+    keepText(this.pass.program.work, memoKey.length);
+    this.#copied.set(memoKey, only);
+    return only;
+  }
+
+  readonly #copied = new Map<string, boolean>();
 
   /**
    * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
@@ -582,11 +724,15 @@ export class Consumers {
       literal === undefined || found.path.length === 0
         ? undefined
         : this.#literalStores.get(literal);
-    // (the literal's first element decides its elements' type, A2's decider)
-    const decider = definitions.cellDefs.get(found.cell)?.[0];
-    if (store !== undefined && decider !== undefined && this.#throughCopy(decider, found.path)) {
+    if (store !== undefined) {
       const path = joinSteps(store.path, [step], found.path);
-      const deferred = this.#deferred(site, store.place, path, true);
+      // (the offending element and every other contribution a whole copy)
+      const deferred = this.#deferred(
+        site,
+        store.place,
+        path,
+        this.#isCopy(found.d.value) && this.#copiesOnly(store.place, path),
+      );
       if (deferred.brought !== null) {
         this.#error(
           "written-target",
@@ -871,7 +1017,10 @@ export class Consumers {
             ),
             root,
             path,
-            !written && this.#decidedViaCopy(decider, root, path),
+            !written &&
+              d.place === root &&
+              this.#broughtByCopy(d, path) &&
+              this.#copiesOnly(root, path),
           );
           this.#error(
             "written-target",
@@ -1737,6 +1886,7 @@ export class Consumers {
       receiverText,
       member,
       extra,
+      c.owner,
     );
   }
 
@@ -1774,6 +1924,8 @@ export class Consumers {
       "call",
       this.pass.program.textAt(this.#own(receiver, site)),
       `.${name}()`,
+      [],
+      receiver,
     );
   }
 
@@ -1793,6 +1945,7 @@ export class Consumers {
     receiver: string,
     member: string,
     extra: readonly Offending[] = [],
+    receiverPlace?: PlaceId,
   ): void {
     const rule: DiagnosticRule = { rule: "member", receiver, member, use };
     const detail = {
@@ -1844,6 +1997,7 @@ export class Consumers {
         rule,
         ["non-null"],
         detail,
+        receiverPlace,
       );
   }
 
@@ -2412,7 +2566,18 @@ export class Consumers {
             `has .${propertyName(property)} before the store`,
           ]);
       }
-      this.#memberChecks(at, label, receiver, takes, what, "store", receiverText, member, extra);
+      this.#memberChecks(
+        at,
+        label,
+        receiver,
+        takes,
+        what,
+        "store",
+        receiverText,
+        member,
+        extra,
+        owner,
+      );
     }
   }
 

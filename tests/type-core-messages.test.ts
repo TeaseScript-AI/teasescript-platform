@@ -277,16 +277,55 @@ test("each consumer's first sentence, as an error and as a warning, with its rul
     [
       'let a = [{n: 1}, {n: "x"}]\nexit\n',
       [
-        "E TSV044 '\"x\"': This list mixes elements whose 'n' is a number with elements whose 'n' is text " +
-          "(string). A list holds one type, so use values of one type in it.",
+        "E TSV044 '\"x\"': This list mixes a number and text (string) in 'n' of its elements. A list holds one " +
+          "type, so use values of one type in it.",
+      ],
+    ],
+    // the whole path to the mixed part, through a record and through a collection
+    [
+      'let a = [{a: {n: 1}}, {a: {n: "x"}}]\nexit\n',
+      [
+        "E TSV044 '\"x\"': This list mixes a number and text (string) in 'a.n' of its elements. A list holds one " +
+          "type, so use values of one type in it.",
+      ],
+    ],
+    [
+      'let a = [{a: [1]}, {a: ["x"]}]\nexit\n',
+      [
+        "E TSV044 '\"x\"': This list mixes a number and text (string) in an element of 'a' of its elements. A list " +
+          "holds one type, so use values of one type in it.",
+      ],
+    ],
+    // a store into an element names the element in words, never an index the source does not have
+    [
+      'let n = [1]\nn[0] = "x"\nexit\n',
+      [
+        "E TSV041 '\"x\"': An element of 'n' holds a whole number (integer) since line 1, so it cannot take text " +
+          "(string). Use a separate variable for a value of another type.",
       ],
     ],
     // ADR 0021 rule 1.1 (A2, r4.75 (4)): a property only copies bring, at its first direct read, naming the copy
     [
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}\nexit\n',
       [
-        "E TSV041 'xs[0].n': 'xs[i].n' holds a number, but 'b' on line 3 brings text (string) into it. Use a " +
-          "separate property for a value of another type.",
+        "E TSV041 'xs[0].n': 'n' of an element of 'xs' holds a number, but 'b' on line 3 brings text (string) " +
+          "into it. Use a separate property for a value of another type.",
+      ],
+    ],
+    // a copy made through a projection, named whole
+    [
+      'let bundle = {left: {n: 1}, right: {n: "bad"}}\nlet c = bundle.left\nc = bundle.right\nsay c.n\nexit\n',
+      [
+        "E TSV041 'c.n': 'c.n' holds a whole number (integer) since line 2, but 'bundle.right' on line 3 brings " +
+          "text (string) into it. Use a separate property for a value of another type.",
+      ],
+    ],
+    // a direct store keeps its own error at its value, whatever names the value
+    [
+      'let a = {n: 1}\nlet c = a\nsay c.n\nlet wrong = "bad"\nc.n = wrong\nexit\n',
+      [
+        "E TSV041 'wrong': 'c.n' holds a whole number (integer) since line 2, so it cannot take text (string). Use " +
+          "a separate variable for a value of another type.",
       ],
     ],
     // V30 §13: a union holding a whole collection beside another type, with V30's suggestion where it has one
@@ -307,6 +346,129 @@ test("each consumer's first sentence, as an error and as a warning, with its rul
   ];
   for (const [source, expected] of cases)
     assert.deepEqual(messages(main(source)), expected, source);
+});
+
+test("a word that came with its value from another line names that value's origin, never this line's read as its subject (D1)", () => {
+  // the second sentence of each warning of `code` at the site `site`
+  const why = (source: string, code: string, site: string): string[] =>
+    reported(main(source))
+      .filter((found) => !found.error && found.code === code && found.site === site)
+      .map((found) => found.message.slice(found.message.indexOf(CHECKED) + CHECKED.length + 1));
+  const count = (source: string, site: string, expected: string): void =>
+    assert.deepEqual(why(source, "TSV011", site), [expected], source);
+  const from = (name: string, origin: string): string => `'${name}' gets its value from ${origin}`;
+  // each word read where it arises, then through a copy (or an operation, a call) that only carries it
+  count(
+    "let n = 1\nif hostValue { n = 1.5 }\nrepeat n {}\nexit\n",
+    "n",
+    "'n' is set inside an 'if' or another branch, so which value reaches this line depends on the choice.",
+  );
+  count(
+    "let n = 1\nif hostValue { n = 1.5 }\nlet c = n\nrepeat c {}\nexit\n",
+    "c",
+    from(
+      "c",
+      "a store inside an 'if' or another branch, so which value it gets depends on the choice.",
+    ),
+  );
+  count(
+    "let n = 1\nif hostValue { n = 1.5 }\nrepeat n + 1 {}\nexit\n",
+    "n + 1",
+    from(
+      "n + 1",
+      "a store inside an 'if' or another branch, so which value it gets depends on the choice.",
+    ),
+  );
+  count(
+    "let n = 1\nrepeat 2 {\nrepeat n {}\nn = 1.5\n}\nexit\n",
+    "n",
+    "'n' is set before this loop, so the compiler does not follow which value reaches this line in each round.",
+  );
+  count(
+    "let n = 1\nrepeat 2 {\nlet c = n\nrepeat c {}\nn = 1.5\n}\nexit\n",
+    "c",
+    from("c", "a store that the compiler does not follow from round to round of a loop."),
+  );
+  count(
+    "let n = 1\nfunction change { n = 1.5 }\nchange()\nrepeat n {}\nexit\n",
+    "n",
+    "'n' may be changed by a function or a file the script calls before this line.",
+  );
+  count(
+    "let n = 1\nfunction change { n = 1.5 }\nchange()\nlet c = n\nrepeat c {}\nexit\n",
+    "c",
+    from("c", "a place that a function or a file the script calls may change."),
+  );
+  count(
+    'let n = 1\nshowPermanentButton "x" { n = 1.5 }\nrepeat n {}\nexit\n',
+    "n",
+    "A button, timer, or media block may run before this line and change 'n'.",
+  );
+  count(
+    'let n = 1\nshowPermanentButton "x" { n = 1.5 }\nlet c = n\nrepeat c {}\nexit\n',
+    "c",
+    from("c", "a place that a button, timer, or media block may change."),
+  );
+  count(
+    "let n = 1\nlabel again\nlet c = n\nrepeat c {}\nn = 1.5\ngoto again\nexit\n",
+    "c",
+    from("c", "a line that is also reached by a 'goto'."),
+  );
+  count(
+    "function use(n) {\nrepeat n {}\n}\nuse(1)\nuse(1.5)\nexit\n",
+    "n",
+    "'use' is called from more than one place, so 'n' may hold another kind in each call.",
+  );
+  // (the parameter is `pick`'s, and `use` has one call)
+  count(
+    "function pick(n) { return n }\nfunction use { let c = pick(1)\nrepeat c {} }\nlet b = pick(1.5)\nuse()\nexit\n",
+    "c",
+    from("c", "a parameter of a function called from more than one place."),
+  );
+  count(
+    "let xs = [1, 1.5]\nrepeat xs[0] {}\nexit\n",
+    "xs[0]",
+    "'xs[0]' is a list element, and the compiler knows what kinds the list holds, not which element holds which.",
+  );
+  count(
+    "let xs = [1, 1.5]\nlet c = xs[0]\nrepeat c {}\nexit\n",
+    "c",
+    from(
+      "c",
+      "a list element or another part of a value that the compiler follows together with the rest.",
+    ),
+  );
+  count(
+    'let room = {count: 1}\nif hostValue { room = {name: "hall"} }\nrepeat room.count {}\nexit\n',
+    "room.count",
+    "'room' may hold an object that has no 'count' property.",
+  );
+  // (every object `c` holds has `ok`: its value is what lacks a property)
+  count(
+    'let room = {n: 1}\nroom = {name: "hall"}\nlet c = {ok: room.n}\nrepeat c.ok {}\nexit\n',
+    "c.ok",
+    from("c.ok", "a property that an object may lack."),
+  );
+  // a reference union: each warning names its own kind
+  const member =
+    "The compiler cannot tell whether 'x' has property 'n' here, so the script checks 'x.n' when it runs.";
+  assert.deepEqual(
+    reported(
+      main("let x: speaker | timer = hostValue\nlet c = x.n\nlet d = c\nrepeat d {}\nexit\n"),
+    )
+      .filter((found) => found.site !== "hostValue")
+      .map((found) => found.message),
+    [
+      `${member} 'x' is a speaker, and its properties are checked when the script runs.`,
+      `${member} 'x' is a timer handle, and its properties are checked when the script runs.`,
+      `${member} ${OUTSIDE("x")}`,
+      `${COUNT}, but 'd' may be a value of another kind here, ${CHECKED} ` +
+        from(
+          "d",
+          "a property of a speaker or another reference, which is checked when the script runs.",
+        ),
+    ],
+  );
 });
 
 test("every sentence of the set's records keeps the form: code in single quotes, no semicolon, the word never shown (D1)", (t) => {

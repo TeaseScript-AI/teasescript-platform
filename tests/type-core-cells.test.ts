@@ -2992,6 +2992,82 @@ test("a named collection in a literal or an add brings its elements' types to th
   assert.deepEqual(differing, []);
 });
 
+test("a property only copies of whole objects bring errs at its first direct read or store, the copy related; a store or a literal's own field keeps its error (ADR 0021 rule 1.1, r4.75 (4))", () => {
+  // per program its errors as site text, with the related site's text where there is one
+  const programs: readonly (readonly [string, string, readonly string[]])[] = [
+    [
+      "copies of variables",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = a\nc = b\nsay c.n\nexit',
+      ["c.n (b)"],
+    ],
+    // a projection that copies a whole object is a copy too
+    [
+      "copies through projections",
+      'let bundle = {left: {n: 1}, right: {n: "bad"}}\nlet c = bundle.left\nc = bundle.right\nsay c.n\nexit',
+      ["c.n (bundle.right)"],
+    ],
+    // a store through the property is the property's own, whatever names its value
+    [
+      "a direct store of a named value",
+      'let a = {n: 1}\nlet c = a\nsay c.n\nlet wrong = "bad"\nc.n = wrong\nexit',
+      ["wrong"],
+    ],
+    // a literal of the destination gives the property itself, so the copy's error stays at the copy
+    [
+      "a literal's field beside the copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, {n: 2}, b]\nsay xs[0].n\nexit',
+      ["b"],
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [name, source, expected] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    for (const reversed of [false, true]) {
+      const run = (): CompactRecord =>
+        withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+      const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+      const errors = record.diagnostics
+        .filter((diagnostic) => diagnostic.class === "compile-error")
+        .map(
+          ({ site, related }) =>
+            source.slice(site.offset, site.end) +
+            (related === undefined ? "" : ` (${source.slice(related.offset, related.end)})`),
+        );
+      if (JSON.stringify(errors) !== JSON.stringify(expected))
+        differing.push(`${name}${reversed ? " reversed" : ""}: ${errors.join(", ")}`);
+    }
+  }
+  assert.deepEqual(differing, []);
+});
+
+test("the copied-property check grows with the program, not with its copies times its fields (A2, ADR 0021 rule 1.1)", () => {
+  // k copies of a record with k fields, a record of k other-typed fields added, each field read: one error per field
+  const program = (k: number): string => {
+    const fields = (value: string): string =>
+      Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
+    const reads = Array.from({ length: k }, (_, i) => `say "\${xs[0].f${i}}"`).join("\n");
+    return (
+      `let good = {${fields("1")}}\nlet bad = {${fields('"x"')}}\n` +
+      `let xs = [${Array.from({ length: k }, () => "good").join(", ")}]\nxs.add(bad)\n${reads}\nexit`
+    );
+  };
+  const work = (k: number): { total: number; nodes: number } => {
+    const request = coreRequest([{ path: "main.tease", source: program(k) }]);
+    assert.ok(request !== null);
+    const answers = analyseCore(request);
+    assert.equal(
+      answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
+      k,
+    );
+    return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
+  };
+  const small = work(32);
+  const large = work(64);
+  // the work ratio per doubling of the source, against `type-core-work.test.ts`'s criterion (2 for linear work)
+  assert.ok((2 * (large.total / small.total)) / (large.nodes / small.nodes) <= 2.15);
+});
+
 test("a written expected type holds a default to its own kinds at every depth, known or possible (C10, the owner's F3)", () => {
   const integer = (call: string): string => `let n: integer = ${call}\nrepeat n {}\nexit`;
   const integers = (call: string): string => `let xs: integer[] = ${call}\nrepeat xs[0] {}\nexit`;

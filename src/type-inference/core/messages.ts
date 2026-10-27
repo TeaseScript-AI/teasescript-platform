@@ -95,9 +95,13 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
       : diagnostic.rule;
   const first = warningSentence(rule, text, diagnostic.kinds, source);
   // a warning whose value has no word of its own (an exact value the rule still checks) has no second sentence
-  return context === "unknown" && !detail.outside
-    ? first
-    : `${first} ${contextSentence(context, name, detail, source)}`;
+  if (context === "unknown" && !detail.outside) return first;
+  // a word that came with a value from another line speaks of that value's origin, never of this line's names
+  const why = detail.direct
+    ? contextSentence(context, name, detail, source, diagnostic.kinds)
+    : // (a member's `missing` is the member's own value, from a property read elsewhere)
+      originSentence(context, context === "missing" ? text : name);
+  return `${first} ${why}`;
 }
 
 // ------------------------------------------------------------------------------------------- the kinds in words
@@ -137,6 +141,27 @@ function plural(kinds: readonly ItemTag[]): string {
   return found.length === 0
     ? "values of one kind"
     : either(found.map((kind) => (kind === "null" ? "null" : VALUE_KINDS[kind].plural)));
+}
+
+/**
+ * A path below a place in words (D2: source text, never code the source does not hold): its properties as code after
+ * the place's own (`'box.a.n'`), and each element or dict value step in words (`'n' of an element of 'xs'`). `root`: the
+ * place's code, or words for a place the source has no name for (`its elements`).
+ */
+export function pathPhrase(
+  root: { readonly code: string } | { readonly words: string },
+  steps: readonly string[],
+): string {
+  let phrase = "words" in root ? root.words : null;
+  let chain = "code" in root ? root.code : "";
+  const named = (): string =>
+    chain === "" ? phrase! : phrase === null ? `'${chain}'` : `'${chain}' of ${phrase}`;
+  for (const step of steps)
+    if (step === "element" || step === "entry") {
+      phrase = `${step === "entry" ? "a value" : "an element"} of ${named()}`;
+      chain = "";
+    } else chain = chain === "" ? step : chain + "." + step;
+  return named();
 }
 
 /** A member as its sentence names it: `property 'n'`, `method 'add'`, `elements`. */
@@ -194,9 +219,9 @@ type StoreRule = Extract<DiagnosticRule, { rule: "store" }>;
 
 /** A store's place as its sentence names it: declared with a type, or holding the type a store decided. */
 function storeSubject(rule: StoreRule, source: MessageSource): string {
-  if (rule.written) return `'${rule.into}' is declared as ${described(rule.type)}`;
+  if (rule.written) return `${capitalized(rule.into)} is declared as ${described(rule.type)}`;
   const since = rule.decider === null ? "" : ` since line ${source.line(rule.decider)}`;
-  return `'${rule.into}' holds ${described(rule.type)}${since}`;
+  return `${capitalized(rule.into)} holds ${described(rule.type)}${since}`;
 }
 
 /**
@@ -207,7 +232,7 @@ function storeFix(rule: StoreRule, kinds: readonly ItemTag[]): string {
   if (rule.type.includes("integer") && kinds.includes("number")) return ROUND_COUNT_FIX;
   const all = known([...rule.type, ...kinds]);
   const scalars = all.every((kind) => kind === "null" || isScalarKind(kind));
-  return scalars && /^[\p{L}_][\p{L}\p{N}_]*$/u.test(rule.into)
+  return scalars && /^'[\p{L}_][\p{L}\p{N}_]*'$/u.test(rule.into)
     ? ` To allow both, write its type as '${all.join(" | ")}'.`
     : " Use a separate variable for a value of another type.";
 }
@@ -252,17 +277,14 @@ function errorSentence(
     case "selection":
       return `'${rule.collection}' is empty here, so it has no element for '${rule.member}'.`;
     case "mixed": {
-      const parts = rule.collection === "dict" ? "values" : "elements";
-      const last = rule.path.at(-1);
-      const mixes =
-        last === undefined
-          ? `${described(rule.type)} and ${described(kinds)}`
-          : last === "element" || last === "entry"
-            ? `${parts} that hold ${plural(rule.type)} with ${parts} that hold ${plural(kinds)}`
-            : `${parts} whose '${last}' is ${described(rule.type)} with ${parts} whose '${last}' is ${described(kinds)}`;
+      // (where in its elements, as the path below them goes)
+      const where =
+        rule.path.length === 0
+          ? ""
+          : ` in ${pathPhrase({ words: rule.collection === "dict" ? "its values" : "its elements" }, rule.path)}`;
       return (
-        `This ${rule.collection} mixes ${mixes}. A ${rule.collection} holds one type, so use values of one type ` +
-        "in it."
+        `This ${rule.collection} mixes ${described(rule.type)} and ${described(kinds)}${where}. A ` +
+        `${rule.collection} holds one type, so use values of one type in it.`
       );
     }
     case "operator":
@@ -339,12 +361,46 @@ const HANDLER_RUNS: Readonly<Record<NonNullable<ContextDetail["handler"]>, strin
   media: "its media ends or reaches its cue",
 };
 
-/** A warning's second sentence: why the compiler could not decide at this line (§3.4). */
+/**
+ * The second sentence of a warning whose word came with its value from another line (a copy, a projection, a call, an
+ * operation): where that value comes from, by the word, never naming this line's read as the word's own subject.
+ */
+function originSentence(word: ContextWord, name: string): string {
+  const from = `'${name}' gets its value from`;
+  switch (word) {
+    case "label":
+      return `${from} a line that is also reached by a 'goto'.`;
+    case "later":
+    case "unknown":
+      return `'${name}' comes from outside the script, so its kind is known only when the script runs.`;
+    case "missing":
+      return `${from} a property that an object may lack.`;
+    case "branch":
+      return `${from} a store inside an 'if' or another branch, so which value it gets depends on the choice.`;
+    case "call":
+      return `${from} a place that a function or a file the script calls may change.`;
+    case "dead-code":
+      return `${from} a line that never runs.`;
+    case "deferred-parameter":
+      return `${from} a parameter of a function called from more than one place.`;
+    case "handler":
+      return `${from} a place that a button, timer, or media block may change.`;
+    case "loop":
+      return `${from} a store that the compiler does not follow from round to round of a loop.`;
+    case "member":
+      return `${from} a list element or another part of a value that the compiler follows together with the rest.`;
+    case "unmodelled":
+      return `${from} a property of a speaker or another reference, which is checked when the script runs.`;
+  }
+}
+
+/** A warning's second sentence: why the compiler could not decide at this line (§3.4), its word the read's own. */
 function contextSentence(
   word: ContextWord,
   name: string,
   detail: ContextDetail,
   source: MessageSource,
+  kinds: readonly ItemTag[],
 ): string {
   switch (word) {
     case "label":
@@ -354,7 +410,7 @@ function contextSentence(
     case "later":
       return detail.later === null
         ? "A later line decides the type of this place, and the value copied here may be something else."
-        : `'${detail.later.place}' holds ${plural(detail.later.kinds)} from line ` +
+        : `${capitalized(detail.later.place)} holds ${plural(detail.later.kinds)} from line ` +
             `${source.line(detail.later.decider)} on, but the value copied here may be something else.`;
     case "missing":
       return detail.receiver === null
@@ -400,7 +456,10 @@ function contextSentence(
     case "unknown":
       return `'${name}' comes from outside the script, so its kind is known only when the script runs.`;
     case "unmodelled": {
-      const reference = detail.receiver?.kinds.find((kind) => REFERENCE.has(kind));
+      // (the warning's own kind where it is a reference: one warning per reference kind of a union)
+      const reference =
+        kinds.find((kind) => REFERENCE.has(kind)) ??
+        detail.receiver?.kinds.find((kind) => REFERENCE.has(kind));
       return reference === undefined || detail.receiver === null
         ? `The compiler does not follow '${name}', so it is checked when the script runs.`
         : `'${detail.receiver.text}' is ${described([reference])}, and its properties are checked when the script ` +

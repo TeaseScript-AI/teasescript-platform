@@ -67,6 +67,12 @@ export interface Provenance {
  * `unmodelled`).
  */
 export interface ContextDetail {
+  /**
+   * Whether the word is the warned read's own (its exact path failed there, §3.4): only then do the details below
+   * name what the read itself depends on; else the word came with a value from another line (a copy, a projection, a
+   * call) and its sentence speaks of that value's origin.
+   */
+  readonly direct: boolean;
   /** `unknown`: the value comes from outside the script (host data, a typeless `load` or `fromJson`, F19). */
   readonly outside: boolean;
   readonly callable: string | null;

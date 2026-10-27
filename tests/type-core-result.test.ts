@@ -39,6 +39,7 @@ import {
 
 /** A context word's detail where the word's sentence names nothing more. */
 const NO_DETAIL: ContextDetail = {
+  direct: true,
   outside: false,
   callable: null,
   label: null,

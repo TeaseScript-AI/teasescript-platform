@@ -228,14 +228,79 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
  * always fails an earlier check first), not violable (no derived value violates it) or unreachable (no run evaluates
  * it). A record the route rejects (`CandidateOutsideSlice`) is counted by its first construct outside the slice.
  */
+/** The codes of each record kind's rules on the route (D3): a store's or a literal's, a count's or an index's, a member's. */
+const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
+  "written-target": ["TSV041", "TSV044"],
+  "integer-use": ["TSV011", "TSV043"],
+  "member-read": ["TSV043"],
+};
+
+type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];
+
+/**
+ * The route's diagnostics and a record's that no one-to-one pairing matches (D2, D3): each reported diagnostic paired
+ * with its own expected one of its severity, at its whole site, with a code of the expected kind's rules. Kinds share a
+ * code, so the pairing is a matching (by augmenting paths), not a first fit.
+ */
+function unmatchedDiagnostics(
+  reported: CompilationResult["diagnostics"],
+  expected: readonly ExpectedDiagnostic[],
+): string[] {
+  const fits = (
+    diagnostic: CompilationResult["diagnostics"][number],
+    wanted: ExpectedDiagnostic,
+  ): boolean =>
+    (wanted.class === "compile-error" ? "error" : "warning") === diagnostic.severity &&
+    wanted.site.offset === diagnostic.span.start.offset &&
+    wanted.site.end === diagnostic.span.end.offset &&
+    RECORD_CODES[wanted.kind]?.includes(diagnostic.code) === true;
+  const pairedWith = expected.map((): number => -1);
+  const pair = (index: number, seen: Set<number>): boolean =>
+    expected.some((wanted, at) => {
+      if (seen.has(at) || !fits(reported[index]!, wanted)) return false;
+      seen.add(at);
+      if (pairedWith[at] !== -1 && !pair(pairedWith[at]!, seen)) return false;
+      pairedWith[at] = index;
+      return true;
+    });
+  return [
+    ...reported
+      .filter((_, index) => !pair(index, new Set()))
+      .map(
+        (diagnostic) =>
+          `reported ${diagnostic.severity} ${diagnostic.code} ${diagnostic.span.start.offset}:${diagnostic.span.end.offset}`,
+      ),
+    ...expected
+      .filter((_, at) => pairedWith[at] === -1)
+      .map(
+        (wanted) =>
+          `expected ${wanted.class} ${wanted.kind} ${wanted.site.offset}:${wanted.site.end}`,
+      ),
+  ];
+}
+
+test("the route's diagnostics pair one to one with a record's, so one expected diagnostic never answers two (D2, D3)", () => {
+  // a member read of host data: a store's warning and the member's, both at `v.n`
+  const record = readFixture().find(
+    (found) => found.name === "cp9-cells/r46/m3/sol-m3/external-30",
+  );
+  assert.ok(record !== undefined);
+  const reported = compileProjectWithBackend(
+    record.files,
+    OPTIONS,
+    CORE_BACKEND,
+  ).diagnostics.filter(
+    (diagnostic) => diagnostic.code === "TSV041" || diagnostic.code === "TSV043",
+  );
+  assert.deepEqual(reported.map((diagnostic) => diagnostic.code).sort(), ["TSV041", "TSV043"]);
+  assert.deepEqual(unmatchedDiagnostics(reported, record.expected.diagnostics), []);
+  // the member's code replaced by the store's: the store's expected diagnostic cannot answer both
+  const twice = reported.map((diagnostic) => ({ ...diagnostic, code: "TSV041" }));
+  assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
+});
+
 test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
-  // the codes of each record kind's rules on the route (D3): a store's or a literal's, a count's or an index's, a member's
-  const codes: Readonly<Record<string, readonly string[]>> = {
-    "written-target": ["TSV041", "TSV044"],
-    "integer-use": ["TSV011", "TSV043"],
-    "member-read": ["TSV043"],
-  };
-  const routed = new Set(Object.values(codes).flat());
+  const routed = new Set(Object.values(RECORD_CODES).flat());
   const accepted: string[] = [];
   const outside = new Map<string, number>();
   const classes = new Map<string, number>();
@@ -273,34 +338,11 @@ test("every positive-list record the candidate route reaches plans and runs as i
             diagnostic.message,
         )
         .sort();
-    const site = (severity: string, start: number, end: number) => `${severity} ${start}:${end}`;
     assert.deepEqual(
-      reported(result)
-        .map((diagnostic) =>
-          site(diagnostic.severity, diagnostic.span.start.offset, diagnostic.span.end.offset),
-        )
-        .sort(),
-      record.expected.diagnostics
-        .map((diagnostic) =>
-          site(
-            diagnostic.class === "compile-error" ? "error" : "warning",
-            diagnostic.site.offset,
-            diagnostic.site.end,
-          ),
-        )
-        .sort(),
+      unmatchedDiagnostics(reported(result), record.expected.diagnostics),
+      [],
       record.name,
     );
-    for (const diagnostic of reported(result))
-      assert.ok(
-        record.expected.diagnostics.some(
-          (expected) =>
-            expected.site.offset === diagnostic.span.start.offset &&
-            expected.site.end === diagnostic.span.end.offset &&
-            codes[expected.kind]?.includes(diagnostic.code) === true,
-        ),
-        `${record.name}: ${diagnostic.code} at ${diagnostic.span.start.offset}`,
-      );
     const request = coreRequest(record.files);
     assert.ok(request !== null, record.name);
     assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
