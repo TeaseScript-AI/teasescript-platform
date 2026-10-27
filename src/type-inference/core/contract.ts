@@ -4041,7 +4041,9 @@ export class Contract {
             : unknownItem(REASON.missing, object.token),
         );
       else if (selected.type.kind === "ref")
-        out.push(...(yield* this.indexItems(selected.type.place, after, node, exact, below)));
+        // (one by one: a selected property's items grow with its literal, past one call's arguments)
+        for (const item of yield* this.indexItems(selected.type.place, after, node, exact, below))
+          out.push(item);
       else {
         const at = termAt(selected.type, after);
         if (at !== null) for (const tag of typeTags(at)) out.push(makeItem(tag, object.token));

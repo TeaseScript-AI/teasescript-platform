@@ -218,3 +218,19 @@ test("a choice of 130,000 written records is answered within the native stack", 
     );
   }
 });
+
+/** A choice record's selected property (`Contract.#selectedAt`): its value a list of 130,000 computed elements. */
+test("a choice record whose value holds 130,000 computed elements is answered within the native stack", () => {
+  for (const elements of [10_000, 130_000]) {
+    const request = program([
+      `let choice = {text: "A", value: [${rows(elements, "1 + 0").join(",")}]}`,
+      "let picked: integer = (askChoice choice).first",
+    ]);
+    const answers = analyseCore(request);
+    assert.deepEqual(
+      [answers.outcome, answers.diagnostics.length, answers.checks.length],
+      ["valid", 0, 0],
+      `${elements} elements`,
+    );
+  }
+});
