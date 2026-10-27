@@ -56,12 +56,15 @@ const form = (...parts: readonly (string | RegExp)[]): RegExp =>
 const code = (pattern: string): RegExp => new RegExp(pattern);
 
 /**
- * Whether a subject is a variable or a property path as written, the only subject a fix's example names (Astra r1); and
- * whether its own text may stand in code: on one line, without a comment.
+ * Whether a subject is a stable path as written (TABLE §13 N1), the only subject a fix's example names (Astra r1, r2):
+ * a variable, then properties other than `random`, fixed indexes or keys, or indexes held in plain variables; a literal
+ * word such as `true` is none. And whether its own text may stand in code: on one line, without a comment.
  */
-/** A variable or a property path as written; a literal word such as `true` is none. */
-const path = (text: string): boolean =>
-  /^(?!(true|false|null)\b)[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(text);
+const NAME = "(?!(?:true|false|null)\\b)[A-Za-z_]\\w*";
+const STABLE = new RegExp(
+  `^${NAME}(?:\\.(?!random\\b)[A-Za-z_]\\w*|\\[(?:-?\\d+|${NAME}|"[^"\\\\$]*")\\])*$`,
+);
+const stablePath = (text: string): boolean => STABLE.test(text);
 const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
@@ -87,13 +90,13 @@ const PORTS: readonly Port[] = [
     to: ([, value], { subject }) =>
       ownText(subject)
         ? form(
-            `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
+            `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
               "{ ... }', or give a fallback, as in '",
             code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
             "'.",
           )
         : exact(
-            `Keep '${subject}' in a variable and check the variable first, as in 'if value != null { ... }'.`,
+            `Keep '${subject}' in a new variable and check the variable first, as in 'if value != null { ... }'.`,
           ),
   },
   {
@@ -101,9 +104,9 @@ const PORTS: readonly Port[] = [
     to: ([, test], { subject }) =>
       exact(
         ownText(subject)
-          ? `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value ${test} ` +
+          ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value ${test} ` +
               "{ ... }'."
-          : `Keep '${subject}' in a variable and check the variable first, as in 'if value ${test} { ... }'.`,
+          : `Keep '${subject}' in a new variable and check the variable first, as in 'if value ${test} { ... }'.`,
       ),
   },
   // #1195's decided texts
@@ -118,7 +121,7 @@ const PORTS: readonly Port[] = [
   {
     from: /^Show one of its properties instead\.$/,
     to: (_, { subject }) =>
-      path(subject)
+      stablePath(subject)
         ? form(
             "Show one of its properties instead, as in '${",
             subject,
@@ -131,7 +134,7 @@ const PORTS: readonly Port[] = [
     from: /^Show its elements with 'toList\(\)\.join\(\)' instead\.$/,
     to: (_, { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `Show all its elements with '\${${subject}.toList().join()}'.`
           : "Show its elements with 'toList().join()' instead.",
       ),
@@ -153,7 +156,7 @@ const PORTS: readonly Port[] = [
     from: /^Select one value with '(.+)', or show every value with '(.+)'\.$/,
     to: ([text], { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? text
           : "Select one value with a key, or show every value with 'values.join()'.",
       ),
@@ -185,7 +188,7 @@ const PORTS: readonly Port[] = [
     from: /^To show it as text, write "(.+)"\.$/,
     to: (_, { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `To show it as text, write '"\${${subject}}"'.`
           : "To show it as text, put it in a text with '${...}'.",
       ),
@@ -197,18 +200,21 @@ const PORTS: readonly Port[] = [
     from: /^Write a number key as text, as in "(.+)"\.$/,
     to: (_, { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `Write a number key as text, as in '"\${${subject}}"'.`
           : "Write a number key as text.",
       ),
   },
   {
     from: /^Check '(.+)\.length' first\.$/,
-    to: ([text, collection]) =>
+    to: (_, { subject }) =>
       exact(
-        path(collection!)
-          ? `Check '${collection}.length' first, as in 'if ${collection}.length > 0 { ... }'.`
-          : text,
+        stablePath(subject)
+          ? `Check '${subject}.length' first, as in 'if ${subject}.length > 0 { ... }'.`
+          : ownText(subject)
+            ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check its length, as in ` +
+              "'if value.length > 0 { ... }'."
+            : `Keep '${subject}' in a new variable and check its length first.`,
       ),
   },
   { from: /^Give '(.+)' one type in every element\.$/, to: ([text]) => exact(text) },
@@ -217,7 +223,7 @@ const PORTS: readonly Port[] = [
     from: /^Convert it to text first with toString\(\.\.\.\)\.$/,
     to: (_, { subject, member }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `Convert '${subject}' to text first, as in 'toString(${subject})${member}'.`
           : `Convert '${subject}' to text first with 'toString(...)'.`,
       ),
@@ -226,7 +232,7 @@ const PORTS: readonly Port[] = [
     from: /^Divide it by a unit, as in '.+ \/ 1 (\w+)'\.$/,
     to: ([, unit], { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `Divide '${subject}' by a unit, as in '${subject} / 1 ${unit}'.`
           : `Divide '${subject}' by a unit, such as '1 ${unit}'.`,
       ),
@@ -253,7 +259,7 @@ const PORTS: readonly Port[] = [
     from: /^Use one of its properties instead, such as '(.+)'\.$/,
     to: (_, { subject }) =>
       exact(
-        `Use one of its properties instead, such as '${path(subject) ? `${subject}.` : ""}title'.`,
+        `Use one of its properties instead, such as '${stablePath(subject) ? `${subject}.` : ""}title'.`,
       ),
   },
   // date and time operators and fields: an example where the value it converts is a variable or a path, the other
@@ -261,7 +267,7 @@ const PORTS: readonly Port[] = [
   {
     from: /^Convert it first, as in '(.+)', or use calendar units to keep the clock time\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
-      path(left) && (path(right) || quantity(right))
+      stablePath(left) && (stablePath(right) || quantity(right))
         ? form(
             `Convert it first, as in '(${left}.toAbsoluteDateTime() `,
             code("[-+]"),
@@ -274,7 +280,7 @@ const PORTS: readonly Port[] = [
   {
     from: /^Convert it first, as in '\(.+\)\.toAbsoluteDateTime\(\)'\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
-      path(left) && (path(right) || quantity(right))
+      stablePath(left) && (stablePath(right) || quantity(right))
         ? form(
             `Convert it first, as in '(${left}.toDateTime() `,
             code("[-+]"),
@@ -286,7 +292,7 @@ const PORTS: readonly Port[] = [
     from: /^Convert it first, as in '.+\.toDateTime\(\)\.(\w+)'\.$/,
     to: ([, field], { subject }) =>
       exact(
-        path(subject)
+        stablePath(subject)
           ? `Convert '${subject}' first, as in '${subject}.toDateTime().${field}'.`
           : `Convert '${subject}' with 'toDateTime()' first.`,
       ),
@@ -300,7 +306,7 @@ const PORTS: readonly Port[] = [
     from: /^Compare its date, as in 'toDate\((.+)\)'\.$/,
     to: (_, { operands: [, right = ""] }) =>
       exact(
-        path(right)
+        stablePath(right)
           ? `Compare its date, as in 'toDate(${right})'.`
           : "Compare its date, with 'toDate(...)'.",
       ),
@@ -313,7 +319,7 @@ const PORTS: readonly Port[] = [
     from: /^Subtract their dates with '(.+)', or convert both with toAbsoluteDateTime\(\) for the elapsed time\.$/,
     to: (_, { operands: [left = "", right = ""] }) =>
       exact(
-        `Subtract their dates with ${path(left) && path(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'"}, ` +
+        `Subtract their dates with ${stablePath(left) && stablePath(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'"}, ` +
           "or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
       ),
   },
@@ -459,8 +465,8 @@ const typeTest = (subject: string, type: string): RegExp =>
     /^[A-Za-z_]\w*$/.test(subject)
       ? `Check '${subject}' first, as in 'if ${subject} is ${type} { ... }'.`
       : ownText(subject)
-        ? `Keep '${subject}' in a variable, as in 'let value = ${subject}', and check it, as in 'if value is ${type} { ... }'.`
-        : `Keep '${subject}' in a variable and check the variable first, as in 'if value is ${type} { ... }'.`,
+        ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value is ${type} { ... }'.`
+        : `Keep '${subject}' in a new variable and check the variable first, as in 'if value is ${type} { ... }'.`,
   );
 
 /**
@@ -557,14 +563,15 @@ const INTENDED: readonly Intended[] = [
   },
   {
     rule:
-      "S9b's speaker flow (#1072, unit 6): the fix names the receiver as the source writes it ('people.random.n = " +
-      "...'), the current checker the speaker it holds ('player.n = ...')",
+      "S9b's speaker flow (#1072, unit 6): the fix names the receiver where the source writes it as a stable path, " +
+      "the current checker the speaker it holds ('player.n = ...')",
     matches: ({ current, named }) =>
       /^Speaker '[^']+' has no /.test(current) && !current.startsWith(`Speaker '${named.subject}'`),
-    // (a receiver that is no variable or path gets the sentence alone, #1195 after Astra r1)
+    // (a receiver that is no stable path gets the sentence alone, #1195 after Astra r1 and r2: a store into
+    // `people.random.n` sets another speaker's than the read takes)
     replacement: ({ named }) =>
       exact(
-        /^[A-Za-z_]\w*(\.[A-Za-z_]\w*)*$/.test(named.subject)
+        stablePath(named.subject)
           ? `Assign the property before this line, as in '${named.subject}${named.member} = ...'.`
           : "Assign the property before this line.",
       ),
@@ -682,6 +689,18 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
   ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
+  // a stable path through a fixed index, a key, an index variable (TABLE §13 N1, Astra r2)
+  ["let xs = [1]\nlet caption: string = ⟦xs[0]⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
+  [
+    'let d = dict{"a": 2}\nlet caption: string = ⟦d["a"]⟧\nsay caption\nexit\n',
+    /write '([^']*)'/,
+    ["2"],
+  ],
+  [
+    'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ⟦ts[i].year⟧\nexit\n',
+    /as in '([^']*)'/,
+    ["2026"],
+  ],
   // the null check's fallback, of a kept value and of a composed one
   ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/],
   [
@@ -804,7 +823,91 @@ test("a text join's example puts the operand that is not text in '${...}', and t
   }
 });
 
-test("a fix whose subject is no variable or path, or not on one line, gives its sentence without an example (#1195)", () => {
+/**
+ * Length checks, `⟦…⟧` around the collection a read selects from, and whether it is a stable path (TABLE §13 N1): the
+ * fix checks a stable path itself, and keeps any other in a new variable first, so the check and the read see one
+ * selection (Astra r2: `if groups.random.length > 0 { say groups.random.last }` checks one and reads another).
+ */
+const GROUPS = "let groups: integer[][] = [[], [21]]\n";
+const SELECTIONS: readonly (readonly [string, boolean])[] = [
+  [`${GROUPS}say ⟦groups.random⟧.last\nexit\n`, false],
+  ["let catalog = {groups: [[], [21]]}\nsay ⟦catalog.groups.random⟧.last\nexit\n", false],
+  [`${GROUPS}function pick { return groups.random }\nsay ⟦pick()⟧.last\nexit\n`, false],
+  [`${GROUPS}let i = 0\nsay ⟦groups[i + 1]⟧.last\nexit\n`, false],
+  [
+    `${GROUPS}let xs: integer[]? = null\nlet ys = groups.random\nsay (⟦xs otherwise ys⟧).last\nexit\n`,
+    false,
+  ],
+  [`${GROUPS}say ⟦groups[1]⟧.last\nexit\n`, true],
+  [`${GROUPS}let i = 1\nsay ⟦groups[i]⟧.last\nexit\n`, true],
+  ['let d = dict{"a": [21], "b": []}\nsay ⟦d["a"]⟧.last\nexit\n', true],
+];
+
+/** Seeds under which `groups.random` picks, in turn, the same and different selections. */
+const SEEDS = [2026, 31337, 123456, 424242, 654321, 987654, 999999];
+
+test("a length check's fix checks the selection the read takes, under every seed (Astra r2)", () => {
+  const run = (source: string, seed: number): { failed: boolean; says: string[] } => {
+    const compiled = compileProject([{ path: "main.tease", source }]);
+    assert.deepEqual(
+      compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      [],
+      source,
+    );
+    assert.ok(compiled.plan !== null, source);
+    const { events } = createFreshRuntimeSession(compiled.plan, {
+      seed,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run();
+    return {
+      failed: events.some((event) => event.kind === "runtimeFailure"),
+      says: events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    };
+  };
+  // (the control: a check of `groups.random` itself and its read pick different selections under one of the seeds)
+  const unstable = `${GROUPS}if groups.random.length > 0 { say groups.random.last }\nexit\n`;
+  assert.ok(SEEDS.some((seed) => run(unstable, seed).failed));
+  for (const [marked, stable] of SELECTIONS) {
+    const collection = /⟦([^⟧]*)⟧/.exec(marked)![1]!;
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    const message = analyseCore(request)
+      .diagnostics.map((diagnostic) => coreMessage(diagnostic, text))
+      .find((found) => found.startsWith(`'${collection}' may be empty here.`));
+    assert.ok(message !== undefined, source);
+    // (the fix as its message writes it, applied around the read)
+    const read = source.split("\n").find((line) => line.includes(collection))!;
+    const checked = /Check '[^']*' first, as in 'if ([^']*) \{ \.\.\. \}'\./.exec(message);
+    const kept =
+      /Keep '[^']*' in a new variable, as in '(let value = [^']*)', and check its length, as in 'if ([^']*) \{ \.\.\. \}'\./.exec(
+        message,
+      );
+    assert.equal(checked !== null, stable, message);
+    assert.equal(kept !== null, !stable, message);
+    const fixed = source.replace(
+      read,
+      checked !== null
+        ? `if ${checked[1]!} { ${read} }`
+        : `${kept![1]!}\nif ${kept![2]!} { ${read.replace(collection, "value")} }`,
+    );
+    const runs = SEEDS.map((seed) => run(fixed, seed));
+    assert.deepEqual(
+      runs.filter(({ failed, says }) => failed || !(says.length === 0 || says.join() === "21")),
+      [],
+      fixed,
+    );
+    assert.ok(
+      runs.some(({ says }) => says.join() === "21"),
+      fixed,
+    );
+  }
+});
+
+test("a fix whose subject is no stable path, or not on one line, gives its sentence without an example (#1195)", () => {
   const cases: readonly (readonly [string, string])[] = [
     // the text join where the operand that is not text spans lines or holds a comment (the owner's review)
     ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead."],
@@ -823,10 +926,10 @@ test("a fix whose subject is no variable or path, or not on one line, gives its 
     ["let caption: string = 1\nexit\n", "To show it as text, put it in a text with '${...}'."],
     // (a literal is classified by the parser: `true` is no name, Sol r5)
     ["let caption: string = true\nexit\n", "To show it as text, put it in a text with '${...}'."],
-    // (a collection that is no variable or path keeps its grouping before `.length`, Sol r5)
+    // (a selection that is no stable path, its text not code on one line: kept first, without the example)
     [
-      "let xs: integer[]? = null\nlet ys: integer[] = []\nsay (xs otherwise ys).first\nexit\n",
-      "Check '(xs otherwise ys).length' first.",
+      "let groups: integer[][] = [[], [21]]\nsay (groups /* any */ .random).last\nexit\n",
+      "Keep 'groups /* any */ .random' in a new variable and check its length first.",
     ],
     ["say (1 s + 2 s).seconds\nexit\n", "Divide '1 s + 2 s' by a unit, such as '1 second'."],
     [

@@ -105,7 +105,7 @@ test("each context word's cause says why the value may be of another type, on th
     // (a store into a speaker gives it the property: no stop, #1195 rule 3)
     "W TSV043 'player.n': 'player' may not have property 'n' here. A speaker takes the property when the script runs.",
     `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another type here. ${STOPS} Keep 'player.n' ` +
-      "in a variable, as in 'let value = player.n', and check it, as in 'if value is integer { ... }'. The type of " +
+      "in a new variable, as in 'let value = player.n', and check it, as in 'if value is integer { ... }'. The type of " +
       "'player.n' is known only when the script runs.",
     "W TSV043 'player.n': 'player' may not have property 'n' here. If it does not, the Tease stops with an error " +
       `at this line. Assign the property before this line, as in 'player.n = ...'. ${speaker}`,
@@ -273,7 +273,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       "let xs = [7, null]\nsay xs[0] + 1\nexit\n",
       [
-        `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a variable, ` +
+        `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a new variable, ` +
           "as in 'let value = xs[0]', and check it, as in 'if value != null { ... }', or give a fallback, as in " +
           "'(xs[0] otherwise 0)'. 'xs[0]' is a list element, and any element of the list may be null.",
       ],

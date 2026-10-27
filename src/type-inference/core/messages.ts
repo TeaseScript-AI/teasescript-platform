@@ -200,16 +200,28 @@ function variable(text: string): string | null {
 }
 
 /**
- * Whether a text is a variable or a property path as written, on one line: the only subject a fix's example names
- * (#1195, the lead after Astra r1). Any other subject, a literal or another expression, gets its fix's sentence alone; a
- * name is never taken from another declaration or from the place's facts.
+ * Whether a text is a stable path as written, on one line (TABLE §13 N1): a variable followed by properties, fixed
+ * indexes or keys, or indexes and keys held in plain variables; not `.random`, a call or a computed index. It is the
+ * only subject a fix's example names, so code that reads it again reads the same value (#1195, the lead after Astra r1
+ * and r2). Any other subject, a literal or another expression, gets its fix's sentence alone; a name is never taken
+ * from another declaration or from the place's facts.
  */
-function path(text: string): boolean {
-  const chain = (expression: Expression): boolean =>
+function stablePath(text: string): boolean {
+  const fixed = (index: Expression): boolean =>
+    index.kind === "identifier" ||
+    index.kind === "numberLiteral" ||
+    (index.kind === "unaryExpression" &&
+      index.operator === "-" &&
+      index.operand.kind === "numberLiteral") ||
+    (index.kind === "stringLiteral" && index.parts.every((part) => part.kind === "stringText"));
+  const stable = (expression: Expression): boolean =>
     expression.kind === "identifier" ||
-    (expression.kind === "propertyAccessExpression" && chain(expression.object));
+    (expression.kind === "propertyAccessExpression" &&
+      expression.property.name !== "random" &&
+      stable(expression.object)) ||
+    (expression.kind === "indexExpression" && fixed(expression.index) && stable(expression.object));
   const parsed = parsedExpression(text);
-  return parsed !== null && ownText(text) && chain(parsed.expression);
+  return parsed !== null && ownText(text) && stable(parsed.expression);
 }
 
 /** The literals whose type is their own: a number (also negated), text, `true`/`false`, null, a quantity, a regex. */
@@ -267,12 +279,6 @@ function expressionKind(code: string): Expression["kind"] | null {
 function operandText(code: string): string {
   const kind = expressionKind(code);
   return kind !== null && OPERANDS.has(kind) ? code : `(${code})`;
-}
-
-/** Code as the receiver of a member a fix writes: in parentheses unless a member may follow it. */
-function receiverText(code: string): string {
-  const kind = expressionKind(code);
-  return kind !== null && POSTFIX.has(kind) ? code : `(${code})`;
 }
 
 /**
@@ -429,7 +435,7 @@ function storeFix(rule: StoreRule, kinds: readonly ItemTag[], text: string): str
     values.length > 0 &&
     values.every((kind) => kind === "integer" || kind === "number" || kind === "boolean")
   )
-    return path(text)
+    return stablePath(text)
       ? ` To show it as text, write '"\${${text}}"'.`
       : " To show it as text, put it in a text with '${...}'.";
   const nullOnly = values.length > 0 && values.every((kind) => kind === "null");
@@ -472,7 +478,7 @@ function memberFix(
   const receiver = rule.receiver;
   if (kind === "string" && rule.use === "store")
     return ` Assign a new text to '${receiver}' instead.`;
-  const named = path(receiver);
+  const named = stablePath(receiver);
   if (!method && kind === "absoluteDateTime" && hasTemporalField("datetime", name))
     return named
       ? ` Convert '${receiver}' first, as in '${receiver}.toDateTime().${name}'.`
@@ -503,7 +509,7 @@ function memberFix(
 
 /** The fix of a value that is not true or false where a condition needs one (#1195's decided text). */
 function conditionFix(text: string, kinds: readonly ItemTag[]): string {
-  if (!path(text)) return "";
+  if (!stablePath(text)) return "";
   const kind = known(kinds)[0];
   if (kind === "integer" || kind === "number") return ` Compare it instead, as in '${text} > 0'.`;
   if (kind === "string") return ` Compare it instead, as in '${text} != ""'.`;
@@ -515,7 +521,7 @@ function conditionFix(text: string, kinds: readonly ItemTag[]): string {
 /** The fix of a key that is not text: a number written as text, as the current checker gives it (`dict-operations.ts`). */
 function keyFix(text: string, kinds: readonly ItemTag[]): string {
   if (!kinds.some((kind) => kind === "integer" || kind === "number")) return "";
-  return path(text)
+  return stablePath(text)
     ? ` Write a number key as text, as in '"\${${text}}"'.`
     : " Write a number key as text.";
 }
@@ -527,7 +533,7 @@ function shownFix(
   kinds: readonly ItemTag[],
 ): string {
   const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
-  const label = path(text) ? text : null;
+  const label = stablePath(text) ? text : null;
   if (kind === "object")
     return rule.property === null || label === null
       ? "Show one of its properties instead."
@@ -614,7 +620,8 @@ function temporalFix(
   const moves = operator === "+" || operator === "-";
   // (an example only where the value it converts is a variable or a path, and the other operand one or a literal)
   const named =
-    path(left) && (path(right) || LITERAL_OPERAND.has(expressionKind(right) ?? "identifier"));
+    stablePath(left) &&
+    (stablePath(right) || LITERAL_OPERAND.has(expressionKind(right) ?? "identifier"));
   if (moves && a === "absoluteDateTime" && b === "calendarDuration")
     return named
       ? " An absolute date and time has no calendar. Convert it first, as in " +
@@ -637,14 +644,16 @@ function temporalFix(
   if (operator === "-" && b === "datetime" && rule.domain.includes("calendarDuration"))
     return (
       " A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with " +
-      (path(left) && path(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'") +
+      (stablePath(left) && stablePath(right)
+        ? `'toDate(${left}) - toDate(${right})'`
+        : "'toDate(...)'") +
       ", or convert both with 'toAbsoluteDateTime()' for the elapsed time."
     );
   if (moves && b === "time")
     return " Arithmetic on a time is not available. Combine it with a date first, with 'toDateTime(...)'.";
   const compares = ["<", "<=", ">", ">="].includes(operator);
   if (compares && a === "date" && b === "datetime")
-    return path(right)
+    return stablePath(right)
       ? ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`
       : " A date compares only with another date. Compare its date, with 'toDate(...)'.";
   if ((compares || operator === "/") && a !== undefined && b !== undefined) {
@@ -725,7 +734,7 @@ function errorSentence(
     case "shown": {
       const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
       if (kind === "dict" && !rule.element)
-        return path(text)
+        return stablePath(text)
           ? interpolatedDictMessage(text)
           : "'${...}' cannot show a dict. Select one value with a key, or show every value with 'values.join()'.";
       return `'\${...}' cannot show ${described(kinds)}. ${shownFix(rule, text, kinds)}`;
@@ -896,8 +905,8 @@ function checkFix(text: string, test: string, fallback: string | null, operand =
     name !== null
       ? `Check '${name}' first, as in 'if ${name} ${test} { ... }'`
       : ownText(text)
-        ? `Keep '${text}' in a variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
-        : `Keep '${text}' in a variable and check the variable first, as in 'if value ${test} { ... }'`;
+        ? `Keep '${text}' in a new variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
+        : `Keep '${text}' in a new variable and check the variable first, as in 'if value ${test} { ... }'`;
   if (fallback === null || !ownText(text)) return `${check}.`;
   // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
   const code = `${operandText(text)} otherwise ${fallback}`;
@@ -964,11 +973,15 @@ function warningFix(
   }
   switch (rule.rule) {
     case "selection": {
-      // (an example only for a collection written as a variable or a path; any other is grouped where it stands)
-      const length = `${receiverText(rule.collection)}.length`;
-      return path(rule.collection)
-        ? `Check '${length}' first, as in 'if ${length} > 0 { ... }'.`
-        : `Check '${length}' first.`;
+      // (a check of the collection itself only where reading it again gives the same one; any other is kept first, as
+      // `groups.random` or a call, so the check and the read see one selection, Astra r2)
+      const { collection } = rule;
+      if (stablePath(collection))
+        return `Check '${collection}.length' first, as in 'if ${collection}.length > 0 { ... }'.`;
+      return ownText(collection)
+        ? `Keep '${collection}' in a new variable, as in 'let value = ${collection}', and check its length, as in ` +
+            "'if value.length > 0 { ... }'."
+        : `Keep '${collection}' in a new variable and check its length first.`;
     }
     case "count":
       if (kinds.includes("number")) return ROUND_COUNT_FIX.trimStart();
@@ -1036,12 +1049,12 @@ function memberWarningFix(
   if (speaker && rule.member.startsWith(".")) {
     const name = rule.member.slice(1);
     if (rule.member.endsWith("()"))
-      return `A speaker has no methods. Use one of its properties instead, such as '${path(rule.receiver) ? `${rule.receiver}.` : ""}title'.`;
+      return `A speaker has no methods. Use one of its properties instead, such as '${stablePath(rule.receiver) ? `${rule.receiver}.` : ""}title'.`;
     if (rule.use !== "read") return "";
     return rule.receiver === PLAYER && PERSON_FIELDS.has(name)
       ? "Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the " +
           `script, or assign 'player.${name}' first.`
-      : path(rule.receiver)
+      : stablePath(rule.receiver)
         ? `Assign the property before this line, as in '${rule.receiver}.${name} = ...'.`
         : "Assign the property before this line.";
   }
