@@ -491,7 +491,7 @@ function speakerOnPath(
  * What a change through `descriptor` changes, for the debug trace: a property of the last speaker its path reaches, when
  * the rest of the path goes on from that property into values the session stores; else, for an attached reference whose
  * whole path does, the variable at its root; else nothing, as for a copy or a value derived at each read, such as a
- * dict's `keys`. A path that no longer leads anywhere is judged by the steps that still do.
+ * dict's `keys`. A path that no longer leads anywhere leads to no speaker's property, but still into its variable.
  */
 export function preparedReferenceChangeTarget(
   snapshot: RuntimeSnapshot,
@@ -509,7 +509,7 @@ export function preparedReferenceChangeTarget(
         step.kind === "property" ? { speakerId: current.speakerId, property: step.name } : null;
     else if (!selectsStoredValue(current, step)) target = null;
     const next = resolvePreparedReferenceStep(snapshot, current, step);
-    if (!next.found) break;
+    if (!next.found) return target === "variable" ? target : null;
     current = next.value;
   }
   return target;

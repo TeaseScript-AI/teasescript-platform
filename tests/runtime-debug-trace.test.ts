@@ -848,17 +848,24 @@ test("a change of a value derived at each read, such as a dict's keys, changes n
     [
       "speaker guide {",
       "    bag: dict{ a: [1] }",
+      "    rows: [[1]]",
       "}",
       "let other = guide",
       "let d = dict{ a: [1] }",
-      'say "${guide.bag.keys.removeAt(0)} ${d.values[0].removeAt(0)}", instant',
-      'say "${other.bag["a"].length} ${d["a"].length}", instant',
+      "let unrelated = 7",
+      'say "${guide.bag.keys.removeAt(0)} ${d.values[0].removeAt(0)} ${guide.rows[0].add(guide.rows.removeFirst()[0] + unrelated)}", instant',
+      'say "${other.bag["a"].length} ${d["a"].length} ${other.rows.length}", instant',
       "exit",
     ].join("\n"),
   );
   assertComplete(played);
-  for (const read of causes(played.trace, outputOf(played, "1 1")))
-    assert.ok(!lineage(played.trace, read.id).some((step) => step.location?.line === 6));
+  const [bag, values, rows] = causes(played.trace, outputOf(played, "1 1 0"));
+  for (const read of [bag!, values!])
+    assert.ok(!lineage(played.trace, read.id).some((step) => step.location?.line === 8));
+  // `add` changed the list `removeFirst` took out, which nothing stores any longer: only the removal explains the rest.
+  const removed = lineage(played.trace, rows!.id);
+  assert.ok(removed.some((step) => step.kind === "mutation" && step.target === "guide.rows"));
+  assert.ok(!removed.some((step) => step.target === "unrelated"));
 });
 
 test("a term that a speaker's gender gives, a title read through the other one, or a derived displayName comes from those properties", () => {
