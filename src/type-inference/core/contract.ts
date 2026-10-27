@@ -343,6 +343,12 @@ interface PrefixLevels {
   readonly base: readonly LevelGroup[];
 }
 
+/** A prefix's entries of one shape (`#entryGroups`), the first answering for all where no ingress store differs. */
+interface EntryGroup {
+  readonly entries: PrefixEntry[];
+  w: Writer | null;
+}
+
 /**
  * The sources a prefix's reads take apart from its entries (§8 r4.15: a replaced alias source's own stores below its
  * root, kept apart by their first step), as a layer over the one its prefix inherits: an alias shares its source's
@@ -589,6 +595,9 @@ export class Contract {
   /** A prefix's literal entries grouped at each path below it (`#groupsAt`), per prefix and path. */
   readonly #levelGroups = new Map<string, readonly LevelGroup[]>();
   readonly #levelBases = new Map<Key, PrefixLevels>();
+  /** A prefix's entries that answer by themselves, in groups of one shape (`#entryGroups`), and each value's shape. */
+  readonly #entryGroupsOf = new WeakMap<PrefixLevels, readonly EntryGroup[]>();
+  readonly #shapes = new Map<PlaceId, string | null>();
   readonly #groups = new WeakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
@@ -944,8 +953,17 @@ export class Contract {
             for (const item of yield* this.entryAt(entry, rest)) out.push(item);
         else {
           const levels = this.#prefixLevels(prefix, stores);
-          for (const entry of levels.others)
-            for (const item of yield* this.entryAt(entry, rest)) out.push(item);
+          for (const group of this.#entryGroups(levels)) {
+            const first = yield* this.entryAt(group.entries[0]!, rest);
+            // (an unknown's ingress stores are each entry's own, C9: there every entry answers by itself)
+            if (group.entries.length > 1 && !first.some((item) => item.tag === "unknown")) {
+              for (const item of withWriter(first, group.w)) out.push(item);
+              continue;
+            }
+            for (const item of first) out.push(item);
+            for (const entry of group.entries.slice(1))
+              for (const item of yield* this.entryAt(entry, rest)) out.push(item);
+          }
           if (levels.base.length > 0)
             for (const group of this.#groupsAt(prefix, levels.base, rest))
               out.push(
@@ -1047,6 +1065,125 @@ export class Contract {
     const levels = { others, base };
     this.#levelBases.set(prefix, levels);
     return levels;
+  }
+
+  /**
+   * S6c (the typed-ingress presets, S4's product): a prefix's entries that answer by themselves (`#prefixLevels`), in
+   * groups that answer alike at every path apart from their ingress stores, once per prefix: adds of values of one
+   * shape (`#shapeOf`: a structure whose ingress occurrences stand by what their contract reads), each unguarded or
+   * each guarded, none holding a mark (a holder of no guarded path, read or reference); any other entry its own group.
+   * An entry's ingress stores reach only its unknowns (C9), so where the group's first answers without one, it answers
+   * for the group, the earliest writer for its kinds (F28); k adds of literals of two typed `load`s of one default,
+   * each its own source (r4.15), read at k fields, are one group read once per field. In the entries' order.
+   */
+  #entryGroups(levels: PrefixLevels): readonly EntryGroup[] {
+    const known = this.#entryGroupsOf.get(levels);
+    if (known !== undefined) return known;
+    const groups: EntryGroup[] = [];
+    const byShape = new Map<string, number>();
+    for (const entry of levels.others) {
+      this.pass.program.work.charge("structureSteps");
+      const shape =
+        !sharing() ||
+        entry.elem === undefined ||
+        entry.ingress !== undefined ||
+        !this.#markFree(entry.holder)
+          ? null
+          : this.#shapeOf(entry.elem);
+      const key =
+        shape === null
+          ? null
+          : keptParts(this.#work, shape, entry.at ?? [], entry.guarded ? "g" : "");
+      const at = key === null ? undefined : byShape.get(key);
+      this.#keep(1);
+      if (at !== undefined) {
+        const into = groups[at]!;
+        into.entries.push(entry);
+        into.w = firstWriter(into.w, entry.w);
+        continue;
+      }
+      if (key !== null) byShape.set(key, groups.length);
+      this.#keep(2);
+      groups.push({ entries: [entry], w: entry.w });
+    }
+    this.#entryGroupsOf.set(levels, groups);
+    return groups;
+  }
+
+  /** Whether a holder marks no path (§3.2): none of its paths guarded, no read and no reference of its own. */
+  #markFree(holder: Holder | null): boolean {
+    if (holder === null) return true;
+    this.#collectMarks();
+    return holder.guarded.size === 0 && holder.reads.length === 0 && holder.refsAt.size === 0;
+  }
+
+  /**
+   * S6c: a value's structure (§4.6) where an ingress occurrence stands at a position its result reads, taken by what
+   * its contract reads, its leaf apart: a `load` by its key's kind and its default's structure, a parse by its name and
+   * its default's (neither landing in a written type nor typed by one: no expected type, F18); a literal by its own
+   * kinds, objects, emptiness and its values' shapes, as its structure; a structure where none stands (no shape is
+   * coarser than the structure); `null` for anything else (a reference, a read of host data, a marked read). Two
+   * values of one shape answer alike at every path apart from their ingress stores. Once per value.
+   */
+  #shapeOf(value: PlaceId): string | null {
+    const known = this.#shapes.get(value);
+    if (known !== undefined) return known;
+    const { program, definitions } = this.pass;
+    program.work.charge("structureSteps");
+    const structure = this.structureOf(value);
+    let shape: string | null = null;
+    if (!structure.startsWith("v")) shape = structure;
+    else if (program.hasOf.has(value)) shape = this.#literalShape(value);
+    else if (definitions.ingress.has(value) && this.landsIn(value, []) === null) {
+      const c = program.opOf.get(value);
+      // (the ingress by its kind, and its default, `null` for none)
+      let kind: string | null = null;
+      let fallback: PlaceId | null = null;
+      if (c?.kind === "load" && c.receiver === null) {
+        kind = c.key === null ? "load?" : "load";
+        fallback = c.fallback;
+      } else if (
+        c?.kind === "operation" &&
+        c.contract.family === "conversion" &&
+        conversionCategory(c.contract.name)?.kind === "parses"
+      ) {
+        kind = c.contract.name;
+        fallback = defaultOf(c) ?? null;
+      }
+      const of = fallback === null ? "" : this.structureOf(fallback);
+      if (kind !== null && !of.startsWith("v"))
+        shape = this.#internStructure(
+          keptParts(this.#work, kind, of, fallback === null ? "" : this.#guardsBelow(fallback)),
+        );
+    }
+    this.#shapes.set(value, shape);
+    return shape;
+  }
+
+  /** `#shapeOf` of a literal: its structure's parts (`#structureWork`), its computed values by their shapes. */
+  #literalShape(literal: PlaceId): string | null {
+    const index = this.literalIndex(literal);
+    if (index.references.size > 0) return null;
+    const parts: string[] = [];
+    for (const at of this.#pathOrder(index)) {
+      this.pass.program.work.charge("structureSteps");
+      const path = this.#pathTexts[at]!;
+      parts.push(this.#kindsPart(at, index.terms.get(path)));
+      for (const entry of index.reads.get(path) ?? []) {
+        const part = this.structureOf(entry.value);
+        if (part.startsWith("v") || entry.ingress !== undefined) return null;
+        parts.push(this.#kept(`s${part}`));
+      }
+      for (const entry of index.others.get(path) ?? []) {
+        const part = this.#shapeOf(entry.value);
+        if (part === null) return null;
+        parts.push(this.#kept(`s${part}`));
+      }
+      for (const object of index.objects.get(path)?.list ?? [])
+        parts.push(this.#namesPart(object.names));
+    }
+    parts.push(`empty:${this.#emptyIds(index)}`);
+    return this.#internStructure(`p(${this.#joined(parts, ";")})`);
   }
 
   /**
