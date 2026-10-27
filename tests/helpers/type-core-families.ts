@@ -1493,8 +1493,9 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * written binding, and k whole copies of it with no field read, as a chain, a fan-out and one destination stored k
  * times; k objects with a written field, one other field of each stored into one list a copy then reads (his second
  * witness: the scan resumed, never taken again); and their controls: plain fields, one dimension fixed, one field read,
- * the root changed between its copies, each copy storing its own field, the root copied into itself at another path. A
- * copy costs its own divergences, never its source's every field (r4.51); each is gated with the sharing off too.
+ * the root changed between its copies, each copy storing its own field, the chain closed into a cycle, the root copied
+ * into itself at another path. A copy costs its own divergences, never its source's every field (r4.51); each is gated
+ * with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
@@ -1616,6 +1617,21 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
           "let typed: integer = 1",
           `let root = {${fields(k, () => "typed")}}`,
           rows(k, (i) => `let a${i} = ${i > 0 ? `a${i - 1}` : "root"}\na${i}.f${i} = 2`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-closed-chain",
+    measures:
+      "r4.80's control: A4-inherited-chain closed into a cycle of whole copies, its first copy taking the last",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          copiesOf(k, "chain"),
+          `a0 = a${k - 1}`,
           "exit",
         ),
       ),
