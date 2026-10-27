@@ -49,9 +49,12 @@ are diagnostic reruns only when compact output is insufficient for a failure or
 specific investigation. Do not run a normal and full-output variant by default
 for the same revision. Focused checks remain appropriate when they supply
 distinct task-relevant evidence. To see what the checkout's compiler and
-runtime do with one source, run `npm run probe -- [--run] [--json] <file.tease | ->`
+runtime do with one source or a project, run
+`npm run probe -- [--run] [--json] <file.tease | - | folder | file.tease...>`
 after `npm run build:typescript`: it prints the diagnostics and, with `--run`, the
 messages, runtime failure, or first player interaction (see `tools/probe.mjs`).
+A folder is one project of its `.tease` files, as are several files at their paths from the folder that holds them
+all; the project runs from its `main.tease`, so a `call` or `goto` to another file can be tried.
 A run reads the current time only when `--clock 2026-10-04T18:30:00Z` gives it a UTC
 wall clock, and `--zone Europe/Amsterdam` replaces UTC with that IANA time zone.
 Its `playerProfile` has person fields, which `playerProfile.petNames` reads and `player.copyFrom(playerProfile)`
