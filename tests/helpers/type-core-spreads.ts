@@ -89,11 +89,12 @@ export const SPREAD_CASES: Readonly<Record<string, SpreadCase>> = {
     source: (size) =>
       `let picked: integer = askChoice [${Array.from({ length: size }, () => "{text: 1}").join(",")}]\nexit`,
   },
-  // a choice record's selected property (`Contract.#selectedAt`, S6c): its value a list of k computed elements
+  // a choice record's selected property (`Contract.#selectedAt`, S6c): its value a list of k host values, each its own
+  // item there (values of one class would answer as one, review Astra r1 H1)
   property: {
     source: (size) =>
       [
-        `let choice = {text: "A", value: [${Array.from({ length: size }, () => "1 + 0").join(",")}]}`,
+        `let choice = {text: "A", value: [${Array.from({ length: size }, () => "hostValue").join(",")}]}`,
         "let picked: integer = (askChoice choice).first",
         "exit",
       ].join("\n"),

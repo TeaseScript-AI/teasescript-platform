@@ -154,9 +154,9 @@ test("a choice of written records is answered within the native stack", () => {
   assert.deepEqual(spreadCase("records"), ["valid", 0, 0]);
 });
 
-test("a choice record whose value holds computed elements is answered within the native stack", () => {
+test("a choice record whose value holds host values is answered within the native stack", () => {
   // `Contract.#selectedAt`
-  assert.deepEqual(spreadCase("property"), ["valid", 0, 0]);
+  assert.deepEqual(spreadCase("property"), ["warning-runtime-check", 1, 2]);
 });
 
 test("a choice of choices of many options is classed within the native stack", () => {
