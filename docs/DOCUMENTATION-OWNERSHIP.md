@@ -3,9 +3,7 @@
 This document is the mandatory guide for every non-trivial repository
 documentation edit and documentation review. Pure spelling, link, or formatting
 corrections may skip the reread only when they cannot alter meaning, authority,
-placement, or maintenance obligations. This guide defines where durable
-information belongs and how to avoid competing authority, stale copies, and
-unnecessary recurring agent-context cost.
+placement, or maintenance obligations.
 
 ## Canonical sources and useful repetition
 
@@ -14,25 +12,18 @@ one clear canonical source. Keep the complete authoritative explanation there.
 Elsewhere, prefer a link or the smallest stable summary needed for the local
 document to remain understandable.
 
-**Owner** means the project's human owner and final decision authority. Agents may
-temporarily execute or coordinate work, but they are not owners. A **canonical
-source** is the repository location that maintains a rule or fact. Durable
-responsibility must be recoverable from repository state; record the canonical
-source and any required owner approval or change process rather than assigning
-persistent agent ownership. A coordinator is only an explicitly assigned temporary
-workflow role.
+**Owner** means the project's human owner and final decision authority. Agents may temporarily execute or coordinate
+work, but they are not owners; a coordinator is only an explicitly assigned temporary workflow role. A **canonical
+source** is the repository location that maintains a rule or fact. Durable responsibility must be recoverable from
+repository state; record the canonical source and any required owner approval or change process rather than assigning
+persistent agent ownership.
 
-KISS is primary: choose the simplest complete documentation structure across
-local clarity, authority, maintenance, and recurring reader or agent context.
-Pragmatic YAGNI applies that rule to future-facing documentation and rejects
-policy, inventories, or abstractions that have no current accepted purpose.
-
-DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical explanation
-plus references when that is clearer and simpler to understand and maintain
-than several copies. Prefer limited local repetition when it is the clearer
-KISS solution, provided it does not create competing authority, duplicate
-moving facts, or add unnecessary recurring context cost. DRY is not an absolute
-ban on repetition.
+For documentation, KISS means the simplest complete structure across local clarity, authority, maintenance, and
+recurring reader or agent context; pragmatic YAGNI rejects policy, inventories, or abstractions that have no current
+accepted purpose; and DRY, subordinate to both
+([`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md#kiss-pragmatic-yagni-and-dry)), is not an absolute ban on
+repetition: prefer limited local repetition when it is clearer, provided it does not create competing authority,
+duplicate moving facts, or add unnecessary recurring context cost.
 
 Distinguish these uses:
 
@@ -79,11 +70,8 @@ name marker such as `SUPERSEDED-`, and identify the current replacement inside t
 - **Unresolved product or technical choices:** [`docs/OPEN-DECISIONS.md`](OPEN-DECISIONS.md).
 - **Concrete execution tasks:** GitHub issues; pull requests are implementation handoffs and review evidence.
 
-A product or technical decision by the Owner becomes durable implementation authority only after an accepted ADR,
-accepted specification, or controlling current topic document is updated. `WISHES.xml` may preserve approved product
-intent and wish history, but it does not by itself accept an implementation decision. Chat messages, issues,
-pull-request text, tests, CI results, and reviews may prove intent, behavior, or execution state, but remain evidence or
-task context until the required synchronization occurs.
+[`README-FIRST.md`](../README-FIRST.md#authority-and-conflict-handling) defines when an owner decision becomes durable
+authority.
 
 Executable sources retain moving values they directly control: `.nvmrc` records the required Node runtime selection;
 `package.json` and the lockfile record dependency requirements; bootstrap `MANIFEST.json` files record release payload
@@ -103,36 +91,24 @@ Before every non-trivial documentation edit, the writer must:
 3. make targeted edits to one complete canonical explanation rather than
    appending amendments, replacing the whole document when existing content
    should survive, or adding a competing definition;
-4. use links or minimal stable summaries elsewhere where that remains clear;
-5. retain concise local repetition where it materially improves independent
-   comprehension without creating competing authority or duplicated moving
-   facts;
-6. update or remove stale statements made false by the change;
-7. consolidate existing duplication when it is directly in scope and safe,
+4. elsewhere, use links or minimal stable summaries where that remains clear, and concise local repetition only where
+   it materially improves independent comprehension without creating competing authority or copying moving facts
+   without a concrete local need;
+5. update or remove stale statements made false by the change;
+6. consolidate existing duplication when it is directly in scope and safe,
    without expanding into unrelated cleanup;
-8. review the complete documentation diff for placement, consistency,
+7. review the complete documentation diff for placement, consistency,
    maintenance cost, and recurring agent-context cost.
 
-The documentation reviewer performs the same canonical-source check independently.
-Verify that DRY is used where it reduces total complexity, that intentional
-repetition serves local comprehension, that moving facts are not copied without
-a concrete local need, and that routing documents do not silently become
-competing policy or current-status sources.
+The documentation reviewer performs the same checks independently and also verifies that routing documents do not
+silently become competing policy or current-status sources.
 
-For coordinated work, assign semantic write ownership for each canonical
-surface instead of having multiple agents independently reconcile the same
-meaning. This is a risk-based default, not an absolute rule that an executor may
-never edit documentation: a small mechanical correction may travel with an
-implementation when its authority, meaning, and conflict risk are clear, while
-cross-document consolidation, decision wording, or other semantically sensitive
-changes should normally be handled by one designated documentation writer or an
-explicit handoff. Concurrent documentation work must not create competing
-current-state descriptions merely because the file edits do not textually
-conflict.
-
-Document names describe durable purpose, not a temporary cleanup history or the
-latest review complaint. General tool, command, option, branch, issue, and
-workflow naming is canonically defined in [`DEVELOPMENT-WORKFLOW.md`](DEVELOPMENT-WORKFLOW.md).
+For coordinated work, assign semantic write ownership for each canonical surface instead of having multiple agents
+independently reconcile the same meaning. This is a risk-based default, not a ban on executor documentation edits: a
+small mechanical correction may travel with an implementation when its authority, meaning, and conflict risk are
+clear, while cross-document consolidation, decision wording, or other semantically sensitive changes should normally be
+handled by one designated documentation writer or an explicit handoff. Concurrent documentation work must not create
+competing current-state descriptions merely because the file edits do not textually conflict.
 
 ### Markdown source wrapping
 
@@ -163,22 +139,19 @@ security boundaries, product decisions, or the stable development process:
 
 A code or semantic change is incomplete when its canonical documentation becomes false. Update the relevant repository document in the same pull request unless the change is purely internal and does not affect documented behavior or status.
 
-The release roadmap, temporary coordination, and implementation status have different lifecycles:
+Temporary coordination and implementation status have different lifecycles:
 
-- `docs/planning/RELEASE-ROADMAP.md` records owner-selected release-stage placement and open outcomes, and may retain
-  compact checked milestones as progress history; current implementation details and status remain in their canonical
-  sources;
 - a deliberately maintained repository issue or phase-scope document may record scheduled scope when the owner or coordinator chooses to keep that planning in GitHub;
-- temporary coordinator work breakdowns, executor assignments, integration order, and commit tracking remain outside the repository and are non-canonical;
+- temporary coordinator work breakdowns, executor assignments, integration order and logs, and commit tracking remain
+  outside the repository and are non-canonical;
 - accepted decisions and implemented results from temporary coordination are synchronized back into the relevant ADRs, specifications, current topic documents, and `PHASE-STATUS.md`.
 
-Capability routing follows the same canonical-source rule. `docs/agents/README.md` is the canonical source for
-selection and composition; each focused guide is canonical only for its profile procedure. After a verified checkout
-exists, replaceable connector artifact mechanics live in `docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. The compact
-project-folder `README-FIRST.md` is the narrow pre-checkout exception: it carries the concrete startup acquisition steps
-needed to obtain the first exact checkout from an otherwise empty project context. Later source refreshes use the
-current connector acquisition guide; universal documents and other controlled derivatives do not copy those moving
-mechanics.
+`docs/agents/README.md` is the canonical source for selection and composition; each focused guide is canonical only for
+its profile procedure. After a verified checkout exists, replaceable connector artifact mechanics live in
+`docs/agents/CONNECTOR-SOURCE-ACQUISITION.md`. The compact project-folder `README-FIRST.md` is the narrow pre-checkout
+exception: it carries the concrete startup acquisition steps needed to obtain the first exact checkout from an otherwise
+empty project context. Later source refreshes use the current connector acquisition guide; universal documents and other
+controlled derivatives do not copy those moving mechanics.
 
 ## Shared project folder: durable context and non-authoritative research
 
@@ -205,14 +178,12 @@ Do not add the following merely to make the repository self-contained:
 - large third-party source ZIP files;
 - copied legacy engine/script archives;
 - chat scratchpads or temporary research notes;
-- temporary coordinator work breakdowns, executor assignments, or integration logs;
 - generated archive binaries, per-release checksums, or temporary staging manifests for ChatGPT project-folder derivatives;
 - duplicate historical versions of canonical documents;
 - PR-specific audit reports after their relevant conclusions are incorporated into current docs and tests.
 
 ## Avoiding drift
 
-- GitHub is the source of truth for exact implementation, decision, and stable workflow documentation.
 - The shared project context must not claim an exact current commit or test count unless it is a dated handoff note.
 - When a chat lacks GitHub access, provide a current repository ZIP or patch rather than treating the shared research package as current code documentation.
 - Periodic research-archive cleanup may reorganize files, but must preserve source hashes and non-authoritative labels.

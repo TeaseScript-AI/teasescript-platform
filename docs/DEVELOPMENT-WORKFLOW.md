@@ -21,9 +21,8 @@ The agent creating or substantially refining an issue should include:
 - evidence, reproduction, or relevant source references;
 - explicit scope and exclusions;
 - acceptance criteria;
-- when proposing future-facing infrastructure, the concrete scheduled
-  consumer, accepted boundary that must be correct when first introduced, or
-  difficult-to-reverse boundary problem that justifies implementing it now.
+- when proposing future-facing infrastructure, the concrete reason that justifies implementing it now (see
+  [KISS, pragmatic YAGNI, and DRY](#kiss-pragmatic-yagni-and-dry)).
 
 Prefer separate issues when each can be implemented, tested, reviewed, and merged safely on its own. A proposed
 implementation phase must also be dependency-closed for behavior it introduces: if ordinary successful execution
@@ -47,79 +46,47 @@ classify it as one of:
 | Optional defensive hardening | May be proposed, but does not block unrelated work without a concrete current need. |
 | Unresolved proposal | Requires the normal owner/ADR decision route before implementation treats it as accepted. |
 
-An agent-written issue, test, ADR draft, specification draft, pull-request
-description, or review comment is evidence and context, not authority by
-itself. A previous comment does not become authoritative merely because another
-agent accepted or implemented it. A specification or ADR becomes authoritative
-only after acceptance through the repository authority process, and only within
-its recorded scope. Existing behavior may still require preservation when it is
-part of a supported path, an accepted contract, or an explicit owner-approved
-acceptance criterion. Tests may prove such behavior, but their private fixture
-structure, helper identity, or exact harness design does not independently
-create a product contract.
+A previous comment or draft does not become authoritative because another agent accepted or implemented it; a
+specification or ADR becomes authoritative only after acceptance through the repository authority process, and only
+within its recorded scope. Existing behavior may still require preservation when it is part of a supported path, an
+accepted contract, or an explicit owner-approved acceptance criterion. Tests may prove such behavior, but their private
+fixture structure, helper identity, or exact harness design does not independently create a product contract.
 
-Use words such as `must`, `exact`, `versioned`, `authoritative`, and
-`compatibility` only when the text identifies the accepted behavior, real
-boundary, or owner decision that requires that strength. A stricter
-implementation being technically possible is not sufficient.
-
-Before declaring a project limitation, proposing infrastructure, or presenting
-owner options, verify the relevant existing capability through the smallest
-authoritative evidence set. Do not generalize one API action, connector method,
-helper, or environment limitation to the complete supported workflow. Report a
-material shared-workflow failure instead of silently working around it.
-
-Do not invent project-wide policy, numeric thresholds, style or readability
-limits, naming rules, compatibility promises, mandatory tools, or workflow
-gates. Until a durable rule has evidence, owner approval, and synchronization
-into its canonical source, use configured tooling, current authority, and
-task-proportional judgment.
+Use words such as `must`, `exact`, `versioned`, `authoritative`, and `compatibility` only when the text identifies the
+accepted behavior, real boundary, or owner decision that requires that strength. A stricter implementation being
+technically possible is not sufficient. Until a proposed durable rule has evidence, owner approval, and synchronization
+into its canonical source, use configured tooling, current authority, and task-proportional judgment.
 
 ### KISS, pragmatic YAGNI, and DRY
 
-Once the current requirement and its authority are established, choose the
-simplest complete approach that safely satisfies that requirement and its real
-boundaries. Assess simplicity across design, implementation, evidence, workflow,
-and maintenance cost. The smallest individual patch is not automatically the
-simplest overall solution.
+Once the current requirement and its authority are established, choose the simplest complete approach that safely
+satisfies that requirement and its real boundaries, assessing simplicity across design, implementation, evidence,
+workflow, and maintenance cost. The smallest individual patch is not automatically the simplest overall solution. Less
+code or documentation is beneficial when clarity, behavior, evidence, and maintenance remain at least as strong.
 
-Pragmatic YAGNI applies this rule to future-facing complexity. Implement only
-the complexity needed for the current requirement and its real boundaries.
-
-KISS and pragmatic YAGNI are not competing rules. Apparent conflict normally
-means simplicity is being assessed too locally or hypothetical future value is
-being treated as a current requirement.
-
-Statements such as “we may need this later,” “a more general solution would be
-cleaner,” an unscheduled backlog entry, a historical implementation, or an
-earlier test or review comment do not by themselves justify present
-infrastructure.
-
-Future-facing complexity needs a concrete reason, such as:
+Pragmatic YAGNI applies this rule to future-facing complexity: implement only the complexity needed for the current
+requirement and its real boundaries. The two do not compete; apparent conflict normally means simplicity is being
+assessed too locally or hypothetical future value is being treated as a current requirement. “We may need this later,”
+“a more general solution would be cleaner,” an unscheduled backlog entry, a historical implementation, or an earlier
+test or review comment does not by itself justify present infrastructure. Future-facing complexity needs a concrete
+reason, such as:
 
 - an owner- or coordinator-scheduled consumer that will use it;
 - an accepted boundary that must be correct when first introduced;
 - a demonstrated data, security, persistence, or public-compatibility problem
   that would be materially harder to repair later.
 
-Use the smallest seam that addresses that concrete reason. A narrow interface
-for an already scheduled next consumer may be proportionate; implementing the
-complete generalized future subsystem is not.
+Use the smallest seam that addresses that reason: a narrow interface for an already scheduled next consumer may be
+proportionate; implementing the complete generalized future subsystem is not. When no present implementation is
+justified, propose or route the idea through the appropriate owner-governed wish, planning, backlog, or open-decision
+process. Recording a proposal preserves it without accepting, scheduling, or authorizing implementation and without
+turning it into production maintenance surface.
 
-When no present implementation is justified, propose or route the idea through
-the appropriate owner-governed wish, planning, backlog, or open-decision
-process. Recording a proposal preserves it without accepting, scheduling, or
-authorizing implementation and without turning it into production maintenance
-surface.
-
-DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical
-implementation, rule, or explanation plus references only when that is clearer
-and simpler across the complete maintenance lifecycle. Use limited local
-repetition when that is the clearer KISS solution. Do not force DRY when it
-creates indirection, competing authority, duplicated moving facts, speculative
-abstraction, or unnecessary recurring context cost. For the
-documentation-specific application, follow
-[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md).
+DRY is subordinate to KISS and pragmatic YAGNI. Use one canonical implementation, rule, or explanation plus references
+only when that is clearer and simpler across the complete maintenance lifecycle; otherwise use limited local
+repetition. Do not force DRY when it creates indirection, competing authority, duplicated moving facts, speculative
+abstraction, or unnecessary recurring context cost. [`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md) applies
+this rule to documentation.
 
 ### Review finding classes
 
@@ -147,24 +114,9 @@ case` do not establish severity without the concrete reason.
 Fix confirmed in-scope findings in the reviewed pull request before merge; track all others, including post-merge
 findings, in open issues linked to the review.
 
-### Proportional review lenses
-
-Select only lenses relevant to the changed behavior: accepted behavior, issue
-scope, and scope expansion; correctness and failure handling; architecture,
-ownership, dependency direction, coherent file boundaries, and real security
-or trust boundaries; determinism, serialization, ordering, persistence, and
-compatibility; test quality and evidence, including negative paths;
-maintainability and readability,
-including over-compression and needless fragmentation; KISS, pragmatic YAGNI,
-useful DRY, and dependency cost; documentation accuracy, stale or conflicting
-text, and current-status impact; complete-diff collateral changes, generated
-files, debug code, and secrets; and convergence or remaining uncertainty. Ask
-whether a reasonable future maintainer could understand and safely change the
-result.
-
-This is not a rigid checklist: not every lens applies, and a preference is not
-a blocker. Use the finding classes and blocking-evidence rules below for
-severity and evidence.
+Review lenses are in
+[`IMPLEMENTATION-AND-REVIEW.md`](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#self-review-and-assigned-review);
+severity and evidence follow the finding classes above and the blocking-evidence rules below.
 
 ### Blocking evidence
 
@@ -190,31 +142,23 @@ unless evidence shows a reachable supported path or real boundary consequence.
 
 ### Review convergence
 
-A review is not converging when successive substantive findings come from the
-same invariant or problem family and each repair addresses only one newly found
-sibling without reducing uncertainty about the remaining supported behavior
-space. No fixed review count triggers this rule. Both the implementer and the
-reviewer are responsible for recognizing and reporting the pattern without
-waiting to be asked: from the second review round on, every review report and
-every repair report states, for each substantive finding, whether it belongs to
-a problem family an earlier round already found, and if so whether the review
-is converging and why. Whoever coordinates the work compares those answers
-across rounds and brings a non-converging pattern to the owner with a proposal;
-without a separate coordinator, the implementer does this.
+A review is not converging when successive substantive findings come from the same invariant or problem family and
+each repair addresses only one newly found sibling without reducing uncertainty about the remaining supported behavior
+space. No fixed review count triggers this rule, and repeated one-off patches do not prove convergence. Both the
+implementer and the reviewer recognize and report the pattern without waiting to be asked: from the second review round
+on, every review report and every repair report states, for each substantive finding, whether it belongs to a problem
+family an earlier round already found, and if so whether the review is converging and why. Whoever coordinates the
+work compares those answers across rounds and brings a non-converging pattern to the owner with a proposal; without a
+separate coordinator, the implementer does this.
 
-Relevant signals include:
+Signals include consecutive findings involving the same lifecycle, validator, helper, state transition, or
+public/trusted boundary; repairs repeatedly adding one isolated special case; no explicit account of the remaining
+bounded behavior space; tests growing mainly as a list of previously discovered incidents; completeness uncertainty not
+decreasing after each repair; and a reviewer continuing to find sibling cases without being able to explain why the
+remaining space is covered.
 
-- consecutive findings involving the same lifecycle, validator, helper, state
-  transition, or public/trusted boundary;
-- repairs repeatedly adding one isolated special case;
-- no explicit account of the remaining bounded behavior space;
-- tests growing mainly as a list of previously discovered incidents;
-- uncertainty about completeness not decreasing after each repair;
-- a reviewer continuing to find sibling cases without being able to explain
-  why the remaining space is covered.
-
-When these signals appear, pause before repeating the same repair cycle and
-briefly record:
+When these signals appear, pause before repeating the same repair cycle and briefly record, in the active pull-request
+or issue discussion or in the owner/coordinator handoff when that is the active coordination surface:
 
 1. the recurring pattern;
 2. why the current method is not demonstrating convergence;
@@ -224,29 +168,22 @@ briefly record:
 5. whether a material scope or execution-strategy change needs owner or
    coordinator approval.
 
-Record this assessment in the active pull-request or issue discussion, or in
-the owner/coordinator handoff when that is the active coordination surface. Do
-not create a separate report or policy file solely for this checkpoint unless
-an existing canonical document genuinely becomes inaccurate.
+Do not create a separate report or policy file solely for this checkpoint unless an existing canonical document
+genuinely becomes inaccurate.
 
-Possible alternatives include an explicit test matrix, state-transition table,
-invariant inventory, property- or model-based strategy, a focused completeness
-audit, splitting an overly broad issue, or simplifying or redesigning the
-implementation. Do not prescribe a matrix or new framework for every repeated
-finding; choose the smallest method that matches the demonstrated problem.
+The implementer adopts, or the reviewer recommends or requires, the smallest systematic repair or evidence method that
+can establish completeness, such as an explicit test matrix, state-transition table, invariant inventory, property- or
+model-based strategy, a focused completeness audit, splitting an overly broad issue, or simplifying or redesigning the
+implementation. Do not prescribe a matrix or new framework for every repeated finding; choose the smallest method that
+matches the demonstrated problem. A bounded systematic model is justified when it is the smallest credible way to
+resolve demonstrated completeness uncertainty, but it does not justify generic infrastructure, speculative
+compatibility, or unrelated hardening. Isolated findings, unrelated defects, and a known finite repair list whose
+remaining coverage is understood may continue through ordinary repair and review.
 
-Isolated findings, unrelated defects, and a known finite repair list whose
-remaining coverage is understood may continue through ordinary repair and
-review. Repeatedly applying the smallest local patch is not automatically the
-simplest overall solution. Under KISS and pragmatic YAGNI, a bounded systematic
-model is justified when it is the smallest credible way to resolve demonstrated
-completeness uncertainty, but it does not justify generic infrastructure,
-speculative compatibility, or unrelated hardening.
-
-The implementer must not silently broaden the pull request into a large
-campaign. When the revised approach materially changes scope or execution
-strategy, present the pattern, options, recommendation, cost, and exclusions to
-the owner or coordinator before proceeding.
+The implementer must not silently broaden the pull request into a large campaign. When the revised approach is a
+material scope, redesign, issue-split, or execution-strategy change, present the pattern, options, recommendation, cost,
+and exclusions to the owner or coordinator and obtain their decision before proceeding. Uncertainty that cannot be
+bounded may require a separately assigned audit.
 
 ### Proportional repair and owner escalation
 
@@ -289,13 +226,6 @@ or public compatibility.
 For longer work, coherent milestones and an orchestrator-supplied temporary
 checklist may be used. Before claiming completion, the executor must reread the
 checklist and verify every item against the actual diff and relevant files.
-Store long editable drafts in temporary files outside the repository rather
-than disposable chat blocks, unless the file is an intended deliverable.
-
-If required input cannot be obtained in the current environment, stop repeating
-equivalent impossible variants, record the exact missing input and checked
-alternatives, and request the smallest concrete owner action that can unblock
-the work.
 
 Before destructively discarding substantial experimental work that established
 useful coupling, failure, migration, or verification evidence, preserve a local
@@ -318,11 +248,8 @@ task, review, reproduction, or evidence to that exact identity.
 Tool, command, option, file, branch, issue, and workflow names describe durable
 purpose rather than temporary cleanup history or the latest review complaint.
 
-Use full-file create or replacement actions only for genuinely new files or an
-intentional complete replacement. When existing content must survive, use the
-normal Git route or verified patch publication. Do not switch to full-file
-replacement midway through a preservation edit merely because it appears
-simpler.
+When existing content must survive, use the normal Git route or verified patch publication; do not switch to full-file
+replacement midway through a preservation edit merely because it appears simpler.
 
 ## Normal flow
 
@@ -337,27 +264,22 @@ For a normal issue:
 7. Run the required verification and review the complete diff.
 8. Merge after approval and passing checks, then delete the branch.
 
-The pull request is the implementation handoff record.
-
-Make small logical commits with concise English imperative messages.
-
-Every pull request that fully completes an assigned issue must include the closing reference: `Closes #123`
-
-Use `Refs #123` only when the pull request is related to the issue but intentionally does not complete it.
+The pull request is the implementation handoff record. Every pull request that fully completes an assigned issue must
+include the closing reference `Closes #123`; use `Refs #123` only when the pull request is related to the issue but
+intentionally does not complete it.
 
 ## Capability-specific execution
 
-This document is canonical only for rules that apply regardless of agent capability. Before source acquisition or a
-repository write, select the applicable route in [`agents/README.md`](agents/README.md). That router and its
-focused capability guides are canonical for capability-specific source acquisition, permitted writes, verification, and
-publication constraints. Do not copy capability-specific procedures into this document.
+This document is canonical only for rules that apply regardless of agent capability.
+[`agents/README.md`](agents/README.md) and its focused capability guides are canonical for capability-specific source
+acquisition, permitted writes, verification, and publication constraints. Do not copy capability-specific procedures
+into this document.
 
 ## Documentation ownership
 
-Before every non-trivial documentation change or documentation review, read
-[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md). Record material ownership or consolidation
-decisions in the active issue, pull request, or review discussion; do not create a separate report unless the
-task requires one.
+Record material documentation ownership or consolidation decisions (see
+[`DOCUMENTATION-OWNERSHIP.md`](DOCUMENTATION-OWNERSHIP.md)) in the active issue, pull request, or review discussion;
+do not create a separate report unless the task requires one.
 
 The agent implementing a change updates documentation affected by the implemented behavior in the same pull
 request unless the task explicitly assigns that documentation update elsewhere. Every pull request states its
@@ -385,14 +307,13 @@ the changed behavior does not reach that layer.
 
 ## Verification
 
-Every pull request runs its relevant configured checks and reports exact commands and results. Use the exact
-Node.js version declared in `.nvmrc` and confirm the effective environment before installing dependencies.
-Missing NVM is not itself a verification failure when another supported mechanism activated the required
-version. Reuse earlier verification while the tested source/content and every relevant input, toolchain,
-transformation or transport boundary, and mutable state on which the evidence depends are proven equivalent. Revalidate
-only when one of those can invalidate the earlier evidence; a different commit or head alone is not enough when exact
-relevant tree/content equivalence is established. Do not repeat equivalent nested suites, unchanged digest checks, or
-oversized routine fixtures unless they add distinct evidence.
+Use the exact Node.js version declared in `.nvmrc` and confirm the effective environment before installing dependencies.
+Missing NVM is not itself a verification failure when another supported mechanism activated the required version. Reuse
+earlier verification while the tested source/content and every relevant input, toolchain, transformation or transport
+boundary, and mutable state on which the evidence depends are proven equivalent. Revalidate only when one of those can
+invalidate the earlier evidence; a different commit or head alone is not enough when exact relevant tree/content
+equivalence is established. Do not repeat equivalent nested suites, unchanged digest checks, or oversized routine
+fixtures unless they add distinct evidence.
 
 ```shell
 node --version
@@ -407,7 +328,6 @@ its public `tsc` command. The separately pinned `ts-morph` package supports deve
 [lint exception parsing](LINTING.md). Do
 not replace either dependency without an explicit dependency migration.
 
-Inspect the complete diff and run any change-specific playground, browser, security, migration, or integration
-checks. Report failures, warnings, skipped checks, stale or contradictory documentation, and remaining risks.
-Merge only after the required review and checks pass, then follow the selected capability route for the final
-publication or handoff operation.
+Run any change-specific playground, browser, security, migration, or integration checks, and report stale or
+contradictory documentation with the other results `AGENTS.md` requires. Merge only after the required review and checks
+pass, then follow the selected capability route for the final publication or handoff operation.
