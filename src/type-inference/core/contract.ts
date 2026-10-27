@@ -444,6 +444,11 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** Computed values of a literal at a path that answer alike (`#othersAt`): the first, and the earliest cell writer. */
+interface OtherGroup extends ValueEntry {
+  readonly writer: Writer | null;
+}
+
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
 export interface StoredChoiceKeys {
   readonly value: boolean;
@@ -559,6 +564,13 @@ export class Contract {
   readonly #snapshots = new Map<PlaceId, string>();
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
   readonly #readClasses = [new Map<PlaceId, string | null>(), new Map<PlaceId, string | null>()];
+  /** Per computed value, its contract class (`contractClass`). */
+  readonly #contractClasses = new Map<PlaceId, string | null>();
+  /** Per literal's list of computed values at a path, its groups on the contract side and the value side (`#othersAt`). */
+  readonly #otherGroups = [
+    new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
+    new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
+  ];
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly #choiceOptions = [
     new Map<PlaceId, readonly number[]>(),
@@ -1868,6 +1880,66 @@ export class Contract {
     }
     memo.set(value, cls);
     return cls;
+  }
+
+  /**
+   * S6c: what a computed value's contract at every path rests on, as one text (`readClass` for a read): a `get` by its
+   * receiver's and its default's reads, never its key (`#contractOfOp` reads only these, §4.6), an `otherwise` by its
+   * operands' reads; `null` for any other value, or an operand that is no read. Once per value.
+   */
+  public contractClass(value: PlaceId): string | null {
+    const known = this.#contractClasses.get(value);
+    if (known !== undefined) return known;
+    const c = this.pass.program.opOf.get(value);
+    let cls: string | null = null;
+    if (c === undefined) cls = this.readClass(value, false);
+    else if (c.kind === "get" || c.kind === "fallback") {
+      const [first, second] = c.kind === "get" ? [c.receiver, c.fallback] : [c.left, c.right];
+      const [a, b] = [this.readClass(first, false), this.readClass(second, false)];
+      if (a !== null && b !== null) cls = keptParts(this.#work, c.kind, a, b);
+    }
+    this.#contractClasses.set(value, cls);
+    return cls;
+  }
+
+  /**
+   * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
+   * once per list and side: values of one class (`contractClass`; on the value side `Values.valueClass`) answer alike at
+   * every path, so the first stands for them, the earliest writer for its kinds (each value's kinds take its cell's
+   * writer, F28); any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
+   * contributions (§3.4's several elements) stays the list's.
+   */
+  #othersAt(list: readonly ValueEntry[] | undefined, exact: boolean): readonly OtherGroup[] {
+    if (list === undefined) return [];
+    const memo = this.#otherGroups[exact ? 1 : 0]!;
+    const known = memo.get(list);
+    if (known !== undefined) return known;
+    const { definitions, program, values } = this.pass;
+    const groups: OtherGroup[] = [];
+    const byClass = new Map<string, number>();
+    for (const entry of list) {
+      program.work.charge("invSteps");
+      const writer = entry.g === null ? null : definitions.writerOf(entry.g);
+      const cls = !sharing()
+        ? null
+        : exact
+          ? values.valueClass(entry.value)
+          : this.contractClass(entry.value);
+      // (on the contract side a value without its cell's writer apart from one with it)
+      const key =
+        cls === null ? null : keptParts(this.#work, cls, exact || writer !== null ? "w" : "");
+      const at = key === null ? undefined : byClass.get(key);
+      if (at !== undefined) {
+        const into = groups[at]!;
+        groups[at] = { value: into.value, g: into.g, writer: firstWriter(into.writer, writer) };
+        continue;
+      }
+      if (key !== null) byClass.set(key, groups.length);
+      this.#keep(2);
+      groups.push({ value: entry.value, g: entry.g, writer });
+    }
+    memo.set(list, groups);
+    return groups;
   }
 
   /**
@@ -3698,12 +3770,9 @@ export class Contract {
               ),
             ),
           );
-        for (const entry of index.others.get(path) ?? [])
+        for (const group of this.#othersAt(index.others.get(path), false))
           out.push(
-            ...withWriter(
-              yield* this.contractOfValueAt(entry.value, after()),
-              entry.g === null ? null : definitions.writerOf(entry.g),
-            ),
+            ...withWriter(yield* this.contractOfValueAt(group.value, after()), group.writer),
           );
       } else {
         const copies = length < rest.length && elementAbove ? (index.reads.get(path) ?? []) : null;
@@ -3717,8 +3786,8 @@ export class Contract {
           for (const entry of index.exact.get(path) ?? [])
             out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
         const others = index.others.get(path) ?? [];
-        for (const entry of others)
-          out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
+        for (const group of this.#othersAt(others, true))
+          out.push(...(yield* values.valueItems(group.value, group.g?.node ?? node, after())));
         sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
