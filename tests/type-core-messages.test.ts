@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
+import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
@@ -226,8 +227,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let flagHost = askBoolean "f"\nlet x: speaker | object = player\nif flagHost { x = {m: 1} }\nx.n = 1\nexit\n',
       [
         "W TSV043 'x.n': 'x' may have no property 'n' here. If it is an object without 'n', the Tease stops with an " +
-          "error at this line. A speaker takes the property. 'x' is a speaker, whose properties are known only when " +
-          "the script runs.",
+          "error at this line. A speaker takes the property. 'x' may be a speaker, whose properties are known only " +
+          "when the script runs.",
         `W TSV043 'x.n': 'x' may hold an object without property 'n' here. If it does, the Tease stops with an error ` +
           "at this line.",
       ],
@@ -385,6 +386,34 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     assert.deepEqual(messages(main(source)), expected, source);
 });
 
+test("a warning whose expression never runs is not reported, as the line's TSV065 says it; an error there is (#1195)", () => {
+  const shown = (source: string): string[] => {
+    const request = coreRequest(main(source));
+    assert.ok(request !== null, source);
+    return reportedDiagnostics(analyseCore(request)).map(
+      (diagnostic) => `${diagnostic.class === "compile-error" ? "E" : "W"} ${diagnostic.code}`,
+    );
+  };
+  const read = 'let key = "n"\n';
+  // a branch, the right side of `and` and `or`, code after a function's `return`
+  assert.deepEqual(shown(`${read}if false { say load(key, default: "") - 1 }\nexit\n`), []);
+  assert.deepEqual(shown(`${read}say false and (load(key, default: "") - 1 > 0)\nexit\n`), []);
+  assert.deepEqual(shown(`${read}say true or (load(key, default: "") - 1 > 0)\nexit\n`), []);
+  assert.deepEqual(
+    shown(`function f {\nreturn\n${read}say load(key, default: "") - 1\n}\nf()\nexit\n`),
+    [],
+  );
+  // an expression that runs before its statement ends early, and a store's error that never runs
+  assert.deepEqual(
+    shown(
+      `function stop { exit }\n${read}function use(a, b) { say a }\n` +
+        'use(load(key, default: "") - 1, stop())\nexit\n',
+    ),
+    ["W TSV043"],
+  );
+  assert.deepEqual(shown('if false { let n: integer = "x" }\nexit\n'), ["E TSV041"]);
+});
+
 test("a word that came with its value from another line names that value's origin, never this line's read as its subject (D1)", () => {
   // the cause, the last sentence of each warning of `code` at the site `site`
   const why = (source: string, code: string, site: string): string[] =>
@@ -498,9 +527,9 @@ test("a word that came with its value from another line names that value's origi
       .filter((found) => found.site !== "hostValue")
       .map((found) => found.message),
     [
-      `${member} Assign the property before this line, as in 'x.n = ...'. 'x' is a speaker, whose properties are ` +
-        "known only when the script runs.",
-      `${member} 'x' is a timer handle, whose properties are known only when the script runs.`,
+      `${member} Assign the property before this line, as in 'x.n = ...'. 'x' may be a speaker, whose properties ` +
+        "are known only when the script runs.",
+      `${member} 'x' may be a timer handle, whose properties are known only when the script runs.`,
       `${member} ${OUTSIDE("x")}`,
       `${COUNT}, but 'd' may be a value of another type here. ${STOPS} Check 'd' first, as in ` +
         "'if d is integer { ... }'. The type of 'd' is known only when the script runs.",

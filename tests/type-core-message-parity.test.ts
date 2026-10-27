@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileProject } from "../src/compiler.js";
+import { createFreshRuntimeSession } from "../src/index.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
@@ -23,9 +24,11 @@ import { readFixture } from "./helpers/type-core-fixture.js";
  * checker is removed (#1076), this compares with its messages captured before.
  */
 
-/** What the new checker's diagnostic names: its subject as the source writes it, and an operation's operands. */
+/** What the new checker's diagnostic names: its subject as the source writes it, a member, an operation's operands. */
 interface Named {
   readonly subject: string;
+  /** A member as its code writes it: `.length`, `.get(...)`; empty for any other rule. */
+  readonly member: string;
   readonly operands: readonly string[];
 }
 
@@ -150,12 +153,8 @@ const PORTS: readonly Port[] = [
   // members of a kind without them
   {
     from: /^Convert it to text first with toString\(\.\.\.\)\.$/,
-    to: (_, { subject }) =>
-      form(
-        `Convert '${subject}' to text first, as in 'toString(${subject})`,
-        code("\\.\\w+(?:\\(\\.\\.\\.\\))?"),
-        "'.",
-      ),
+    to: (_, { subject, member }) =>
+      exact(`Convert '${subject}' to text first, as in 'toString(${subject})${member}'.`),
   },
   {
     from: /^Divide it by a unit, as in '.+ \/ 1 (\w+)'\.$/,
@@ -265,7 +264,7 @@ function fixes(message: string): string[] {
 /** What a diagnostic names, in the source's own text. */
 function namedBy(diagnostic: CoreDiagnostic, source: MessageSource): Named {
   if (diagnostic.kind === "written-type")
-    return { subject: source.text(diagnostic.site), operands: [] };
+    return { subject: source.text(diagnostic.site), member: "", operands: [] };
   const { rule } = diagnostic;
   return {
     subject:
@@ -274,6 +273,12 @@ function namedBy(diagnostic: CoreDiagnostic, source: MessageSource): Named {
         : rule.rule === "selection"
           ? rule.collection
           : source.text(diagnostic.site),
+    member:
+      rule.rule !== "member"
+        ? ""
+        : rule.member.endsWith("()")
+          ? `${rule.member.slice(0, -2)}(...)`
+          : rule.member,
     operands: rule.rule === "operator" ? rule.operands.map((site) => source.text(site)) : [],
   };
 }
@@ -449,6 +454,13 @@ const REPAIRS: readonly (readonly [string, RegExp])[] = [
   // the text join, a chain of `+`, also as a warning
   ['let score = 3\nsay ⟦"You have " + score + " points"⟧\nexit\n', /as in '([^']*)'/],
   ['function f(n) {\nsay ⟦"You have " + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n', /as in '([^']*)'/],
+  // text in a variable, a sum of numbers kept whole
+  ['let prefix = "You have "\nlet n = 1\nsay ⟦prefix + n + " points"⟧\nexit\n', /as in '([^']*)'/],
+  [
+    'function f(n) {\nlet prefix = "You have "\nsay ⟦prefix + n + " points"⟧\n}\nf(1)\nf(2)\nexit\n',
+    /as in '([^']*)'/,
+  ],
+  ['let n = 1\nsay ⟦"Sum: " + (n + 2)⟧\nexit\n', /as in '([^']*)'/],
   // date and time operators, composed operands grouped, also as a warning
   [
     'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay ⟦(t + 1 s) + 1 calendar day⟧\nexit\n',
@@ -470,18 +482,21 @@ const REPAIRS: readonly (readonly [string, RegExp])[] = [
     /as in '([^']*)'/,
   ],
   ["say ⟦(1 s + 2 s).seconds⟧\nexit\n", /as in '([^']*)'/],
+  ["say ⟦(1 s+2 s*3).seconds⟧\nexit\n", /as in '([^']*)'/],
   ["let n = 1\nsay ⟦n.length⟧\nexit\n", /as in '([^']*)'/],
   [
-    "player.copyFrom(playerProfile)\nlet value = player\nsay ⟦value.get(0, default: 3)⟧\nexit\n",
+    // (the current checker's example property, of a speaker that has it)
+    'speaker sage { title: "Sage" }\nlet value = sage\nsay ⟦value.get(0, default: 3)⟧\nexit\n',
     /such as '([^']*)'/,
   ],
   // `${...}`: an object's first property it shows, a set
   ['let slave = {nested: {name: "A"}, age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/],
+  ['let slave = {names: ["A"], age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/],
   ['let s = set[1]\nsay "⟦${s}⟧"\nexit\n', /with '([^']*)'/],
   // a condition, a key, text
   ['let count = 2\nif ⟦count⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
-  ["let d = dict{a: 1}\nsay d[⟦1⟧]\nexit\n", /as in '([^']*)'/],
+  ['let d = dict{"1": 5}\nsay d[⟦1⟧]\nexit\n', /as in '([^']*)'/],
   ["let caption: string = ⟦1⟧\nexit\n", /write '([^']*)'/],
   // the null check's fallback, of a kept value and of a composed one
   ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/],
@@ -501,7 +516,7 @@ const REPAIRS: readonly (readonly [string, RegExp])[] = [
   ],
 ];
 
-test("the code each fix suggests compiles where it stands (#1195)", () => {
+test("the code each fix suggests compiles where it stands and runs (#1195)", () => {
   for (const [marked, pick] of REPAIRS) {
     const source = marked.replace(/[⟦⟧]/g, "");
     const files = [{ path: "main.tease", source }];
@@ -522,5 +537,15 @@ test("the code each fix suggests compiles where it stands (#1195)", () => {
       [],
       fixed,
     );
+    // (until it exits, fails, or waits for the player)
+    const { plan } = compileProject([{ path: "main.tease", source: fixed }]);
+    assert.ok(plan !== null, fixed);
+    const session = createFreshRuntimeSession(plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    });
+    const failures = session.run().events.filter((event) => event.kind === "runtimeFailure");
+    assert.deepEqual(failures, [], fixed);
   }
 });
