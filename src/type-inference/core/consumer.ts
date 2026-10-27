@@ -902,10 +902,10 @@ class Contracts {
 
   /**
    * A place's contract at a path: its admitted type (`admittedType`) with each object the place decided given the
-   * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object` and an
-   * undecided one stay open, the fields in the order of the stored value's records at their level (`fieldOrder`; a
-   * place's contract is its first checked store's). A contract deeper than the slice follows makes the program, stored by
-   * `at`, leave the slice.
+   * properties the core finds for it (`Answers.placeProperties`), each by its own contract; a written `object`, own or a
+   * copy's (A4 through copies: any object, V30 §13), and an undecided one stay open, the fields in the order of the
+   * stored value's records at their level (`fieldOrder`; a place's contract is its first checked store's). A contract
+   * deeper than the slice follows makes the program, stored by `at`, leave the slice.
    */
   *#contractTask(
     id: PlaceId,
@@ -958,7 +958,8 @@ class Contracts {
           ),
         };
       case "object": {
-        if (plan.properties.length > 0 || this.answers.place(id, path).admitted.by !== "decided")
+        const admitted = this.answers.place(id, path).admitted;
+        if (plan.properties.length > 0 || admitted.by !== "decided" || admitted.inherited)
           return plan;
         if (path.length + 1 >= SLICE_DEPTH)
           throw new OutsideContract(at, "a value whose structure the slice does not follow");
