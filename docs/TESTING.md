@@ -103,6 +103,7 @@ Give each maintained test family a distinct evidence obligation: accepted behavi
 confirmed regression, deterministic invariant, or material browser-only risk. Choose the cheapest layer that proves it;
 keep representative source-to-runtime integration where isolated tests cannot prove the connection. Browser tests own
 rendering, focus, input, scrolling and accessibility semantics, not repeated runtime normalization/checkpoint matrices.
+CI time is costly: every test must add evidence worth its run time.
 
 Use the smallest representative fixture; retain large inputs when scale itself caused the defect. Separate expensive
 setup from the boundary under test when a small integration case plus direct boundary evidence proves both obligations.

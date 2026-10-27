@@ -140,7 +140,8 @@ lens above. Escalate uncertainty that cannot be bounded through a separately ass
   cost.
 - **Tests and evidence:** suitable layers, assertions, independently derived or explicitly scoped regression oracles,
   diagnostics, reproducibility, negative paths, whether each new or materially changed test protects a real obligation
-  rather than temporary implementation state, and proof of the claim rather than a green total.
+  rather than temporary implementation state, whether a cheaper form would prove the same, and proof of the claim
+  rather than a green total.
 - **Documentation and context:** correctness, canonical-source placement, lifecycle, routing, executable
   details, stale or competing text, consolidation, and safe, token-efficient compactness.
 - **Boundaries and cost:** reachable trust boundaries, realistic workloads, input-driven scaling,
@@ -185,7 +186,7 @@ Non-authoritative memory aid; mark `N/A` only after considering the item.
 - [ ] Language rules reused from their one home; analyses that predict runtime behavior derive it from
   the plan or shared helpers and are tested against the runtime.
 - [ ] Supported behavior and failures proved through real paths.
-- [ ] Tests and oracles are sound; negative probes used when warranted.
+- [ ] Tests and oracles are sound and worth their run time; negative probes used when warranted.
 - [ ] Documentation is canonical, current, consolidated, and token-efficient without semantic loss.
 - [ ] Dependencies, trust boundaries, input-driven scaling/native-JavaScript failures, security, performance,
   and resources checked proportionately.

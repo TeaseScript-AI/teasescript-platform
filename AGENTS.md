@@ -90,6 +90,7 @@ shared-workflow failures.
 
 Before substantive work, state the expected files, acceptance criteria, and
 major risks or unresolved decisions, then continue in small verifiable steps.
+Describe the size of work by complexity, not by time estimates.
 Use targeted reads and edits. For ordinary repository-local QA, prefer precise validation terms such as `invalid`,
 `malformed`, `external`, or `negative`; reserve explicit security terminology for actual security or trust-boundary
 work. Keep successful output
@@ -97,6 +98,11 @@ compact; do not print or quote complete large files, diffs, or logs without a
 concrete need, but preserve actionable warnings, failures, and diagnostics. Keep long editable drafts out of
 chat and repository scratch files; use a temporary file unless it is a
 deliverable.
+
+Keep all text (documentation, comments, issues, pull requests, reviews, reports)
+as short as its meaning allows: every sentence, heading, example and repeated
+fact must earn its recurring reading cost. Never cut meaning, authority,
+conditions, order, exceptions or clarity to save words.
 
 Correct existing wording before appending an amendment. Use preservation-aware
 edits; full-file creation or replacement is only for a new file or intentional
@@ -132,8 +138,7 @@ route in `docs/agents/README.md` and use only the writes and publication method
 that route permits. Do not improvise a lower-level source-publication route or
 continue from stale capability assumptions.
 
-Keep `main` stable. Use one issue, one executing agent, one short-lived branch, and
-one pull request by default. Do not make substantive changes directly on
+Keep `main` stable. Do not make substantive changes directly on
 `main`, push to another agent's branch without an explicit handoff, or silently
 combine unrelated work. Never force-push or rewrite `main`. Keep the
 pull-request description aligned with the final scope, deferred work,
@@ -142,7 +147,6 @@ same branch and pull request. Make small logical commits with concise English
 imperative messages. Prefer squash merge after approval and passing checks,
 then delete the branch.
 
-The owner or coordinator selects scheduling and any coordinated multi-agent
-exception. Backlog, wish, and planning entries do not schedule themselves.
+The owner or coordinator selects scheduling. Backlog, wish, and planning entries do not schedule themselves.
 Follow `docs/DEVELOPMENT-WORKFLOW.md` for universal issue, branch, pull-request,
 review, documentation, merge, and verification rules.
