@@ -159,6 +159,16 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
   assert.deepEqual([forward, reversed], [expected, expected]);
 });
 
+/*
+ * The five inherited argument spreads (S6c; Astra's static list on S6, TABLE r4.73 (2)) append one by one now. Four have
+ * a source that makes the list source-sized; each is a regression below, with its 10,000-size control, and the spread
+ * restored fails its own. The fifth, the copy forest's mark spans (`ExactPath.#forest`'s `found`), has none: a source
+ * with more than four anchors takes the cross-source index before the append (`FEW_ANCHORS`), and the copies of one of
+ * at most four anchors, sorted by dominator position, make at most 2 × 4 − 1 = 7 runs of one nearest anchor (dominator
+ * intervals are laminar: each nested anchor splits its ancestor's run once), one span each; 130,000 tested copies of a
+ * root beside four tested side sources append one span.
+ */
+
 /** A place's operand regions merged per file (`GuardIndex.#placeOperands`): one test of a field, 130,000 of another. */
 test("130,000 tests of one field beside a test of another are analysed within the native stack", () => {
   for (const operands of [10_000, 130_000]) {

@@ -680,7 +680,8 @@ export class ExactPath {
       const path = keptPathText(this.#work, key);
       const list = markSpans.get(path);
       if (list === undefined) markSpans.set(path, [...found]);
-      else list.push(...found);
+      // (one by one, as every append here: `found` holds at most seven spans, `tests/type-core-native.test.ts`)
+      else for (const span of found) list.push(span);
     };
     let open: { key: Key; callable: number; low: number; high: number } | null = null;
     for (const { key, callable, entry } of guards.branchRegions()) {
