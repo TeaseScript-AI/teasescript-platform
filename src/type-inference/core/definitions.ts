@@ -236,6 +236,11 @@ export class DefinitionIndex {
   readonly #defaultOf = new Map<PlaceId, Definition>();
   /** The dominator positions of every live call site's call-in and call-out outside block code, sorted (X6). */
   readonly sitePositions: readonly number[];
+  /**
+   * The callables ordinary code may run (X6's owner sets count only their stores; a helper only blocks run is X7's), for
+   * the narrowings' owner rule (§13 N2: a callable holding an invalidation of a collection joins its owner set).
+   */
+  readonly ordinary: ReadonlySet<Callable>;
   #serial = 0;
 
   public constructor(readonly program: CoreProgram) {
@@ -286,6 +291,7 @@ export class DefinitionIndex {
     // the owner sets (X6): a live store by a callable other than its key's declaring activation that ordinary code may
     // run; a helper only blocks run stores as their code does (X7, r4.10)
     const ordinary = this.#ordinaryCallables();
+    this.ordinary = ordinary;
     for (const d of this.storeDefs) {
       work.charge("ownerSteps", d.path.length + 1);
       const owner = program.flow.ownerOf(d.node.region);
@@ -1016,6 +1022,14 @@ export class DefinitionLists {
         best = { def: d, rest: path.slice(length) };
     }
     return best;
+  }
+
+  /**
+   * The own events of a key, as X6 reads them: its own and its descendants' live definitions outside block code, sorted,
+   * once per key (§13 N2 and N5 count a narrowing's events in it).
+   */
+  public eventList(key: Key): readonly number[] {
+    return this.#eventList(key);
   }
 
   /** The own events of a key: its own and its descendants' live definitions outside block code, sorted (X6). */

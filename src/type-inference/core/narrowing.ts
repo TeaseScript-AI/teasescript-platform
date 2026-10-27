@@ -434,8 +434,8 @@ interface Invalidation {
 }
 
 /**
- * One collection key's invalidations: positions outside block code, sorted, and where their calls end by file; up to
- * two owners; whether a block holds one.
+ * One collection key's invalidations: positions outside block code, sorted, and where their calls end by file; the
+ * callables holding them, each once; whether a block holds one.
  */
 export interface Invalidations {
   readonly positions: readonly number[];
@@ -718,10 +718,14 @@ export class NarrowingIndex {
       const positions: number[] = [];
       const texts = new Map<number, number[]>();
       const owners: (Callable | null)[] = [];
+      const seen = new Set<Callable | null>();
       let inBlock = false;
       for (const entry of list) {
         work.charge("indexSteps");
-        if (owners.length < 2 && !owners.includes(entry.owner)) owners.push(entry.owner);
+        if (!seen.has(entry.owner)) {
+          seen.add(entry.owner);
+          owners.push(entry.owner);
+        }
         if (entry.inBlock) {
           inBlock = true;
           continue;

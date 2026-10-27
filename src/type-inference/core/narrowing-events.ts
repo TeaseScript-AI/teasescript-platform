@@ -57,8 +57,8 @@ function kindsText(kinds: readonly ItemTag[]): string {
 }
 
 export class NarrowingEvents {
-  /** Per key, the positions of its own and its descendants' live definitions outside block code (X6's list). */
-  readonly #own = new Map<Key, readonly number[]>();
+  /** Per collection key, whether a callable ordinary code may run outside its activation holds an invalidation (N2). */
+  readonly #outside = new Map<Key, boolean>();
   /** Per key, its assignments by the refined location they store, made on the key's first question (N5's candidates). */
   readonly #stored = new Map<Key, ReadonlyMap<string, readonly Definition[]>>();
   /** Per (store, filtered kind set): whether the store preserves the kinds (N5). */
@@ -202,7 +202,9 @@ export class NarrowingEvents {
   /** G's event lists (N2): its dependency keys' own events, the call sites under the owner rule, the invalidations. */
   #events(g: Narrowing): readonly EventList[] {
     const { definitions, lists } = this.pass;
-    const events: EventList[] = [{ positions: this.#ownList(g.key), word: "branch", own: true }];
+    const events: EventList[] = [
+      { positions: this.pass.lists.eventList(g.key), word: "branch", own: true },
+    ];
     for (const prefix of prefixesOf(g.key))
       events.push({
         positions: lists.definitionsOf(prefix).eventPositions,
@@ -210,7 +212,7 @@ export class NarrowingEvents {
         own: false,
       });
     for (const variable of g.variables)
-      events.push({ positions: this.#ownList(variable), word: "branch", own: false });
+      events.push({ positions: this.pass.lists.eventList(variable), word: "branch", own: false });
     for (const collection of g.collections) {
       const invalidations = this.index.invalidations(collection);
       if (invalidations !== undefined)
@@ -224,7 +226,7 @@ export class NarrowingEvents {
 
   /**
    * X6's owner rule over G's dependency keys: another callable stores the key, a prefix or a key below, or an index
-   * variable; or a callable other than a collection's activation holds an invalidation of it (N2).
+   * variable; or a callable ordinary code may run, other than a collection's activation, holds an invalidation of it (N2).
    */
   #ownedAway(g: Narrowing): boolean {
     const { definitions } = this.pass;
@@ -233,11 +235,23 @@ export class NarrowingEvents {
       g.variables.some((variable) => definitions.ownedAway(variable))
     )
       return true;
-    return g.collections.some((collection) => {
-      const owners = this.index.invalidations(collection)?.owners ?? [];
-      const own = definitions.declaringCallable(keyPlace(collection));
-      return owners.some((owner) => owner !== own);
-    });
+    return g.collections.some((collection) => this.#invalidatedOutside(collection));
+  }
+
+  /** Whether a callable ordinary code may run, other than a collection's activation, holds an invalidation of it, once. */
+  #invalidatedOutside(collection: Key): boolean {
+    const known = this.#outside.get(collection);
+    if (known !== undefined) return known;
+    const { definitions, program } = this.pass;
+    const own = definitions.declaringCallable(keyPlace(collection));
+    const owners = this.index.invalidations(collection)?.owners ?? [];
+    program.work.charge("ownerSteps", owners.length + 1);
+    const outside = owners.some(
+      (owner) => owner !== null && owner !== own && definitions.ordinary.has(owner),
+    );
+    keepText(program.work, collection.length);
+    this.#outside.set(collection, outside);
+    return outside;
   }
 
   /** X7's handler-store predicate over G's dependency keys, a block holding an invalidation of a collection included. */
@@ -248,25 +262,6 @@ export class NarrowingEvents {
       g.variables.some((variable) => handlers.handlerTouches(variable)) ||
       g.collections.some((collection) => this.index.invalidations(collection)?.inBlock === true)
     );
-  }
-
-  /** A key's own and its descendants' live definitions outside block code, sorted, once per key (X6's list). */
-  #ownList(key: Key): readonly number[] {
-    const known = this.#own.get(key);
-    if (known !== undefined) return known;
-    const { program, definitions, lists } = this.pass;
-    const positions: number[] = [];
-    for (const below of [key, ...definitions.keysBelow(key)])
-      for (const d of definitions.byKey.get(below) ?? []) {
-        program.work.charge("eventSteps");
-        if (lists.live(d) && program.live(d.node) && !program.inBlockCode(d.node))
-          positions.push(program.position(d.node));
-      }
-    program.work.charge("eventSteps", sortCost(positions.length));
-    positions.sort((a, b) => a - b);
-    keepText(program.work, key.length);
-    this.#own.set(key, positions);
-    return positions;
   }
 
   /**
