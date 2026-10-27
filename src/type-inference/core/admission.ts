@@ -1524,7 +1524,10 @@ export class Admission {
         const copies = into.get(place);
         if (copies === undefined) continue;
         const own = at(place);
-        for (const { path } of copies) own.add(keptText(this.#work, path));
+        for (const { path } of copies) {
+          work.charge("indexSteps");
+          own.add(keptText(this.#work, path));
+        }
         for (const path of hots.get(place) ?? []) {
           work.charge("indexSteps");
           own.add(keptText(this.#work, path));
@@ -1701,12 +1704,15 @@ export class Admission {
   /** Whether a cycle of copies holds only whole copies within it (no step added or taken), its members' one landing. */
   #wholeCycle(component: readonly PlaceId[]): boolean {
     const { into, cycleOf } = this.#inheritance();
+    const work = this.pass.program.work;
     const cycle = cycleOf.get(component[0]!);
     return component.every((member) =>
-      (into.get(member) ?? []).every(
-        (copy) =>
-          cycleOf.get(copy.from) !== cycle || (copy.path.length === 0 && copy.strip.length === 0),
-      ),
+      (into.get(member) ?? []).every((copy) => {
+        work.charge("indexSteps");
+        return (
+          cycleOf.get(copy.from) !== cycle || (copy.path.length === 0 && copy.strip.length === 0)
+        );
+      }),
     );
   }
 
@@ -1886,7 +1892,10 @@ export class Admission {
         // members, everything below each where its copies add or take steps, Sol's review r2 B1)
         const owns = component.map((member) => this.#ownStructure(member));
         const outside = component.flatMap((member) =>
-          (into.get(member) ?? []).filter((copy) => cycleOf.get(copy.from) !== cycle),
+          (into.get(member) ?? []).filter((copy) => {
+            work.charge("indexSteps");
+            return cycleOf.get(copy.from) !== cycle;
+          }),
         );
         const contents = this.#looseOf(owns, outside, loose, !this.#wholeCycle(component));
         if (this.#wholeCycle(component)) {
@@ -1904,14 +1913,15 @@ export class Admission {
           };
           const types = new Map<string, Set<TypeTerm>>();
           const classes = new Map<string, InheritedCopy>();
-          for (const member of component) {
+          for (const [index, member] of component.entries()) {
+            work.charge("indexSteps");
             for (const [text, levels] of seeds.get(member) ?? []) {
               put(keptSplit(this.#work, text));
               let found = types.get(text);
               if (found === undefined) types.set(text, (found = new Set()));
               for (const level of levels) found.add(level);
             }
-            const own = owns[component.indexOf(member)]!;
+            const own = owns[index]!;
             for (const path of own?.points ?? []) if (lands(path)) put(path);
             // (its other values and its reads, everything landed below each)
             for (const prefixes of [own?.below ?? [], (own?.reads ?? []).map(({ at }) => at)])
@@ -2126,7 +2136,7 @@ export class Admission {
       parts.push(keptParts(this.#work, "g", ...ids.sort()));
     }
     for (const read of reads) parts.push(keptParts(this.#work, "r", read.at, read.source));
-    work.charge("indexSteps", sortCost(parts.length));
+    work.charge("indexSteps", reads.length + sortCost(parts.length));
     const key = keptParts(this.#work, ...parts.sort());
     const known = this.#meetings.get(key);
     if (known !== undefined) return known;
@@ -2167,7 +2177,10 @@ export class Admission {
         if (isPrefix(prefix, entry.path)) consider(path);
       }
     };
-    for (const [text, entry] of landed) if (entry.by.size > 1) consider(text);
+    for (const [text, entry] of landed) {
+      work.charge("indexSteps");
+      if (entry.by.size > 1) consider(text);
+    }
     for (const read of reads) below(read.at);
     // (each source's contents beside its landings: each node, strip and landing path once)
     const seen = new Set<string>();
@@ -2295,6 +2308,10 @@ export class Admission {
     const below: (readonly string[])[] = everything ? [[]] : [];
     for (const own of owns) {
       if (own === null) continue;
+      this.pass.program.work.charge(
+        "indexSteps",
+        own.points.length + own.below.length + own.reads.length,
+      );
       points.push(...own.points);
       below.push(...own.below);
       for (const { at } of own.reads) below.push(at);
@@ -2986,7 +3003,10 @@ export class Admission {
       let chains = this.#eligibleWhileGrouping.get(representative);
       if (chains === undefined)
         this.#eligibleWhileGrouping.set(representative, (chains = new Map()));
-      if (!chains.has(deepest)) chains.set(deepest, this.#eligibleBy(representative, [deepest]));
+      if (!chains.has(deepest)) {
+        keepText(this.#work, deepest.length);
+        chains.set(deepest, this.#eligibleBy(representative, [deepest]));
+      }
       return chains.get(deepest)!;
     }
     let index = this.#eligible.get(representative);
