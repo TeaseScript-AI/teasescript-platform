@@ -1798,6 +1798,22 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "A4-inherited-disjoint-stores",
+    measures:
+      "Astra's review B2: a copy of a root of k written-typed and k plain fields, storing each plain field, each written one read",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}, ${fields(k, () => "1", "g")}}`,
+          "let a = root",
+          rows(k, (i) => `a.g${i} = 2`),
+          rows(k, (i) => `let c${i} = a.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "A4-inherited-self-copy",
     measures:
       "r4.80's control: a root of k written-typed fields copied into itself at another path (`root.q = root`), then k whole copies",

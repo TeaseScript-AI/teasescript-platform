@@ -126,6 +126,8 @@ interface Inheritance {
 interface CopyForest {
   readonly parent: ReadonlyMap<PlaceId, PlaceId>;
   readonly stores: ReadonlyMap<PlaceId, ReadonlySet<string>>;
+  /** Per place, its keys' prefixes' texts, its root's too: whether it stores at or below a path (`#landsThrough`). */
+  readonly under: ReadonlyMap<PlaceId, ReadonlySet<string>>;
   readonly top: ReadonlyMap<PlaceId, PlaceId>;
   readonly depth: ReadonlyMap<PlaceId, number>;
   readonly entry: ReadonlyMap<PlaceId, number>;
@@ -1315,11 +1317,11 @@ export class Admission {
       if (own?.has(text) === true) return place;
       lists.push(forest.storing.get(text));
     }
-    for (const text of own ?? []) {
-      this.pass.program.work.charge("indexSteps");
-      if (isPrefix(prefix, splitPath(text))) return place;
-    }
-    lists.push(forest.beneath.get(keptText(this.#work, prefix)));
+    // (a key of its own at or below the prefix, from its keys' prefixes: never a scan of its keys, Astra's review B2)
+    const text = keptText(this.#work, prefix);
+    this.pass.program.work.charge("indexSteps");
+    if (forest.under.get(place)?.has(text) === true) return place;
+    lists.push(forest.beneath.get(text));
     return this.#nearest(place, lists);
   }
 
@@ -1421,6 +1423,7 @@ export class Admission {
       }
     }
     const stores = new Map<PlaceId, Set<string>>();
+    const under = new Map<PlaceId, Set<string>>();
     // (per key, the places storing at it; and at it or below it, each key's prefixes, the root's too, once per place)
     const at = new Map<string, PlaceId[]>();
     const below = new Map<string, PlaceId[]>();
@@ -1442,6 +1445,7 @@ export class Admission {
           prefixes.add(keptText(this.#work, steps.slice(0, length)));
       }
       for (const text of prefixes) put(below, text, place);
+      under.set(place, prefixes);
     }
     // (each list by entry, the last entries below its places the leaves of a max segment tree)
     const index = (map: Map<string, PlaceId[]>): Map<string, Storing> => {
@@ -1462,6 +1466,7 @@ export class Admission {
     this.#forest = {
       parent,
       stores,
+      under,
       top,
       depth,
       entry,
