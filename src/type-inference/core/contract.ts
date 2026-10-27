@@ -2512,6 +2512,8 @@ export class Contract {
             continue;
           }
           f.ck = copied;
+          // (the frame keeps the copied key's path while its source's layer is walked, charged as kept)
+          keepText(this.#work, copied.length);
           f.proj = path;
           const memoised = this.#prefix.get(root);
           if (memoised !== undefined) {

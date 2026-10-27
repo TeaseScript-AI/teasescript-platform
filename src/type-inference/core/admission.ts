@@ -1891,9 +1891,10 @@ export class Admission {
         for (let length = 0; length < path.length; length += 1) {
           this.pass.program.work.charge("eligibility");
           const key = keptKey(this.#work, root, path.slice(0, length));
+          const rest = keptSlice(this.#work, path, length);
           const list = demands.get(key);
-          if (list === undefined) demands.set(key, [path.slice(length)]);
-          else list.push(path.slice(length));
+          if (list === undefined) demands.set(key, [rest]);
+          else list.push(rest);
         }
       this.#demands = demands;
     }
@@ -2273,7 +2274,8 @@ export class Admission {
     if (known !== undefined) return known;
     const { definitions, lists, program } = this.pass;
     const place = keyPlace(key);
-    const path = keyPath(key);
+    // (its steps, which the roots' rests below keep, charged by the key's text)
+    const path = keptPath(this.#work, key);
     const roots: { value: PlaceId; at: readonly string[]; strip: readonly string[] }[] = [];
     const levels: (readonly string[])[] = [];
     // a store's value standing at `below` (an add's below its element), read at `strip`: below the key, at its path or
@@ -2288,17 +2290,29 @@ export class Admission {
           : below;
       for (let index = 0; index < at.length && index < strip.length; index += 1)
         if (at[index] !== strip[index]) return;
+      // (a rest made here is charged as kept; a whole one is shared)
       roots.push(
         at.length > strip.length
-          ? { value: d.value, at: at.slice(strip.length), strip: [] }
-          : { value: d.value, at: [], strip: strip.slice(at.length) },
+          ? {
+              value: d.value,
+              at: strip.length === 0 ? at : keptSlice(this.#work, at, strip.length),
+              strip: [],
+            }
+          : {
+              value: d.value,
+              at: [],
+              strip: at.length === 0 ? strip : keptSlice(this.#work, strip, at.length),
+            },
       );
     };
-    for (let length = 0; length <= path.length; length += 1)
-      for (const d of definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [])
-        root(d, [], path.slice(length));
+    for (let length = 0; length <= path.length; length += 1) {
+      const stores = definitions.byKey.get(keyOf(place, path.slice(0, length))) ?? [];
+      // (a prefix's stores share one rest of the key's path)
+      const rest = stores.length === 0 ? [] : keptSlice(this.#work, path, length);
+      for (const d of stores) root(d, [], rest);
+    }
     for (const below of definitions.keysBelow(key)) {
-      const at = keptPath(this.#work, below).slice(path.length);
+      const at = keptSlice(this.#work, keptPath(this.#work, below), path.length);
       if (at.some((step) => step !== "element")) continue;
       levels.push(at);
       for (const d of definitions.byKey.get(below) ?? []) root(d, at, []);
@@ -2330,7 +2344,8 @@ export class Admission {
       if (!paths.has(text)) paths.set(text, at);
     };
     for (const at of levels)
-      for (let length = 1; length <= at.length; length += 1) path(at.slice(0, length));
+      for (let length = 1; length <= at.length; length += 1)
+        path(keptSlice(this.#work, at, 0, length));
     const pending: (readonly [PlaceId, readonly string[], readonly string[]])[] = [];
     for (let index = roots.length - 1; index >= 0; index -= 1)
       pending.push([roots[index]!.value, roots[index]!.at, roots[index]!.strip]);
@@ -2354,6 +2369,8 @@ export class Admission {
           pending.push([carried[index]![0], at, carried[index]![1]]);
         continue;
       }
+      // (its cells' tasks share one rest of the strip, charged as kept)
+      let rest: readonly string[] | null = null;
       for (const has of program.hasOf.get(current)!) {
         // while reading into it only the field on the path (its literal's fields indexed once), then every field
         const on = strip.length > 0 ? this.#termAt(has.type, strip[0]!) : undefined;
@@ -2365,8 +2382,10 @@ export class Admission {
           const step = strip.length === 0 ? keptSteps(this.#work, at, [name]) : at;
           if (strip.length === 0) path(step);
           if (term.kind === "ref")
-            for (const d of definitions.cellDefs.get(term.place) ?? [])
-              pending.push([d.value!, step, strip.slice(1)]);
+            for (const d of definitions.cellDefs.get(term.place) ?? []) {
+              rest ??= strip.length === 0 ? strip : keptSlice(this.#work, strip, 1);
+              pending.push([d.value!, step, rest]);
+            }
         }
       }
     }
@@ -2553,9 +2572,10 @@ export class Admission {
         for (let length = 0; length < path.length; length += 1) {
           this.pass.program.work.charge("indexSteps");
           const prefix = keptKey(this.#work, root, path.slice(0, length));
+          const rest = keptSlice(this.#work, path, length);
           const paths = this.#below.get(prefix);
-          if (paths === undefined) this.#below.set(prefix, [path.slice(length)]);
-          else paths.push(path.slice(length));
+          if (paths === undefined) this.#below.set(prefix, [rest]);
+          else paths.push(rest);
         }
     }
     return this.#below.get(key) ?? [];
@@ -2679,6 +2699,8 @@ export class Admission {
         continue;
       }
       const next: [PlaceId, readonly string[], readonly string[]][] = [];
+      // (its cells' tasks share one rest of the strip, charged as kept)
+      let rest: readonly string[] | null = null;
       if (program.hasOf.has(current))
         for (const has of program.hasOf.get(current)!) {
           const on = strip.length > 0 ? this.#termAt(has.type, strip[0]!) : undefined;
@@ -2688,8 +2710,10 @@ export class Admission {
             if (term.kind === "ref") {
               // (one path per field, which its cells share, charged before it is made)
               const child = strip.length === 0 ? keptSteps(this.#work, path, [name]) : path;
-              for (const d of definitions.cellDefs.get(term.place) ?? [])
-                next.push([d.value!, child, strip.slice(1)]);
+              for (const d of definitions.cellDefs.get(term.place) ?? []) {
+                rest ??= strip.length === 0 ? strip : keptSlice(this.#work, strip, 1);
+                next.push([d.value!, child, rest]);
+              }
             }
         }
       else
@@ -3773,7 +3797,7 @@ export class Admission {
           ingress,
           d,
           path: stop.path,
-          recordPath: property < 0 ? stop.path : stop.path.slice(0, property),
+          recordPath: property < 0 ? stop.path : keptSlice(this.#work, stop.path, 0, property),
           key: stop.key,
           site,
           reads: program.places[stop.value]?.site ?? site,

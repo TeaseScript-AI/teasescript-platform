@@ -192,10 +192,15 @@ export function keptSteps<T>(work: WorkLedger, ...parts: readonly (readonly T[])
   return joinSteps(...parts);
 }
 
-/** `steps` from `start` on in one new array (a path's rest below a step), charged before it is made. */
-export function keptSlice<T>(work: WorkLedger, steps: readonly T[], start: number): T[] {
-  keepArray(work, steps.length - start);
-  return steps.slice(start);
+/** `steps` from `start` to `end` in one new array (a path's rest or a prefix of it), charged before it is made. */
+export function keptSlice<T>(
+  work: WorkLedger,
+  steps: readonly T[],
+  start: number,
+  end = steps.length,
+): T[] {
+  keepArray(work, end - start);
+  return steps.slice(start, end);
 }
 
 /** Which limit an analysis reached: the work allowance, the statement nesting or the read depth. */

@@ -233,8 +233,11 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * inserted (`keepText(work, memoKey.length)` before a memo stores it). A read's snapshot made by `joinParts` and kept in
  * a memo, and a stop's kept in a set of distinct ones, passed the scan above, which reads how a text is made, not what
  * keeps it (the deep-literal review's R3-B1). This scan finds, per member, a local text made so and then stored by
- * `.set`, `.add` or `.push` with no charge naming it before the store. A tripwire too: it misses a text kept under
- * another name, returned by a call (`#aliasKey`), or kept in an object.
+ * `.set`, `.add` or `.push` with no charge naming it before the store. A path's copy by `slice` is kept the same way
+ * (a task's strip below a literal's step, a split's rest in a memo, the deep-literal review's R5-B1 and R6-B1): a
+ * local made by `path.slice(…)` of one of the core's names for a path, or such a slice in a stored argument (inside an
+ * array or an object too) outside a kept helper's call, is found as well. A tripwire too: it misses a text or a copy
+ * kept under another name, returned by a call (`#aliasKey`), or kept in an object after it was made.
  */
 const PLAIN_TWIN = /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText)\(/;
 
@@ -243,7 +246,19 @@ const CHARGE = /(?:\b(?:kept\w*|keepText|keep)|#kept|#keepText)\(/;
 
 /** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
 const STORED: Readonly<Record<string, readonly [number, string]>> = {
+  "admission.ts #contributions slice": [
+    1,
+    "a store's contributions at a path, returned and read once by its caller, not kept",
+  ],
+  "admission.ts #inputs slice": [
+    1,
+    "a decision's prefixes, returned and read once by the decision, not kept",
+  ],
   "admission.ts #ownLeaves memoKey": [1, "a definition's id and a flag"],
+  "answers.ts #propertyNames slice": [
+    3,
+    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
+  ],
   "answers.ts #propertyNames id": [
     1,
     "a properties query's walk, its texts ending with the query (S9b's, TABLE r4.78 (3))",
@@ -258,21 +273,33 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "its base made by `keptKey`, which charges its size, with two numbers",
   ],
+  "definitions.ts prefixesOf slice": [1, "a helper itself, the plain twin of `keptPrefixes`"],
   "exact-path.ts #forest id": [1, "a place, a callable and two positions"],
 };
 
-/** The offset just past the string or template that opens at `at` (a template's interpolations read whole). */
+/** The offset just past the string or template that opens at `at`, a template's interpolations read as code. */
 function pastLiteral(text: string, at: number): number {
   const quote = text[at]!;
-  let braces = 0;
   for (let index = at + 1; index < text.length; index += 1) {
     const char = text[index]!;
     if (char === "\\") index += 1;
-    else if (quote === "`" && braces === 0 && text.startsWith("${", index)) {
-      braces = 1;
-      index += 1;
-    } else if (braces > 0) braces += char === "{" ? 1 : char === "}" ? -1 : 0;
     else if (char === quote) return index + 1;
+    else if (quote === "`" && text.startsWith("${", index)) index = pastCode(text, index + 2) - 1;
+  }
+  return text.length;
+}
+
+/** The offset just past the `}` that ends an interpolation's code at `at`, its own strings and templates read whole. */
+function pastCode(text: string, at: number): number {
+  let depth = 0;
+  for (let index = at; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === '"' || char === "'" || char === "`") index = pastLiteral(text, index) - 1;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      if (depth === 0) return index + 1;
+      depth -= 1;
+    }
   }
   return text.length;
 }
@@ -321,6 +348,7 @@ function plainStores(file: string, source: string): Map<string, string[]> {
   }
   const names = [...PATH_NAMES].join("|");
   const template = new RegExp(`\\$\\{(?:[\\w#?.]*\\.)?(?:${names})\\b`);
+  const slice = new RegExp(`\\b(?:[\\w#]+[?!]?\\.)*(?:${names})[?!]?\\.slice\\(`);
   const found = new Map<string, string[]>();
   for (const [name, start, end] of runs) {
     const text = lines.slice(start, end).join("\n");
@@ -328,7 +356,11 @@ function plainStores(file: string, source: string): Map<string, string[]> {
     for (const made of text.matchAll(/\b(?:const|let) (\w+)(?::[^=]*)? =\s*([^]*?);\s*\n/g)) {
       const local = made[1]!;
       const value = made[2]!;
-      if (CHARGE.test(value) || !(PLAIN_TWIN.test(value) || template.test(value))) continue;
+      if (
+        CHARGE.test(value) ||
+        !(PLAIN_TWIN.test(value) || template.test(value) || slice.test(value))
+      )
+        continue;
       for (const store of text.matchAll(/\.(?:set|add|push)\(/g)) {
         const open = store.index + store[0].length - 1;
         if (store.index < made.index || !callArguments(text, open).includes(local)) continue;
@@ -339,6 +371,15 @@ function plainStores(file: string, source: string): Map<string, string[]> {
         found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
       }
     }
+    // a path's slice stored as it is made, outside a kept helper's call
+    for (const store of text.matchAll(/\.(?:set|add|push)\(/g))
+      for (const argument of callArguments(text, store.index + store[0].length - 1)) {
+        const copy = slice.exec(argument);
+        if (copy === null || CHARGE.test(argument.slice(0, copy.index))) continue;
+        const key = `${file} ${name} slice`;
+        const at = lineOf(store.index);
+        found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
+      }
   }
   return found;
 }
@@ -439,6 +480,23 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const text = joinParts(key, 1);",
     '    this.memo.set(")", text);',
     "  }",
+    "  #nested(key: string) {",
+    "    const text = joinParts(key, 1);",
+    '    this.memo.set(`${"{"}`, text);',
+    "    const other = joinParts(key, 2);",
+    "    this.memo.set(`${`{`}`, other);",
+    "  }",
+    "  #tail(strip: string[]) {",
+    "    pending.push([1, 2, strip.slice(1)]);",
+    "    pending.push([1, 2, keptSlice(this.#work, strip, 1)]);",
+    "  }",
+    "  #prefix(path: string[], n: number) {",
+    "    this.#below.set(k, path.slice(0, n));",
+    "    const rest = path.slice(n);",
+    "    list.push(rest);",
+    "    const kept = keptSlice(this.#work, path, n);",
+    "    list.push(kept);",
+    "  }",
     "  #charged(key: string) {",
     "    const memoKey = joinParts(key, 2);",
     "    keepText(this.#work, memoKey.length);",
@@ -455,6 +513,11 @@ test("the scan finds a plain-made text kept uncharged", () => {
       "probe.ts #distinct text 1",
       "probe.ts #structure id 1",
       "probe.ts #quoted text 1",
+      "probe.ts #nested text 1",
+      "probe.ts #nested other 1",
+      "probe.ts #tail slice 1",
+      "probe.ts #prefix rest 1",
+      "probe.ts #prefix slice 1",
     ],
   );
 });
