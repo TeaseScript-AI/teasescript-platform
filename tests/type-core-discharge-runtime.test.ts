@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { compileSource, compileSourceWithBackend } from "../src/compiler.js";
-import type { InstructionPlan, TypePlan } from "../src/plan/model.js";
+import type { InstructionPlan, TypeCheckPlan, TypePlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
@@ -25,7 +26,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { recordDifferences } from "./helpers/type-core-records.js";
+import { type CompactRecord, recordDifferences } from "./helpers/type-core-records.js";
 
 /*
  * The discharge map's new rows (the port plan's S3 §4, step S7) through the candidate route, each in the three layers of
@@ -1354,15 +1355,62 @@ test("a known `null` reads as the `null` type, an unknown stays open, and each r
 });
 
 test("a literal wider than a native call takes compiles and keeps its checks, in three layers (S7 review r7 B1, r8 B1)", () => {
-  // more elements than one call passes as spread arguments: the contracts collect them one at a time; one order only,
-  // as the width is the defect's cause and each compile of it is costly
-  const source = `let p = [hostValue, ${Array.from({ length: 131_071 }, () => "0").join(", ")}]\nsay p[0]\nsay "AFTER"\nexit\n`;
-  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
-  assert.ok(request !== null);
+  // more elements than one call passes as spread arguments: the contracts collect them one at a time. A call's
+  // arguments overflow near 12,000 under a 100 KiB stack (near 125,000 at Node's default), so every layer runs in a
+  // child of that stack (`--stack-size=100`, the native suite's method) at 30,000, where `recordsBelow`'s spread
+  // restored has no plan (TSC007) at a fraction of the default stack's work; one order only, as the width is the
+  // defect's cause
+  const source = `let p = [hostValue, ${Array.from({ length: 29_999 }, () => "0").join(", ")}]\nsay p[0]\nsay "AFTER"\nexit\n`;
+  assert.ok(coreRequest([{ path: "main.tease", source }], OPTIONS.globals) !== null);
+  const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
+  const script = `
+    import {readFileSync} from "node:fs";
+    import {compileSourceWithBackend} from ${url("../src/compiler.js")};
+    import {validateInstructionPlan} from ${url("../src/plan/validation.js")};
+    import {run} from ${url("../src/runtime/engine.js")};
+    import {CORE_BACKEND} from ${url("../src/type-inference/core/backend.js")};
+    import {createImmediatePacingRuntimeSnapshot} from ${url("./helpers/immediate-pacing-runtime.js")};
+    import {compactAnalysis, coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    const source = readFileSync(0, "utf8");
+    const options = ${JSON.stringify(OPTIONS)};
+    const {checks} = compactAnalysis(coreRequest([{path: "main.tease", source}], options.globals));
+    const {plan, diagnostics} = compileSourceWithBackend(source, options, CORE_BACKEND);
+    const runOf = (hostValue) => {
+      const {snapshot, events} = run(plan, createImmediatePacingRuntimeSnapshot(plan, {globals: {hostValue}}));
+      return {status: snapshot.status, events};
+    };
+    console.log(JSON.stringify({
+      checks,
+      codes: diagnostics.map(({code}) => code),
+      plan: plan === null ? null : {
+        errors: validateInstructionPlan(plan).errors,
+        stores: plan.instructions.flatMap(({kind, typeCheck}) =>
+          (kind === "declareBinding" || kind === "assign") && typeCheck !== undefined ? [typeCheck] : []),
+        runs: [runOf(1), runOf("bad")],
+      },
+    }));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=100", "--input-type=module", "--eval", script],
+    { input: source, encoding: "utf8", timeout: 120_000, maxBuffer: 64 * 1024 },
+  );
+  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.status, 0, `exit ${child.status}\n${child.stderr.slice(-2_000)}`);
+  // EVIDENCE: invariant: the child prints the JSON its script above builds.
+  const seen = JSON.parse(child.stdout) as {
+    readonly checks: CompactRecord["checks"];
+    readonly codes: readonly string[];
+    readonly plan: {
+      readonly errors: readonly unknown[];
+      readonly stores: readonly TypeCheckPlan[];
+      readonly runs: readonly { readonly status: string; readonly events: InterpreterEvent[] }[];
+    } | null;
+  };
   // the core's boundary at the host value, against the elements' integer (C9)
   const hostValue = `${source.indexOf("hostValue")}:${source.indexOf("hostValue") + 9}`;
   assert.ok(
-    compactAnalysis(request).checks.some(
+    seen.checks.some(
       (check) =>
         check.boundary &&
         check.target === "p.element" &&
@@ -1370,12 +1418,15 @@ test("a literal wider than a native call takes compiles and keeps its checks, in
         check.against.join() === "integer",
     ),
   );
-  const plan = compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan;
-  assert.ok(plan !== null);
-  assert.deepEqual(validateInstructionPlan(plan).errors, []);
-  assert.deepEqual(checkedStores(plan), ["'p' list<integer>"]);
-  assert.deepEqual(ran(runWith(plan, 1)), halted(["1", "AFTER"]));
-  assert.deepEqual(ran(runWith(plan, "bad")), failed(`TSR058@8:${source.indexOf("\n")}`));
+  assert.ok(seen.plan !== null, `no plan (${seen.codes.join(", ")})`);
+  assert.deepEqual(seen.plan.errors, []);
+  assert.deepEqual(
+    seen.plan.stores.map((check) => `${check.place} ${typeText(check.type)}`),
+    ["'p' list<integer>"],
+  );
+  const [fits, misfits] = seen.plan.runs.map(({ status, events }) => summary(events, status));
+  assert.deepEqual(fits, halted(["1", "AFTER"]));
+  assert.deepEqual(misfits, failed(`TSR058@8:${source.indexOf("\n")}`));
 });
 
 test("a typed parse or load into a copy of a written type leaves the slice until the core's F18 takes the copied domain (the lead's ruling 2)", () => {
