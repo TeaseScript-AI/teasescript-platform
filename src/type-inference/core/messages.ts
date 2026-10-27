@@ -106,7 +106,10 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   ];
   // a warning whose value has no word of its own (an exact value the rule still checks) has no cause; `later`'s first
   // sentence names the deciding line, and a member's missing property is its first sentence
-  const missing = rule.rule === "member" && context === "missing";
+  // (a member's missing property is its first sentence, and another rule's at that read repeats the member's warning)
+  const missing = context === "missing" && (rule.rule === "member" || detail.direct);
+  // (a literal subject has no origin of its own: its warning is its receiver's, `0` in `value.get(0, ...)`)
+  const literal = rule.rule !== "member" && LITERAL.test(text);
   // (a store into a speaker alone: the first sentence says what happens, which no cause changes)
   const holder = detail.receiver?.kinds ?? kinds;
   const speaker =
@@ -114,7 +117,13 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
     rule.use === "store" &&
     holder.length > 0 &&
     holder.every((kind) => kind === "speaker");
-  if (!(context === "unknown" && !detail.outside) && context !== "later" && !missing && !speaker)
+  if (
+    !(context === "unknown" && !detail.outside) &&
+    context !== "later" &&
+    !missing &&
+    !speaker &&
+    !literal
+  )
     // a word that came with a value from another line speaks of that value's origin, never of this line's names
     sentences.push(
       detail.direct
@@ -190,7 +199,11 @@ function variable(text: string): string | null {
   return /^[\p{L}_][\p{L}\p{N}_]*$/u.test(text) ? text : null;
 }
 
-/** Whether a text is a variable or a property path, as the current checker's fixes name a value. */
+/**
+ * Whether a text is a variable or a property path as written: the only subject a fix's example names (#1195, the lead
+ * after Astra r1). Any other subject, a literal or another expression, gets its fix's sentence alone; a name is never
+ * taken from another declaration or from the place's facts.
+ */
 function path(text: string): boolean {
   return /^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(text);
 }
@@ -223,12 +236,6 @@ const OPERANDS: ReadonlySet<Expression["kind"]> = new Set([
 /** The kind of expression code is, by the language's own parser (its binding, whatever its spacing); `null` if none. */
 function expressionKind(code: string): Expression["kind"] | null {
   return parsedExpression(code)?.expression.kind ?? null;
-}
-
-/** Code as the receiver of a member a fix writes after it: in parentheses unless it binds tighter (`t`, `f(x)`). */
-function receiverText(code: string): string {
-  const kind = expressionKind(code);
-  return kind !== null && POSTFIX.has(kind) ? code : `(${code})`;
 }
 
 /** Code as an operand of an operator or `otherwise` a fix writes: in parentheses unless it binds tighter. */
@@ -391,7 +398,9 @@ function storeFix(rule: StoreRule, kinds: readonly ItemTag[], text: string): str
     values.length > 0 &&
     values.every((kind) => kind === "integer" || kind === "number" || kind === "boolean")
   )
-    return ` To show it as text, write '"\${${text}}"'.`;
+    return path(text)
+      ? ` To show it as text, write '"\${${text}}"'.`
+      : " To show it as text, put it in a text with '${...}'.";
   const nullOnly = values.length > 0 && values.every((kind) => kind === "null");
   const both = typeText([...rule.type, ...kinds]);
   const collection = elementOf(rule);
@@ -432,15 +441,22 @@ function memberFix(
   const receiver = rule.receiver;
   if (kind === "string" && rule.use === "store")
     return ` Assign a new text to '${receiver}' instead.`;
+  const named = path(receiver);
   if (!method && kind === "absoluteDateTime" && hasTemporalField("datetime", name))
-    return ` Convert '${receiver}' first, as in '${receiverText(receiver)}.toDateTime().${name}'.`;
+    return named
+      ? ` Convert '${receiver}' first, as in '${receiver}.toDateTime().${name}'.`
+      : ` Convert '${receiver}' with 'toDateTime()' first.`;
   if (kind !== "string" && VALUE_KINDS[kind].type === "scalar" && isTextMember(name))
-    return ` Convert '${receiver}' to text first, as in 'toString(${receiver})${method ? `.${name}(...)` : `.${name}`}'.`;
+    return named
+      ? ` Convert '${receiver}' to text first, as in 'toString(${receiver})${method ? `.${name}(...)` : `.${name}`}'.`
+      : ` Convert '${receiver}' to text first with 'toString(...)'.`;
   if (!method && kind === "duration") {
     const unit = elapsedDurationUnit(name);
     if (unit !== undefined) {
       const single = name.length > 2 && name.endsWith("s") ? name.slice(0, -1) : name;
-      return ` Divide '${receiver}' by a unit, as in '${operandText(receiver)} / 1 ${single}'.`;
+      return named
+        ? ` Divide '${receiver}' by a unit, as in '${receiver} / 1 ${single}'.`
+        : ` Divide '${receiver}' by a unit, such as '1 ${single}'.`;
     }
   }
   if (!method && kind === "calendarDuration")
@@ -448,7 +464,7 @@ function memberFix(
   if (method && kind === "set" && listMethod(name)?.notOnSet !== undefined)
     return name === "get"
       ? " Use 'contains(...)' instead."
-      : ` Copy '${receiver}' into a list with '${receiverText(receiver)}.toList()' first.`;
+      : ` Copy '${receiver}' into a list with '${named ? `${receiver}.` : ""}toList()' first.`;
   if (!method && kind === "list" && rule.use === "read")
     return " Use 'length', 'first', 'last', or 'random'.";
   return "";
@@ -468,8 +484,9 @@ function conditionFix(text: string, kinds: readonly ItemTag[]): string {
 /** The fix of a key that is not text: a number written as text, as the current checker gives it (`dict-operations.ts`). */
 function keyFix(text: string, kinds: readonly ItemTag[]): string {
   if (!kinds.some((kind) => kind === "integer" || kind === "number")) return "";
-  const written = /^\d+(\.\d+)?$/.test(text) ? text : `\${${text}}`;
-  return ` Write a number key as text, as in '"${written}"'.`;
+  return path(text)
+    ? ` Write a number key as text, as in '"\${${text}}"'.`
+    : " Write a number key as text.";
 }
 
 /** How `${...}` shows a value of each kind it cannot show, where one has a fix (#1195's decided texts). */
@@ -485,7 +502,9 @@ function shownFix(
       ? "Show one of its properties instead."
       : `Show one of its properties instead, as in '\${${label}.${rule.property}}'.`;
   if (kind === "set")
-    return `Show all its elements with '\${${label ?? "value"}.toList().join()}'.`;
+    return label === null
+      ? "Show its elements with 'toList().join()' instead."
+      : `Show all its elements with '\${${label}.toList().join()}'.`;
   return SHOWN_RULE;
 }
 
@@ -503,10 +522,57 @@ function parsedExpression(
     : null;
 }
 
+/**
+ * A literal whose elements mix types (ADR 0021 rule 1.3), in the current checker's sentences (#1195, the owner's
+ * review): its elements' own types; a nested collection's as its written type (`a list (integer[])`); objects by the
+ * property that differs. The fix: a written union where the elements are scalars, declared on the variable whose start
+ * value the literal is, else the type alone; one type for the property; values of one type in a nested collection,
+ * whose union V30 §13 forbids (rule 3.4).
+ */
+function mixedSentence(
+  rule: Extract<DiagnosticRule, { rule: "mixed" }>,
+  kinds: readonly ItemTag[],
+): string {
+  const { collection, path } = rule;
+  const holds = `A ${collection} holds one type.`;
+  // the steps to the property that differs, and the collections below it
+  const property = path.findLastIndex((step) => step !== "element" && step !== "entry");
+  const below = path.slice(property + 1);
+  const nested = (types: readonly ItemTag[]): string => {
+    let written = typeText(types);
+    for (const step of below.toReversed())
+      written =
+        written === null ? null : collectionText(step === "entry" ? "dict" : "list", written);
+    const outer = below[0] === "entry" ? "dict" : "list";
+    return below.length === 0 || written === null
+      ? described(types)
+      : `${VALUE_KINDS[outer].description} (${written})`;
+  };
+  if (property >= 0) {
+    const name = path
+      .slice(0, property + 1)
+      .filter((step) => step !== "element" && step !== "entry")
+      .map(propertyName)
+      .join(".");
+    return (
+      `This ${collection} mixes objects whose property '${name}' holds ${nested(rule.type)} in one and ` +
+      `${nested(kinds)} in another. ${holds} Give '${name}' one type in every ` +
+      `${collection === "dict" ? "value" : "element"}.`
+    );
+  }
+  const first = `This ${collection} mixes ${nested(rule.type)} and ${nested(kinds)}. ${holds}`;
+  const both = path.length === 0 ? typeText([...rule.type, ...kinds]) : null;
+  if (both === null) return `${first} Use values of one type in it.`;
+  const written = collectionText(collection, both);
+  const root = rule.root;
+  return root !== null && (root.kind === "let" || root.kind === "global")
+    ? `${first} To allow both, declare it as '${root.kind} ${root.name}: ${written} = ...'.`
+    : `${first} To allow both, declare it as '${written}'.`;
+}
+
 /** The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). */
 function temporalFix(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
-  text: string,
   kinds: readonly ItemTag[],
   source: MessageSource,
 ): string {
@@ -515,11 +581,14 @@ function temporalFix(
   const [a, b] = rule.operand ? [undefined, kinds[0]] : rule.pair;
   const { operator } = rule;
   const moves = operator === "+" || operator === "-";
+  // (an example only where the value it converts is a variable or a path, and the other operand one or a literal)
+  const named =
+    path(left) && (path(right) || LITERAL_OPERAND.has(expressionKind(right) ?? "identifier"));
   if (moves && a === "absoluteDateTime" && b === "calendarDuration")
-    return (
-      " An absolute date and time has no calendar. Convert it first, as in " +
-      `'(${receiverText(left)}.toDateTime() ${operator} ${operandText(right)}).toAbsoluteDateTime()'.`
-    );
+    return named
+      ? " An absolute date and time has no calendar. Convert it first, as in " +
+          `'(${left}.toDateTime() ${operator} ${right}).toAbsoluteDateTime()'.`
+      : " An absolute date and time has no calendar. Convert it with 'toDateTime()' first.";
   if (moves && a === "date" && b === "duration") {
     const amount = /^(\d+) ?(d|day|days|w|week|weeks)$/.exec(right);
     if (amount === null) return " A date moves only by calendar units, such as '1 calendar day'.";
@@ -528,20 +597,25 @@ function temporalFix(
   }
   if (moves && a === "datetime" && b === "duration")
     return (
-      " A date and time has no time zone, so it cannot move by elapsed time. Convert it first, as in " +
-      `'(${receiverText(left)}.toAbsoluteDateTime() ${operator} ${operandText(right)}).toDateTime()', or use calendar ` +
-      "units to keep the clock time."
+      " A date and time has no time zone, so it cannot move by elapsed time. " +
+      (named
+        ? `Convert it first, as in '(${left}.toAbsoluteDateTime() ${operator} ${right}).toDateTime()', `
+        : "Convert it with 'toAbsoluteDateTime()' first, ") +
+      "or use calendar units to keep the clock time."
     );
   if (operator === "-" && b === "datetime" && rule.domain.includes("calendarDuration"))
     return (
       " A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with " +
-      `'toDate(${left}) - toDate(${right})', or convert both with 'toAbsoluteDateTime()' for the elapsed time.`
+      (path(left) && path(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'") +
+      ", or convert both with 'toAbsoluteDateTime()' for the elapsed time."
     );
   if (moves && b === "time")
-    return ` Arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, ${rule.operand ? text : right})'.`;
+    return " Arithmetic on a time is not available. Combine it with a date first, with 'toDateTime(...)'.";
   const compares = ["<", "<=", ">", ">="].includes(operator);
   if (compares && a === "date" && b === "datetime")
-    return ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`;
+    return path(right)
+      ? ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`
+      : " A date compares only with another date. Compare its date, with 'toDate(...)'.";
   if ((compares || operator === "/") && a !== undefined && b !== undefined) {
     const pair = new Set([a, b]);
     if (pair.has("calendarDuration") && pair.has("duration"))
@@ -606,38 +680,23 @@ function errorSentence(
     }
     case "selection":
       return `'${rule.collection}' is empty here, so it has no element for '${rule.member}'.`;
-    case "mixed": {
-      // (where in its elements, as the path below them goes)
-      const where =
-        rule.path.length === 0
-          ? ""
-          : ` in ${pathPhrase({ words: rule.collection === "dict" ? "its values" : "its elements" }, rule.path)}`;
-      const last = rule.path.at(-1);
-      const both = typeText([...rule.type, ...kinds]);
-      const fix =
-        last !== undefined && last !== "element" && last !== "entry"
-          ? `Give '${propertyName(last)}' one type in every ${rule.collection === "dict" ? "value" : "element"}.`
-          : rule.path.length === 0 && both !== null
-            ? `To keep both, declare a union type, as in '${collectionText(rule.collection, both)}'.`
-            : `Use values of one type in it.`;
-      return (
-        `This ${rule.collection} mixes ${described(rule.type)} and ${described(kinds)}${where}. A ` +
-        `${rule.collection} holds one type. ${fix}`
-      );
-    }
+    case "mixed":
+      return mixedSentence(rule, kinds);
     case "operator": {
-      const other = joined(rule, kinds, []);
-      if (other !== null)
-        return `'+' joins text only with other text, not with ${described(other)}. ${JOIN_FIX}`;
+      const join = joined(rule, text, kinds, [], source);
+      if (join !== null)
+        return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join.operand)}`;
       return rule.operand
-        ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, text, kinds, source)}`
+        ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, kinds, source)}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.` +
-            temporalFix(rule, text, kinds, source);
+            temporalFix(rule, kinds, source);
     }
     case "shown": {
       const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
       if (kind === "dict" && !rule.element)
-        return interpolatedDictMessage(path(text) ? text : null);
+        return path(text)
+          ? interpolatedDictMessage(text)
+          : "'${...}' cannot show a dict. Select one value with a key, or show every value with 'values.join()'.";
       return `'\${...}' cannot show ${described(kinds)}. ${shownFix(rule, text, kinds)}`;
     }
     case "count":
@@ -662,28 +721,52 @@ function errorSentence(
  */
 function joined(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
+  text: string,
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
-): Known[] | null {
+  source: MessageSource,
+): { readonly other: Known[]; readonly operand: string | null } | null {
   if (rule.operator !== "+" || fits.length > 0 || rule.operands.length !== 2) return null;
-  const own = known(rule.operand ? kinds : rule.pair);
-  const other = !rule.operand
-    ? own.includes("string")
-      ? own.filter((kind) => kind !== "string")
-      : []
-    : own.includes("string")
-      ? named(rule.domain).filter((kind) => kind !== "string")
-      : rule.domain.includes("string")
-        ? own
-        : [];
-  return other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind)) ? null : other;
+  const texts = rule.operands.map((site) => source.text(site));
+  // the combination the operation offends in, one kind per operand: the operand that is not text
+  if (rule.pair.length === 2 && rule.pair.includes("string")) {
+    const index = rule.pair.findIndex((kind) => kind !== "string");
+    const kind = rule.pair[index];
+    return index < 0 || kind === undefined || !SHOWN_KINDS.has(kind) || kind === "null"
+      ? null
+      : { other: known([kind]), operand: texts[index] ?? null };
+  }
+  const own = known(kinds);
+  if (!rule.operand) return null;
+  // (an operand whose combination is unknown: text where its place takes another kind, or the other way round)
+  const other = own.includes("string")
+    ? named(rule.domain).filter((kind) => kind !== "string")
+    : rule.domain.includes("string")
+      ? own
+      : [];
+  if (other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind) || kind === "null"))
+    return null;
+  return {
+    other,
+    operand: own.includes("string") ? (texts.find((found) => found !== text) ?? null) : text,
+  };
 }
 
 /**
- * The text-join fix (#1195): the sentence alone. An example written from the source's operands changed what some chains
- * say (a numeric prefix, text that joins into `${...}`), so the lead dropped it (#1195, after S8d's review r4).
+ * The text-join fix (#1195): the operand that is not text, in `${...}` as the source writes it (the owner's review), on
+ * one line and without a comment; else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
+ * changed what some chains say (S8d's reviews r3 and r4).
  */
-const JOIN_FIX = "Put the value in the text instead.";
+function joinFix(operand: string | null): string {
+  return operand === null || !ownText(operand)
+    ? "Put the value in the text instead."
+    : `Put the value in the text as '\${${operand}}' instead.`;
+}
+
+/** Whether a subject's own text may stand in a fix's code: on one line, and without a comment. */
+function ownText(code: string): boolean {
+  return !/[\n\r]|\/\/|\/\*/.test(code);
+}
 
 /** The kinds `${...}` shows as text. */
 const SHOWN_KINDS: ReadonlySet<ItemTag> = new Set([
@@ -731,13 +814,12 @@ function warningSentence(
       const holder = detail.receiver?.kinds ?? kinds;
       if (rule.use === "store" && (kinds.includes("speaker") || holder.includes("speaker")))
         return holder.every((kind) => kind === "speaker")
-          ? `'${rule.receiver}' may have no ${noun} here. A speaker takes the property when the script runs.`
-          : `'${rule.receiver}' may have no ${noun} here. If it is an object without '${rule.member.slice(1)}', ` +
+          ? `'${rule.receiver}' may not have ${noun} here. A speaker takes the property when the script runs.`
+          : `'${rule.receiver}' may not have ${noun} here. If it is an object without '${rule.member.slice(1)}', ` +
               `${STOPS} A speaker takes the property.`;
-      return (
-        `'${rule.receiver}' may have no ${noun}${rule.use === "store" ? " that can be set" : ""} here. If it has ` +
-        `none, ${STOPS}`
-      );
+      // (only a property is set by a store: a method is called, an element stored at its index)
+      const settable = rule.use === "store" && noun.startsWith("property");
+      return `'${rule.receiver}' may not have ${noun}${settable ? " that can be set" : ""} here. If it does not, ${STOPS}`;
     }
     case "selection":
       return `'${rule.collection}' may be empty here. If it is, ${STOPS}`;
@@ -778,15 +860,27 @@ function fallbackValue(kinds: readonly ItemTag[]): string | null {
  */
 function checkFix(text: string, test: string, fallback: string | null, operand = false): string {
   const name = variable(text);
+  // (a value kept in a variable shows its `let`, where its own text may stand in code)
   const check =
-    name === null
-      ? `Keep '${text}' in a variable and check the variable first, as in 'if value ${test} { ... }'`
-      : `Check '${name}' first, as in 'if ${name} ${test} { ... }'`;
-  if (fallback === null) return `${check}.`;
+    name !== null
+      ? `Check '${name}' first, as in 'if ${name} ${test} { ... }'`
+      : ownText(text)
+        ? `Keep '${text}' in a variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
+        : `Keep '${text}' in a variable and check the variable first, as in 'if value ${test} { ... }'`;
+  if (fallback === null || !ownText(text)) return `${check}.`;
   // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
   const code = `${operandText(text)} otherwise ${fallback}`;
   return `${check}, or give a fallback, as in '${operand ? `(${code})` : code}'.`;
 }
+
+/** The literals an example may write beside a named value as the source writes them. */
+const LITERAL_OPERAND: ReadonlySet<Expression["kind"]> = new Set([
+  "numberLiteral",
+  "durationLiteral",
+  "unitExpression",
+  "angleExpression",
+  "booleanLiteral",
+]);
 
 /** A literal's text: a number, text or `true`/`false`. */
 const LITERAL = /^(-?\d[\d.]*|"[^"]*"|true|false)$/;
@@ -842,7 +936,9 @@ function warningFix(
   }
   switch (rule.rule) {
     case "selection":
-      return `Check '${rule.collection}.length' first.`;
+      return ownText(rule.collection)
+        ? `Check '${rule.collection}.length' first, as in 'if ${rule.collection}.length > 0 { ... }'.`
+        : `Check '${rule.collection}.length' first.`;
     case "count":
       if (kinds.includes("number")) return ROUND_COUNT_FIX.trimStart();
       break;
@@ -852,8 +948,9 @@ function warningFix(
       break;
     case "operator": {
       // (the repairs of the error the values would be: a text join, a date and time conversion)
-      if (joined(rule, kinds, fits) !== null) return JOIN_FIX;
-      const temporal = temporalFix(rule, text, kinds, source).trimStart();
+      const join = joined(rule, text, kinds, fits, source);
+      if (join !== null) return joinFix(join.operand);
+      const temporal = temporalFix(rule, kinds, source).trimStart();
       if (temporal !== "" || !rule.operand) return temporal;
       break;
     }
@@ -870,6 +967,8 @@ function warningFix(
       ? ""
       : checkFix(subject, `is ${test}`, null);
   }
+  // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
+  if (LITERAL.test(text) || context === "missing") return "";
   const test = typeText(fits);
   if (test !== null) return checkFix(subject, `is ${test}`, null);
   return errorFix(rule, text, kinds).trimStart();
@@ -906,12 +1005,14 @@ function memberWarningFix(
   if (speaker && rule.member.startsWith(".")) {
     const name = rule.member.slice(1);
     if (rule.member.endsWith("()"))
-      return `A speaker has no methods. Use one of its properties instead, such as '${rule.receiver}.title'.`;
+      return `A speaker has no methods. Use one of its properties instead, such as '${path(rule.receiver) ? `${rule.receiver}.` : ""}title'.`;
     if (rule.use !== "read") return "";
     return rule.receiver === PLAYER && PERSON_FIELDS.has(name)
       ? "Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the " +
           `script, or assign 'player.${name}' first.`
-      : `Assign the property before this line, as in '${rule.receiver}.${name} = ...'.`;
+      : path(rule.receiver)
+        ? `Assign the property before this line, as in '${rule.receiver}.${name} = ...'.`
+        : "Assign the property before this line.";
   }
   // (a reference's own members are the runtime's: no test narrows them)
   const lacking = known(kinds);
@@ -955,7 +1056,7 @@ function originSentence(word: ContextWord, name: string): string {
     case "missing":
       return `${from} a property that an object may lack.`;
     case "branch":
-      return `${from} an 'if' or another branch, so which value it gets depends on the choice.`;
+      return `${from} an 'if' or another branch, so which value it gets depends on which branch runs.`;
     case "call":
       return `${from} a place that a function or a file the script calls may change.`;
     case "dead-code":
@@ -994,8 +1095,8 @@ function contextSentence(
         : `'${detail.receiver.text}' may hold an object that has no '${detail.receiver.member}' property.`;
     case "branch":
       return (
-        `'${name}' is set inside an 'if' or another branch, so which value reaches this line depends on the ` +
-        "choice."
+        `'${name}' is set inside an 'if' or another branch, so which value reaches this line depends on which ` +
+        "branch runs."
       );
     case "call":
       return detail.callable === null
