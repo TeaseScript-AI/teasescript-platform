@@ -272,6 +272,41 @@ interface LooseIndex {
   readonly fromAt: Map<string, Loose["from"][number][]>;
 }
 
+/** Entries by path (`#byPath`): each under every prefix of its path (the path's own text included), and at its path. */
+interface ByPath<T> {
+  readonly under: ReadonlyMap<string, readonly T[]>;
+  readonly at: ReadonlyMap<string, readonly T[]>;
+}
+
+const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
+
+/**
+ * A place's own contributions by path (`#ownIndex`, `OwnStructure`), selected at, above or below a path by its
+ * prefixes, never listed for each path (`#stepOf`, `#readMeets`; Astra's review r2 B2): its reads (by their sources)
+ * and then its other values, and its points with their stores, each in their order.
+ */
+interface OwnIndex {
+  readonly opaque: ByPath<OwnOpaque>;
+  readonly points: ByPath<OwnPoint>;
+}
+
+/** A read (by its source) or any other value of a place's own, at its path (`OwnIndex`). */
+interface OwnOpaque {
+  readonly path: readonly string[];
+  readonly read: Key | null;
+}
+
+/** A literal or constant of a place's own, at its path, with its store (`OwnIndex`). */
+interface OwnPoint {
+  readonly path: readonly string[];
+  readonly source: PointSource;
+}
+
+/** A fed cycle's members' own contributions and stores taken again, member by member (`#cycleIndex`). */
+interface CycleIndex extends OwnIndex {
+  readonly retaken: ByPath<readonly string[]>;
+}
+
 /** A root's contents beside its landings below a strip, as rests from it (`#flatLoose`). */
 interface FlatLoose {
   readonly points: (readonly string[])[];
@@ -1012,7 +1047,13 @@ export class Admission {
   /** Per place and path, what it holds there (`#identity`); per place, its own contributions (`#ownStructure`). */
   readonly #identities = new Map<string, Identity>();
   readonly #owns = new Map<PlaceId, OwnStructure | null>();
-  readonly #opaque = new Map<PlaceId, ReadonlySet<string>>();
+  /** Per own structure, per place and per fed cycle (its members' list), what stands where (`#stepOf`). */
+  readonly #ownIndexes = new WeakMap<OwnStructure, OwnIndex>();
+  readonly #placeIndexes = new Map<
+    PlaceId,
+    { readonly retaken: ByPath<readonly string[]>; readonly copies: ByPath<InheritedCopy> }
+  >();
+  readonly #cycleIndexes = new WeakMap<readonly PlaceId[], CycleIndex>();
   #cycleMembers: Map<number, PlaceId[]> | null = null;
   readonly #forwards = new Map<
     PlaceId,
@@ -2540,11 +2581,11 @@ export class Admission {
       for (const path of paths) touched.set(keptText(this.#work, path), path);
     };
     const own = this.#ownStructure(read.root);
-    const opaque = this.#opaqueAt(read.root);
-    let covered = own === null;
+    const index = own === null ? null : this.#ownIndex(own);
+    let covered = index === null;
     for (let length = 0; length <= read.strip.length && !covered; length += 1) {
       work.charge("indexSteps");
-      covered = opaque.has(keptText(this.#work, read.strip.slice(0, length)));
+      covered = index!.opaque.at.has(keptText(this.#work, read.strip.slice(0, length)));
     }
     const groups = [...run.served];
     const seen = new Set<Group>(groups);
@@ -2562,22 +2603,21 @@ export class Admission {
     )
       take(this.#landedUnder(run, read.at));
     else {
-      for (const point of own!.points) {
+      // (its points, other values and reads at or below the read's strip, from its index: never all for each read)
+      const text = keptText(this.#work, read.strip);
+      for (const { path: point } of index!.points.under.get(text) ?? []) {
         work.charge("indexSteps");
-        if (!isPrefix(read.strip, point)) continue;
         const path = keptSteps(this.#work, read.at, point.slice(read.strip.length));
         if (this.#landsAny(run, path, keptText(this.#work, path))) take([path]);
       }
-      for (const prefixes of [own!.below, own!.reads.map(({ at }) => at)])
-        for (const prefix of prefixes) {
+      const opaque = index!.opaque.under.get(text) ?? [];
+      for (const reads of [false, true])
+        for (const { path: prefix, read: source } of opaque) {
+          if ((source !== null) !== reads) continue;
           work.charge("indexSteps");
-          if (isPrefix(read.strip, prefix))
-            take(
-              this.#landedUnder(
-                run,
-                keptSteps(this.#work, read.at, prefix.slice(read.strip.length)),
-              ),
-            );
+          take(
+            this.#landedUnder(run, keptSteps(this.#work, read.at, prefix.slice(read.strip.length))),
+          );
         }
     }
     // (a fresh account: the read's contents stand beside the groups' at each path)
@@ -3265,81 +3305,70 @@ export class Admission {
     readonly sources: readonly PointSource[];
     readonly below: readonly (readonly string[])[];
   } | null {
-    const { into, cycleOf, fed } = this.#inheritance();
+    const { cycleOf, fed } = this.#inheritance();
     const work = this.pass.program.work;
     work.charge("indexSteps");
+    // (what stands at, above or below the strip, looked up by its prefixes in indexes of the place's stores, copies and
+    // own contributions: never each of them for each strip, Astra's review r2 B2)
+    const texts: string[] = [];
+    for (let length = 0; length <= strip.length; length += 1) {
+      work.charge("indexSteps");
+      texts.push(keptText(this.#work, strip.slice(0, length)));
+    }
+    const text = texts.at(-1)!;
+    const crosses = (index: ByPath<unknown>): boolean =>
+      index.under.has(text) || texts.some((prefix) => index.at.has(prefix));
+    const points: (readonly string[])[] = [];
+    const sources: PointSource[] = [];
+    const below: (readonly string[])[] = [];
+    // (the place's contributions below the path, as rests from it: reads and other values, then points)
+    const collect = (index: OwnIndex): void => {
+      for (const { path } of index.opaque.under.get(text) ?? []) {
+        work.charge("indexSteps");
+        if (path.length > strip.length) below.push(keptSlice(this.#work, path, strip.length));
+      }
+      for (const { path, source } of index.points.under.get(text) ?? []) {
+        work.charge("indexSteps");
+        points.push(keptSlice(this.#work, path, strip.length));
+        sources.push(source);
+      }
+    };
     const feeder = fed.get(place);
     if (feeder !== undefined) {
       // a member of a cycle of whole copies one place outside it feeds: that place's landings, with every member's own
       // contributions below the path (the cycle's contents flow round it)
-      const points: (readonly string[])[] = [];
-      const sources: PointSource[] = [];
-      const below: (readonly string[])[] = [];
-      for (const member of this.#membersOf(place)) {
-        for (const path of this.#retakenOf(member)) {
-          work.charge("indexSteps");
-          if (isPrefix(path, strip) || isPrefix(strip, path)) return null;
-        }
-        const own = this.#ownStructure(member);
-        for (const { at } of own?.reads ?? []) {
-          work.charge("indexSteps");
-          if (isPrefix(at, strip)) return null;
-          if (isPrefix(strip, at)) below.push(keptSlice(this.#work, at, strip.length));
-        }
-        for (const path of own?.below ?? []) {
-          work.charge("indexSteps");
-          if (isPrefix(path, strip)) return null;
-          if (isPrefix(strip, path)) below.push(keptSlice(this.#work, path, strip.length));
-        }
-        (own?.points ?? []).forEach((path, index) => {
-          work.charge("indexSteps");
-          if (!isPrefix(strip, path)) return;
-          points.push(keptSlice(this.#work, path, strip.length));
-          sources.push(own!.sources[index]!);
-        });
-      }
+      const index = this.#cycleIndex(place);
+      if (crosses(index.retaken) || texts.some((prefix) => index.opaque.at.has(prefix)))
+        return null;
+      collect(index);
       return { from: feeder, strip, points, sources, below };
     }
     if (cycleOf.has(place) || this.#seedsUnder(place, strip).length > 0) return null;
-    for (const path of this.#retakenOf(place)) {
-      work.charge("indexSteps");
-      if (isPrefix(path, strip) || isPrefix(strip, path)) return null;
-    }
+    const { retaken, copies } = this.#placeIndex(place);
+    if (crosses(retaken)) return null;
+    if ((copies.under.get(text)?.length ?? 0) > (copies.at.get(text)?.length ?? 0)) return null;
+    // the one copy or read reaching the path, at or above it (a second one, or any other value there, holds more)
     let from: PlaceId | null = null;
     let at: readonly string[] = [];
     let reaching = 0;
-    for (const copy of into.get(place) ?? []) {
-      work.charge("indexSteps");
-      if (isPrefix(copy.path, strip)) {
-        reaching += 1;
+    for (const prefix of texts)
+      for (const copy of copies.at.get(prefix) ?? []) {
+        work.charge("indexSteps");
+        if ((reaching += 1) > 1) return null;
         from = copy.from;
         at = keptSteps(this.#work, copy.strip, strip.slice(copy.path.length));
-      } else if (isPrefix(strip, copy.path)) return null;
-    }
+      }
     const own = this.#ownStructure(place);
-    const points: (readonly string[])[] = [];
-    const sources: PointSource[] = [];
-    const below: (readonly string[])[] = [];
-    for (const read of own?.reads ?? []) {
-      work.charge("indexSteps");
-      if (isPrefix(read.at, strip)) {
-        reaching += 1;
-        from = keyPlace(read.source);
-        at = keptSteps(this.#work, keptPath(this.#work, read.source), strip.slice(read.at.length));
-      } else if (isPrefix(strip, read.at)) below.push(keptSlice(this.#work, read.at, strip.length));
-    }
+    const index = own === null ? null : this.#ownIndex(own);
+    for (const prefix of index === null ? [] : texts)
+      for (const { path, read } of index!.opaque.at.get(prefix) ?? []) {
+        work.charge("indexSteps");
+        if (read === null || (reaching += 1) > 1) return null;
+        from = keyPlace(read);
+        at = keptSteps(this.#work, keptPath(this.#work, read), strip.slice(path.length));
+      }
     if (reaching !== 1 || from === null) return null;
-    for (const path of own?.below ?? []) {
-      work.charge("indexSteps");
-      if (isPrefix(path, strip)) return null;
-      if (isPrefix(strip, path)) below.push(keptSlice(this.#work, path, strip.length));
-    }
-    (own?.points ?? []).forEach((path, index) => {
-      work.charge("indexSteps");
-      if (!isPrefix(strip, path)) return;
-      points.push(keptSlice(this.#work, path, strip.length));
-      sources.push(own!.sources[index]!);
-    });
+    if (index !== null) collect(index);
     return { from, strip: at, points, sources, below };
   }
 
@@ -3357,21 +3386,90 @@ export class Admission {
     return this.#cycleMembers.get(cycleOf.get(place)!) ?? [place];
   }
 
-  /** The paths where a place's own contributions are opaque, any other value or a read (`#met`), once per place. */
-  #opaqueAt(place: PlaceId): ReadonlySet<string> {
-    let found = this.#opaque.get(place);
-    if (found !== undefined) return found;
-    const own = this.#ownStructure(place);
-    const texts = new Set<string>();
-    for (const prefix of own?.below ?? []) {
-      this.pass.program.work.charge("indexSteps");
-      texts.add(keptText(this.#work, prefix));
+  /** Entries by path (`ByPath`): each under every prefix of its path, its own text included, and at its path. */
+  #byPath<T>(entries: readonly T[], pathOf: (entry: T) => readonly string[]): ByPath<T> {
+    if (entries.length === 0) return NO_PATHS;
+    const work = this.pass.program.work;
+    const under = new Map<string, T[]>();
+    const at = new Map<string, T[]>();
+    const put = (map: Map<string, T[]>, text: string, entry: T): void => {
+      const list = map.get(text);
+      if (list === undefined) map.set(text, [entry]);
+      else list.push(entry);
+    };
+    for (const entry of entries) {
+      const path = pathOf(entry);
+      let text = "";
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        text = keptText(this.#work, path.slice(0, length));
+        put(under, text, entry);
+      }
+      put(at, text, entry);
     }
-    for (const { at } of own?.reads ?? []) {
-      this.pass.program.work.charge("indexSteps");
-      texts.add(keptText(this.#work, at));
+    return { under, at };
+  }
+
+  /** A place's own contributions by path (`OwnIndex`), once per own structure. */
+  #ownIndex(own: OwnStructure): OwnIndex {
+    let found = this.#ownIndexes.get(own);
+    if (found === undefined) {
+      const opaque: OwnOpaque[] = [];
+      const points: OwnPoint[] = [];
+      this.#ownEntries(own, opaque, points);
+      found = {
+        opaque: this.#byPath(opaque, ({ path }) => path),
+        points: this.#byPath(points, ({ path }) => path),
+      };
+      this.#ownIndexes.set(own, found);
     }
-    this.#opaque.set(place, (found = texts));
+    return found;
+  }
+
+  /** A place's own contributions as `OwnIndex`'s entries: in `opaque` its reads, then its other values; its points. */
+  #ownEntries(own: OwnStructure, opaque: OwnOpaque[], points: OwnPoint[]): void {
+    for (const { at, source } of own.reads) opaque.push({ path: at, read: source });
+    for (const path of own.below) opaque.push({ path, read: null });
+    own.points.forEach((path, index) => points.push({ path, source: own.sources[index]! }));
+  }
+
+  /** A place's stores taken again and its copies of inheriting places by path (`#stepOf`), once per place. */
+  #placeIndex(place: PlaceId): {
+    readonly retaken: ByPath<readonly string[]>;
+    readonly copies: ByPath<InheritedCopy>;
+  } {
+    let found = this.#placeIndexes.get(place);
+    if (found === undefined) {
+      found = {
+        retaken: this.#byPath(this.#retakenOf(place), (path) => path),
+        copies: this.#byPath(this.#inheritance().into.get(place) ?? [], ({ path }) => path),
+      };
+      this.#placeIndexes.set(place, found);
+    }
+    return found;
+  }
+
+  /** A fed cycle's members' own contributions and stores taken again by path (`CycleIndex`), once per cycle. */
+  #cycleIndex(place: PlaceId): CycleIndex {
+    const members = this.#membersOf(place);
+    let found = this.#cycleIndexes.get(members);
+    if (found === undefined) {
+      const retaken: (readonly string[])[] = [];
+      const opaque: OwnOpaque[] = [];
+      const points: OwnPoint[] = [];
+      for (const member of members) {
+        this.pass.program.work.charge("indexSteps");
+        for (const path of this.#retakenOf(member)) retaken.push(path);
+        const own = this.#ownStructure(member);
+        if (own !== null) this.#ownEntries(own, opaque, points);
+      }
+      found = {
+        retaken: this.#byPath(retaken, (path) => path),
+        opaque: this.#byPath(opaque, ({ path }) => path),
+        points: this.#byPath(points, ({ path }) => path),
+      };
+      this.#cycleIndexes.set(members, found);
+    }
     return found;
   }
 
