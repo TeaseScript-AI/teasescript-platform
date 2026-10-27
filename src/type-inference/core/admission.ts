@@ -945,6 +945,8 @@ export class Admission {
   readonly #pending = new Map<number, Definition>();
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
+  /** The key each read check took in `#readSeen` or `#hostSeen`, in `readChecks`' order (`null`: F18's, none). */
+  readonly #readCheckKeys: (PlaceId | string | null)[] = [];
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
   readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
   /** Per store, the ingresses that reach its value through an operation's own read (`#ownLeaves`). */
@@ -6374,6 +6376,7 @@ export class Admission {
         `validate external data entering ${label} against its own unknown contract`,
       ),
     );
+    this.#readCheckKeys.push(value);
   }
 
   /**
@@ -6397,6 +6400,18 @@ export class Admission {
       on: `validate external data ${here.target}`,
       boundary: true,
     });
+    this.#readCheckKeys.push(at);
+  }
+
+  /**
+   * Takes back the read checks from `length` on, with the keys they took, so the walk that finishes their unit after a
+   * stop makes them again (D4 a′: the running unit's findings are taken back, TABLE r4.54).
+   */
+  public takeBackReadChecks(length: number): void {
+    for (const key of this.#readCheckKeys.splice(length))
+      if (typeof key === "number") this.#readSeen.delete(key);
+      else if (key !== null) this.#hostSeen.delete(key);
+    this.readChecks.length = length;
   }
 
   public boundariesAt(items: readonly Item[], here: Obligation | null): void {
@@ -6459,6 +6474,7 @@ export class Admission {
           `validate external data entering ${found.label} against ${found.tags.join("|")}`,
         ),
       );
+      this.#readCheckKeys.push(null);
     }
   }
 

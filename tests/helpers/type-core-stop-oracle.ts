@@ -121,15 +121,14 @@ function within(inner: Span, outer: Span): boolean {
 }
 
 /**
- * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108), none at a sound stop.
- * At any stop: no error the unstopped compile lacks, a plan wherever it has one, the fitting runs unchanged. Where
- * admission settled, the rest whole (r4.108 (1)): a mark excuses the record with its code at its site and nothing
- * else. The diagnostics and the checks are compared in their published order (r4.86 (1)) besides those records and
- * the stop's own warning. The plans are compared whole; a difference stands only inside the plan content of a mark
- * whose obligation is not the unstopped one at its code and site (one that is owes the same check): the content that
- * leaving it, and the unstopped warning with its code and site, out of each compile's discharge removes. A violating
- * run differs only where the run that stops first fails in a node holding such content. C5's error at a literal never
- * moves to its store's mark there: a settled stop decides its receiver's shape (r4.108 (2)).
+ * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108, r4.109), none at a
+ * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else. The diagnostics and
+ * the checks are compared in their published order (r4.86 (1)) besides those records and the stop's own warning. The
+ * plans are compared whole; a difference stands only inside the plan content of a mark whose obligation is not the
+ * unstopped one at its code and site (one that is owes the same check): the content that leaving it, and the unstopped
+ * warning with its code and site, out of each compile's discharge removes. The fitting runs are unchanged; a violating
+ * run differs only where the run that stops first fails in a node holding such content. C5's error at a literal moves
+ * to its store's mark only where admission had not settled, its receiver's shape undecided (r4.108 (2)).
  */
 export function stopProblems(c: StopCase): string[] {
   const { unstopped, stopped } = c;
@@ -144,22 +143,19 @@ export function stopProblems(c: StopCase): string[] {
       ];
       if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
-  if (!stopped.answers.budget.settled) {
-    // (before admission settled nothing it found stands, r4.99: no error the unstopped compile lacks, a plan wherever
-    // it has one, the fitting runs unchanged; C5's error may stand as its store's mark there, r4.108 (2))
-    const errors = new Set(
-      unstopped.result.diagnostics.flatMap((d) =>
-        d.severity === "error" ? [recordOf(d.code, offsets(d))] : [],
-      ),
-    );
-    for (const d of stopped.result.diagnostics)
-      if (d.severity === "error" && !errors.has(recordOf(d.code, offsets(d))))
-        problems.push(`new error ${recordOf(d.code, offsets(d))}`);
-    if (want !== null && got === null) problems.push("no plan");
-    if (want !== null && got !== null) fitting();
-    return problems;
-  }
   const excused = new Set(marks.map((mark) => recordOf(mark.code, mark.site)));
+  // (before admission settled, a receiver's shape is undecided: C5's error at the literal may stand as the mark of the
+  // store that owes it, r4.108 (2))
+  if (!stopped.answers.budget.settled)
+    for (const d of unstopped.answers.diagnostics)
+      if (
+        d.class === "compile-error" &&
+        "rule" in d &&
+        d.rule.rule === "absent" &&
+        d.rule.store !== null &&
+        excused.has(recordOf(d.code, d.rule.store))
+      )
+        excused.add(recordOf(d.code, d.site));
   // the diagnostics, in their published order
   const shown = (each: StopRun): string[] =>
     each.result.diagnostics

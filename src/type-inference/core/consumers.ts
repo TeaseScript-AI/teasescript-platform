@@ -27,6 +27,7 @@ import {
   REFERENCE,
   termAt,
   typeTags,
+  unknownItem,
   writtenOf,
 } from "./contract.js";
 import {
@@ -393,12 +394,12 @@ export class Consumers {
 
   /**
    * A read in the finishing path (D4 a′, TABLE r4.90, r4.99; S3 §5 revision 14, r4.102), answered from the retained
-   * state only, the first source that decides it winning: a literal's own kind, which no proof decides (an error found
-   * there stands); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
+   * state only, the first source that decides it winning: a leaf's own kind (`#leafKind`), which no proof decides (an
+   * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
    * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
    * decided, or a copy's through the copy forest, `Admission.retained`); `STOPPED` (`unknown` with the reason `budget`)
-   * only where none of these decides it, so its consumer owes its check when the script runs. Only a literal's kind and
-   * the read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
+   * only where none of these decides it, so its consumer owes its check when the script runs. Only a leaf's kind and the
+   * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
    * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
    * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
    * `#required`.
@@ -410,7 +411,7 @@ export class Consumers {
     requirement = false,
   ): readonly Item[] {
     const { contract, values } = this.pass;
-    const own = rest.length === 0 ? this.#literalKind(value) : null;
+    const own = this.#leafKind(value, rest);
     if (own !== null) return own;
     // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
@@ -449,6 +450,9 @@ export class Consumers {
    */
   #finishingKeyRead(key: Key, node: FlowNode): readonly Item[] {
     const { contract, values, program } = this.pass;
+    // (a host global the script never stores into holds its own external data, as its reads do: `#leafKind`)
+    if (program.isHost(keyPlace(key)) && !this.#storedHosts().has(keyPlace(key)))
+      return [unknownItem(REASON.external)];
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
       const items = this.#run(work());
       return items.some(unsettledItem) ? null : items;
@@ -532,6 +536,51 @@ export class Consumers {
   }
 
   /** A scalar literal's own kind, which no proof decides (an error found there stands, D4 a′); `null` for any other value. */
+  /**
+   * A leaf's own kind (S3 §5 revision 18, TABLE r4.109 (1)): a literal's own kind at the read, and below it its
+   * children's, or a host read's own ingress, directly or through projections (`Contract.ingressOf`), where the script
+   * stores nothing into its host global: what the value is, known from the program's structure without solving; else
+   * `null`.
+   */
+  #leafKind(value: PlaceId, rest: readonly string[]): readonly Item[] | null {
+    const { contract, program } = this.pass;
+    const own = rest.length === 0 ? this.#literalKind(value) : null;
+    if (own !== null) return own;
+    // (below a collection or record literal, its own children's, each a leaf: `[hostValue]` at its element)
+    const place = program.places[value]?.kind;
+    if (rest.length > 0 && place?.kind === "value" && program.hasOf.has(value)) {
+      const step = rest[0] === "element" && place.node === "dictLiteral" ? "entry" : rest[0]!;
+      const items: Item[] = [];
+      for (const child of this.admission.literalChildren(value, step)) {
+        const found = child.value === undefined ? null : this.#leafKind(child.value, rest.slice(1));
+        if (found === null) return null;
+        items.push(...found);
+      }
+      return items.length === 0 ? null : items;
+    }
+    const ingress = contract.ingressOf(value);
+    const binding = ingress === null ? undefined : program.occurrenceOf.get(ingress);
+    return binding !== undefined && program.isHost(binding) && !this.#storedHosts().has(binding)
+      ? contract.entered(value, [unknownItem(REASON.external)])
+      : null;
+  }
+
+  /** The host globals the script stores into, at any path (`#leafKind`), found once. */
+  #storedHosts(): ReadonlySet<PlaceId> {
+    if (this.#hostStores === null) {
+      const { program, definitions } = this.pass;
+      const stored = new Set<PlaceId>();
+      for (const d of definitions.storeDefs) {
+        program.work.charge("checks");
+        if (program.isHost(d.place)) stored.add(d.place);
+      }
+      this.#hostStores = stored;
+    }
+    return this.#hostStores;
+  }
+
+  #hostStores: ReadonlySet<PlaceId> | null = null;
+
   #literalKind(value: PlaceId): readonly Item[] | null {
     const { program } = this.pass;
     const place = program.places[value]?.kind;
@@ -670,7 +719,7 @@ export class Consumers {
       this.stopped = error.limit;
       this.#stoppedAt = { stage: this.#stage, unit: this.#unit - 1 };
       this.diagnostics.length = this.#mark.diagnostics;
-      this.admission.readChecks.length = this.#mark.readChecks;
+      this.admission.takeBackReadChecks(this.#mark.readChecks);
     }
   }
 
@@ -2310,16 +2359,27 @@ export class Consumers {
     const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
     if (directTags.length === 0) {
       // a stop left the type it is checked against undecided: the check is owed against that key's contract,
-      // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing
-      if (
-        direct.some(unsettledItem) &&
-        !withoutEmpty(this.#valueItems(value, node, rest)).every((item) => item.tag === "null")
-      )
+      // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing; its
+      // host data meets its boundary as unstopped (r4.109 (1))
+      const own = withoutEmpty(this.#valueItems(value, node, rest));
+      if (direct.some(unsettledItem) && !own.every((item) => item.tag === "null")) {
         this.#storeWarning(site, label, STOPPED[0]!, ["unknown"], {
           rule: "fallback",
           fallback: c.kind === "fallback",
           type: ["unknown"],
         });
+        if (into === null || !typeTags(into).includes("unknown"))
+          this.admission.boundariesAt(
+            own.filter((item) => isOpaque(item) || isExternal(item)),
+            this.#obligation(
+              "copy-type",
+              site,
+              label,
+              ["unknown"],
+              `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label}`,
+            ),
+          );
+      }
       return false;
     }
     const directFamilies = new Set(directTags.map(family));
