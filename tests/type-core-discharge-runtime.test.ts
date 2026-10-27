@@ -1276,6 +1276,20 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
       error instanceof CandidateOutsideSlice &&
       error.what === "an open part of a typed parse's or load's default that its destination types",
   );
+  // an own written destination that admits every kind below the call (`object`'s fields: V30 §13) types nothing there:
+  // a parse's or a load's open part stays on the route, plain, optional or as a list's element (Sol's r1 B2 on #1218)
+  for (const [type, fallback, json] of [
+    ["object", "{n: 0}", '{"n": "text"}'],
+    ["object?", "{n: 0}", "null"],
+    ["object[]", "[{n: 0}]", '[{"n": "text"}]'],
+  ] as const)
+    for (const call of [
+      `fromJson(hostValue, default: ${fallback}, files: false)`,
+      `load("k", default: ${fallback})`,
+    ]) {
+      const plan = candidatePlan(`let p: ${type} = ${call}\nsay "DONE"\nexit\n`);
+      assert.deepEqual(ran(runWith(plan, json)), halted(["DONE"]), `${type} = ${call}`);
+    }
   // where nothing else types it, it stays unknown: any JSON value there, the others read as typed
   const open =
     'let p = fromJson(hostValue, default: {a: 1, b: null}, files: false)\nsay p.a\nsay "AFTER"\nexit\n';

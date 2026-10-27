@@ -1010,14 +1010,15 @@ class Contracts {
     // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type
     if (held.has("unknown") || held.size === 0) {
       if (path.length === 0) return null;
-      if (
-        at.landing !== null &&
-        this.answers.place(at.landing.id, [...at.landing.path, ...path]).admitted.by !== "undecided"
-      )
-        throw new OutsideContract(
-          at.call,
-          "an open part of a typed parse's or load's default that its destination types",
-        );
+      if (at.landing !== null) {
+        // (a level the place admits every kind at, an unrestricted part, V30 §13, types nothing)
+        const { admitted } = this.answers.place(at.landing.id, [...at.landing.path, ...path]);
+        if (admitted.by !== "undecided" && !admitted.kinds.includes("unknown"))
+          throw new OutsideContract(
+            at.call,
+            "an open part of a typed parse's or load's default that its destination types",
+          );
+      }
       return ANY_VALUE;
     }
     if (path.length + 1 >= SLICE_DEPTH)

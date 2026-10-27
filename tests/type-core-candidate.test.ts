@@ -706,6 +706,12 @@ test("the S7 oracle derives object admissions and default structures from their 
       "{c: integer, o: {}}",
     ],
     ['let rec = {n: 1}\nlet p = rec\np = hostValue\nsay "DONE"\nexit\n', "store", "{n: integer}"],
+    // a written `list` destination's open element takes a typed parse's open default (Sol's r1 B2 on #1218)
+    [
+      'let p: list = fromJson(hostValue, default: [], files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "list<any>",
+    ],
     [
       "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
       "expected",
