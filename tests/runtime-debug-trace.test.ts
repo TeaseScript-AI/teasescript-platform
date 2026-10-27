@@ -843,6 +843,24 @@ test("a change inside a speaker's property explains it under every name for the 
   }
 });
 
+test("a change of a value derived at each read, such as a dict's keys, changes nothing stored", () => {
+  const played = traced(
+    [
+      "speaker guide {",
+      "    bag: dict{ a: [1] }",
+      "}",
+      "let other = guide",
+      "let d = dict{ a: [1] }",
+      'say "${guide.bag.keys.removeAt(0)} ${d.values[0].removeAt(0)}", instant',
+      'say "${other.bag["a"].length} ${d["a"].length}", instant',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  for (const read of causes(played.trace, outputOf(played, "1 1")))
+    assert.ok(!lineage(played.trace, read.id).some((step) => step.location?.line === 6));
+});
+
 test("a term that a speaker's gender gives, a title read through the other one, or a derived displayName comes from those properties", () => {
   const played = traced(
     [

@@ -41,7 +41,7 @@ import type {
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { takeSequence } from "./operations/support.js";
 import {
-  preparedReferenceSpeakerPath,
+  preparedReferenceChangeTarget,
   readPreparedReference,
   scopeBindings,
   type PreparedReferenceDescriptor,
@@ -532,9 +532,9 @@ export class Evaluator {
   }
 
   /**
-   * Records the new version of the variable a change inside it reached, unless the change reached a copy, with the
-   * causes collected so far. A change inside a speaker's property changes that property, which every name for the
-   * speaker reads, and keeps the rest of its earlier version.
+   * Records the new version of the variable a change inside it reached, with the causes collected so far, unless the
+   * change reached a copy or a value derived at each read. A change inside a speaker's property changes that property,
+   * which every name for the speaker reads, and keeps the rest of its earlier version.
    */
   public traceVariableChange(
     kind: "mutation" | "assignment",
@@ -542,21 +542,21 @@ export class Evaluator {
     span: SourceSpan,
   ): number | null {
     if (descriptor === null) return null;
-    const inSpeaker = preparedReferenceSpeakerPath(this.snapshot, descriptor);
-    const property = inSpeaker?.path[0];
-    if (property?.kind === "property") {
-      const speaker = speakerById(this, inSpeaker!.speakerId, span);
+    const target = preparedReferenceChangeTarget(this.snapshot, descriptor);
+    if (target === null) return null;
+    if (target !== "variable") {
+      const speaker = this.snapshot.speakers.find((candidate) => candidate.id === target.speakerId);
+      if (speaker === undefined) return null;
       return this.trace!.writeState(
         kind,
         stateKey("speaker", speaker.id),
-        { property: property.name },
-        `${speaker.identifier}.${property.name}`,
-        speaker.properties.find((candidate) => candidate.name === property.name)?.value ?? null,
+        { property: target.property },
+        `${speaker.identifier}.${target.property}`,
+        speaker.properties.find((candidate) => candidate.name === target.property)?.value ?? null,
         span,
         true,
       );
     }
-    if (descriptor.detached) return null;
     const { rootFrameId, rootName } = descriptor;
     if (rootFrameId === null || rootName === null) return null;
     const root = scopeBindings(this.snapshot, rootFrameId)?.find(

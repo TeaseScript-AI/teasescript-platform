@@ -1943,8 +1943,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   never reaches the script's execution.
 - **Records.** Each has an ID, kind, target, source location from the plan's spans, scene time, value preview,
   dependencies, and detail. They cover declarations; assignments, including to a property, index, or dict key and
-  compound ones, as a new version of the whole variable, or of the speaker property they change inside; collection
-  methods that change their receiver, the same way; arguments,
+  compound ones, as a new version of the whole variable, or of the speaker property they change inside, and of
+  neither inside a value derived at each read, such as a dict's `keys`; collection methods that change their receiver,
+  the same way; arguments,
   supplied and defaulted parameters, and returns; loop sources and loop variables; intermediate values the compiled
   code keeps; accepted answers and button timeouts, only on settlement, so refused and repeated reports record
   nothing; loads, with whether the key was stored and whether a default ran; storage writes, a persistent one once the
