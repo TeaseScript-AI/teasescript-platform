@@ -2,24 +2,8 @@
 
 ## Guiding principle
 
-Use the simplest GitHub workflow that safely completes the task. The default is:
-
-```text
-one issue
-    -> one agent
-    -> one short-lived branch
-    -> one pull request to main
-```
-
-Do not introduce a coordinator, integration branch, or multiple executor agents merely because a task is technically difficult, touches several files, or spans more than one layer. Coordination has a cost and must solve a concrete problem.
-
-Use coordinated multi-agent work only when it solves a concrete execution or integration problem, such as genuinely
-independent workstreams, dependent work that needs controlled handoffs or merge order, capability separation, or safe
-pipelining that materially reduces idle time without blurring ownership. Workflow defaults guide the common case rather
-than act as ceremony: a task-proportional deviation is valid when it is simpler or safer for the actual scope, provided
-the reason, changed ownership, and verification consequences are made explicit. This flexibility applies to stated
-defaults and recommendations, not explicit mandatory repository or capability-route rules, and does not override
-accepted behavior, trust boundaries, or required evidence.
+Keep unfinished work in open issues and update them at each handoff and merge. Split or combine issues, agents and
+pull requests as the work needs; keep each pull request one coherent change and make handoffs explicit.
 
 Source bundles and agent bootstrap provide local repository access when needed.
 Development and integration use GitHub-native branches and pull requests.
@@ -28,7 +12,8 @@ tested patch result.
 
 ## Issue sizing
 
-An issue should normally describe one coherent, reviewable task that one agent can execute from reproduction or design through implementation, tests, documentation impact, and pull request.
+An issue describes one coherent outcome: a bug, a task, a change or a decision. Bundle small related items in one issue
+with a checklist.
 
 The agent creating or substantially refining an issue should include:
 
@@ -159,6 +144,9 @@ Classify every actionable finding in plain language:
 Labels such as `bug`, `contract violation`, `security issue`, or `missing edge
 case` do not establish severity without the concrete reason.
 
+Fix confirmed in-scope findings in the reviewed pull request before merge; track all others, including post-merge
+findings, in open issues linked to the review.
+
 ### Proportional review lenses
 
 Select only lenses relevant to the changed behavior: accepted behavior, issue
@@ -269,6 +257,10 @@ defect into a generalized framework, new permanent compatibility layer, public
 contract, schema, or unrelated hardening campaign without a separate owner
 decision.
 
+Record a technical limit in `docs/RESOURCE-LIMITS.md` per ADR 0019 and continue only with evidence that no reasonable
+fix exists: a fix is impossible, or costs far more than it gains (such as a depth no real script reaches). Growth or
+memory use that a reasonable fix removes is a bug to fix, not a limit. ADR 0019's owner decisions still apply.
+
 When owner approval is required, explain in ordinary language what product
 behavior, data risk, security boundary, or maintenance problem the stronger
 contract protects, what happens without it, and what complexity it adds. For a
@@ -332,12 +324,12 @@ normal Git route or verified patch publication. Do not switch to full-file
 replacement midway through a preservation edit merely because it appears
 simpler.
 
-## Default single-agent flow
+## Normal flow
 
 For a normal issue:
 
 1. Confirm the issue is sufficiently scoped and accepted for implementation.
-2. Create one short-lived branch from current `main`.
+2. Create a short-lived branch from current `main`.
 3. Implement code, tests, fixtures, examples, and relevant documentation on that branch.
 4. Open a pull request to `main`; a draft pull request may be opened early when visibility or feedback is useful.
 5. Keep the pull request description aligned with the final implementation.
@@ -345,7 +337,7 @@ For a normal issue:
 7. Run the required verification and review the complete diff.
 8. Merge after approval and passing checks, then delete the branch.
 
-The pull request is the implementation handoff record. A separate coordinator report, integration branch, or milestone orchestrator is not required.
+The pull request is the implementation handoff record.
 
 Make small logical commits with concise English imperative messages.
 
