@@ -151,7 +151,7 @@ test("a clock read gives a value of its kind, with or without the arguments it d
       relation("clock", name),
       inputsOf({ named: { x: closedView(INTEGER_TYPE) } }),
       legacyOperation(`let r = ${name}(x: 1)\nexit`),
-      { fact, errors: ["TSV020"] },
+      { fact, errors: ["TSV022"] },
       "fact",
     );
   }

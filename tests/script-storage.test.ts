@@ -27,9 +27,9 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
   "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
-/** The TSR055 message for a session-only `kind`, saved directly or nested in another value. */
+/** The message for a session-only `kind`, saved directly or nested in an object. */
 const unstorableMessage = (kind: string, nested: boolean) =>
-  `save cannot store ${nested ? `this value: it holds ${kind}, which exists` : `${kind}: it exists`} only in the current session. ${kind === "a message handle" ? "Save the message's text instead." : "Save values such as text, numbers, or lists instead."}`;
+  `save cannot store ${nested ? `this object: it holds ${kind}, which exists` : `${kind}: it exists`} only in the current session. ${kind === "a message handle" ? "Save a message's text with its text property, as in 'save line.text as \"status\"'." : "Save values such as text, numbers, or lists instead."}`;
 
 /**
  * The compact and the bounded spelling of `load`, which behave the same. Without a fallback, the default is `null` and
@@ -753,7 +753,7 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
   }
 });
 
-test("save rejects session handles and speaker references at the top level and nested with TSR055", () => {
+test("save rejects session handles and speaker references at the top level and nested with the compiler's TSV043", () => {
   for (const [declaration, kind] of [
     ["let handle = timer async 1 s", "a timer handle"],
     ['let handle = playAudio async "a.mp3"', "a media handle"],
@@ -777,7 +777,7 @@ test("save rejects session handles and speaker references at the top level and n
         result = run(compiled, loaded.snapshot);
       }
       assert.equal(result.snapshot.status, "failed", `${declaration}: ${value}`);
-      assert.equal(result.snapshot.failure?.code, "TSR055");
+      assert.equal(result.snapshot.failure?.code, "TSV043");
       assert.equal(result.snapshot.failure?.message, unstorableMessage(kind, value !== "handle"));
       assert.deepEqual(result.snapshot.scriptStorage, []);
     }

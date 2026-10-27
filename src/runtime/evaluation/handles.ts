@@ -7,6 +7,7 @@ import type { MessageRemovedEvent, MessageUpdatedEvent } from "../events.js";
 import { takeSequence } from "../operations/support.js";
 import {
   assignedTypeMessage,
+  HANDLE_MEMBERS,
   handleMemberMessage,
   handleMethod,
   handleProperty,
@@ -32,6 +33,7 @@ import type {
 import { type RuntimeSnapshot, MAX_RUNTIME_SESSION_TIME_MS } from "../snapshot/state.js";
 import { isAnyDuration } from "../values/value-predicates.js";
 import { describeShownValue, shownChoice } from "../values/value-types.js";
+import { describeValue } from "../../value-kinds.js";
 import {
   pauseMedia,
   resumeMedia,
@@ -156,9 +158,10 @@ export function assignTimerProperty(
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  receiver: ExpressionPlan,
 ): void {
   const timer = timerOf(evaluator, handle, span);
-  const property = assignedHandleProperty("timer", name, value, span);
+  const property = assignedHandleProperty(evaluator, "timer", name, value, span, receiver);
   const now = evaluator.snapshot.currentSessionTimeMs;
   let warning: TimerWarning | "expired" | null;
   switch (property) {
@@ -270,9 +273,10 @@ export function assignMediaProperty(
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  receiver: ExpressionPlan,
 ): void {
   const media = mediaOf(evaluator, handle, span);
-  const property = assignedHandleProperty("media", name, value, span);
+  const property = assignedHandleProperty(evaluator, "media", name, value, span, receiver);
   switch (property) {
     case "volume":
       // EVIDENCE: validation: assignedValueProblem accepted it through the volume's domain (isMediaVolume).
@@ -285,7 +289,7 @@ export function assignMediaProperty(
       if (!Number.isFinite(duration.milliseconds))
         throw fault(
           "TSR050",
-          assignedTypeMessage("media", property, describeShownValue(value)),
+          assignedTypeMessage("media", property, describeShownValue(value), null),
           span,
         );
       exactDurationMilliseconds(duration, `Media ${property}`, span);
@@ -324,8 +328,9 @@ export function assignCameraProperty(
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  receiver: ExpressionPlan,
 ): void {
-  const property = assignedHandleProperty("camera", name, value, span);
+  const property = assignedHandleProperty(evaluator, "camera", name, value, span, receiver);
   const view = cameraView(evaluator);
   if (!view.shown) {
     evaluator.warn(
@@ -420,7 +425,7 @@ export function assignMessageProperty(
   span: SourceSpan,
   receiver: ExpressionPlan,
 ): void {
-  const property = assignedHandleProperty("messageHandle", name, value, span);
+  const property = assignedHandleProperty(evaluator, "messageHandle", name, value, span, receiver);
   if (property !== "text") {
     const unhandled: never = property;
     throw new Error(`Message property '${String(unhandled)}' has no implementation.`);
@@ -477,27 +482,36 @@ export function readHandleProperty<Kind extends HandleKind>(
 }
 
 /**
- * The property `name` of a handle of `kind` that `value` may be assigned to (see `HANDLE_MEMBERS`): `TSR003` for one
- * that cannot be assigned, and `TSR050` for a value it does not take.
+ * The property `name` of a handle of `kind` that `value` may be assigned to through `receiver` (see `HANDLE_MEMBERS`),
+ * with the compiler's code and text for the same problem: the handle's code (`HandleContract.code`) for one that cannot
+ * be assigned and for a value outside its domain, and `TSV041` for a value of another type than one without a domain
+ * takes.
  */
 function assignedHandleProperty<Kind extends HandleKind>(
+  evaluator: Evaluator,
   kind: Kind,
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
+  receiver: ExpressionPlan,
 ): AssignableHandleProperty<Kind> {
+  const code = HANDLE_MEMBERS[kind].code;
   if (!isAssignableHandleProperty(kind, name))
-    throw fault("TSR003", handleMemberMessage(kind, name, "assign"), span);
+    throw fault(code, handleMemberMessage(kind, name, "assign"), span);
   const { type, domain } = handleProperty(kind, name)!.assign!;
   if (domain !== undefined) {
     if (!domain.accepts(value))
       throw fault(
-        "TSR050",
+        code,
         domain.message(domain.shows === "choice" ? shownChoice(value) : describeShownValue(value)),
         span,
       );
   } else if (type === "duration" ? !isAnyDuration(value) : typeof value !== "string")
-    throw fault("TSR050", assignedTypeMessage(kind, name, describeShownValue(value)), span);
+    throw fault(
+      "TSV041",
+      assignedTypeMessage(kind, name, describeValue(value), receiverLabel(evaluator, receiver)),
+      span,
+    );
   return name;
 }
 

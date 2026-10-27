@@ -45,6 +45,7 @@ import {
   isTemporal,
   isTimerHandle,
 } from "./value-predicates.js";
+import { joinElementMessage } from "../../shown-text-rules.js";
 import { describeValue, VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -164,12 +165,7 @@ export function joinedText(
   span: SourceSpan,
   context: TemporalContext,
 ): string {
-  if (!isVisibleScalar(item))
-    throw fault(
-      "TSR021",
-      "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes. Select an element or a property first.",
-      span,
-    );
+  if (!isVisibleScalar(item)) throw fault("TSV042", joinElementMessage(valueKindOf(item)), span);
   return visibleText(item, span, context);
 }
 

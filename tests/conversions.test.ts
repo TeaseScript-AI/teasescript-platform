@@ -265,7 +265,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
     [
       "say round(value)\nexit",
       { value: "2.5" },
-      "TSR059",
+      "TSV043",
       "round(...) needs a number, not text (string). Convert text with toNumber(...) first.",
     ],
   ];

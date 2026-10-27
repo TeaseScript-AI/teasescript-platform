@@ -39,6 +39,8 @@ import {
   type RuntimeFileStoreActionSnapshot,
   type RuntimeFileToStore,
 } from "./model.js";
+import { filesOptionMessage } from "../../conversions.js";
+import { storedFileFix, textOperandMessage } from "../../text-operand-rules.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../values/plain-data.js";
@@ -348,12 +350,10 @@ function storedFileOperand(
 ): string {
   if (typeof value === "string" && holdsStoredFile(snapshot.storedFiles, value)) return value;
   throw new RuntimeFault(
-    "TSR059",
-    `${call}(...) ${call === "hashFile" ? "hashes" : "reads"} a stored file, ${
-      typeof value === "string"
-        ? `but ${JSON.stringify(messageText(value))} is not one`
-        : `not ${describeValue(value)}`
-    }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or fromJson(...) gave for a file.`,
+    typeof value === "string" ? "TSR059" : "TSV043",
+    typeof value === "string"
+      ? `${call}(...) ${call === "hashFile" ? "hashes" : "reads"} a stored file, but ${JSON.stringify(messageText(value))} is not one. ${storedFileFix(call)}`
+      : textOperandMessage(call, describeValue(value)),
     copySpan(span),
   );
 }
@@ -364,11 +364,7 @@ function filesOperand(
   span: FileStoreInstruction["span"],
 ): boolean {
   if (typeof value === "boolean") return value;
-  throw new RuntimeFault(
-    "TSR059",
-    `${call}(...) takes true or false (boolean) for 'files:', not ${describeValue(value)}.`,
-    copySpan(span),
-  );
+  throw new RuntimeFault("TSV043", filesOptionMessage(call, describeValue(value)), copySpan(span));
 }
 
 /**

@@ -1822,7 +1822,7 @@ test("round, floor, and ceil give whole numbers as V30 section 13 specifies", ()
   const dynamic = runValidSource(
     'function dynamic(value) {\n    return value\n}\nsay "${round(dynamic("2"))}"\nexit',
   );
-  assert.equal(dynamic.snapshot.failure?.code, "TSR059");
+  assert.equal(dynamic.snapshot.failure?.code, "TSV043");
 });
 
 test("an error inside a stored literal or a typed load default is reported once", () => {
@@ -2341,7 +2341,10 @@ test("a message handle has one text property, takes text, and stays out of text,
     assert.deepEqual(codes(source), [["TSV043", message]], source);
   assert.equal(codes('say "${line}"')[0]?.[0], "TSV042");
   assert.equal(codes("say toString(line)")[0]?.[0], "TSV043");
-  assert.match(codes('save [line] as "k"')[0]?.[1] ?? "", /cannot be saved.*text property/u);
+  assert.match(
+    codes('save [line] as "k"')[0]?.[1] ?? "",
+    /save cannot store this list: it holds a message handle.*text property/u,
+  );
   assert.deepEqual(codes('save line.text as "status"'), []);
   assert.equal(codes('let other: string = say "x"')[0]?.[0], "TSV041");
   // `message` stays an ordinary name; `messageHandle` is the type's.

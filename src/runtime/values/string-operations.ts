@@ -9,7 +9,6 @@ import {
   isTextMember,
   isTextMethod,
   methodArgumentCountMessage,
-  readsPosition,
   regexMemberMessage,
   stringLength,
   takesRegex,
@@ -340,7 +339,7 @@ function regexOperation(
       const template = replacement as string;
       work.charge(template.length);
       const parsed = replacementParts(template, regex.source, program.groups);
-      if (!parsed.ok) throw fault("TSR057", parsed.problem, span);
+      if (!parsed.ok) throw fault("TSV043", parsed.problem, span);
       parts = parsed.parts;
     }
     return regexResult(text, name, program, parts, work);
@@ -518,8 +517,7 @@ export function checkTextArguments(
   const check = (domain: TextDomain): void => {
     if (domain.reads.some((read) => read !== "length" && read >= positional.length)) return;
     const problem = domain.problem(domain.reads.map(read), member);
-    if (problem !== undefined)
-      throw fault(readsPosition(member, domain) ? "TSR025" : "TSR057", problem, span);
+    if (problem !== undefined) throw fault("TSV043", problem, span);
   };
   const readsOnly = (domain: TextDomain): number | undefined =>
     domain.reads.length === 1 && domain.reads[0] !== "length" ? domain.reads[0] : undefined;
@@ -527,7 +525,7 @@ export function checkTextArguments(
     const parameter = parameters[index]!;
     if (!fits(parameter, value))
       throw fault(
-        parameter.kind === "position" ? "TSR024" : "TSR057",
+        parameter.kind === "position" ? "TSR024" : "TSV043",
         argumentTypeMessage(member, parameter, describeValue(value)) +
           argumentFix(parameter, argumentKind(value)),
         span,

@@ -9,7 +9,7 @@ import {
   parseIsoTimestamp,
   type TemporalResult,
 } from "./temporal.js";
-import { VALUE_KINDS } from "./value-kinds.js";
+import { thisValue, unwritableJsonReason, VALUE_KINDS, type ValueKind } from "./value-kinds.js";
 
 /**
  * How a built-in of one positional argument is called: the conversions, and the file and hash functions of text (V30
@@ -355,8 +355,23 @@ function isConversionResult(result: ConversionResult, value: unknown): boolean {
   return VALUE_KINDS[result].is(value as SerializableRuntimeValue);
 }
 
-export const WRITABLE_JSON_FIX =
-  "Write plain values, such as text, numbers, lists, or dicts, instead.";
+/** A `files:` of `call`, described as `given`, that is not true or false (V30 §13). */
+export function filesOptionMessage(call: string, given: string): string {
+  return `'files:' of ${call}(...) takes true or false (boolean), not ${given}.`;
+}
+
+const WRITABLE_JSON_FIX = "Write plain values, such as text, numbers, lists, or dicts, instead.";
+
+/**
+ * `toJson` of a value of `kind` that JSON cannot hold, or of a value that holds one, of kind `holder`, or `null` for a
+ * value of no one kind (V30 §13).
+ */
+export function unwritableJsonMessage(kind: ValueKind, holder?: ValueKind | null): string {
+  const reason = `${VALUE_KINDS[kind].description}, which ${unwritableJsonReason(kind)}`;
+  return holder === undefined
+    ? `toJson(...) cannot write ${reason}. ${WRITABLE_JSON_FIX}`
+    : `toJson(...) cannot write ${thisValue(holder ?? undefined)}: it holds ${reason}. ${WRITABLE_JSON_FIX}`;
+}
 
 /**
  * The number written in `text`: the decimal or scientific form `askNumber` accepts, with surrounding whitespace

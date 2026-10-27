@@ -63,13 +63,13 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     const itemKind = orderedFamily(valueKindOf(item));
     if (itemKind === undefined)
       throw fault(
-        "TSR060",
+        "TSV043",
         `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(item)}.`,
         span,
       );
     if (kind !== undefined && itemKind !== kind)
       throw fault(
-        "TSR060",
+        "TSV043",
         `sort() needs elements of one kind, but this list has ${VALUE_KINDS[kind].plural} and ${VALUE_KINDS[itemKind].plural}.`,
         span,
       );
@@ -85,7 +85,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     families.delete("zero");
     if (families.size > 1 || families.has("mixed"))
       throw fault(
-        "TSR060",
+        "TSV043",
         "sort() orders calendar durations of one kind only: months, days, or exact time.",
         span,
       );
@@ -244,12 +244,12 @@ export function readCollection(
       const count = positional[0]!;
       if (typeof count !== "number")
         throw fault(
-          "TSR057",
+          "TSV043",
           listArgumentMessage(name, "count", describeValue(count), "other"),
           span,
         );
       const problem = countProblem(name, count);
-      if (problem !== undefined) throw fault("TSR057", problem, span);
+      if (problem !== undefined) throw fault("TSV043", problem, span);
       // A count beyond the length takes the whole list.
       return createCapturedSerializableList(
         name === "take"
@@ -310,7 +310,7 @@ function setOperation(
 ): SerializableRuntimeValue[] {
   if (!isList(argument) && !isSet(argument))
     throw fault(
-      "TSR060",
+      "TSV043",
       listArgumentMessage(
         name,
         "collection",

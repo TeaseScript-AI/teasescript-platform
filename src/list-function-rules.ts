@@ -247,7 +247,7 @@ function describeKinds(kinds: readonly ListValueKind[]): string {
 
 /**
  * Why the list function `name` cannot read a value described as `given`, of `kind` (`undefined` for a value of no kind
- * a list function reads), where it reads `kinds`: from the compiler (`TSV043`) and the runtime (`TSR060`). `x` says
+ * a list function reads), where it reads `kinds`: from the compiler and the runtime (`TSV043`). `x` says
  * whether it is an x value of `linearRegression`. An angle wraps around at 360°, and a calendar day or month has no
  * fixed length.
  */
@@ -262,7 +262,12 @@ export function listValueMessage(
   return `${name}(...) needs ${describeKinds(kinds)}${x ? " as x values" : ""}, not ${given}.${kind === "calendarDuration" ? " A calendar day or month has no fixed length." : ""}`;
 }
 
-/** Why `name` cannot read values of several of `kinds` together, from the compiler and the runtime (`TSR060`). */
+/** A list function `name` whose `by:` or other option names `key`, a property that an object of the list lacks. */
+export function missingPropertyMessage(name: string, key: string): string {
+  return `${name}(...): an object in the list has no property '${key}'.`;
+}
+
+/** Why `name` cannot read values of several of `kinds` together, from the compiler and the runtime (`TSV043`). */
 export function mixedListValuesMessage(
   name: string,
   kinds: readonly ListValueKind[],

@@ -166,7 +166,7 @@ test("sum adds angles, while the other statistics and the numeric functions do n
     errors("say abs(-90 deg)").map(([, message]) => message),
     [numeric],
   );
-  assert.deepEqual(failure("say abs(dynamic(-90 deg))"), ["TSR059", numeric]);
+  assert.deepEqual(failure("say abs(dynamic(-90 deg))"), ["TSV043", numeric]);
 });
 
 test("an angle shows in degrees with a degree sign, alone and in collection notation", () => {
@@ -300,13 +300,13 @@ test("where the compiler cannot see the type, the same mistakes fail at runtime"
   for (const [source, code, message] of [
     [
       "say sin(dynamic(90))",
-      "TSR059",
+      "TSV043",
       "sin needs an angle: write 'sin(90 deg)' for degrees or 'sin(1.5 rad)' for radians.",
     ],
-    ["say asin(dynamic(30 deg))", "TSR059", "asin(...) needs a number, not an angle."],
+    ["say asin(dynamic(30 deg))", "TSV043", "asin(...) needs a number, not an angle."],
     [
       "say toRad(dynamic(180))",
-      "TSR059",
+      "TSV043",
       "toRad needs an angle: write 'toRad(180 deg)' for degrees.",
     ],
     [
@@ -351,7 +351,7 @@ test("where the compiler cannot see the type, the same mistakes fail at runtime"
     ],
     [
       "say [dynamic(90 deg), dynamic(3)].sort()",
-      "TSR060",
+      "TSV043",
       "sort() needs elements of one kind, but this list has angles and numbers.",
     ],
     [

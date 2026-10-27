@@ -310,11 +310,11 @@ test("numeric functions check their arguments", () => {
     ],
   );
   assert.deepEqual(failure(`${DYNAMIC}say pow(dynamic("2"), 3)\nexit`), [
-    "TSR059",
+    "TSV043",
     "pow(...) needs a number, not text (string). Convert text with toNumber(...) first.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say abs(dynamic(null))\nexit`), [
-    "TSR059",
+    "TSV043",
     "abs(...) needs a number, not null.",
   ]);
 });

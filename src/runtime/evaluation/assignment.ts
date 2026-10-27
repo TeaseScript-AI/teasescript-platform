@@ -172,19 +172,19 @@ export function assign(
       return;
     }
     if (isTimerHandle(object)) {
-      assignTimerProperty(evaluator, object, target.name, value, target.span);
+      assignTimerProperty(evaluator, object, target.name, value, target.span, target.object);
       if (evaluator.trace !== null)
         evaluator.writeState(object, target.name, value, target.span, { property: target.name });
       return;
     }
     if (isMediaHandle(object)) {
-      assignMediaProperty(evaluator, object, target.name, value, target.span);
+      assignMediaProperty(evaluator, object, target.name, value, target.span, target.object);
       if (evaluator.trace !== null)
         evaluator.writeState(object, target.name, value, target.span, { property: target.name });
       return;
     }
     if (isCameraView(object)) {
-      assignCameraProperty(evaluator, target.name, value, target.span);
+      assignCameraProperty(evaluator, target.name, value, target.span, target.object);
       if (evaluator.trace !== null)
         evaluator.writeState(object, target.name, value, target.span, { property: target.name });
       return;

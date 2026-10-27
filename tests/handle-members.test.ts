@@ -157,7 +157,7 @@ test("a member that a handle does not have or cannot assign fails with one text 
       // A kind without any property to assign fails before it is asked for one.
       if (fixed.length < Object.keys(properties).length)
         assert.deepEqual(failure(`${PICK}${HANDLES[kind]}\npick(h).${name} = ${value}`), [
-          "TSR003",
+          code,
           assign,
         ]);
     }
@@ -181,7 +181,7 @@ test("a value outside a property's domain fails with the domain's text when comp
         [contract(kind).code, message, written],
       ]);
       assert.deepEqual(failure(`${PICK}${HANDLES[kind]}\nh.${name} = pick(${written})`), [
-        "TSR050",
+        contract(kind).code,
         message,
       ]);
     }

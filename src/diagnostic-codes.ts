@@ -230,18 +230,63 @@ export const DIAGNOSTIC_CODES = {
   TSV029: entry(["type checker"], "error", "Invalid choice", DOCS.values),
   TSV032: entry(["name pass"], "error", "Blocking command in a parameter default", DOCS.values),
   TSV033: entry(["name pass"], "error", "Invalid timer or handler return", DOCS.values),
-  TSV034: entry(["type checker"], "error", "Invalid timer handle member", DOCS.values),
+  TSV034: {
+    ...entry(["type checker", "runtime"], "error", "Invalid timer handle member", DOCS.values),
+    shared: {
+      parts: [
+        "a member that a timer handle does not have, a property it cannot assign, and a value " +
+          "outside a property's domain (`handle-members.ts`)",
+        "the same rules with the same texts where the handle or the value is not known when " +
+          "the script is compiled",
+      ],
+    },
+  },
   TSV035: entry(["type checker"], "error", "Duration combined with a number", DOCS.values),
   TSV036: entry(["type checker"], "error", "Invalid media file, option, or cue", DOCS.values),
-  TSV037: entry(["type checker"], "error", "Invalid media handle member", DOCS.values),
+  TSV037: {
+    ...entry(["type checker", "runtime"], "error", "Invalid media handle member", DOCS.values),
+    shared: {
+      parts: [
+        "a member that a media handle does not have, a property it cannot assign, and a value " +
+          "outside a property's domain (`handle-members.ts`)",
+        "the same rules with the same texts where the handle or the value is not known when " +
+          "the script is compiled",
+      ],
+    },
+  },
   TSV038: entry(["type checker"], "error", "Invalid storage key", DOCS.values),
   TSV039: entry(["type checker"], "error", "Invalid prefill", DOCS.values),
   TSV040: entry(["type checker"], "error", "List where text is shown", DOCS.values),
-  TSV041: entry(["type checker"], ["error", "warning"], "Type mismatch", DOCS.values),
-  TSV042: entry(["type checker"], ["error", "warning"], "Value that cannot be shown", DOCS.values),
+  TSV041: {
+    ...entry(["type checker", "runtime"], ["error", "warning"], "Type mismatch", DOCS.values),
+    shared: {
+      parts: [
+        "every value that does not fit its place, among them a handle property of another type " +
+          "(`assignedTypeMessage`)",
+        "the same rule with the same text for a handle property, where the handle is not known " +
+          "when the script is compiled",
+      ],
+    },
+  },
+  TSV042: {
+    ...entry(
+      ["type checker", "runtime"],
+      ["error", "warning"],
+      "Value that cannot be shown",
+      DOCS.values,
+    ),
+    shared: {
+      parts: [
+        "every value that text cannot show, among them in `${...}` and `join()` " +
+          "(`shown-text-rules.ts`)",
+        "the same rules with the same texts for `${...}` and `join()` of a value whose type " +
+          "the compiler does not know",
+      ],
+    },
+  },
   TSV043: {
     ...entry(
-      ["type checker", "plan analysis"],
+      ["type checker", "plan analysis", "runtime"],
       ["error", "warning"],
       "Unsupported operand, method, or property",
       DOCS.values,
@@ -253,11 +298,25 @@ export const DIAGNOSTIC_CODES = {
           "(`missingSpeakerPropertyMessage`)",
         "the same rule with the same text for a speaker property that a way to the read " +
           "misses (V30 §37)",
+        "the same rules with the same texts for a value whose type or value the compiler does " +
+          "not know: a built-in's argument of another type, among them the text of " +
+          "`text-operand-rules.ts`, the options of `lock-rules.ts`, `toJson`, the numeric and " +
+          "list functions, the arguments of a text or list method, a `save` of a value that " +
+          "exists only in the session (`save-rules.ts`), and a property of a message handle or " +
+          "a permanent button that cannot be assigned",
       ],
     },
   },
   TSV044: entry(["type checker"], "error", "Mixed types", DOCS.values),
-  TSV045: entry(["type checker"], "error", "Negative list index", DOCS.values),
+  TSV045: {
+    ...entry(["type checker", "runtime"], "error", "Negative list index", DOCS.values),
+    shared: {
+      parts: [
+        "a list index that the compiler knows is below 0 (`negativeListIndexMessage`)",
+        "the same rule with the same text for an index it does not know",
+      ],
+    },
+  },
   TSV046: entry(["type checker"], "warning", "Test with a constant result", DOCS.values),
   TSV047: entry(["name pass"], "error", "Invalid `case` value", DOCS.values),
   TSV048: entry(["name pass"], "error", "Repeated or overlapping `case`", DOCS.values),
@@ -296,7 +355,17 @@ export const DIAGNOSTIC_CODES = {
     },
   },
   TSV058: entry(["plan analysis"], "warning", "Loop with no way out", DOCS.values),
-  TSV059: entry(["type checker"], "error", "Invalid camera view member", DOCS.values),
+  TSV059: {
+    ...entry(["type checker", "runtime"], "error", "Invalid camera view member", DOCS.values),
+    shared: {
+      parts: [
+        "a member that a camera view does not have, a property it cannot assign, and a value " +
+          "outside a property's domain (`handle-members.ts`)",
+        "the same rules with the same texts where the camera view or the value is not known " +
+          "when the script is compiled",
+      ],
+    },
+  },
   TSV061: entry(["compiler"], "warning", "Wait or timer written in days or weeks", DOCS.values),
   TSV062: entry(["type checker"], "warning", "Fallback that is never used", DOCS.values),
   TSV063: entry(["name pass"], "error", "`speaker` without a speaker", DOCS.values),
@@ -407,7 +476,7 @@ export const DIAGNOSTIC_CODES = {
   TSR022: entry(["runtime"], "error", "Empty speaker display name", DOCS.runtime),
   TSR023: entry(["runtime"], "error", "Speaker the session does not have (defect)", DOCS.runtime),
   TSR024: entry(["runtime"], "error", "Index or position that is not a whole number", DOCS.runtime),
-  TSR025: entry(["runtime"], "error", "Index or position out of range", DOCS.runtime),
+  TSR025: entry(["runtime"], "error", "List index beyond the end", DOCS.runtime),
   TSR026: entry(["runtime"], "error", "Condition that is not true or false", DOCS.runtime),
   TSR027: entry(["runtime"], "error", "Operand that is not a number", DOCS.runtime),
   TSR028: entry(["runtime"], "error", "Wrong number or form of arguments", DOCS.runtime),
@@ -467,16 +536,19 @@ export const DIAGNOSTIC_CODES = {
     DOCS.runtime,
   ),
   TSR054: entry(["runtime"], "error", "Storage key that is not text", DOCS.runtime),
-  TSR055: entry(
-    ["runtime"],
-    "error",
-    "Save of a value that exists only in the session",
-    DOCS.runtime,
-  ),
-  TSR057: entry(["runtime"], "error", "Count or text argument that cannot be used", DOCS.runtime),
+  TSR055: {
+    ...entry(
+      ["runtime"],
+      "error",
+      "Save of a value that exists only in the session, now `TSV043`",
+      DOCS.runtime,
+    ),
+    retired: true,
+  },
+  TSR057: entry(["runtime"], "error", "Regex value that cannot be compiled (defect)", DOCS.runtime),
   TSR058: entry(["runtime"], "error", "Value that does not fit its type", DOCS.runtime),
-  TSR059: entry(["runtime"], "error", "Built-in argument of the wrong kind", DOCS.runtime),
-  TSR060: entry(["runtime"], "error", "Collection elements of the wrong kind", DOCS.runtime),
+  TSR059: entry(["runtime"], "error", "Built-in argument that cannot be used", DOCS.runtime),
+  TSR060: entry(["runtime"], "error", "Weight that is not a number", DOCS.runtime),
   TSR061: entry(["runtime"], "error", "Missing dict key", DOCS.runtime),
   TSR062: entry(["runtime"], "error", "Dict key that is not text", DOCS.runtime),
   TSR063: entry(["runtime"], "error", "Date or time out of range", DOCS.runtime),

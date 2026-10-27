@@ -242,7 +242,7 @@ test("a range, handle member, or media position problem has one code and one tex
       "Timer handle property 'elapsed' cannot be assigned. You can assign remaining, display, or repeatDuration.",
       [
         `${PICK}${CLOCK}pick(clock).elapsed = 1 s`,
-        "TSR003",
+        "TSV034",
         "Timer handle property 'elapsed' cannot be assigned. You can assign remaining, display, or repeatDuration.",
       ],
     ],
@@ -255,7 +255,7 @@ test("a range, handle member, or media position problem has one code and one tex
       'Timer display must be "visible", "mystery", or "hidden", but this is "big".',
       [
         `${PICK}${CLOCK}clock.display = pick("big")`,
-        "TSR050",
+        "TSV034",
         'Timer display must be "visible", "mystery", or "hidden", but this is "big".',
       ],
     ],
@@ -525,16 +525,47 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ["let l = [1]\nsay l[(0 - 1)]", "(0 - 1)"],
         ["let l = [1]\nl[-1] = 2", "-1"],
         ["let l = [1]\nl.removeAt(-1)", "-1"],
+      ],
+      "TSV045",
+      "A list index cannot be negative, but the index is -1. The first element is at index 0, and the last at 'l.length - 1'.",
+      // An index the compiler does not know fails with the same code and text.
+      [
+        `${PICK}let l = [1]\nsay l[pick(-1)]`,
+        "TSV045",
+        "A list index cannot be negative, but the index is -1. The first element is at index 0, and the last at 'l.length - 1'.",
+      ],
+    ],
+    [
+      [
+        ["let l = [1]\nlet i = -1\nsay l[i]", "i"],
+        ["let l = [1]\nlet i = -1\nl[i] = 2", "i"],
+      ],
+      "TSV045",
+      "A list index cannot be negative, but 'i' is -1. The first element is at index 0, and the last at 'l.length - 1'.",
+      [
+        `${PICK}let l = [1]\nlet i = pick(-1)\nsay l[i]`,
+        "TSV045",
+        "A list index cannot be negative, but 'i' is -1. The first element is at index 0, and the last at 'l.length - 1'.",
+      ],
+    ],
+    [
+      [
         // Only a list has an index or removeAt, so the receiver need not be known, and on a receiver the compiler
         // cannot know, removeAt checks no other index rule.
         ["function f(x) {\n    say x[-1]\n}", "-1"],
         ["function f(x) {\n    x.removeAt(-1)\n}", "-1"],
-        ["function f(x) {\n    x.removeAt(-1.5)\n}", "-1.5"],
-        ["function f(x) {\n    x.removeAt((-3 / 2))\n}", "(-3 / 2)"],
-        [`${PICK}say pick([1]).removeAt(-1.5)`, "-1.5"],
       ],
       "TSV045",
-      "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
+      "A list index cannot be negative, but the index is -1. The first element is at index 0, and the last at 'x.length - 1'.",
+      null,
+    ],
+    [
+      [
+        ["function f(x) {\n    x.removeAt(-1.5)\n}", "-1.5"],
+        ["function f(x) {\n    x.removeAt((-3 / 2))\n}", "(-3 / 2)"],
+      ],
+      "TSV045",
+      "A list index cannot be negative, but the index is -1.5. The first element is at index 0, and the last at 'x.length - 1'.",
       null,
     ],
     [

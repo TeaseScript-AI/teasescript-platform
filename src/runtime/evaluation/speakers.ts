@@ -42,10 +42,17 @@ import { mediaProperty } from "../background/media.js";
 import { timerProperty } from "../background/timers.js";
 import { shownPermanentButton } from "../background/permanent-buttons.js";
 import { stateKey } from "../debug/debug-trace.js";
+import type { ExpressionPlan } from "../../plan/model.js";
+import {
+  EMPTY_INTERPOLATED_LIST_MESSAGE,
+  INTERPOLATED_LIST_MESSAGE,
+  interpolatedDictMessage,
+  interpolationMessage,
+} from "../../shown-text-rules.js";
 import { VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView } from "./handles.js";
 import { randomItem } from "./draws.js";
-import { type SourceSpan, fault } from "./support.js";
+import { type SourceSpan, fault, planLabel } from "./support.js";
 import type { Evaluator } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -176,26 +183,25 @@ export function outputSpeaker(
   });
 }
 
-/** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
+/**
+ * `${...}` text of `value`, the value of `expression`. A list selects one element with the session RNG, again at every
+ * evaluation.
+ */
 export function interpolationText(
   evaluator: Evaluator,
   value: SerializableRuntimeValue,
-  span: SourceSpan,
+  expression: ExpressionPlan,
 ): string {
-  if (isDict(value)) throw fault("TSR021", DICT_TEXT_MESSAGE, span);
-  if (!isList(value)) return visibleText(value, span, currentTemporalContext(evaluator.snapshot));
-  if (value.items.length === 0)
-    throw fault(
-      "TSR019",
-      "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
-      span,
-    );
-  if (!value.items.every(isVisibleScalar))
-    throw fault(
-      "TSR021",
-      "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
-      span,
-    );
+  const span = expression.span;
+  if (isDict(value))
+    throw fault("TSV042", interpolatedDictMessage(planLabel(expression, evaluator.plan)), span);
+  if (!isList(value)) {
+    if (!isVisibleScalar(value))
+      throw fault("TSV042", interpolationMessage(valueKindOf(value)), span);
+    return visibleText(value, span, currentTemporalContext(evaluator.snapshot));
+  }
+  if (value.items.length === 0) throw fault("TSV042", EMPTY_INTERPOLATED_LIST_MESSAGE, span);
+  if (!value.items.every(isVisibleScalar)) throw fault("TSV042", INTERPOLATED_LIST_MESSAGE, span);
   return visibleText(
     randomItem(evaluator, value.items, span, "interpolation"),
     span,
@@ -277,9 +283,6 @@ function handleNotation(
         : media.state;
   return quotedTextWithin("<media ", media.source, `, ${state}>`, "say", span);
 }
-
-const DICT_TEXT_MESSAGE =
-  '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
 
 export function setSpeakerProperty(
   speaker: RuntimeSpeakerSnapshot,

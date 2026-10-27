@@ -165,7 +165,7 @@ test("the compiler and runtime reject what a camera view cannot do", () => {
   const computed = runValidSource(
     'let view = showCamera\nlet where = "nowhere"\nview.placement = where\nexit',
   ).snapshot;
-  assert.equal(computed.failure?.code, "TSR050");
+  assert.equal(computed.failure?.code, "TSV059");
   assert.deepEqual(computed.cameraView, { placement: "window", shown: true });
 });
 

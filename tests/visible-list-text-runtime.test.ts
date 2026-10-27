@@ -163,11 +163,11 @@ test("interpolation checks the whole list before selecting, so the outcome does 
   // `dynamic` hides the text's type, so one list may hold text and another value.
   const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases = [
-    [`${dynamic}let values = [dynamic("ok"), { value: 1 }]\nsay "\${values}"\nexit`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), ["nested"]]\nsay "\${values}"\nexit`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), set[1]]\nsay "\${values}"\nexit`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), 1..2]\nsay "\${values}"\nexit`, "TSR021"],
-    ['let values = []\nsay "${values}"\nexit', "TSR019"],
+    [`${dynamic}let values = [dynamic("ok"), { value: 1 }]\nsay "\${values}"\nexit`, "TSV042"],
+    [`${dynamic}let values = [dynamic("ok"), ["nested"]]\nsay "\${values}"\nexit`, "TSV042"],
+    [`${dynamic}let values = [dynamic("ok"), set[1]]\nsay "\${values}"\nexit`, "TSV042"],
+    [`${dynamic}let values = [dynamic("ok"), 1..2]\nsay "\${values}"\nexit`, "TSV042"],
+    ['let values = []\nsay "${values}"\nexit', "TSV042"],
   ] as const;
   for (const [source, code] of cases) {
     for (const randomValue of [0, 0.75]) {
@@ -204,7 +204,7 @@ test("interpolated values the compiler can see are checked when compiling", () =
     [
       'say "${{ name: "Bo" }}"\nexit',
       '{ name: "Bo" }',
-      '"${...}" cannot show an object. It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, and selects one element of a list.',
+      "'${...}' cannot show an object. Show one of its properties instead.",
     ],
   ] as const;
   for (const [source, at, message] of cases) {

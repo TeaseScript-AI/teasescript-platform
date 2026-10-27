@@ -10,9 +10,9 @@ import {
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "../values/serializable-values.js";
-import { isMessageHandle } from "../values/value-predicates.js";
 import { describeShownValue } from "../values/value-types.js";
-import { describeValue } from "../../value-kinds.js";
+import { unsavableMessage } from "../../save-rules.js";
+import { valueKindOf } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 
 /** One key of the session's view of script storage; the stored value is never `null`. */
@@ -120,19 +120,12 @@ export function assertPersistable(
   span: SourceSpan | PlanSourceLocation,
 ): void {
   const identity = findRuntimeIdentity(value);
-  if (identity !== null) {
-    const kind = describeValue(identity);
-    const fix = isMessageHandle(identity)
-      ? " Save the message's text instead."
-      : " Save values such as text, numbers, or lists instead.";
+  if (identity !== null)
     throw fault(
-      "TSR055",
-      identity === value
-        ? `save cannot store ${kind}: it exists only in the current session.${fix}`
-        : `save cannot store this value: it holds ${kind}, which exists only in the current session.${fix}`,
+      "TSV043",
+      unsavableMessage(valueKindOf(identity), identity === value ? undefined : valueKindOf(value)),
       span,
     );
-  }
 }
 
 /**

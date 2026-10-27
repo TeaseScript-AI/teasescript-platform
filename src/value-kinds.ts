@@ -565,3 +565,8 @@ export function hasIdentity(kind: ValueKind): boolean {
 export function unwritableJsonReason(kind: ValueKind): string {
   return hasIdentity(kind) ? "exists only in the current session" : "has no JSON form";
 }
+
+/** A value of `kind` as a message points to it, such as `this list`, or `this value` for a kind it does not know. */
+export function thisValue(kind: ValueKind | undefined): string {
+  return `this ${kind === undefined ? "value" : VALUE_KINDS[kind].description.replace(/^an? /u, "")}`;
+}

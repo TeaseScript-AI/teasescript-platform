@@ -162,8 +162,21 @@ test("a date or time call with arguments has the compiler's text where the runti
     }
     assert.fail("The call did not fail.");
   };
-  for (const [source, run, code] of [
+  for (const [source, run, code, compiledCode = "TSV020"] of [
     ["say getDate(1)", () => temporalNow("getDate", [1], {}, capture, 0, span), "TSR028"],
+    // A name is an unknown named argument, as for any other built-in.
+    [
+      "say getDate(foo: 1)",
+      () => temporalNow("getDate", [], { foo: 1 }, capture, 0, span),
+      "TSR028",
+      "TSV022",
+    ],
+    [
+      'say toDate("2026-10-04").formatDate(locale: "de")',
+      () => temporalMethod(day, "formatDate", [], { locale: "de" }, DEFAULT_TEMPORAL_CONTEXT, span),
+      "TSR015",
+      "TSV022",
+    ],
     [
       'say toDate("2026-10-04").toISO(1)',
       () => temporalMethod(day, "toISO", [1], {}, DEFAULT_TEMPORAL_CONTEXT, span),
@@ -177,8 +190,34 @@ test("a date or time call with arguments has the compiler's text where the runti
   ] as const) {
     const compiled = diagnostics(source);
     assert.equal(compiled.length, 1, source);
-    assert.equal(compiled[0]![0], "TSV020", source);
+    assert.equal(compiled[0]![0], compiledCode, source);
     assert.deepEqual(fault(run), [code, compiled[0]![1]], source);
+  }
+});
+
+test("a problem that the compiler and the runtime both find has the compiler's code and text in both", () => {
+  // The runtime finds it in a value whose type or value the compiler does not know.
+  const D = "function dynamic(value) {\n    return value\n}\n";
+  for (const [known, unknown] of [
+    ["say hashText(5)", `${D}say hashText(dynamic(5))`],
+    ['say [dict{ "a": 1 }].join()', `${D}say dynamic([dict{ "a": 1 }]).join()`],
+    ['say "${1..2}"', `${D}say "\${dynamic(1..2)}"`],
+    [
+      'let t = timer async 10 s\nsave t as "k"',
+      `${D}let t = timer async 10 s\nsave dynamic(t) as "k"`,
+    ],
+    [
+      "let items = [1, 2, 3]\nlet i = -1\nsay items[i]",
+      `${D}let items = [1, 2, 3]\nlet i = dynamic(-1)\nsay items[i]`,
+    ],
+    [
+      'let h = timer async 10 s\nh.remaining = "wrong"',
+      `${D}let t = timer async 10 s\nlet h = dynamic(t)\nh.remaining = "wrong"`,
+    ],
+  ]) {
+    const compiled = diagnostics(known!);
+    assert.equal(compiled.length, 1, known);
+    assert.deepEqual(runtimeFailure(compileValidPlan(`${unknown}\nexit`)), compiled[0], unknown);
   }
 });
 

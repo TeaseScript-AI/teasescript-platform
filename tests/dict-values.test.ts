@@ -155,8 +155,8 @@ test("a missing key, a key that is not text, and ${dict} fail with the fix", () 
     'A dict key is text (string), but this is a whole number (integer). Write a number key as text, as in "${id}".',
   ]);
   assert.deepEqual(failure(`${DYNAMIC}${toys}say "\${dynamic(toys)}"\nexit`), [
-    "TSR021",
-    '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().',
+    "TSV042",
+    "'${...}' cannot show a dict. Select one value with 'dict[key]', or show every value with 'dict.values.join()'.",
   ]);
   // The compiler reports what it can see.
   assert.deepEqual(diagnostics(`${toys}let id = 5\nsay toys[id]\nsay "\${toys}"\nexit`), [
@@ -167,7 +167,7 @@ test("a missing key, a key that is not text, and ${dict} fail with the fix", () 
     ],
     [
       "TSV042",
-      '"${...}" cannot show a dict. Select one value with toys[key], or show every value with toys.values.join().',
+      "'${...}' cannot show a dict. Select one value with 'toys[key]', or show every value with 'toys.values.join()'.",
       "toys",
     ],
   ]);

@@ -31,6 +31,8 @@ import type {
   RuntimeLockNotice,
   RuntimeLockOutcome,
 } from "./model.js";
+import { lockOptionMessage, malformedPublicKeyMessage } from "../../lock-rules.js";
+import { storedFileFix, textOperandMessage } from "../../text-operand-rules.js";
 import { describeValue } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 import { isPlainRecord } from "../values/plain-data.js";
@@ -193,8 +195,8 @@ function startLock(
   const call = instruction.call;
   if (!locks(call) && password !== undefined && typeof password !== "string")
     throw new RuntimeFault(
-      "TSR059",
-      `'password:' of ${call}(...) takes text (string), not ${describeValue(password)}.`,
+      "TSV043",
+      lockOptionMessage(call, "password", false, describeValue(password)),
       copySpan(span),
     );
   const written = typeof password === "string" ? password : null;
@@ -202,8 +204,8 @@ function startLock(
   if (call === "decryptText") {
     if (typeof value !== "string")
       throw new RuntimeFault(
-        "TSR059",
-        `decryptText(...) opens locked text (string), not ${describeValue(value)}.`,
+        "TSV043",
+        textOperandMessage("decryptText", describeValue(value)),
         copySpan(span),
       );
     // Text that is not Base64 is no lock, as for `fromBase64`.
@@ -224,8 +226,8 @@ function startLock(
   const text = call === "encryptText" ? value : storedFile(call, value, snapshot, span);
   if (typeof text !== "string")
     throw new RuntimeFault(
-      "TSR059",
-      `encryptText(...) locks text (string), not ${describeValue(text)}.`,
+      "TSV043",
+      textOperandMessage("encryptText", describeValue(text)),
       copySpan(span),
     );
   if (
@@ -236,7 +238,7 @@ function startLock(
     openers.publicKeys.length === 0
   )
     throw new RuntimeFault(
-      "TSR059",
+      "TSV043",
       `${call}(...) has no way to open, because ${
         operands.publicKey === false
           ? "'password:', 'publicKey:', and 'timeLock:' are all false"
@@ -264,14 +266,14 @@ function encryptOpeners(
 ): EncryptOpeners {
   if (password !== undefined && typeof password !== "string" && typeof password !== "boolean")
     throw new RuntimeFault(
-      "TSR059",
-      `'password:' of ${call}(...) takes text (string), true, or false, not ${describeValue(password)}.`,
+      "TSV043",
+      lockOptionMessage(call, "password", true, describeValue(password)),
       copySpan(span),
     );
   if (timeLock !== undefined && typeof timeLock !== "boolean" && !isAbsoluteDateTime(timeLock))
     throw new RuntimeFault(
-      "TSR059",
-      `'timeLock:' of ${call}(...) takes a moment (absoluteDateTime), true, or false, not ${describeValue(timeLock)}.`,
+      "TSV043",
+      lockOptionMessage(call, "timeLock", true, describeValue(timeLock)),
       copySpan(span),
     );
   const written =
@@ -319,8 +321,8 @@ function writtenKeys(
 ): WrittenKeys {
   if (key !== undefined && typeof key !== "string")
     throw new RuntimeFault(
-      "TSR059",
-      `'key:' of ${call}(...) takes an unlock key as text (string), not ${describeValue(key)}.`,
+      "TSV043",
+      lockOptionMessage(call, "key", false, describeValue(key)),
       copySpan(span),
     );
   const written =
@@ -333,18 +335,14 @@ function writtenKeys(
   for (const item of written) {
     if (typeof item !== "string")
       throw new RuntimeFault(
-        "TSR059",
-        `'publicKey:' of ${call}(...) takes a public key (string), a list of them, true, or false, ${
-          item === publicKey
-            ? `not ${describeValue(item)}`
-            : `but its list holds ${describeValue(item)}`
-        }.`,
+        "TSV043",
+        lockOptionMessage(call, "publicKey", true, describeValue(item), item !== publicKey),
         copySpan(span),
       );
     if (parsePublicKey(item) === null)
       throw new RuntimeFault(
-        "TSR059",
-        `'publicKey:' of ${call}(...) takes public keys, such as "age1…" or "ssh-ed25519 AAAA…", but ${JSON.stringify(messageText(item))} is neither.`,
+        "TSV043",
+        malformedPublicKeyMessage(call, JSON.stringify(messageText(item))),
         copySpan(span),
       );
     publicKeys.push(item.trim());
@@ -595,12 +593,10 @@ function storedFile(
 ): string {
   if (typeof value === "string" && holdsStoredFile(snapshot.storedFiles, value)) return value;
   throw new RuntimeFault(
-    "TSR059",
-    `${call}(...) ${call === "encryptFile" ? "locks" : "opens"} a stored file, ${
-      typeof value === "string"
-        ? `but ${JSON.stringify(messageText(value))} is not one`
-        : `not ${describeValue(value)}`
-    }. Pass the text that takePhoto(), askImage(...), fileFromBase64(...), or encryptFile(...) gave for a file.`,
+    typeof value === "string" ? "TSR059" : "TSV043",
+    typeof value === "string"
+      ? `${call}(...) ${call === "encryptFile" ? "locks" : "opens"} a stored file, but ${JSON.stringify(messageText(value))} is not one. ${storedFileFix(call)}`
+      : textOperandMessage(call, describeValue(value)),
     copySpan(span),
   );
 }

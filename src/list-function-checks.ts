@@ -15,6 +15,7 @@ import {
   type ListFunction,
   listValueKind,
   type ListValueKind,
+  missingPropertyMessage,
 } from "./list-function-rules.js";
 import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
 import { familyOf, VALUE_KINDS } from "./value-kinds.js";
@@ -41,7 +42,7 @@ import {
 } from "./static-types.js";
 import { PropertyTable } from "./static-types/property-tables.js";
 import { copyType } from "./static-types/places.js";
-import { describeValue } from "./static-types/type-names.js";
+import { describeKind } from "./static-types/type-names.js";
 
 /** The problems with a call of a list function, the properties it reads by name, and its result type. */
 export interface ListFunctionCheck {
@@ -188,7 +189,7 @@ function listFunctionType(context: Context, name: ListFunctionName, known: Known
         if (isAssignable(NUMBER_TYPE, type)) return knownNumber(known, argument);
         problem(
           context,
-          `${name}(...) needs a number as its ${parameter}, not ${describeValue(type)}.`,
+          `${name}(...) needs a number as its ${parameter}, not ${describeKind(type)}.`,
           argument,
         );
         return undefined;
@@ -271,7 +272,7 @@ function valuesType(
     if (!isAssignable(STRING_TYPE, forUse(propertyType)))
       problem(
         context,
-        `${name}(...) needs the name of a property as its ${option}:, not ${describeValue(forUse(propertyType))}.`,
+        `${name}(...) needs the name of a property as its ${option}:, not ${describeKind(forUse(propertyType))}.`,
         property,
       );
     else key = staticVisibleText(property);
@@ -282,7 +283,7 @@ function valuesType(
   if (other !== undefined) {
     problem(
       context,
-      `${name}(...) needs a list, not ${describeValue(other)}.${other.kind === "range" ? RANGE_LIST_FIX : ""}`,
+      `${name}(...) needs a list, not ${describeKind(other)}.${other.kind === "range" ? RANGE_LIST_FIX : ""}`,
       list,
     );
     return UNKNOWN_TYPE;
@@ -297,7 +298,7 @@ function valuesType(
   if (notObject !== undefined) {
     problem(
       context,
-      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeValue(notObject)}.`,
+      `${name}(...) needs a list of objects for ${option}:, not a list that holds ${describeKind(notObject)}.`,
       list,
     );
     return UNKNOWN_TYPE;
@@ -308,7 +309,7 @@ function valuesType(
     at: property,
     name: key,
     objects: element,
-    message: `${name}(...): the objects in this list have no property '${key}'.`,
+    message: missingPropertyMessage(name, key),
   });
   const found: StaticType[] = [];
   for (const member of parts) {
@@ -341,7 +342,7 @@ function valueKind(
     if (listKind === undefined || !allowed.includes(listKind)) {
       problem(
         context,
-        listValueMessage(context.name, allowed, describeValue(part), listKind, x),
+        listValueMessage(context.name, allowed, describeKind(part), listKind, x),
         at,
       );
       return undefined;
@@ -385,7 +386,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
       context,
       isScalar(other, "angle")
         ? angleStatisticMessage(name)
-        : `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeValue(other)}.`,
+        : `${name}(...) needs a number, date, datetime, or absolute date and time as its x, not ${describeKind(other)}.`,
       x,
     );
     return UNKNOWN_TYPE;
@@ -415,7 +416,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
   ) {
     problem(
       context,
-      `${name}(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(type)}.`,
+      `${name}(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeKind(type)}.`,
       line,
     );
     return UNKNOWN_TYPE;
@@ -430,7 +431,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
     if (!fits)
       problem(
         context,
-        `${name}(...) needs ${VALUE_KINDS[familyOf(startKind)].description} as its x, like the line's start, not ${describeValue(xType)}.`,
+        `${name}(...) needs ${VALUE_KINDS[familyOf(startKind)].description} as its x, like the line's start, not ${describeKind(xType)}.`,
         x,
       );
   }

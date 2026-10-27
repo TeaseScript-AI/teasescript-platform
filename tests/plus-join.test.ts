@@ -337,7 +337,7 @@ test("+ on values known only when the script runs joins them or fails with the f
     "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, use add(value), or write list + [value] for a new list.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nitems.addAll(dynamic(2))\nexit`), [
-    "TSR060",
+    "TSV043",
     "addAll() needs a list, not a whole number (integer).",
   ]);
   // Elements of unknown type are checked against the list's element type.

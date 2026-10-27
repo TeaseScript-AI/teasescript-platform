@@ -20,6 +20,19 @@ export function logicalOperandRule(operator: "and" | "or" | null): string {
 export const LIST_INDEX_RULE = "A list index must be a whole number (integer)";
 
 /**
+ * A list index `value` below 0, which no element has (`TSV045`), with the index and the list as written where they are
+ * names, such as `i` and `items`.
+ */
+export function negativeListIndexMessage(
+  value: number,
+  index: string | null,
+  list: string | null,
+): string {
+  const subject = index === null || index === String(value) ? "the index" : `'${index}'`;
+  return `A list index cannot be negative, but ${subject} is ${value}. The first element is at index 0, and the last at ${list === null ? "length - 1" : `'${list}.length - 1'`}.`;
+}
+
+/**
  * The amount before a duration or an angle unit is a number (runtime error `TSR027`): in a `wait` or a timer, which also
  * take a range there, as in any other place.
  */

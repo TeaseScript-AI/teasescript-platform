@@ -130,6 +130,7 @@ import {
 import {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  type ClockFunctionName,
   type ConversionName,
   type NumericFunctionName,
   type RandomFunctionName,
@@ -185,6 +186,7 @@ import {
   timerDisplayMessage,
 } from "./handle-rules.js";
 import {
+  assignedTypeFix,
   HANDLE_MEMBERS,
   handleMemberMessage,
   handleMethod,
@@ -203,8 +205,16 @@ import {
   wholeRangeMessage,
   type RangeBounds,
 } from "./range-checks.js";
+import { unsavableMessage } from "./save-rules.js";
+import {
+  EMPTY_INTERPOLATED_LIST_MESSAGE,
+  INTERPOLATED_LIST_MESSAGE,
+  interpolatedDictMessage,
+  interpolationMessage,
+} from "./shown-text-rules.js";
 import {
   logicalOperandRule,
+  negativeListIndexMessage,
   notNumberFix,
   orderRule,
   UNIT_AMOUNT_RULE,
@@ -281,6 +291,7 @@ import {
   type DictMethod,
 } from "./dict-operations.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
+import { escapeMarkupFix, textOperandMessage } from "./text-operand-rules.js";
 import { isTextMethod, TEXT_METHODS, type TextMethod } from "./text-operations.js";
 import {
   CALENDAR_DURATION_PARTS,
@@ -294,9 +305,10 @@ import {
   isTemporalMethod,
   TEMPORAL_FIELDS,
   TEMPORAL_METHODS,
-  temporalArgumentsMessage,
+  temporalArgumentsProblem,
   temporalMemberMessage,
   type TemporalField,
+  type TemporalMethodName,
 } from "./temporal-builtins.js";
 import {
   missingPropertyMessage,
@@ -411,9 +423,15 @@ import { joinTypes, TypeJoin } from "./static-types/join.js";
 import { narrowTo, excludeType, assignedType } from "./static-types/narrowing.js";
 import { elementStoreType, elementType } from "./static-types/elements.js";
 import { typeFromAnnotation } from "./static-types/annotations.js";
-import { describeValue, isAnnotatable, typeName } from "./static-types/type-names.js";
+import { describeKind, describeValue, isAnnotatable, typeName } from "./static-types/type-names.js";
 import { arithmeticType } from "./static-types/arithmetic.js";
-import { mayEqualKinds, ordersWith, VALUE_KIND_NAMES, VALUE_KINDS } from "./value-kinds.js";
+import {
+  mayEqualKinds,
+  ordersWith,
+  VALUE_KIND_NAMES,
+  VALUE_KINDS,
+  type ValueKind,
+} from "./value-kinds.js";
 import { unreturnableChoiceMessage } from "./choice-values.js";
 import { checksProperties, typePlan } from "./type-plans.js";
 import {
@@ -1981,12 +1999,23 @@ export class TypeChecker {
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
         const unsaveable = holdsSessionValue(value);
-        if (unsaveable)
+        if (unsaveable) {
+          let identity: ValueKind | undefined;
+          containsType(value, (part) => {
+            if (isIdentityType(part)) identity = valueKindOfType(part);
+            return identity !== undefined;
+          });
+          // A value that may be one is named as one; one that holds one, by what holds it.
+          const holder = nonNullTypeForUse(value);
           this.#report(
             typeCode.invalidOperand,
-            `${SESSION_VALUES} cannot be saved, but this is ${describeValue(value)}.${containsType(value, (part) => part.kind === "messageHandle") ? " Save a message's text with its text property, as in 'save line.text as \"status\"'." : ""}`,
+            unsavableMessage(
+              identity!,
+              members(holder).some(isIdentityType) ? undefined : (valueKindOfType(holder) ?? null),
+            ),
             statement.value.span,
           );
+        }
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
         if (!unsaveable)
           yield* compileChild(this.#savedValueTask(statement.key, statement.value, value));
@@ -3595,7 +3624,8 @@ export class TypeChecker {
       all.length === 1 && all[0]!.kind === "object"
         ? this.#pathOf(objectExpression, scope)
         : undefined;
-    // Only an object's property has a first value that a fix may give another type; a handle's has a fixed type.
+    // Only an object's property has a first value that a fix may give another type; a handle's has a fixed type, which
+    // the runtime names as the compiler does (`assignedTypeMessage`).
     return propertyPlace(
       type,
       label,
@@ -3605,6 +3635,10 @@ export class TypeChecker {
       objectLabel !== null && all.every((member) => member.kind === "object")
         ? { kind: "property", label }
         : null,
+      all.every((member) => isHandleKind(member.kind)) &&
+        (isScalar(type, "duration") || isScalar(type, "string"))
+        ? assignedTypeFix(isScalar(type, "duration") ? "duration" : "string")
+        : undefined,
     );
   }
 
@@ -5936,7 +5970,7 @@ export class TypeChecker {
    * Notes a read of the property `name` from a value of type `object` at `site`. When every value it may be is an
    * object whose properties the compiler knows, and none has the property, the end of the check reports `message` at
    * `span` if no object at that place can have it when the script runs (#845); a message that names the properties the
-   * objects can have is a function of them. Any other read the runtime checks (TSR017, or TSR060 for a list function).
+   * objects can have is a function of them. Any other read the runtime checks (TSR017, or TSV043 for a list function).
    */
   #noteMissingProperty(
     site: Expression,
@@ -6341,7 +6375,7 @@ export class TypeChecker {
       expression.arguments.length === 1 &&
       expression.arguments[0]!.kind === "positionalArgument"
     )
-      this.#checkNegativeIndex(expression.arguments[0]!.value);
+      this.#checkNegativeIndex(expression.arguments[0]!.value, callee.object, false);
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();
@@ -6512,12 +6546,8 @@ export class TypeChecker {
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
       // The methods of date and time values take no arguments; a format follows the player's settings.
-      if (all.every(isTemporal) && isTemporalMethod(method) && expression.arguments.length > 0)
-        this.#report(
-          typeCode.argumentCount,
-          temporalArgumentsMessage(method, expression.arguments.length),
-          callee.property.span,
-        );
+      if (all.every(isTemporal) && isTemporalMethod(method))
+        this.#reportTemporalArguments(method, expression, callee.property.span);
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
@@ -6981,7 +7011,8 @@ export class TypeChecker {
         values[0]!,
         (member) => isScalar(member, "string"),
         expression.arguments[0]!.value,
-        `${name}(...) ${conversion.does}`,
+        () =>
+          `${name}(...) ${conversion.does}, not ${describeKind(nonNullTypeForUse(values[0]!))}.`,
       );
     if (conversion.result === "unknown") return UNKNOWN_TYPE;
     const result = scalarType(conversion.result);
@@ -7015,11 +7046,7 @@ export class TypeChecker {
     if (isClockFunction(name)) {
       // A clock read takes no arguments (see `ClockFunction`).
       if (expression.arguments.length > 0)
-        this.#report(
-          typeCode.argumentCount,
-          temporalArgumentsMessage(name, expression.arguments.length),
-          expression.arguments[0]!.value.span,
-        );
+        this.#reportTemporalArguments(name, expression, expression.arguments[0]!.value.span);
       return scalarType(CLOCK_CONTRACTS[name].result);
     }
     // `min` and `max` of one argument that may be a list take its values (V30 §16), and otherwise their arguments' values.
@@ -7136,11 +7163,7 @@ export class TypeChecker {
             value!,
             (member) => isScalar(member, "string"),
             argument!.value,
-            name === "hashText"
-              ? "hashText(...) hashes text (string)"
-              : name === "hashFile"
-                ? "hashFile(...) hashes a stored file, which is text (string)"
-                : "fileToBase64(...) reads a stored file, which is text (string)",
+            () => textOperandMessage(name, describeKind(nonNullTypeForUse(value!))),
           );
         // A stored file is named by text, a hash is text, or the result is the default.
         const fallback = expression.arguments.findIndex(
@@ -7168,11 +7191,7 @@ export class TypeChecker {
             values[index]!,
             (member) => isScalar(member, "string"),
             expression.arguments[index]!.value,
-            name === "encryptText"
-              ? "encryptText(...) locks text (string)"
-              : name === "decryptText"
-                ? "decryptText(...) opens locked text (string)"
-                : `${name}(...) ${name === "encryptFile" ? "locks" : "opens"} a stored file, which is text (string)`,
+            () => textOperandMessage(name, describeKind(nonNullTypeForUse(values[index]!))),
           );
         const fallback = expression.arguments.findIndex(
           (item) => item.kind === "namedArgument" && item.name.name === "default",
@@ -7185,7 +7204,21 @@ export class TypeChecker {
             value,
             (member) => isScalar(member, "string"),
             argument.value,
-            "escapeMarkup(...) takes text (string)",
+            () => {
+              const used = nonNullTypeForUse(value);
+              const elements = used.kind === "list" ? members(used.element) : [];
+              return textOperandMessage(
+                "escapeMarkup",
+                describeKind(used),
+                escapeMarkupFix(
+                  valueKindOfType(used),
+                  elements.every((element) => {
+                    const kind = valueKindOfType(element);
+                    return kind !== undefined && VALUE_KINDS[kind].shown !== null;
+                  }),
+                ),
+              );
+            },
           );
         return STRING_TYPE;
       case "script": {
@@ -7361,7 +7394,7 @@ export class TypeChecker {
         (member) => !isKnown(member) || resolved(member).kind === "list",
       )
     )
-      this.#checkNegativeIndex(expression);
+      this.#checkNegativeIndex(expression, objectExpression, true);
     if (known.length > 0 && known.every((member) => member.kind === "object")) {
       const key = staticChoiceValue(expression)?.value;
       const name = expressionLabel(objectExpression);
@@ -7411,11 +7444,47 @@ export class TypeChecker {
       );
   }
 
-  /** A list index the compiler knows is below 0, which no element has. */
-  #checkNegativeIndex(expression: Expression): void {
+  /**
+   * A list index the compiler knows is below 0, which no element has, of the list `list`; an index written in brackets
+   * is named (`written`), an argument is not.
+   */
+  #checkNegativeIndex(expression: Expression, list: Expression, written: boolean): void {
     const known = this.#known(expression);
     if (typeof known === "number" && known < 0)
-      this.#report(typeCode.invalidListIndex, NEGATIVE_INDEX_MESSAGE, expression.span);
+      this.#report(
+        typeCode.invalidListIndex,
+        negativeListIndexMessage(
+          known,
+          written ? expressionLabel(expression) : null,
+          expressionLabel(list),
+        ),
+        expression.span,
+      );
+  }
+
+  /**
+   * Reports the first problem with the arguments of a clock read or a method of a date or time value
+   * (`temporalArgumentsProblem`): an unknown name at the name, and a number at `countSpan`.
+   */
+  #reportTemporalArguments(
+    name: ClockFunctionName | TemporalMethodName,
+    expression: CallExpression,
+    countSpan: SourceSpan,
+  ): void {
+    const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
+    const problem = temporalArgumentsProblem(
+      name,
+      expression.arguments.length - named.length,
+      named.map((argument) => argument.name.name),
+    );
+    if (problem === undefined) return;
+    if (problem.kind === "unknownNamedArgument")
+      this.#report(
+        typeCode.unknownNamedArgument,
+        problem.message,
+        named.find((argument) => argument.name.name === problem.name)!.name.span,
+      );
+    else this.#report(typeCode.argumentCount, problem.message, countSpan);
   }
 
   /** Checks the names and the number of the arguments of a dict method (see `DICT_METHODS`); returns whether they fit. */
@@ -7771,34 +7840,22 @@ export class TypeChecker {
           this.#report(
             typeCode.unshowableValue,
             member.kind === "dict"
-              ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, and selects one element of a list.`,
+              ? interpolatedDictMessage(expressionLabel(expression))
+              : interpolationMessage(valueKindOfType(member)!),
             expression.span,
           ),
       );
       if (!reported)
         this.#checkElements(expression, type, isShown, () =>
-          this.#report(
-            typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
-            expression.span,
-          ),
+          this.#report(typeCode.unshowableValue, INTERPOLATED_LIST_MESSAGE, expression.span),
         );
       return;
     }
     if (value.elements.length === 0)
-      this.#report(
-        typeCode.unshowableValue,
-        "'${...}' shows one random element of a list, but this list is empty. Check its length first.",
-        value.span,
-      );
+      this.#report(typeCode.unshowableValue, EMPTY_INTERPOLATED_LIST_MESSAGE, value.span);
     for (const element of value.elements)
       this.#checkMembers(element, this.#typeOf(element), isShown, () =>
-        this.#report(
-          typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.",
-          element.span,
-        ),
+        this.#report(typeCode.unshowableValue, INTERPOLATED_LIST_MESSAGE, element.span),
       );
   }
 
@@ -9202,6 +9259,7 @@ function propertyPlace(
   text: PlaceText,
   widening: PlacePath | undefined,
   declared: Declared,
+  otherType = " Use a separate property for a value of another type.",
 ): Place {
   return {
     type,
@@ -9216,7 +9274,7 @@ function propertyPlace(
     verb: "be set to",
     fix: (value, expression) => {
       const conversion = conversionFix(type, value, expression);
-      return conversion ?? " Use a separate property for a value of another type.";
+      return conversion ?? otherType;
     },
   };
 }
@@ -9912,9 +9970,6 @@ function numberPrefillFix(expression: Expression): string {
     ? ` Write it as a number: 'prefill: ${text.trim()}'.`
     : " Use a number, such as 'prefill: 10'.";
 }
-
-const NEGATIVE_INDEX_MESSAGE =
-  "A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
 
 /** Whether `expression` is `true` as written, also in parentheses. */
 function isTrueLiteral(expression: Expression): boolean {

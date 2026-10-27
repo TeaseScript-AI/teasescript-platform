@@ -344,7 +344,7 @@ test("sort, min, max, and set operations order durations by length and calendar 
     `${DYNAMIC}let spans = [dynamic(1 calendar day), dynamic(24 h)]\nspans.sort()\nexit`,
     `${DYNAMIC}let spans = [dynamic(1 calendar month), dynamic(30 calendar days)]\nspans.sort()\nexit`,
   ])
-    assert.equal(runtimeFailure(source), "TSR060", source);
+    assert.equal(runtimeFailure(source), "TSV043", source);
   assert.equal(
     runtimeFailure(`${DYNAMIC}say min(dynamic(1 calendar day), dynamic(24 h))\nexit`),
     "TSR059",

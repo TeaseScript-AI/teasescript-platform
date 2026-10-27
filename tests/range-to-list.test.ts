@@ -298,15 +298,15 @@ test("a range given where a list is needed names toList in the fix", () => {
     "'+' joins two texts or two lists and adds numbers or durations, but these are a range and a list. To add the numbers of a range, write range.toList() + list.",
   ]);
   assert.deepEqual(failure(`${PICK}let x = [0]\nx.addAll(pick(1..=3))\nexit`)?.slice(0, 2), [
-    "TSR060",
+    "TSV043",
     "addAll() needs a list, not a range. Make a list of its numbers with toList() first.",
   ]);
   assert.deepEqual(failure(`${PICK}say [0].union(pick(1..=3))\nexit`)?.slice(0, 2), [
-    "TSR060",
+    "TSV043",
     "union() needs a list or a set, not a range. Make a list of its numbers with toList() first.",
   ]);
   assert.deepEqual(failure(`${PICK}say sum(pick(1..=3))\nexit`)?.slice(0, 2), [
-    "TSR059",
+    "TSV043",
     "sum(...) needs a list, not a range. Make a list of its numbers with toList() first.",
   ]);
 });

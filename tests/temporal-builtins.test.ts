@@ -159,9 +159,10 @@ test("a clock read or a method of a date or time value with arguments fails alik
       ["x: 1", [], { x: 1 }],
     ] as const) {
       const reported = errors(`say ${name}(${written})\nexit`);
+      // A name is an unknown named argument, as for any other built-in.
       assert.deepEqual(
         reported.map(([code]) => code),
-        ["TSV020"],
+        [Object.keys(named).length > 0 ? "TSV022" : "TSV020"],
         name,
       );
       assert.deepEqual(
@@ -192,7 +193,7 @@ test("a clock read or a method of a date or time value with arguments fails alik
         ["1, 2", [1, 2], {}],
         ["x: 1", [], { x: 1 }],
       ] as const) {
-        // The same text at the method's name, whether the compiler knows the value or not.
+        // The same text at the method's name, or at a name it does not take, whether the compiler knows the value or not.
         const call = `say v.${name}(${written})\nexit`;
         const at = (source: string) =>
           errors(source).map(([code, message, offset]) => [
@@ -201,7 +202,11 @@ test("a clock read or a method of a date or time value with arguments fails alik
             offset - source.indexOf(call),
           ]);
         const known = at(`let v = ${VALUES[kind]}\n${call}`);
-        assert.deepEqual(known, [["TSV020", known[0]![1], "say v.".length]], `${kind} ${name}`);
+        const [code, offset] =
+          Object.keys(named).length > 0
+            ? ["TSV022", `say v.${name}(`.length]
+            : ["TSV020", "say v.".length];
+        assert.deepEqual(known, [[code, known[0]![1], offset]], `${kind} ${name}`);
         assert.deepEqual(
           at(`${DYNAMIC}let v = dynamic(${VALUES[kind]})\n${call}`),
           known,

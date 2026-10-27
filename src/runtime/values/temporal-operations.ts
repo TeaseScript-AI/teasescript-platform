@@ -15,7 +15,7 @@ import {
   hasTemporalField,
   hasTemporalMethod,
   isCalendarDurationPart,
-  temporalArgumentsMessage,
+  temporalArgumentsProblem,
   temporalMemberMessage,
   type TemporalMethodName,
 } from "../../temporal-builtins.js";
@@ -107,12 +107,8 @@ export function temporalNow(
   atMs: number,
   span: SourceSpan,
 ): SerializableRuntimeTemporal {
-  if (positional.length > 0 || Object.keys(named).length > 0)
-    throw fault(
-      "TSR028",
-      temporalArgumentsMessage(name, positional.length + Object.keys(named).length),
-      span,
-    );
+  const problem = temporalArgumentsProblem(name, positional.length, Object.keys(named));
+  if (problem !== undefined) throw fault("TSR028", problem.message, span);
   const epochMilliseconds = wallClockAt(capture, atMs);
   if (epochMilliseconds === undefined)
     throw fault(
@@ -296,12 +292,8 @@ export function temporalMethod(
 ): SerializableRuntimeValue {
   if (!hasTemporalMethod(value.kind, name))
     throw fault("TSR016", missingTemporalMember(value, name, "method", null), span);
-  if (positional.length > 0 || Object.keys(named).length > 0)
-    throw fault(
-      "TSR015",
-      temporalArgumentsMessage(name, positional.length + Object.keys(named).length),
-      span,
-    );
+  const problem = temporalArgumentsProblem(name, positional.length, Object.keys(named));
+  if (problem !== undefined) throw fault("TSR015", problem.message, span);
   return methodResult(value, name, context, span);
 }
 

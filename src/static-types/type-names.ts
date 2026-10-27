@@ -79,6 +79,16 @@ function* typeNameTask(typeToName: StaticType): CompileTask<string> {
   }
 }
 
+/**
+ * A value of `type` described by its kind alone, as the runtime describes a value it finds (`describeValue` of
+ * `value-kinds.ts`): `a list`, not `a list (integer[])`. A union, or a type of no one kind, is described in full. For a
+ * message that the runtime gives too, so both describe a value alike.
+ */
+export function describeKind(type: StaticType): string {
+  const kind = valueKindOfType(type);
+  return kind === undefined ? describeValue(type) : VALUE_KINDS[kind].description;
+}
+
 /** A plain-language description of a value of `type` for diagnostics, as the runtime describes one (`description`). */
 export function describeValue(type: StaticType): string {
   const value = canonical(type);

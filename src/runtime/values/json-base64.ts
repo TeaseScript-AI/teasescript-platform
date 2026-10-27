@@ -1,5 +1,5 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
-import { WRITABLE_JSON_FIX } from "../../conversions.js";
+import { unwritableJsonMessage } from "../../conversions.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../../source.js";
 import {
@@ -19,12 +19,7 @@ import type {
 } from "./serializable-values.js";
 import { binaryFromBase64 } from "../host-data/stored-files.js";
 import { checkTextLength, textTooLong } from "./text-length.js";
-import {
-  describeValue,
-  unwritableJsonReason,
-  VALUE_KINDS,
-  valueKindOf,
-} from "../../value-kinds.js";
+import { describeValue, VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { copySpan } from "../../plan/source-location.js";
 
 // `toJson`, `fromJson`, `toBase64`, and `fromBase64` (V30 §13), which exchange data with other programs as text. Native
@@ -43,7 +38,7 @@ type JsonWork =
 /**
  * The compact JSON text of `value`: text, numbers, `true`, `false`, and `null` as they are; a list or set as an array, a
  * set in its order; a dict, an object, and a speaker's properties as an object in key order; a date or time as its ISO
- * text, an absolute one in UTC; a duration as its milliseconds; and an angle as its degrees. Any other value fails with `TSR059`, and a text
+ * text, an absolute one in UTC; a duration as its milliseconds; and an angle as its degrees. Any other value fails with `TSV043`, a speaker inside its own properties with `TSR059`, and a text
  * longer than a text can be with `TSR084`. `storedFile` may give the JSON to write in place of a text, in the order the
  * texts are written; keys are never given to it.
  */
@@ -96,7 +91,11 @@ export function jsonText(
       continue;
     }
     if (VALUE_KINDS[valueKindOf(current)].json === null)
-      throw fault("TSR059", unwritableMessage(current, item.nested), span);
+      throw fault(
+        "TSV043",
+        unwritableJsonMessage(valueKindOf(current), item.nested ? valueKindOf(value) : undefined),
+        span,
+      );
     switch (current.kind) {
       case "list":
       case "set": {
@@ -149,15 +148,6 @@ export function jsonText(
     }
   }
   return out.join("");
-}
-
-/** Why `toJson` cannot write `value`, which it holds or is. */
-function unwritableMessage(value: SerializableRuntimeValue, nested: boolean): string {
-  const kind = describeValue(value);
-  const reason = unwritableJsonReason(valueKindOf(value));
-  return nested
-    ? `toJson(...) cannot write this value: it holds ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`
-    : `toJson(...) cannot write ${kind}, which ${reason}. ${WRITABLE_JSON_FIX}`;
 }
 
 /** `text` as a JSON string, as native JSON writes it, or `TSR084` when that would be longer than a text can be. */
