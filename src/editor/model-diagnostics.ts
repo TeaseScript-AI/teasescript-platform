@@ -1,7 +1,7 @@
 import type { ProjectImageFile } from "../image-catalog.js";
 import { languageProjectOverview } from "../language-tooling.js";
 import type { ScriptHeader } from "../script-header.js";
-import { toMonacoMarkers, type MonacoMarker } from "./monaco-mapping.js";
+import { toMonacoMarkers, type MonacoMarker, type MonacoSeverities } from "./monaco-mapping.js";
 
 export interface DiagnosticModel {
   getValue(): string;
@@ -27,7 +27,7 @@ export interface ProjectFileView {
  */
 export function watchProjectDiagnostics(
   models: readonly ProjectModel[],
-  severity: { readonly Error: number; readonly Warning: number },
+  severity: MonacoSeverities,
   publish: (files: readonly ProjectFileView[]) => void,
   options: { readonly images?: readonly ProjectImageFile[] } = {},
 ): { dispose(): void } {

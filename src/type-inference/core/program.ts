@@ -1,4 +1,5 @@
 import type { FileTarget, Program } from "../../ast.js";
+import type { SourceSpan } from "../../source.js";
 import type { TypeAnalysisFile, TypeAnalysisRequest } from "../backend.js";
 import { collectGraph } from "../collector.js";
 import type {
@@ -9,7 +10,7 @@ import type {
   PlaceId,
   SourceSite,
 } from "../graph.js";
-import { ledgerFor, type WorkLedger } from "./budget.js";
+import { ledgerFor, NESTING_LIMIT, type WorkLedger } from "./budget.js";
 import { dominators, type Dominators } from "./dominators.js";
 import {
   buildFlowGraph,
@@ -92,42 +93,60 @@ export function siteKey(site: SourceSite): string {
 }
 
 /**
- * The parsed nodes of the programs, every node with a kind, so formatting and comments do not count (TABLE §8), and
- * the deepest nesting of their blocks: a function's body, a block's, a branch's or a loop's body and an `else if`, each
- * one level.
+ * The parsed nodes of the programs, every node with a kind, so formatting and comments do not count (TABLE §8); the
+ * deepest nesting of their blocks: a function's body, a block's, a branch's or a loop's body and an `else if`, each
+ * one level; and the outermost blocks nested past the nesting limit, whose code is checked when the script runs.
  */
 function measureSyntax(programs: readonly Program[]): {
   readonly nodes: number;
   readonly nesting: number;
+  readonly deep: readonly SourceSite[];
 } {
   let nodes = 0;
   let nesting = 0;
-  const pending: { readonly value: unknown; readonly depth: number }[] = programs.map((value) => ({
-    value,
-    depth: 0,
-  }));
+  const deep: SourceSite[] = [];
+  const pending: {
+    readonly value: unknown;
+    readonly depth: number;
+    readonly file: number;
+    /** Inside a block already counted as too deep. */
+    readonly inside: boolean;
+  }[] = programs.map((value, file) => ({ value, depth: 0, file, inside: false }));
   while (pending.length > 0) {
-    const { value, depth } = pending.pop()!;
+    const { value, depth, file, inside } = pending.pop()!;
     if (value === null || typeof value !== "object") continue;
     if (Array.isArray(value)) {
-      for (const entry of value) pending.push({ value: entry, depth });
+      for (const entry of value) pending.push({ value: entry, depth, file, inside });
       continue;
     }
     // EVIDENCE: invariant: a non-array object of the parsed program, read by key.
     const fields = value as Readonly<Record<string, unknown>>;
-    if (typeof fields["kind"] === "string") nodes += 1;
+    const kinded = typeof fields["kind"] === "string";
+    if (kinded) nodes += 1;
     const inner = fields["kind"] === "block" ? depth + 1 : depth;
     nesting = Math.max(nesting, inner);
+    // the outermost node past the limit (a block, or an `else if` counted past it)
+    const outermost = kinded && !inside && inner > NESTING_LIMIT;
+    if (outermost) {
+      // EVIDENCE: invariant: a parsed node with a kind has its span.
+      const span = fields["span"] as SourceSpan;
+      deep.push({ file, start: span.start.offset, end: span.end.offset });
+    }
     for (const key of Object.keys(fields)) {
       if (key === "span" || key === "site") continue;
       const field = fields[key];
       if (field === null || typeof field !== "object") continue;
       // an `else if` is an `if` nested in its predecessor's `else`: one level more
       const elseIf = key === "elseBlock" && "kind" in field && field.kind === "ifStatement";
-      pending.push({ value: field, depth: elseIf ? inner + 1 : inner });
+      pending.push({
+        value: field,
+        depth: elseIf ? inner + 1 : inner,
+        file,
+        inside: inside || outermost,
+      });
     }
   }
-  return { nodes, nesting };
+  return { nodes, nesting, deep };
 }
 
 /**
@@ -146,6 +165,8 @@ export class CoreProgram {
   readonly syntaxNodes: number;
   /** The deepest nesting of the programs' blocks. */
   readonly nesting: number;
+  /** The outermost blocks nested past the nesting limit, by file and start: their code is checked when it runs. */
+  readonly deep: readonly SourceSite[];
 
   /** A read's occurrence place, by the binding it reads. */
   readonly occurrenceOf = new Map<PlaceId, PlaceId>();
@@ -171,6 +192,7 @@ export class CoreProgram {
     const syntax = measureSyntax(request.files.map((file) => file.program));
     this.syntaxNodes = syntax.nodes;
     this.nesting = syntax.nesting;
+    this.deep = [...syntax.deep].sort((a, b) => a.file - b.file || a.start - b.start);
     this.work = ledgerFor(this.syntaxNodes);
     this.scope = { work: this.work, ingress: new IngressGraph() };
     this.#sources = request.files.map((file) => file.source);
@@ -181,8 +203,13 @@ export class CoreProgram {
     this.constraints = this.graph.constraints;
   }
 
-  /** The setup work of the analysis (TABLE §8), charged, and the indexes: once, before anything reads them. */
+  /**
+   * The setup work of the analysis (TABLE §8), charged, and the indexes: once, before anything reads them. A stop in it
+   * leaves it to run again to its end, uncharged, for the finishing path (D4 a′).
+   */
   public index(): void {
+    if (this.#indexed) return;
+    this.hasOf.clear();
     this.work.charge("syntaxNodes", this.syntaxNodes);
     // the graph and its dominators are setup work too: their nodes, their edges, and a step per node and edge of the
     // dominator search
@@ -265,6 +292,35 @@ export class CoreProgram {
     for (const constraint of this.constraints)
       if (constraint.kind === "speakerRead" && !this.placeBySite.has(siteKey(constraint.site)))
         this.placeBySite.set(siteKey(constraint.site), constraint.occurrence);
+    this.#indexed = true;
+  }
+
+  #indexed = false;
+
+  /** Whether a site lies in code nested past the nesting limit (`deep`), by a binary search. */
+  public isDeep(site: SourceSite): boolean {
+    let low = 0;
+    let high = this.deep.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      const block = this.deep[middle]!;
+      if (block.file < site.file || (block.file === site.file && block.start <= site.start))
+        low = middle + 1;
+      else high = middle;
+    }
+    const block = this.deep[low - 1];
+    return (
+      block !== undefined &&
+      block.file === site.file &&
+      block.start <= site.start &&
+      site.end <= block.end
+    );
+  }
+
+  /** The number a callable's work is counted to (`WorkLedger.spender`): its region's, past setup's 0. */
+  public spenderOf(node: FlowNode): number {
+    const callable = this.flow.callableOf(node.region);
+    return callable === null ? 0 : callable.id + 1;
   }
 
   public place(id: PlaceId): Place {
@@ -327,6 +383,11 @@ export class CoreProgram {
       projection = this.projOf.get(current);
     }
     return { root: current, path: steps.reverse() };
+  }
+
+  /** A file's whole text as a site. */
+  public fileSite(file: number): SourceSite {
+    return { file, start: 0, end: (this.#sources[file] ?? "").length };
   }
 
   /** The source text at a site. */

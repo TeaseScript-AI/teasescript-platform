@@ -9,9 +9,10 @@ import test from "node:test";
  * work allowance stops them first. Per literal kind, a child process with a capped V8 heap compiles `let value =` the
  * literal nested 1,024 and 4,097 deep on the candidate route (`compileSourceWithBackend(…, CORE_BACKEND)`;
  * after the switch, production `compileSource(source)` in its place) and analyses the same literal with one read of it
- * in the core. Each must end with a plan or the candidate's structured rejection (the allowance's stop, or the slice it
- * does not cover yet: records and dicts, lists deeper than its facts follow), and with the core's outcome, its
- * allowance's `budget-error` included; a signal exit (134, 137), an uncaught exception or the timeout fails the test.
+ * in the core. Each must end with a plan, the stopped analysis's included (the allowance's stop is a warning, D4 a′),
+ * or the candidate's structured rejection (the slice it does not cover yet: records and dicts, lists deeper than its
+ * facts follow), and with the core's outcome; a signal exit (134, 137), an uncaught exception or the timeout fails the
+ * test.
  * 4,097 is one beyond the deepest depth measured (4,096): scale regressions, not a supported maximum, since none
  * exists.
  */
@@ -81,7 +82,7 @@ for (const [kind, open, close, read] of KINDS)
     for (const line of lines)
       assert.match(
         line,
-        /^\d+\t(plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error|budget-error)$/,
+        /^\d+\t(plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error)$/,
         `${kind}: ${line}`,
       );
   });
@@ -108,7 +109,7 @@ test("a record nested 2,048 deep with long property names stops within the allow
     depths,
   );
   for (const line of lines)
-    assert.match(line, /^\d+\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+    assert.match(line, /^\d+\t(valid|warning-runtime-check|compile-error)$/, line);
 });
 
 /**
@@ -150,7 +151,7 @@ test("typed copies of a list nested 4,096 deep with 16,384 references stop withi
     ["4096 fanout", "4096 fanout reversed", "2048 chain", "2048 levels"],
   );
   for (const line of lines)
-    assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error)$/, line);
 });
 
 /**
@@ -183,7 +184,7 @@ test("8,192 and 10,000 nested defaults around a host value stop within the allow
     ["8192 forward", "8192 reversed", "10000 forward", "10000 reversed"],
   );
   for (const line of lines)
-    assert.match(line, /\t(valid|warning-runtime-check|compile-error|budget-error)$/, line);
+    assert.match(line, /\t(valid|warning-runtime-check|compile-error)$/, line);
 });
 
 /**
@@ -218,7 +219,7 @@ test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing t
   for (const line of lines)
     assert.match(
       line,
-      /^\d+\t(plan|no plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error|budget-error)$/,
+      /^\d+\t(plan|no plan|outside: [^\t]+)\t(valid|warning-runtime-check|compile-error)$/,
       line,
     );
 });

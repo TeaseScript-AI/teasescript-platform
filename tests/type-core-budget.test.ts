@@ -4,9 +4,7 @@ import test from "node:test";
 import {
   allowanceFor,
   BudgetExhausted,
-  checkNesting,
   ledgerFor,
-  NESTING_LIMIT,
   WORK_FLOOR,
   WORK_PER_NODE,
   WorkLedger,
@@ -80,15 +78,6 @@ test("the allowance is 30,000,000 or 256 per syntax node, whichever is larger", 
   assert.equal(ledgerFor(crossing + 1000).allowance, 256 * (crossing + 1000));
 });
 
-test("statements nest 256 deep", () => {
-  assert.equal(NESTING_LIMIT, 256);
-  checkNesting(256);
-  assert.throws(
-    () => checkNesting(257),
-    (error: unknown) => error instanceof BudgetExhausted && error.limit === "nesting",
-  );
-});
-
 test("a test allowance holds for every ledger made inside it, and only there", () => {
   assert.equal(
     withTestAllowance(10, () => ledgerFor(1_000_000).allowance),
@@ -112,92 +101,273 @@ test("a test allowance holds for every ledger made inside it, and only there", (
   );
 });
 
-test("an analysis stopped in its consumers publishes its stop, computing nothing more after it", () => {
-  // forty functions, most of whose call sites the stopped consumers never counted (their single-site memo empty)
-  const source = `${Array.from({ length: 40 }, (_, i) => `function f${i}(p) {\n  repeat p {}\n}\nf${i}(${i})`).join("\n")}\nexit`;
-  const request = (): NonNullable<ReturnType<typeof coreRequest>> => {
-    const made = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(made !== null);
-    return made;
-  };
-  const total = analyseCore(request()).budget.total;
-  const stopped = withTestAllowance(Math.floor(total * 0.95), () => analyseCore(request()));
-  assert.deepEqual(
-    { outcome: stopped.outcome, exhausted: stopped.budget.exhausted, deferred: stopped.deferred },
-    { outcome: "budget-error", exhausted: "work", deferred: { parameters: [], results: [] } },
-  );
-});
-
-test("an analysis stopped anywhere, its setup included, publishes its stop", () => {
-  // files that each call every file (W13's call graph) beside a function: setup, solver and consumers all charge
-  const part = 'call "parts/*.tease"\nend';
-  const files = [
-    {
-      path: "main.tease",
-      source: 'function f(p) {\n  repeat p {}\n}\nf(2)\ncall "parts/*.tease"\nexit',
-    },
-    ...Array.from({ length: 6 }, (_, i) => ({ path: `parts/f${i}.tease`, source: part })),
-  ];
-  // (prepared once: each analysis of it is a fresh one)
+/** A project's request, its files parsing and resolving. */
+function requestOf(files: readonly { readonly path: string; readonly source: string }[]) {
   const request = coreRequest(files);
-  assert.ok(request !== null);
-  const total = analyseCore(request).budget.total;
-  const stops: string[] = [];
-  let inSetup = 0;
-  for (let step = 1; step < 32; step += 1) {
-    const stopped = withTestAllowance(Math.floor((total * step) / 32), () => analyseCore(request));
-    stops.push(`${stopped.outcome} ${stopped.budget.exhausted} ${stopped.diagnostics.length}`);
-    if (!stopped.budget.counts.has("frames")) inSetup += 1;
-  }
-  assert.deepEqual(
-    stops,
-    Array.from({ length: 31 }, () => "budget-error work 0"),
+  assert.ok(request !== null, "the files parse and resolve");
+  return request;
+}
+
+const main = (source: string) => [{ path: "main.tease", source }];
+
+/** An analysis in the source order, or with the consumers' and the solver's orders reversed (`reversed`). */
+function analysed(request: ReturnType<typeof requestOf>, reversed = false, allowance?: number) {
+  const run = () =>
+    allowance === undefined
+      ? analyseCore(request)
+      : withTestAllowance(allowance, () => analyseCore(request));
+  return reversed
+    ? withSolverSeam({ reverseWorklist: true }, () =>
+        withConsumerOrder((list) => [...list].reverse(), run),
+      )
+    : run();
+}
+
+/** A stopped analysis as these tests compare it: its outcome, limit, shown diagnostics and the checks it moved. */
+function stopOf(answers: ReturnType<typeof analyseCore>, source: string) {
+  const text = (site: { readonly start: number; readonly end: number }) =>
+    source.slice(site.start, site.end);
+  return {
+    outcome: answers.outcome,
+    exhausted: answers.budget.exhausted,
+    errors: answers.diagnostics
+      .filter((diagnostic) => diagnostic.class === "compile-error")
+      .map((diagnostic) => `${diagnostic.code} ${text(diagnostic.site)}`),
+    stops: answers.diagnostics.filter(
+      (diagnostic) => diagnostic.kind === "budget" && diagnostic.class === "warning-runtime-check",
+    ).length,
+    unchecked: answers.diagnostics
+      .filter((diagnostic) => diagnostic.class === "not-checked-budget")
+      .map((diagnostic) =>
+        diagnostic.kind === "budget" ? (diagnostic.place.name ?? "top level") : "",
+      ),
+    deferred: answers.budget.deferred.map(
+      (diagnostic) =>
+        `${diagnostic.obligation.kind} ${text(diagnostic.site)} ${diagnostic.provenance.context}`,
+    ),
+  };
+}
+
+test("after a stop the ledger counts only finishing work, and before it each unit to its spender", () => {
+  const work = new WorkLedger(10);
+  work.spender = 3;
+  work.charge("checks", 4);
+  work.spender = 0;
+  work.charge("checks", 5);
+  assert.throws(
+    () => work.charge("checks", 2),
+    (error: unknown) => error instanceof BudgetExhausted && error.limit === "work",
   );
-  assert.ok(inSetup > 0, "some stop falls in the setup");
-  assert.equal(withTestAllowance(total, () => analyseCore(request)).outcome, "valid");
+  work.stop("work");
+  work.charge("checks", 100);
+  assert.deepEqual(
+    {
+      total: work.total,
+      finishing: work.finishing,
+      stopped: work.stopped,
+      spent: [...work.spent()],
+    },
+    { total: 11, finishing: 100, stopped: "work", spent: [7, undefined, undefined, 4] },
+  );
+  // (a later limit does not replace the first)
+  work.stop("read-depth");
+  assert.equal(work.stopped, "work");
 });
 
 /**
- * A known limit until S8 (the lead's ruling): a recursive record type, whose record alternative itself holds the
- * recursion, is followed at ever deeper paths, so this terminating program stops at the work allowance (30,000,001
- * units, 10 to 14 s, in both orders). S8's fallback turns the stop into warnings with runtime checks; the candidate
- * repair is a depth bound from the program's own structure, deeper paths answered `unknown`. Pinned here: the stop is
- * clean, in both orders.
+ * TABLE r4.55, S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
+ * checked when the script runs, every other statement proved as ever (admission still decides every place from every
+ * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
+ * deepest nesting's place.
  */
-test("a recursive record type stops cleanly with budget-error, in either order (a known limit until S8)", () => {
+test("statements nested past 256 levels are checked when the script runs, the rest proved (TABLE r4.55)", () => {
+  const nested = (depth: number) =>
+    `let k: integer = 1.5\n${"if hostValue == 1 {\n".repeat(depth)}say "\${hostValue}"\n${"}\n".repeat(depth)}exit`;
+  const chained = (length: number) =>
+    `let n = 1\n${Array.from({ length }, (_, i) => `${i === 0 ? "" : "else "}if n == ${i} { say "\${hostValue}" }`).join("\n")}\nexit`;
+  const at256 = stopOf(analysed(requestOf(main(nested(256)))), nested(256));
+  assert.deepEqual(
+    { ...at256, deferred: at256.deferred.length },
+    {
+      outcome: "compile-error",
+      exhausted: null,
+      errors: ["TSV041 1.5"],
+      stops: 0,
+      unchecked: [],
+      deferred: 0,
+    },
+  );
+  for (const reversed of [false, true])
+    assert.deepEqual(stopOf(analysed(requestOf(main(nested(257))), reversed), nested(257)), {
+      outcome: "compile-error",
+      exhausted: "nesting",
+      errors: ["TSV041 1.5"],
+      stops: 1,
+      unchecked: ["top level"],
+      deferred: ["operand hostValue budget"],
+    });
+  assert.equal(analysed(requestOf(main(chained(255)))).budget.exhausted, null);
+  const chain = stopOf(analysed(requestOf(main(chained(257)))), chained(257));
+  assert.deepEqual([chain.exhausted, chain.stops, chain.deferred.length > 0], ["nesting", 1, true]);
+});
+
+/**
+ * D4 a′ (TABLE r4.54): a stop is no compile error. At every allowance below the analysis's work, wherever the stop
+ * falls (the setup, admission, the walk), in both orders: the literal error stands (found before the stop, or by the
+ * finishing path, which knows a literal's kind); the count that waits on the recursive contract is checked when the
+ * script runs; one warning; and the finishing path's work stays within a small multiple of the program's size.
+ */
+test("a stop never rejects a script: its findings stand and the rest is checked when it runs, in both orders", () => {
   const source =
-    "function f(n: integer) {\n  if n == 0 { return {custom: 1} }\n  if n == 1 { return {custom: f(0)} }\n  return f(n - 1).custom\n}\nrepeat f(3) {}\nexit";
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  const got = [false, true].map((reversed) => {
-    const run = (): ReturnType<typeof analyseCore> =>
-      withTestAllowance(100_000, () =>
-        withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request)),
+    'let x = "s" - 1\nfunction chain(n: integer) {\n  if n == 0 { return {value: 1, next: null} }\n  return {value: n, next: chain(n - 1)}\n}\nfunction last(node) {\n  if node.next == null { return node.value }\n  return last(node.next)\n}\nrepeat last(chain(3)) {}\nexit';
+  const request = requestOf(main(source));
+  const nodes = analysed(request, false, 1_000_000).budget.counts.get("syntaxNodes")!;
+  for (const reversed of [false, true])
+    for (let allowance = 250; allowance <= 64_000; allowance *= 2) {
+      const answers = analysed(request, reversed, allowance);
+      const stop = stopOf(answers, source);
+      const where = `${allowance}${reversed ? " reversed" : ""}`;
+      assert.deepEqual(
+        [stop.outcome, stop.exhausted, stop.errors, stop.stops],
+        ["compile-error", "work", ['TSV043 "s"'], 1],
+        where,
       );
-    const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
-    return `${answers.outcome} ${answers.budget.exhausted} ${answers.diagnostics.length}`;
-  });
-  assert.deepEqual(got, ["budget-error work 0", "budget-error work 0"]);
+      assert.ok(stop.deferred.includes("integer-check last(chain(3)) budget"), where);
+      assert.ok(
+        answers.budget.finishing <= 16 * nodes,
+        `${where}: ${answers.budget.finishing} units`,
+      );
+    }
+  // the same program without the literal error compiles with the warning
+  const quiet = source.replace('let x = "s" - 1\n', "");
+  assert.equal(
+    stopOf(analysed(requestOf(main(quiet)), false, 4_000), quiet).outcome,
+    "warning-runtime-check",
+  );
+});
+
+test("a stop at any unit keeps a store's check, in admission, in the walk and in the publication (D4 a′)", () => {
+  // external data stored into a written type: a warning's check before the stop, a moved check after it; the stop at
+  // each unit of the analysis in turn (a stop in admission or the publication once took the warning back unmoved)
+  const source = 'let v = hostValue\nlet n: integer = v\nsay "AFTER"\nexit';
+  const request = requestOf(main(source));
+  const total = analysed(request).budget.total;
+  const lost: number[] = [];
+  for (let allowance = 1; allowance < total; allowance += 1)
+    if (
+      !analysed(request, false, allowance).checks.some(
+        (check) =>
+          check.kind === "copy-type" && source.slice(check.site.start, check.site.end) === "v",
+      )
+    )
+      lost.push(allowance);
+  assert.deepEqual(lost, []);
+});
+
+test("the stop's warning names the heaviest place and marks each function it left unchecked once", () => {
+  // forty functions, the stop in the walk over their counts: those it reached keep their proofs
+  const source = `${Array.from({ length: 40 }, (_, i) => `function f${i}(p) {\n  repeat p {}\n}\nf${i}(${i})`).join("\n")}\nexit`;
+  const request = requestOf(main(source));
+  const total = analysed(request).budget.total;
+  for (const fraction of [0.95, 0.5, 0.01]) {
+    const answers = analysed(request, false, Math.floor(total * fraction));
+    const stop = stopOf(answers, source);
+    assert.equal(stop.stops, 1, String(fraction));
+    // once per function, exactly those whose checks moved
+    const starts = Array.from({ length: 40 }, (_, i) => source.indexOf(`function f${i}(`));
+    const moved = new Set(
+      answers.budget.deferred.map(
+        (d) => `f${starts.findLastIndex((start) => start <= d.site.start)}`,
+      ),
+    );
+    assert.deepEqual([...stop.unchecked].sort(), [...moved].sort(), String(fraction));
+    const summary = answers.diagnostics.find(
+      (diagnostic) => diagnostic.kind === "budget" && diagnostic.class === "warning-runtime-check",
+    );
+    assert.ok(summary?.kind === "budget" && summary.class === "warning-runtime-check");
+    assert.equal(summary.deferred, stop.deferred.length);
+    assert.ok(
+      summary.place.name !== null && /^f\d+$/.test(summary.place.name),
+      summary.place.name ?? "",
+    );
+  }
 });
 
 /**
- * The same known limit in an ordinary linked list (Astra round 3): built by `chain(n)` and walked by `last(node)`
- * through `node.next`, 66 syntax nodes, 68 instructions at runtime; the core exhausts its allowance (30,000,001 units)
- * in both orders. An input to S8, which must give a finite conservative contract answer here (Known limits). Pinned:
- * the stop is clean, in both orders.
+ * S8's obligations (TABLE r4.55 (3)): the finishing path is bounded when the setup, admission's passes, or a recursive
+ * contract spend the allowance. Each stop compiles, with one warning and its checks, its finishing work small.
  */
-test("a linked record list stops cleanly with budget-error, in either order (a known limit until S8)", () => {
+test("the finishing path is bounded after a stop in the setup, in admission's passes and in a recursive contract", () => {
+  const cases: readonly (readonly [string, readonly { path: string; source: string }[]])[] = [
+    [
+      "the setup (every file calls every file)",
+      [
+        {
+          path: "main.tease",
+          source: 'function f(p) {\n  repeat p {}\n}\nf(2)\ncall "parts/*.tease"\nexit',
+        },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          path: `parts/f${i}.tease`,
+          source: 'call "parts/*.tease"\nend',
+        })),
+      ],
+    ],
+    [
+      "admission's passes (a chain of rejections)",
+      main(
+        `let v0 = 0\nv0 = "x"\n${Array.from({ length: 12 }, (_, i) => `let v${i + 1} = v${i}\nv${i + 1} = "x"`).join("\n")}\nlet final: integer = v12\nexit`,
+      ),
+    ],
+    [
+      "a recursive record type",
+      main(
+        "function f(n: integer) {\n  if n == 0 { return {custom: 1} }\n  if n == 1 { return {custom: f(0)} }\n  return f(n - 1).custom\n}\nrepeat f(3) {}\nexit",
+      ),
+    ],
+  ];
+  for (const [name, files] of cases) {
+    const request = requestOf(files);
+    // (the stops are sampled below 100,000 units: a run to that point gives the program's size and its own total)
+    const full = analysed(request, false, 100_000);
+    const nodes = full.budget.counts.get("syntaxNodes")!;
+    const total = Math.min(full.budget.total, 100_000);
+    for (const reversed of [false, true])
+      for (const fraction of [0.9, 0.5, 0.1, 0.02]) {
+        const answers = analysed(request, reversed, Math.max(1, Math.floor(total * fraction)));
+        const where = `${name} ${fraction}${reversed ? " reversed" : ""}`;
+        assert.equal(answers.budget.exhausted, "work", where);
+        assert.notEqual(answers.outcome, "valid", where);
+        assert.equal(
+          answers.diagnostics.filter(
+            (d) => d.kind === "budget" && d.class === "warning-runtime-check",
+          ).length,
+          1,
+          where,
+        );
+        assert.ok(answers.budget.deferred.length > 0, where);
+        assert.ok(
+          answers.budget.finishing <= 16 * nodes,
+          `${where}: ${answers.budget.finishing} units`,
+        );
+      }
+  }
+});
+
+/**
+ * PLAN §6b's recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
+ * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
+ * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.
+ */
+test("a linked record list stops at the allowance with its count checked when it runs, in either order", () => {
   const source =
     "function chain(n: integer) {\n  if n == 0 { return {value: 1, next: null} }\n  return {value: n, next: chain(n - 1)}\n}\nfunction last(node) {\n  if node.next == null { return node.value }\n  return last(node.next)\n}\nrepeat last(chain(3)) {}\nexit";
-  const request = coreRequest([{ path: "main.tease", source }]);
-  assert.ok(request !== null);
-  const got = [false, true].map((reversed) => {
-    const run = (): ReturnType<typeof analyseCore> =>
-      withTestAllowance(100_000, () =>
-        withSolverSeam({ reverseWorklist: reversed }, () => analyseCore(request)),
-      );
-    const answers = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
-    return `${answers.outcome} ${answers.budget.exhausted} ${answers.diagnostics.length}`;
-  });
-  assert.deepEqual(got, ["budget-error work 0", "budget-error work 0"]);
+  const request = requestOf(main(source));
+  for (const reversed of [false, true]) {
+    const stop = stopOf(analysed(request, reversed, 100_000), source);
+    assert.deepEqual(
+      [stop.outcome, stop.exhausted, stop.errors, stop.stops, stop.unchecked.sort()],
+      ["warning-runtime-check", "work", [], 1, ["chain", "last", "top level"]],
+    );
+    assert.ok(stop.deferred.includes("integer-check last(chain(3)) budget"));
+  }
 });

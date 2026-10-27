@@ -2786,7 +2786,7 @@ test("the candidate's facts list every binding, read and value of the program wi
   );
 });
 
-test("a program the work allowance stops after its analysis is rejected, never accepted without its facts", () => {
+test("a program the work allowance stops, in its analysis or after it, compiles with the stop's warning and its checks (D4 a′)", () => {
   const request = coreRequest([
     {
       path: "main.tease",
@@ -2794,18 +2794,25 @@ test("a program the work allowance stops after its analysis is rejected, never a
     },
   ]);
   assert.ok(request !== null);
-  const outcomes = new Set<string>();
+  const ends = new Set<string>();
   for (let allowance = 20; allowance <= 4_000; allowance += 20) {
     const outcome = insideSlice(() =>
       withTestAllowance(allowance, () => CORE_BACKEND.analyze(request)),
     );
-    if (outcome === null) outcomes.add("rejected");
-    else {
-      assert.doesNotThrow(() => outcome.facts(), String(allowance));
-      outcomes.add("accepted");
-    }
+    assert.ok(outcome !== null, `${allowance}: never outside the slice for its size`);
+    assert.doesNotThrow(() => outcome.facts(), String(allowance));
+    const codes = outcome.checked.diagnostics.flat().map((d) => `${d.severity} ${d.code}`);
+    assert.ok(!codes.some((code) => code.startsWith("error")), `${allowance}: no compile error`);
+    ends.add(codes.includes("warning TSV076") ? "stopped" : "analysed");
+    // the written store's check, the warning's or the stop's
+    assert.ok(
+      [...outcome.checked.runtimeChecks.keys()].some(
+        (site) => site.kind === "letStatement" && site.name.name === "xs",
+      ),
+      `${allowance}: the check of 'xs'`,
+    );
   }
-  assert.deepEqual([...outcomes].sort(), ["accepted", "rejected"]);
+  assert.deepEqual([...ends].sort(), ["analysed", "stopped"]);
 });
 
 /** A type check result as JSON-safe data, its syntax keys by their spans. */

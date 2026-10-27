@@ -1,7 +1,11 @@
 import type { DiagnosticCode, DiagnosticCodeSeverity } from "./diagnostic-codes.js";
 import { createSourceSpan, type SourceSpan } from "./source.js";
 
-export const DiagnosticSeverity = { Error: "error", Warning: "warning" } as const;
+/**
+ * How strongly a diagnostic speaks: an error stops the compile; a warning and an information compile, the information
+ * a note the editor shows at its information level (the new checker's "not checked (budget)", TABLE r4.54).
+ */
+export const DiagnosticSeverity = { Error: "error", Warning: "warning", Info: "info" } as const;
 
 export type DiagnosticSeverity = (typeof DiagnosticSeverity)[keyof typeof DiagnosticSeverity];
 

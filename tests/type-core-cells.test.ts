@@ -472,7 +472,7 @@ test("a warning names the earliest admitted store of its offending kind, after a
     const warning = analyseCore(request).diagnostics.find(
       (diagnostic) => diagnostic.site.start === site,
     );
-    assert.ok(warning?.class === "warning-runtime-check", name);
+    assert.ok(warning?.class === "warning-runtime-check" && warning.kind !== "budget", name);
     assert.deepEqual(
       warning.provenance.writers.map((found) => found.start),
       [writer],

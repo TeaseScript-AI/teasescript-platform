@@ -27,7 +27,8 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
 
 /**
  * The context words in the order a warning names the first (§3.4): the words of §3's steps 1 and 2, which are decided
- * first, then those of the exact path's conditions X1 to X7, then A7's `later`.
+ * first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the analysis
+ * stopped before deciding (B1, D4; S3 §5).
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -42,6 +43,7 @@ export const CONTEXT_WORDS = [
   "branch",
   "handler",
   "later",
+  "budget",
 ] as const;
 
 export type ContextWord = (typeof CONTEXT_WORDS)[number];
@@ -130,6 +132,14 @@ export function marksOf(from: readonly Item[]): {
 /** The mark of an element read that may find no element (TABLE §1 M): not a value, so no consumer checks it. */
 export const EMPTY: Item = Object.freeze(makeItem("empty"));
 
+/**
+ * Every value's answer once the analysis stopped (D4 a′): `unknown` with the reason `budget`, the terminal contract
+ * every key has, so each consumer owes its check when the script runs and no further proof is made.
+ */
+export const STOPPED: readonly Item[] = Object.freeze([
+  makeItem("unknown", null, { reasons: REASON.budget, context: "budget", cert: "pos" }),
+]);
+
 /** The identity of a writer, as `kind@file:offset` with the file's index. */
 export function writerKey(writer: Writer): string {
   return `${writer.kind}@${writer.file}:${writer.start}`;
@@ -151,14 +161,15 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 
 /**
  * The word of one unknown's reasons (TABLE §1 r4.23): the first present in the rank `external` (`unknown`), `opaque`
- * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`); `budget` comes last and has no word of its
- * own yet (B1, the budget's fallback), nor has an unknown without reasons: both say `unknown`.
+ * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
+ * reasons says `unknown`.
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
   if ((reasons & REASON.opaque) !== 0) return "unmodelled";
   if ((reasons & REASON.deferred) !== 0) return "deferred-parameter";
   if ((reasons & REASON.missing) !== 0) return "missing";
+  if ((reasons & REASON.budget) !== 0) return "budget";
   return "unknown";
 }
 
