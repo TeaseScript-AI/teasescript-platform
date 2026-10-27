@@ -56,6 +56,7 @@ import {
   makeItem,
   mergeItems,
   REASON,
+  STOPPED,
   weaken,
   type Item,
   type ItemTag,
@@ -529,7 +530,7 @@ export class Values {
 
   /** The value of a place at a node at a path, by the place's kind. */
   *#valueAt(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
-    this.pass.solver.enterRead();
+    if (!this.pass.solver.enterRead()) return STOPPED;
     try {
       const { program, contract } = this.pass;
       if (program.speakerPlaces.has(value))

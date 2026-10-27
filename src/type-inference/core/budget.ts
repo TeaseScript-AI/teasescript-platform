@@ -326,9 +326,9 @@ export class WorkLedger {
  * 24.18.0's default stack (984 KiB) such a chain overflowed at 2,552 levels, alike on the laptop worker and the agent
  * host, for index, property, `.first`, deep-literal and untyped reads; 1,024 is about 40 % of that, leaving the stack
  * a compile is called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it
- * (`compiler.core-read-depth`).
+ * (`compiler.core-read-depth`). After a stop, a read past it is not settled (`Solver.enterRead`).
  */
-const READ_DEPTH_LIMIT = 1_024;
+export const READ_DEPTH_LIMIT = 1_024;
 
 /** Throws `BudgetExhausted` when a read chain `depth` levels deep exceeds the read-depth limit. */
 export function checkReadDepth(depth: number): void {

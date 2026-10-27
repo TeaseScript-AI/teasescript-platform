@@ -386,15 +386,10 @@ export class Consumers {
     const { contract, values } = this.pass;
     const own = rest.length === 0 ? this.#literalKind(value) : null;
     if (own !== null) return own;
-    // (a read chain past the read depth stops here as anywhere: unsettled, the next source asked)
+    // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
-      try {
-        const items = this.#run(work());
-        return items.some(unsettledItem) ? null : items;
-      } catch (error) {
-        if (!(error instanceof BudgetExhausted)) throw error;
-        return null;
-      }
+      const items = this.#run(work());
+      return items.some(unsettledItem) ? null : items;
     };
     const found =
       (this.pass.program.work.stopped === null

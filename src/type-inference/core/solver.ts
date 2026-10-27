@@ -1,4 +1,4 @@
-import { checkReadDepth, joinParts, keepText, type WorkLedger } from "./budget.js";
+import { checkReadDepth, joinParts, keepText, READ_DEPTH_LIMIT, type WorkLedger } from "./budget.js";
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
 
 /*
@@ -262,11 +262,14 @@ export class Solver {
 
   /**
    * A read chain one level deeper in the running frame (`checkReadDepth`): a frame runs from the solver's loop, so its
-   * native calls are its own chain's, and a demand it yields starts a new frame at none.
+   * native calls are its own chain's, and a demand it yields starts a new frame at none. Past the read depth the
+   * analysis stops; after a stop, the deeper read is not settled (`false`: its generator answers `STOPPED`).
    */
-  public enterRead(): void {
+  public enterRead(): boolean {
+    if (this.#work.stopped !== null && this.#readDepth >= READ_DEPTH_LIMIT) return false;
+    checkReadDepth(this.#readDepth + 1);
     this.#readDepth += 1;
-    checkReadDepth(this.#readDepth);
+    return true;
   }
 
   /** The read chain one level shallower again. */

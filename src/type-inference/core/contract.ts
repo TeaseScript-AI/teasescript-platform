@@ -69,6 +69,7 @@ import {
   mergeItems,
   reasonContext,
   REASON,
+  STOPPED,
   weaken,
   type ContextWord,
   type IngressNode,
@@ -1589,7 +1590,7 @@ export class Contract {
 
   /** The kinds at a path of a value, by the value's kind. */
   *#valueAt(value: PlaceId, rest: readonly string[]): Work<readonly Item[]> {
-    this.pass.solver.enterRead();
+    if (!this.pass.solver.enterRead()) return STOPPED;
     try {
       if (rest.length === 0) return yield* this.contractOfValue(value);
       const { program, guards } = this.pass;
@@ -1646,7 +1647,7 @@ export class Contract {
 
   /** The kinds a value can have at any point, mirroring the value side's dispatch. */
   public *contractOfValue(value: PlaceId): Work<readonly Item[]> {
-    this.pass.solver.enterRead();
+    if (!this.pass.solver.enterRead()) return STOPPED;
     try {
       const { program, guards } = this.pass;
       program.work.charge("invSteps");
