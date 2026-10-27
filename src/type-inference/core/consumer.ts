@@ -36,7 +36,7 @@ import { closedType, type Answers } from "./answers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
-import { coreMessage, messageSource, type MessageSource } from "./messages.js";
+import { coreMessage, messageSource, reported, type MessageSource } from "./messages.js";
 import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
 
 /*
@@ -441,7 +441,9 @@ export function coreCheckResult(
     if (diagnostic.kind === "operator")
       throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
     sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
-    diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
+    // (a warning on a line that never runs: TSV065 reports the line, #1195)
+    if (reported(diagnostic))
+      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
   }
   const { checks, core } = runtimeChecks(answers, index, request);
   // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets

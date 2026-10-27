@@ -30,6 +30,7 @@ import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carr
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { nodeOf, SliceIndex } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { reported as reportedByCompiler } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -338,13 +339,25 @@ test("every positive-list record the candidate route reaches plans and runs as i
             diagnostic.message,
         )
         .sort();
-    assert.deepEqual(
-      unmatchedDiagnostics(reported(result), record.expected.diagnostics),
-      [],
-      record.name,
-    );
     const request = coreRequest(record.files);
     assert.ok(request !== null, record.name);
+    // (a warning on a line that never runs is the record's, but the compiler reports the line instead, #1195)
+    const silent = analyseCore(request).diagnostics.filter(
+      (diagnostic) => !reportedByCompiler(diagnostic),
+    );
+    const expected = [...record.expected.diagnostics];
+    for (const quiet of silent) {
+      const at = expected.findIndex(
+        (wanted) =>
+          wanted.class === quiet.class &&
+          wanted.kind === quiet.kind &&
+          wanted.site.offset === quiet.site.start &&
+          wanted.site.end === quiet.site.end,
+      );
+      assert.ok(at >= 0, record.name);
+      expected.splice(at, 1);
+    }
+    assert.deepEqual(unmatchedDiagnostics(reported(result), expected), [], record.name);
     assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
     assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
     const single = inBothOrders(() => candidate(source));
