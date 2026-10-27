@@ -91,6 +91,11 @@ import type { Work } from "./solver.js";
  * meets external data, admission's boundary check of its ingress (C9). Saves (C8) are the storage module's.
  */
 
+type Operation = Extract<ValueConstraint, { kind: "operation" }>;
+
+/** How deep a chain of `+` a text-join fix opens (`Consumers.#chain`); a deeper operand stays whole. */
+const CHAIN_DEPTH = 256;
+
 const BOOLEAN: ReadonlySet<ItemTag> = new Set(["boolean"]);
 const TEXT: ReadonlySet<ItemTag> = new Set(["string"]);
 const ITERABLE: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "range"]);
@@ -676,10 +681,64 @@ export class Consumers {
     };
   }
 
-  /** The names of the properties a value's or a key's objects have (S3 §1), in the order the search finds them. */
-  #propertiesOf(start: PropertyNamesTask): string[] {
-    return [...propertyNames(this.pass, (work) => this.#run(work), start)];
+  /**
+   * The names of the properties a value's or a key's objects have (S3 §1), in the order the search finds them: once per
+   * place a value copies, so every read of one place asks once.
+   */
+  #propertiesOf(of: { readonly key: Key } | { readonly value: PlaceId }): readonly string[] {
+    const place = "key" in of ? of.key : (this.pass.contract.copiedKey(of.value) ?? of.value);
+    let found = this.#names.get(place);
+    if (found === undefined) {
+      const start: PropertyNamesTask = "key" in of ? of : { value: of.value, path: [] };
+      found = [...propertyNames(this.pass, (work) => this.#run(work), start)];
+      this.#names.set(place, found);
+    }
+    return found;
   }
+
+  readonly #names = new Map<Key | PlaceId, readonly string[]>();
+
+  /**
+   * The property `${...}` shows of an object instead (#1195's decided text): the first, in its literal's order, whose
+   * value it shows, of the earliest literal in source order the value may hold; `null` without one. Once per place.
+   */
+  #shownProperty(value: PlaceId): string | null {
+    const { program, contract } = this.pass;
+    const place = contract.copiedKey(value) ?? value;
+    const known = this.#shown.get(place);
+    if (known !== undefined) return known;
+    const first: { site: SourceSite | null; names: Iterable<string> } = { site: null, names: [] };
+    propertyNames(
+      this.pass,
+      (work) => this.#run(work),
+      { value, path: [] },
+      (literal, names) => {
+        const site = program.place(literal).site;
+        if (
+          site !== null &&
+          (first.site === null ||
+            site.file < first.site.file ||
+            (site.file === first.site.file && site.start < first.site.start))
+        ) {
+          first.site = site;
+          first.names = names;
+        }
+      },
+    );
+    let found: string | null = null;
+    for (const step of first.names) {
+      program.work.charge("checks");
+      const kinds = withoutEmpty(this.#run(contract.contractOfValueAt(value, [step])));
+      if (kinds.length > 0 && kinds.every((item) => SHOWN.some((kind) => kind === item.tag))) {
+        found = propertyName(step);
+        break;
+      }
+    }
+    this.#shown.set(place, found);
+    return found;
+  }
+
+  readonly #shown = new Map<Key | PlaceId, string | null>();
 
   /** The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it. */
   #storeSteps(root: PlaceId, path: readonly string[]): StoreStep[] {
@@ -734,48 +793,81 @@ export class Consumers {
 
   #directSites: Map<string, SourceSite> | null = null;
 
-  /** The `+` operations by their result and by each operand they take, made on a `+` diagnostic's first need. */
+  /**
+   * The `+` operations by their result and by each operand they take, and each chain's operands by its outermost `+`
+   * and each `+` its outermost, made on a `+` diagnostic's first need (`#chain`).
+   */
   #plus: {
-    readonly byResult: Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>;
-    readonly byOperand: Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>;
+    readonly byResult: Map<PlaceId, Operation>;
+    readonly byOperand: Map<PlaceId, Operation>;
+    readonly tops: Map<Operation, Operation>;
+    readonly chains: Map<Operation, readonly SourceSite[]>;
   } | null = null;
 
   /**
    * The operands of the chain of `+` an operation stands in, left to right (#1195's text join: `"You have " + score +
    * " points"` as one text): an operand that is a `+` with text among its own operands is opened, any other kept whole.
+   * Each chain is walked once, each step charged, so the warnings of one chain share it.
    */
-  #chain(c: Extract<ValueConstraint, { kind: "operation" }>): SourceSite[] {
+  #chain(c: Operation): readonly SourceSite[] {
     const { program } = this.pass;
     if (this.#plus === null) {
-      const byResult = new Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>();
-      const byOperand = new Map<PlaceId, Extract<ValueConstraint, { kind: "operation" }>>();
+      const byResult = new Map<PlaceId, Operation>();
+      const byOperand = new Map<PlaceId, Operation>();
       for (const constraint of program.constraints)
         if (constraint.kind === "operation" && operatorOf(constraint) === "+") {
+          program.work.charge("indexSteps");
           byResult.set(constraint.result, constraint);
           for (const argument of constraint.arguments) byOperand.set(argument, constraint);
         }
-      this.#plus = { byResult, byOperand };
+      this.#plus = { byResult, byOperand, tops: new Map(), chains: new Map() };
     }
-    const { byResult, byOperand } = this.#plus;
+    const { byResult, byOperand, tops, chains } = this.#plus;
+    // the outermost `+`, each step's own remembered
+    const climbed: Operation[] = [];
     let top = c;
-    for (let depth = 0; depth < 256; depth += 1) {
+    for (
+      let known = tops.get(top);
+      known === undefined && climbed.length < CHAIN_DEPTH;
+      known = tops.get(top)
+    ) {
+      program.work.charge("indexSteps");
+      climbed.push(top);
       const outer = byOperand.get(top.result);
       if (outer === undefined) break;
       top = outer;
     }
-    const leaves = (
-      operation: Extract<ValueConstraint, { kind: "operation" }>,
-      depth: number,
-    ): SourceSite[] =>
-      operation.arguments.flatMap((argument) => {
+    top = tops.get(top) ?? top;
+    for (const step of climbed) tops.set(step, top);
+    const found = chains.get(top);
+    if (found !== undefined) return found;
+    // whether each `+` below the top has text among its operands, once per `+`, then one walk that opens those
+    const text = new Map<Operation, boolean>();
+    const hasText = (operation: Operation, depth: number): boolean => {
+      const known = text.get(operation);
+      if (known !== undefined) return known;
+      program.work.charge("indexSteps");
+      const opened = operation.arguments.some((argument) => {
         const inner = byResult.get(argument);
-        if (inner !== undefined && depth < 256) {
-          const opened = leaves(inner, depth + 1);
-          if (opened.some((site) => program.textAt(site).startsWith('"'))) return opened;
-        }
-        return [this.#own(argument, operation.site)];
+        return inner !== undefined && depth < CHAIN_DEPTH
+          ? hasText(inner, depth + 1)
+          : program.textAt(this.#own(argument, operation.site)).startsWith('"');
       });
-    return leaves(top, 0);
+      text.set(operation, opened);
+      return opened;
+    };
+    const leaves: SourceSite[] = [];
+    const walk = (operation: Operation, depth: number): void => {
+      for (const argument of operation.arguments) {
+        const inner = byResult.get(argument);
+        if (inner !== undefined && depth < CHAIN_DEPTH && hasText(inner, depth + 1))
+          walk(inner, depth + 1);
+        else leaves.push(this.#own(argument, operation.site));
+      }
+    };
+    walk(top, 0);
+    chains.set(top, leaves);
+    return leaves;
   }
 
   /**
@@ -2000,7 +2092,7 @@ export class Consumers {
       const kinds = this.#kindsOf(value, node);
       // (an object's first property, which its sentence shows instead)
       const property = kinds.some((item) => item.tag === "object")
-        ? (this.#propertiesOf({ value, path: [] })[0] ?? null)
+        ? this.#shownProperty(value)
         : null;
       this.#consume(
         value,
@@ -2076,7 +2168,8 @@ export class Consumers {
     // D1: an operand's rule names the kinds its place takes; the operation's, none
     // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
     const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
-    const rule = (index: number | null): DiagnosticRule => ({
+    const text = operands.some((items) => items.some((item) => item.tag === "string"));
+    const rule = (index: number | null, pair: readonly ItemTag[] = []): DiagnosticRule => ({
       rule: "operator",
       operator: c.contract.name,
       operand: index !== null,
@@ -2087,7 +2180,8 @@ export class Consumers {
               (kind): kind is ValueKind => kind !== "unknown" && kind !== "non-null",
             ),
       operands: c.arguments.map((_, index) => operandSite(index)),
-      chain: operator === "+" ? this.#chain(c) : [],
+      pair,
+      chain: operator === "+" && text ? this.#chain(c) : [],
     });
     // an operand's items its domain takes; none for the operation
     const taken = (index: number | null): Item[] => {
@@ -2123,7 +2217,10 @@ export class Consumers {
         this.#error(
           "operator",
           c.site,
-          rule(null),
+          rule(
+            null,
+            operands.map((items) => items[0]!.tag),
+          ),
           operands.map((items) => items[0]!.tag),
         );
       else
@@ -2142,6 +2239,7 @@ export class Consumers {
       target: string,
       against: readonly RequiredKind[],
       index: number | null,
+      pair: readonly ItemTag[] = [],
     ): void =>
       this.#warning(
         "operator",
@@ -2154,7 +2252,7 @@ export class Consumers {
           against,
           `check the operand of ${c.contract.name} when it runs`,
         ),
-        rule(index),
+        rule(index, pair),
         taken(index),
       );
     // the kind obligations (§4: one per offending kind of an operand; every operand that may be null owes its own
@@ -2177,13 +2275,15 @@ export class Consumers {
       const key = joinParts(index, item.fan === undefined ? item.tag : `fan ${item.fan}`);
       if (!offending.has(key)) offending.set(key, [index, item]);
     };
-    let operation: [Item, readonly RequiredKind[]] | null = null;
+    // (the operation's offending item, what it owes, and its combination's kinds, which its fixes name)
+    let operation: [Item, readonly RequiredKind[], readonly ItemTag[]] | null = null;
     for (const [at, items] of combinations.entries()) {
       if (fitted[at] === "row" || items.some((item) => item.tag === "null")) continue;
       if (fitted[at] === "value") {
         operation ??= [
           items.find((item) => item.cert === "pos") ?? items[0]!,
           ["calendarDuration"],
+          items.map((item) => item.tag),
         ];
         continue;
       }
@@ -2195,7 +2295,12 @@ export class Consumers {
           .map((_, index) => index)
           .filter((index) => !fitsBeside(index, items[index]!.tag));
       if (places.length === 1) offend(places[0]!, items[places[0]!]!);
-      else operation ??= [items.find((item) => item.cert === "pos") ?? items[0]!, domain(0)];
+      else
+        operation ??= [
+          items.find((item) => item.cert === "pos") ?? items[0]!,
+          domain(0),
+          items.map((item) => item.tag),
+        ];
     }
     operands.forEach((items, index) => {
       const unknown = items.find((item) => isOpaque(item) || isExternal(item));
@@ -2204,8 +2309,8 @@ export class Consumers {
     for (const [index, item] of offending.values())
       owe(item, operandSite(index), operandText(index), domain(index), index);
     if (operation !== null) {
-      const [item, against] = operation;
-      owe(item, c.site, program.textAt(c.site), against, null);
+      const [item, against, pair] = operation;
+      owe(item, c.site, program.textAt(c.site), against, null, pair);
     }
     operands.forEach((items, index) => {
       const nullItem = items.find((item) => item.tag === "null");
@@ -2326,7 +2431,7 @@ export class Consumers {
             receiver: receiverText,
             property: propertyName(property),
             store: null,
-            properties: this.#propertiesOf({ value: c.owner, path: [] }),
+            properties: [...this.#propertiesOf({ value: c.owner })],
           },
           [],
         );
@@ -3020,7 +3125,7 @@ export class Consumers {
               receiver: receiverText,
               property: propertyName(property),
               store: presence.literal === null ? null : at,
-              properties: this.#propertiesOf({ key: d.recv! }),
+              properties: [...this.#propertiesOf({ key: d.recv! })],
             },
             [],
           );

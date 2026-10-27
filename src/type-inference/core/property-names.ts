@@ -25,6 +25,8 @@ export function propertyNames(
   pass: CorePass,
   run: <T>(work: Work<T>) => T,
   start: PropertyNamesTask,
+  /** Each object of a literal the value holds, with its names in the literal's order (a first property's question). */
+  objects?: (literal: PlaceId, names: ReadonlySet<string>) => void,
 ): ReadonlySet<string> {
   const { program, contract, definitions } = pass;
   const names = new Set<string>();
@@ -67,8 +69,10 @@ export function propertyNames(
     if ("literal" in task) {
       const index = contract.literalIndex(task.literal);
       const at = pathText(task.path);
-      for (const object of index.objects.get(at)?.list ?? [])
+      for (const object of index.objects.get(at)?.list ?? []) {
+        objects?.(task.literal, object.names);
         for (const name of object.names) names.add(propertyName(name));
+      }
       // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
       // prefixes, or by the stands of a map that has fewer (a deep path beside few stands, a shallow one beside many)
       for (const map of [index.reads, index.others])
