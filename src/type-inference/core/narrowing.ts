@@ -6,7 +6,7 @@ import { caseValueKey } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinParts, keepText, keptArray, keptParts, textUnits, type WorkLedger } from "./budget.js";
+import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
 import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
@@ -91,12 +91,30 @@ function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof co
   return conditionShape(node);
 }
 
-/** A literal index's or case's key (`caseValueKey`), the parentheses and sign it walks charged. */
+/**
+ * A literal index's or case's key (`caseValueKey`), the parentheses and sign it walks charged, and the literal's text it
+ * reads and makes charged as a kept text is (TABLE r4.58).
+ */
 function literalKey(expression: Expression, work: WorkLedger): string | undefined {
   const node = peel(expression, work);
   if (node.kind === "unaryExpression" && (node.operator === "-" || node.operator === "+"))
     peel(node.operand, work);
-  return caseValueKey(node);
+  // (a string's parts, read up to its first interpolation)
+  if (node.kind === "stringLiteral") work.charge("indexSteps", node.parts.length);
+  const key = caseValueKey(node);
+  if (key !== undefined) keepText(work, key.length);
+  return key;
+}
+
+/**
+ * An expression's operands (`expressionChildren`), the parts it walks and gives none for charged as well: a string's
+ * texts, a tag query's tags and operators.
+ */
+function childrenOf(expression: Expression, work: WorkLedger): readonly Expression[] {
+  if (expression.kind === "stringLiteral") work.charge("indexSteps", expression.parts.length);
+  else if (expression.kind === "tagQueryExpression")
+    work.charge("indexSteps", expression.steps.length);
+  return expressionChildren(expression);
 }
 
 /** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
@@ -608,6 +626,8 @@ export class NarrowingIndex {
       region: OperandSpan | null = null,
       window: OperandSpan | null = null,
     ): void => {
+      // (one unit per definition asked, `#operandRegions` among the askers)
+      work.charge("indexSteps");
       if (!program.reached(node)) return;
       const operand = peel(tested, work);
       const path = stablePath(program, file, operand);
@@ -814,7 +834,7 @@ export class NarrowingIndex {
           );
           continue;
         }
-        for (const child of each(work, "indexSteps", expressionChildren(peel(expression, work))))
+        for (const child of each(work, "indexSteps", childrenOf(peel(expression, work), work)))
           pending.push({ expression: child, and: null, or: null });
       }
     }
@@ -1019,8 +1039,6 @@ function caseForm(
   if (key === "null") return ONLY_NULL;
   if (key.startsWith("string:")) return { kind: "is", kinds: ["string"] };
   if (!key.startsWith("number:")) return null;
-  // (a literal's own text, charged)
-  work.charge("indexSteps", textUnits(key.length));
   return Number.isInteger(Number(key.substring("number:".length)))
     ? { kind: "is", kinds: ["integer"] }
     : { kind: "is", kinds: ["number"], fractional: true };

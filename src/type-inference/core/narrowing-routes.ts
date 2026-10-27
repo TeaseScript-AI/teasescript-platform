@@ -473,6 +473,8 @@ export class NarrowingRoutes {
    * applicability, over the statements holding its own kills and their ancestors.
    */
   #killLayer(key: Key, calls: boolean): Layer {
+    // (one unit per prefix the recursion climbs)
+    this.#work.charge("indexSteps");
     const memo = joinParts(key, calls ? "calls" : "leaves");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
