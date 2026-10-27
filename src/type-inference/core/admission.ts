@@ -158,11 +158,22 @@ function cyclesOf(
   return out;
 }
 
-/** `#inheritedAt`'s signal: a scan needs another place's inherited type first, taken before it is scanned again. */
-class Unresolved extends Error {
-  public constructor(readonly key: Key) {
-    super(`unresolved ${key}`);
-  }
+/**
+ * A computation that may need an unwritten place's inherited type at a path first (`#inheritedAt`): it yields that place
+ * and path's key and is resumed with the type, so a scan that waits on another stops where it stands and goes on from
+ * there, never taken again from its start.
+ */
+type Inheriting<T> = Generator<Key, T, TypeTerm | null>;
+
+/** `#inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
+interface Waiting {
+  readonly key: Key;
+  readonly steps: Inheriting<{
+    readonly copied: TypeTerm | null;
+    readonly nullable: boolean;
+  } | null> | null;
+  /** Its cycle of decisions when it stopped (`#cycleOf`): a scan whose cycle grew meanwhile is taken again. */
+  cycle: string;
 }
 
 /**
@@ -576,6 +587,8 @@ export class Admission {
   readonly #inherited = new Map<Key, TypeTerm | null>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`#cut`): a union-find. */
   readonly #cycles = new Map<Key, Key>();
+  /** Each cycle's size, by its root (`#cycleOf`). */
+  readonly #cycleSizes = new Map<Key, number>();
   /**
    * The deepest path a written type can reach through copies (`#inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
@@ -755,13 +768,15 @@ export class Admission {
    * path, through whatever copy of a written binding it comes (a chain of copies, a projection, a selected carrier, a
    * literal, a parameter's default), at every collection level: `#scan`'s copied type, with the place's own `null`
    * where its decision is nullable beside the copy (`optionalOf`), `null` where a value decides the path or nothing does. A copy of the place carries that type there. Once per place and path, iteratively: a scan
-   * that needs another place's type first stops (`Unresolved`) and is taken again after it, so a chain of copies never
-   * deepens the native stack. A scan that needs the very place and path whose own scan is waiting closes a cycle of
-   * copies: those waiting from there on are joined (`#cycles`), and a copy between two of them carries no written type
-   * (`#cut`): a cycle of copies decides nothing written, whichever of its places is asked first. A place at another path
-   * is no cycle (`a.q = a`: `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`#reach`) a place
-   * inherits only what its path's prefix there leaves below it (an unrestricted part), so a copy nesting a place in
-   * itself never deepens without end.
+   * that needs another place's type first is suspended where it stands (`Inheriting`) and goes on from there once that
+   * type is known, so a chain of copies never deepens the native stack and a scanned prefix is never scanned again for a
+   * sibling resolved later (the owner's reviewer's F1 on #1049, TABLE r4.80). A scan that needs the very place and path
+   * whose own scan is waiting closes a cycle of copies: those waiting from there on are joined (`#cycles`), and a copy
+   * between two of them carries no written type (`#cut`): a cycle of copies decides nothing written, whichever of its
+   * places is asked first. A scan whose own cycle grew while it waited is taken again from its start, since the cut may
+   * now drop a copy it already read; nothing else changes what it read. A place at another path is no cycle (`a.q = a`:
+   * `a.q.p` needs `a.p`). Past the deepest path a written type reaches (`#reach`) a place inherits only what its path's
+   * prefix there leaves below it (an unrestricted part), so a copy nesting a place in itself never deepens without end.
    */
   #inheritedAt(place: PlaceId, path: readonly string[]): TypeTerm | null {
     if (path.length > this.#reach) {
@@ -771,46 +786,65 @@ export class Admission {
     const key = keyOf(place, path);
     const known = this.#inherited.get(key);
     if (known !== undefined) return known;
-    if (this.#resolving) throw new Unresolved(key);
+    // (a resolution resolves every key its scans wait on itself, so none starts inside another)
+    if (this.#resolving)
+      throw new Error(`The inherited type of '${key}' was asked while resolving.`);
     this.#resolving = true;
     try {
-      const pending: Key[] = [key];
+      const scan = (next: Key): Waiting => {
+        const inputs = this.#inputs(keyPlace(next), keyPath(next));
+        return {
+          key: next,
+          steps: inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next),
+          cycle: "",
+        };
+      };
+      const pending: Waiting[] = [scan(key)];
       // (the positions of the waiting scans, and the last cycle closed)
       const waiting = new Map<Key, number>([[key, 0]]);
       let closed = "";
+      // (the type the top scan waited on, given to it as it goes on)
+      let given: TypeTerm | null = null;
+      // the top scan's type is taken, the scan below it goes on, or is taken again where its cycle grew meanwhile
+      const resolved = (term: TypeTerm | null): void => {
+        const done = pending.pop()!;
+        keepText(this.#work, done.key.length);
+        this.#inherited.set(done.key, term);
+        waiting.delete(done.key);
+        const below = pending.at(-1);
+        if (below !== undefined && below.cycle !== this.#cycleOf(below.key))
+          pending[pending.length - 1] = scan(below.key);
+        given = term;
+      };
       while (pending.length > 0) {
-        const next = pending[pending.length - 1]!;
-        try {
-          const inputs = this.#inputs(keyPlace(next), keyPath(next));
-          const found = inputs === null ? null : this.#scan(inputs.direct, inputs.prefixes, next);
-          keepText(this.#work, next.length);
-          this.#inherited.set(
-            next,
-            found === null ? null : optionalOf(found.copied, found.nullable),
-          );
-          pending.pop();
-          waiting.delete(next);
-        } catch (error) {
-          if (!(error instanceof Unresolved)) throw error;
-          const from = waiting.get(error.key);
-          if (from !== undefined) {
-            const cycle = joinParts(next, error.key);
-            // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
-            if (cycle === closed) {
-              keepText(this.#work, next.length);
-              this.#inherited.set(next, null);
-              pending.pop();
-              waiting.delete(next);
-              continue;
-            }
-            closed = cycle;
-            for (let index = from; index < pending.length; index += 1)
-              this.#join(pending[index]!, error.key);
+        const top = pending.at(-1)!;
+        // (a key no store reaches finds nothing)
+        const step =
+          top.steps === null ? { done: true as const, value: null } : top.steps.next(given);
+        given = null;
+        if (step.done === true) {
+          resolved(step.value === null ? null : optionalOf(step.value.copied, step.value.nullable));
+          continue;
+        }
+        const needed = step.value;
+        const from = waiting.get(needed);
+        if (from !== undefined) {
+          const cycle = joinParts(top.key, needed);
+          // (a scan that asks again across the cycle just closed inherits nothing: it never waits on itself twice)
+          if (cycle === closed) {
+            resolved(null);
             continue;
           }
-          waiting.set(error.key, pending.length);
-          pending.push(error.key);
+          closed = cycle;
+          for (let index = from; index < pending.length; index += 1)
+            this.#join(pending[index]!.key, needed);
+          // (its cycle grew: taken again, as every scan it joined is when it goes on)
+          pending[pending.length - 1] = scan(top.key);
+          continue;
         }
+        top.cycle = this.#cycleOf(top.key);
+        waiting.set(needed, pending.length);
+        pending.push(scan(needed));
       }
     } finally {
       this.#resolving = false;
@@ -819,20 +853,55 @@ export class Admission {
   }
 
   /**
+   * What `from` inherits at `path` (`#inheritedAt`) as a scan asks it: known, or the key it waits on yielded, past the
+   * deepest path a written type reaches its path's prefix there.
+   */
+  *#inheritedSteps(from: PlaceId, path: readonly string[]): Inheriting<TypeTerm | null> {
+    if (path.length > this.#reach) {
+      const above = yield* this.#inheritedSteps(from, path.slice(0, this.#reach));
+      return above === null ? null : permittedAt(above, path.slice(this.#reach));
+    }
+    const key = keyOf(from, path);
+    const known = this.#inherited.get(key);
+    return known !== undefined ? known : yield key;
+  }
+
+  /**
    * The written type a copy of `from` at `path` carries into the decision of `into`: what `from` inherits there
    * (`#inheritedAt`), none where the two wait on each other through copies (`#cut`).
    */
-  #inheritedInto(from: PlaceId, path: readonly string[], into: Key | null): TypeTerm | null {
+  *#inheritedInto(
+    from: PlaceId,
+    path: readonly string[],
+    into: Key | null,
+  ): Inheriting<TypeTerm | null> {
     // (past the deepest path a written type reaches, the place's path there is what it waits on, `#inheritedAt`)
     const source = keyOf(from, path.length > this.#reach ? path.slice(0, this.#reach) : path);
     if (into !== null && this.#cut(into, source)) return null;
-    const term = this.#inheritedAt(from, path);
+    const term = yield* this.#inheritedSteps(from, path);
     return into !== null && this.#cut(into, source) ? null : term;
+  }
+
+  /** A computation run outside a resolution: each inherited type it waits on resolved by `#inheritedAt` first. */
+  #drive<T>(steps: Inheriting<T>): T {
+    let given: TypeTerm | null = null;
+    for (;;) {
+      const step = steps.next(given);
+      if (step.done === true) return step.value;
+      given = this.#inheritedAt(keyPlace(step.value), keyPath(step.value));
+    }
   }
 
   /** Whether two decisions wait on each other through copies (`#cycles`). */
   #cut(a: Key, b: Key): boolean {
     return this.#cycles.has(a) && this.#cycles.has(b) && this.#root(a) === this.#root(b);
+  }
+
+  /** A decision's cycle as it stands (`#cycles`): its root and size, empty outside every cycle. */
+  #cycleOf(key: Key): string {
+    if (!this.#cycles.has(key)) return "";
+    const root = this.#root(key);
+    return `${this.#cycleSizes.get(root)!}:${root}`;
   }
 
   #root(key: Key): Key {
@@ -847,10 +916,17 @@ export class Admission {
   }
 
   #join(a: Key, b: Key): void {
-    for (const key of [a, b]) if (!this.#cycles.has(key)) this.#cycles.set(key, key);
+    for (const key of [a, b])
+      if (!this.#cycles.has(key)) {
+        this.#cycles.set(key, key);
+        this.#cycleSizes.set(key, 1);
+      }
     const x = this.#root(a);
     const y = this.#root(b);
-    if (x !== y) this.#cycles.set(x, y);
+    if (x === y) return;
+    this.#cycles.set(x, y);
+    this.#cycleSizes.set(y, this.#cycleSizes.get(y)! + this.#cycleSizes.get(x)!);
+    this.#cycleSizes.delete(x);
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
@@ -1193,7 +1269,7 @@ export class Admission {
       return null;
     }
     if (tags === null) {
-      const found = this.#scan(direct, prefixes, key);
+      const found = this.#drive(this.#scan(direct, prefixes, key));
       if (found !== null)
         ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
       else {
@@ -1428,11 +1504,11 @@ export class Admission {
    * with what it decides: a lazy merge of the direct stores and the prefixes' whole stores and adds, each read only as
    * far as the scan goes; `null` where none decides.
    */
-  #scan(
+  *#scan(
     direct: readonly Candidate[],
     prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[],
     into: Key,
-  ): {
+  ): Inheriting<{
     readonly tags: ItemTag[];
     readonly nullable: boolean;
     readonly byWritten: boolean;
@@ -1442,7 +1518,7 @@ export class Admission {
     readonly copied: TypeTerm | null;
     readonly decider: Definition;
     readonly site: SourceSite | null;
-  } | null {
+  } | null> {
     const { program, lists } = this.pass;
     const work = program.work;
     const seen = new Map<string, Item[]>();
@@ -1494,7 +1570,8 @@ export class Admission {
       const d = scans[best]!.ds[position]!;
       const at = scans[best]!.at(position);
       work.charge("checks", scans.length);
-      const first = d.value === undefined ? null : this.#earliestDecider(d.value, d.node, at, into);
+      const first =
+        d.value === undefined ? null : yield* this.#earliestDecider(d.value, d.node, at, into);
       const copied = first?.term ?? null;
       if (copied !== null) {
         // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
@@ -1623,7 +1700,7 @@ export class Admission {
         key,
         inputs === null || below
           ? null
-          : (this.#scan(inputs.direct, inputs.prefixes, key)?.site ?? null),
+          : (this.#drive(this.#scan(inputs.direct, inputs.prefixes, key))?.site ?? null),
       );
     }
     return this.#deciderSites.get(key)!;
@@ -2985,12 +3062,12 @@ export class Admission {
    * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
    * nothing on the path decides.
    */
-  #earliestDecider(
+  *#earliestDecider(
     value: PlaceId,
     node: FlowNode,
     at: readonly string[],
     into: Key | null,
-  ): { readonly term: TypeTerm | null; readonly site: SourceSite | null } | null {
+  ): Inheriting<{ readonly term: TypeTerm | null; readonly site: SourceSite | null } | null> {
     const { program, values } = this.pass;
     const stops = this.#stopsOf(value, node);
     const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
@@ -3011,7 +3088,7 @@ export class Admission {
         const term =
           stop.from === null
             ? permittedAt(stop.term!, rest)
-            : this.#inheritedInto(stop.from, rest, into);
+            : yield* this.#inheritedInto(stop.from, rest, into);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
         if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
@@ -3667,7 +3744,7 @@ export class Admission {
             const copied =
               identity === null
                 ? null
-                : (this.#earliestDecider(d.value, d.node, path, null)?.term ?? null);
+                : (this.#drive(this.#earliestDecider(d.value, d.node, path, null))?.term ?? null);
             const kinds = [...new Set(own.map(family))];
             if (copied !== null)
               first.set(at, {
