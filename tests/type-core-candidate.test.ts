@@ -673,39 +673,39 @@ test("the S7 oracle derives object admissions and default structures from their 
       "{stats: {n: integer}}",
     ],
     ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
-    // a copied written `object` stays any object below it, its value read whole, its neighbours restricted (#1215)
-    ["let typed: object = {n: 1}\nlet p = typed\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
+    // a copied written `object` stays any object below it, its neighbours restricted, no field read (#1215)
+    ['let typed: object = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n', "store", "{}"],
     [
-      "let typed: object? = {n: 1}\nlet p = typed\np = hostValue\nsay p.n\nexit\n",
+      'let typed: object? = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "null|{}",
     ],
     [
-      "let typed: object[] = [{n: 1}]\nlet p = typed\np = hostValue\nsay p[0].n\nexit\n",
+      'let typed: object[] = [{n: 1}]\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "list<{}>",
     ],
     [
-      "let typed: object = {n: 1}\nlet a = typed\nlet b = a\nlet p = b\np = hostValue\nsay p.n\nexit\n",
+      'let typed: object = {n: 1}\nlet a = typed\nlet b = a\nlet p = b\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "{}",
     ],
     [
-      "let typed: object = {n: 1}\nlet rec = {o: typed}\nlet p = rec.o\np = hostValue\nsay p.n\nexit\n",
+      'let typed: object = {n: 1}\nlet rec = {o: typed}\nlet p = rec.o\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "{}",
     ],
     [
-      "let typed: object = {n: 1}\nlet p = {o: typed}\np = hostValue\nsay p.o.n\nexit\n",
+      'let typed: object = {n: 1}\nlet p = {o: typed}\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "{o: {}}",
     ],
     [
-      "let typed: object = {n: 1}\nlet count: integer = 2\nlet p = {c: count, o: typed}\np = hostValue\nsay p.o.n\nexit\n",
+      'let typed: object = {n: 1}\nlet count: integer = 2\nlet p = {c: count, o: typed}\np = hostValue\nsay "DONE"\nexit\n',
       "store",
       "{c: integer, o: {}}",
     ],
-    ["let rec = {n: 1}\nlet p = rec\np = hostValue\nsay p.n\nexit\n", "store", "{n: integer}"],
+    ['let rec = {n: 1}\nlet p = rec\np = hostValue\nsay "DONE"\nexit\n', "store", "{n: integer}"],
     [
       "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
       "expected",
