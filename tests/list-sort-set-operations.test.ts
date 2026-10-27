@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compareCodePoints } from "../src/code-points.js";
 import { compileSource } from "../src/compiler.js";
 import { run } from "../src/runtime/engine.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
@@ -59,6 +60,23 @@ test("comparisons order text by code point, as sort does", () => {
     said('say "${"😀" < "ｚ"} ${"😀" <= "ｚ"} ${"😀" > "ｚ"} ${"😀" >= "ｚ"}"\nexit'),
     ["false false true true"],
   );
+});
+
+test("the text order ranks lone surrogates and split pairs by code point", () => {
+  // Each left text comes first: U+DBFF before U+1F600, U+D83D U+E000 before U+1F600, U+D83D before U+1F600, and U+DC00
+  // before U+E000.
+  const pairs: [string, string][] = [
+    ["\uDBFF", "😀"],
+    ["\uD83D\uE000", "😀"],
+    ["\uD83D", "😀"],
+    ["\uDC00", "\uE000"],
+  ];
+  for (const [left, right] of pairs)
+    assert.deepEqual(
+      [Math.sign(compareCodePoints(left, right)), Math.sign(compareCodePoints(right, left))],
+      [-1, 1],
+      JSON.stringify([left, right]),
+    );
 });
 
 test("shuffle reorders in place with the session RNG, drawing once per element after the first", () => {
