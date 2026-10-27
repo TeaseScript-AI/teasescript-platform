@@ -191,6 +191,8 @@ interface Treap {
 
 /** A place's copies of one identity at one path, with the locals of their ways (`#meeting`). */
 interface Group {
+  /** Its identity's key with its path (`#meeting`). */
+  readonly id: string;
   readonly root: PlaceId;
   readonly strip: readonly string[];
   readonly path: readonly string[];
@@ -205,16 +207,6 @@ interface Held {
   readonly locals: Locals | null;
 }
 
-/** A configuration of a place's groups in `#meeting`'s order: a node of their prefix trie. */
-interface Configuration {
-  readonly id: number;
-  readonly next: Map<string, Configuration>;
-  /** What its last group adds to the meeting of the groups before it (`#joined`). */
-  readonly added: readonly (readonly string[])[];
-  /** Per read identity and path, what the read meets of these groups (`#readMeets`). */
-  readonly reads: Map<string, readonly (readonly string[])[]>;
-}
-
 /** The groups of one `#meeting` call: those it listed, by their landings and contents, and those it asks. */
 interface Running {
   readonly lands: Map<string, { readonly path: readonly string[]; readonly groups: Group[] }>;
@@ -223,7 +215,7 @@ interface Running {
   /** The listed groups' contents beside their landings: points, and prefixes they may hold anything below. */
   readonly points: Map<string, Group[]>;
   readonly below: Map<string, Group[]>;
-  /** The groups asked: the widest, and those a known configuration served (a prefix of the call's order). */
+  /** The groups asked: those another place holds too (`#meeting`), or the one a pair asks. */
   readonly served: Group[];
   readonly loose: ReadonlyMap<PlaceId, Loose>;
   /** Per path the call tested its groups at (`#tested`), what it has accounted there. */
@@ -263,7 +255,7 @@ interface FlatLoose {
   readonly belowTexts: Set<string>;
 }
 
-/** A locals chain's paths where a configuration's groups land, kept only where a node adds one (`#localsMeet`). */
+/** A locals chain's paths where a shared group lands, kept only where a node adds one (`#localsAsked`). */
 interface LocalsMet {
   readonly paths: readonly (readonly string[])[];
   readonly next: LocalsMet | null;
@@ -976,10 +968,10 @@ export class Admission {
   #forest: CopyForest | null = null;
   /** Per class, its eligible member per tested key asked while the groups are made (`#eligibleAt`). */
   readonly #eligibleWhileGrouping = new Map<Definition, Map<string, Definition | null>>();
-  /** The prefix trie of the configurations of places' groups (`#meeting`), and its nodes' count. */
-  readonly #configurations: Configuration = { id: 0, next: new Map(), added: [], reads: new Map() };
-  #configurationCount = 1;
-  /** Per locals node, per configuration and place path, its chain's paths there (`#localsMeet`). */
+  /** Per group identity, how many places hold it (`#countIdentities`); per pair of shared groups, or of a read and one, where they meet (`#pairMeets`, `#readAsked`). */
+  readonly #identityPlaces = new Map<string, number>();
+  readonly #pairs = new Map<string, readonly (readonly string[])[]>();
+  /** Per locals node, per place path and shared group, its chain's paths there (`#localsAsked`). */
   readonly #localsMet = new Map<Locals, Map<string, LocalsMet>>();
   /** Per root and strip, its contents beside its landings (`#flatLoose`). */
   readonly #flatLooses = new Map<string, FlatLoose>();
@@ -2034,6 +2026,7 @@ export class Admission {
     const { seeds, into, cycleOf, cycles, order } = this.#inheritance();
     const work = this.pass.program.work;
     const hots = new Map<PlaceId, readonly (readonly string[])[]>();
+    this.#countIdentities(order);
     // (the source a copy that only copies one source whole stands for, and a bound on each place's landed paths)
     const origins = new Map<PlaceId, PlaceId>();
     // (each place's contents beside its landings, and a bound on its landed paths)
@@ -2259,11 +2252,12 @@ export class Admission {
 
   /**
    * Where a place's copies of different identities (`#identity`: what they land and hold, whichever place they come
-   * from), or its reads, may meet a written type another of its copies lands (`#hotSets`, TABLE r4.86 (2)). Its groups
-   * in a canonical order (widest first, then by identity) walk the configurations (`Configuration`): what each group
-   * adds to the groups before it is found once for every place holding that prefix (`#joined`), whatever else the place
-   * holds; each read once per configuration (`#readMeets`); each way's locals once per configuration (`#localsMeet`).
-   * Groups no configuration serves are listed once per call (`Running`); the others are asked.
+   * from), or its reads, may meet a written type another of its copies lands (`#hotSets`, TABLE r4.86 (2); Sol's reviews
+   * r4–r6). A group no other place holds (`#identityPlaces`) is listed here, once for the whole pass (`#joined`), with
+   * the shared groups asked; the shared groups meet two by two, once per pair for every place holding both
+   * (`#pairMeets`); each read meets the listed groups here and each shared group once per pair (`#readMeets`); each
+   * way's locals likewise (`#localsListed`, `#localsAsked`). So a shared contribution is never listed again for another place, whatever
+   * else that place holds.
    */
   #meeting(
     copies: readonly InheritedCopy[],
@@ -2278,21 +2272,23 @@ export class Admission {
       const id = keptParts(this.#work, root, strip, copy.path);
       let group = groups.get(id);
       if (group === undefined)
-        groups.set(id, (group = { root, strip, path: copy.path, locals: new Set() }));
+        groups.set(id, (group = { id, root, strip, path: copy.path, locals: new Set() }));
       if (locals !== null) group.locals.add(locals);
     }
     if (groups.size === 0 || (groups.size === 1 && reads.length === 0)) return [];
-    const size = (group: Group): number => this.#landingSize(group.root, group.strip);
-    const ordered = [...groups].sort(
-      ([a, left], [b, right]) => size(right) - size(left) || (a < b ? -1 : a > b ? 1 : 0),
-    );
-    work.charge("indexSteps", ordered.length + sortCost(ordered.length));
+    const listed: Group[] = [];
+    const asked: Group[] = [];
+    for (const group of [...groups.values()].sort((a, b) =>
+      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+    ))
+      ((this.#identityPlaces.get(group.id) ?? 0) > 1 ? asked : listed).push(group);
+    work.charge("indexSteps", groups.size + sortCost(groups.size));
     const run: Running = {
       lands: new Map(),
       under: new Map(),
       points: new Map(),
       below: new Map(),
-      served: [],
+      served: asked,
       loose,
       accounts: new Map(),
     };
@@ -2303,26 +2299,15 @@ export class Admission {
         out.set(keptText(this.#work, path), path);
       }
     };
-    let node = this.#configurations;
-    // (the configuration of the groups asked: a prefix of the order)
-    let served = node;
-    let first = true;
-    for (const [id, group] of ordered) {
-      let next = node.next.get(id);
-      const known = next !== undefined;
-      if (next === undefined) {
-        const added = first ? [] : this.#joined(group, run, loose);
-        next = { id: this.#configurationCount++, next: new Map(), added, reads: new Map() };
-        node.next.set(id, next);
+    for (const group of listed) put(this.#joined(group, run, loose));
+    for (let first = 0; first < asked.length; first += 1)
+      for (let second = first + 1; second < asked.length; second += 1) {
+        work.charge("indexSteps");
+        put(this.#pairMeets(asked[first]!, asked[second]!, loose));
       }
-      if (known || first) {
-        run.served.push(group);
-        served = next;
-      }
-      first = false;
-      put(next.added);
-      node = next;
-    }
+    const ways: { readonly chain: Locals; readonly base: readonly string[] }[] = [];
+    for (const group of [...listed, ...asked])
+      for (const chain of group.locals) ways.push({ chain, base: group.path });
     for (const read of reads) {
       work.charge("indexSteps");
       const { root, strip, locals } = this.#identity(
@@ -2330,22 +2315,102 @@ export class Admission {
         keptPath(this.#work, read.source),
       );
       const held: Held = { root, strip, at: read.at, locals };
-      const id = keptParts(this.#work, root, strip, read.at);
-      let found = node.reads.get(id);
-      if (found === undefined) node.reads.set(id, (found = this.#readMeets(held, run)));
-      put(found);
-      if (locals !== null) this.#localsMeet(locals, read.at, served, run, put);
+      // (the listed groups' landings at or below it, here; each shared group once per pair)
+      const touched = new Map<string, readonly string[]>();
+      for (const text of run.under.get(keptText(this.#work, read.at)) ?? []) {
+        work.charge("indexSteps");
+        touched.set(text, run.lands.get(text)!.path);
+      }
+      put(this.#tested(touched, run, held, new Map()));
+      for (const group of asked) put(this.#readAsked(held, group, loose));
+      if (locals !== null) ways.push({ chain: locals, base: read.at });
     }
-    for (const [, group] of ordered)
-      for (const chain of group.locals) this.#localsMeet(chain, group.path, served, run, put);
+    for (const { chain, base } of ways) {
+      put(this.#localsListed(chain, base, run));
+      for (const group of asked) put(this.#localsAsked(chain, base, group));
+    }
     return [...out.values()];
   }
 
   /**
-   * What a group adds to the meeting of the groups before it (`#meeting`), listing it (`Running`): every path it lands,
-   * its contents beside its landings (`Loose`, `#flatLoose`) where a group before it lands, and every landed path below
-   * where those contents are opaque; of those, where a written type landed there may not meet the contents there
-   * (`#tested`).
+   * The places of the pass holding each group identity (`#meeting`: a group one place holds is listed there), counted
+   * once over the places whose copies meet (`#hotSets`' order).
+   */
+  #countIdentities(order: readonly (readonly PlaceId[])[]): void {
+    const { into, cycleOf } = this.#inheritance();
+    const work = this.pass.program.work;
+    for (const component of order) {
+      if (cycleOf.has(component[0]!)) continue;
+      const seen = new Set<string>();
+      for (const copy of into.get(component[0]!) ?? []) {
+        work.charge("indexSteps");
+        const { root, strip } = this.#identity(copy.from, copy.strip);
+        const id = keptParts(this.#work, root, strip, copy.path);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        this.#identityPlaces.set(id, (this.#identityPlaces.get(id) ?? 0) + 1);
+      }
+    }
+  }
+
+  /**
+   * Where two shared groups meet (`#meeting`), once per pair: the smaller listed (`#joined`), the larger asked; by size,
+   * its landing and contents beside it (`#landingSize`, `#flatLoose`).
+   */
+  #pairMeets(
+    first: Group,
+    second: Group,
+    loose: ReadonlyMap<PlaceId, Loose>,
+  ): readonly (readonly string[])[] {
+    const key = keptParts(this.#work, "pair", first.id, second.id);
+    const known = this.#pairs.get(key);
+    if (known !== undefined) return known;
+    const size = (group: Group): number =>
+      this.#landingSize(group.root, group.strip) + this.#flatSize(group, loose);
+    const [smaller, larger] = size(second) < size(first) ? [second, first] : [first, second];
+    const found = this.#joined(smaller, this.#asking([larger], loose), loose);
+    this.#pairs.set(key, found);
+    return found;
+  }
+
+  /** What a read meets of one shared group (`#meeting`, `#readMeets`), once per read and group. */
+  #readAsked(
+    read: Held,
+    group: Group,
+    loose: ReadonlyMap<PlaceId, Loose>,
+  ): readonly (readonly string[])[] {
+    const key = keptParts(this.#work, "read", read.root, read.strip, read.at, group.id);
+    const known = this.#pairs.get(key);
+    if (known !== undefined) return known;
+    const found = this.#readMeets(read, this.#asking([group], loose));
+    this.#pairs.set(key, found);
+    return found;
+  }
+
+  /** A call's state asking these groups and listing none (`Running`). */
+  #asking(groups: Group[], loose: ReadonlyMap<PlaceId, Loose>): Running {
+    return {
+      lands: new Map(),
+      under: new Map(),
+      points: new Map(),
+      below: new Map(),
+      served: groups,
+      loose,
+      accounts: new Map(),
+    };
+  }
+
+  /** How many points and prefixes a group's root holds beside its landings below its strip (`#flatLoose`). */
+  #flatSize(group: Group, loose: ReadonlyMap<PlaceId, Loose>): number {
+    const flat = this.#flatLoose(group.root, group.strip, loose);
+    return flat.points.length + flat.below.length;
+  }
+
+  /**
+   * Where a group meets the groups listed before it and the groups asked (`#meeting`), listing it (`Running`): every
+   * path it lands, its contents beside its landings (`Loose`, `#flatLoose`) where another group lands, and every landed
+   * path below where those contents are opaque; of those, where a written type landed there may not meet the contents
+   * there (`#tested`).
    */
   #joined(group: Group, run: Running, loose: ReadonlyMap<PlaceId, Loose>): (readonly string[])[] {
     const work = this.pass.program.work;
@@ -2442,63 +2507,15 @@ export class Admission {
   }
 
   /**
-   * Where a way's locals stand where a group of a configuration lands (`#meeting`): its points there, every landed path
-   * below its opaque values; each decided at the place (its contents are its own). Against the groups asked (`served`,
-   * a prefix of the order): once per locals node, served configuration and place path, a chain's nodes shared by every way
-   * through them. Against the groups the call listed: their landings at or below the way's path, each looked up in the
-   * chain's texts (`Locals`), or the chain walked where it is the shorter.
+   * Where a way's locals stand where a listed group lands (`#meeting`): its points there, every listed landing below its
+   * opaque values; each decided at the place (its contents are its own). The chain walked, or the listed landings at or
+   * below the way's path looked up in the chain's texts (`Locals`), whichever is the shorter.
    */
-  #localsMeet(
-    chain: Locals,
-    base: readonly string[],
-    served: Configuration,
-    run: Running,
-    put: (list: readonly (readonly string[])[]) => void,
-  ): void {
+  #localsListed(chain: Locals, base: readonly string[], run: Running): (readonly string[])[] {
     const work = this.pass.program.work;
-    const key = keptParts(this.#work, served.id, base);
-    const pending: Locals[] = [];
-    let at: Locals | null = chain;
-    let met: LocalsMet | null = null;
-    for (; at !== null; at = at.next) {
-      work.charge("indexSteps");
-      const known = this.#localsMet.get(at)?.get(key);
-      if (known !== undefined) {
-        met = known;
-        break;
-      }
-      pending.push(at);
-    }
-    const asked = (path: readonly string[]): boolean =>
-      run.served.some((group) => {
-        work.charge("indexSteps");
-        return this.#groupLands(group, path);
-      });
-    for (let index = pending.length - 1; index >= 0; index -= 1) {
-      const local = pending[index]!;
-      const found: (readonly string[])[] = [];
-      for (const point of local.points) {
-        work.charge("indexSteps");
-        const path = keptSteps(this.#work, base, point);
-        if (asked(path)) found.push(path);
-      }
-      for (const prefix of local.below) {
-        work.charge("indexSteps");
-        const under = keptSteps(this.#work, base, prefix);
-        for (const group of run.served)
-          for (const path of this.#groupBelow(group, under)) found.push(path);
-      }
-      // (only the nodes that add a path are kept on the way)
-      if (found.length > 0) met = { paths: found, next: met };
-      let byKey = this.#localsMet.get(local);
-      if (byKey === undefined) this.#localsMet.set(local, (byKey = new Map()));
-      byKey.set(key, met ?? NO_LOCALS_MET);
-    }
-    for (let way = met; way !== null && way !== NO_LOCALS_MET; way = way.next) put(way.paths);
-    // the groups this call listed: their landings at or below the way's path, in the chain's texts
-    const listed = run.under.get(keptText(this.#work, base)) ?? [];
-    if (listed.length === 0) return;
     const out: (readonly string[])[] = [];
+    const listed = run.under.get(keptText(this.#work, base)) ?? [];
+    if (listed.length === 0) return out;
     if (chain.size <= listed.length)
       for (let local: Locals | null = chain; local !== null; local = local.next) {
         for (const point of local.points) {
@@ -2518,15 +2535,87 @@ export class Admission {
       for (const text of listed) {
         work.charge("indexSteps");
         const path = run.lands.get(text)!.path;
-        const rest = path.slice(base.length);
-        let held = treapHas(chain.pointTexts, pathText(rest));
-        for (let length = 0; length <= rest.length && !held; length += 1) {
-          work.charge("indexSteps");
-          held = treapHas(chain.belowTexts, pathText(rest.slice(0, length)));
-        }
-        if (held) out.push(path);
+        if (this.#localsHold(chain, path.slice(base.length))) out.push(path);
       }
-    put(out);
+    return out;
+  }
+
+  /**
+   * Where a way's locals stand where a shared group lands (`#meeting`), once per chain, path and group: the group's
+   * landings at or below the way's path looked up in the chain's texts where they are the fewer, else the chain walked,
+   * each node once per path and group for every chain through it.
+   */
+  #localsAsked(
+    chain: Locals,
+    base: readonly string[],
+    group: Group,
+  ): readonly (readonly string[])[] {
+    const work = this.pass.program.work;
+    const key = keptParts(this.#work, base, group.id);
+    let byKey = this.#localsMet.get(chain);
+    const known = byKey?.get(key);
+    if (known !== undefined) return this.#localsPaths(known);
+    if (this.#landingSize(group.root, group.strip) <= chain.size) {
+      const found: (readonly string[])[] = [];
+      for (const path of this.#groupBelow(group, base)) {
+        work.charge("indexSteps");
+        if (this.#localsHold(chain, path.slice(base.length))) found.push(path);
+      }
+      if (byKey === undefined) this.#localsMet.set(chain, (byKey = new Map()));
+      const met = found.length > 0 ? { paths: found, next: null } : NO_LOCALS_MET;
+      byKey.set(key, met);
+      return found;
+    }
+    // (walked: the nodes not yet met for this path and group, back from the first one met)
+    const pending: Locals[] = [];
+    let met: LocalsMet | null = null;
+    for (let at: Locals | null = chain; at !== null; at = at.next) {
+      work.charge("indexSteps");
+      const found = this.#localsMet.get(at)?.get(key);
+      if (found !== undefined) {
+        met = found;
+        break;
+      }
+      pending.push(at);
+    }
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const local = pending[index]!;
+      const found: (readonly string[])[] = [];
+      for (const point of local.points) {
+        work.charge("indexSteps");
+        const path = keptSteps(this.#work, base, point);
+        if (this.#groupLands(group, path)) found.push(path);
+      }
+      for (const prefix of local.below) {
+        work.charge("indexSteps");
+        for (const path of this.#groupBelow(group, keptSteps(this.#work, base, prefix)))
+          found.push(path);
+      }
+      // (only the nodes that add a path are kept on the way)
+      if (found.length > 0) met = { paths: found, next: met };
+      let nodeKeys = this.#localsMet.get(local);
+      if (nodeKeys === undefined) this.#localsMet.set(local, (nodeKeys = new Map()));
+      nodeKeys.set(key, met ?? NO_LOCALS_MET);
+    }
+    return this.#localsPaths(met ?? NO_LOCALS_MET);
+  }
+
+  /** A kept locals result's paths (`LocalsMet`). */
+  #localsPaths(met: LocalsMet): (readonly string[])[] {
+    const out: (readonly string[])[] = [];
+    for (let way: LocalsMet | null = met; way !== null && way !== NO_LOCALS_MET; way = way.next)
+      for (const path of way.paths) out.push(path);
+    return out;
+  }
+
+  /** Whether a chain's locals hold a rest from its way's path: a point there, or an opaque value at or above it. */
+  #localsHold(chain: Locals, rest: readonly string[]): boolean {
+    if (treapHas(chain.pointTexts, pathText(rest))) return true;
+    for (let length = 0; length <= rest.length; length += 1) {
+      this.pass.program.work.charge("indexSteps");
+      if (treapHas(chain.belowTexts, pathText(rest.slice(0, length)))) return true;
+    }
+    return false;
   }
 
   /**
