@@ -2429,6 +2429,57 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // #1077: a class of stores checked at a path that each of its members reaches as its own candidate too (an add at
+  // its element, directly and through its list; a return into a written result, A9), each member checked once
+  {
+    name: "A5-same-source-adds-decided-element",
+    measures:
+      "A5, #1077: k `xs.add(root)` of one host-bearing number into a list its initializer types, k reads of its last",
+    program: (k) =>
+      main(
+        lines(
+          "let root = [1.5, hostValue].first",
+          "let xs = [1.5]",
+          rows(k, () => "xs.add(root)"),
+          rows(k, () => "repeat xs.last {}"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A5-same-source-add-alls-decided-element",
+    measures:
+      "A5, #1077: k `xs.addAll(more)` of one list of a host-bearing number into a list its initializer types, k reads",
+    program: (k) =>
+      main(
+        lines(
+          "let root = [1.5, hostValue].first",
+          "let more = [root]",
+          "let xs = [1.5]",
+          rows(k, () => "xs.addAll(more)"),
+          rows(k, () => "repeat xs.last {}"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A9-same-source-returns-written-result",
+    measures:
+      "A9, #1077: k + 1 returns of one list of a host-bearing number from a function whose result is `number[]`, k calls",
+    program: (k) =>
+      main(
+        lines(
+          "let root = [1.5, hostValue].first",
+          "let more = [root]",
+          "function pick(c): number[] {",
+          rows(k, (i) => `if c == ${i} {\nreturn more\n}`),
+          "return more",
+          "}",
+          rows(k, (i) => `let picked${i} = pick(${i})`),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**
@@ -4444,9 +4495,8 @@ export const VALUE_SHARING_PROGRAMS: readonly {
 }));
 
 /**
- * S6's sharing faults on `main` (#1077, TABLE r4.83 (4)), held from the differential until repaired: the first two
- * reorder their diagnostics with the sharing on, the third publishes 16 diagnostics and 17 checks against 11 and 12
- * (Sol's r3).
+ * S6's sharing faults (TABLE r4.83 (4)), held from the differential: with the sharing on they publish their diagnostics
+ * in another order, which publication in source order (#1059) repairs.
  */
 export const HELD_SHARING_FAULTS: readonly {
   readonly name: string;
@@ -4484,18 +4534,35 @@ export const HELD_SHARING_FAULTS: readonly {
       "xs.add(root)",
       "let n: integer = xs[0].f0",
     ],
-    [
-      "chain: six adds of a host element, its last and a random element read",
-      "let root = [1.5, hostValue].first",
-      "let xs = [1.5]",
-      ...Array.from({ length: 6 }, () => "xs.add(root)"),
-      "let chosen = [xs.first, null].first",
-      "chosen = 1",
-      "repeat xs.last {}",
-      "repeat xs.random {}",
-    ],
   ] as const
 ).map(([name, ...source]) => ({
   name,
   files: [{ path: "main.tease", source: `${source.join("\n")}\nexit\n` }],
 }));
+
+/**
+ * S6's sharing faults repaired, in the differential: #1077's adds of one class, each a candidate at the list's element
+ * directly and through the list, published 16 diagnostics and 17 checks against 11 and 12 (Sol's r3).
+ */
+export const REPAIRED_SHARING_FAULTS: readonly {
+  readonly name: string;
+  readonly files: readonly SourceFile[];
+}[] = [
+  {
+    name: "chain: six adds of a host element, its last and a random element read",
+    files: [
+      {
+        path: "main.tease",
+        source: `${[
+          "let root = [1.5, hostValue].first",
+          "let xs = [1.5]",
+          ...Array.from({ length: 6 }, () => "xs.add(root)"),
+          "let chosen = [xs.first, null].first",
+          "chosen = 1",
+          "repeat xs.last {}",
+          "repeat xs.random {}",
+        ].join("\n")}\nexit\n`,
+      },
+    ],
+  },
+];

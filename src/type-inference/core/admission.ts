@@ -1293,6 +1293,17 @@ export class Admission {
         )
           take(d);
     }
+    // (a member its class's candidate holds is checked there only, never as its own candidate too: an add is a direct
+    // candidate at its element as well as its list's store, a return into a written result its root's at every path
+    // (A9), a rejected member is retaken; each charged where it was taken, #1077)
+    for (const [key, candidate] of candidates) {
+      const representative = this.#representative.get(candidate.d);
+      if (
+        representative !== undefined &&
+        candidates.get(joinParts(representative.uid, candidate.at))?.members !== undefined
+      )
+        candidates.delete(key);
+    }
     const ordered = [...candidates.values()].sort(
       (a, b) => this.sourceOrder(a.d) - this.sourceOrder(b.d),
     );

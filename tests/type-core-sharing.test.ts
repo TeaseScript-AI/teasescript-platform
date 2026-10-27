@@ -19,6 +19,7 @@ import {
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
+  REPAIRED_SHARING_FAULTS,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
   W34_KNOWN_PRODUCTS,
@@ -103,6 +104,8 @@ function programs(): Program[] {
       for (const k of [2, 3])
         out.push({ name: `${family.name} at ${k}`, files: family.program(k) });
   for (const { name, files } of ORACLE_PROGRAMS) out.push({ name: `oracle ${name}`, files });
+  for (const { name, files } of REPAIRED_SHARING_FAULTS)
+    out.push({ name: `repaired ${name}`, files });
   // S6c's programs: each discovery it shares beside what a coarser key would merge (`VALUE_SHARING_PROGRAMS`)
   for (const { name, files } of VALUE_SHARING_PROGRAMS) out.push({ name: `S6c ${name}`, files });
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
@@ -216,10 +219,10 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
 
-/** S6's sharing faults on `main` (`HELD_SHARING_FAULTS`, #1077), held: run and reported, failing nothing. */
+/** S6's sharing faults that reorder their diagnostics (`HELD_SHARING_FAULTS`), held: run and reported, failing nothing. */
 test(
   "S6's held sharing faults are output-neutral in both orders",
-  { todo: "S6 sharing fault on main, #1077 (TABLE r4.83 (4)), repair pending" },
+  { todo: "Depends on #1059 (diagnostics published in source order), TABLE r4.83 (4)" },
   () => {
     const differing: string[] = [];
     for (const program of HELD_SHARING_FAULTS) {
