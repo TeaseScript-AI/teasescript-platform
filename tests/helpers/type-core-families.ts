@@ -2243,8 +2243,9 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
 /**
  * S6-CARRIERS §4.5, §4.7 and S6c (TABLE r4.61, r4.69 (2)): k adds of one record to one list, a choice of k options of one
  * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
- * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source, in either order and
- * chained, and adds of one source after a different first add or in two blocks (reviews r1, r2). Adds of several
+ * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source (a chain whose first link
+ * is a direct alias, `get`s in reverse order, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
+ * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
  * sources strictly in turn keep the chain's one step per add per path (TABLE §8), which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
  * `Contract.readClass`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
@@ -2292,41 +2293,6 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
           `let root = {${fields(k, () => "1")}}`,
           "let xs = [root]",
           `let box = [${cells(k, "xs.get(0, default: root)")}]`,
-          rows(k, (i) => `repeat box[0].f${i} {}`),
-          "exit",
-        ),
-      ),
-  },
-  // review r1 (S6c): the same source through k stable aliases, as options and as `get` defaults and receivers
-  {
-    name: "A8-same-source-alias-choices",
-    measures:
-      "S6c, A8: a choice of k options, each a stable alias of one k-field record, every field read",
-    // 47,138 / 94,337 units at k = 64, 128 in both orders (2.0075; `main` 161,020 / 555,071, 3.46)
-    program: (k) =>
-      main(
-        lines(
-          `let root = {${fields(k, () => "1")}}`,
-          rows(k, (i) => `let alias${i} = root`),
-          `let box = askChoice ${Array.from({ length: k }, (_, i) => `{text: "${i}", value: alias${i}}`).join(", ")}`,
-          rows(k, (i) => `repeat box.f${i} {}`),
-          "exit",
-        ),
-      ),
-  },
-  {
-    name: "A8-same-source-alias-gets",
-    measures:
-      "S6c, A8: a literal of k `list_i.get(0, default: alias_i)`, aliases of one list and one record",
-    // 72,211 / 144,595 units at k = 64, 128 in both orders (2.0099; `main` 371,136 / 1,347,656, 3.64)
-    program: (k) =>
-      main(
-        lines(
-          `let root = {${fields(k, () => "1")}}`,
-          "let xs = [root]",
-          rows(k, (i) => `let alias${i} = root`),
-          rows(k, (i) => `let list${i} = xs`),
-          `let box = [${Array.from({ length: k }, (_, i) => `list${i}.get(0, default: alias${i})`).join(", ")}]`,
           rows(k, (i) => `repeat box[0].f${i} {}`),
           "exit",
         ),
@@ -2390,37 +2356,25 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // review r1/r2 (S6c): adds of one source after a different first add, and in two blocks, each a run of one class
-  ...(
-    [
-      [
-        "A5-preface-then-same-adds-unknown",
-        (k: number) => ["other", ...Array.from({ length: k }, () => "root")],
-      ],
-      [
-        "A5-two-blocks-adds-unknown",
-        (k: number) => Array.from({ length: k }, (_, i) => (i < k / 2 ? "root" : "other")),
-      ],
-    ] as const
-  ).map(([name, sources]) => ({
-    name,
-    measures: `S6c, A5: adds of two k-field records of host data, ${name.includes("preface") ? "one of the first, then k of the second" : "k / 2 of each in two blocks"}, every field read`,
-    // 153,001 / 307,875 and 161,051 / 324,558 units at k = 64, 128 (2.0240, 2.0231; `main` 3.36, 3.36)
-    program: (k: number) =>
+  // review r1/r2 (S6c): adds of one source in two blocks, each a run of one class, the second after another source
+  {
+    name: "A5-two-blocks-adds-unknown",
+    measures:
+      "S6c, A5: k / 2 adds of each of two k-field records of host data, in two blocks, every field read",
+    // 161,051 / 324,558 units at k = 64, 128 in both orders (2.0231; `main` 389,088 / 1,304,083, 3.36)
+    program: (k) =>
       main(
         lines(
           "let raw = hostValue",
           `let root = {${fields(k, () => "[1, raw][1]")}}`,
           `let other = {${fields(k, () => "[2, raw][1]")}}`,
           "let xs = []",
-          sources(k)
-            .map((source) => `xs.add(${source})`)
-            .join("\n"),
+          rows(k, (i) => (i < k / 2 ? "xs.add(root)" : "xs.add(other)")),
           rows(k, (i) => `repeat xs[0].f${i} {}`),
           "exit",
         ),
       ),
-  })),
+  },
   {
     name: "A5-same-source-alias-adds-unknown",
     measures:

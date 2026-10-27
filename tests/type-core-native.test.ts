@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -6,6 +7,7 @@ import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { SPREAD_PROGRAMS } from "./helpers/type-core-spreads.js";
 
 /*
  * Native resilience (TABLE §8): the coarse core's answers on large flat programs stay on the heap and on the solver's
@@ -161,86 +163,67 @@ test("a copy at the end of a chain of 4,096 copies keeps the written type within
 
 /*
  * The five inherited argument spreads (S6c; Astra's static list on S6, TABLE r4.73 (2)) append one by one now. Four have
- * a source that makes the list source-sized; each is a regression below, with its 10,000-size control, and the spread
- * restored fails its own. The fifth, the copy forest's mark spans (`ExactPath.#forest`'s `found`), has none: a source
- * with more than four anchors takes the cross-source index before the append (`FEW_ANCHORS`), and the copies of one of
- * at most four anchors, sorted by dominator position, make at most 2 × 4 − 1 = 7 runs of one nearest anchor (dominator
- * intervals are laminar: each nested anchor splits its ancestor's run once), one span each; 130,000 tested copies of a
- * root beside four tested side sources append one span.
+ * a source that makes the list source-sized; each is a regression below, beside a small control, and the spread
+ * restored fails its own. A call's arguments overflow near 125,000 at Node's default stack, and near 12,000 under a
+ * 100 KiB stack, so each runs in a child of that stack (`--stack-size=100`) at 30,000: the same failure of a
+ * source-sized spread at a fraction of the work (the owner's test-cost rule; at 130,000 on the default stack each case
+ * took 8 to 21 s). The fifth, the copy forest's mark spans (`ExactPath.#forest`'s `found`), has none: a source with more
+ * than four anchors takes the cross-source index before the append (`FEW_ANCHORS`), and the copies of at most four
+ * anchors, sorted by dominator position, make at most 2 × 4 − 1 = 7 runs of one nearest anchor (dominator intervals are
+ * laminar: each nested anchor splits its ancestor's run once), one span each; 130,000 tested copies of a root beside
+ * four tested side sources append one span.
  */
 
-/** A place's operand regions merged per file (`GuardIndex.#placeOperands`): one test of a field, 130,000 of another. */
-test("130,000 tests of one field beside a test of another are analysed within the native stack", () => {
-  for (const operands of [10_000, 130_000]) {
-    const request = program([
-      "let root = {a: 1, b: 1, n: [1, hostValue][1]}",
-      `let ok = root.a is integer and ${rows(operands, "root.b is integer").join(" and ")} and true`,
-      "let box = root",
-      "repeat box.n {}",
-    ]);
-    const answers = analyseCore(request);
-    assert.deepEqual(
-      [answers.outcome, answers.diagnostics.length, answers.checks.length],
-      ["warning-runtime-check", 1, 2],
-      `${operands} operands`,
-    );
-  }
+/** A spread regression's program analysed at each size in a child with a 100 KiB stack: its outcome, diagnostics, checks. */
+function spreadCase(name: string, sizes: readonly number[]): unknown[] {
+  // (each program resolves, so a child's failure is its size's)
+  const program = SPREAD_PROGRAMS[name];
+  assert.ok(program !== undefined && coreRequest([{ path: "main.tease", source: program(3) }]));
+  const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
+  const script = `
+    import {analyseCore} from ${url("../src/type-inference/core/answers.js")};
+    import {coreRequest} from ${url("./helpers/type-core-analysis.js")};
+    import {SPREAD_PROGRAMS} from ${url("./helpers/type-core-spreads.js")};
+    for (const size of ${JSON.stringify(sizes)}) {
+      const answers = analyseCore(coreRequest([{path: "main.tease", source: SPREAD_PROGRAMS[${JSON.stringify(name)}](size)}]));
+      console.log(JSON.stringify([answers.outcome, answers.diagnostics.length, answers.checks.length]));
+    }
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=100", "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 120_000, maxBuffer: 64 * 1024 },
+  );
+  assert.equal(child.error, undefined, `${name}: ${child.error?.message}`);
+  assert.equal(child.status, 0, `${name}: exit ${child.status}\n${child.stderr.slice(-2_000)}`);
+  return child.stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as unknown);
+}
+
+const SPREAD_SIZES = [5_000, 30_000];
+
+test("tests of one field beside a test of another merge their operand regions within the native stack", () => {
+  // `GuardIndex.#placeOperands`
+  const expected = ["warning-runtime-check", 1, 2];
+  assert.deepEqual(spreadCase("guards", SPREAD_SIZES), [expected, expected]);
 });
 
-/**
- * A strongly connected component of the solver abandoned when a rerun finds an earlier dependency (`Solver.#abandon`):
- * 130,000 functions each returning the next one's result, the last the first's, beside one returning their length.
- */
-test("a component of 130,000 mutually recursive results is abandoned within the native stack", () => {
-  for (const size of [10_000, 130_000]) {
-    const request = program([
-      'let flagHost = askBoolean "flag"',
-      "let out = outer().length",
-      'function outer: string | integer { if flagHost { return "ok" }\nreturn get0().length }',
-      ...Array.from(
-        { length: size },
-        (_, i) =>
-          `function get${i}${i === 0 ? ": object | string | integer" : ""} {\n${
-            i === 0 ? "  if flagHost { return {length: outer()} }\n" : ""
-          }  return ${i + 1 < size ? `get${i + 1}()` : "get0().length"}\n}`,
-      ),
-    ]);
-    const answers = analyseCore(request);
-    assert.deepEqual(
-      [answers.outcome, answers.diagnostics.length, answers.checks.length],
-      ["warning-runtime-check", 3, 3],
-      `${size} functions`,
-    );
-  }
+test("a component of mutually recursive results is abandoned within the native stack", () => {
+  // `Solver.#abandon`
+  const expected = ["warning-runtime-check", 3, 3];
+  assert.deepEqual(spreadCase("solver", SPREAD_SIZES), [expected, expected]);
 });
 
-/** A choice's button values at a selection step (`Contract.indexItems`): a list of 130,000 choice records. */
-test("a choice of 130,000 written records is answered within the native stack", () => {
-  for (const records of [10_000, 130_000]) {
-    const request = program([
-      `let picked: integer = askChoice [${rows(records, "{text: 1}").join(",")}]`,
-    ]);
-    const answers = analyseCore(request);
-    assert.deepEqual(
-      [answers.outcome, answers.diagnostics.length, answers.checks.length],
-      ["valid", 0, 0],
-      `${records} records`,
-    );
-  }
+test("a choice of written records is answered within the native stack", () => {
+  // `Contract.indexItems` at a selection step
+  const expected = ["valid", 0, 0];
+  assert.deepEqual(spreadCase("records", SPREAD_SIZES), [expected, expected]);
 });
 
-/** A choice record's selected property (`Contract.#selectedAt`): its value a list of 130,000 computed elements. */
-test("a choice record whose value holds 130,000 computed elements is answered within the native stack", () => {
-  for (const elements of [10_000, 130_000]) {
-    const request = program([
-      `let choice = {text: "A", value: [${rows(elements, "1 + 0").join(",")}]}`,
-      "let picked: integer = (askChoice choice).first",
-    ]);
-    const answers = analyseCore(request);
-    assert.deepEqual(
-      [answers.outcome, answers.diagnostics.length, answers.checks.length],
-      ["valid", 0, 0],
-      `${elements} elements`,
-    );
-  }
+test("a choice record whose value holds computed elements is answered within the native stack", () => {
+  // `Contract.#selectedAt`
+  const expected = ["valid", 0, 0];
+  assert.deepEqual(spreadCase("property", SPREAD_SIZES), [expected, expected]);
 });
