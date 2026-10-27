@@ -2,9 +2,9 @@ import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, type WorkLedger } from "./budget.js";
 import {
+  keptPrefixes,
   keyPath,
   keyPlace,
-  prefixesOf,
   sortCost,
   type Definition,
   type Key,
@@ -180,7 +180,9 @@ export class NarrowingRoutes {
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
     if (handlers.handlerTouches(key) && handlers.afterSomeCreation(node)) return null;
     // positions and members are not facts: no element key and no reference member has a route
-    if (keyPath(key).includes("element") || (yield* contract.refReceiver(key))) return null;
+    const steps = keyPath(key);
+    program.work.charge("eventSteps", steps.length + 1);
+    if (steps.includes("element") || (yield* contract.refReceiver(key))) return null;
     const chain = this.#chainOf(node);
     if (chain === null) return null;
     const body = chain[0]!.block;
@@ -192,7 +194,7 @@ export class NarrowingRoutes {
       if (found !== null && (best === null || found.start > best.start)) best = found;
     };
     consider(this.#ownCandidates(key, tag));
-    for (const prefix of prefixesOf(key)) consider(this.#wholeStores(prefix));
+    for (const prefix of keptPrefixes(program.work, key)) consider(this.#wholeStores(prefix));
     const found: Candidate | null = best;
     if (found === null) return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
@@ -223,6 +225,7 @@ export class NarrowingRoutes {
       return false;
     // a whole store of a prefix answers below it only through its literal's properties, to a seed
     const rest = keyPath(key).slice(d.path.length);
+    program.work.charge("exactQueries", d.path.length + rest.length);
     let value: PlaceId = d.value;
     for (const step of rest) {
       program.work.charge("exactQueries");
@@ -264,7 +267,7 @@ export class NarrowingRoutes {
     if (node === null || expression === undefined) return null;
     const path: StablePath | null = stablePath(program, node.file, expression);
     if (path === null || path.steps.some((step) => step.kind !== "property")) return null;
-    return { key: pathKey(path), node };
+    return { key: pathKey(path, program.work), node };
   }
 
   /** An object literal's property's stored value, by name. */
@@ -372,6 +375,7 @@ export class NarrowingRoutes {
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
+    this.#work.charge("eventSteps", Math.min(writer.length, chain.length) + 1);
     while (
       level < writer.length &&
       level < chain.length &&
@@ -425,7 +429,7 @@ export class NarrowingRoutes {
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
-    const prefix = prefixesOf(key)[0];
+    const prefix = keptPrefixes(program.work, key)[0];
     const parent = prefix === undefined ? null : this.#killLayer(prefix, calls);
     const seeds: TreeStatement[] = [];
     for (const d of definitions.byKey.get(key) ?? []) {
@@ -565,6 +569,7 @@ export class NarrowingRoutes {
   /** The refined location of a key without element steps: its properties' texts. */
   #location(key: Key): string | null {
     const steps = keyPath(key);
+    this.#work.charge("indexSteps", steps.length + 1);
     if (steps.includes("element")) return null;
     return locationOf({
       root: keyPlace(key),

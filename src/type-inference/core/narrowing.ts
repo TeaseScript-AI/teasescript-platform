@@ -59,8 +59,9 @@ function readsElement(step: PathStep): boolean {
   return step.kind !== "property" || selectsElement(step.name);
 }
 
-/** The contract key a path's read asks (§1: every index, key and selection is `element`). */
-export function pathKey(path: StablePath, length = path.steps.length): Key {
+/** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
+export function pathKey(path: StablePath, work: WorkLedger, length = path.steps.length): Key {
+  work.charge("eventSteps", length + 1);
   const steps: string[] = [];
   for (let index = 0; index < length; index += 1) {
     const step = path.steps[index]!;
@@ -85,16 +86,20 @@ export function stablePath(
   root: PlaceId | null = null,
 ): StablePath | null {
   const steps: PathStep[] = [];
+  // (outermost first; reversed once the root is found: whether every step so far is an element read)
+  let trailingOnly = true;
   let current = unwrap(expression);
-  // (outermost first; reversed once the root is found)
   while (current.kind !== "identifier") {
     program.work.charge("eventSteps");
     if (current.kind === "propertyAccessExpression") {
       const name = current.property.name;
       if (name === "random") {
-        if (!trailing || steps.some((step) => step.kind !== "element")) return null;
+        if (!trailing || !trailingOnly) return null;
         steps.push({ kind: "element" });
-      } else steps.push({ kind: "property", name });
+      } else {
+        steps.push({ kind: "property", name });
+        trailingOnly = false;
+      }
       current = unwrap(current.object);
       continue;
     }
@@ -102,11 +107,13 @@ export function stablePath(
     const index = unwrap(current.index);
     const fixed = caseValueKey(index);
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
-    if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:")))
+    if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
       steps.push({ kind: "fixed", text: fixed });
-    else if (variable !== null) steps.push({ kind: "variable", place: variable });
-    else if (trailing && steps.every((step) => step.kind === "element"))
-      steps.push({ kind: "element" });
+      trailingOnly = false;
+    } else if (variable !== null) {
+      steps.push({ kind: "variable", place: variable });
+      trailingOnly = false;
+    } else if (trailing && trailingOnly) steps.push({ kind: "element" });
     else return null;
     current = unwrap(current.object);
   }
@@ -474,10 +481,13 @@ export interface Invalidations {
   readonly inBlock: boolean;
 }
 
-/** The read's own location and its element scopes (N2): each text with the element steps it adds. */
-export interface ReadScope {
-  readonly location: string;
-  readonly path: StablePath;
+/**
+ * A node of the trie of tested paths: a path's steps from its root, each by its label; the refined locations of the
+ * path ending here followed by k element steps, by k (k = 0: the path's own).
+ */
+interface PathNode {
+  readonly children: Map<string, PathNode>;
+  readonly locations: Map<number, string>;
 }
 
 /** Each program's narrowing index, made by the first pass that asks for it. */
@@ -499,6 +509,8 @@ export class NarrowingIndex {
     return index;
   }
 
+  /** The tested paths, per root, as a trie: a read finds its own location and its element scopes in one walk. */
+  readonly #tested = new Map<PlaceId, PathNode>();
   /** Per refined location, its branches' narrowing definitions by their regions in the dominator walk. */
   readonly #byLocation = new Map<string, Laminar<Narrowing>>();
   /** Per refined location and file, its operand regions' narrowing definitions by their text spans. */
@@ -542,16 +554,33 @@ export class NarrowingIndex {
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
       const base = path.steps.flatMap((step, index) =>
-        readsElement(step) ? [kept(pathKey(path, index))] : [],
+        readsElement(step) ? [kept(pathKey(path, work, index))] : [],
       );
       // the tested path and, for a positive collection test, one more element step per element type it names: each
       // element step's collection, the tested path's key and those below it, is one of its G's collections too (N2)
       let { form, element } = outcome;
       let collections = base;
-      let key = kept(pathKey(path));
+      let key = kept(pathKey(path, work));
+      // the tested path in the trie of tested paths, its locations by the element steps they add
+      let at: PathNode | undefined = this.#tested.get(path.root);
+      if (at === undefined) {
+        at = { children: new Map(), locations: new Map() };
+        this.#tested.set(path.root, at);
+      }
+      for (const step of path.steps) {
+        work.charge("indexSteps");
+        const label = stepLabel(step);
+        let child: PathNode | undefined = at.children.get(label);
+        if (child === undefined) {
+          child = { children: new Map(), locations: new Map() };
+          at.children.set(label, child);
+        }
+        at = child;
+      }
       for (let elements = 0; ; elements += 1) {
         work.charge("indexSteps");
         const location = locationOf(path, elements, work);
+        at.locations.set(elements, location);
         const g: Narrowing = {
           location,
           path,
@@ -722,6 +751,7 @@ export class NarrowingIndex {
     ): void => {
       if (at === null || !program.live(at)) return;
       const target = program.targetRoot(program.occurrenceOf.get(receiver) ?? receiver);
+      work.charge("indexSteps", target.path.length);
       const key = keyOf(target.root, path ?? target.path);
       const list = found.get(key);
       const entry: Invalidation = {
@@ -824,31 +854,32 @@ export class NarrowingIndex {
   }
 
   /**
-   * The locations a read at `node` asks (N2): its own path's text, and for each split of its trailing element steps
-   * the element scope of the path before them (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`): one per depth.
+   * The nearest narrowing definition of a read at `node` (N2): of its own path's text, and of each element scope of its
+   * trailing element steps (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`), the deepest region wins. One walk of the
+   * read's steps down the trie of tested paths, asking only the scopes a test defines: linear in the read's path.
    */
-  public scopes(node: FlowNode): ReadScope[] {
-    const expression = node.expression;
-    if (expression === undefined) return [];
-    const path = stablePath(this.program, node.file, expression, true);
-    if (path === null) return [];
-    const scopes: ReadScope[] = [];
-    if (path.steps.every((step) => step.kind !== "element"))
-      scopes.push({ location: locationOf(path), path });
-    for (let length = path.steps.length - 1; length >= 0; length -= 1) {
-      this.program.work.charge("eventSteps");
-      if (!readsElement(path.steps[length]!)) break;
-      scopes.push({ location: locationOf(path, path.steps.length - length, null, length), path });
-    }
-    return scopes;
-  }
-
-  /** The nearest narrowing definition of any of a read's locations (the deepest region wins), or `null`. */
   public nearestAt(node: FlowNode): Narrowing | null {
+    const program = this.program;
+    const expression = node.expression;
+    if (expression === undefined) return null;
+    const path = stablePath(program, node.file, expression, true);
+    if (path === null) return null;
+    const steps = path.steps;
+    // the trailing element steps start at `first`
+    let first = steps.length;
+    while (first > 0 && readsElement(steps[first - 1]!)) {
+      program.work.charge("eventSteps");
+      first -= 1;
+    }
     let best: Narrowing | null = null;
-    for (const scope of this.scopes(node)) {
-      const g = this.nearest(scope.location, node);
-      if (g !== null && (best === null || nearer(this.program, g, best))) best = g;
+    let at = this.#tested.get(path.root);
+    for (let length = 0; at !== undefined; length += 1) {
+      program.work.charge("eventSteps");
+      const location = length >= first ? at.locations.get(steps.length - length) : undefined;
+      const g = location === undefined ? null : this.nearest(location, node);
+      if (g !== null && (best === null || nearer(program, g, best))) best = g;
+      if (length === steps.length) break;
+      at = at.children.get(stepLabel(steps[length]!));
     }
     return best;
   }

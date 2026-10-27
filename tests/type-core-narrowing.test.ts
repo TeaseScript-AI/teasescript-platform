@@ -704,6 +704,33 @@ test("N5 evaluates a long preserving store without deepening the native stack", 
   assert.equal(at(long, "say n", 4), "non-null: holds");
 });
 
+/** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
+function queryDoubling(source: (k: number) => string, marker: string, delta: number): number {
+  const [small, large] = [64, 128].map((k) => {
+    const analysed = pass(source(k));
+    const node = read(analysed, marker, delta);
+    const work = analysed.pass.program.work;
+    const before = work.total;
+    narrowingAt(analysed.pass, node);
+    return { units: work.total - before, nodes: work.counts().get("syntaxNodes") ?? 1 };
+  });
+  return (2 * (large!.units / small!.units)) / (large!.nodes / small!.nodes);
+}
+
+test("a long `otherwise` chain's preserving store and a deep element read cost what their size does (Sol r3)", () => {
+  // each value's items merged by kind: a chain's intermediates never grow with it
+  const chain = (k: number): string => {
+    let value = "n";
+    for (let index = 0; index < k; index += 1) value = `(${value} otherwise n)`;
+    return `let n: integer? = load("n", default: null)\nif n is integer | null { repeat 2 { say n\n n = ${value} } }`;
+  };
+  assert.ok(queryDoubling(chain, "say n", 4) <= 2.15);
+  // one walk of the read's steps down the tested paths' trie, never a scope text per trailing depth
+  const deep = (k: number): string =>
+    `let xs = load("xs", default: [])\nif xs is integer[][] { say 1 }\nsay xs${"[0 + 0]".repeat(k)}`;
+  assert.ok(queryDoubling(deep, "say xs", 4) <= 2.15);
+});
+
 test("G's value is its input filtered by its form (N1)", () => {
   const scope = pass().pass.program.scope;
   const items = (...tags: readonly ItemTag[]): Item[] =>

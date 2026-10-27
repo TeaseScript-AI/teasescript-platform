@@ -1,10 +1,10 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { joinParts, keepText, type WorkLedger } from "./budget.js";
+import { joinParts, keepText, textUnits, type WorkLedger } from "./budget.js";
 import { operatorOf } from "./contract.js";
 import {
+  keptPrefixes,
   keyPlace,
-  prefixesOf,
   sortCost,
   type Definition,
   type Key,
@@ -12,7 +12,7 @@ import {
 } from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowLoop, FlowNode } from "./flow-graph.js";
-import { makeItem, type ContextWord, type Item, type ItemTag } from "./items.js";
+import { makeItem, mergeItems, type ContextWord, type Item, type ItemTag } from "./items.js";
 import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowing.js";
 import { countIn, lowerBound } from "./narrowing-statements.js";
 import { operationItems } from "./operator-table.js";
@@ -72,6 +72,9 @@ export class NarrowingEvents {
   readonly #subsets = new Map<string, readonly number[]>();
   /** Per key (and per key with its descendants), its definitions' text offsets by file (an operand region's X6). */
   readonly #text = new Map<string, ReadonlyMap<number, readonly number[]>>();
+  /** Per narrowing, its event lists (X6's, by position) and its prefixes' keys, made once. */
+  readonly #eventsOf = new Map<Narrowing, readonly EventList[]>();
+  readonly #prefixesOf = new Map<Narrowing, readonly Key[]>();
   /** Per loop head, its loop. */
   readonly #loops = new Map<FlowNode, FlowLoop>();
 
@@ -141,7 +144,7 @@ export class NarrowingEvents {
       return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
     const lists: (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] = [
       [this.#texts(g.key, true), "branch"],
-      ...prefixesOf(g.key).map((prefix) => [this.#texts(prefix, false), "branch"] as const),
+      ...this.#prefixes(g).map((prefix) => [this.#texts(prefix, false), "branch"] as const),
       ...g.variables.map((variable) => [this.#texts(variable, true), "branch"] as const),
       ...g.collections.map(
         (collection) => [this.index.invalidations(collection)?.texts, "branch"] as const,
@@ -208,13 +211,27 @@ export class NarrowingEvents {
     return [[program.position(entry), program.position(entry)], ...ranges];
   }
 
-  /** G's event lists (N2): its dependency keys' own events, the call sites under the owner rule, the invalidations. */
+  /** G's prefixes' keys, made (and charged) once per G. */
+  #prefixes(g: Narrowing): readonly Key[] {
+    const known = this.#prefixesOf.get(g);
+    if (known !== undefined) return known;
+    const made = keptPrefixes(this.#work, g.key);
+    this.#prefixesOf.set(g, made);
+    return made;
+  }
+
+  /**
+   * G's event lists (N2), once per G: its dependency keys' own events, the call sites under the owner rule, the
+   * invalidations.
+   */
   #events(g: Narrowing): readonly EventList[] {
+    const known = this.#eventsOf.get(g);
+    if (known !== undefined) return known;
     const { definitions, lists } = this.pass;
     const events: EventList[] = [
       { positions: this.pass.lists.eventList(g.key), word: "branch", own: true },
     ];
-    for (const prefix of prefixesOf(g.key))
+    for (const prefix of this.#prefixes(g))
       events.push({
         positions: lists.definitionsOf(prefix).eventPositions,
         word: "branch",
@@ -230,6 +247,7 @@ export class NarrowingEvents {
     if (this.#ownedAway(g))
       events.push({ positions: definitions.sitePositions, word: "call", own: false });
     this.#work.charge("eventSteps", events.length);
+    this.#eventsOf.set(g, events);
     return events;
   }
 
@@ -418,7 +436,9 @@ export class NarrowingEvents {
         const expression = at?.expression;
         const path =
           expression === undefined || at === null ? null : stablePath(program, at.file, expression);
-        if (path !== null && locationOf(path) === location) {
+        const text = path === null ? null : locationOf(path);
+        if (text !== null) program.work.charge("exactValues", textUnits(text.length));
+        if (text === location) {
           program.work.charge("exactValues", kinds.length);
           done.set(
             top.place,
@@ -440,15 +460,20 @@ export class NarrowingEvents {
         continue;
       }
       pending.pop();
+      // (each value's items merged by kind, so a chain's intermediate values stay as small as its kinds)
       if (c?.kind === "operation" && operator !== null) {
         const operands = top.parts.map((part) => withoutEmpty(done.get(part)!));
-        done.set(top.place, operationItems(operator, operands, program.scope, c.site));
+        done.set(
+          top.place,
+          mergeItems(operationItems(operator, operands, program.scope, c.site), program.scope),
+        );
       } else {
         const [left, right] = top.parts.map((part) => done.get(part)!);
+        program.work.charge("exactValues", left!.length + right!.length);
         done.set(
           top.place,
           left!.some((item) => item.tag === "null" || item.tag === "unknown")
-            ? [...left!.filter((item) => item.tag !== "null"), ...right!]
+            ? mergeItems([...left!.filter((item) => item.tag !== "null"), ...right!], program.scope)
             : left!,
         );
       }
