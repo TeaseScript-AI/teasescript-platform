@@ -1952,7 +1952,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   never reaches the script's execution.
 - **Records.** Each has an ID, kind, target, source location from the plan's spans, scene time, value preview,
   dependencies, and detail. They cover declarations; assignments, including to a property, index, or dict key and
-  compound ones, as a new version of the whole variable; collection methods that change their receiver; arguments,
+  compound ones, as a new version of the whole variable, or of the speaker property they change inside, and of
+  neither inside a value derived at each read, such as a dict's `keys`; collection methods that change their receiver,
+  the same way; arguments,
   supplied and defaulted parameters, and returns; loop sources and loop variables; intermediate values the compiled
   code keeps; accepted answers and button timeouts, only on settlement, so refused and repeated reports record
   nothing; loads, with whether the key was stored and whether a default ran; storage writes, a persistent one once the
@@ -1966,9 +1968,10 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   real target; temporaries by call frame and temporary ID; arguments by call frame and parameter; storage by key. The
   properties of a speaker, timer, media, message, permanent button, or the camera view, and the tagged photos, are state keyed by
   its identity, so every name for it reads the same versions. A property read takes the newest change that sets that
-  property: its assignment, a timer or media method for the timed properties, or a declaration or `showCamera` for
-  all of it. A change does not depend on the version it replaces, except that each tagged photo joins the earlier
-  ones. A compiled copy of one value shares that value's record.
+  property: its assignment or a change inside its value, a timer or media method for the timed properties, or a
+  declaration or `showCamera` for all of it. A change does not depend on the version it replaces, except that a change
+  inside a speaker property keeps the rest of it and each tagged photo joins the earlier ones. A compiled copy of one
+  value shares that value's record.
 - **Staging.** Records made while a `say` or a speaker declaration is staged commit or vanish with it, and they and the
   stage's rollback bookkeeping count toward the bounds meanwhile.
 - **Bounds.** At most 8,192 records or 8 MiB of accounted data (`RUNTIME_DEBUG_TRACE_LIMITS`), which drops the oldest

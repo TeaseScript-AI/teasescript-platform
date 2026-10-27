@@ -34,6 +34,7 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface RoomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
   readonly rooms: {
     readonly current: Readonly<Ref<"normal" | "debug">>;
     readonly debugHasData: Readonly<Ref<boolean>>;
@@ -378,6 +379,94 @@ test("Reload session keeps the debug room's saved data; Reset session deletes th
   await settle(context);
   assert.deepEqual(said(host.session.value), ["Run 1"]);
   assert.deepEqual(await rooms.values("test").load(), [{ key: "runs", value: 1 }]);
+});
+
+test("a debug session that cannot be kept leaves no earlier one for a reload, and the debug room keeps its saved data and photos", async (context) => {
+  stubBrowser(context);
+  const plan = compilePlayerProject(
+    'say "Short", instant\nshowButton "Count"\nlet xs = (1..=5000).toList()\nsay "Long", instant\nshowButton "Shrink"\nxs = [1]\nsay "Short again", instant\nshowButton "Done"\nexit',
+  ).plan!;
+  const reference = "captured-media:00000000-0000-4000-8000-000000000000:1";
+  const data = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+  const memory = memoryKeptRoomStore();
+  await memory.create(
+    "test",
+    [{ key: "photo", value: reference }],
+    [
+      {
+        namespace: "test",
+        reference,
+        kind: "image",
+        mimeType: "image/png",
+        size: data.size,
+        width: 1,
+        height: 1,
+        data,
+      },
+    ],
+  );
+  let full = false;
+  const rooms: KeptRoomStore = {
+    ...memory,
+    publish: async (scope, update) => {
+      if (full) throw new DOMException("The quota is exceeded.", "QuotaExceededError");
+      return memory.publish(scope, update);
+    },
+  };
+  const host = mountHost(context, {
+    own: savedData([]),
+    kept: memoryKeptSessionStore(),
+    rooms,
+    room: "debug",
+  });
+  const unchanged = async () => {
+    assert.deepEqual(await rooms.values("test").load(), [{ key: "photo", value: reference }]);
+    assert.deepEqual(await rooms.media.listReferences("test"), [reference]);
+  };
+  const notKept = () => host.notices.value.some((notice) => notice.key === "session-not-kept");
+  await prepare(context, host, plan);
+  await host.activate();
+  await settle(context);
+  assert.notEqual(await rooms.session("test"), null);
+
+  // V8 cannot write a state as JSON longer than a text can be; a list of 5,000 stands for such a list.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const stringify = JSON.stringify;
+  context.mock.method(JSON, "stringify", (...args: Parameters<typeof JSON.stringify>) => {
+    const json = stringify(...args);
+    if (
+      typeof args[0] === "object" &&
+      args[0] !== null &&
+      "observedSessionTimeMs" in args[0] &&
+      json.length > 20_000
+    )
+      throw new RangeError("Invalid string length");
+    return json;
+  });
+  await press(context, host);
+  assert.equal(said(host.session.value).at(-1), "Long");
+  // The point kept before would go on from before the list as if it were now, so it goes, and a notice says so.
+  assert.equal(await rooms.session("test"), null);
+  assert.ok(notKept());
+  await unchanged();
+  await press(context, host);
+  assert.equal(said(host.session.value).at(-1), "Short again");
+  assert.notEqual(await rooms.session("test"), null);
+  assert.ok(!notKept());
+  context.mock.restoreAll();
+
+  // A new session that cannot be kept leaves none for a reload either, not the one Reload deleted.
+  full = true;
+  await host.rooms.reloadDebug();
+  await settle(context);
+  assert.deepEqual(said(host.session.value), ["Short"]);
+  assert.equal(await rooms.session("test"), null);
+  await unchanged();
 });
 
 test("Debug off in the debug room only stops the script reading Debug as on", async (context) => {

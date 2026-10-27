@@ -1292,9 +1292,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       snapshotJson = playerRuntimeSnapshotJson(current);
     } catch {
       // A state this browser cannot write, such as one holding a list too long to save, cannot be kept, and the point kept
-      // before must not stand in for it: a reload would go on from an earlier state as if it were this one. In the debug
-      // room it stays until a later state is kept, since discarding it there would take the room's saved data too.
-      if (room.value === "normal") await forgetKeptSession(current);
+      // before must not stand in for it: a reload would go on from an earlier state as if it were this one.
+      await forgetKeptSession(current);
       return;
     }
     const events = current.events;
@@ -1314,12 +1313,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     await storageRoute;
     if (disposed || (room.value === "debug") !== inDebugRoom) return;
     try {
+      // A new session replaces the one kept before.
+      if (from === 0) await discardKeptSession(inDebugRoom);
       if (inDebugRoom) {
         // The debug room stores the session's photos like its saved ones.
         await capturedMedia.promote(references).catch(() => {});
       } else {
-        // A new session replaces the one kept before, with its photos.
-        if (from === 0) await store.discard(keptScope);
         // The photos no save stored go with the session, a photo already kept as it is; a stored one stays stored
         // while the session uses it (`capturedMediaStorage`).
         for (const photo of capturedMedia.sessionRecords(references))
@@ -1334,7 +1333,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       });
       kept = { plan: true, count, last };
       if (inDebugRoom) debugRoom.value = { session: true };
-      else notices.dismiss(playerNoticeKeys.sessionNotKept);
+      notices.dismiss(playerNoticeKeys.sessionNotKept);
     } catch {
       // The session kept before stays; a reload continues from there.
     }
@@ -1345,11 +1344,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function forgetKeptSession(current: PlayerRuntimeSession) {
     kept = { plan: false, count: 0, last: null };
-    await keptSessions.discard(keptScope!).catch(() => {});
+    await discardKeptSession(room.value === "debug").catch(() => {});
     const live = current.state.status === "running" || current.state.status === "waiting";
     if (!live) notices.dismiss(playerNoticeKeys.sessionNotKept);
     else if (!notices.list.some((notice) => notice.key === playerNoticeKeys.sessionNotKept))
       notices.publish(playerNotices.sessionNotKept());
+  }
+  /**
+   * Discards the session the room keeps: the normal room's with the photos only it uses, the debug room's alone, since
+   * the room's saved data and photos stay.
+   */
+  async function discardKeptSession(inDebugRoom: boolean) {
+    if (!inDebugRoom) return keptSessions.discard(keptScope!);
+    await debugRooms.discardSession(keptScope!);
+    debugRoom.value = { session: false };
   }
   /** Keeps the shown session as it is now and waits until it is kept. */
   async function keepSession(): Promise<void> {

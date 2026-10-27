@@ -36,7 +36,7 @@ export interface KeptSessionStore {
 /**
  * A kept session together with saved values of its own, by storage scope: the debug room of each script (DEBUGGER.md
  * "Debug room"), whose photos the store's `media` holds under the same references as the photos they were copied from.
- * A room is created and discarded as a whole.
+ * A room is created and discarded as a whole; its session can also be discarded alone.
  */
 export interface KeptRoomStore extends KeptSessionStore {
   /** The scope's room, with whether it keeps a session, or `null` without one; rejects when the store cannot be read. */
@@ -52,6 +52,8 @@ export interface KeptRoomStore extends KeptSessionStore {
   ): Promise<void>;
   /** The room's saved values, as script storage; every operation rejects once the room is gone. */
   values(scope: string): ScriptStorageProvider;
+  /** Deletes the scope's session, at once; the room keeps its saved values and photos. */
+  discardSession(scope: string): Promise<void>;
 }
 
 /** The state a reload continues: the plan the session runs, its snapshot, the events that led to it, and its marks. */
@@ -207,6 +209,11 @@ function loadedEntries(values: unknown): readonly RuntimeScriptStorageEntrySnaps
 
 /** A store in this page's memory, for a browser without IndexedDB; a reload ends its sessions. */
 export function memoryKeptSessionStore(): KeptSessionStore {
+  return memorySessions();
+}
+
+/** The sessions of a memory store, which `discardSession` deletes without their photos. */
+function memorySessions(): KeptSessionStore & Pick<KeptRoomStore, "discardSession"> {
   interface Kept {
     session: { planJson: string; snapshotJson: string; marks: DebugHistoryMarks } | null;
     events: InterpreterEvent[];
@@ -244,12 +251,18 @@ export function memoryKeptSessionStore(): KeptSessionStore {
       listReferences: async (namespace) => [...(kept.get(namespace)?.media.keys() ?? [])],
     },
     discard: async (scope) => void kept.delete(scope),
+    async discardSession(scope) {
+      const found = kept.get(scope);
+      if (found === undefined) return;
+      found.session = null;
+      found.events = [];
+    },
   };
 }
 
 /** A room store in this page's memory, for a browser without IndexedDB; a reload ends its rooms. */
 export function memoryKeptRoomStore(): KeptRoomStore {
-  const sessions = memoryKeptSessionStore();
+  const sessions = memorySessions();
   const rooms = new Map<string, readonly RuntimeScriptStorageEntrySnapshot[]>();
   const room = (scope: string) => {
     const values = rooms.get(scope);
@@ -588,5 +601,11 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
           transaction.objectStore(MEDIA).delete(scopeRange(scope));
         },
       ),
+    discardSession: (scope) =>
+      transact<void>(database, [SESSIONS, PLANS, EVENTS], "readwrite", (transaction) => {
+        transaction.objectStore(SESSIONS).delete(scope);
+        transaction.objectStore(PLANS).delete(scope);
+        transaction.objectStore(EVENTS).delete(scopeRange(scope));
+      }),
   };
 }

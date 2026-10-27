@@ -479,13 +479,48 @@ function speakerOnPath(
     if (depth >= minimumDepth && isSpeakerReference(current))
       speaker = { reference: current, depth };
     const step = descriptor.path[depth]!;
-    if (step.kind === "property" && !isObject(current) && !isSpeakerReference(current))
-      speaker = null;
+    if (!selectsStoredValue(current, step)) speaker = null;
     const next = resolvePreparedReferenceStep(snapshot, current, step);
     if (!next.found) return null;
     current = next.value;
   }
   return speaker;
+}
+
+/**
+ * What a change through `descriptor` changes, for the debug trace: a property of the last speaker its path reaches, when
+ * the rest of the path goes on from that property into values the session stores; else, for an attached reference whose
+ * whole path does, the variable at its root; else nothing, as for a copy or a value derived at each read, such as a
+ * dict's `keys`. A path that no longer leads anywhere leads to no speaker's property, but still into its variable.
+ */
+export function preparedReferenceChangeTarget(
+  snapshot: RuntimeSnapshot,
+  descriptor: PreparedReferenceDescriptor,
+): { readonly speakerId: number; readonly property: string } | "variable" | null {
+  const root = preparedReferenceRoot(snapshot, descriptor);
+  if (!root.found) return null;
+  let target: { speakerId: number; property: string } | "variable" | null = descriptor.detached
+    ? null
+    : "variable";
+  let current = root.value;
+  for (const step of descriptor.path) {
+    if (isSpeakerReference(current))
+      target =
+        step.kind === "property" ? { speakerId: current.speakerId, property: step.name } : null;
+    else if (!selectsStoredValue(current, step)) target = null;
+    const next = resolvePreparedReferenceStep(snapshot, current, step);
+    if (!next.found) return target === "variable" ? target : null;
+    current = next.value;
+  }
+  return target;
+}
+
+/**
+ * Whether `step` from `value` leads to a value the session stores: a property of an object or a speaker, a list element,
+ * or a dict entry. Any other property, such as a dict's `values`, is derived at each read, so no change follows it back.
+ */
+function selectsStoredValue(value: SerializableRuntimeValue, step: PreparedReferenceStep): boolean {
+  return step.kind !== "property" || isObject(value) || isSpeakerReference(value);
 }
 
 export function preparedReferenceSpeakerPath(
