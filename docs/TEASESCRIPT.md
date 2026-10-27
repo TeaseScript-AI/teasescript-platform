@@ -74,7 +74,8 @@ customGreeting("Hello")  // ordinary package-library call
 
 A formatter formats ordinary calls according to the existing call grammar. It does not invent command syntax for a library function.
 
-The accepted boundary does not itself change accepted V30 forms such as `wait 2 s` or `timer 10 s`. ADR 0018 supersedes only the V30 points it names; unrelated V30 syntax remains authoritative.
+The accepted boundary does not itself change accepted V30 forms such as `wait 2 s` or `timer 10 s`. ADR 0018 supersedes
+only the V30 points it names; unrelated V30 syntax remains authoritative.
 
 ## Colour and regex engines
 

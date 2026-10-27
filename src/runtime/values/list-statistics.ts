@@ -281,6 +281,9 @@ function numbersOf(
 function statistic(name: string, values: readonly number[], share: number): number {
   switch (name) {
     case "sum":
+      // Not the native `Math.sumPrecise`: WebKit's is wrong for some negative sums, such as `[-1]`
+      // (https://bugs.webkit.org/show_bug.cgi?id=315450), fixed upstream in
+      // https://github.com/WebKit/WebKit/pull/65558. Switch once the fix ships in the supported browsers.
       return quotient(sum(values.map(exact)), ONE);
     case "average":
       return quotient(sum(values.map(exact)), whole(values.length));
