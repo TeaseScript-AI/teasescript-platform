@@ -1561,12 +1561,19 @@ export class Contract {
           return yield* this.#contractIteration(projection.owner, []);
         if (measuresLength(projection.step))
           return yield* this.#contractLength(projection.owner, projection.step, []);
-        const elements = yield* this.contractOfValueAt(projection.owner, [
-          stepName(projection.step),
-        ]);
-        if (!selectsElement(projection.step)) return elements;
-        const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
-        return withOwnSelection(elements, owners, this.pass);
+        if (!selectsElement(projection.step))
+          return yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
+        // S6c: a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
+        // `.first` reads each link once whole, never each link 2^k times
+        const site = program.places[value]?.site ?? null;
+        const demand: Demand = {
+          key: joinParts("cpj", value),
+          kind: "contract",
+          file: site?.file ?? -1,
+          offset: site?.start ?? -1,
+          make: () => this.#selection(projection),
+        };
+        return yield demand;
       }
       if (program.callOutOf.has(value))
         return yield* this.contractOf(keyOf(this.#resultOf(value), []));
@@ -1590,6 +1597,16 @@ export class Contract {
     } finally {
       this.pass.solver.leaveRead();
     }
+  }
+
+  /** An element selection's kinds (`contractOfValue`): its owner's at the step, with the owner's own selection. */
+  *#selection(projection: {
+    readonly owner: PlaceId;
+    readonly step: string;
+  }): Work<readonly Item[]> {
+    const elements = yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
+    const owners = withoutEmpty(yield* this.contractOfValue(projection.owner));
+    return withOwnSelection(elements, owners, this.pass);
   }
 
   /** The result place of a call's value (F20). */

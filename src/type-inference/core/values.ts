@@ -336,14 +336,24 @@ export class Values {
           return yield* this.#iteration(projection.owner, at, rest);
         if (measuresLength(projection.step))
           return yield* this.#length(projection.owner, at, projection.step, rest);
-        const elements = yield* this.valueItems(
-          projection.owner,
-          at,
-          joinSteps([stepName(projection.step)], rest),
-        );
-        if (!selectsElement(projection.step)) return elements;
-        const owners = withoutEmpty(yield* this.valueItems(projection.owner, at, []));
-        return withOwnSelection(elements, owners, this.pass);
+        if (!selectsElement(projection.step))
+          return yield* this.valueItems(
+            projection.owner,
+            at,
+            joinSteps([stepName(projection.step)], rest),
+          );
+        // S6c: a selection reads its owner twice, at its step and whole, so its whole value once per value and node,
+        // whatever asks: a chain of k `.first` reads each link once whole, never each link 2^k times
+        if (rest.length > 0)
+          return yield* this.#selection(projection.owner, projection.step, at, rest);
+        const site = program.places[value]?.site ?? null;
+        return yield {
+          key: joinParts("vpj", value, projection.node === null ? (node?.id ?? "-") : ""),
+          kind: "value",
+          file: site?.file ?? -1,
+          offset: site?.start ?? -1,
+          make: () => this.#selection(projection.owner, projection.step, at, []),
+        };
       }
       if (program.callOutOf.has(value)) {
         const call = program.opOf.get(value);
@@ -363,6 +373,18 @@ export class Values {
     } finally {
       this.pass.solver.leaveRead();
     }
+  }
+
+  /** An element selection's value at a path (`#valueAt`): its owner's at the step, with the owner's own selection. */
+  *#selection(
+    owner: PlaceId,
+    step: string,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    const elements = yield* this.valueItems(owner, node, joinSteps([stepName(step)], rest));
+    const owners = withoutEmpty(yield* this.valueItems(owner, node, []));
+    return withOwnSelection(elements, owners, this.pass);
   }
 
   /** F27: the loop variable is the element of the iterable's value at loop entry; a dict's key is text, a range's a whole number. */
