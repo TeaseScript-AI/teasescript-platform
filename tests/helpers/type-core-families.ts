@@ -3090,13 +3090,14 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
     name: "I1203-computed-load-forms",
     measures:
-      "#1203: a list of k loads whose keys are a host value, a variable, a property, an element and a sum, their defaults `null`, a number and records of their own fields (a class each), then a record added (the contract side), a field of its first read k times",
-    // 56,129 / 111,214 units at k = 64, 128 in both orders (2.0149; `main` 84,215 / 224,740, 2.71; 2.27 with one
-    // answer per class of loads, a class per default, #1208 review r1 B1)
+      "#1203: a list of k loads whose keys are a host value, a variable, a property, an element and a sum, their defaults `null`, a number, records of their own fields (a class each) and a choice of a list's buttons (no class), then a record added (the contract side), a field of its first read k times",
+    // 56,979 / 113,229 units at k = 64, 128 in both orders (2.0130; `main` 85,065 / 226,755, 2.70; 2.32 with one
+    // answer per class of loads, a class per default, #1208 review r1; `mergeItems` 3.11 where a load needs its
+    // default's class, review r3)
     program: (k) => {
       const keys = ["hostValue", "key", "names.key", "keys[0]", 'key + "1"'];
       const defaults = (i: number): string =>
-        ["null", "0", `{a${i}: 1}`, `{f0: {a${i}: 1}}`][i % 4]!;
+        ["null", "0", `{a${i}: 1}`, `{f0: {a${i}: 1}}`, "(askChoice [1, 2])"][(i * 2) % 5]!;
       return main(
         lines(
           'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]',

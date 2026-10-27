@@ -537,6 +537,15 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
         ["box[2]", "box", "unknown"],
       ],
     ],
+    // loads of a default with no class (a choice of a list's buttons) answer alike below their root (#1208 review r3)
+    [
+      `let key = "k"\nlet box = [load(hostValue, default: (askChoice [1, 2])), load(key, default: (askChoice [1, 2])), load(hostValue, default: {a2: 1})]\nrepeat box[0].field0 {}\nrepeat box[2].field1 {}\nlet whole = box[1]\nexit\n`,
+      [
+        ["box[0].field0", "box", "unknown"],
+        ["box[2].field1", "box", "unknown"],
+        ["box[1]", "box", "unknown"],
+      ],
+    ],
     // loads of different defaults, each its own class, answer alike below their root (#1208 review r1 B1)
     [
       `let key = "k"\nlet named = {a3: 1}\nlet box = [load(hostValue, default: {a0: 1}), load(key, default: null), load(hostValue, default: {f0: {a2: 1}}), load(hostValue, default: named), ${loads(1)}]\nrepeat box[0].field0 {}\nrepeat box[3].field1 {}\nlet whole = box[1]\nexit\n`,
