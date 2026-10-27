@@ -1,0 +1,29 @@
+name: Decision
+description: A question the owner must decide.
+type: Task
+labels:
+  - needs triage
+  - "owner: input"
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: The choice to be made.
+    validations:
+      required: true
+  - type: textarea
+    id: affects
+    attributes:
+      label: What it affects
+      description: What depends on the answer, and whether work waits on it.
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and trade-offs
+      description: The viable choices and their consequences, with a code example where it helps.
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: The preferred choice, and why.

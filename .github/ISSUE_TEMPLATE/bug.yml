@@ -1,0 +1,40 @@
+name: Bug
+description: Something works differently than it should.
+type: Bug
+labels:
+  - needs triage
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What goes wrong, and when you run into it.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What it blocks or degrades, how often, and any workaround.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest TeaseScript source and what you do. An intermittent problem is welcome too.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen, with the specification or decision that says so if you know it.
+  - type: textarea
+    id: version
+    attributes:
+      label: Version and environment
+      description: The commit or build, and the browser, host or backend if relevant.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and investigation
+      description: >-
+        Relevant log lines or screenshots, a diagnosis grounded in reproduction, source or logs (mark hypotheses as
+        such), and related issues or pull requests.
