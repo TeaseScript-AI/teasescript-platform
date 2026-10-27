@@ -3044,6 +3044,27 @@ test("a property only copies of whole objects bring errs at its first direct rea
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {n: 2}}, {inner: b}]\nsay xs[0].inner.n\nexit',
       ["{inner: b}"],
     ],
+    // copies in a literal that lands inside another literal or through an add: at the first direct read or store
+    [
+      "a list of copies inside an object",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = {items: [a, b]}\nxs.items[0].n = 2\nexit',
+      ["xs.items[0].n (b)"],
+    ],
+    [
+      "a list of copies inside a list",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [[a, b]]\nsay xs[0][0].n\nexit',
+      ["xs[0][0].n (b)"],
+    ],
+    [
+      "an added list of copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.addAll([a, b])\nsay xs[0].n\nexit',
+      ["xs[0].n (b)"],
+    ],
+    [
+      "an added element that is a list of copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.add([a, b])\nsay xs[0][0].n\nexit',
+      ["xs[0][0].n (b)"],
+    ],
     // a literal's own field is its own contribution, whatever it copies
     [
       "a literal's field copied from a property",

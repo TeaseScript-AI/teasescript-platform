@@ -651,7 +651,6 @@ export class Consumers {
   }
 
   #directSites: Map<string, SourceSite> | null = null;
-  #literalStores: Map<PlaceId, Definition> | null = null;
 
   /**
    * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
@@ -875,6 +874,34 @@ export class Consumers {
   }
 
   /**
+   * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
+   * itself, an added element one step below), or the literals around it (a collection's cell as `element`, an object's
+   * property by name) put it at; `null` where nothing stores it.
+   */
+  #landingOf(
+    literal: PlaceId,
+  ): { readonly place: PlaceId; readonly path: readonly string[] } | null {
+    const { program, definitions } = this.pass;
+    const steps: string[] = [];
+    for (let at = literal; ;) {
+      program.work.charge("checks");
+      const d = (definitions.byValue.get(at) ?? []).find(
+        (each) => each.kind === "whole" || each.kind === "add",
+      );
+      if (d === undefined) return null;
+      const owner = d.kind === "whole" ? program.cellOwner.get(d.place) : undefined;
+      if (owner === undefined) {
+        const base =
+          d.kind === "add" && d.how !== "elements" ? joinSteps(d.path, ["element"]) : d.path;
+        return { place: d.place, path: joinSteps(base, steps.reverse()) };
+      }
+      const kind = program.place(d.place).kind;
+      steps.push(kind.kind === "property" ? propertyStep(kind.name) : "element");
+      at = owner.owner;
+    }
+  }
+
+  /**
    * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
    * error at the offending element, or where a copy brought it into a property, A2's at the property's first direct read
    * or store.
@@ -883,25 +910,15 @@ export class Consumers {
     site: SourceSite,
     found: Parameters<Parameters<Admission["literalElements"]>[1]>[1],
   ): void {
-    const { program, definitions } = this.pass;
+    const { program } = this.pass;
     const owner = program.cellOwner.get(found.cell);
     const literal = owner?.kind === "cell" ? owner.owner : undefined;
     const cell = program.place(found.cell).kind;
     const step = cell.kind === "cell" ? cell.step : "element";
-    // the place the literal is stored into, through which a later read reaches the property
-    if (this.#literalStores === null) {
-      this.#literalStores = new Map();
-      for (const d of definitions.storeDefs) {
-        program.work.charge("indexSteps");
-        if (d.kind === "whole" && d.value !== undefined && !this.#literalStores.has(d.value))
-          this.#literalStores.set(d.value, d);
-      }
-    }
+    // the place the literal lands in, through which a later read reaches the property
     const store =
-      literal === undefined || found.path.length === 0
-        ? undefined
-        : this.#literalStores.get(literal);
-    if (store !== undefined) {
+      literal === undefined || found.path.length === 0 ? null : this.#landingOf(literal);
+    if (store !== null) {
       // (a key's steps: a dict value is an `element`, as `targetRoot` makes it)
       const below = found.path.map((at) => (at === "entry" ? "element" : at));
       const path = joinSteps(store.path, ["element"], below);
