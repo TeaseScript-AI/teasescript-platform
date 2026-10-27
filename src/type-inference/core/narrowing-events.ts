@@ -5,7 +5,6 @@ import { operatorOf } from "./contract.js";
 import {
   keptPrefixes,
   keyPlace,
-  sortCost,
   type Definition,
   type Key,
   type PositionRange,
@@ -14,6 +13,17 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, mergeItems, type ContextWord, type Item, type ItemTag } from "./items.js";
 import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowing.js";
+import {
+  copied,
+  each,
+  every,
+  holds,
+  mapped,
+  passing,
+  some,
+  sorted,
+  steps,
+} from "./narrowing-iteration.js";
 import { countIn, lowerBound } from "./narrowing-statements.js";
 import { operationItems } from "./operator-table.js";
 import type { Work } from "./solver.js";
@@ -45,20 +55,28 @@ interface EventList {
  * compared with each kind, charged.
  */
 function keptWithin(items: readonly Item[], kinds: readonly ItemTag[], work: WorkLedger): boolean {
-  work.charge("exactValues", (items.length + 1) * Math.max(1, kinds.length));
-  if (kinds.includes("unknown")) return true;
-  return items.every(
+  if (holds(work, "exactValues", kinds, "unknown")) return true;
+  return every(
+    work,
+    "exactValues",
+    items,
     (item) =>
       item.tag === "empty" ||
-      kinds.includes(item.tag) ||
-      (item.tag === "integer" && kinds.includes("number")),
+      holds(work, "exactValues", kinds, item.tag) ||
+      (item.tag === "integer" && holds(work, "exactValues", kinds, "number")),
   );
 }
 
-/** The kind set's signature: its tags, each once, sorted (a sort charged). */
+/** The kind set's signature: its tags, each once, sorted. */
 function kindsText(kinds: readonly ItemTag[], work: WorkLedger): string {
-  work.charge("eventSteps", sortCost(kinds.length) + 1);
-  return [...new Set(kinds)].sort().join(",");
+  const seen = new Set<ItemTag>();
+  for (const kind of each(work, "eventSteps", kinds)) seen.add(kind);
+  const tags = sorted(work, "eventSteps", copied(work, "eventSteps", seen), (a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  // (`joinParts` walks the tags once more)
+  work.charge("eventSteps", tags.length);
+  return joinParts(tags);
 }
 
 export class NarrowingEvents {
@@ -82,8 +100,8 @@ export class NarrowingEvents {
     readonly pass: CorePass,
     readonly index: NarrowingIndex,
   ) {
-    pass.program.work.charge("indexSteps", pass.program.flow.loops.length);
-    for (const loop of pass.program.flow.loops) this.#loops.set(loop.head, loop);
+    for (const loop of each(pass.program.work, "indexSteps", pass.program.flow.loops))
+      this.#loops.set(loop.head, loop);
   }
 
   get #work(): WorkLedger {
@@ -112,9 +130,8 @@ export class NarrowingEvents {
       return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
     const events = this.#events(g);
     // X5 with N5: every event of a dependency key inside a loop around the read that does not enclose G
-    for (const head of node.loops) {
-      program.work.charge("eventSteps", 1 + g.node.loops.length);
-      if (g.node.loops.includes(head)) continue;
+    for (const head of each(program.work, "eventSteps", node.loops)) {
+      if (holds(program.work, "eventSteps", g.node.loops, head)) continue;
       const loop = this.#loops.get(head);
       if (loop === undefined) return "loop";
       if ((yield* this.#first(g, events, this.#inside(loop), kinds)) !== null) return "loop";
@@ -163,18 +180,18 @@ export class NarrowingEvents {
     const work = this.#work;
     const lists: (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] = [
       [this.#texts(g.key, true), "branch"],
-      ...this.#prefixes(g).map((prefix) => [this.#texts(prefix, false), "branch"] as const),
-      ...g.variables.map((variable) => [this.#texts(variable, true), "branch"] as const),
-      ...g.collections.map(
-        (collection) => [this.index.invalidations(collection)?.texts, "branch"] as const,
-      ),
     ];
+    for (const prefix of each(work, "eventSteps", this.#prefixes(g)))
+      lists.push([this.#texts(prefix, false), "branch"]);
+    for (const variable of each(work, "eventSteps", g.variables))
+      lists.push([this.#texts(variable, true), "branch"]);
+    for (const collection of each(work, "eventSteps", g.collections))
+      lists.push([this.index.invalidations(collection)?.texts, "branch"]);
     if (this.#ownedAway(g)) lists.push([this.index.statements.callTexts, "call"]);
     let first = Infinity;
     let word: ContextWord | null = null;
-    for (const [byFile, found] of lists) {
+    for (const [byFile, found] of each(work, "eventSteps", lists)) {
       const offsets = byFile?.get(file);
-      work.charge("eventSteps");
       if (offsets === undefined) continue;
       const index = lowerBound(work, offsets, from);
       if (index < offsets.length && offsets[index]! < to && offsets[index]! < first) {
@@ -195,19 +212,20 @@ export class NarrowingEvents {
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
     const byFile = new Map<number, number[]>();
-    for (const at of below ? [key, ...definitions.keysBelow(key)] : [key])
-      for (const d of definitions.byKey.get(at) ?? []) {
-        program.work.charge("eventSteps");
+    const keys = [key];
+    if (below)
+      for (const lower of each(program.work, "eventSteps", definitions.keysBelow(key)))
+        keys.push(lower);
+    for (const at of each(program.work, "eventSteps", keys))
+      for (const d of each(program.work, "eventSteps", definitions.byKey.get(at) ?? [])) {
         if (!lists.live(d) || !program.live(d.node) || program.inBlockCode(d.node)) continue;
         // (a call's effect follows its arguments: where its site ends)
         const list = byFile.get(d.site.file);
         if (list === undefined) byFile.set(d.site.file, [d.site.end]);
         else list.push(d.site.end);
       }
-    for (const list of byFile.values()) {
-      program.work.charge("eventSteps", sortCost(list.length));
-      list.sort((a, b) => a - b);
-    }
+    for (const list of each(program.work, "eventSteps", byFile.values()))
+      sorted(program.work, "eventSteps", list, (a, b) => a - b);
     keepText(program.work, memo.length);
     this.#text.set(memo, byFile);
     return byFile;
@@ -221,10 +239,14 @@ export class NarrowingEvents {
       program.reached(loop.body) && program.dom.dominates(loop.body, loop.head)
         ? loop.body
         : loop.head;
-    const ranges = program.reached(loop.exit)
-      ? lists.spanBetween(entry, loop.exit)
-      : [[program.position(entry) + 1, program.positionEnd(entry)] as const];
-    return [[program.position(entry), program.position(entry)], ...ranges];
+    const ranges: PositionRange[] = [[program.position(entry), program.position(entry)]];
+    if (!program.reached(loop.exit))
+      ranges.push([program.position(entry) + 1, program.positionEnd(entry)]);
+    // (X6's span is at most two ranges)
+    else
+      for (const range of each(program.work, "eventSteps", lists.spanBetween(entry, loop.exit)))
+        ranges.push(range);
+    return ranges;
   }
 
   /** G's prefixes' keys, made (and charged) once per G. */
@@ -247,22 +269,21 @@ export class NarrowingEvents {
     const events: EventList[] = [
       { positions: this.pass.lists.eventList(g.key), word: "branch", own: true },
     ];
-    for (const prefix of this.#prefixes(g))
+    for (const prefix of each(this.#work, "eventSteps", this.#prefixes(g)))
       events.push({
         positions: lists.definitionsOf(prefix).eventPositions,
         word: "branch",
         own: false,
       });
-    for (const variable of g.variables)
+    for (const variable of each(this.#work, "eventSteps", g.variables))
       events.push({ positions: this.pass.lists.eventList(variable), word: "branch", own: false });
-    for (const collection of g.collections) {
+    for (const collection of each(this.#work, "eventSteps", g.collections)) {
       const invalidations = this.index.invalidations(collection);
       if (invalidations !== undefined)
         events.push({ positions: invalidations.positions, word: "branch", own: false });
     }
     if (this.#ownedAway(g))
       events.push({ positions: definitions.sitePositions, word: "call", own: false });
-    this.#work.charge("eventSteps", events.length);
     this.#eventsOf.set(g, events);
     return events;
   }
@@ -273,12 +294,15 @@ export class NarrowingEvents {
    */
   #ownedAway(g: Narrowing): boolean {
     const { definitions } = this.pass;
+    const work = this.#work;
     if (
       definitions.ownedAway(g.key) ||
-      g.variables.some((variable) => definitions.ownedAway(variable))
+      some(work, "ownerSteps", g.variables, (variable) => definitions.ownedAway(variable))
     )
       return true;
-    return g.collections.some((collection) => this.#invalidatedOutside(collection));
+    return some(work, "ownerSteps", g.collections, (collection) =>
+      this.#invalidatedOutside(collection),
+    );
   }
 
   /** Whether a callable ordinary code may run, other than a collection's activation, holds an invalidation of it, once. */
@@ -288,8 +312,10 @@ export class NarrowingEvents {
     const { definitions, program } = this.pass;
     const own = definitions.declaringCallable(keyPlace(collection));
     const owners = this.index.invalidations(collection)?.owners ?? [];
-    program.work.charge("ownerSteps", owners.length + 1);
-    const outside = owners.some(
+    const outside = some(
+      program.work,
+      "ownerSteps",
+      owners,
       (owner) => owner !== null && owner !== own && definitions.ordinary.has(owner),
     );
     keepText(program.work, collection.length);
@@ -306,10 +332,16 @@ export class NarrowingEvents {
   /** X7's handler-store predicate over G's dependency keys, a block holding an invalidation of a collection included. */
   #touched(g: Narrowing): boolean {
     const { handlers } = this.pass;
+    const work = this.#work;
     return (
       handlers.handlerTouches(g.key) ||
-      g.variables.some((variable) => handlers.handlerTouches(variable)) ||
-      g.collections.some((collection) => this.index.invalidations(collection)?.inBlock === true)
+      some(work, "eventSteps", g.variables, (variable) => handlers.handlerTouches(variable)) ||
+      some(
+        work,
+        "eventSteps",
+        g.collections,
+        (collection) => this.index.invalidations(collection)?.inBlock === true,
+      )
     );
   }
 
@@ -327,10 +359,9 @@ export class NarrowingEvents {
     const work = this.#work;
     let at = Infinity;
     let word: ContextWord | null = null;
-    for (const list of events)
-      for (const [low, high] of ranges) {
+    for (const list of each(work, "eventSteps", events))
+      for (const [low, high] of each(work, "eventSteps", ranges)) {
         if (low > high) continue;
-        work.charge("eventSteps");
         const from = lowerBound(work, list.positions, low);
         const to = lowerBound(work, list.positions, high + 1);
         if (from >= to || list.positions[from]! >= at) continue;
@@ -342,9 +373,8 @@ export class NarrowingEvents {
           // the first rank j with more events than preserving stores up to its position
           let lo = from;
           let hi = to - 1;
-          while (lo < hi) {
+          for (const _ of steps(work, "eventSteps", () => lo < hi)) {
             const middle = (lo + hi) >> 1;
-            work.charge("eventSteps");
             const preserving = lowerBound(work, subset, list.positions[middle]! + 1) - base;
             if (middle - from + 1 > preserving) hi = middle;
             else lo = middle + 1;
@@ -369,13 +399,14 @@ export class NarrowingEvents {
     const known = this.#subsets.get(signature);
     if (known !== undefined) return known;
     const positions: number[] = [];
-    for (const store of this.#storesOf(g.key).get(g.location) ?? []) {
-      program.work.charge("indexSteps");
+    for (const store of each(
+      program.work,
+      "indexSteps",
+      this.#storesOf(g.key).get(g.location) ?? [],
+    ))
       if (yield* this.preserves(store, g.location, kinds))
         positions.push(program.position(store.node));
-    }
-    program.work.charge("indexSteps", sortCost(positions.length));
-    positions.sort((a, b) => a - b);
+    sorted(program.work, "indexSteps", positions, (a, b) => a - b);
     keepText(program.work, signature.length);
     this.#subsets.set(signature, positions);
     return positions;
@@ -387,8 +418,7 @@ export class NarrowingEvents {
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
     const byLocation = new Map<string, Definition[]>();
-    for (const d of definitions.byKey.get(key) ?? []) {
-      program.work.charge("indexSteps");
+    for (const d of each(program.work, "indexSteps", definitions.byKey.get(key) ?? [])) {
       const statement = d.node.statement;
       if (
         d.kind !== "whole" ||
@@ -400,7 +430,7 @@ export class NarrowingEvents {
         continue;
       const path = stablePath(program, d.node.file, statement.target, false, d.place);
       if (path === null) continue;
-      const location = locationOf(path, 0, program.work);
+      const location = locationOf(path, program.work, 0, true);
       const list = byLocation.get(location);
       if (list === undefined) byLocation.set(location, [d]);
       else list.push(d);
@@ -442,7 +472,7 @@ export class NarrowingEvents {
     const pending: { readonly place: PlaceId; parts: readonly PlaceId[] | null }[] = [
       { place: value, parts: null },
     ];
-    while (pending.length > 0) {
+    for (const _ of steps(program.work, "exactValues", () => pending.length > 0)) {
       const top = pending.at(-1)!;
       if (done.has(top.place)) {
         pending.pop();
@@ -458,13 +488,14 @@ export class NarrowingEvents {
         const expression = at?.expression;
         const path =
           expression === undefined || at === null ? null : stablePath(program, at.file, expression);
-        const text = path === null ? null : locationOf(path);
+        const text = path === null ? null : locationOf(path, program.work);
         if (text !== null) program.work.charge("exactValues", textUnits(text.length));
         if (text === location) {
-          program.work.charge("exactValues", kinds.length);
           done.set(
             top.place,
-            kinds.map((tag) => makeItem(tag, null, { cert: "pos" })),
+            mapped(program.work, "exactValues", kinds, (tag) =>
+              makeItem(tag, null, { cert: "pos" }),
+            ),
           );
           continue;
         }
@@ -478,26 +509,40 @@ export class NarrowingEvents {
           done.set(top.place, yield* values.valueItems(top.place, at ?? node, []));
           continue;
         }
-        for (const part of top.parts) pending.push({ place: part, parts: null });
+        for (const part of each(program.work, "exactValues", top.parts))
+          pending.push({ place: part, parts: null });
         continue;
       }
       pending.pop();
       // (each value's items merged by kind, so a chain's intermediate values stay as small as its kinds)
       if (c?.kind === "operation" && operator !== null) {
-        const operands = top.parts.map((part) => withoutEmpty(done.get(part)!));
+        const operands = mapped(program.work, "exactValues", top.parts, (part) => {
+          const items = done.get(part)!;
+          // (`withoutEmpty` walks the operand's items)
+          program.work.charge("exactValues", items.length);
+          return withoutEmpty(items);
+        });
         done.set(
           top.place,
           mergeItems(operationItems(operator, operands, program.scope, c.site), program.scope),
         );
       } else {
-        const [left, right] = top.parts.map((part) => done.get(part)!);
-        program.work.charge("exactValues", left!.length + right!.length);
-        done.set(
-          top.place,
-          left!.some((item) => item.tag === "null" || item.tag === "unknown")
-            ? mergeItems([...left!.filter((item) => item.tag !== "null"), ...right!], program.scope)
-            : left!,
-        );
+        const left = done.get(top.parts[0]!)!;
+        const right = done.get(top.parts[1]!)!;
+        if (
+          !some(
+            program.work,
+            "exactValues",
+            left,
+            (item) => item.tag === "null" || item.tag === "unknown",
+          )
+        )
+          done.set(top.place, left);
+        else {
+          const joined = passing(program.work, "exactValues", left, (item) => item.tag !== "null");
+          for (const item of each(program.work, "exactValues", right)) joined.push(item);
+          done.set(top.place, mergeItems(joined, program.scope));
+        }
       }
     }
     return done.get(value)!;

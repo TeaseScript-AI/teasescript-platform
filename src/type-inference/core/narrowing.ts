@@ -6,12 +6,23 @@ import { caseValueKey } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinParts, keepText, keptArray, keptParts, keptSteps, type WorkLedger } from "./budget.js";
-import { keyBelow, keyOf, sortCost, type Key } from "./definitions.js";
+import { joinParts, keepText, keptArray, keptParts, textUnits, type WorkLedger } from "./budget.js";
+import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
 import { selectsElement } from "./method-categories.js";
 import { propertyStep, siteKey, type CoreProgram } from "./program.js";
+import {
+  copied,
+  each,
+  every,
+  flatMapped,
+  mapped,
+  passing,
+  some,
+  sorted,
+  steps,
+} from "./narrowing-iteration.js";
 import { StatementTree } from "./narrowing-statements.js";
 
 /*
@@ -62,10 +73,8 @@ function readsElement(step: PathStep): boolean {
 /** An expression without the parentheses around it, each one walked charged (they nest as deep as written). */
 function peel(expression: Expression, work: WorkLedger): Expression {
   let current = expression;
-  while (current.kind === "parenthesizedExpression") {
-    work.charge("eventSteps");
-    current = current.expression;
-  }
+  for (const _ of steps(work, "eventSteps", () => current.kind === "parenthesizedExpression"))
+    if (current.kind === "parenthesizedExpression") current = current.expression;
   return current;
 }
 
@@ -92,15 +101,17 @@ function literalKey(expression: Expression, work: WorkLedger): string | undefine
 
 /** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
 export function pathKey(path: StablePath, work: WorkLedger, length = path.steps.length): Key {
-  work.charge("eventSteps", length + 1);
-  const steps: string[] = [];
-  for (let index = 0; index < length; index += 1) {
+  work.charge("eventSteps");
+  let index = 0;
+  const made: string[] = [];
+  for (const _ of steps(work, "eventSteps", () => index < length)) {
     const step = path.steps[index]!;
-    steps.push(
+    made.push(
       step.kind === "property" && !readsElement(step) ? propertyStep(step.name) : "element",
     );
+    index += 1;
   }
-  return keyOf(path.root, steps);
+  return keyOf(path.root, made);
 }
 
 /**
@@ -116,20 +127,19 @@ export function stablePath(
   trailing = false,
   root: PlaceId | null = null,
 ): StablePath | null {
-  const steps: PathStep[] = [];
-  // (outermost first; reversed once the root is found: whether every step so far is an element read)
+  // (outermost first, each put in front: whether every step so far is an element read)
+  const outermost: PathStep[] = [];
   let trailingOnly = true;
   const work = program.work;
   let current = peel(expression, work);
-  while (current.kind !== "identifier") {
-    program.work.charge("eventSteps");
+  for (const _ of steps(work, "eventSteps", () => current.kind !== "identifier")) {
     if (current.kind === "propertyAccessExpression") {
       const name = current.property.name;
       if (name === "random") {
         if (!trailing || !trailingOnly) return null;
-        steps.push({ kind: "element" });
+        outermost.push({ kind: "element" });
       } else {
-        steps.push({ kind: "property", name });
+        outermost.push({ kind: "property", name });
         trailingOnly = false;
       }
       current = peel(current.object, work);
@@ -140,18 +150,25 @@ export function stablePath(
     const fixed = literalKey(index, work);
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
     if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
-      steps.push({ kind: "fixed", text: fixed });
+      outermost.push({ kind: "fixed", text: fixed });
       trailingOnly = false;
     } else if (variable !== null) {
-      steps.push({ kind: "variable", place: variable });
+      outermost.push({ kind: "variable", place: variable });
       trailingOnly = false;
-    } else if (trailing && trailingOnly) steps.push({ kind: "element" });
+    } else if (trailing && trailingOnly) outermost.push({ kind: "element" });
     else return null;
     current = peel(current.object, work);
   }
   const binding = root ?? bindingOf(program, file, current);
   if (binding === null) return null;
-  return { root: binding, steps: steps.reverse() };
+  // (innermost first)
+  let index = outermost.length;
+  const ordered: PathStep[] = [];
+  for (const _ of steps(work, "eventSteps", () => index > 0)) {
+    index -= 1;
+    ordered.push(outermost[index]!);
+  }
+  return { root: binding, steps: ordered };
 }
 
 /** The binding an identifier reads: a `let`, `global`, loop variable or parameter. */
@@ -179,9 +196,14 @@ export type NarrowingForm =
 const NON_NULL: NarrowingForm = { kind: "non-null" };
 const ONLY_NULL: NarrowingForm = { kind: "null" };
 
-/** Whether an item of kind `tag` lies wholly within `kinds` (an integer is a number). */
-function within(tag: ItemTag, kinds: readonly ValueKind[]): boolean {
-  return kinds.some((kind) => kind === tag || (tag === "integer" && kind === "number"));
+/** Whether an item of kind `tag` lies wholly within `kinds` (an integer is a number), each kind compared charged. */
+function within(tag: ItemTag, kinds: readonly ValueKind[], work: WorkLedger): boolean {
+  return some(
+    work,
+    "mergeItems",
+    kinds,
+    (kind) => kind === tag || (tag === "integer" && kind === "number"),
+  );
 }
 
 /** The kind an item of kind `tag` keeps under a positive test of `kind`, or `null` when they are disjoint. */
@@ -205,11 +227,10 @@ export function narrowedItems(
   items: readonly Item[],
   scope: ItemScope,
 ): Item[] {
-  // an item compared with each of a type test's kinds
-  const kinds = form.kind === "is" || form.kind === "is-not" ? form.kinds.length : 1;
-  scope.work.charge("mergeItems", items.length * Math.max(1, kinds) + 1);
+  const work = scope.work;
+  work.charge("mergeItems");
   const kept: Item[] = [];
-  for (const item of items) {
+  for (const item of each(work, "mergeItems", items)) {
     if (item.tag === "empty") {
       kept.push(item);
       continue;
@@ -222,21 +243,23 @@ export function narrowedItems(
         if (item.tag === "null" || item.tag === "unknown") kept.push({ ...item, tag: "null" });
         break;
       case "is":
-        for (const kind of form.kinds) {
+        for (const kind of each(work, "mergeItems", form.kinds)) {
           const tag = overlap(item.tag, kind, form.fractional === true);
           if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
         }
         break;
       case "is-not":
-        if (item.tag === "unknown" || !within(item.tag, form.kinds)) kept.push(item);
+        if (item.tag === "unknown" || !within(item.tag, form.kinds, work)) kept.push(item);
         break;
     }
   }
   const merged = mergeItems(kept, scope);
   if (form.kind === "is-not") return merged;
-  const left = merged.filter((item) => item.tag !== "empty");
+  const left = passing(work, "mergeItems", merged, (item) => item.tag !== "empty");
   if (left.length !== 1 || left[0]!.tag === "unknown" || left[0]!.cert === "def") return merged;
-  return merged.map((item) => (item === left[0] ? { ...item, cert: "def" } : item));
+  return mapped(work, "mergeItems", merged, (item) =>
+    item === left[0] ? { ...item, cert: "def" } : item,
+  );
 }
 
 /**
@@ -244,16 +267,21 @@ export function narrowedItems(
  * comparison per kind of a type test, charged.
  */
 export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): boolean {
-  work.charge("eventSteps", form.kind === "is" || form.kind === "is-not" ? form.kinds.length : 1);
+  work.charge("eventSteps");
   switch (form.kind) {
     case "non-null":
       return tag === "null";
     case "null":
       return tag !== "null";
     case "is":
-      return form.kinds.every((kind) => overlap(tag, kind, form.fractional === true) === null);
+      return every(
+        work,
+        "eventSteps",
+        form.kinds,
+        (kind) => overlap(tag, kind, form.fractional === true) === null,
+      );
     case "is-not":
-      return within(tag, form.kinds);
+      return within(tag, form.kinds, work);
   }
 }
 
@@ -275,9 +303,8 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
   const elements: TypeAnnotation[] = [];
   let others = 0;
   const pending = [annotation];
-  while (pending.length > 0) {
+  for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
     const type = pending.pop()!;
-    work.charge("indexSteps");
     switch (type.kind) {
       case "namedType":
         kinds.add(type.name);
@@ -297,12 +324,12 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
         pending.push(type.value);
         break;
       case "unionType":
-        for (const member of type.members) pending.push(member);
+        for (const member of each(work, "indexSteps", type.members)) pending.push(member);
         break;
     }
   }
   return {
-    kinds: [...kinds],
+    kinds: copied(work, "indexSteps", kinds),
     constrained,
     element: elements.length === 1 && others === 0 ? elements[0]! : null,
   };
@@ -336,11 +363,13 @@ function formOf(
 ): { readonly form: NarrowingForm; readonly element: TypeAnnotation | null } {
   const type = fact.type;
   if (type === null) return { form: fact.holds ? ONLY_NULL : NON_NULL, element: null };
-  work.charge("indexSteps", type.kinds.length);
   return fact.holds
     ? { form: { kind: "is", kinds: type.kinds }, element: type.element }
     : {
-        form: { kind: "is-not", kinds: type.kinds.filter((kind) => !type.constrained.has(kind)) },
+        form: {
+          kind: "is-not",
+          kinds: passing(work, "indexSteps", type.kinds, (kind) => !type.constrained.has(kind)),
+        },
         element: null,
       };
 }
@@ -353,11 +382,11 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
   const end = expression.span.end.offset;
   let shape = shapeOf(expression, work);
   let holds = true;
-  while (shape.kind === "not") {
-    work.charge("indexSteps");
-    holds = !holds;
-    shape = shapeOf(shape.operand, work);
-  }
+  for (const _ of steps(work, "indexSteps", () => shape.kind === "not"))
+    if (shape.kind === "not") {
+      holds = !holds;
+      shape = shapeOf(shape.operand, work);
+    }
   if (shape.kind === "null")
     return { tested: shape.tested, end, type: null, holds: shape.negated ? !holds : holds };
   if (shape.kind !== "type") return null;
@@ -376,9 +405,8 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
  */
 function facts(condition: Expression, outcome: boolean, into: Fact[], work: WorkLedger): void {
   const pending = [condition];
-  while (pending.length > 0) {
+  for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
     const expression = pending.pop()!;
-    work.charge("indexSteps");
     const test = testForm(expression, work);
     if (test !== null) {
       into.push(outcome ? test : opposite(test));
@@ -442,19 +470,25 @@ export class Laminar<T> {
     readonly work: WorkLedger,
     entries: { readonly start: number; readonly end: number; readonly item: T }[],
   ) {
-    work.charge("indexSteps", sortCost(entries.length));
-    const order = entries.map((_, index) => index);
-    order.sort(
+    const order = mapped(work, "indexSteps", entries, (_, index) => index);
+    sorted(
+      work,
+      "indexSteps",
+      order,
       (a, b) => entries[a]!.start - entries[b]!.start || entries[b]!.end - entries[a]!.end || a - b,
     );
-    const sorted = order.map((index) => entries[index]!);
+    const ordered = mapped(work, "indexSteps", order, (index) => entries[index]!);
     const parents: number[] = [];
     const jumps: number[] = [];
     const depths: number[] = [];
     const open: number[] = [];
-    for (const [index, entry] of sorted.entries()) {
-      work.charge("indexSteps");
-      while (open.length > 0 && sorted[open.at(-1)!]!.end < entry.start) open.pop();
+    for (const [index, entry] of each(work, "indexSteps", ordered.entries())) {
+      for (const _ of steps(
+        work,
+        "indexSteps",
+        () => open.length > 0 && ordered[open.at(-1)!]!.end < entry.start,
+      ))
+        open.pop();
       const parent = open.at(-1) ?? -1;
       parents.push(parent);
       depths.push(parent < 0 ? 0 : depths[parent]! + 1);
@@ -467,9 +501,9 @@ export class Laminar<T> {
       );
       open.push(index);
     }
-    this.starts = sorted.map((entry) => entry.start);
-    this.ends = sorted.map((entry) => entry.end);
-    this.items = sorted.map((entry) => entry.item);
+    this.starts = mapped(work, "indexSteps", ordered, (entry) => entry.start);
+    this.ends = mapped(work, "indexSteps", ordered, (entry) => entry.end);
+    this.items = mapped(work, "indexSteps", ordered, (entry) => entry.item);
     this.parents = parents;
     this.#jumps = jumps;
   }
@@ -478,16 +512,14 @@ export class Laminar<T> {
   public innermostIndex(at: number): number {
     let low = 0;
     let high = this.starts.length;
-    while (low < high) {
+    for (const _ of steps(this.work, "eventSteps", () => low < high)) {
       const middle = (low + high) >> 1;
-      this.work.charge("eventSteps");
       if (this.starts[middle]! <= at) low = middle + 1;
       else high = middle;
     }
     // (up the chain the intervals end no earlier: a jump whose interval ends before `at` passes every one below it)
     let index = low - 1;
-    while (index >= 0 && this.ends[index]! < at) {
-      this.work.charge("eventSteps");
+    for (const _ of steps(this.work, "eventSteps", () => index >= 0 && this.ends[index]! < at)) {
       const jump = this.#jumps[index]!;
       index = jump >= 0 && this.ends[jump]! < at ? this.parents[jump]! : this.parents[index]!;
     }
@@ -591,10 +623,10 @@ export class NarrowingIndex {
         keepText(work, key.length);
         return key;
       };
-      const variables = path.steps.flatMap((step) =>
+      const variables = flatMapped(work, "indexSteps", path.steps, (step) =>
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
-      const base = path.steps.flatMap((step, index) =>
+      const base = flatMapped(work, "indexSteps", path.steps, (step, index) =>
         readsElement(step) ? [kept(pathKey(path, work, index))] : [],
       );
       // the tested path and, for a positive collection test, one more element step per element type it names: each
@@ -608,8 +640,7 @@ export class NarrowingIndex {
         at = { children: new Map(), locations: new Map() };
         this.#tested.set(path.root, at);
       }
-      for (const step of path.steps) {
-        work.charge("indexSteps");
+      for (const step of each(work, "indexSteps", path.steps)) {
         const label = stepLabel(step);
         let child: PathNode | undefined = at.children.get(label);
         if (child === undefined) {
@@ -618,9 +649,10 @@ export class NarrowingIndex {
         }
         at = child;
       }
-      for (let elements = 0; ; elements += 1) {
-        work.charge("indexSteps");
-        const location = locationOf(path, elements, work);
+      let elements = -1;
+      for (const _ of steps(work, "indexSteps", () => true)) {
+        elements += 1;
+        const location = locationOf(path, work, elements, true);
         at.locations.set(elements, location);
         const g: Narrowing = {
           location,
@@ -656,18 +688,20 @@ export class NarrowingIndex {
         const inner = testedType(element, work);
         form = { kind: "is", kinds: inner.kinds };
         element = inner.element;
-        collections = keptSteps(work, collections, [key]);
+        const below = copied(work, "indexSteps", collections);
+        below.push(key);
+        collections = below;
         key = kept(keyBelow(key, ["element"]));
       }
     };
     const proven: Fact[] = [];
     // `if` conditions (the then arm, the else arm or the way past) and `while` conditions (the body only)
-    for (const use of flow.conditionUses)
-      for (const [index, branch] of use.branches.entries()) {
+    for (const use of each(work, "indexSteps", flow.conditionUses))
+      for (const [index, branch] of each(work, "indexSteps", use.branches.entries())) {
         if (index > 1) break;
         proven.length = 0;
         facts(use.operand, index === 0, proven, work);
-        for (const fact of proven)
+        for (const fact of each(work, "indexSteps", proven))
           define(branch, use.file, fact.tested, formOf(fact, work), null, {
             file: use.file,
             start: fact.end,
@@ -675,12 +709,11 @@ export class NarrowingIndex {
           });
       }
     // `switch` cases: `case null`, a literal case by its value, `default` and later cases after `case null`
-    for (const use of flow.switchUses) {
+    for (const use of each(work, "indexSteps", flow.switchUses)) {
       const statement = statements.switchAt(use.file, use.span.start.offset, use.span.end.offset);
       if (statement === undefined) continue;
       let afterNull = false;
-      for (const [index, branch] of use.branches.entries()) {
-        work.charge("indexSteps");
+      for (const [index, branch] of each(work, "indexSteps", use.branches.entries())) {
         const switchCase = statement.cases[index];
         const form =
           switchCase === undefined ? null : caseForm(switchCase.values, switchCase.typeTest, work);
@@ -692,10 +725,12 @@ export class NarrowingIndex {
       }
     }
     this.#operandRegions(define);
-    for (const [location, list] of lists) this.#byLocation.set(location, new Laminar(work, list));
-    for (const [location, byFile] of operands) {
+    for (const [location, list] of each(work, "indexSteps", lists))
+      this.#byLocation.set(location, new Laminar(work, list));
+    for (const [location, byFile] of each(work, "indexSteps", operands)) {
       const nests = new Map<number, Laminar<Narrowing>>();
-      for (const [file, list] of byFile) nests.set(file, new Laminar(work, list));
+      for (const [file, list] of each(work, "indexSteps", byFile))
+        nests.set(file, new Laminar(work, list));
       this.#byOperand.set(location, nests);
     }
     this.#invalidate();
@@ -718,21 +753,22 @@ export class NarrowingIndex {
   ): void {
     const program = this.program;
     const work = program.work;
-    const logicals = [...program.flow.logicals].sort(
+    const logicals = sorted(
+      work,
+      "indexSteps",
+      copied(work, "indexSteps", program.flow.logicals),
       (a, b) =>
         a.file - b.file ||
         a.expression.span.start.offset - b.expression.span.start.offset ||
         b.expression.span.end.offset - a.expression.span.end.offset,
     );
-    work.charge("indexSteps", sortCost(logicals.length));
     let outer: (typeof logicals)[number] | null = null;
     type Visit = {
       readonly expression: Expression;
       readonly and: Expression | null;
       readonly or: Expression | null;
     };
-    for (const logical of logicals) {
-      work.charge("indexSteps");
+    for (const logical of each(work, "indexSteps", logicals)) {
       if (
         outer !== null &&
         outer.file === logical.file &&
@@ -742,9 +778,8 @@ export class NarrowingIndex {
       outer = logical;
       const file = logical.file;
       const pending: Visit[] = [{ expression: logical.expression, and: null, or: null }];
-      while (pending.length > 0) {
+      for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
         const { expression, and, or } = pending.pop()!;
-        work.charge("indexSteps");
         const test = testForm(expression, work);
         if (test !== null) {
           const node = program.exprAt({
@@ -752,10 +787,10 @@ export class NarrowingIndex {
             start: expression.span.start.offset,
             end: expression.span.end.offset,
           });
-          for (const [top, fact] of [
+          for (const [top, fact] of each(work, "indexSteps", [
             [and, test],
             [or, opposite(test)],
-          ] as const)
+          ] as const))
             if (node !== null && top !== null)
               define(node, file, fact.tested, formOf(fact, work), {
                 file,
@@ -779,7 +814,7 @@ export class NarrowingIndex {
           );
           continue;
         }
-        for (const child of expressionChildren(peel(expression, work)))
+        for (const child of each(work, "indexSteps", expressionChildren(peel(expression, work))))
           pending.push({ expression: child, and: null, or: null });
       }
     }
@@ -813,8 +848,7 @@ export class NarrowingIndex {
         found.set(key, [entry]);
       } else list.push(entry);
     };
-    for (const constraint of program.constraints) {
-      work.charge("indexSteps");
+    for (const constraint of each(work, "indexSteps", program.constraints)) {
       // a removal, a clear, and the order-changing `sort`, `shuffle`, `reverse` (F5–F8)
       if (
         constraint.kind === "operation" &&
@@ -824,17 +858,16 @@ export class NarrowingIndex {
       )
         add(constraint.receiver, null, program.effectNode(constraint.site), constraint.site);
       // an add: a store into the collection's elements at its call
-      if (
-        constraint.kind === "store" &&
-        ["element", "elements", "entry"].includes(constraint.how)
-      ) {
+      if (constraint.kind === "store" && ADDS.has(constraint.how)) {
         const projection = program.projOf.get(constraint.into);
         if (projection === undefined || projection.step === "index") continue;
-        const target = program.targetRoot(constraint.into);
+        // (the collection's path: the element's without its last step)
+        const collection = copied(work, "indexSteps", program.targetRoot(constraint.into).path);
+        collection.pop();
         // (an add takes effect at its call, as its definition does)
         add(
           constraint.into,
-          target.path.slice(0, -1),
+          collection,
           projection.node?.expression?.kind === "callExpression"
             ? projection.node
             : program.effectNode(constraint.site),
@@ -842,14 +875,13 @@ export class NarrowingIndex {
         );
       }
     }
-    for (const [collection, list] of found) {
+    for (const [collection, list] of each(work, "indexSteps", found)) {
       const positions: number[] = [];
       const texts = new Map<number, number[]>();
       const owners: (Callable | null)[] = [];
       const seen = new Set<Callable | null>();
       let inBlock = false;
-      for (const entry of list) {
-        work.charge("indexSteps");
+      for (const entry of each(work, "indexSteps", list)) {
         if (!seen.has(entry.owner)) {
           seen.add(entry.owner);
           owners.push(entry.owner);
@@ -863,9 +895,9 @@ export class NarrowingIndex {
         if (offsets === undefined) texts.set(entry.file, [entry.offset]);
         else offsets.push(entry.offset);
       }
-      work.charge("indexSteps", 2 * sortCost(positions.length));
-      positions.sort((a, b) => a - b);
-      for (const offsets of texts.values()) offsets.sort((a, b) => a - b);
+      sorted(work, "indexSteps", positions, (a, b) => a - b);
+      for (const offsets of each(work, "indexSteps", texts.values()))
+        sorted(work, "indexSteps", offsets, (a, b) => a - b);
       this.#invalidations.set(collection, { positions, texts, owners, inBlock });
     }
   }
@@ -911,23 +943,23 @@ export class NarrowingIndex {
     if (expression === undefined) return null;
     const path = stablePath(program, node.file, expression, true);
     if (path === null) return null;
-    const steps = path.steps;
+    const work = program.work;
+    const walk = path.steps;
     // the trailing element steps start at `first`
-    let first = steps.length;
-    while (first > 0 && readsElement(steps[first - 1]!)) {
-      program.work.charge("eventSteps");
+    let first = walk.length;
+    for (const _ of steps(work, "eventSteps", () => first > 0 && readsElement(walk[first - 1]!)))
       first -= 1;
-    }
     let best: Narrowing | null = null;
     let at = this.#tested.get(path.root);
-    for (let length = 0; at !== undefined; length += 1) {
-      program.work.charge("eventSteps");
-      const location = length >= first ? at.locations.get(steps.length - length) : undefined;
+    let length = 0;
+    for (const _ of steps(work, "eventSteps", () => at !== undefined)) {
+      const location = length >= first ? at!.locations.get(walk.length - length) : undefined;
       const g = location === undefined ? null : this.nearest(location, node);
       // (at an equal region the later, more specific scope wins: the read's own path last)
       if (g !== null && (best === null || !nearer(program, best, g))) best = g;
-      if (length === steps.length) break;
-      at = at.children.get(stepLabel(steps[length]!));
+      if (length === walk.length) break;
+      at = at!.children.get(stepLabel(walk[length]!));
+      length += 1;
     }
     return best;
   }
@@ -941,27 +973,34 @@ function nearer(program: CoreProgram, a: Narrowing, b: Narrowing): boolean {
     : program.position(a.node) > program.position(b.node);
 }
 
-/** The labels of a path's first `length` steps followed by `elements` element steps. */
-function labelsOf(path: StablePath, elements: number, length = path.steps.length): string[] {
+/** The labels of a path's first `length` steps followed by `elements` element steps, each made charged. */
+function labelsOf(path: StablePath, elements: number, length: number, work: WorkLedger): string[] {
   const labels: string[] = [];
-  for (let index = 0; index < length; index += 1) labels.push(stepLabel(path.steps[index]!));
-  for (let index = 0; index < elements; index += 1) labels.push("[*]");
+  let index = 0;
+  for (const _ of steps(work, "eventSteps", () => index < length + elements)) {
+    labels.push(index < length ? stepLabel(path.steps[index]!) : "[*]");
+    index += 1;
+  }
   return labels;
 }
 
 /**
- * The refined location of a path's first `length` steps followed by `elements` element steps, its text charged where
- * a structure keeps it (`work`), made plain where a step only looks it up.
+ * The refined location of a path's first `length` steps followed by `elements` element steps, its labels made charged;
+ * its text charged too where a structure keeps it (`kept`), made plain where a step only looks it up.
  */
 export function locationOf(
   path: StablePath,
+  work: WorkLedger,
   elements = 0,
-  work: WorkLedger | null = null,
+  kept = false,
   length = path.steps.length,
 ): string {
-  const labels = labelsOf(path, elements, length);
-  return work === null ? joinParts(path.root, labels) : keptParts(work, path.root, labels);
+  const labels = labelsOf(path, elements, length, work);
+  return kept ? keptParts(work, path.root, labels) : joinParts(path.root, labels);
 }
+
+/** The stores that add to a collection (an `add`, `addAll`, a dict's new entry): F5's adds. */
+const ADDS: ReadonlySet<string> = new Set(["element", "elements", "entry"]);
 
 /** Whether a method changes the collection it is called on in place (`ListMethod.changes`, `DictMethod.changes`). */
 function mutates(name: string): boolean {
@@ -980,7 +1019,9 @@ function caseForm(
   if (key === "null") return ONLY_NULL;
   if (key.startsWith("string:")) return { kind: "is", kinds: ["string"] };
   if (!key.startsWith("number:")) return null;
-  return Number.isInteger(Number(key.slice("number:".length)))
+  // (a literal's own text, charged)
+  work.charge("indexSteps", textUnits(key.length));
+  return Number.isInteger(Number(key.substring("number:".length)))
     ? { kind: "is", kinds: ["integer"] }
     : { kind: "is", kinds: ["number"], fractional: true };
 }

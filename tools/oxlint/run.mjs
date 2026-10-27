@@ -3,16 +3,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { CHARGED_FILES, checkChargedIteration } from "./check-charged-iteration.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
 import { lintFiles, repositoryRoot } from "./files.mjs";
 
 const files = lintFiles();
 let invalidEvidence = false;
 for (const file of files) {
-  for (const diagnostic of checkEvidenceComments(
-    file,
-    readFileSync(resolve(repositoryRoot, file), "utf8"),
-  )) {
+  const text = readFileSync(resolve(repositoryRoot, file), "utf8");
+  for (const diagnostic of [
+    ...checkEvidenceComments(file, text),
+    ...(CHARGED_FILES.has(file) ? checkChargedIteration(file, text) : []),
+  ]) {
     console.error(
       `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
     );

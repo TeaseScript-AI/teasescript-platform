@@ -2,7 +2,7 @@ import type { Block, Statement, SwitchStatement } from "../../ast.js";
 import { joinParts, keptParts, type WorkLedger } from "./budget.js";
 import type { FlowLoop, FlowNode, GuardUse } from "./flow-graph.js";
 import { Laminar } from "./narrowing.js";
-import { sortCost } from "./definitions.js";
+import { each, some, sorted, steps } from "./narrowing-iteration.js";
 import type { CoreProgram } from "./program.js";
 
 /*
@@ -85,8 +85,7 @@ export function countIn(
 export function lowerBound(work: WorkLedger, sorted: readonly number[], target: number): number {
   let low = 0;
   let high = sorted.length;
-  while (low < high) {
-    work.charge("eventSteps");
+  for (const _ of steps(work, "eventSteps", () => low < high)) {
     const middle = (low + high) >> 1;
     if (sorted[middle]! < target) low = middle + 1;
     else high = middle;
@@ -113,13 +112,11 @@ export class StatementTree {
     const work = program.work;
     const flow = program.flow;
     const uses = new Map<string, GuardUse>();
-    for (const use of [...flow.conditionUses, ...flow.switchUses]) {
-      work.charge("indexSteps");
-      uses.set(keptParts(work, use.file, use.span.start.offset, use.span.end.offset), use);
-    }
+    for (const conditions of each(work, "indexSteps", [flow.conditionUses, flow.switchUses]))
+      for (const use of each(work, "indexSteps", conditions))
+        uses.set(keptParts(work, use.file, use.span.start.offset, use.span.end.offset), use);
     const loops = new Map<Statement, FlowLoop>();
-    work.charge("indexSteps", flow.loops.length + flow.regions.length);
-    for (const loop of flow.loops) loops.set(loop.statement, loop);
+    for (const loop of each(work, "indexSteps", flow.loops)) loops.set(loop.statement, loop);
     const order: TreeStatement[] = [];
     const byFile = new Map<number, { start: number; end: number; item: TreeStatement }[]>();
     const pending: {
@@ -148,7 +145,7 @@ export class StatementTree {
       pending.push({ into: made, file, statements });
       return made;
     };
-    for (const region of flow.regions) {
+    for (const region of each(work, "indexSteps", flow.regions)) {
       if (region.kind === "file")
         this.#roots.set(
           region.id,
@@ -169,10 +166,9 @@ export class StatementTree {
         readonly end: { readonly offset: number };
       },
     ) => uses.get(joinParts(file, span.start.offset, span.end.offset));
-    while (pending.length > 0) {
+    for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
       const { into, file, statements } = pending.pop()!;
-      for (const statement of statements) {
-        work.charge("indexSteps");
+      for (const statement of each(work, "indexSteps", statements)) {
         // a function's body is a callable of its own
         if (statement.kind === "functionDeclaration") continue;
         const loop = loops.get(statement) ?? null;
@@ -229,9 +225,8 @@ export class StatementTree {
               statement,
             );
             const branches = useOf(file, statement.subject.span)?.branches ?? [];
-            statement.cases.forEach((switchCase, index) =>
-              made.arms.push(block(made, branches[index] ?? null, switchCase.body.statements)),
-            );
+            for (const [index, switchCase] of each(work, "indexSteps", statement.cases.entries()))
+              made.arms.push(block(made, branches[index] ?? null, switchCase.body.statements));
             const fallback: Block | null = statement.defaultBlock;
             made.arms.push(
               block(made, branches[statement.cases.length] ?? null, fallback?.statements ?? []),
@@ -248,7 +243,10 @@ export class StatementTree {
               !(program.reached(loop.body) && program.dom.dominates(loop.body, loop.exit));
             made.exits =
               loop !== null &&
-              loop.exit.predecessors.some(
+              some(
+                work,
+                "indexSteps",
+                loop.exit.predecessors,
                 (before) =>
                   program.live(before) &&
                   !flow.isDeadEdge(before, loop.exit) &&
@@ -260,11 +258,11 @@ export class StatementTree {
         }
       }
     }
-    for (const [file, list] of byFile) this.#byFile.set(file, new Laminar(work, list));
+    for (const [file, list] of each(work, "indexSteps", byFile))
+      this.#byFile.set(file, new Laminar(work, list));
     // a live call site outside block code whose call-in every route through its statement's own expressions passes
     const calls: { start: number; end: number; item: FlowNode }[] = [];
-    for (const site of flow.sites) {
-      work.charge("indexSteps");
+    for (const site of each(work, "indexSteps", flow.sites)) {
       const at = site.callIn;
       if (!program.live(at) || program.inBlockCode(at) || at.span === null) continue;
       calls.push({ start: program.position(at), end: program.positionEnd(at), item: at });
@@ -279,11 +277,12 @@ export class StatementTree {
     // bottom-up: a statement after its alternatives' statements (they were made after it), each block counting its
     // closed statements as they are decided
     const closedIn = new Map<TreeBlock, { leaves: number; calls: number }>();
-    for (let index = order.length - 1; index >= 0; index -= 1) {
+    let index = order.length;
+    for (const _ of steps(work, "indexSteps", () => index > 0)) {
+      index -= 1;
       const made = order[index]!;
-      work.charge("indexSteps", 1 + made.arms.length);
       if (made.called) made.calls = true;
-      for (const arm of made.arms) {
+      for (const arm of each(work, "indexSteps", made.arms)) {
         if (!arm.live) continue;
         made.liveArms += 1;
         const closed = closedIn.get(arm);
@@ -300,13 +299,10 @@ export class StatementTree {
       if (made.calls) counts.calls += 1;
     }
     this.#calls = new Laminar(work, calls);
-    for (const offsets of this.callTexts.values()) {
-      work.charge("indexSteps", sortCost(offsets.length));
-      offsets.sort((a, b) => a - b);
-    }
-    work.charge("indexSteps", order.length);
-    for (const made of this.blocks)
-      for (const statement of made.statements) {
+    for (const offsets of each(work, "indexSteps", this.callTexts.values()))
+      sorted(work, "indexSteps", offsets, (a, b) => a - b);
+    for (const made of each(work, "indexSteps", this.blocks))
+      for (const statement of each(work, "indexSteps", made.statements)) {
         if (statement.leaves) made.leaves.push(statement.index);
         if (statement.calls) made.calls.push(statement.index);
       }

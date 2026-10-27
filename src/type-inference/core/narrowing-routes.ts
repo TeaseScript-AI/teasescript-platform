@@ -1,17 +1,20 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
 import { joinParts, keepText, type WorkLedger } from "./budget.js";
-import {
-  keptPrefixes,
-  keyPath,
-  keyPlace,
-  sortCost,
-  type Definition,
-  type Key,
-} from "./definitions.js";
+import { keptPrefixes, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { ItemTag } from "./items.js";
 import type { Work } from "./solver.js";
+import {
+  copied,
+  each,
+  holds,
+  mapped,
+  passing,
+  some,
+  sorted,
+  steps,
+} from "./narrowing-iteration.js";
 import {
   locationOf,
   pathKey,
@@ -98,7 +101,7 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
     kind.node !== "booleanLiteral"
   )
     return null;
-  for (const has of program.hasOf.get(value) ?? [])
+  for (const has of each(program.work, "exactQueries", program.hasOf.get(value) ?? []))
     if (has.type.kind === "atom") return has.type.name;
   return null;
 }
@@ -137,8 +140,8 @@ export class NarrowingRoutes {
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
     let memo = joinParts(key, node.id, tag);
-    let answer: Definition | null;
-    for (;;) {
+    let answer: Definition | null = null;
+    for (const _ of steps(this.#work, "exactQueries", () => true)) {
       const known = this.#witnesses.get(memo);
       if (known !== undefined) {
         answer = known;
@@ -163,7 +166,7 @@ export class NarrowingRoutes {
       memo = joinParts(key, node.id, tag);
     }
     // each copy is certified exactly when its source's read is
-    while (waiting.length > 0) {
+    for (const _ of steps(this.#work, "exactQueries", () => waiting.length > 0)) {
       const { memo: waited, found } = waiting.pop()!;
       answer = answer === null ? null : found.def;
       this.#witnesses.set(waited, answer);
@@ -182,9 +185,11 @@ export class NarrowingRoutes {
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
     if (handlers.handlerTouches(key) && this.#registered(node)) return null;
     // positions and members are not facts: no element key and no reference member has a route
-    const steps = keyPath(key);
-    program.work.charge("eventSteps", steps.length + 1);
-    if (steps.includes("element") || (yield* contract.refReceiver(key))) return null;
+    const path = keyPath(key);
+    // (`keyPath` walks the key's text)
+    program.work.charge("eventSteps", path.length + 1);
+    if (holds(program.work, "eventSteps", path, "element") || (yield* contract.refReceiver(key)))
+      return null;
     const chain = this.#chainOf(node);
     if (chain === null) return null;
     const body = chain[0]!.block;
@@ -196,7 +201,8 @@ export class NarrowingRoutes {
       if (found !== null && (best === null || found.start > best.start)) best = found;
     };
     consider(this.#ownCandidates(key, tag));
-    for (const prefix of keptPrefixes(program.work, key)) consider(this.#wholeStores(prefix));
+    for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
+      consider(this.#wholeStores(prefix));
     const found: Candidate | null = best;
     if (found === null) return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
@@ -232,11 +238,17 @@ export class NarrowingRoutes {
     )
       return false;
     // a whole store of a prefix answers below it only through its literal's properties, to a seed
-    const rest = keyPath(key).slice(d.path.length);
-    program.work.charge("exactQueries", d.path.length + rest.length);
+    // (`keyPath` walks the key's text)
+    const full = keyPath(key);
+    program.work.charge("exactQueries", full.length);
+    const rest: string[] = [];
+    let step = d.path.length;
+    for (const _ of steps(program.work, "exactQueries", () => step < full.length)) {
+      rest.push(full[step]!);
+      step += 1;
+    }
     let value: PlaceId = d.value;
-    for (const step of rest) {
-      program.work.charge("exactQueries");
+    for (const step of each(program.work, "exactQueries", rest)) {
       const property = this.#property(value, propertyName(step));
       if (property === undefined) return false;
       value = property;
@@ -268,10 +280,8 @@ export class NarrowingRoutes {
     if (this.#arguments !== null) return this.#arguments;
     const { definitions, program } = this.pass;
     const argued = new Set<Key>();
-    for (const d of definitions.transferDefs) {
-      program.work.charge("indexSteps");
+    for (const d of each(program.work, "indexSteps", definitions.transferDefs))
       if (d.how === "argument") argued.add(d.key);
-    }
     this.#arguments = argued;
     return argued;
   }
@@ -284,7 +294,11 @@ export class NarrowingRoutes {
     const expression = node?.expression;
     if (node === null || expression === undefined) return null;
     const path: StablePath | null = stablePath(program, node.file, expression);
-    if (path === null || path.steps.some((step) => step.kind !== "property")) return null;
+    if (
+      path === null ||
+      some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property")
+    )
+      return null;
     return { key: pathKey(path, program.work), node };
   }
 
@@ -294,10 +308,9 @@ export class NarrowingRoutes {
     let known = this.#properties.get(literal);
     if (known === undefined) {
       const made = new Map<string, PlaceId>();
-      for (const has of program.hasOf.get(literal) ?? []) {
+      for (const has of each(program.work, "indexSteps", program.hasOf.get(literal) ?? [])) {
         if (has.type.kind !== "object" || has.type.properties === null) continue;
-        for (const property of has.type.properties) {
-          program.work.charge("indexSteps");
+        for (const property of each(program.work, "indexSteps", has.type.properties)) {
           if (property.type.kind === "ref") made.set(property.name, property.type.place);
         }
       }
@@ -321,12 +334,20 @@ export class NarrowingRoutes {
 
   /** A statement's places from its callable's body down to it. */
   #up(statement: TreeStatement): Place[] {
-    const chain: Place[] = [];
-    for (let at: TreeStatement | null = statement; at !== null; at = at.block.owner) {
-      this.#work.charge("eventSteps");
-      chain.push({ block: at.block, index: at.index });
+    const upward: Place[] = [];
+    let at: TreeStatement | null = statement;
+    for (const _ of steps(this.#work, "eventSteps", () => at !== null)) {
+      upward.push({ block: at!.block, index: at!.index });
+      at = at!.block.owner;
     }
-    return chain.reverse();
+    // (from the body down)
+    let index = upward.length;
+    const chain: Place[] = [];
+    for (const _ of steps(this.#work, "eventSteps", () => index > 0)) {
+      index -= 1;
+      chain.push(upward[index]!);
+    }
+    return chain;
   }
 
   /**
@@ -343,10 +364,11 @@ export class NarrowingRoutes {
     const work = this.#work;
     work.charge("eventSteps");
     if (countIn(work, calls ? block.calls : block.leaves, low, high) > 0) return true;
-    for (let at = layer; at !== null; at = at.parent) {
-      work.charge("eventSteps");
-      const own = at.closed.get(block.id);
+    let at = layer;
+    for (const _ of steps(work, "eventSteps", () => at !== null)) {
+      const own = at!.closed.get(block.id);
       if (own !== undefined && countIn(work, own, low, high) > 0) return true;
+      at = at!.parent;
     }
     return false;
   }
@@ -359,7 +381,9 @@ export class NarrowingRoutes {
    * body and read after it); a loop only a `break` leaves stops the writer side.
    */
   #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
-    for (let level = chain.length - 1; level >= 0; level -= 1) {
+    let level = chain.length;
+    for (const _ of steps(this.#work, "eventSteps", () => level > 0)) {
+      level -= 1;
       const { block, index } = chain[level]!;
       if (this.#closed(block, index + 1, block.statements.length, layer, calls)) return block.end;
       const owner = block.owner;
@@ -393,20 +417,24 @@ export class NarrowingRoutes {
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
-    this.#work.charge("eventSteps", Math.min(writer.length, chain.length) + 1);
-    while (
-      level < writer.length &&
-      level < chain.length &&
-      writer[level]!.block === chain[level]!.block &&
-      writer[level]!.index === chain[level]!.index
-    )
+    for (const _ of steps(
+      this.#work,
+      "eventSteps",
+      () =>
+        level < writer.length &&
+        level < chain.length &&
+        writer[level]!.block === chain[level]!.block &&
+        writer[level]!.index === chain[level]!.index,
+    ))
       level += 1;
     // (b): the read's statement after the candidate's in their lowest shared block, never a sibling arm
     if (level >= writer.length || level >= chain.length) return false;
     const shared = writer[level]!.block;
     if (chain[level]!.block !== shared || chain[level]!.index <= writer[level]!.index) return false;
     // (a): the writer side, from the candidate's block up to the shared one, out of a loop through its header
-    for (let up = writer.length - 1; up > level; up -= 1) {
+    let up = writer.length;
+    for (const _ of steps(this.#work, "eventSteps", () => up - 1 > level)) {
+      up -= 1;
       const { block, index } = writer[up]!;
       if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
       if (block.owner !== null && !this.#leaves(block.owner, layer.calls)) return false;
@@ -415,9 +443,11 @@ export class NarrowingRoutes {
     if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
       return false;
     // (d): each entered block's statements before the read's
-    for (let down = level + 1; down < chain.length; down += 1) {
+    let down = level + 1;
+    for (const _ of steps(this.#work, "eventSteps", () => down < chain.length)) {
       const { block, index } = chain[down]!;
       if (this.#closed(block, 0, index, layer, layer.calls)) return false;
+      down += 1;
     }
     // (d), (e): a compulsory call before the read inside its top statement (a header entered, an earlier operand)
     if (layer.calls) {
@@ -450,8 +480,7 @@ export class NarrowingRoutes {
     const prefix = keptPrefixes(program.work, key)[0];
     const parent = prefix === undefined ? null : this.#killLayer(prefix, calls);
     const seeds: TreeStatement[] = [];
-    for (const d of definitions.byKey.get(key) ?? []) {
-      program.work.charge("indexSteps");
+    for (const d of each(program.work, "indexSteps", definitions.byKey.get(key) ?? [])) {
       if (
         (d.kind !== "whole" && d.kind !== "const") ||
         d.weak ||
@@ -483,20 +512,21 @@ export class NarrowingRoutes {
     const location = this.#location(key);
     const tests = new Set<TreeStatement>();
     if (location !== null)
-      for (const g of this.index.definitionsOf(location)) {
-        this.#work.charge("indexSteps");
+      for (const g of each(this.#work, "indexSteps", this.index.definitionsOf(location))) {
         const owner = this.tree.armAt(g.node)?.owner;
         if (owner !== undefined && owner !== null) tests.add(owner);
       }
     const layer = this.#build(
       parent,
       calls,
-      [...tests],
+      copied(this.#work, "indexSteps", tests),
       location === null
         ? null
         : (arm) =>
             arm.entry !== null &&
-            this.index.atEntry(arm.entry, location).some((g) => removes(g.form, tag, this.#work)),
+            some(this.#work, "indexSteps", this.index.atEntry(arm.entry, location), (g) =>
+              removes(g.form, tag, this.#work),
+            ),
     );
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);
@@ -520,22 +550,22 @@ export class NarrowingRoutes {
     const counts = new Map<number, number>();
     const arms = new Map<TreeStatement, number>();
     const counted = new Set<TreeBlock>();
-    const closedBelow = (statement: TreeStatement): boolean => {
-      if (statement[variant]) return true;
-      for (let at = parent; at !== null; at = at.parent) {
-        work.charge("eventSteps");
-        if (at.statements.has(statement)) return true;
-      }
-      return false;
+    // (the layers below, from the nearest)
+    const below = (): Generator<Layer> => {
+      let at = parent;
+      return (function* () {
+        for (const _ of steps(work, "eventSteps", () => at !== null)) {
+          yield at!;
+          at = at!.parent;
+        }
+      })();
     };
-    const armBelow = (arm: TreeBlock): boolean => {
-      if (arm[variant].length > 0) return true;
-      for (let at = parent; at !== null; at = at.parent) {
-        work.charge("eventSteps");
-        if ((at.counts.get(arm.id) ?? 0) > 0) return true;
-      }
-      return false;
-    };
+    const closedBelow = (statement: TreeStatement): boolean =>
+      statement[variant] ||
+      some(work, "eventSteps", below(), (layer) => layer.statements.has(statement));
+    const armBelow = (arm: TreeBlock): boolean =>
+      arm[variant].length > 0 ||
+      some(work, "eventSteps", below(), (layer) => (layer.counts.get(arm.id) ?? 0) > 0);
     const pending: TreeStatement[] = [];
     // an arm closed here for the first time counts for its statement, which may then close
     const close = (arm: TreeBlock): void => {
@@ -555,44 +585,43 @@ export class NarrowingRoutes {
       work.charge("indexSteps");
       if (statement.skip || statement.arms.length === 0 || statements.has(statement)) return;
       let closedArms = statement.sharedArms[variant] + (arms.get(statement) ?? 0);
-      for (let at = parent; at !== null; at = at.parent) {
-        work.charge("eventSteps");
-        closedArms += at.arms.get(statement) ?? 0;
-      }
+      for (const layer of each(work, "eventSteps", below()))
+        closedArms += layer.arms.get(statement) ?? 0;
       if (closedArms >= statement.liveArms) mark(statement);
     };
-    for (const seed of seeds) {
+    for (const seed of each(work, "indexSteps", seeds)) {
       if (starts === null) mark(seed);
-      else
-        for (const arm of seed.arms) {
-          work.charge("indexSteps");
-          if (starts(arm)) close(arm);
-        }
-      while (pending.length > 0) check(pending.pop()!);
+      else for (const arm of each(work, "indexSteps", seed.arms)) if (starts(arm)) close(arm);
+      for (const _ of steps(work, "indexSteps", () => pending.length > 0)) check(pending.pop()!);
     }
     const closed = new Map<number, number[]>();
-    work.charge("indexSteps", statements.size);
-    for (const statement of statements) {
+    for (const statement of each(work, "indexSteps", statements)) {
       const list = closed.get(statement.block.id);
       if (list === undefined) closed.set(statement.block.id, [statement.index]);
       else list.push(statement.index);
     }
-    for (const list of closed.values()) {
-      work.charge("indexSteps", sortCost(list.length));
-      list.sort((a, b) => a - b);
-    }
+    for (const list of each(work, "indexSteps", closed.values()))
+      sorted(work, "indexSteps", list, (a, b) => a - b);
     return { parent, statements, closed, counts, arms, calls };
   }
 
   /** The refined location of a key without element steps: its properties' texts. */
   #location(key: Key): string | null {
-    const steps = keyPath(key);
-    this.#work.charge("indexSteps", steps.length + 1);
-    if (steps.includes("element")) return null;
-    return locationOf({
-      root: keyPlace(key),
-      steps: steps.map((step) => ({ kind: "property", name: propertyName(step) })),
-    });
+    const work = this.#work;
+    const path = keyPath(key);
+    // (`keyPath` walks the key's text)
+    work.charge("indexSteps", path.length + 1);
+    if (holds(work, "indexSteps", path, "element")) return null;
+    return locationOf(
+      {
+        root: keyPlace(key),
+        steps: mapped(work, "indexSteps", path, (step) => ({
+          kind: "property",
+          name: propertyName(step),
+        })),
+      },
+      work,
+    );
   }
 
   /** A key's own exact definitions that certify `tag` where they stand (a seed or a certified read), by callable body. */
@@ -602,7 +631,9 @@ export class NarrowingRoutes {
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);
     const made = this.#candidateLists(
-      (this.pass.definitions.byKey.get(key) ?? []).filter((d) => this.#carries(d, tag)),
+      passing(this.#work, "indexSteps", this.pass.definitions.byKey.get(key) ?? [], (d) =>
+        this.#carries(d, tag),
+      ),
       layer,
       layer.calls,
     );
@@ -630,7 +661,10 @@ export class NarrowingRoutes {
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
     const made = this.#candidateLists(
-      (this.pass.definitions.byKey.get(prefix) ?? []).filter(
+      passing(
+        this.#work,
+        "indexSteps",
+        this.pass.definitions.byKey.get(prefix) ?? [],
         (d) => d.kind === "whole" && !d.weak && d.value !== undefined,
       ),
       null,
@@ -650,8 +684,7 @@ export class NarrowingRoutes {
     const { program, lists } = this.pass;
     const work = program.work;
     const byBody = new Map<TreeBlock, Candidate[]>();
-    for (const d of definitions) {
-      work.charge("indexSteps");
+    for (const d of each(work, "indexSteps", definitions)) {
       if (!lists.live(d) || !program.live(d.node) || program.inBlockCode(d.node)) continue;
       const chain = this.#chainOf(d.node);
       if (chain === null) continue;
@@ -668,16 +701,32 @@ export class NarrowingRoutes {
       else list.push(candidate);
     }
     const made = new Map<TreeBlock, Candidates>();
-    for (const [body, list] of byBody) {
-      work.charge("indexSteps", sortCost(list.length) + 2 * list.length);
-      list.sort((a, b) => a.start - b.start || a.def.site.start - b.def.site.start);
+    for (const [body, list] of each(work, "indexSteps", byBody)) {
+      sorted(
+        work,
+        "indexSteps",
+        list,
+        (a, b) => a.start - b.start || a.def.site.start - b.def.site.start,
+      );
       let size = 1;
-      while (size < list.length) size <<= 1;
-      const reaches = new Array<number>(2 * size).fill(-Infinity);
-      list.forEach((candidate, index) => (reaches[size + index] = candidate.reach));
-      for (let index = size - 1; index >= 1; index -= 1)
+      for (const _ of steps(work, "indexSteps", () => size < list.length)) size *= 2;
+      // a tree of maxima over the reaches, its leaves from `size` on
+      const reaches: number[] = [];
+      for (const _ of steps(work, "indexSteps", () => reaches.length < 2 * size)) {
+        const leaf = reaches.length - size;
+        reaches.push(leaf >= 0 && leaf < list.length ? list[leaf]!.reach : -Infinity);
+      }
+      let index = size;
+      for (const _ of steps(work, "indexSteps", () => index > 1)) {
+        index -= 1;
         reaches[index] = Math.max(reaches[2 * index]!, reaches[2 * index + 1]!);
-      made.set(body, { list, starts: list.map((candidate) => candidate.start), reaches, size });
+      }
+      made.set(body, {
+        list,
+        starts: mapped(work, "indexSteps", list, (candidate) => candidate.start),
+        reaches,
+        size,
+      });
     }
     return made;
   }
