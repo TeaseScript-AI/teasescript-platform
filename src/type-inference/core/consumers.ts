@@ -533,16 +533,7 @@ export class Consumers {
         // the object lacking the property is one the receiver's own stores hold (not one a copy brings)
         const lacking = item.writer;
         if (binding === undefined || lacking === null) return false;
-        const holder = keyOf(binding, receiver ? path : path.slice(0, -1));
-        return (definitions.byKey.get(holder) ?? []).some((d) => {
-          const writer = definitions.writerOf(d);
-          return (
-            writer !== null &&
-            writer.file === lacking.file &&
-            writer.start === lacking.start &&
-            writer.end === lacking.end
-          );
-        });
+        return definitions.hasWriter(keyOf(binding, receiver ? path : path.slice(0, -1)), lacking);
       }
       case "unmodelled": {
         const holder = receiver ? value : owner;
