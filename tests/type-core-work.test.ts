@@ -126,7 +126,7 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
  * gate with its counts, never retunes it. Copies interleaved with conditional stores below their path (S6-CARRIERS
  * §4.7, condition (b)) are gated in the same form, a known limit by the owner's decision too (TABLE r4.69 (1)), and so
  * are copies separated by calls storing their source (r4.71); k nested own defaults, whose evaluation keys admission's
- * stop index keeps, are gated so as one proposed known product (TABLE r4.78 (5)), the owner's to decide.
+ * stop index keeps, are gated so as one known product, a known limit by the owner's decision too (TABLE r4.78 (5)).
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);

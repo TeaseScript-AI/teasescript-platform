@@ -1981,7 +1981,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   // S6-CARRIERS §3.4 with Codex r20 B5: k merged host stores met by k consumers, each provenance node resolved once (the
-  // nested own defaults of §3.2 are a proposed known product)
+  // nested own defaults of §3.2 are a gated known limit)
   ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
     name: `C9-merged-leaves-${variant}`,
     measures: `§3.4: k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
@@ -2158,8 +2158,8 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
  * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
- * defaults, one product of admission's stop index with three witnesses: proposed in the same form (TABLE r4.78 (5)),
- * the owner's to decide.
+ * defaults, one product of admission's stop index with three witnesses: accepted in the same form (TABLE r4.78 (5),
+ * option A).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -2228,13 +2228,13 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
         ),
       ),
   },
-  // One proposed known product with three witnesses (TABLE r4.78 (5)), the owner to accept it as a gated known limit or
-  // to want evaluation keys that share their prefixes: admission's stop index keeps an evaluation key and a chain of
-  // operations per nested operation, each one entry longer than the one around it, now charged as kept, so k nested
-  // own defaults keep about k²/2 entries. In both orders at k = 64, 128 (`main` in brackets, the keys uncharged):
-  // `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,712 / 65,555 (3.040; 2.047), `load` 7,150 / 25,167
-  // (3.592; 2.054), re-measured with the snapshots charged (3.937, 3.046 and 3.593 before); at k = 1,024 8.6 %, 10.9 %
-  // and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,141 and 4,472
+  // One known product with three witnesses, a gated known limit by the owner's decision (TABLE r4.78 (5), option A;
+  // evaluation keys that share their prefixes are a possible follow-up): admission's stop index keeps an evaluation
+  // key and a chain of operations per nested operation, each one entry longer than the one around it, now charged as
+  // kept, so k nested own defaults keep about k²/2 entries. In both orders at k = 64, 128 (`main` in brackets, the keys
+  // uncharged): `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,712 / 65,555 (3.040; 2.047), `load` 7,150 /
+  // 25,167 (3.592; 2.054), re-measured with the snapshots charged (3.937, 3.046 and 3.593 before); at k = 1,024 8.6 %,
+  // 10.9 % and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,141 and 4,472
   { ...nestedOwn("otherwise", (inner) => `null otherwise (${inner})`), measured: 3.94 },
   { ...nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`), measured: 3.05 },
   { ...nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`), measured: 3.6 },
