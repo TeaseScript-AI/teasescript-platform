@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileSource } from "../src/compiler.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
 /** Each diagnostic as `line code message`. */
 function report(source: string): string[] {
@@ -163,13 +164,62 @@ test("the endings follow which code can run", () => {
       codes(source).some((code) => code.endsWith(" TSV053")),
       source,
     );
-  // Across files: a file that a transfer enters can run, and one that nothing enters still says how it ends.
+  // Across files: a file that a transfer enters can run, and one that nothing enters never runs but still says how it
+  // ends.
   assert.deepEqual(
     compileProject([
       { path: "main.tease", source: 'goto "end.tease"' },
       { path: "end.tease", source: "exit" },
       { path: "other.tease", source: 'say "other"' },
     ]).diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`),
-    ["other.tease TSV052"],
+    ["other.tease TSV065", "other.tease TSV052"],
   );
+});
+
+test("the code of a file that no goto or call which can run starts never runs", () => {
+  const tagged = (tag: string, source: string) => `---\ntags: "${tag}"\n---\n${source}`;
+  const files = Object.entries({
+    "main.tease": [
+      'call "path.tease"',
+      'call "rooms/*.tease"',
+      'call tagged "picked"',
+      'let next = [script("computed.tease")]',
+      "call (next[0])",
+      "help()",
+      'if false {\n    call "dead.tease"\n}',
+      "exit",
+    ].join("\n"),
+    "path.tease": 'say "path"\nend',
+    "rooms/glob.tease": 'say "glob"\nend',
+    "picked.tease": tagged("picked", 'say "picked"\nend'),
+    "skipped.tease": tagged("skipped", 'say "skipped"\nend'),
+    "computed.tease": 'say "computed"\nend',
+    "helpers.tease": 'global function help {\n    say "help"\n}',
+    // Only code that never runs starts these, and a start value runs at the start of the session.
+    "dead.tease": 'say "dead"\ncall "chained.tease"\nend',
+    "chained.tease": 'say "chained"\nend',
+    "never.tease": 'global start = 1\nsay "never ${start}"\nend',
+  }).map(([path, source]) => ({ path, source }));
+  assert.deepEqual(
+    compileProject(files).diagnostics.map(
+      (diagnostic) => `${diagnostic.path}:${diagnostic.span.start.line + 1} ${diagnostic.code}`,
+    ),
+    [
+      "main.tease:8 TSV065",
+      "chained.tease:1 TSV065",
+      "dead.tease:1 TSV065",
+      "never.tease:2 TSV065",
+      "skipped.tease:4 TSV065",
+    ],
+  );
+  assert.equal(
+    compileProject(files).diagnostics.find((diagnostic) => diagnostic.path === "dead.tease")
+      ?.message,
+    "The code of 'dead.tease' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.",
+  );
+  // As the session runs: each file that may start runs, and none of the others.
+  const said = assertRuntimeResumeEquivalent(files, {
+    warnings: ["TSV065", "TSV065", "TSV065", "TSV065", "TSV065"],
+  }).events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(said, ["path", "glob", "picked", "computed", "help"]);
 });

@@ -239,7 +239,11 @@ test("a project that takes tagged photos cannot prove a pick empty at compile ti
     [pick, { path: "camera.tease", source: 'let photo = takePhoto(tags: ["selfie"])\nexit' }],
     { images },
   );
-  assert.deepEqual(result.diagnostics, []);
+  // Only that nothing starts camera.tease here.
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [["camera.tease", "TSV065"]],
+  );
 });
 
 test("restore rejects capture tags or catalog entries no engine produces", () => {

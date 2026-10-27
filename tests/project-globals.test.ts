@@ -94,40 +94,45 @@ function mutableCopy<T>(value: T): Mutable<T> {
 }
 
 test("globals and speakers are set up before the story: main.tease first, then by path, in source order", () => {
-  const plan = compiledPlan([
-    {
-      path: "main.tease",
-      source: [
-        'say "${first} ${second} ${third} ${fromHandler} ${host.lastName}"',
-        "first = 7",
-        "again()",
-        'say "${first}"',
-        "exit",
-        "function again {",
-        "  global first = 1",
-        "}",
-      ].join("\n"),
-    },
-    {
-      path: "b.tease",
-      source: [
-        'speaker host { lastName: "Second is ${second}" }',
-        "function never {",
-        "  global third = first + second",
-        "}",
-      ].join("\n"),
-    },
-    {
-      path: "a.tease",
-      source: [
-        "if false {",
-        "  global second = first + 1",
-        "}",
-        'timer async 1 s { global fromHandler = "h" }',
-        "end",
-      ].join("\n"),
-    },
-  ]);
+  const plan = compiledPlan(
+    [
+      {
+        path: "main.tease",
+        source: [
+          'say "${first} ${second} ${third} ${fromHandler} ${host.lastName}"',
+          "first = 7",
+          "again()",
+          'say "${first}"',
+          "exit",
+          "function again {",
+          "  global first = 1",
+          "}",
+        ].join("\n"),
+      },
+      {
+        path: "b.tease",
+        source: [
+          'speaker host { lastName: "Second is ${second}" }',
+          "function never {",
+          "  global third = first + second",
+          "}",
+        ].join("\n"),
+      },
+      {
+        path: "a.tease",
+        source: [
+          "if false {",
+          "  global second = first + 1",
+          "}",
+          'timer async 1 s { global fromHandler = "h" }',
+          "end",
+        ].join("\n"),
+      },
+    ],
+    {},
+    // Nothing starts a.tease.
+    ["TSV065"],
+  );
   const result = runToEnd(plan);
   assert.equal(result.snapshot.status, "halted");
   // Every declaration has its value before main.tease starts, though no other file and no block around them ran.
@@ -602,28 +607,33 @@ test("a global function is callable from every file and sees only globals, its p
 });
 
 test("speakers are global: declared anywhere in any file and known in every file", () => {
-  const plan = compiledPlan([
-    {
-      path: "main.tease",
-      source: [
-        "speaker vera",
-        'say "Hello"',
-        'say as cashier "Ask ${vera.firstName}"',
-        "exit",
-      ].join("\n"),
-    },
-    {
-      path: "people.tease",
-      source: [
-        'global shop = "Corner"',
-        "if false {",
-        '  speaker vera { displayName: "Vera"\n    firstName: "Vera" }',
-        "}",
-        'speaker cashier { displayName: "${shop} cashier" }',
-        "end",
-      ].join("\n"),
-    },
-  ]);
+  const plan = compiledPlan(
+    [
+      {
+        path: "main.tease",
+        source: [
+          "speaker vera",
+          'say "Hello"',
+          'say as cashier "Ask ${vera.firstName}"',
+          "exit",
+        ].join("\n"),
+      },
+      {
+        path: "people.tease",
+        source: [
+          'global shop = "Corner"',
+          "if false {",
+          '  speaker vera { displayName: "Vera"\n    firstName: "Vera" }',
+          "}",
+          'speaker cashier { displayName: "${shop} cashier" }',
+          "end",
+        ].join("\n"),
+      },
+    ],
+    {},
+    // Nothing starts people.tease.
+    ["TSV065"],
+  );
   assert.deepEqual(said(runToEnd(plan).events), ["Vera: Hello", "Corner cashier: Ask Vera"]);
 
   // A global is not a variable of its file: it has its value before any goto, unlike a skipped let.
@@ -663,7 +673,11 @@ test("speakers are global: declared anywhere in any file and known in every file
       main,
       { path: "shop.tease", source: 'global shop = "Corner"\nglobal caption = shop, default: ""' },
     ]),
-    [["shop.tease", "TSV052", 2]],
+    // Nothing starts that file here.
+    [
+      ["shop.tease", "TSV065", 2],
+      ["shop.tease", "TSV052", 2],
+    ],
   );
 
   // Two speakers of one name are an error at both places, also in sibling blocks.
@@ -1134,10 +1148,14 @@ test("a call of another file's function that is not global cannot be restored", 
   assert.equal(validateRuntimeSnapshot(moved, plan).valid, false);
 
   // Nor can a session that failed in main.tease claim to stand in another file's code.
-  const failing = compiledPlan([
-    { path: "main.tease", source: "let x = [1][2]\nexit" },
-    { path: "lib.tease", source: "let y = 2\nlet z = 3\nend\nfunction local { wait 1 s }" },
-  ]);
+  const failing = compiledPlan(
+    [
+      { path: "main.tease", source: "let x = [1][2]\nexit" },
+      { path: "lib.tease", source: "let y = 2\nlet z = 3\nend\nfunction local { wait 1 s }" },
+    ],
+    {},
+    ["TSV065"],
+  );
   const failed = run(failing, createFreshRuntimeSnapshot(failing)).snapshot;
   assert.equal(validateRuntimeSnapshot(failed, failing).valid, true);
   for (const position of [

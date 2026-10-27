@@ -18,9 +18,16 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
-function compiledPlan(files: readonly ProjectSourceFile[]): InstructionPlan {
+/** The plan of a project whose only diagnostics are the TSV065 warnings of the files in `unstarted`, which nothing starts. */
+function compiledPlan(
+  files: readonly ProjectSourceFile[],
+  unstarted: readonly string[] = [],
+): InstructionPlan {
   const result = compileProject(files);
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    unstarted.map((path) => [path, "TSV065"]),
+  );
   assert.notEqual(result.plan, null);
   return result.plan!;
 }
@@ -41,7 +48,21 @@ const twoFiles = [
 
 test("a project compiles into one plan: main.tease first, then the other files by path", () => {
   const result = compileProject(twoFiles);
-  assert.deepEqual(result.diagnostics, []);
+  // main.tease starts neither other file, so their code never runs.
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.path,
+      diagnostic.span.start.line,
+      diagnostic.code,
+      diagnostic.message,
+    ]),
+    ["intro.tease", "rooms/hall.tease"].map((path) => [
+      path,
+      path === "intro.tease" ? 0 : 1,
+      "TSV065",
+      `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`,
+    ]),
+  );
   assert.deepEqual(
     result.files.map((file) => file.path),
     ["main.tease", "intro.tease", "rooms/hall.tease"],
@@ -108,10 +129,13 @@ test("each diagnostic names its file, and an error in any file leaves no plan", 
 });
 
 test("the session starts in main.tease and never runs into the next file", () => {
-  const plan = compiledPlan([
-    { path: "main.tease", source: 'say "main"\nexit' },
-    { path: "after.tease", source: 'say "after"\nexit' },
-  ]);
+  const plan = compiledPlan(
+    [
+      { path: "main.tease", source: 'say "main"\nexit' },
+      { path: "after.tease", source: 'say "after"\nexit' },
+    ],
+    ["after.tease"],
+  );
   const finished = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.deepEqual(
     finished.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
@@ -204,7 +228,7 @@ test("the file list needs main.tease and unique package paths", () => {
 });
 
 test("plan validation checks the file table and keeps calls inside their file", () => {
-  const plan = compiledPlan(twoFiles);
+  const plan = compiledPlan(twoFiles, ["intro.tease", "rooms/hall.tease"]);
   const errors = (changed: unknown): string[] =>
     validateInstructionPlan(changed).errors.map((error) => `${error.path} ${error.message}`);
   const files = plan.files;
@@ -257,10 +281,13 @@ function mutableCopy(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot> {
 }
 
 test("a checkpoint runs code of a file only in an activation of that file", () => {
-  const timers = compiledPlan([
-    { path: "main.tease", source: 'timer async 1 s { say "main handler" }\nwait 5 s\nexit' },
-    { path: "other.tease", source: 'timer async 1 s { say "other handler" }\nexit' },
-  ]);
+  const timers = compiledPlan(
+    [
+      { path: "main.tease", source: 'timer async 1 s { say "main handler" }\nwait 5 s\nexit' },
+      { path: "other.tease", source: 'timer async 1 s { say "other handler" }\nexit' },
+    ],
+    ["other.tease"],
+  );
   const otherStart = timers.files[1]!.startInstruction;
   const foreign = timers.functions.find((definition) => definition.entryInstruction >= otherStart)!;
   const waiting = run(timers, createImmediatePacingRuntimeSnapshot(timers)).snapshot;
@@ -292,10 +319,13 @@ test("a checkpoint runs code of a file only in an activation of that file", () =
   assert.equal(validateRuntimeSnapshot(active, timers).valid, false);
 
   // And a message paced in another file while main.tease runs.
-  const says = compiledPlan([
-    { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
-    { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },
-  ]);
+  const says = compiledPlan(
+    [
+      { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
+      { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },
+    ],
+    ["other.tease"],
+  );
   const pacing = run(says, createFreshRuntimeSnapshot(says)).snapshot;
   assert.equal(pacing.status, "waiting");
   const offset = says.files[1]!.startInstruction;

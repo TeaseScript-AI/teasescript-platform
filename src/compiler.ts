@@ -506,12 +506,14 @@ function checkFlow(
         ),
       ),
     );
+    const unstarted = reachability.unstartedFileWarnings(targets);
     // In source order, a warning before an error at the same place, as the loop that never ends comes before the
     // missing exit that it causes.
     files.forEach((file, index) =>
       addSemanticDiagnostics(
         file,
         [
+          ...unstarted[index]!,
           ...warnings[index]!,
           ...transfers[index]!.filter(
             (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,

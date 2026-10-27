@@ -33,14 +33,33 @@ function says(events: readonly InterpreterEvent[]): string[] {
   return events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
 }
 
-/** What the project says, run to its end, also stepwise with a checkpoint restore at every boundary. */
-function said(main: string, ending: "end" | "exit" = "exit"): string[] {
-  return says(assertRuntimeResumeEquivalent(project(main, ending)).events);
+/**
+ * What the project says, run to its end, also stepwise with a checkpoint restore at every boundary. Its only
+ * diagnostics are the TSV065 warnings of the `unstarted` files, which no `goto` or `call` starts.
+ */
+function said(
+  main: string,
+  ending: "end" | "exit" = "exit",
+  unstarted: readonly string[] = [],
+): string[] {
+  return says(
+    assertRuntimeResumeEquivalent(project(main, ending), {
+      warnings: unstarted.map(() => "TSV065"),
+    }).events,
+  );
 }
 
-function compiled(main: string, ending: "end" | "exit" = "exit"): InstructionPlan {
+/** The plan of the project, whose only diagnostics are the TSV065 warnings of the `unstarted` files. */
+function compiled(
+  main: string,
+  ending: "end" | "exit" = "exit",
+  unstarted: readonly string[] = [],
+): InstructionPlan {
   const result = compileProject(project(main, ending));
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    unstarted.map((path) => [path, "TSV065"]),
+  );
   return result.plan!;
 }
 
@@ -48,9 +67,10 @@ function compiled(main: string, ending: "end" | "exit" = "exit"): InstructionPla
 function drawn(
   main: string,
   draws: readonly number[],
-  ending: "end" | "exit" = "exit",
+  ending: "end" | "exit",
+  unstarted: readonly string[],
 ): { says: string[]; draws: number } {
-  const plan = compiled(main, ending);
+  const plan = compiled(main, ending, unstarted);
   let next = 0;
   const finished = run(plan, createImmediatePacingRuntimeSnapshot(plan), {
     random: { next: () => draws[next++] ?? 0 },
@@ -66,7 +86,13 @@ function errors(main: string): [string, string][] {
 }
 
 test("a file's header tags are in the plan file table, in name order", () => {
-  const plan = compiled("exit");
+  // Nothing starts the other files.
+  const plan = compiled("exit", "exit", [
+    "notes.tease",
+    "rooms/public.tease",
+    "rooms/soft.tease",
+    "rooms/strict.tease",
+  ]);
   assert.deepEqual(
     plan.files.map((file) => [file.path, file.tags]),
     [
@@ -105,29 +131,39 @@ test("findScripts lists script references to the matching files, in path order",
         "say none.length",
         "goto (strict[0])",
       ].join("\n"),
+      "exit",
+      // No list may hold a reference to it.
+      ["notes.tease"],
     ),
     ["1", "3", "0", "strict"],
   );
 });
 
 test("goto tagged and call tagged pick one matching file with one draw, entering it at its top", () => {
-  // Only one file passes, so the draw cannot change the pick.
-  assert.deepEqual(drawn('goto tagged "punishment" > 3, none: ["public"]', [0.99]), {
-    says: ["strict"],
-    draws: 1,
-  });
+  // Only one file passes, so the draw cannot change the pick, and the others never run.
+  const others = ["notes.tease", "rooms/public.tease", "rooms/soft.tease"];
+  assert.deepEqual(
+    drawn('goto tagged "punishment" > 3, none: ["public"]', [0.99], "exit", others),
+    { says: ["strict"], draws: 1 },
+  );
   // Two files pass in path order, soft then strict; the draw picks one.
   for (const [draw, picked] of [
     [0, "soft"],
     [0.99, "strict"],
   ] as const) {
     assert.deepEqual(
-      drawn('call tagged "punishment", from: "rooms/s*.tease"\nsay "back"\nexit', [draw], "end"),
+      drawn('call tagged "punishment", from: "rooms/s*.tease"\nsay "back"\nexit', [draw], "end", [
+        "notes.tease",
+        "rooms/public.tease",
+      ]),
       { says: [picked, "back"], draws: 1 },
     );
   }
   // A checkpoint restore at every boundary never draws again.
-  assert.deepEqual(said('call tagged "chastity"\nsay "back"\nexit', "end"), ["strict", "back"]);
+  assert.deepEqual(said('call tagged "chastity"\nsay "back"\nexit', "end", others), [
+    "strict",
+    "back",
+  ]);
 });
 
 test("a pick whose literal tags match no file is a compile error; one that only may match fails at runtime", () => {
@@ -137,7 +173,9 @@ test("a pick whose literal tags match no file is a compile error; one that only 
   for (const main of ['goto tagged all: (["absent"])', 'call tagged all: [("absent")]\nexit']) {
     assert.deepEqual(errors(main), [["TST002", NO_FILE]], main);
   }
-  const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum');
+  const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum', "exit", [
+    "notes.tease",
+  ]);
   const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(failed.snapshot.status, "failed");
   assert.equal(failed.snapshot.failure?.code, "TSR082");
@@ -188,7 +226,12 @@ test("a script query yields script references, which only transfers and script v
 });
 
 test("plan validation rejects non-canonical file tags and a from that no script query may have", () => {
-  const plan = compiled('let found = findScripts(from: "rooms/*.tease")\nexit');
+  const plan = compiled('let found = findScripts(from: "rooms/*.tease")\nexit', "exit", [
+    "notes.tease",
+    "rooms/public.tease",
+    "rooms/soft.tease",
+    "rooms/strict.tease",
+  ]);
   const cases: [string, (plan: MutablePlan) => void, string][] = [
     [
       "a non-canonical file tag",
@@ -293,7 +336,7 @@ test("picks and lists see path order, also with main.tease among the matches", (
     },
     { path: "a.tease", source: '---\ntags: "start"\n---\nsay "a"\nexit' },
   ];
-  assert.deepEqual(says(assertRuntimeResumeEquivalent(files).events), [
+  assert.deepEqual(says(assertRuntimeResumeEquivalent(files, { warnings: ["TSV065"] }).events), [
     '[script("a.tease"), script("main.tease")]',
   ]);
 });

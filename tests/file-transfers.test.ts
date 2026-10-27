@@ -48,10 +48,22 @@ function said(
   return outputs(assertRuntimeResumeEquivalent(files, options).events);
 }
 
-function compiled(files: readonly ProjectSourceFile[]): InstructionPlan {
+/** The plan of a project whose only diagnostics are the TSV065 warnings of the files in `unstarted`, which nothing starts. */
+function compiled(
+  files: readonly ProjectSourceFile[],
+  unstarted: readonly string[] = [],
+): InstructionPlan {
   const result = compileProject(files);
-  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    unstarted.map((path) => [path, "TSV065"]),
+  );
   return result.plan!;
+}
+
+/** The TSV065 warning of a file that no `goto` or `call` starts (#595). */
+function unstarted(path: string): string {
+  return `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`;
 }
 
 test("goto naming a file starts it afresh from its top", () => {
@@ -165,7 +177,9 @@ test("a call starts another file, so a label or a call that can start the runnin
   ]);
   const rooms = { "rooms/a.tease": "exit", "rooms/b.tease": "exit" };
   assert.deepEqual(
-    diagnostics(project("exit", { ...rooms, "rooms/a.tease": 'call "rooms/*.tease"\nexit' })),
+    diagnostics(
+      project('goto "rooms/a.tease"', { ...rooms, "rooms/a.tease": 'call "rooms/*.tease"\nexit' }),
+    ),
     [
       [
         "rooms/a.tease",
@@ -559,7 +573,8 @@ test("an end with no call to return to is an error where code that runs without 
     diagnostics('goto script("scene.tease")', scene).map(([path, code]) => [path, code]),
     [["scene.tease", "TSV070"]],
   );
-  // A tagged pick may start only the files whose tags it may match, by its tag tests and literal tag lists.
+  // A tagged pick may start only the files whose tags it may match, by its tag tests and literal tag lists, so the
+  // scene never runs.
   const tagged = (tags: string, source: string) => `---\ntags: "${tags}"\n---\n${source}`;
   for (const pick of [
     'goto tagged "finale"',
@@ -571,7 +586,7 @@ test("an end with no call to return to is an error where code that runs without 
         "finale.tease": tagged("finale", "exit"),
         "scene.tease": tagged("scene", "end"),
       }),
-      [],
+      [["scene.tease", "TSV065", unstarted("scene.tease")]],
       pick,
     );
   // A goto keeps the call that waits for the file it leaves.
@@ -677,7 +692,8 @@ test("a computed target may start only the files that a reference of the project
   );
   assert.deepEqual(warnings(example), []);
   assert.deepEqual(said(example), ["a", "b", "c", "hall", "exit"]);
-  // A text with ${...} names the files its texts allow; a load of a number gives no reference.
+  // A text with ${...} names the files its texts allow; a load of a number gives no reference. Nothing starts the
+  // other files.
   assert.deepEqual(
     warnings(
       project(
@@ -685,7 +701,7 @@ test("a computed target may start only the files that a reference of the project
         called,
       ),
     ),
-    [],
+    ["b.tease TSV065", "c.tease TSV065"],
   );
   // ADR 0023: a pool of findScripts(...) names the files it may list; one of them that ends still warns.
   const tagged = (tags: string, source: string) => `---\ntags: ${tags}\n---\n${source}`;
@@ -707,7 +723,7 @@ test("a computed target may start only the files that a reference of the project
         pool,
       ),
     ),
-    ["modules/corner.tease TSV071"],
+    ["modules/corner.tease TSV071", "modules/soft.tease TSV065"],
   );
   // A reference that a load may give, which an earlier session may have saved, or a host value, may name any file.
   for (const [main, options] of [
@@ -727,7 +743,9 @@ test("a computed target may start only the files that a reference of the project
 test("an object that a load gives may hold a reference to any file", () => {
   // A saved object holds a reference in a property that the reader's type does not list.
   const scene = { "scene.tease": 'say "scene"\nend' };
-  const writer = compiled(project('save { next: script("scene.tease") } as "data"\nexit', scene));
+  const writer = compiled(project('save { next: script("scene.tease") } as "data"\nexit', scene), [
+    "scene.tease",
+  ]);
   const scriptStorage = run(writer, createImmediatePacingRuntimeSnapshot(writer)).snapshot
     .scriptStorage;
   const reader = project(
@@ -1082,7 +1100,10 @@ test("a goto or call names a file that exists", () => {
     ],
   ]);
   // Calling such a file runs nothing and returns at once.
-  assert.deepEqual(codes('call "helpers.tease"\nexit', others), []);
+  assert.deepEqual(
+    codes('call "helpers.tease"\nexit', { "helpers.tease": others["helpers.tease"] }),
+    [],
+  );
   assert.deepEqual(
     codes('let room = "hall"\ngoto "rooms/${room}.tease"', others).map(([code]) => code),
     ["TSP039"],
@@ -1266,6 +1287,7 @@ test("a plan's global function has no label to go to", () => {
     project("skip()\nexit", {
       "lib.tease": 'label later\nexit\nglobal function skip { say "skip" }',
     }),
+    ["lib.tease"],
   );
   const lib = plan.files[1]!;
   const skip = plan.functions.find((definition) => definition.name === "skip")!;
