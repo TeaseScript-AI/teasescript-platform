@@ -175,6 +175,18 @@ interface Locals {
   /** Any other value, and what lies below it. */
   readonly below: readonly (readonly string[])[];
   readonly next: Locals | null;
+  /** The whole chain's count of points and prefixes, and its points' and prefixes' texts (persistent, shared tails). */
+  readonly size: number;
+  readonly pointTexts: Treap | null;
+  readonly belowTexts: Treap | null;
+}
+
+/** A persistent treap of texts (`Locals`): each insert copies its path, so chains sharing a tail share its texts. */
+interface Treap {
+  readonly key: string;
+  readonly priority: number;
+  readonly left: Treap | null;
+  readonly right: Treap | null;
 }
 
 /** A place's copies of one identity at one path, with the locals of their ways (`#meeting`). */
@@ -232,6 +244,17 @@ interface Account {
   met: boolean;
 }
 
+/** A place's contents beside its landings by prefix (`#looseIndex`). */
+interface LooseIndex {
+  /** Each point, prefix and source's copy under every prefix of its path (the path's own text included). */
+  readonly points: Map<string, (readonly string[])[]>;
+  readonly below: Map<string, (readonly string[])[]>;
+  readonly from: Map<string, Loose["from"][number][]>;
+  /** The prefixes' texts, and the sources' copies by their own paths. */
+  readonly belowTexts: Set<string>;
+  readonly fromAt: Map<string, Loose["from"][number][]>;
+}
+
 /** A root's contents beside its landings below a strip, as rests from it (`#flatLoose`). */
 interface FlatLoose {
   readonly points: (readonly string[])[];
@@ -269,6 +292,34 @@ function lastAtLeast(tree: readonly number[], size: number, last: number, least:
   node -= 1;
   while (node < size) node = tree[2 * node + 1]! >= least ? 2 * node + 1 : 2 * node;
   return node - size;
+}
+
+/** Whether a treap holds a text (`Locals`). */
+function treapHas(treap: Treap | null, key: string): boolean {
+  for (let at = treap; at !== null; at = key < at.key ? at.left : at.right)
+    if (at.key === key) return true;
+  return false;
+}
+
+/** A treap with a text, its path copied (a text's priority its hash, so the shape is the texts' own). */
+function treapWith(treap: Treap | null, key: string): Treap {
+  if (treap === null) {
+    let priority = 2166136261;
+    for (let index = 0; index < key.length; index += 1)
+      priority = Math.imul(priority ^ key.charCodeAt(index), 16777619);
+    return { key, priority: priority >>> 0, left: null, right: null };
+  }
+  if (key === treap.key) return treap;
+  if (key < treap.key) {
+    const left = treapWith(treap.left, key);
+    return left.priority > treap.priority
+      ? { ...left, right: { ...treap, left: left.right } }
+      : { ...treap, left };
+  }
+  const right = treapWith(treap.right, key);
+  return right.priority > treap.priority
+    ? { ...right, left: { ...treap, right: right.left } }
+    : { ...treap, right };
 }
 
 /** Whether `path` starts with `prefix` (or is it). */
@@ -932,6 +983,7 @@ export class Admission {
   readonly #localsMet = new Map<Locals, Map<string, LocalsMet>>();
   /** Per root and strip, its contents beside its landings (`#flatLoose`). */
   readonly #flatLooses = new Map<string, FlatLoose>();
+  readonly #looseIndexes = new WeakMap<Loose, LooseIndex>();
   /** Per place and path, what it holds there (`#identity`); per place, its own contributions (`#ownStructure`). */
   readonly #identities = new Map<string, Identity>();
   readonly #owns = new Map<PlaceId, OwnStructure | null>();
@@ -944,8 +996,8 @@ export class Admission {
   /** Per place, its seeds' paths at or below each prefix (`#seedsUnder`), and its stores taken again (`#retakenOf`). */
   readonly #seedIndex = new Map<PlaceId, Map<string, string[]>>();
   #retakenByPlace: Map<PlaceId, (readonly string[])[]> | null = null;
-  /** Per place, a bound on the paths copies land in it (`#meeting` lists all but the largest group's). */
-  readonly #bounds = new Map<PlaceId, number>();
+  /** Per root and strip, how many paths copies land in it at or below the strip (`#landingSize`). */
+  readonly #sizes = new Map<string, number>();
   /** Per key, its decision before it is recorded (`#decided`); the keys `decide` took (`#lazily`). */
   readonly #decisions = new Map<Key, Decided | null>();
   readonly #attempted = new Set<Key>();
@@ -1979,14 +2031,13 @@ export class Admission {
    */
   #hotSets(): ReadonlyMap<PlaceId, readonly (readonly string[])[]> {
     if (this.#hots !== null) return this.#hots;
-    const { seeds, into, cycleOf, cycles, fed, order } = this.#inheritance();
+    const { seeds, into, cycleOf, cycles, order } = this.#inheritance();
     const work = this.pass.program.work;
     const hots = new Map<PlaceId, readonly (readonly string[])[]>();
     // (the source a copy that only copies one source whole stands for, and a bound on each place's landed paths)
     const origins = new Map<PlaceId, PlaceId>();
     // (each place's contents beside its landings, and a bound on its landed paths)
     const loose = new Map<PlaceId, Loose>();
-    const bound = (place: PlaceId): number => this.#bounds.get(place) ?? 0;
     const retaken = new Map<PlaceId, (readonly string[])[]>();
     for (const key of this.#retaken.keys()) {
       work.charge("indexSteps");
@@ -2012,7 +2063,6 @@ export class Admission {
           // landing: its candidates the members', and a path hot where any member's contents may not fit there
           // (its landing: one set, or the place outside it that feeds it, asked)
           const shared = cycles.get(component[0]!);
-          const feeder = fed.get(component[0]!);
           const lands = (path: readonly string[]): boolean =>
             shared === undefined ? this.#landed(component[0]!, path) : shared.has(pathText(path));
           const candidates = new Map<string, readonly string[]>();
@@ -2065,7 +2115,6 @@ export class Admission {
           for (const member of component) {
             hots.set(member, hot);
             origins.set(member, member);
-            this.#bounds.set(member, shared === undefined ? bound(feeder!) : shared.size);
             loose.set(member, contents);
           }
           continue;
@@ -2082,7 +2131,6 @@ export class Admission {
             if (cycles.get(member)!.has(pathText(path))) hot.push(path);
           hots.set(member, hot);
           origins.set(member, member);
-          this.#bounds.set(member, cycles.get(member)!.size);
           loose.set(member, contents);
         }
         continue;
@@ -2091,16 +2139,13 @@ export class Admission {
       const copies = into.get(place) ?? [];
       // its copies, a copy of a place standing for one source by that source
       const classes = new Map<string, InheritedCopy>();
-      let landing = seeds.get(place)?.size ?? 0;
       for (const copy of copies) {
         work.charge("indexSteps");
         const origin = origins.get(copy.from) ?? copy.from;
         const id = keptParts(this.#work, origin, copy.path, copy.strip);
         if (!classes.has(id))
           classes.set(id, origin === copy.from ? copy : { ...copy, from: origin });
-        landing = Math.min(Number.MAX_SAFE_INTEGER, landing + 1 + bound(copy.from));
       }
-      this.#bounds.set(place, landing);
       const own = this.#ownStructure(place);
       loose.set(place, this.#looseOf([own], copies, loose));
       const only = classes.size === 1 ? [...classes.values()][0]! : null;
@@ -2237,9 +2282,9 @@ export class Admission {
       if (locals !== null) group.locals.add(locals);
     }
     if (groups.size === 0 || (groups.size === 1 && reads.length === 0)) return [];
-    const bound = (group: Group): number => this.#bounds.get(group.root) ?? 0;
+    const size = (group: Group): number => this.#landingSize(group.root, group.strip);
     const ordered = [...groups].sort(
-      ([a, left], [b, right]) => bound(right) - bound(left) || (a < b ? -1 : a > b ? 1 : 0),
+      ([a, left], [b, right]) => size(right) - size(left) || (a < b ? -1 : a > b ? 1 : 0),
     );
     work.charge("indexSteps", ordered.length + sortCost(ordered.length));
     const run: Running = {
@@ -2259,15 +2304,21 @@ export class Admission {
       }
     };
     let node = this.#configurations;
+    // (the configuration of the groups asked: a prefix of the order)
+    let served = node;
     let first = true;
     for (const [id, group] of ordered) {
       let next = node.next.get(id);
+      const known = next !== undefined;
       if (next === undefined) {
         const added = first ? [] : this.#joined(group, run, loose);
-        if (first) run.served.push(group);
         next = { id: this.#configurationCount++, next: new Map(), added, reads: new Map() };
         node.next.set(id, next);
-      } else run.served.push(group);
+      }
+      if (known || first) {
+        run.served.push(group);
+        served = next;
+      }
       first = false;
       put(next.added);
       node = next;
@@ -2283,10 +2334,10 @@ export class Admission {
       let found = node.reads.get(id);
       if (found === undefined) node.reads.set(id, (found = this.#readMeets(held, run)));
       put(found);
-      if (locals !== null) this.#localsMeet(locals, read.at, node, run, put);
+      if (locals !== null) this.#localsMeet(locals, read.at, served, run, put);
     }
     for (const [, group] of ordered)
-      for (const chain of group.locals) this.#localsMeet(chain, group.path, node, run, put);
+      for (const chain of group.locals) this.#localsMeet(chain, group.path, served, run, put);
     return [...out.values()];
   }
 
@@ -2392,18 +2443,20 @@ export class Admission {
 
   /**
    * Where a way's locals stand where a group of a configuration lands (`#meeting`): its points there, every landed path
-   * below its opaque values; each decided at the place (its contents are its own). Once per locals node, place path and
-   * configuration, a chain's nodes shared by every way through them.
+   * below its opaque values; each decided at the place (its contents are its own). Against the groups asked (`served`,
+   * a prefix of the order): once per locals node, served configuration and place path, a chain's nodes shared by every way
+   * through them. Against the groups the call listed: their landings at or below the way's path, each looked up in the
+   * chain's texts (`Locals`), or the chain walked where it is the shorter.
    */
   #localsMeet(
     chain: Locals,
     base: readonly string[],
-    node: Configuration,
+    served: Configuration,
     run: Running,
     put: (list: readonly (readonly string[])[]) => void,
   ): void {
     const work = this.pass.program.work;
-    const key = keptParts(this.#work, node.id, base);
+    const key = keptParts(this.#work, served.id, base);
     const pending: Locals[] = [];
     let at: Locals | null = chain;
     let met: LocalsMet | null = null;
@@ -2416,18 +2469,24 @@ export class Admission {
       }
       pending.push(at);
     }
+    const asked = (path: readonly string[]): boolean =>
+      run.served.some((group) => {
+        work.charge("indexSteps");
+        return this.#groupLands(group, path);
+      });
     for (let index = pending.length - 1; index >= 0; index -= 1) {
       const local = pending[index]!;
       const found: (readonly string[])[] = [];
       for (const point of local.points) {
         work.charge("indexSteps");
         const path = keptSteps(this.#work, base, point);
-        if (this.#landsAny(run, path, keptText(this.#work, path))) found.push(path);
+        if (asked(path)) found.push(path);
       }
       for (const prefix of local.below) {
         work.charge("indexSteps");
-        for (const path of this.#landedUnder(run, keptSteps(this.#work, base, prefix)))
-          found.push(path);
+        const under = keptSteps(this.#work, base, prefix);
+        for (const group of run.served)
+          for (const path of this.#groupBelow(group, under)) found.push(path);
       }
       // (only the nodes that add a path are kept on the way)
       if (found.length > 0) met = { paths: found, next: met };
@@ -2436,6 +2495,38 @@ export class Admission {
       byKey.set(key, met ?? NO_LOCALS_MET);
     }
     for (let way = met; way !== null && way !== NO_LOCALS_MET; way = way.next) put(way.paths);
+    // the groups this call listed: their landings at or below the way's path, in the chain's texts
+    const listed = run.under.get(keptText(this.#work, base)) ?? [];
+    if (listed.length === 0) return;
+    const out: (readonly string[])[] = [];
+    if (chain.size <= listed.length)
+      for (let local: Locals | null = chain; local !== null; local = local.next) {
+        for (const point of local.points) {
+          work.charge("indexSteps");
+          const path = keptSteps(this.#work, base, point);
+          if (run.lands.has(keptText(this.#work, path))) out.push(path);
+        }
+        for (const prefix of local.below) {
+          work.charge("indexSteps");
+          for (const text of run.under.get(
+            keptText(this.#work, keptSteps(this.#work, base, prefix)),
+          ) ?? [])
+            out.push(run.lands.get(text)!.path);
+        }
+      }
+    else
+      for (const text of listed) {
+        work.charge("indexSteps");
+        const path = run.lands.get(text)!.path;
+        const rest = path.slice(base.length);
+        let held = treapHas(chain.pointTexts, pathText(rest));
+        for (let length = 0; length <= rest.length && !held; length += 1) {
+          work.charge("indexSteps");
+          held = treapHas(chain.belowTexts, pathText(rest.slice(0, length)));
+        }
+        if (held) out.push(path);
+      }
+    put(out);
   }
 
   /**
@@ -2549,6 +2640,46 @@ export class Admission {
     return false;
   }
 
+  /**
+   * A place's contents beside its landings by prefix (`#flatLoose`): its points, prefixes and sources' copies under every
+   * prefix of their paths, its prefixes' texts, and its copies by their own paths; once per node.
+   */
+  #looseIndex(loose: Loose): LooseIndex {
+    const known = this.#looseIndexes.get(loose);
+    if (known !== undefined) return known;
+    const work = this.pass.program.work;
+    const index: LooseIndex = {
+      points: new Map(),
+      below: new Map(),
+      belowTexts: new Set(),
+      from: new Map(),
+      fromAt: new Map(),
+    };
+    const under = <T>(map: Map<string, T[]>, path: readonly string[], item: T): void => {
+      for (let length = 0; length <= path.length; length += 1) {
+        work.charge("indexSteps");
+        const text = keptText(this.#work, path.slice(0, length));
+        const list = map.get(text);
+        if (list === undefined) map.set(text, [item]);
+        else list.push(item);
+      }
+    };
+    for (const point of loose.points) under(index.points, point, point);
+    for (const prefix of loose.below) {
+      under(index.below, prefix, prefix);
+      index.belowTexts.add(keptText(this.#work, prefix));
+    }
+    for (const entry of loose.from) {
+      under(index.from, entry.copy.path, entry);
+      const text = keptText(this.#work, entry.copy.path);
+      const list = index.fromAt.get(text);
+      if (list === undefined) index.fromAt.set(text, [entry]);
+      else list.push(entry);
+    }
+    this.#looseIndexes.set(loose, index);
+    return index;
+  }
+
   /** Whether a group's root holds contents beside its landings at a place's path (`#flatLoose`). */
   #flatHolds(group: Group, path: readonly string[], loose: ReadonlyMap<PlaceId, Loose>): boolean {
     if (!isPrefix(group.path, path)) return false;
@@ -2616,32 +2747,38 @@ export class Admission {
       const at = keptParts(this.#work, id, task.strip, task.rest);
       if (seen.has(at)) continue;
       seen.add(at);
-      for (const each of task.loose.points) {
+      // (the node's entries at, above and below the strip, from its index: never every entry for each strip)
+      const index = this.#looseIndex(task.loose);
+      const text = keptText(this.#work, task.strip);
+      for (const each of index.points.get(text) ?? []) {
         work.charge("indexSteps");
-        if (isPrefix(task.strip, each))
-          point(keptSteps(this.#work, task.rest, each.slice(task.strip.length)));
+        point(keptSteps(this.#work, task.rest, each.slice(task.strip.length)));
       }
-      for (const prefix of task.loose.below) {
+      for (const prefix of index.below.get(text) ?? []) {
         work.charge("indexSteps");
-        if (isPrefix(task.strip, prefix))
-          under(keptSteps(this.#work, task.rest, prefix.slice(task.strip.length)));
-        else if (isPrefix(prefix, task.strip)) under(task.rest);
+        under(keptSteps(this.#work, task.rest, prefix.slice(task.strip.length)));
       }
       // (a source's own copies' contents, the two steps composed: theirs, then this one's)
-      for (const { copy: inner, loose: from } of task.loose.from) {
+      for (const { copy: inner, loose: from } of index.from.get(text) ?? []) {
         work.charge("indexSteps");
-        if (isPrefix(task.strip, inner.path))
-          tasks.push({
-            loose: from,
-            strip: inner.strip,
-            rest: keptSteps(this.#work, task.rest, inner.path.slice(task.strip.length)),
-          });
-        else if (isPrefix(inner.path, task.strip))
+        tasks.push({
+          loose: from,
+          strip: inner.strip,
+          rest: keptSteps(this.#work, task.rest, inner.path.slice(task.strip.length)),
+        });
+      }
+      for (let length = 0; length < task.strip.length; length += 1) {
+        work.charge("indexSteps");
+        const above = keptText(this.#work, task.strip.slice(0, length));
+        if (index.belowTexts.has(above)) under(task.rest);
+        for (const { copy: inner, loose: from } of index.fromAt.get(above) ?? []) {
+          work.charge("indexSteps");
           tasks.push({
             loose: from,
             strip: keptSteps(this.#work, inner.strip, task.strip.slice(inner.path.length)),
             rest: task.rest,
           });
+        }
       }
     }
     this.#flatLooses.set(key, flat);
@@ -2650,15 +2787,14 @@ export class Admission {
 
   /**
    * A bound on the paths a place's groups land at or below a prefix (`#readMeets`): a group's whole landing where the prefix
-   * is above its path, else its root's seeds there (an index lookup) where copies land nothing in it, else its bound.
+   * is above its path, else its root's seeds there (an index lookup) where copies land nothing in it, else its landing.
    */
   #landingsBelow(groups: readonly Group[], prefix: readonly string[]): number {
     const { into, cycleOf } = this.#inheritance();
     let total = 0;
     for (const group of groups) {
       this.pass.program.work.charge("indexSteps");
-      const bound = this.#bounds.get(group.root) ?? 0;
-      if (isPrefix(prefix, group.path)) total += 1 + bound;
+      if (isPrefix(prefix, group.path)) total += this.#landingSize(group.root, group.strip);
       else if (isPrefix(group.path, prefix))
         total +=
           (into.get(group.root)?.length ?? 0) === 0 && !cycleOf.has(group.root)
@@ -2666,9 +2802,18 @@ export class Admission {
                 group.root,
                 keptSteps(this.#work, group.strip, prefix.slice(group.path.length)),
               ).length
-            : bound;
+            : this.#landingSize(group.root, group.strip);
     }
     return total;
+  }
+
+  /** How many paths copies land in a root at or below a strip, and the strip (`#meeting`'s order), once per root and strip. */
+  #landingSize(root: PlaceId, strip: readonly string[]): number {
+    const key = keptParts(this.#work, root, strip);
+    let found = this.#sizes.get(key);
+    if (found === undefined)
+      this.#sizes.set(key, (found = 1 + this.#landedBelow(root, strip).length));
+    return found;
   }
 
   /** Whether a group of a place's copies lands a path of the place (`#meeting`): its own path, or its root below. */
@@ -2746,12 +2891,41 @@ export class Admission {
       const locals =
         points.length === 0 && below.length === 0
           ? found.locals
-          : { points, below, next: found.locals };
+          : this.#localsNode(points, below, found.locals);
       found = { root: found.root, strip: found.strip, locals };
       this.#identities.set(key, found);
     }
     this.#identities.set(asked, found);
     return found;
+  }
+
+  /** A locals node before a chain, with the chain's texts beside its own (`Locals`), each insert charged. */
+  #localsNode(
+    points: readonly (readonly string[])[],
+    below: readonly (readonly string[])[],
+    next: Locals | null,
+  ): Locals {
+    const work = this.pass.program.work;
+    // (each insert keeps a path of the treap's depth, about the log of the chain's size)
+    const depth = 1 + Math.ceil(Math.log2(1 + (next?.size ?? 0) + points.length + below.length));
+    let pointTexts = next?.pointTexts ?? null;
+    let belowTexts = next?.belowTexts ?? null;
+    for (const point of points) {
+      work.charge("indexSteps", depth);
+      pointTexts = treapWith(pointTexts, keptText(this.#work, point));
+    }
+    for (const prefix of below) {
+      work.charge("indexSteps", depth);
+      belowTexts = treapWith(belowTexts, keptText(this.#work, prefix));
+    }
+    return {
+      points,
+      below,
+      next,
+      size: (next?.size ?? 0) + points.length + below.length,
+      pointTexts,
+      belowTexts,
+    };
   }
 
   /**
