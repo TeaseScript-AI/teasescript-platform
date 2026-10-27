@@ -228,21 +228,28 @@ function constructions(file: string, source: string): Map<string, string[]> {
 }
 
 /**
- * A text a plain twin makes (`joinParts`, `pathText`, `keyOf`, …), or a template of a path or key (`` `k${key}` ``), is
+ * A text or an array a plain twin makes (`joinParts`, `pathText`, `keyOf`, `joinSteps`, `keyPath`, …), or a template of
+ * a path or key (`` `k${key}` ``), is
  * for a lookup or to pass on; one a structure keeps is charged first: made by a kept helper, or charged where it is
  * inserted (`keepText(work, memoKey.length)` before a memo stores it). A read's snapshot made by `joinParts` and kept in
  * a memo, and a stop's kept in a set of distinct ones, passed the scan above, which reads how a text is made, not what
- * keeps it (the deep-literal review's R3-B1). This scan finds, per member, a local text made so and then stored by
- * `.set`, `.add` or `.push` with no charge naming it before the store. A path's copy by `slice` is kept the same way
- * (a task's strip below a literal's step, a split's rest in a memo, the deep-literal review's R5-B1 and R6-B1): a
- * local made by `path.slice(…)` of one of the core's names for a path, or such a slice in a stored argument (inside an
- * array or an object too) outside a kept helper's call, is found as well. A tripwire too: it misses a text or a copy
- * kept under another name, returned by a call (`#aliasKey`), or kept in an object after it was made.
+ * keeps it (the deep-literal review's R3-B1). A path's copy by `slice` of one of the core's names for a path is kept
+ * the same way (a task's strip below a literal's step, a split's rest in a memo: R5-B1, R6-B1). This scan is a tripwire
+ * for these constructions in a member: such a text or copy made outside a kept helper's own arguments (judged by the
+ * brackets around it, so a kept call beside it or in another branch charges nothing of it), then stored by `.set`,
+ * `.add` or `.push` (as an argument, or inside an array or an object there) with no charge naming it before the store
+ * (a kept helper, `keepText`, or the ledger's `charge` by its length), or stored as it is made. It misses a text or a
+ * copy kept under another name, returned by a call (`#aliasKey`), or kept in an object after it was made; the account
+ * of the walks' kept arrays (the pull request) is the evidence of what the core keeps.
  */
-const PLAIN_TWIN = /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText)\(/;
+const PLAIN_TWIN =
+  /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf)\(/;
 
 /** A charge or a kept helper: its call before a store, naming the text, charges it (`keepText(work, key.length)`). */
-const CHARGE = /(?:\b(?:kept\w*|keepText|keep)|#kept|#keepText)\(/;
+const CHARGE = /(?:\b(?:kept\w*|keepText|keep|charge)|#kept|#keepText)\(/;
+
+/** The name of a kept helper, whose call charges what it makes of its arguments. */
+const KEPT_CALLEE = /^(?:kept\w*|#kept)$/;
 
 /** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
 const STORED: Readonly<Record<string, readonly [number, string]>> = {
@@ -250,11 +257,23 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a store's contributions at a path, returned and read once by its caller, not kept",
   ],
+  "admission.ts decide at": [
+    1,
+    "a candidate's path, its decision read once by the consumer and then dropped",
+  ],
+  "admission.ts #inputs prefix": [
+    1,
+    "a decision's prefix key, returned and read once by the decision, not kept",
+  ],
   "admission.ts #inputs slice": [
     1,
     "a decision's prefixes, returned and read once by the decision, not kept",
   ],
   "admission.ts #ownLeaves memoKey": [1, "a definition's id and a flag"],
+  "answers.ts #propertyNames at": [
+    1,
+    "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
+  ],
   "answers.ts #propertyNames slice": [
     3,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
@@ -268,6 +287,7 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
   ],
   "consumers.ts #admittedStores side": [1, "a definition's id and two positions"],
+  "consumers.ts #operator key": [1, "an operand's index and a kind"],
   "contract.ts #prefixWork root": [1, "a place's root key, `place|`"],
   "contract.ts #readGroups groupKey": [
     1,
@@ -305,11 +325,11 @@ function pastCode(text: string, at: number): number {
 }
 
 /**
- * The arguments of the call whose `(` is at `open`, split at their top-level commas; a delimiter inside a string or a
- * template is text (`.set(")", text)`).
+ * The arguments of the call whose `(` is at `open`, each its start and end, split at their top-level commas; a delimiter
+ * inside a string or a template is text (`.set(")", text)`).
  */
-function callArguments(text: string, open: number): string[] {
-  const out: string[] = [];
+function callArguments(text: string, open: number): (readonly [number, number])[] {
+  const out: (readonly [number, number])[] = [];
   let depth = 0;
   let from = open + 1;
   for (let at = open + 1; at < text.length; at += 1) {
@@ -318,16 +338,65 @@ function callArguments(text: string, open: number): string[] {
     else if ("([{".includes(char)) depth += 1;
     else if (")]}".includes(char)) {
       if (depth === 0) {
-        out.push(text.slice(from, at).trim());
+        out.push([from, at]);
         return out;
       }
       depth -= 1;
     } else if (char === "," && depth === 0) {
-      out.push(text.slice(from, at).trim());
+      out.push([from, at]);
       from = at + 1;
     }
   }
   return out;
+}
+
+/**
+ * Whether `offset` in `text` is outside every kept helper's own arguments, judged by the brackets around it (strings and
+ * templates read whole, an interpolation's code with them), and outside strings and templates unless `literal` (a
+ * template's interpolation is found inside one).
+ */
+function plainAt(text: string, offset: number, literal = false): boolean {
+  const kept: boolean[] = [];
+  for (let at = 0; at < offset; at += 1) {
+    const char = text[at]!;
+    if (char === '"' || char === "'" || char === "`") {
+      at = pastLiteral(text, at) - 1;
+      if (at >= offset) return literal && !kept.includes(true);
+    } else if (char === "(")
+      kept.push(KEPT_CALLEE.test(/(#?[\w$]+)\s*$/.exec(text.slice(0, at))?.[1] ?? ""));
+    else if (char === "[" || char === "{") kept.push(false);
+    else if (char === ")" || char === "]" || char === "}") kept.pop();
+  }
+  return !kept.includes(true);
+}
+
+/**
+ * Whether the construction at `offset` is the value that starts at `from` itself (or a branch or an element of it), not
+ * an argument of a call inside it (`map.get(pathText(at))` makes no value of the text): no call's bracket open around it.
+ */
+function ownAt(text: string, from: number, offset: number): boolean {
+  const calls: boolean[] = [];
+  for (let at = from; at < offset; at += 1) {
+    const char = text[at]!;
+    if (char === '"' || char === "'" || char === "`") at = pastLiteral(text, at) - 1;
+    else if (char === "(") calls.push(/[\w$#)\]!]\s*$/.test(text.slice(from, at)));
+    else if (char === "[" || char === "{") calls.push(false);
+    else if (char === ")" || char === "]" || char === "}") calls.pop();
+  }
+  return !calls.includes(true);
+}
+
+/** The offset of the `;` that ends the statement going on at `from`, at its own bracket depth. */
+function statementEnd(text: string, from: number): number {
+  let depth = 0;
+  for (let at = from; at < text.length; at += 1) {
+    const char = text[at]!;
+    if (char === '"' || char === "'" || char === "`") at = pastLiteral(text, at) - 1;
+    else if ("([{".includes(char)) depth += 1;
+    else if (")]}".includes(char)) depth -= 1;
+    else if (char === ";" && depth <= 0) return at;
+  }
+  return text.length;
 }
 
 /** The stores of a plain-made text in one file, by member and name, with the lines they are on. */
@@ -353,33 +422,64 @@ function plainStores(file: string, source: string): Map<string, string[]> {
   for (const [name, start, end] of runs) {
     const text = lines.slice(start, end).join("\n");
     const lineOf = (offset: number): number => start + text.slice(0, offset).split("\n").length - 1;
-    for (const made of text.matchAll(/\b(?:const|let) (\w+)(?::[^=]*)? =\s*([^]*?);\s*\n/g)) {
+    const record = (key: string, offset: number): void => {
+      const at = lineOf(offset);
+      found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
+    };
+    // where in [from, to) a plain twin, a template of a path or a path's slice is made outside a kept helper's call
+    const plainMade = (from: number, to: number, forms: readonly RegExp[]): number[] =>
+      forms.flatMap((form) =>
+        [...text.slice(from, to).matchAll(new RegExp(form.source, "g"))]
+          .map((match) => from + match.index)
+          .filter((offset) => plainAt(text, offset, form === template)),
+      );
+    const stores = [...text.matchAll(/\.(?:set|add|push)\(/g)].map((store) => ({
+      at: store.index,
+      ranges: callArguments(text, store.index + store[0].length - 1),
+    }));
+    // (a declaration that starts a statement, `for (let …` none; its value up to the statement's end)
+    for (const made of text.matchAll(/(?:^|[;{}])\s*(?:const|let) (\w+)(?::[^=]*)? =/gm)) {
       const local = made[1]!;
-      const value = made[2]!;
+      const valueAt = made.index + made[0].length;
+      const valueEnd = statementEnd(text, valueAt);
       if (
-        CHARGE.test(value) ||
-        !(PLAIN_TWIN.test(value) || template.test(value) || slice.test(value))
+        !plainMade(valueAt, valueEnd, [PLAIN_TWIN, template, slice]).some((offset) =>
+          ownAt(text, valueAt, offset),
+        )
       )
         continue;
-      for (const store of text.matchAll(/\.(?:set|add|push)\(/g)) {
-        const open = store.index + store[0].length - 1;
-        if (store.index < made.index || !callArguments(text, open).includes(local)) continue;
-        const before = text.slice(made.index + made[0].length, store.index);
+      // (the local as a value, not read through: `rest.length`, `stores[0]`, `frame(…)` keep none of it)
+      const reference = new RegExp(`(?<![\\w$#.])${local}(?![\\w$]|\\s*[.[(])`, "g");
+      // (up to the next declaration of the name: a later one is another variable)
+      const next = new RegExp(`\\b(?:const|let) ${local}\\b`, "g");
+      next.lastIndex = valueEnd;
+      const until = next.exec(text)?.index ?? text.length;
+      for (const { at, ranges } of stores) {
+        if (at < made.index || at > until) continue;
+        // (the local itself in a stored argument, in a tuple or an object there too, outside a kept helper's call; an
+        // argument of another call makes that call's value, not the local)
+        const kept = ranges.some(([from, to]) =>
+          [...text.slice(from, to).matchAll(reference)].some(
+            (use) =>
+              plainAt(text, from + use.index) &&
+              ownAt(text, from, from + use.index) &&
+              // (an object's key of that name is no use of it)
+              !(
+                /[{,]\s*$/.test(text.slice(from, from + use.index)) &&
+                /^\s*:/.test(text.slice(from + use.index + local.length))
+              ),
+          ),
+        );
+        if (!kept) continue;
+        const before = text.slice(valueEnd, at);
         if (new RegExp(`${CHARGE.source}[^;]*\\b${local}\\b`).test(before)) continue;
-        const key = `${file} ${name} ${local}`;
-        const at = lineOf(store.index);
-        found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
+        record(`${file} ${name} ${local}`, at);
       }
     }
     // a path's slice stored as it is made, outside a kept helper's call
-    for (const store of text.matchAll(/\.(?:set|add|push)\(/g))
-      for (const argument of callArguments(text, store.index + store[0].length - 1)) {
-        const copy = slice.exec(argument);
-        if (copy === null || CHARGE.test(argument.slice(0, copy.index))) continue;
-        const key = `${file} ${name} slice`;
-        const at = lineOf(store.index);
-        found.set(key, [...(found.get(key) ?? []), `${file}:${at + 1}: ${lines[at]!.trim()}`]);
-      }
+    for (const { at, ranges } of stores)
+      for (const [from, to] of ranges)
+        for (const _ of plainMade(from, to, [slice])) record(`${file} ${name} slice`, at);
   }
   return found;
 }
@@ -497,6 +597,28 @@ test("the scan finds a plain-made text kept uncharged", () => {
     "    const kept = keptSlice(this.#work, path, n);",
     "    list.push(kept);",
     "  }",
+    "  #beside(path: string[], strip: string[]) {",
+    "    pending.push([keptSteps(work, path, []), strip.slice(1)]);",
+    "    memo.set(key, { path: keptSteps(work, path, []), strip: strip.slice(1) });",
+    "    pending.push([1, flag ? keptSlice(this.#work, strip, 1) : strip.slice(1)]);",
+    "    pending.push([keptSteps(work, path, []), keptSlice(this.#work, strip, 1)]);",
+    "  }",
+    "  #within(strip: string[]) {",
+    "    const tail = strip.slice(1);",
+    "    pending.push([1, 2, tail]);",
+    "    memo.set(key, { strip: tail });",
+    "    const paid = strip.slice(1);",
+    "    work.charge('eventSteps', 1 + paid.length);",
+    "    pending.push([1, paid]);",
+    "    const copied = strip.slice(1);",
+    "    pending.push([1, keptSteps(work, copied, [])]);",
+    "  }",
+    "  #joined(key: number[]) {",
+    "    const longer = joinSteps(key, [1]);",
+    "    pending.push({ key: longer });",
+    "    const named = joinSteps(key, [2]);",
+    "    pending.push({ named: 1, path: [] });",
+    "  }",
     "  #charged(key: string) {",
     "    const memoKey = joinParts(key, 2);",
     "    keepText(this.#work, memoKey.length);",
@@ -518,6 +640,9 @@ test("the scan finds a plain-made text kept uncharged", () => {
       "probe.ts #tail slice 1",
       "probe.ts #prefix rest 1",
       "probe.ts #prefix slice 1",
+      "probe.ts #beside slice 3",
+      "probe.ts #within tail 2",
+      "probe.ts #joined longer 1",
     ],
   );
 });
