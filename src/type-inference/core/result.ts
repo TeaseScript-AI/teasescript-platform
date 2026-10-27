@@ -330,6 +330,29 @@ export interface CoreRecord {
   readonly runtimeChecks: readonly RecordObligation[];
 }
 
+/**
+ * The published checks (TABLE r4.86 (1)): in source order of their sites, at one site the warnings' obligations in the
+ * order of their diagnostics, then the other checks in their own order; the core's record keeps the same order
+ * (`coreRecord`).
+ */
+export function checksBySite(
+  owned: readonly Obligation[],
+  others: readonly Obligation[],
+): Obligation[] {
+  const all: { readonly item: Obligation; readonly other: number }[] = [];
+  for (const item of owned) all.push({ item, other: 0 });
+  for (const item of others) all.push({ item, other: 1 });
+  return all
+    .sort(
+      (a, b) =>
+        a.item.site.file - b.item.site.file ||
+        a.item.site.start - b.item.site.start ||
+        a.item.site.end - b.item.site.end ||
+        a.other - b.other,
+    )
+    .map(({ item }) => item);
+}
+
 /** `result` as a record, with `paths` the project's file paths by file index. */
 export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRecord {
   const path = (file: number): string => {
@@ -376,16 +399,19 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
           obligation: obligation(diagnostic.obligation),
         },
   );
-  // each diagnostic's obligation, also where two read alike (§4: a diagnostic per obligation), then every other check once
-  const runtimeChecks = diagnostics.flatMap((diagnostic) =>
-    diagnostic.obligation === undefined ? [] : [diagnostic.obligation],
+  // each diagnostic's obligation, also where two read alike (§4: a diagnostic per obligation), then every other check once,
+  // in the answers' order (`checksBySite`)
+  const owned = result.diagnostics.flatMap((diagnostic) =>
+    diagnostic.class === "compile-error" ? [] : [diagnostic.obligation],
   );
-  const listed = new Set(runtimeChecks.map((check) => JSON.stringify(check)));
-  for (const check of result.checks.map(obligation)) {
-    const key = JSON.stringify(check);
+  const listed = new Set(owned.map((check) => JSON.stringify(obligation(check))));
+  const others: Obligation[] = [];
+  for (const check of result.checks) {
+    const key = JSON.stringify(obligation(check));
     if (listed.has(key)) continue;
     listed.add(key);
-    runtimeChecks.push(check);
+    others.push(check);
   }
+  const runtimeChecks = checksBySite(owned, others).map(obligation);
   return { outcome: result.outcome, diagnostics, runtimeChecks };
 }

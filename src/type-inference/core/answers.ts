@@ -50,6 +50,7 @@ import {
   type CoreAnalysisRequest,
 } from "./program.js";
 import {
+  checksBySite,
   outcomeOf,
   type CoreDiagnostic,
   type CoreOutcome,
@@ -576,24 +577,24 @@ class CoreAnswers implements Answers {
           )
         : [];
     this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
-    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes
-    const checks: { readonly item: Obligation; readonly rule: number }[] = [];
+    // each warning's obligation, one per warning (§4), then the boundary checks no warning owes: in source order of their
+    // sites, at one site the warnings' obligations in the diagnostics' order, then the others (`checksBySite`)
+    const owned: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
       if (diagnostic.class === "warning-runtime-check") {
-        checks.push({ item: diagnostic.obligation, rule: rules.get(diagnostic) ?? 0 });
+        owned.push(diagnostic.obligation);
         const at = siteKey(diagnostic.obligation.site);
         const list = this.#obligations.get(at);
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
+    const others: { readonly item: Obligation; readonly rule: number }[] = [];
     if (exhausted === null) {
-      // (at one site after the warnings' obligations, as they are made)
       for (const list of consumers.admission.boundaries.values())
-        for (const item of list) checks.push({ item, rule: consumers.rules.length + 1 });
-      for (const item of consumers.admission.readChecks)
-        checks.push({ item, rule: consumers.rules.length + 2 });
+        for (const item of list) others.push({ item, rule: 0 });
+      for (const item of consumers.admission.readChecks) others.push({ item, rule: 1 });
     }
-    this.checks = bySite(checks);
+    this.checks = checksBySite(owned, bySite(others));
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
     // after a stop the ledger is spent: nothing more is computed, so no binding is published as deferred

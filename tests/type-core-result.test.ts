@@ -337,12 +337,12 @@ test("a result's record has the expectation set's shape, survives JSON, and comp
   }
   const [, external, called] = RECORDS;
   const record = coreRecord(external!.result, external!.paths);
-  // a warning's obligation is a runtime check too, and every check is listed once
+  // a warning's obligation is a runtime check too, every check is listed once, in source order of their sites (r4.86 (1))
   assert.deepEqual(
     record.runtimeChecks.map(
       (check) => `${check.kind} ${check.boundary === true ? check.reason : "use"}`,
     ),
-    ["null-check use", "copy-type external-data"],
+    ["copy-type external-data", "null-check use"],
   );
   assert.deepEqual(
     coreRecord(

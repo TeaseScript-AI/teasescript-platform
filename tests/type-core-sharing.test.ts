@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../src/compiler.js";
-import { analyseCore } from "../src/type-inference/core/answers.js";
+import { analyseCore, coreResult } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
@@ -159,14 +160,20 @@ function prepared(program: Program): Prepared {
   return { program, request, bindings };
 }
 
+/** Two sites as (file index, start, end), in source order. */
+function compareSites(a: readonly number[], b: readonly number[]): number {
+  return a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+}
+
 /**
- * What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection; and the
- * record alone (its outcome, diagnostics and checks).
+ * What a program publishes, in one order: the answers, each binding's admitted types, the plan or the rejection; the
+ * record alone (its outcome, diagnostics and checks, and the same serialized); and whether each of its lists is in
+ * source order of its sites (r4.86 (1)).
  */
 function published(
   { program, request, bindings }: Prepared,
   reversed: boolean,
-): { readonly text: string; readonly record: string } {
+): { readonly text: string; readonly record: string; readonly sited: boolean } {
   const ordered = <T>(callback: () => T): T =>
     reversed
       ? withConsumerOrder(
@@ -196,7 +203,31 @@ function published(
     diagnostics: answers.diagnostics,
     checks: answers.checks,
   };
-  return { text: JSON.stringify({ ...record, admitted, lowered }), record: JSON.stringify(record) };
+  const paths = program.files.map((file) => file.path);
+  const serialized = coreRecord(coreResult(answers), paths);
+  const sitesOf = (
+    list: readonly {
+      readonly site: { readonly file: number; readonly start: number; readonly end: number };
+    }[],
+  ) => list.map(({ site }) => [site.file, site.start, site.end]);
+  const recordSites = (
+    list: readonly {
+      readonly site: { readonly file: string; readonly offset: number; readonly end: number };
+    }[],
+  ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
+  const sited = [
+    sitesOf(answers.diagnostics),
+    sitesOf(answers.checks),
+    recordSites(serialized.diagnostics),
+    recordSites(serialized.runtimeChecks),
+  ].every((sites) =>
+    sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
+  );
+  return {
+    text: JSON.stringify({ ...record, admitted, lowered }),
+    record: JSON.stringify({ record, serialized }),
+    sited,
+  };
 }
 
 test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
@@ -205,8 +236,10 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   let runs = 0;
   // (programs of one exact input, their files in order, share its outcome in each order: each is reported by its name)
   const changed = new Map<string, boolean>();
-  // (the record a program publishes is in source order of its sites, the same in both orders: r4.86 (1))
+  // (the record a program publishes, and its serialized form, is in source order of its sites, the same in both orders:
+  // r4.86 (1))
   const reordered: string[] = [];
+  const unsited: string[] = [];
   for (const program of all) {
     let ready: Prepared | undefined;
     const records: string[] = [];
@@ -220,6 +253,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
         differs = shared.text !== withoutSharing(() => published(once, reversed)).text;
         changed.set(input, differs);
         records.push(shared.record);
+        if (!shared.sited) unsited.push(`${program.name}${reversed ? " (reversed)" : ""}`);
       }
       if (differs) differing.push(`${program.name}${reversed ? " (reversed)" : ""}`);
     }
@@ -231,6 +265,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
   );
   assert.deepEqual(differing, []);
   assert.deepEqual(reordered, []);
+  assert.deepEqual(unsited, []);
   assert.ok(all.length > 2_500, `${all.length} programs`);
 });
 
