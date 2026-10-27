@@ -368,3 +368,76 @@ test("a host stack failure while the finished plan is validated is still TSC007"
     [["TSC007", 0, source.length]],
   );
 });
+
+test("a package file the host could not load is an error where a path written out names it, else a warning", () => {
+  const broken = {
+    path: "scenes/broken.tease",
+    reason:
+      "The text of 'scenes/broken.tease' uses a character encoding the Player cannot read. Save the file as UTF-8 in your text editor.",
+  };
+  const locked = { path: "images/locked.jpg", reason: "'images/locked.jpg' cannot be opened." };
+  const bell = {
+    path: "sounds/bell*.mp3",
+    reason: "The name of 'sounds/bell*.mp3' is not usable.",
+  };
+  const attic = { path: "attic", reason: "The folder 'attic' cannot be opened." };
+  const unreadableFiles = [broken, locked, bell, attic];
+  const compile = (main: string) =>
+    compileProject([{ path: "main.tease", source: main }], { unreadableFiles });
+  // Where nothing names them, each is a warning at itself, with the host's reason, and the script compiles.
+  const clean = compile("exit");
+  assert.notEqual(clean.plan, null);
+  assert.deepEqual(
+    clean.diagnostics.map(({ path, span, severity, code, message }) => [
+      path,
+      span.start.line,
+      severity,
+      code,
+      message,
+    ]),
+    unreadableFiles.map(({ path, reason }) => [path, 0, "warning", "TSC011", reason]),
+  );
+  // A path or glob written out that names one is an error there instead, also where it never runs.
+  for (const [main, file] of [
+    ['goto "scenes/broken.tease"', broken],
+    ['call "scenes/broken.tease"\nexit', broken],
+    ['let next = script("scenes/broken.tease")\nexit', broken],
+    ['if false {\n    goto "scenes/*.tease"\n}\nexit', broken],
+    ['let found = findScripts(from: "scenes/*.tease")\nexit', broken],
+    ['showImage "images/locked.jpg"\nexit', locked],
+    ['playAudio async "sounds/bell*.mp3"\nexit', bell],
+  ] as const) {
+    const result = compile(main);
+    assert.equal(result.plan, null, main);
+    assert.deepEqual(
+      result.diagnostics.map(({ path, severity, code, message }) => [
+        path,
+        severity,
+        code,
+        message,
+      ]),
+      [
+        ...unreadableFiles
+          .filter((other) => other !== file)
+          .map(({ path, reason }) => [path, "warning", "TSC011", reason]),
+        ["main.tease", "error", "TSC011", file.reason],
+      ],
+      main,
+    );
+  }
+  // A media path is not a glob, and a glob names only the files it matches.
+  assert.deepEqual(
+    compile('playAudio async "sounds/bell.mp3"\nshowImage "images/*.jpg"\nexit').diagnostics.map(
+      ({ path, code }) => `${path} ${code}`,
+    ),
+    unreadableFiles.map(({ path }) => `${path} TSC011`),
+  );
+  // Every session starts at main.tease, so a main.tease the host could not load is an error.
+  const main = { path: "main.tease", reason: "The text of 'main.tease' cannot be read." };
+  assert.deepEqual(
+    compileProject([], { unreadableFiles: [main] }).diagnostics.map(
+      ({ path, severity, code, message }) => [path, severity, code, message],
+    ),
+    [["main.tease", "error", "TSC011", main.reason]],
+  );
+});

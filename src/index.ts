@@ -46,7 +46,7 @@ export {
   type ProjectSourceFile,
 } from "./compiler.js";
 export type { ProjectImageFile } from "./image-catalog.js";
-export { MAIN_FILE_PATH } from "./project-paths.js";
+export { MAIN_FILE_PATH, type UnreadablePackageFile } from "./project-paths.js";
 export {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,

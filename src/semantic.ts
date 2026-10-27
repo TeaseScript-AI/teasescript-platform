@@ -53,7 +53,7 @@ import {
 import { changesElements, reordersList } from "./list-methods.js";
 import { duplicateEntryMessage } from "./object-properties.js";
 import { noteSharing, rootName, type Sharing } from "./operation-checks.js";
-import { isPathGlob, MAIN_FILE_PATH } from "./project-paths.js";
+import { isPathGlob, MAIN_FILE_PATH, type UnreadablePackageFile } from "./project-paths.js";
 import type { StatementFlow } from "./reachability.js";
 import { canonicalRegexFlags, compileRegex, regexFlagProblem } from "./regex.js";
 import {
@@ -76,6 +76,7 @@ import {
 } from "./semantic/scope.js";
 import { validateStartValue } from "./semantic/start-values.js";
 import {
+  reportUnreadableFiles,
   taggedCandidates,
   validateScriptReference,
   validateTransferTarget,
@@ -88,6 +89,8 @@ import type { Tag } from "./tags.js";
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
+  /** The package files and folders that the host could not load (#595); a path written out that names one is an error. */
+  readonly unreadableFiles?: readonly UnreadablePackageFile[];
 }
 
 export interface SemanticValidationResult {
@@ -110,6 +113,8 @@ export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
   /** The files each glob target may pick, in project order. */
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The files the host could not load that a path or glob written out in the file names (see `reportUnreadableFiles`). */
+  readonly unreadableNamed: ReadonlySet<string>;
   /** The files each `goto tagged` or `call tagged` may pick, by the tags of their headers (see `taggedCandidates`). */
   readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
   /** How each `call` of a file names it, for the check of the running file that follows the plan. */
@@ -181,6 +186,7 @@ export function validateProjectSemantics(
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
+      unreadableNamed: validators[index]?.unreadableNamed ?? new Set<string>(),
       taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
       fileCalls: validators[index]?.fileCalls ?? new Map<Statement, FileCallTarget>(),
       referencedScripts: project.referencedScripts,
@@ -328,6 +334,9 @@ export class SemanticValidator {
 
   /** The files each glob target may pick. */
   readonly picks = new Map<FileTarget, readonly string[]>();
+
+  /** The files the host could not load that a path or glob written out in this file names. */
+  readonly unreadableNamed = new Set<string>();
 
   public validate(program: Program): void {
     // The configuration belongs to the project, so its problems are reported once, in main.tease.
@@ -565,6 +574,7 @@ export class SemanticValidator {
     for (const operand of mediaOperands(media)) {
       yield* compileChild(this.#validateExpressionTask(operand, scope, null));
     }
+    this.#reportUnreadableMedia(media.file);
     if (!media.async && valuePosition) {
       this.report(
         semanticCode.invalidMediaForm,
@@ -702,6 +712,7 @@ export class SemanticValidator {
         return;
       case "showImageStatement":
         this.validateExpression(statement.image, scope, null);
+        this.#reportUnreadableMedia(statement.image);
         return;
       case "hideImageStatement":
       case "showCameraStatement":
@@ -888,6 +899,12 @@ export class SemanticValidator {
         return;
       }
     }
+  }
+
+  /** A media or image file written out names it, not a glob. */
+  #reportUnreadableMedia(file: Expression): void {
+    const path = literalText(file);
+    if (path !== undefined) reportUnreadableFiles(this, path, file.span, false);
   }
 
   /** The files that each `goto tagged` or `call tagged` may pick, by its tag tests and literal tag lists. */
@@ -1466,6 +1483,8 @@ export class SemanticValidator {
         for (const operand of tagQueryOperands(expression)) {
           yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
         }
+        if (expression.from !== null)
+          reportUnreadableFiles(this, expression.from.pattern, expression.from.span);
         // `findScripts(...)` makes references to the files it may list.
         if (expression.catalog === "scripts" && expression.select === "list")
           this.project.refer(taggedCandidates(this, expression));

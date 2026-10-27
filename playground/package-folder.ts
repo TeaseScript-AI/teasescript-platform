@@ -2,13 +2,13 @@ import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type { ProjectSourceFile } from "../src/compiler.js";
 import type { ProjectImageFile } from "../src/image-catalog.js";
-import { packageAssetPathProblem } from "../src/project-paths.js";
+import { packageAssetPathProblem, type UnreadablePackageFile } from "../src/project-paths.js";
 import {
   readImageXmpKeywords,
   readXmpPacketKeywords,
   type XmpKeywordsResult,
 } from "../src/xmp-keywords.js";
-import type { PackageCatalog, PackageProblem } from "./package-catalog.js";
+import type { PackageCatalog } from "./package-catalog.js";
 
 /** The image file types of the development package folder, by lowercase extension. */
 export const PACKAGE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -55,13 +55,13 @@ export class PackageFolder {
 
   /**
    * Every readable image, audio or video file, and `.tease` file below the folder, by its path relative to it, in path
-   * order. An image has
-   * the keywords of its sidecar named after the whole file (`room.jpg.xmp`) when it has one, and otherwise of its
-   * embedded XMP. What cannot be read is listed in `problems` instead.
+   * order. An image has the keywords of its sidecar named after the whole file (`room.jpg.xmp`) when it has one, and
+   * otherwise of its embedded XMP, or none with a `tagsProblem` when they cannot be read. What cannot be read is listed
+   * in `unreadable` instead, each with a reason that names it and says what to do.
    */
   public async scan(): Promise<PackageCatalog> {
-    const problems: PackageProblem[] = [];
-    const files = await listFiles(this.root, problems);
+    const unreadable: UnreadablePackageFile[] = [];
+    const files = await listFiles(this.root, unreadable);
     const present = new Set(files);
     for (const path of this.#cache.keys()) if (!present.has(path)) this.#cache.delete(path);
     const images: ProjectImageFile[] = [];
@@ -74,12 +74,12 @@ export class PackageFolder {
         try {
           sources.push({ path, source: UTF8.decode(await readFile(join(this.root, path))) });
         } catch (error) {
-          problems.push({
+          unreadable.push({
             path,
-            message:
+            reason:
               error instanceof TypeError
-                ? "Skipped: it is not UTF-8 text."
-                : `Skipped: it cannot be read${errorCode(error)}.`,
+                ? `The text of '${path}' uses a character encoding the Player cannot read. Save the file as UTF-8 in your text editor.`
+                : cannotOpen(path, error),
           });
         }
         continue;
@@ -88,7 +88,10 @@ export class PackageFolder {
       if (!isMedia && !PACKAGE_IMAGE_EXTENSIONS.has(extension)) continue;
       const problem = packageAssetPathProblem(path);
       if (problem !== null) {
-        problems.push({ path, message: `Skipped: ${problem}.` });
+        unreadable.push({
+          path,
+          reason: `The name of '${path}' cannot be used in a package: ${problem}. Rename the file.`,
+        });
         continue;
       }
       if (isMedia) {
@@ -96,23 +99,36 @@ export class PackageFolder {
         continue;
       }
       const sidecar = `${path}.xmp`;
+      const tagsFile = present.has(sidecar) ? sidecar : path;
       let result: XmpKeywordsResult;
       try {
-        result = present.has(sidecar)
-          ? await this.#read(sidecar, readXmpPacketKeywords)
-          : extension === ".svg"
-            ? SIDECAR_ONLY
-            : await this.#read(path, readImageXmpKeywords);
+        result =
+          tagsFile === sidecar
+            ? await this.#read(sidecar, readXmpPacketKeywords)
+            : extension === ".svg"
+              ? SIDECAR_ONLY
+              : await this.#read(path, readImageXmpKeywords);
       } catch (error) {
-        problems.push({ path, message: `Skipped: it cannot be read${errorCode(error)}.` });
+        // An image whose sidecar cannot be opened still loads, without tags.
+        if (tagsFile === sidecar)
+          images.push({ path, keywords: [], tagsProblem: cannotOpen(sidecar, error) });
+        else unreadable.push({ path, reason: cannotOpen(path, error) });
         continue;
       }
-      images.push({ path, keywords: result.kind === "keywords" ? result.keywords : [] });
-      if (result.kind === "unsupported" || result.kind === "invalid") {
-        problems.push({ path, message: result.reason });
+      if (result.kind === "keywords" || result.kind === "none") {
+        images.push({ path, keywords: result.kind === "keywords" ? result.keywords : [] });
+        continue;
       }
+      // A malformed file says what is wrong only; saving it again from a photo tool repairs it.
+      const repair =
+        result.kind === "unsupported"
+          ? ""
+          : tagsFile === sidecar
+            ? ` Save '${sidecar}' again with your photo tool.`
+            : ` Save the tags of '${path}' again with your photo tool.`;
+      images.push({ path, keywords: [], tagsProblem: `${result.reason}${repair}` });
     }
-    return { images, media, sources, problems };
+    return { images, media, sources, unreadable };
   }
 
   async #read(
@@ -166,9 +182,9 @@ export function isPackageId(id: string): boolean {
 
 /**
  * The regular files below `root`, by `/`-separated relative path, in UTF-16 order; hidden entries and links are left
- * out. A folder that cannot be read is reported in `problems`; `.` stands for the root.
+ * out. A folder that cannot be read is reported in `unreadable`; `.` stands for the root.
  */
-async function listFiles(root: string, problems: PackageProblem[]): Promise<string[]> {
+async function listFiles(root: string, unreadable: UnreadablePackageFile[]): Promise<string[]> {
   const files: string[] = [];
   const folders = [""];
   while (folders.length > 0) {
@@ -177,10 +193,17 @@ async function listFiles(root: string, problems: PackageProblem[]): Promise<stri
     try {
       entries = await readdir(join(root, folder), { withFileTypes: true });
     } catch (error) {
-      problems.push({
-        path: folder === "" ? "." : folder,
-        message: `The folder cannot be read${errorCode(error)}.`,
-      });
+      unreadable.push(
+        folder === ""
+          ? {
+              path: ".",
+              reason: `The package folder cannot be opened${errorCode(error)}. Check that the package folder exists and that its permissions allow reading the folder.`,
+            }
+          : {
+              path: folder,
+              reason: `The folder '${folder}' cannot be opened${errorCode(error)}. Check that the permissions of '${folder}' allow reading the folder.`,
+            },
+      );
       continue;
     }
     for (const entry of entries) {
@@ -191,6 +214,11 @@ async function listFiles(root: string, problems: PackageProblem[]): Promise<stri
     }
   }
   return files.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+/** Why a file that cannot be opened is not loaded, and what to do. */
+function cannotOpen(path: string, error: unknown): string {
+  return `'${path}' cannot be opened${errorCode(error)}. Check that the permissions of '${path}' allow reading the file.`;
 }
 
 /** The system error code, such as ` (EACCES)`, or nothing. */

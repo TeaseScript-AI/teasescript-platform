@@ -1,5 +1,4 @@
 import { shallowRef, type ShallowRef } from "vue";
-import type { PackageProblem } from "../../../playground/package-catalog.js";
 import {
   compilePlayerProject,
   createPlayerRuntimeSession,
@@ -20,10 +19,8 @@ export interface ScriptHost {
   /** The person fields of the player's profile that the session starts with (V30 §37), if the host has them. */
   readonly playerProfile?: RuntimePlayerProfileInput;
   resolveAsset(path: string): string | null;
-  load(): Promise<{
-    readonly project: string | PlayerProject;
-    readonly problems: readonly PackageProblem[];
-  }>;
+  /** The script, or the package as a project with the files the host could not load. */
+  load(): Promise<{ readonly project: string | PlayerProject }>;
 }
 
 /** The `title` and `author` of a script's header, each `null` when the header does not give it. */
@@ -47,17 +44,14 @@ export function prepareHostedScript(
   const failure = shallowRef<ScriptFailure | null>(null);
   const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
   void Promise.all([host.load(), player.loadScriptStorage()]).then(
-    ([{ project, problems }]) => {
+    ([{ project }]) => {
       identity.value = scriptIdentity(project);
       // The title names the script where saved data of several scripts is listed.
       if (identity.value.title !== null) player.rememberScriptName(identity.value.title);
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
-        failure.value = {
-          title: "This script cannot start",
-          problems: [...compilation.diagnostics, ...problems],
-        };
+        failure.value = { title: "This script cannot start", problems: compilation.diagnostics };
         return;
       }
       void player.prepareScript(

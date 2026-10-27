@@ -28,7 +28,7 @@ const host: ScriptHost =
     ? {
         storageScope: demoStorageScope,
         resolveAsset: resolveDemoAsset,
-        load: async () => ({ project: demoSource, problems: [] }),
+        load: async () => ({ project: demoSource }),
       }
     : developmentPackageHost(packageId);
 // Durable captured and chosen media; when IndexedDB is unavailable, it stays session media.

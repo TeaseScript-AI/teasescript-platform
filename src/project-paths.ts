@@ -1,6 +1,15 @@
 /** The fixed entry file of every project (ADR 0022). */
 export const MAIN_FILE_PATH = "main.tease";
 
+/**
+ * A package file or folder that the host could not load (#595), with `reason`: sentences that name it, say what is
+ * wrong, and what to do, which are the message of its `TSC011`.
+ */
+export interface UnreadablePackageFile {
+  readonly path: string;
+  readonly reason: string;
+}
+
 const TEASE_EXTENSION = ".tease";
 
 /**

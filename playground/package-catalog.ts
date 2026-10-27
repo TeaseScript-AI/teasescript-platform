@@ -1,9 +1,10 @@
 import type { ProjectSourceFile } from "../src/compiler.js";
 import type { ProjectImageFile } from "../src/image-catalog.js";
+import type { UnreadablePackageFile } from "../src/project-paths.js";
 
 /**
  * What the playground server lists of a development package: its images, its audio and video files, its `.tease`
- * files, and what it skipped.
+ * files, and what it skipped. Compiling with them reports what it skipped and the images whose tags it could not read.
  */
 export interface PackageCatalog {
   readonly images: readonly ProjectImageFile[];
@@ -11,13 +12,8 @@ export interface PackageCatalog {
   readonly media: readonly string[];
   /** Every `.tease` file; `compileProject` reports a path that is not a package path. */
   readonly sources: readonly ProjectSourceFile[];
-  /** Files and folders that could not be read, and images whose tags could not be read, with the reason. */
-  readonly problems: readonly PackageProblem[];
-}
-
-export interface PackageProblem {
-  readonly path: string;
-  readonly message: string;
+  /** The files and folders that could not be read. */
+  readonly unreadable: readonly UnreadablePackageFile[];
 }
 
 /**
@@ -56,22 +52,23 @@ export async function loadDevelopmentPackage(id: string): Promise<PackageCatalog
 /** The catalog the server sent, or `null` when it does not have the expected shape. */
 function packageCatalog(value: unknown): PackageCatalog | null {
   if (!isRecord(value)) return null;
-  const { images, media, sources, problems } = value;
+  const { images, media, sources, unreadable } = value;
   if (
     !Array.isArray(images) ||
     !Array.isArray(media) ||
     !Array.isArray(sources) ||
-    !Array.isArray(problems)
+    !Array.isArray(unreadable)
   )
     return null;
   if (!media.every((path) => typeof path === "string")) return null;
   const parsedImages: ProjectImageFile[] = [];
   for (const image of images) {
     if (!isRecord(image)) return null;
-    const { path, keywords } = image;
+    const { path, keywords, tagsProblem } = image;
     if (typeof path !== "string" || !Array.isArray(keywords)) return null;
     if (!keywords.every((keyword) => typeof keyword === "string")) return null;
-    parsedImages.push({ path, keywords });
+    if (tagsProblem !== undefined && typeof tagsProblem !== "string") return null;
+    parsedImages.push({ path, keywords, ...(tagsProblem === undefined ? {} : { tagsProblem }) });
   }
   const parsedSources: ProjectSourceFile[] = [];
   for (const file of sources) {
@@ -80,18 +77,18 @@ function packageCatalog(value: unknown): PackageCatalog | null {
     if (typeof path !== "string" || typeof source !== "string") return null;
     parsedSources.push({ path, source });
   }
-  const parsedProblems: PackageProblem[] = [];
-  for (const problem of problems) {
-    if (!isRecord(problem)) return null;
-    const { path, message } = problem;
-    if (typeof path !== "string" || typeof message !== "string") return null;
-    parsedProblems.push({ path, message });
+  const parsedUnreadable: UnreadablePackageFile[] = [];
+  for (const file of unreadable) {
+    if (!isRecord(file)) return null;
+    const { path, reason } = file;
+    if (typeof path !== "string" || typeof reason !== "string") return null;
+    parsedUnreadable.push({ path, reason });
   }
   return {
     images: parsedImages,
     media: [...media],
     sources: parsedSources,
-    problems: parsedProblems,
+    unreadable: parsedUnreadable,
   };
 }
 

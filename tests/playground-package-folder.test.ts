@@ -52,16 +52,20 @@ test("the development package folder offers its images with their XMP keywords, 
   const catalog = await get(server, "/dev-package/catalog.json");
   assert.equal(catalog.status, 200);
   const body = JSON.parse(catalog.body.toString("utf8"));
+  const packed = "The PNG stores its XMP compressed. Save the tags in a sidecar file instead.";
   assert.deepEqual(body.images, [
-    { path: "packed.png", keywords: [] },
+    { path: "packed.png", keywords: [], tagsProblem: packed },
     { path: "plain.gif", keywords: [] },
     { path: "rooms/bath.png", keywords },
     { path: "rooms/bedroom.jpg", keywords },
   ]);
-  assert.deepEqual(
-    body.problems.map((problem: { path: string }) => problem.path),
-    ["packed.png", "star*.jpg"],
-  );
+  assert.deepEqual(body.unreadable, [
+    {
+      path: "star*.jpg",
+      reason:
+        "The name of 'star*.jpg' cannot be used in a package: '*' is only allowed in a glob. Rename the file.",
+    },
+  ]);
 
   const image = await get(server, "/dev-package/files/rooms/bedroom.jpg");
   assert.equal(image.status, 200);
@@ -71,13 +75,22 @@ test("the development package folder offers its images with their XMP keywords, 
   assert.equal((await get(server, "/dev-package/files/notes.txt")).status, 404);
   assert.equal((await get(server, "/dev-package/files/%2E%2E/escape.jpg")).status, 400);
 
-  // The playground compiles with the catalog, so tag queries pick from these images.
+  // The playground compiles with the catalog, so tag queries pick from these images, and an image whose tags cannot
+  // be read is a warning.
   const compiled = compileWorkspaceSource('showImage tagged "bedroom", "punishment" >= 4\nexit', {
     images: body.images,
   });
   assert.deepEqual(
-    compiled.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TST003", "TST003"],
+    compiled.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]),
+    [
+      ["packed.png", "TST007"],
+      ["rooms/bath.png", "TST003"],
+      ["rooms/bedroom.jpg", "TST003"],
+    ],
+  );
+  assert.equal(
+    compiled.diagnostics[0]!.message,
+    `The tags of 'packed.png' could not be read, so 'findImages' and 'showImage tagged' do not find 'packed.png' by its tags. ${packed}`,
   );
   const finished = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
   assert.ok(["rooms/bath.png", "rooms/bedroom.jpg"].includes(finished.snapshot!.stageImage!));
@@ -109,17 +122,27 @@ test("the catalog follows edits that keep a file's size and time, and skips what
     { path: "room.png", keywords: ["kitchen", ...keywords.slice(1)] },
   ]);
 
-  // A file the server may not read is reported, and the others stay available. (Root reads every file.)
+  // A file the server may not read is reported, and the others stay available; an image whose sidecar it may not read
+  // stays without tags. (Root reads every file.)
   if (process.getuid?.() !== 0) {
     await copyFile(join(fixtures, "no-xmp.jpg"), join(root, "locked.jpg"));
     await chmod(join(root, "locked.jpg"), 0o000);
+    await chmod(sidecar, 0o000);
     const listed = await catalog();
-    assert.deepEqual(
-      listed.images.map((image: { path: string }) => image.path),
-      ["room.png"],
-    );
-    assert.deepEqual(listed.problems, [
-      { path: "locked.jpg", message: "Skipped: it cannot be read (EACCES)." },
+    assert.deepEqual(listed.images, [
+      {
+        path: "room.png",
+        keywords: [],
+        tagsProblem:
+          "'room.png.xmp' cannot be opened (EACCES). Check that the permissions of 'room.png.xmp' allow reading the file.",
+      },
+    ]);
+    assert.deepEqual(listed.unreadable, [
+      {
+        path: "locked.jpg",
+        reason:
+          "'locked.jpg' cannot be opened (EACCES). Check that the permissions of 'locked.jpg' allow reading the file.",
+      },
     ]);
   }
 
@@ -131,7 +154,13 @@ test("the catalog follows edits that keep a file's size and time, and skips what
     images: [],
     media: [],
     sources: [],
-    problems: [{ path: ".", message: "The folder cannot be read (ENOENT)." }],
+    unreadable: [
+      {
+        path: ".",
+        reason:
+          "The package folder cannot be opened (ENOENT). Check that the package folder exists and that its permissions allow reading the folder.",
+      },
+    ],
   });
 });
 
@@ -177,7 +206,7 @@ test("a root of packages offers each direct subfolder as a package, with only it
       },
       { path: "main.tease", source: await readFile(join(packages, "house/main.tease"), "utf8") },
     ],
-    problems: [],
+    unreadable: [],
   });
   const image = await get(server, "/dev-package/house/files/images/hall.svg");
   assert.equal(image.status, 200);
@@ -245,7 +274,7 @@ test("a root of packages offers each direct subfolder as a package, with only it
   ]);
 });
 
-test("a package lists every .tease file it can read, and the others as problems", async (context) => {
+test("a package lists every .tease file it can read, and compiling it reports the others", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "teasescript-packages-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, "odd/notes"), { recursive: true });
@@ -262,21 +291,64 @@ test("a package lists every .tease file it can read, and the others as problems"
     listed.sources.map((file: { path: string }) => file.path),
     ["main.tease", "notes/Upper.TEASE"],
   );
-  assert.deepEqual(listed.problems, [
-    { path: "latin1.tease", message: "Skipped: it is not UTF-8 text." },
-  ]);
-  // The scanner does not judge package paths; compiling the project does.
+  const latin1 =
+    "The text of 'latin1.tease' uses a character encoding the Player cannot read. Save the file as UTF-8 in your text editor.";
+  assert.deepEqual(listed.unreadable, [{ path: "latin1.tease", reason: latin1 }]);
+  // The scanner does not judge package paths; compiling the project does. A file it could not read is a warning where
+  // nothing names it, also when the rest compiles (#595).
   assert.deepEqual(
-    compileWorkspaceProject(listed.sources).diagnostics.map(({ path, code }) => [path, code]),
-    [["notes/Upper.TEASE", "TSC009"]],
+    compileWorkspaceProject(listed.sources, { unreadableFiles: listed.unreadable }).diagnostics.map(
+      ({ path, code }) => [path, code],
+    ),
+    [
+      ["notes/Upper.TEASE", "TSC009"],
+      ["latin1.tease", "TSC011"],
+    ],
   );
+  const project = (main: string) => ({
+    files: [{ path: "main.tease", source: main }],
+    unreadableFiles: listed.unreadable,
+  });
+  const clean = compilePlayerProject(project("exit"));
+  assert.notEqual(clean.plan, null);
+  assert.deepEqual(clean.diagnostics, [
+    {
+      path: "latin1.tease",
+      line: 1,
+      column: 1,
+      severity: "warning",
+      code: "TSC011",
+      message: latin1,
+    },
+  ]);
+  // Where a path or glob written out names it, the file is an error there, and the script cannot start.
+  for (const main of ['goto "latin1.tease"', 'call "*.tease"\nexit']) {
+    const failed = compilePlayerProject(project(main));
+    assert.equal(failed.plan, null, main);
+    assert.deepEqual(
+      failed.diagnostics.map(({ path, line, column, severity, code, message }) => [
+        path,
+        line,
+        column,
+        severity,
+        code,
+        message,
+      ]),
+      [["main.tease", 1, main.indexOf('"') + 1, "error", "TSC011", latin1]],
+      main,
+    );
+  }
 
   if (process.getuid?.() !== 0) {
     await writeFile(join(root, "odd/locked.tease"), "exit\n");
     await chmod(join(root, "odd/locked.tease"), 0o000);
-    assert.deepEqual((await catalog()).problems, [
-      { path: "latin1.tease", message: "Skipped: it is not UTF-8 text." },
-      { path: "locked.tease", message: "Skipped: it cannot be read (EACCES)." },
+    assert.deepEqual((await catalog()).unreadable, [
+      { path: "latin1.tease", reason: latin1 },
+      {
+        path: "locked.tease",
+        reason:
+          "'locked.tease' cannot be opened (EACCES). Check that the permissions of 'locked.tease' allow reading the file.",
+      },
     ]);
   }
 });

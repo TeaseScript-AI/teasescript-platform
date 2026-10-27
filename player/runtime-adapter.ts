@@ -31,6 +31,7 @@ import {
   type PresentationSettings,
   type ProjectImageFile,
   type ProjectSourceFile,
+  type UnreadablePackageFile,
   type RuntimeInteractionActionSnapshot,
   type CapturedMediaAdmission,
   type CaptureUnavailableReason,
@@ -498,11 +499,16 @@ export interface PlayerRuntimeControlResult<
   readonly outcome: T;
 }
 
-/** The `.tease` files of a package and its images; a session starts at the top of `main.tease` (ADR 0022). */
+/**
+ * The `.tease` files of a package, its images, and the files the host could not load; a session starts at the top of
+ * `main.tease` (ADR 0022).
+ */
 export interface PlayerProject {
   readonly files: readonly ProjectSourceFile[];
   /** The package images that tag queries search; none by default. */
   readonly images?: readonly ProjectImageFile[];
+  /** The package files and folders the host could not load, which compiling reports; none by default. */
+  readonly unreadableFiles?: readonly UnreadablePackageFile[];
 }
 
 /** A diagnostic as the Player lists it: the file or image it belongs to, its one-based line and column, its message. */
@@ -525,10 +531,10 @@ export interface PlayerCompilation {
 export function compilePlayerProject(script: string | PlayerProject): PlayerCompilation {
   const project =
     typeof script === "string" ? { files: [{ path: MAIN_FILE_PATH, source: script }] } : script;
-  const compilation = compileProject(
-    project.files,
-    project.images === undefined ? {} : { images: project.images },
-  );
+  const compilation = compileProject(project.files, {
+    ...(project.images === undefined ? {} : { images: project.images }),
+    ...(project.unreadableFiles === undefined ? {} : { unreadableFiles: project.unreadableFiles }),
+  });
   return Object.freeze({
     plan: compilation.plan,
     diagnostics: Object.freeze(

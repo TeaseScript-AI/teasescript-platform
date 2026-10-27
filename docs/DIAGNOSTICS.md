@@ -37,8 +37,8 @@ the line that brings them; elsewhere "a number" stays the general word (owner de
   allows.
 - **type checker** (`src/type-checker.ts`): types and values. The coarse core (`src/type-inference/core/`), which
   replaces it, is reached only through a test-only compile route so far.
-- **compiler** (`src/compiler.ts`): the project's file paths and images, waits written in days or weeks, the check of
-  the compiled plan, and the host's call stack.
+- **compiler** (`src/compiler.ts`): the project's file paths and images, the files the host could not load, waits
+  written in days or weeks, the check of the compiled plan, and the host's call stack.
 - **lowering** (`src/compiler/`): the instruction plan.
 - **plan analysis** (`src/reachability.ts`, `src/speaker-flow.ts`): which code can run and how files and the session
   end, and which speaker properties a read can find, on the compiled plan.
@@ -211,6 +211,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TST004` | Tag with two different numbers | error | parser, compiler, type checker |
 | `TST005` | Invalid tag | error | type checker |
 | `TST006` | Invalid `from:` of a tag query | error | type checker |
+| `TST007` | Image tags that could not be read | warning | compiler |
 
 ## Compiler (TSC)
 
@@ -224,6 +225,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSC008` | Invalid presentation option or markup colour | error | type checker |
 | `TSC009` | Invalid or repeated package path | error | compiler |
 | `TSC010` | Unsupported instruction plan format or version | error | plan validation |
+| `TSC011` | Package file that could not be loaded | error or warning | name pass, compiler |
 
 ## Codes with more than one owner
 
@@ -259,3 +261,6 @@ code each.
   - parser: a tag that a file header gives two different numbers (`conflictingTagMessage`)
   - compiler: the same rule with the same text, naming the image, for the keywords of an image
   - type checker: the same rule with the same text for the written tags of `takePhoto(tags: [...])`
+- `TSC011`
+  - name pass: a path or glob written out that names a file the host could not load, as the target of a `goto` or `call`, in `script(...)`, as the `from:` of a tag query, or as the file of `showImage`, `playAudio`, or `playVideo`, with the host's reason as its text
+  - compiler: the same rule with the same text for `main.tease`, where every session starts, and as a warning at each other file or folder the host could not load that no such path or glob names
