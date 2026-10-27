@@ -1,7 +1,11 @@
 #!/usr/bin/env node
-// Compiles one TeaseScript source with this checkout's build and prints its diagnostics. With --run it also runs the
-// script: default reading time is zero, and the script's clock moves forward to the next moment something is due (a
-// `wait`, an authored reading time, a timer), one moment at a time, so a timer's button or ask appears at its own time.
+// Compiles one TeaseScript source, or a project of several files, with this checkout's build and prints its
+// diagnostics. A folder is a project of every .tease file in it and its subfolders, at its path from that folder;
+// several files are a project of those files, at their paths from the deepest folder that holds them all. A project
+// runs from its main.tease, and its diagnostics and runtime failures name their file by that path (a runtime warning
+// names none: the runtime gives it no file). With --run it also runs the script: default reading time is zero, and the
+// script's clock moves forward to the next moment something is due (a `wait`, an authored reading time, a timer), one
+// moment at a time, so a timer's button or ask appears at its own time.
 // The run stops when the script ends, fails (the runtime's own limits apply, such as its step limit for a busy loop),
 // waits for the player (an answer, a button, also a timed button), or after 10,000 clock moves.
 // --clock gives the run a wall clock, a UTC date and time such as 2026-10-04T18:30:00Z (seconds and milliseconds are
@@ -11,18 +15,18 @@
 // {"firstName": "Alex", "gender": "male", "petNames": ["puppy", "pet"]}; without one, playerProfile has no fields, so
 // reading one fails with TSR017.
 // Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--player-profile <file.json>]]
-//   [--json] <file.tease | ->
+//   [--json] <file.tease | - | folder | file.tease...>
 // (- or no file reads standard input)
 // For JSON consumers, call `node tools/probe.mjs --json …` or `npm --silent run probe -- --json …`, so npm prints no
 // banner. Needs `npm run build:typescript` first: the probe loads dist/, so rebuild after changing the source.
 // Exit status: 0 no error (also when the run stops waiting), 1 compile errors, 3 runtime failure, 2 usage, missing
 // build, or unreadable source.
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage =
-  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--player-profile <file.json>]] [--json] <file.tease | ->";
+  "Usage: npm run probe -- [--run [--clock <UTC date-time>] [--zone <IANA time zone>] [--player-profile <file.json>]] [--json] <file.tease | - | folder | file.tease...>";
 const maxClockMoves = 10_000;
 const options = {
   run: false,
@@ -47,13 +51,11 @@ while (args.length > 0) {
   } else if (arg.startsWith("--")) fail(`Unknown option ${arg}`);
   else files.push(arg);
 }
-if (files.length > 1) fail("One source at a time.");
 if (
   !options.run &&
   (options.clock !== undefined || options.zone !== undefined || options.playerProfile !== undefined)
 )
   fail("--clock, --zone, and --player-profile apply to --run only.");
-const file = files[0] ?? "-";
 const entry = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "src", "index.js");
 if (!existsSync(entry)) {
   console.error(`No build at ${entry}. Run npm run build:typescript first.`);
@@ -61,6 +63,7 @@ if (!existsSync(entry)) {
 }
 const {
   captureTemporalContext,
+  compileProject,
   compileSource,
   createFreshRuntimeSession,
   createFreshRuntimeSnapshot,
@@ -73,21 +76,16 @@ if (options.clock !== undefined) sessionOptions.wallClockMs = clockMs(options.cl
 if (options.zone !== undefined) sessionOptions.temporalContext = zoneContext(options.zone);
 if (options.playerProfile !== undefined)
   sessionOptions.playerProfile = playerProfileInput(options.playerProfile);
-let source;
-try {
-  source = readFileSync(file === "-" ? 0 : file, "utf8");
-} catch (error) {
-  console.error(`Cannot read ${file === "-" ? "standard input" : file}: ${error.message}`);
-  process.exit(2);
-}
+const file = files[0] ?? "-";
+const project = files.length > 1 || (file !== "-" && isFolder(file));
 const name = file === "-" ? "<stdin>" : file;
 
-const compiled = compileSource(source);
+const compiled = project ? compileProject(projectSources()) : compileSource(read(file));
 const diagnostics = compiled.diagnostics.map((d) => ({
   severity: d.severity,
   code: d.code,
   message: d.message,
-  at: where(d.span),
+  at: where(d.span, d.path),
 }));
 const compileFailed = compiled.plan === null || diagnostics.some((d) => d.severity === "error");
 const run = options.run && !compileFailed ? runScript(compiled.plan) : null;
@@ -97,7 +95,8 @@ if (options.json) {
 } else {
   for (const d of diagnostics) console.log(`${d.at} ${d.severity} ${d.code} ${d.message}`);
   if (diagnostics.length === 0) console.log("no diagnostics");
-  if (compileFailed && options.run) console.log("not run: the source has compile errors");
+  if (compileFailed && options.run)
+    console.log(`not run: the ${project ? "project" : "source"} has compile errors`);
   if (run !== null) {
     for (const line of run.events) console.log(line);
     console.log(run.summary);
@@ -168,7 +167,7 @@ function describe(event) {
     case "messageUpdated":
       return `message updated: ${event.text}`;
     case "runtimeFailure":
-      return `runtime failure ${event.code} at ${where(event.span)}: ${event.message}`;
+      return `runtime failure ${event.code} at ${where(event.span, event.path)}: ${event.message}`;
     case "developerWarning":
       return `warning ${event.code} at ${where(event.span)}: ${event.message}`;
     case "actionRequested":
@@ -224,9 +223,59 @@ function playerProfileInput(file) {
   return playerProfile;
 }
 
-// Spans count lines and columns from 0; editors count from 1.
-function where(span) {
-  return span?.start ? `${name}:${span.start.line + 1}:${span.start.column + 1}` : name;
+// The project's files with their package paths: a folder's .tease files, or the given files.
+function projectSources() {
+  if (files.length === 1) {
+    let paths;
+    try {
+      paths = readdirSync(file, { recursive: true });
+    } catch (error) {
+      console.error(`Cannot read ${file}: ${error.message}`);
+      process.exit(2);
+    }
+    return paths
+      .filter((path) => path.endsWith(".tease") && !isFolder(join(file, path)))
+      .map((path) => ({ path: path.split(sep).join("/"), source: read(join(file, path)) }));
+  }
+  if (files.some((each) => each === "-" || isFolder(each)))
+    fail("Several sources are files: give standard input or a folder on its own.");
+  const paths = files.map((each) => resolve(each));
+  let root = dirname(paths[0]);
+  // Up to the folder that holds them all; a root folder is its own parent.
+  while (
+    paths.some((path) => relative(root, path).split(sep)[0] === "..") &&
+    dirname(root) !== root
+  )
+    root = dirname(root);
+  return files.map((each, index) => ({
+    path: relative(root, paths[index]).split(sep).join("/"),
+    source: read(each),
+  }));
+}
+
+// A path that cannot be read is no folder; reading it as a file reports why.
+function isFolder(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function read(path) {
+  try {
+    return readFileSync(path === "-" ? 0 : path, "utf8");
+  } catch (error) {
+    console.error(`Cannot read ${path === "-" ? "standard input" : path}: ${error.message}`);
+    process.exit(2);
+  }
+}
+
+// Spans count lines and columns from 0; editors count from 1. A project names the file by its package path.
+function where(span, path) {
+  const at = project ? path : name;
+  const position = span?.start ? `${span.start.line + 1}:${span.start.column + 1}` : undefined;
+  return [at, position].filter((part) => part !== undefined).join(":");
 }
 
 function fail(message) {

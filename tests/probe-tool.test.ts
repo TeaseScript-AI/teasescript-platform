@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,8 +10,12 @@ import test from "node:test";
 const probe = fileURLToPath(new URL("../../tools/probe.mjs", import.meta.url));
 
 function runProbe(source: string, args: readonly string[]) {
-  const child = spawnSync(process.execPath, [probe, ...args, "-"], {
-    input: source,
+  return spawnProbe([...args, "-"], source);
+}
+
+function spawnProbe(args: readonly string[], input?: string) {
+  const child = spawnSync(process.execPath, [probe, ...args], {
+    input,
     encoding: "utf8",
     timeout: 60_000,
   });
@@ -78,6 +82,32 @@ test("probe refuses a clock or time zone it cannot use", () => {
     assert.equal(result.status, 2, `${option} ${value}`);
     assert.ok(result.stderr.includes(value), result.stderr);
     assert.equal(result.stdout, "");
+  }
+});
+
+test("probe --run runs a folder or several files as a project from its main.tease", () => {
+  const directory = mkdtempSync(join(tmpdir(), "probe-project-"));
+  try {
+    mkdirSync(join(directory, "scenes"));
+    const file = (path: string, source: string) => writeFileSync(join(directory, path), source);
+    file(
+      "main.tease",
+      'say "start"\ncall "scenes/intro.tease"\nsay "back"\ngoto "scenes/end.tease"\n',
+    );
+    file("scenes/intro.tease", 'say "intro"\nend\n');
+    file("scenes/end.tease", 'say "end"\nexit\n');
+    const folder = spawnProbe(["--run", directory]);
+    assert.equal(folder.status, 0, folder.stderr);
+    assert.match(folder.stdout, /^say: start\nsay: intro\nsay: back\nsay: end\nexit\nhalted /m);
+    // Only the given files, at their paths from the folder that holds them both.
+    const files = spawnProbe([
+      join(directory, "scenes", "intro.tease"),
+      join(directory, "main.tease"),
+    ]);
+    assert.equal(files.status, 1, files.stderr);
+    assert.match(files.stdout, /^main\.tease:4:6 error TSV057 .*'scenes\/end\.tease'/m);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
