@@ -1047,13 +1047,18 @@ export class Admission {
   /** Per place and path, what it holds there (`#identity`); per place, its own contributions (`#ownStructure`). */
   readonly #identities = new Map<string, Identity>();
   readonly #owns = new Map<PlaceId, OwnStructure | null>();
-  /** Per own structure, per place and per fed cycle (its members' list), what stands where (`#stepOf`). */
+  /**
+   * Per own structure, per place and per fed cycle (its members' list), what stands where (`#stepOf`); per place, its
+   * copies' positions by path (`#copiesAlong`); per cycle's landing, its paths by path (`#landedBelow`).
+   */
   readonly #ownIndexes = new WeakMap<OwnStructure, OwnIndex>();
-  readonly #placeIndexes = new Map<
-    PlaceId,
-    { readonly retaken: ByPath<readonly string[]>; readonly copies: ByPath<InheritedCopy> }
-  >();
+  readonly #retakenIndexes = new Map<PlaceId, ByPath<readonly string[]>>();
   readonly #cycleIndexes = new WeakMap<readonly PlaceId[], CycleIndex>();
+  readonly #copyIndexes = new Map<
+    PlaceId,
+    { readonly list: readonly InheritedCopy[]; readonly index: ByPath<number> }
+  >();
+  readonly #cycleLandings = new WeakMap<ReadonlySet<string>, ByPath<readonly string[]>>();
   #cycleMembers: Map<number, PlaceId[]> | null = null;
   readonly #forwards = new Map<
     PlaceId,
@@ -1975,8 +1980,8 @@ export class Admission {
     const memo = this.#landedPaths;
     const frames: {
       readonly key: string;
-      readonly place: PlaceId;
       readonly path: readonly string[];
+      readonly copies: readonly InheritedCopy[];
       next: number;
     }[] = [];
     // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one;
@@ -1996,7 +2001,8 @@ export class Admission {
             (fed.has(at) && steps.length === 0) ||
             null;
       if (found !== null) memo.set(key, found);
-      else frames.push({ key, place: at, path: steps, next: 0 });
+      // (its copies above the path, looked up by its prefixes, Astra's review r2 B2)
+      else frames.push({ key, path: steps, copies: this.#copiesAlong(at, steps, false), next: 0 });
       return found;
     };
     const first = open(place, path);
@@ -2010,19 +2016,17 @@ export class Admission {
         frames.pop();
         continue;
       }
-      const copies = this.#copiesOf(frame.place);
-      if (frame.next >= copies.length) {
+      if (frame.next >= frame.copies.length) {
         memo.set(frame.key, false);
         frames.pop();
         answer = false;
         continue;
       }
-      const copy = copies[frame.next++]!;
-      work.charge("indexSteps");
-      answer =
-        copy.path.length < frame.path.length && isPrefix(copy.path, frame.path)
-          ? open(copy.from, keptSteps(this.#work, copy.strip, frame.path.slice(copy.path.length)))
-          : false;
+      const copy = frame.copies[frame.next++]!;
+      answer = open(
+        copy.from,
+        keptSteps(this.#work, copy.strip, frame.path.slice(copy.path.length)),
+      );
     }
     return memo.get(key)!;
   }
@@ -2033,7 +2037,7 @@ export class Admission {
    * source, prefix and way of writing its paths once.
    */
   #landedBelow(place: PlaceId, prefix: readonly string[]): string[] {
-    const { cycleOf, cycles, fed } = this.#inheritance();
+    const { cycleOf, fed } = this.#inheritance();
     const work = this.pass.program.work;
     const out = new Set<string>();
     const seen = new Set<string>();
@@ -2050,10 +2054,13 @@ export class Admission {
       const id = keptParts(this.#work, task.place, task.below, task.drop, task.prepend);
       if (seen.has(id)) continue;
       seen.add(id);
-      const emit = (path: readonly string[]): void => {
-        work.charge("indexSteps");
+      const add = (path: readonly string[]): void => {
         if (isPrefix(task.below, path))
           out.add(keptText(this.#work, joinSteps(task.prepend, path.slice(task.drop))));
+      };
+      const emit = (path: readonly string[]): void => {
+        work.charge("indexSteps");
+        add(path);
       };
       // (a place that lands through its parent lands its root and what the copy it lands through does, `#landsThrough`)
       const through = this.#landsThrough(task.place, task.below);
@@ -2062,13 +2069,16 @@ export class Admission {
         tasks.push({ ...task, place: through });
         continue;
       }
+      // (a cycle's landed paths, and the copies at, above or below the prefix, from indexes by path: never every one
+      // for each prefix, Astra's review r2 B2)
       if (cycleOf.has(task.place) && !fed.has(task.place)) {
-        for (const text of cycles.get(task.place)!) emit(splitPath(text));
+        const landing = this.#cycleLanding(task.place);
+        for (const path of landing.under.get(keptText(this.#work, task.below)) ?? []) emit(path);
         continue;
       }
       for (const text of this.#seedsUnder(task.place, task.below)) emit(splitPath(text));
-      for (const copy of this.#copiesOf(task.place)) {
-        emit(copy.path);
+      for (const copy of this.#copiesAlong(task.place, task.below, true)) {
+        add(copy.path);
         // (the source's paths at or below the strip, those the prefix asks for)
         const below = isPrefix(copy.path, task.below)
           ? keptSteps(this.#work, copy.strip, task.below.slice(copy.path.length))
@@ -3352,17 +3362,18 @@ export class Admission {
       return { from: feeder, strip, points, sources, below };
     }
     if (cycleOf.has(place) || this.#seedsUnder(place, strip).length > 0) return null;
-    const { retaken, copies } = this.#placeIndex(place);
-    if (crosses(retaken)) return null;
+    if (crosses(this.#retakenIndex(place))) return null;
+    const { list, index: copies } = this.#copyIndex(place);
     if ((copies.under.get(text)?.length ?? 0) > (copies.at.get(text)?.length ?? 0)) return null;
     // the one copy or read reaching the path, at or above it (a second one, or any other value there, holds more)
     let from: PlaceId | null = null;
     let at: readonly string[] = [];
     let reaching = 0;
     for (const prefix of texts)
-      for (const copy of copies.at.get(prefix) ?? []) {
+      for (const position of copies.at.get(prefix) ?? []) {
         work.charge("indexSteps");
         if ((reaching += 1) > 1) return null;
+        const copy = list[position]!;
         from = copy.from;
         at = keptSteps(this.#work, copy.strip, strip.slice(copy.path.length));
       }
@@ -3441,18 +3452,80 @@ export class Admission {
     own.points.forEach((path, index) => points.push({ path, source: own.sources[index]! }));
   }
 
-  /** A place's stores taken again and its copies of inheriting places by path (`#stepOf`), once per place. */
-  #placeIndex(place: PlaceId): {
-    readonly retaken: ByPath<readonly string[]>;
-    readonly copies: ByPath<InheritedCopy>;
+  /** A place's stores taken again by path (`#stepOf`), once per place. */
+  #retakenIndex(place: PlaceId): ByPath<readonly string[]> {
+    let found = this.#retakenIndexes.get(place);
+    if (found === undefined)
+      this.#retakenIndexes.set(
+        place,
+        (found = this.#byPath(this.#retakenOf(place), (path) => path)),
+      );
+    return found;
+  }
+
+  /** A place's copies (`#copiesOf`) with their positions by path (`ByPath`), once per place. */
+  #copyIndex(place: PlaceId): {
+    readonly list: readonly InheritedCopy[];
+    readonly index: ByPath<number>;
   } {
-    let found = this.#placeIndexes.get(place);
+    let found = this.#copyIndexes.get(place);
     if (found === undefined) {
-      found = {
-        retaken: this.#byPath(this.#retakenOf(place), (path) => path),
-        copies: this.#byPath(this.#inheritance().into.get(place) ?? [], ({ path }) => path),
-      };
-      this.#placeIndexes.set(place, found);
+      const list = this.#copiesOf(place);
+      const positions = list.map((_, position) => position);
+      found = { list, index: this.#byPath(positions, (position) => list[position]!.path) };
+      this.#copyIndexes.set(place, found);
+    }
+    return found;
+  }
+
+  /**
+   * A place's copies whose paths stand above a path (strictly), and with `under` those at or below it too, in the
+   * copies' order (`#landed`, `#landedBelow`): the path's prefixes looked up, never every copy for each path, or the
+   * copies tested where they are no more than the prefixes; each copy taken or tested charged here.
+   */
+  #copiesAlong(place: PlaceId, path: readonly string[], under: boolean): readonly InheritedCopy[] {
+    const work = this.pass.program.work;
+    const copies = this.#copiesOf(place);
+    if (copies.length <= path.length + 1) {
+      // (no more copies than the path has prefixes: each tested, as cheap as the lookups)
+      const out: InheritedCopy[] = [];
+      for (const copy of copies) {
+        work.charge("indexSteps");
+        if (
+          (copy.path.length < path.length && isPrefix(copy.path, path)) ||
+          (under && isPrefix(path, copy.path))
+        )
+          out.push(copy);
+      }
+      return out;
+    }
+    const { list, index } = this.#copyIndex(place);
+    const positions: number[] = [];
+    for (let length = 0; length <= path.length; length += 1) {
+      work.charge("indexSteps");
+      const text = keptText(this.#work, path.slice(0, length));
+      const found =
+        length < path.length ? index.at.get(text) : under ? index.under.get(text) : undefined;
+      for (const position of found ?? []) {
+        work.charge("indexSteps");
+        positions.push(position);
+      }
+    }
+    if (positions.length > 1) {
+      work.charge("indexSteps", sortCost(positions.length));
+      positions.sort((a, b) => a - b);
+    }
+    return positions.map((position) => list[position]!);
+  }
+
+  /** A member of a cycle of copies' landed paths by path (`Inheritance.cycles`, `#landedBelow`), once per landing. */
+  #cycleLanding(place: PlaceId): ByPath<readonly string[]> {
+    const landing = this.#inheritance().cycles.get(place)!;
+    let found = this.#cycleLandings.get(landing);
+    if (found === undefined) {
+      const paths: (readonly string[])[] = [];
+      for (const text of landing) paths.push(keptSplit(this.#work, text));
+      this.#cycleLandings.set(landing, (found = this.#byPath(paths, (path) => path)));
     }
     return found;
   }
