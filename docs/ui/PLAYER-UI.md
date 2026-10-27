@@ -465,8 +465,9 @@ The Player does not run a script on page load. It opens on the start page: the m
 middle the `title` and "by" `author` of the script's `main.tease` header, either alone when only it is given and
 neither without them, above an explicit **Start** control, which takes focus. The transcript, composer, and Stage stay
 hidden until a session is shown. A script that does not compile cannot start: instead of Start, the Player lists its
-diagnostics, each with its file, line, and message. The player's activation of Start is the user activation that later
-audible media playback relies on, so scripts may play audio from their first statement without a separate unlock step.
+errors, each with its file, line, and message. Its warnings are for the author's tools, not the start page. The
+player's activation of Start is the user activation that later audible media playback relies on, so scripts may play
+audio from their first statement without a separate unlock step.
 
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page

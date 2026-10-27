@@ -4,7 +4,6 @@ export interface ScriptProblem {
   readonly path?: string;
   readonly line?: number;
   readonly column?: number;
-  readonly severity?: "error" | "warning";
   readonly message: string;
 }
 
@@ -37,9 +36,7 @@ function location(problem: ScriptProblem): string {
       <ol class="flex min-h-0 flex-col gap-3 overflow-y-auto wrap-anywhere">
         <li v-for="(problem, index) in failure.problems" :key="index" class="flex flex-col gap-0.5">
           <span v-if="problem.path" class="font-mono text-sm text-muted-foreground">{{ location(problem) }}</span>
-          <span class="text-sm">
-            <template v-if="problem.severity === 'warning'">Warning: </template>{{ problem.message }}
-          </span>
+          <span class="text-sm">{{ problem.message }}</span>
         </li>
       </ol>
     </section>

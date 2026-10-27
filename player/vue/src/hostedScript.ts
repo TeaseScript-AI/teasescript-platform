@@ -51,7 +51,11 @@ export function prepareHostedScript(
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
-        failure.value = { title: "This script cannot start", problems: compilation.diagnostics };
+        failure.value = {
+          title: "This script cannot start",
+          // Warnings are for the author's tools, not the start page (PLAYER-UI "Session start and user activation").
+          problems: compilation.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+        };
         return;
       }
       void player.prepareScript(
