@@ -27,6 +27,8 @@ import {
   missingPropertyMessage,
   predictPositionMessage,
   predictStartMessage,
+  PREDICT_NULL_LINE_MESSAGE,
+  predictLineMessage,
 } from "../../list-function-rules.js";
 import { RANDOM_CONTRACTS } from "../../random-functions.js";
 import type { PlanSourceLocation } from "../../plan/model.js";
@@ -480,6 +482,16 @@ function predict(
   const slope = property("slope");
   const intercept = property("intercept");
   const start = property("start");
+  // As the compiler checks them, with its code and text: an x of a kind that no line starts at, then a line property
+  // that is null, then a line that is not an object with the three properties.
+  const xKind = kindOf(x);
+  if (isAngle(x)) throw fault("TSV043", angleStatisticMessage("predict"), span);
+  if (xKind === undefined || !LIST_FUNCTION_CONTRACTS.predict.positions.includes(xKind))
+    throw fault("TSV043", predictPositionMessage(describeValue(x)), span);
+  if (slope === null || intercept === null || start === null)
+    throw fault("TSV043", PREDICT_NULL_LINE_MESSAGE, span);
+  if (slope === undefined || intercept === undefined || start === undefined)
+    throw fault("TSV043", predictLineMessage(describeValue(line)), span);
   // The amounts of a line: numbers, or exact durations.
   const amount = (value: SerializableRuntimeValue | undefined): number | undefined =>
     typeof value === "number"
@@ -495,18 +507,14 @@ function predict(
     kind !== undefined && LIST_FUNCTION_CONTRACTS.predict.positions.includes(kind)
       ? kind
       : undefined;
+  // The compiler does not check the other values of the properties.
   if (
     slopeAmount === undefined ||
     interceptAmount === undefined ||
-    (intercept !== undefined && isDuration(intercept)) !== durations ||
+    isDuration(intercept) !== durations ||
     startKind === undefined
   )
-    // The compiler checks that the line is an object with the three properties, not their values.
-    throw fault(
-      slope !== undefined && intercept !== undefined && start !== undefined ? "TSR059" : "TSV043",
-      `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeValue(line)}.`,
-      span,
-    );
+    throw fault("TSR059", predictLineMessage(describeValue(line)), span);
   // intercept + slope × (x - start), exactly, with x - start in days, and rounded once.
   let offset: Exact | undefined;
   let perDay = 1n;
@@ -516,19 +524,9 @@ function predict(
     offset = whole(unitsFrom(start, x));
     if (start.kind !== "date") perDay = BigInt(MS_PER_DAY);
   }
-  if (offset === undefined) {
-    // As the compiler checks it: an x of a kind that no line starts at first, then one of another kind than the start.
-    const xKind = kindOf(x);
-    throw fault(
-      "TSV043",
-      isAngle(x)
-        ? angleStatisticMessage("predict")
-        : xKind === undefined || !LIST_FUNCTION_CONTRACTS.predict.positions.includes(xKind)
-          ? predictPositionMessage(describeValue(x))
-          : predictStartMessage(valueKindOf(start!), describeValue(x)),
-      span,
-    );
-  }
+  // An x of another kind than the start, which the compiler checks where it knows the start.
+  if (offset === undefined)
+    throw fault("TSV043", predictStartMessage(valueKindOf(start), describeValue(x)), span);
   const value = quotient(
     add(multiply(exact(interceptAmount), whole(perDay)), multiply(exact(slopeAmount), offset)),
     whole(perDay),

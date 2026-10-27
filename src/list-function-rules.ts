@@ -263,6 +263,18 @@ export function listValueMessage(
   return `${name}(...) needs ${describeKinds(kinds)}${x ? " as x values" : ""}, not ${given}.${kind === "calendarDuration" ? " A calendar day or month has no fixed length." : ""}`;
 }
 
+/** A `predict` line with a `slope`, `intercept`, or `start` that is or may be null. */
+export const PREDICT_NULL_LINE_MESSAGE =
+  "predict(...) needs a line from linearRegression(...), whose slope, intercept, and start are never null.";
+
+/**
+ * A `predict` line, described as `given`, that is not an object with `slope`, `intercept`, and `start`, or, at runtime
+ * only, whose properties are not numbers, durations, or a start that x can be (runtime error `TSR059`).
+ */
+export function predictLineMessage(given: string): string {
+  return `predict(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${given}.`;
+}
+
 /** A `predict` x, described as `given`, of a kind that no line starts at. */
 export function predictPositionMessage(given: string): string {
   return `predict(...) needs a number, date, datetime, or absolute date and time as its x, not ${given}.`;

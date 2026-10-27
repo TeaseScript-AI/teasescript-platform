@@ -227,6 +227,12 @@ test("a problem that the compiler and the runtime both find has the compiler's c
       'let r = encryptText("hi", password: ["p"], publicKey: false, timeLock: false)',
       `${D}let r = encryptText("hi", password: dynamic(["p"]), publicKey: false, timeLock: false)`,
     ],
+    // A predict line checked in the compiler's order: x first, then a property that is null.
+    [
+      "let n = predict({ slope: null, intercept: 0, start: 0 }, 1)",
+      `${D}let n = predict(dynamic({ slope: null, intercept: 0, start: 0 }), 1)`,
+    ],
+    ['let n = predict(5, "a")', `${D}let n = predict(dynamic(5), dynamic("a"))`],
     // An argument is not an index written in brackets, so neither names it.
     [
       "let items = [1, 2]\nlet i = -2\nitems.removeAt(i)",

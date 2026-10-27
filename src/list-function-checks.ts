@@ -18,6 +18,8 @@ import {
   missingPropertyMessage,
   predictPositionMessage,
   predictStartMessage,
+  PREDICT_NULL_LINE_MESSAGE,
+  predictLineMessage,
 } from "./list-function-rules.js";
 import { TEMPORAL_KINDS, type TemporalKind } from "./temporal-builtins.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
@@ -403,11 +405,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
   if (
     fields.some((field) => field !== undefined && members(field).some((one) => one.kind === "null"))
   ) {
-    problem(
-      context,
-      `${name}(...) needs a line from linearRegression(...), whose slope, intercept, and start are never null.`,
-      line,
-    );
+    problem(context, PREDICT_NULL_LINE_MESSAGE, line);
     return UNKNOWN_TYPE;
   }
   if (
@@ -415,11 +413,7 @@ function predictType(context: Context, positions: readonly ListValueKind[]): Sta
     (object.properties !== null &&
       (intercept === undefined || property("slope") === undefined || start === undefined))
   ) {
-    problem(
-      context,
-      `${name}(...) needs a line from linearRegression(...), with slope, intercept, and start, not ${describeKind(type)}.`,
-      line,
-    );
+    problem(context, predictLineMessage(describeKind(type)), line);
     return UNKNOWN_TYPE;
   }
   const startKind = start === undefined ? undefined : knownKind(start);
