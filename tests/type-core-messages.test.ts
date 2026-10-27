@@ -99,8 +99,8 @@ test("each context word's cause says why the value may be of another type, on th
   const speaker = "'player' is a speaker, whose properties are known only when the script runs.";
   // (in source order of their sites: the store's member read first, r4.86 (1))
   word("cp9-cells/F19a/direct", [
-    "W TSV043 'player.n': 'player' may have no property 'n' that can be set here. If it has none, the Tease stops " +
-      `with an error at this line. ${speaker}`,
+    // (a store into a speaker gives it the property: no stop, #1195 rule 3)
+    "W TSV043 'player.n': 'player' may have no property 'n' here. A speaker takes the property when the script runs.",
     `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another type here. ${STOPS} Keep 'player.n' ` +
       "in a variable and check the variable first, as in 'if value is integer { ... }'. The type of 'player.n' is " +
       "known only when the script runs.",
@@ -219,6 +219,26 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       [
         "E TSV043 '{n: 1}': This object has no property 'other', so 'x.other' on line 2 cannot set 'other'. Its " +
           "only property is 'n'. Add 'other' to this object.",
+      ],
+    ],
+    // a store into a speaker or an object: what happens to each (#1195 rule 3)
+    [
+      'let flagHost = askBoolean "f"\nlet x: speaker | object = player\nif flagHost { x = {m: 1} }\nx.n = 1\nexit\n',
+      [
+        "W TSV043 'x.n': 'x' may have no property 'n' here. If it is an object without 'n', the Tease stops with an " +
+          "error at this line. A speaker takes the property. 'x' is a speaker, whose properties are known only when " +
+          "the script runs.",
+        `W TSV043 'x.n': 'x' may hold an object without property 'n' here. If it does, the Tease stops with an error ` +
+          "at this line.",
+      ],
+    ],
+    // a possible null as an operand of an operator: its fallback in parentheses, as the parser asks of `otherwise`
+    [
+      "let xs = [7, null]\nsay xs[0] + 1\nexit\n",
+      [
+        `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a variable ` +
+          "and check the variable first, as in 'if value != null { ... }', or give a fallback, as in " +
+          "'(xs[0] otherwise 0)'. 'xs[0]' is a list element, and any element of the list may be null.",
       ],
     ],
     // C6

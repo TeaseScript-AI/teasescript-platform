@@ -87,18 +87,6 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
   }
 }
 
-/**
- * Whether the compiler reports a diagnostic: every one but a warning on a line that never runs, which the warning for
- * code that never runs (TSV065) already reports (#1195). An error there stays (ADR 0021 rule 1.8).
- */
-export function reported(diagnostic: CoreDiagnostic): boolean {
-  return (
-    diagnostic.class === "compile-error" ||
-    diagnostic.provenance.context !== "dead-code" ||
-    !diagnostic.provenance.detail.direct
-  );
-}
-
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
 export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): string {
   if (diagnostic.kind === "written-type") return writtenTypeMessage(diagnostic, source);
@@ -111,13 +99,20 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   const name =
     rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : text;
   const sentences = [
-    warningSentence(rule, text, kinds, source, context),
-    warningFix(rule, text, kinds, diagnostic.fits, detail, context),
+    warningSentence(rule, text, kinds, source, context, detail),
+    warningFix(rule, text, kinds, diagnostic.fits, detail, context, source),
   ];
   // a warning whose value has no word of its own (an exact value the rule still checks) has no cause; `later`'s first
   // sentence names the deciding line, and a member's missing property is its first sentence
   const missing = rule.rule === "member" && context === "missing";
-  if (!(context === "unknown" && !detail.outside) && context !== "later" && !missing)
+  // (a store into a speaker alone: the first sentence says what happens, which no cause changes)
+  const holder = detail.receiver?.kinds ?? kinds;
+  const speaker =
+    rule.rule === "member" &&
+    rule.use === "store" &&
+    holder.length > 0 &&
+    holder.every((kind) => kind === "speaker");
+  if (!(context === "unknown" && !detail.outside) && context !== "later" && !missing && !speaker)
     // a word that came with a value from another line speaks of that value's origin, never of this line's names
     sentences.push(
       detail.direct
@@ -196,6 +191,36 @@ function variable(text: string): string | null {
 /** Whether a text is a variable or a property path, as the current checker's fixes name a value. */
 function path(text: string): boolean {
   return /^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(text);
+}
+
+/** Code without its bracketed and quoted parts: what binds outside them. */
+function unbracketed(code: string): string {
+  let depth = 0;
+  let quoted = false;
+  let plain = "";
+  for (let at = 0; at < code.length; at += 1) {
+    const char = code[at]!;
+    if (quoted) {
+      if (char === "\\") at += 1;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if ("([{".includes(char)) depth += 1;
+    else if (")]}".includes(char)) depth -= 1;
+    else if (depth === 0) plain += char;
+  }
+  return plain;
+}
+
+/** Code as the receiver of a member a fix writes after it: in parentheses unless it binds tighter (`t`, `f(x)`). */
+function receiverText(code: string): string {
+  return /^[\d-]/.test(code) || /[\s+\-*/%<>=!?]/.test(unbracketed(code)) ? `(${code})` : code;
+}
+
+/** Code as an operand of an operator or `otherwise` a fix writes: in parentheses where an operator binds in it. */
+function operandText(code: string): string {
+  return /\s(?:[-+*/%<>]=?|[!=]=|and|or|otherwise|is)\s|^not\s/.test(unbracketed(code))
+    ? `(${code})`
+    : code;
 }
 
 /**
@@ -394,14 +419,14 @@ function memberFix(
   if (kind === "string" && rule.use === "store")
     return ` Assign a new text to '${receiver}' instead.`;
   if (!method && kind === "absoluteDateTime" && hasTemporalField("datetime", name))
-    return ` Convert '${receiver}' first, as in '${receiver}.toDateTime().${name}'.`;
+    return ` Convert '${receiver}' first, as in '${receiverText(receiver)}.toDateTime().${name}'.`;
   if (kind !== "string" && VALUE_KINDS[kind].type === "scalar" && isTextMember(name))
     return ` Convert '${receiver}' to text first, as in 'toString(${receiver})${method ? `.${name}(...)` : `.${name}`}'.`;
   if (!method && kind === "duration") {
     const unit = elapsedDurationUnit(name);
     if (unit !== undefined) {
       const single = name.length > 2 && name.endsWith("s") ? name.slice(0, -1) : name;
-      return ` Divide '${receiver}' by a unit, as in '${receiver} / 1 ${single}'.`;
+      return ` Divide '${receiver}' by a unit, as in '${operandText(receiver)} / 1 ${single}'.`;
     }
   }
   if (!method && kind === "calendarDuration")
@@ -409,7 +434,7 @@ function memberFix(
   if (method && kind === "set" && listMethod(name)?.notOnSet !== undefined)
     return name === "get"
       ? " Use 'contains(...)' instead."
-      : ` Copy '${receiver}' into a list with 'toList()' first.`;
+      : ` Copy '${receiver}' into a list with '${receiverText(receiver)}.toList()' first.`;
   if (!method && kind === "list" && rule.use === "read")
     return " Use 'length', 'first', 'last', or 'random'.";
   return "";
@@ -468,13 +493,13 @@ function temporalFix(
 ): string {
   const [left, right] = rule.operands.map((site) => source.text(site));
   if (left === undefined || right === undefined) return "";
-  const [a, b] = rule.operand ? [undefined, kinds[0]] : kinds;
+  const [a, b] = rule.operand ? [undefined, kinds[0]] : rule.pair;
   const { operator } = rule;
   const moves = operator === "+" || operator === "-";
   if (moves && a === "absoluteDateTime" && b === "calendarDuration")
     return (
       " An absolute date and time has no calendar. Convert it first, as in " +
-      `'(${left}.toDateTime() ${operator} ${right}).toAbsoluteDateTime()'.`
+      `'(${receiverText(left)}.toDateTime() ${operator} ${operandText(right)}).toAbsoluteDateTime()'.`
     );
   if (moves && a === "date" && b === "duration") {
     const amount = /^(\d+) ?(d|day|days|w|week|weeks)$/.exec(right);
@@ -485,7 +510,8 @@ function temporalFix(
   if (moves && a === "datetime" && b === "duration")
     return (
       " A date and time has no time zone, so it cannot move by elapsed time. Convert it first, as in " +
-      `'(${left}.toAbsoluteDateTime() ${operator} ${right}).toDateTime()', or use calendar units to keep the clock time.`
+      `'(${receiverText(left)}.toAbsoluteDateTime() ${operator} ${operandText(right)}).toDateTime()', or use calendar ` +
+      "units to keep the clock time."
     );
   if (operator === "-" && b === "datetime" && rule.domain.includes("calendarDuration"))
     return (
@@ -581,8 +607,9 @@ function errorSentence(
       );
     }
     case "operator": {
-      const join = joinFix(rule, kinds, [], source);
-      if (join !== null) return join;
+      const other = joined(rule, kinds, []);
+      if (other !== null)
+        return `'+' joins text only with other text, not with ${described(other)}. ${joinRepair(rule, source)}`;
       return rule.operand
         ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${temporalFix(rule, text, kinds, source)}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.` +
@@ -609,19 +636,18 @@ function errorSentence(
 }
 
 /**
- * A `+` of text and a value of another kind that `${...}` shows, where none of the operand's kinds fits (`fits`): the
- * sentence #1195 decided, with the text the operation writes instead; else `null`. An operand that is text where its
- * place takes another kind (`domain`) is joined with that kind; an operand of another kind where its place takes text,
- * with its own; the operation, with the kind of its operand that is not text.
+ * A `+` of text and a value of another kind that `${...}` shows, where none of the operand's kinds fits (`fits`): the kinds
+ * the text is joined with, else `null`. An operand that is text where its place takes another kind (`domain`) is joined
+ * with that kind; an operand of another kind where its place takes text, with its own; the operation, with the kind of
+ * its operand (`pair`) that is not text.
  */
-function joinFix(
+function joined(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
-  source: MessageSource,
-): string | null {
-  if (rule.operator !== "+" || fits.length > 0 || rule.operands.length !== 2) return null;
-  const own = known(kinds);
+): Known[] | null {
+  if (rule.operator !== "+" || fits.length > 0 || rule.chain.length < 2) return null;
+  const own = known(rule.operand ? kinds : rule.pair);
   const other = !rule.operand
     ? own.includes("string")
       ? own.filter((kind) => kind !== "string")
@@ -631,11 +657,15 @@ function joinFix(
       : rule.domain.includes("string")
         ? own
         : [];
-  if (other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind))) return null;
-  return (
-    `'+' joins text only with other text, not with ${described(other)}. Put the value in the text instead, as in ` +
-    `'${joinedText(rule.chain, source)}'.`
-  );
+  return other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind)) ? null : other;
+}
+
+/** The text-join fix (#1195's decided text): the chain's operands as one text. */
+function joinRepair(
+  rule: Extract<DiagnosticRule, { rule: "operator" }>,
+  source: MessageSource,
+): string {
+  return `Put the value in the text instead, as in '${joinedText(rule.chain, source)}'.`;
 }
 
 /** The kinds `${...}` shows as text. */
@@ -662,6 +692,7 @@ function warningSentence(
   kinds: readonly ItemTag[],
   source: MessageSource,
   context: ContextWord,
+  detail: ContextDetail,
 ): string {
   const may = `may be ${described(kinds)} here. If it is, ${STOPS}`;
   switch (rule.rule) {
@@ -677,10 +708,19 @@ function warningSentence(
       if (kinds.includes("null")) return `'${rule.receiver}' may be null here. If it is, ${STOPS}`;
       if (kinds.length > 0 && kinds.every((kind) => kind !== "unknown" && !REFERENCE.has(kind)))
         return `'${rule.receiver}' may be ${described(kinds)} here, which has no ${noun}. If it is, ${STOPS}`;
-      return context === "missing"
-        ? `'${rule.receiver}' may hold an object without ${noun} here. If it does, ${STOPS}`
-        : `'${rule.receiver}' may have no ${noun}${rule.use === "store" ? " that can be set" : ""} here. If it has ` +
-            `none, ${STOPS}`;
+      if (context === "missing")
+        return `'${rule.receiver}' may hold an object without ${noun} here. If it does, ${STOPS}`;
+      // a store into a speaker gives it the property when the script runs; one into an object without it stops
+      const holder = detail.receiver?.kinds ?? kinds;
+      if (rule.use === "store" && (kinds.includes("speaker") || holder.includes("speaker")))
+        return holder.every((kind) => kind === "speaker")
+          ? `'${rule.receiver}' may have no ${noun} here. A speaker takes the property when the script runs.`
+          : `'${rule.receiver}' may have no ${noun} here. If it is an object without '${rule.member.slice(1)}', ` +
+              `${STOPS} A speaker takes the property.`;
+      return (
+        `'${rule.receiver}' may have no ${noun}${rule.use === "store" ? " that can be set" : ""} here. If it has ` +
+        `none, ${STOPS}`
+      );
     }
     case "selection":
       return `'${rule.collection}' may be empty here. If it is, ${STOPS}`;
@@ -719,13 +759,16 @@ function fallbackValue(kinds: readonly ItemTag[]): string | null {
  * The check that makes a use safe (ADR 0021 rules 1.9 and 3.5): of a variable directly, of any other value kept in a
  * variable first, since only a variable narrows (rule 5); for null with a fallback where it has one.
  */
-function checkFix(text: string, test: string, fallback: string | null): string {
+function checkFix(text: string, test: string, fallback: string | null, operand = false): string {
   const name = variable(text);
   const check =
     name === null
       ? `Keep '${text}' in a variable and check the variable first, as in 'if value ${test} { ... }'`
       : `Check '${name}' first, as in 'if ${name} ${test} { ... }'`;
-  return `${check}${fallback === null ? "" : `, or give a fallback, as in '${text} otherwise ${fallback}'`}.`;
+  if (fallback === null) return `${check}.`;
+  // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
+  const code = `${operandText(text)} otherwise ${fallback}`;
+  return `${check}, or give a fallback, as in '${operand ? `(${code})` : code}'.`;
 }
 
 /** A literal's text: a number, text or `true`/`false`. */
@@ -761,6 +804,7 @@ function warningFix(
   fits: readonly ItemTag[],
   detail: ContextDetail,
   context: ContextWord,
+  source: MessageSource,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
   if (kinds.includes("null")) {
@@ -772,7 +816,12 @@ function warningFix(
           (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
             dictMethod(rule.member.slice(1, -2))?.changes !== undefined)));
     const fallback = changed ? null : fallbackValue(fits.length > 0 ? fits : ruleKinds(rule));
-    return checkFix(subject, "!= null", fallback);
+    return checkFix(
+      subject,
+      "!= null",
+      fallback,
+      rule.rule === "operator" || (rule.rule === "boolean" && rule.operator !== null),
+    );
   }
   switch (rule.rule) {
     case "selection":
@@ -784,9 +833,13 @@ function warningFix(
       if (rule.type.includes("integer") && kinds.includes("number"))
         return storeFix(rule, kinds, text).trimStart();
       break;
-    case "operator":
-      if (!rule.operand) return "";
+    case "operator": {
+      // (the repairs of the error the values would be: a text join, a date and time conversion)
+      if (joined(rule, kinds, fits) !== null) return joinRepair(rule, source);
+      const temporal = temporalFix(rule, text, kinds, source).trimStart();
+      if (temporal !== "" || !rule.operand) return temporal;
       break;
+    }
     case "member":
       return memberWarningFix(rule, kinds, fits, detail);
     default:
