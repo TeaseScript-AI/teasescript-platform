@@ -5,9 +5,9 @@ import type { WorkCounter, WorkLedger } from "./budget.js";
  * The one way stage 3b's narrowing modules walk anything (TABLE §13.3: "List construction, filtering and every visit
  * are charged"): every item taken, every step of a search and every element a copy or a test visits charges one unit
  * of a named counter as it happens, so a walk cannot go uncharged. `tools/oxlint/check-charged-iteration.mjs` rejects
- * any other loop, array walk or copy in `narrowing.ts`, `narrowing-events.ts`, `narrowing-routes.ts` and
- * `narrowing-statements.ts`: there the ledger is complete by construction. Calls into the rest of the core charge their
- * own work, or are charged at the call with a comment naming the counter.
+ * any other repetition in `narrowing.ts`, `narrowing-events.ts`, `narrowing-routes.ts` and `narrowing-statements.ts`
+ * (a recursion, or a function used as a value, charges a unit on entry), and any call into the rest of the core or
+ * the library that its list does not give a reason for: there the ledger is complete by construction.
  */
 
 /** Each item, one unit of `counter` charged as it is taken. */
