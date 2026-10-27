@@ -22,13 +22,14 @@ import { COMPOSITIONS, roleClasses, ROLES } from "./helpers/type-core-roles.js";
 import { recordsOf, shapesOf } from "./helpers/type-core-rule.js";
 
 /*
- * The role matrix (S6-CARRIERS revision 5, §6), beside the floor: generated from the carrier table's roles
- * (`CARRIER_ROLES`), each with its four placements of the data: inside a literal operand, the whole operand, the
- * operation's own read, a member's receiver (`type-core-roles.ts` holds the table and the compositions). Each placement
- * is a class of the rule function (`type-core-rule.ts`), its shapes each named and inline, without and with a later
- * store, compared exactly in both orders; a placement a role cannot have names why. A role the table gains without its
- * row fails here. A shape the candidate route takes also plans the checked stores its record derives and runs as derived
- * under every host value (§5.2, r4.59); the others report the route's reason.
+ * The role matrix (S6-CARRIERS revision 5, §6), beside the floor. Its purpose is the carrier table (`CARRIER_ROLES`):
+ * every role it lists takes its role at each placement of the data and owes the rule function's records there, and a
+ * shape the candidate route takes plans the checked stores its record derives and runs as derived under every host
+ * value (§5.2, r4.59); the others report the route's reason. The floor leaves to this test the shapes it holds as they
+ * are. The placements: inside a literal operand, the whole operand, the operation's own read, a member's receiver
+ * (`type-core-roles.ts` holds the table and the compositions). Each placement is a class of the rule function
+ * (`type-core-rule.ts`), its shapes each named and inline, without and with a later store, compared exactly in both
+ * orders; a placement a role cannot have names why. A role the table gains without its row fails here.
  */
 
 test("every carrier role's placements owe the rule function's complete C1, C9 and C10 records, in both orders (§6, §5.1)", (t) => {
@@ -103,15 +104,16 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
 });
 
 /**
- * The role matrix's compositions (S6-CARRIERS §6), as exact records in both orders: round 4's eight choice regressions
- * (inline data a published choice selects owes the store's boundary at the host value, an unselected property none),
- * a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and named data in one
- * selected collection (the named data's C1 at the selecting expression, the inline data's boundary alone: r4.63 (1), (2),
- * TABLE r4.67 (3)) and inline data or a host member beside an own read's named data (the merged item's C1 at the store's
- * value, the member's own place's at its read: r4.70 (1)), a choice over a held list (§3.3's record boundary beside C1),
- * a union holding a reference across two carriers (a list or the speaker from an unrestricted dict's values; opaque by
- * dispatch, checked at its consumer), and nullable root and inner receivers of a member (r4.60 beside each receiver's C5
- * check). The mixed selected-value and absent-value-text lists in both element orders are the cells test's (D1).
+ * The role matrix's compositions (S6-CARRIERS §6), as exact records in both orders: seven of round 4's eight choice
+ * regressions (inline data a published choice selects owes the store's boundary at the host value, an unselected
+ * property none), a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and
+ * named data in one selected collection (the named data's C1 at the selecting expression, the inline data's boundary
+ * alone: r4.63 (1), (2), TABLE r4.67 (3)) and inline data or a host member beside an own read's named data (the merged
+ * item's C1 at the store's value, the member's own place's at its read: r4.70 (1)), a choice over a held list (§3.3's
+ * record boundary beside C1), a union holding a reference across two carriers (a list or the speaker from an
+ * unrestricted dict's values; opaque by dispatch, checked at its consumer), and nullable root and inner receivers of a
+ * member (r4.60 beside each receiver's C5 check). The eighth, plain options (`askChoice 1, hostValue`), and the mixed
+ * selected-value and absent-value-text lists in both element orders are the cells test's (D1).
  */
 test("the role matrix's compositions give their exact records, in both orders (§6)", () => {
   for (const [name, source, text] of COMPOSITIONS) {

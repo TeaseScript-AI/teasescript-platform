@@ -423,7 +423,6 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
   const boundary = (against: string, span: string): string =>
     `outcome valid\nB copy-type out [${against}] ${span}`;
   return [
-    ["choice-simple", choice("1, hostValue"), boundary("integer", "23:32")],
     ["choice-list", choice("[1, hostValue]"), boundary("integer", "24:33")],
     [
       "choice-object",
