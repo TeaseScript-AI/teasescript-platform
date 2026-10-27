@@ -2469,10 +2469,11 @@ export class Admission {
       }
     }
     const flat = this.#flatLoose(group.root, group.strip, loose);
+    // (a group is listed once per call and its flattened points and prefixes are unique, so each mark is new)
     const mark = (map: Map<string, Group[]>, text: string): void => {
       const found = map.get(text);
       if (found === undefined) map.set(text, [group]);
-      else if (!found.includes(group)) found.push(group);
+      else found.push(group);
     };
     for (const rest of flat.points) {
       work.charge("indexSteps");
@@ -2511,8 +2512,14 @@ export class Admission {
       covered = opaque.has(keptText(this.#work, read.strip.slice(0, length)));
     }
     const groups = [...run.served];
+    const seen = new Set<Group>(groups);
     for (const { groups: landing } of run.lands.values())
-      for (const group of landing) if (!groups.includes(group)) groups.push(group);
+      for (const group of landing) {
+        work.charge("indexSteps");
+        if (seen.has(group)) continue;
+        seen.add(group);
+        groups.push(group);
+      }
     if (
       covered ||
       own!.points.length + own!.below.length + own!.reads.length >=
