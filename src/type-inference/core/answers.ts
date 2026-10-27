@@ -790,7 +790,9 @@ class CoreAnswers implements Answers {
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
     // the order they run (TABLE r4.86 (1)), the finishing path's as the walk's, then a stop's own warning and marks
-    const ranked = (item: CoreDiagnostic): { readonly item: CoreDiagnostic; readonly rule: number } => ({
+    const ranked = (
+      item: CoreDiagnostic,
+    ): { readonly item: CoreDiagnostic; readonly rule: number } => ({
       item,
       rule: consumers.rules.get(item) ?? 0,
     });
