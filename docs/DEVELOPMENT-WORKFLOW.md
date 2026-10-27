@@ -182,8 +182,8 @@ remaining coverage is understood may continue through ordinary repair and review
 
 The implementer must not silently broaden the pull request into a large campaign. When the revised approach is a
 material scope, redesign, issue-split, or execution-strategy change, present the pattern, options, recommendation, cost,
-and exclusions to the owner or coordinator before proceeding. Uncertainty that cannot be bounded may require a
-separately assigned audit.
+and exclusions to the owner or coordinator and obtain their decision before proceeding. Uncertainty that cannot be
+bounded may require a separately assigned audit.
 
 ### Proportional repair and owner escalation
 

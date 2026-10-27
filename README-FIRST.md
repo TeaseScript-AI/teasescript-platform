@@ -24,16 +24,16 @@ When files conflict, identify the exact conflict. Do not silently combine histor
 
 ## Documentation routing
 
-Follow the start route in `AGENTS.md`, which says when to read each document below. Load a topic document only when the
-assignment depends on its detailed contract. Exact source layout, internal format revisions, dependency versions, test
-results, and live workflow state belong in their executable or topic sources rather than this task router.
+Follow the start route in `AGENTS.md`. Load a topic document only when the assignment depends on its detailed contract.
+Exact source layout, internal format revisions, dependency versions, test results, and live workflow state belong in
+their executable or topic sources rather than this task router.
 
 - `CURRENT-DESIGN.md`: stable cross-component architecture, trust, isolation, persistence, language/library, and
   deterministic-runtime boundaries.
 - `PHASE-STATUS.md`: current phase, gates, implemented capability groups, and major exclusions.
 - `AGENTS.md`: start route, coding, review, and Git rules for every agent.
-- `docs/review-and-audit/`: role-based implementation, review, and explicitly
-  assigned audit guidance.
+- `docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md`: implementation, final self-review, and explicitly assigned
+  pull-request reviews; `docs/review-and-audit/AUDIT.md`: explicitly assigned audits only.
 - `docs/DEVELOPMENT-WORKFLOW.md`: universal issue, branch, pull-request,
   review, documentation, merge, and verification rules.
 - `docs/agents/README.md`: technical capability router for source acquisition,
