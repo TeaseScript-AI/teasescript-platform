@@ -178,7 +178,7 @@ export class NarrowingRoutes {
     program.work.charge("exactQueries");
     if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
-    if (handlers.handlerTouches(key) && handlers.afterSomeCreation(node)) return null;
+    if (handlers.handlerTouches(key) && this.#registered(node)) return null;
     // positions and members are not facts: no element key and no reference member has a route
     const steps = keyPath(key);
     program.work.charge("eventSteps", steps.length + 1);
@@ -198,6 +198,12 @@ export class NarrowingRoutes {
     const found: Candidate | null = best;
     if (found === null) return null;
     return this.#open(key, tag, found, chain, node) ? found : null;
+  }
+
+  /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
+  #registered(node: FlowNode): boolean {
+    this.pass.program.work.charge("eventSteps", node.loops.length + 1);
+    return this.pass.handlers.afterSomeCreation(node);
   }
 
   /**

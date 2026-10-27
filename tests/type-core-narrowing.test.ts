@@ -464,6 +464,36 @@ test("a collection test defines its element steps; a negative one none (N1)", ()
         "is integer element: holds",
       ],
       [
+        "the read's own test beside its collection's, at one entry: the more specific",
+        [
+          'let xs = load("xs", default: [])',
+          "if xs is number[] and xs[0] is integer { say xs[0] }",
+        ],
+        "say xs[0]",
+        4,
+        "is integer: holds",
+      ],
+      [
+        "the same, the tests reversed",
+        [
+          'let xs = load("xs", default: [])',
+          "if xs[0] is integer and xs is number[] { say xs[0] }",
+        ],
+        "say xs[0]",
+        4,
+        "is integer: holds",
+      ],
+      [
+        "an element scope beside a wider one, at one entry",
+        [
+          'let xs = load("xs", default: [])',
+          "if xs is number[][] and xs[0] is integer[] { say xs[0][0] }",
+        ],
+        "say xs[0][0]",
+        4,
+        "is integer element: holds",
+      ],
+      [
         "an element step's collection reordered (N2)",
         [...xs, "if xs is integer[] { xs.reverse()\n repeat xs[0] {} }"],
         "repeat xs[0]",

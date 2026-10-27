@@ -101,7 +101,7 @@ export class NarrowingEvents {
     node: FlowNode,
     kinds: readonly ItemTag[] | null,
   ): Work<ContextWord | null> {
-    const { program, handlers } = this.pass;
+    const { program } = this.pass;
     program.work.charge("exactQueries");
     if (!program.live(node) || !program.live(g.node)) return "dead-code"; // X1
     if (yield* this.pass.contract.refReceiver(g.key)) return "unmodelled";
@@ -124,7 +124,7 @@ export class NarrowingEvents {
     if (word !== null) return word;
     // X7: block code, and the flat veto of a handler store with a registration before the read
     if (program.blockReachable(node)) return "handler";
-    if (this.#touched(g) && handlers.afterSomeCreation(node)) return "handler";
+    if (this.#touched(g) && this.#registered(node)) return "handler";
     return null;
   }
 
@@ -135,7 +135,7 @@ export class NarrowingEvents {
    * range, a binary search each.
    */
   #inOperand(g: Narrowing, node: FlowNode): ContextWord | null {
-    const { program, handlers } = this.pass;
+    const { program } = this.pass;
     const region = g.region!;
     const at = node.span?.start.offset ?? -1;
     if (node.file !== region.file || at < region.start || at > region.end) return "branch";
@@ -165,7 +165,7 @@ export class NarrowingEvents {
     }
     if (word !== null) return word;
     if (program.blockReachable(node)) return "handler";
-    if (this.#touched(g) && handlers.afterSomeCreation(node)) return "handler";
+    if (this.#touched(g) && this.#registered(node)) return "handler";
     return null;
   }
 
@@ -279,6 +279,12 @@ export class NarrowingEvents {
     keepText(program.work, collection.length);
     this.#outside.set(collection, outside);
     return outside;
+  }
+
+  /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
+  #registered(node: FlowNode): boolean {
+    this.pass.program.work.charge("eventSteps", node.loops.length + 1);
+    return this.pass.handlers.afterSomeCreation(node);
   }
 
   /** X7's handler-store predicate over G's dependency keys, a block holding an invalidation of a collection included. */

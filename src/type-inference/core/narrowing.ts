@@ -1,5 +1,5 @@
 import type { Expression, TypeAnnotation } from "../../ast.js";
-import { expressionChildren, unwrap } from "../../expression-children.js";
+import { expressionChildren } from "../../expression-children.js";
 import { dictMethod } from "../../dict-operations.js";
 import { listMethod } from "../../list-methods.js";
 import { caseValueKey } from "../../switch-cases.js";
@@ -59,6 +59,37 @@ function readsElement(step: PathStep): boolean {
   return step.kind !== "property" || selectsElement(step.name);
 }
 
+/** An expression without the parentheses around it, each one walked charged (they nest as deep as written). */
+function peel(expression: Expression, work: WorkLedger): Expression {
+  let current = expression;
+  while (current.kind === "parenthesizedExpression") {
+    work.charge("eventSteps");
+    current = current.expression;
+  }
+  return current;
+}
+
+/**
+ * A condition's shape (`conditionShape`), the parentheses it walks charged: around the condition, and around a
+ * comparison's operands, which it walks to find the `null` literal.
+ */
+function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof conditionShape> {
+  const node = peel(expression, work);
+  if (node.kind === "binaryExpression" && (node.operator === "==" || node.operator === "!=")) {
+    peel(node.left, work);
+    peel(node.right, work);
+  }
+  return conditionShape(node);
+}
+
+/** A literal index's or case's key (`caseValueKey`), the parentheses and sign it walks charged. */
+function literalKey(expression: Expression, work: WorkLedger): string | undefined {
+  const node = peel(expression, work);
+  if (node.kind === "unaryExpression" && (node.operator === "-" || node.operator === "+"))
+    peel(node.operand, work);
+  return caseValueKey(node);
+}
+
 /** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
 export function pathKey(path: StablePath, work: WorkLedger, length = path.steps.length): Key {
   work.charge("eventSteps", length + 1);
@@ -88,7 +119,8 @@ export function stablePath(
   const steps: PathStep[] = [];
   // (outermost first; reversed once the root is found: whether every step so far is an element read)
   let trailingOnly = true;
-  let current = unwrap(expression);
+  const work = program.work;
+  let current = peel(expression, work);
   while (current.kind !== "identifier") {
     program.work.charge("eventSteps");
     if (current.kind === "propertyAccessExpression") {
@@ -100,12 +132,12 @@ export function stablePath(
         steps.push({ kind: "property", name });
         trailingOnly = false;
       }
-      current = unwrap(current.object);
+      current = peel(current.object, work);
       continue;
     }
     if (current.kind !== "indexExpression") return null;
-    const index = unwrap(current.index);
-    const fixed = caseValueKey(index);
+    const index = peel(current.index, work);
+    const fixed = literalKey(index, work);
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
     if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
       steps.push({ kind: "fixed", text: fixed });
@@ -115,7 +147,7 @@ export function stablePath(
       trailingOnly = false;
     } else if (trailing && trailingOnly) steps.push({ kind: "element" });
     else return null;
-    current = unwrap(current.object);
+    current = peel(current.object, work);
   }
   const binding = root ?? bindingOf(program, file, current);
   if (binding === null) return null;
@@ -316,12 +348,12 @@ function formOf(
  * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
  */
 function testForm(expression: Expression, work: WorkLedger): Fact | null {
-  let shape = conditionShape(expression);
+  let shape = shapeOf(expression, work);
   let holds = true;
   while (shape.kind === "not") {
     work.charge("indexSteps");
     holds = !holds;
-    shape = conditionShape(shape.operand);
+    shape = shapeOf(shape.operand, work);
   }
   if (shape.kind === "null")
     return { tested: shape.tested, type: null, holds: shape.negated ? !holds : holds };
@@ -349,7 +381,7 @@ function facts(condition: Expression, outcome: boolean, into: Fact[], work: Work
       into.push(outcome ? test : opposite(test));
       continue;
     }
-    const shape = conditionShape(expression);
+    const shape = shapeOf(expression, work);
     if (shape.kind === (outcome ? "and" : "or")) pending.push(shape.right, shape.left);
   }
 }
@@ -536,7 +568,7 @@ export class NarrowingIndex {
       region: OperandSpan | null = null,
     ): void => {
       if (!program.reached(node)) return;
-      const operand = unwrap(tested);
+      const operand = peel(tested, work);
       const path = stablePath(program, file, operand);
       const input = program.exprAt({
         file,
@@ -636,7 +668,7 @@ export class NarrowingIndex {
         work.charge("indexSteps");
         const switchCase = statement.cases[index];
         const form =
-          switchCase === undefined ? null : caseForm(switchCase.values, switchCase.typeTest);
+          switchCase === undefined ? null : caseForm(switchCase.values, switchCase.typeTest, work);
         const after = afterNull ? NON_NULL : null;
         if (form !== null) define(branch, use.file, use.operand, { form, element: null });
         else if (after !== null)
@@ -717,9 +749,9 @@ export class NarrowingIndex {
               });
           continue;
         }
-        const shape = conditionShape(expression);
+        const shape = shapeOf(expression, work);
         if (shape.kind === "and" || shape.kind === "or") {
-          const self = unwrap(expression);
+          const self = peel(expression, work);
           pending.push(
             shape.kind === "and"
               ? { expression: shape.right, and, or: null }
@@ -732,7 +764,7 @@ export class NarrowingIndex {
           );
           continue;
         }
-        for (const child of expressionChildren(unwrap(expression)))
+        for (const child of expressionChildren(peel(expression, work)))
           pending.push({ expression: child, and: null, or: null });
       }
     }
@@ -877,7 +909,8 @@ export class NarrowingIndex {
       program.work.charge("eventSteps");
       const location = length >= first ? at.locations.get(steps.length - length) : undefined;
       const g = location === undefined ? null : this.nearest(location, node);
-      if (g !== null && (best === null || nearer(program, g, best))) best = g;
+      // (at an equal region the later, more specific scope wins: the read's own path last)
+      if (g !== null && (best === null || !nearer(program, best, g))) best = g;
       if (length === steps.length) break;
       at = at.children.get(stepLabel(steps[length]!));
     }
@@ -924,9 +957,10 @@ function mutates(name: string): boolean {
 function caseForm(
   values: readonly Expression[],
   typeTest: { readonly negated: boolean } | null,
+  work: WorkLedger,
 ): NarrowingForm | null {
   if (typeTest !== null || values.length !== 1) return null;
-  const key = caseValueKey(values[0]!);
+  const key = literalKey(values[0]!, work);
   if (key === undefined) return null;
   if (key === "null") return ONLY_NULL;
   if (key.startsWith("string:")) return { kind: "is", kinds: ["string"] };
