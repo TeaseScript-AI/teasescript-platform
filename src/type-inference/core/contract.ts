@@ -450,9 +450,17 @@ interface ValueEntry {
   readonly value: PlaceId;
 }
 
+/** A read's class (`Contract.readClass`), and the writer of the alias it reads, which its answer takes. */
+interface ReadClass {
+  readonly cls: string | null;
+  readonly writer: Writer | null;
+}
+
 /** Computed values of a literal at a path that answer alike (`#othersAt`): the first, and the earliest cell writer. */
 interface OtherGroup extends ValueEntry {
   readonly writer: Writer | null;
+  /** The alias writers of its first's reads (`#inputWriters`). */
+  readonly writers: readonly (Writer | null)[];
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
@@ -569,7 +577,7 @@ export class Contract {
   /** Per read, its snapshot (`readSnapshot`). */
   readonly #snapshots = new Map<PlaceId, string>();
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
-  readonly #readClasses = [new Map<PlaceId, string | null>(), new Map<PlaceId, string | null>()];
+  readonly #readClasses = [new Map<PlaceId, ReadClass>(), new Map<PlaceId, ReadClass>()];
   /** Per computed value, its contract class (`contractClass`). */
   readonly #contractClasses = new Map<PlaceId, string | null>();
   /** Per literal's list of computed values at a path, its groups on the contract side and the value side (`#othersAt`). */
@@ -2000,14 +2008,48 @@ export class Contract {
    * S6c: what a read's answer at every path below it rests on, as one text, so reads of one class answer alike at every
    * path: its place and projection steps, and its guards there and below (`guardedRead`, `guardedBelowRead`: the
    * outermost tested paths below it whose regions hold it decide its mark at any path, §3.2); on the value side
-   * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node, r4.68 (1)). Never coarser than
-   * the answer: `null` for a value that is no read, a loop's visit, or a read an ingress stands in (its leaf is its
-   * own, S6-CARRIERS §3.1). Once per read and side.
+   * (`exact`) its snapshot too (`readSnapshot`: the exact path's signature at its node, r4.68 (1)). A read of a stable
+   * alias (`#aliasOf`: an unwritten binding whose one definition is a whole copy of a read, on the value side the
+   * read's exact answer) is that copy's read's class with its own steps and guards instead (S6-CARRIERS §4: a whole copy
+   * of a stable source is an alias, never a contribution of its own), so k aliases of one source are one class; their
+   * answers differ only by the alias's writer, the earliest standing for each kind where they merge (`aliasWriter`).
+   * Never coarser than the answer: `null` for a value that is no read, a loop's visit, or a read an ingress stands in
+   * (its leaf is its own, S6-CARRIERS §3.1). Once per read and side, a chain of aliases on an explicit walk.
    */
   public readClass(value: PlaceId, exact: boolean): string | null {
     const memo = this.#readClasses[exact ? 1 : 0]!;
     const known = memo.get(value);
-    if (known !== undefined) return known;
+    if (known !== undefined) return known.cls;
+    // (the reads along a chain of aliases, outermost first, to one whose class is known or that is no alias)
+    const chain: PlaceId[] = [];
+    let below: PlaceId | null = value;
+    while (below !== null && !memo.has(below)) {
+      chain.push(below);
+      below = this.#aliasOf(below, exact)?.source ?? null;
+    }
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const read = chain[index]!;
+      const alias = this.#aliasOf(read, exact);
+      memo.set(read, this.#ownClass(read, exact, alias));
+    }
+    return memo.get(value)!.cls;
+  }
+
+  /**
+   * The writer a read's answer takes from the alias it reads (`readClass`): the alias's one definition's, standing for
+   * every kind of the alias's answer but its emptiness and a missing property's (F28); `null` for a read of no alias.
+   */
+  public aliasWriter(value: PlaceId, exact: boolean): Writer | null {
+    this.readClass(value, exact);
+    return this.#readClasses[exact ? 1 : 0]!.get(value)?.writer ?? null;
+  }
+
+  /** A read's class (`readClass`), its alias's (`#aliasOf`) known. */
+  #ownClass(
+    value: PlaceId,
+    exact: boolean,
+    alias: { readonly source: PlaceId; readonly writer: Writer | null } | null,
+  ): ReadClass {
     const { program, guards, definitions } = this.pass;
     const steps: string[] = [];
     let current = value;
@@ -2021,21 +2063,67 @@ export class Contract {
       projection = program.projOf.get(current);
     }
     const binding = program.occurrenceOf.get(current);
-    let cls: string | null = null;
-    if (!fresh && binding !== undefined) {
-      const snapshot = exact ? this.readSnapshot(value) : "";
-      if (snapshot !== null)
-        cls = keptParts(
-          this.#work,
-          binding,
-          steps.reverse().join(" "),
-          guards.guardedRead(value) ? "g" : "",
-          guards.guardedBelowRead(value).join(" "),
-          snapshot,
-        );
+    if (fresh || binding === undefined) return { cls: null, writer: null };
+    const read = [
+      steps.reverse().join(" "),
+      guards.guardedRead(value) ? "g" : "",
+      guards.guardedBelowRead(value).join(" "),
+    ] as const;
+    const source =
+      alias === null ? null : (this.#readClasses[exact ? 1 : 0]!.get(alias.source)?.cls ?? null);
+    if (alias !== null && source !== null)
+      return { cls: keptParts(this.#work, "a", source, ...read), writer: alias.writer };
+    const snapshot = exact ? this.readSnapshot(value) : "";
+    return {
+      cls: snapshot === null ? null : keptParts(this.#work, binding, ...read, snapshot),
+      writer: null,
+    };
+  }
+
+  /**
+   * The read a read of a stable alias copies, with the alias's writer, or `null` (`readClass`): the binding read is an
+   * unwritten `let` or `global` with one definition, a whole copy of a read (no store below it, in it or into it from
+   * another callable: each would be a second definition), and on the value side that definition is the read's exact
+   * answer (`exactPath` at its node, no rest: every path below the binding is the copy's below it, an event below it
+   * being one of the binding's own, X6).
+   */
+  #aliasOf(
+    value: PlaceId,
+    exact: boolean,
+  ): { readonly source: PlaceId; readonly writer: Writer | null } | null {
+    const { program, definitions } = this.pass;
+    let base = value;
+    for (let projection = program.projOf.get(base); projection !== undefined;) {
+      base = projection.owner;
+      projection = program.projOf.get(base);
     }
-    memo.set(value, cls);
-    return cls;
+    const binding = program.occurrenceOf.get(base);
+    if (binding === undefined || definitions.ingress.has(base) || program.isHost(binding))
+      return null;
+    program.work.charge("invSteps");
+    const kind = program.place(binding).kind;
+    if (kind.kind !== "binding" || writtenOf(kind) !== null) return null;
+    const key = keyOf(binding, []);
+    const defs = definitions.byKey.get(key) ?? [];
+    const d = defs[0];
+    if (
+      defs.length !== 1 ||
+      d === undefined ||
+      d.kind !== "whole" ||
+      d.weak ||
+      d.value === undefined ||
+      definitions.keysBelow(key).length > 0 ||
+      (definitions.loopAdds.get(key)?.length ?? 0) > 0 ||
+      this.copiedKey(d.value) === null
+    )
+      return null;
+    if (exact) {
+      const node = program.occNode.get(base) ?? null;
+      const answer = node === null ? null : this.pass.exact.exactPath(key, node);
+      if (answer === null || !("def" in answer) || answer.def !== d || answer.rest.length > 0)
+        return null;
+    }
+    return { source: d.value, writer: definitions.writerOf(d) };
   }
 
   /**
@@ -2062,7 +2150,8 @@ export class Contract {
    * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
    * once per list and side: values of one class (`contractClass`; on the value side `Values.valueClass`) answer alike at
    * every path, so the first stands for them, the earliest writer for its kinds (each value's kinds take its cell's
-   * writer, F28); any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
+   * writer, F28); a value whose reads' alias writers come earlier than the first's (`#inputWriters`) stands for its own
+   * group, and any other value by itself. In order, so the merged answer keeps its kinds' order; the count of the
    * contributions (§3.4's several elements) stays the list's.
    */
   #othersAt(list: readonly ValueEntry[] | undefined, exact: boolean): readonly OtherGroup[] {
@@ -2072,7 +2161,7 @@ export class Contract {
     if (known !== undefined) return known;
     const { definitions, program, values } = this.pass;
     const groups: OtherGroup[] = [];
-    const byClass = new Map<string, number>();
+    const byClass = new Map<string, number[]>();
     for (const entry of list) {
       program.work.charge("invSteps");
       const writer = entry.g === null ? null : definitions.writerOf(entry.g);
@@ -2084,25 +2173,54 @@ export class Contract {
       // (on the contract side a value without its cell's writer apart from one with it)
       const key =
         cls === null ? null : keptParts(this.#work, cls, exact || writer !== null ? "w" : "");
-      const at = key === null ? undefined : byClass.get(key);
+      // (a value joins its class's first group whose reads' alias writers come no later than its own, so that group's
+      // first stands for it: the earliest writer for each kind, `aliasWriter`)
+      const writers = key === null ? [] : this.#inputWriters(entry.value, exact);
+      const at =
+        key === null
+          ? undefined
+          : (byClass.get(key) ?? []).find((position) =>
+              groups[position]!.writers.every(
+                (first, index) =>
+                  first === writers[index] ||
+                  (first !== null && firstWriter(first, writers[index] ?? null) === first),
+              ),
+            );
       if (at !== undefined) {
         const into = groups[at]!;
-        groups[at] = { value: into.value, g: into.g, writer: firstWriter(into.writer, writer) };
+        groups[at] = { ...into, writer: firstWriter(into.writer, writer) };
         continue;
       }
-      if (key !== null) byClass.set(key, groups.length);
+      if (key !== null) {
+        const positions = byClass.get(key);
+        if (positions === undefined) byClass.set(key, [groups.length]);
+        else positions.push(groups.length);
+      }
       this.#keep(2);
-      groups.push({ value: entry.value, g: entry.g, writer });
+      groups.push({ value: entry.value, g: entry.g, writer, writers });
     }
     memo.set(list, groups);
     return groups;
   }
 
+  /** The alias writers of the reads a computed value's class rests on (`#othersAt`), in the class's order. */
+  #inputWriters(value: PlaceId, exact: boolean): readonly (Writer | null)[] {
+    const c = this.pass.program.opOf.get(value);
+    if (c === undefined) return [this.aliasWriter(value, exact)];
+    if (c.kind === "get")
+      return [this.aliasWriter(c.receiver, exact), this.aliasWriter(c.fallback, exact)];
+    if (c.kind === "fallback")
+      return [this.aliasWriter(c.left, exact), this.aliasWriter(c.right, exact)];
+    return [];
+  }
+
   /**
    * S6c: the options of a choice its answer reads, by their index, once per choice and side: of options that answer
    * alike at every path (a label of one kind; a choice object's selected value, or a computed option, of one read
-   * class, `readClass`), the first alone, so a choice of k options of one source read at k fields reads it once per
-   * field; any other option by itself. In the options' order, so the merged answer keeps its kinds' order.
+   * class, `readClass`) one, so a choice of k options of one source read at k fields reads it once per field; any other
+   * option by itself. Reads of aliases of one source differ by their alias's writer only, so the one whose alias writes
+   * first stands for them (each kind's writer being the earliest, `aliasWriter`), where the first of them stands, so the
+   * merged answer keeps its kinds' order.
    */
   public choiceOptions(
     c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -2113,8 +2231,10 @@ export class Contract {
     if (known !== undefined) return known;
     const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
     const labels = choiceLabels(c);
-    const seen = new Set<string>();
+    // (each class's place among the options, by its first; its option read, the one whose alias writes first)
+    const seen = new Map<string, number>();
     const options: number[] = [];
+    const writers: (Writer | null)[] = [];
     for (const [index, argument] of c.arguments.entries()) {
       this.pass.program.work.charge("invSteps");
       const label = labels[index];
@@ -2122,22 +2242,30 @@ export class Contract {
       // (a label by its kind; a choice object by the read it selects, one without a selected key by itself; a list's
       // or a set's buttons by themselves; a computed option by its read)
       let cls: string | null = null;
+      let read: PlaceId | null = null;
       if (!sharing() || content?.kind === "list" || content?.kind === "set") cls = null;
       else if (label !== undefined) cls = keptParts(this.#work, "l", label ?? "");
       else if (content?.kind === "object") {
-        const selected =
-          content.object === null ? null : (content.object.value ?? content.object.text);
-        const read = selected === null ? null : this.readClass(selected, exact);
-        if (read !== null) cls = keptParts(this.#work, "o", read);
+        read = content.object === null ? null : (content.object.value ?? content.object.text);
+        const of = read === null ? null : this.readClass(read, exact);
+        if (of !== null) cls = keptParts(this.#work, "o", of);
       } else {
-        const read = this.readClass(argument, exact);
-        if (read !== null) cls = keptParts(this.#work, "c", read);
+        read = argument;
+        const of = this.readClass(argument, exact);
+        if (of !== null) cls = keptParts(this.#work, "c", of);
       }
-      if (cls !== null) {
-        if (seen.has(cls)) continue;
-        seen.add(cls);
+      const writer = read === null ? null : this.aliasWriter(read, exact);
+      const at = cls === null ? undefined : seen.get(cls);
+      if (at !== undefined) {
+        if (writer !== null && firstWriter(writer, writers[at]!) === writer) {
+          options[at] = index;
+          writers[at] = writer;
+        }
+        continue;
       }
+      if (cls !== null) seen.set(cls, options.length);
       options.push(index);
+      writers.push(writer);
     }
     this.#keep(options.length);
     memo.set(c.result, options);
