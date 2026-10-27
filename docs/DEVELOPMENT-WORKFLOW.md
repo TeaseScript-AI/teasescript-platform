@@ -22,9 +22,10 @@ closed issues first and add evidence to the one tracking the same problem, reope
 diagnosis in reproduction, source or logs, and mark hypotheses as such.
 
 Labels, described on GitHub: one orchestrator label (`platform`, `V2 compiler`, `importer`); `owner: blocking` or
-`owner: input` while the owner must decide; `in progress` while an agent works on it; `spare capacity` for ready,
-low-priority work; `needs triage` until an orchestrator is assigned. With `gh`, set the type and labels (`--type`,
-`--label`); triage fills any gap. Change labels only when the state changes.
+`owner: input` while a question the owner has not yet decided waits; `in progress` while an agent works on it;
+`spare capacity` for work that must be done but can wait (ready, no owner input, and no more expensive later because
+nothing upcoming builds on it); `needs triage` until an orchestrator is assigned. With `gh`, set the type and labels
+(`--type`, `--label`); triage fills any gap. Change labels only when the state changes.
 
 Before implementation, the issue states the problem or goal, evidence, scope and exclusions, and acceptance criteria.
 Future-facing infrastructure also needs a concrete scheduled consumer, an accepted boundary that must be correct when
