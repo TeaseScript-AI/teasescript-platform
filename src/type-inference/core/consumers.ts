@@ -397,9 +397,11 @@ export class Consumers {
    * there stands); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
    * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
    * decided, or a copy's through the copy forest, `Admission.retained`); `STOPPED` (`unknown` with the reason `budget`)
-   * only where none of these decides it, so its consumer owes its check when the script runs. A written or retained type
-   * is a domain, not the value's kinds (revision 15, r4.105): read as the value for a fixed need, possibly empty at an
-   * element; for a `requirement` that follows from the value's kinds (C10's family) only as one family without `null`.
+   * only where none of these decides it, so its consumer owes its check when the script runs. Only a literal's kind and
+   * the read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
+   * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
+   * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
+   * `#required`.
    */
   #finishingRead(
     value: PlaceId,
@@ -415,33 +417,44 @@ export class Consumers {
       const items = this.#run(work());
       return items.some(unsettledItem) ? null : items;
     };
-    const found =
-      (this.pass.program.work.stopped === null
+    // the value at the read: its own finished answer
+    const exact =
+      this.pass.program.work.stopped === null
         ? null
-        : settled(() => values.valueItems(value, node, rest))) ??
-      settled(() => contract.contractOfValueAt(value, rest));
-    if (found !== null) return found;
-    // the admitted type as admission retained it (S3 §5 revision 14): a written type by its syntax in any finishing
-    // pass; a decision or a copy's only where admission settled
+        : settled(() => values.valueItems(value, node, rest));
+    if (exact !== null) return exact;
+    // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
+    const held = settled(() => contract.contractOfValueAt(value, rest));
+    if (held !== null)
+      return requirement ? this.#required(withoutEmpty(held).map((item) => item.tag)) : held;
+    // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
+    // decision or a copy's only where admission settled
     const written = this.#writtenRead(value);
     const term = written === null ? null : termAt(written, rest);
     const tags =
       term !== null ? typeTags(term) : this.settled ? (this.#retainedRead(value, rest) ?? []) : [];
-    // a domain, not the value's kinds (S3 §5 revision 15): a requirement that follows from the value's kinds (C10's
-    // family) takes them from it only where every value in it gives the same: one family without `null` gives it, `null`
-    // only none; any other leaves it undecided
-    if (requirement && !tags.includes("unknown")) {
-      const families = new Set(
-        tags.filter((tag) => tag !== "null").map((tag) => (tag === "integer" ? "number" : tag)),
-      );
-      if (tags.length > 0 && families.size === 0) return [makeItem("null", null, { cert: "pos" })];
-      if (families.size !== 1 || tags.includes("null")) return STOPPED;
-    }
+    if (requirement) return this.#required(tags);
     if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
     const items = tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
     // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
     const step = rest.at(-1) ?? this.pass.program.projOf.get(value)?.step;
     return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+  }
+
+  /**
+   * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
+   * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
+   * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
+   */
+  #required(tags: readonly ItemTag[]): readonly Item[] {
+    if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
+    const families = new Set(
+      tags.filter((tag) => tag !== "null").map((tag) => (tag === "integer" ? "number" : tag)),
+    );
+    if (families.size === 0) return [makeItem("null", null, { cert: "pos" })];
+    return families.size === 1 && !tags.includes("null")
+      ? tags.map((tag) => makeItem(tag, null, { cert: "pos" }))
+      : STOPPED;
   }
 
   /** The admitted type admission retained at a read's key path and `rest` (`Admission.retained`), else `null`. */
