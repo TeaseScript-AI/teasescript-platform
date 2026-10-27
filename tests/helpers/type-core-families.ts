@@ -1498,8 +1498,9 @@ const copiesOf = (k: number, form: "chain" | "fan-out"): string =>
  * root copied into itself at another path; review r3's shapes (a read stored into each copy's own field, literals
  * holding the root read into one list, copies replaced by aliases that store their own field), the design review's
  * and reviews r5's to r7's (two roots met with a narrow projection each, a chain's last copy read at every field, a chain
- * of own fields copied beside a small record each, distinct records held in two lists). A copy costs its own divergences,
- * never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
+ * of own fields copied beside a small record each, distinct records held in two lists), and Astra's (a copy storing its
+ * plain fields with its written ones read, a copy of a copy storing below each record read whole). A copy costs its own
+ * divergences, never its source's every field (r4.51, r4.86 (2)); each is gated with the sharing off too.
  */
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
@@ -1809,6 +1810,23 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
           "let a = root",
           rows(k, (i) => `a.g${i} = 2`),
           rows(k, (i) => `let c${i} = a.f${i}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "A4-inherited-overlap-ancestor",
+    measures:
+      "Astra's review r2 B2 (`forest-overlap-ancestor`): a copy of a copy of a root of k records, storing one field below each record, each record read",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "{left: typed, right: 1}")}}`,
+          "let a = root",
+          "let b = a",
+          rows(k, (i) => `b.f${i}.right = 2`),
+          rows(k, (i) => `let r${i} = b.f${i}`),
           "exit",
         ),
       ),
