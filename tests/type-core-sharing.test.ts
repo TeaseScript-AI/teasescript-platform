@@ -82,6 +82,207 @@ const one = (name: string, source: string): Program => ({
   files: [{ path: "main.tease", source }],
 });
 
+/**
+ * #1210's programs: projections of host reads (a property, an element, a nested property) in one literal, in records, in
+ * lists or bare, two deep and read below, beside another field, another global, a direct read and known data, guarded,
+ * changed between, in named records, added and stored by calls; a named source and a named projection the controls.
+ * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name.
+ */
+const PROJECTED_INGRESS_PROGRAMS: readonly {
+  readonly name: string;
+  readonly lines: readonly string[];
+  readonly place: readonly [string, readonly string[]];
+  readonly read: string;
+}[] = [
+  {
+    name: "records of one property read (the issue's witness)",
+    lines: [
+      "let box = [{n: ^hostValue.n}, {n: ^hostValue.n}]",
+      "let out: integer = box[0].n",
+      'say "DONE"',
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "lists of one property read",
+    lines: ["let box = [[^hostValue.text], [^hostValue.text]]", "let n: integer = box.first[0]"],
+    place: ["box", ["element", "element"]],
+    read: "box.first[0]",
+  },
+  {
+    name: "lists of one property read with a direct read between",
+    lines: [
+      "let box = [[^hostValue.text], [^hostValue], [^hostValue.text]]",
+      "let n: integer = box.first[0]",
+    ],
+    place: ["box", ["element", "element"]],
+    read: "box.first[0]",
+  },
+  {
+    name: "records of one element read",
+    lines: ["let box = [{n: ^hostValue[0]}, {n: ^hostValue[0]}]", "let out: integer = box[0].n"],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "records of one nested property read",
+    lines: ["let box = [{n: ^hostValue.a.b}, {n: ^hostValue.a.b}]", "let out: integer = box[0].n"],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "property reads bare",
+    lines: ["let box = [^hostValue.n, ^hostValue.n]", "let out: integer = box[0]"],
+    place: ["box", ["element"]],
+    read: "box[0]",
+  },
+  {
+    name: "records in records of one property read",
+    lines: [
+      "let box = [{w: {n: ^hostValue.n}}, {w: {n: ^hostValue.n}}]",
+      "let out: integer = box[0].w.n",
+    ],
+    place: ["box", ["element", "w", "n"]],
+    read: "box[0].w.n",
+  },
+  {
+    name: "property reads read below an element step",
+    lines: ["let box = [^hostValue.r, ^hostValue.r]", "let out: integer = box[0].n"],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "reads of different properties",
+    lines: ["let box = [{n: ^hostValue.n}, {n: ^hostValue.m}]", "let out: integer = box[0].n"],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "reads of one property of two globals",
+    lines: [
+      "let box = [{n: ^hostValue.n}, {n: ^hostInit.n}, {n: ^hostValue.n}]",
+      "let out: integer = box[0].n",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "property reads beside a direct read and known data",
+    lines: [
+      "let box = [{n: ^hostValue.n}, {n: ^hostValue}, {n: 1}, {n: ^hostValue.n}]",
+      "let out: integer = box[0].n",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "guarded property reads beside one outside the test",
+    lines: [
+      "let outside = {n: ^hostValue.n}",
+      "if hostValue.n is integer {",
+      "  let box = [outside, {n: ^hostValue.n}, {n: ^hostValue.n}]",
+      "  let out: integer = box[0].n",
+      "}",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "property reads with a tested property below",
+    lines: [
+      "if hostValue.r.n is integer {",
+      "  let box = [{w: ^hostValue.r}, {w: ^hostValue.r}]",
+      "  let out: integer = box[0].w.n",
+      "}",
+    ],
+    place: ["box", ["element", "w", "n"]],
+    read: "box[0].w.n",
+  },
+  {
+    name: "property reads with a call storing the property between",
+    lines: [
+      "function bump {",
+      "  hostValue.n = 2",
+      "  return 1",
+      "}",
+      "let box = [{n: ^hostValue.n}, {n: bump()}, {n: ^hostValue.n}]",
+      "let out: integer = box[0].n",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "named records of one property read",
+    lines: [
+      "let x = {n: ^hostValue.n}",
+      "let y = {n: ^hostValue.n}",
+      "let box = [x, y]",
+      "let out: integer = box[0].n",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "property reads added",
+    lines: [
+      "let ys = []",
+      "ys.add(^hostValue.n)",
+      "ys.add(^hostValue.n)",
+      "let out: integer = ys[0]",
+    ],
+    place: ["ys", ["element"]],
+    read: "ys[0]",
+  },
+  {
+    name: "records of one property read stored by two calls",
+    lines: [
+      "global st = {n: 1}",
+      "function a {",
+      "  st = {n: ^hostValue.n}",
+      "}",
+      "function b {",
+      "  st = {n: ^hostValue.n}",
+      "}",
+      "a()",
+      "b()",
+      "let out: integer = st.n",
+    ],
+    place: ["st", ["n"]],
+    read: "st.n",
+  },
+  {
+    name: "control: property reads of a named source",
+    lines: [
+      "let raw = ^hostValue",
+      "let box = [{n: raw.n}, {n: raw.n}]",
+      "let out: integer = box[0].n",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "control: reads of a named projection",
+    lines: ["let p = ^hostValue.n", "let box = [{n: p}, {n: p}]", "let out: integer = box[0].n"],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+];
+
+/** A #1210 program's source without its marks, and the spans (`start-end`) of the host reads they mark. */
+function unmarked(lines: readonly string[]): {
+  readonly source: string;
+  readonly spans: readonly string[];
+} {
+  const spans: string[] = [];
+  let source = "";
+  for (const [index, part] of `${lines.join("\n")}\nexit\n`.split("^").entries()) {
+    if (index > 0) spans.push(`${source.length}-${source.length + /^\w+/.exec(part)![0].length}`);
+    source += part;
+  }
+  return { source, spans };
+}
+
 function programs(): Program[] {
   const out: Program[] = [];
   for (const shape of shapesOf(roleClasses().classes)) out.push(one(shape.name, shape.source));
@@ -112,6 +313,8 @@ function programs(): Program[] {
   // S6c's programs: each discovery it shares beside what a coarser key would merge (`VALUE_SHARING_PROGRAMS`)
   for (const { name, files } of VALUE_SHARING_PROGRAMS) out.push({ name: `S6c ${name}`, files });
   for (const { name, files } of DIRECT_INGRESS_PROGRAMS) out.push({ name: `#1196 ${name}`, files });
+  for (const { name, lines } of PROJECTED_INGRESS_PROGRAMS)
+    out.push(one(`#1210 ${name}`, unmarked(lines).source));
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
   // the merged S6's written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
@@ -160,6 +363,16 @@ function prepared(program: Program): Prepared {
   return { program, request, bindings };
 }
 
+/** A computation in the source order, or in the reversed consumer and solver orders. */
+function inOrder<T>(reversed: boolean, callback: () => T): T {
+  return reversed
+    ? withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => withSolverSeam({ reverseWorklist: true }, callback),
+      )
+    : callback();
+}
+
 /** Two sites as (file index, start, end), in source order. */
 function compareSites(a: readonly number[], b: readonly number[]): number {
   return a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
@@ -174,14 +387,7 @@ function published(
   { program, request, bindings }: Prepared,
   reversed: boolean,
 ): { readonly text: string; readonly record: string; readonly sited: boolean } {
-  const ordered = <T>(callback: () => T): T =>
-    reversed
-      ? withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => withSolverSeam({ reverseWorklist: true }, callback),
-        )
-      : callback();
-  const answers = ordered(() => analyseCore(request));
+  const answers = inOrder(reversed, () => analyseCore(request));
   const admitted = bindings.map((place) => [
     place,
     answers.place(place, []).admitted,
@@ -189,7 +395,7 @@ function published(
   ]);
   const lowered = (() => {
     try {
-      const result = ordered(() =>
+      const result = inOrder(reversed, () =>
         compileProjectWithBackend(program.files, { globals: GLOBALS }, CORE_BACKEND),
       );
       return { plan: result.plan, diagnostics: result.diagnostics };
@@ -273,7 +479,7 @@ test("the core's sharing of answers is output-neutral for every family, witness 
  * #1196: a read of a host global has a mixed class (`Contract.classOf`), so the values over it share their discovery
  * where their answer holds no external data and read every member where it does, each naming its own leaf (C9). A lost
  * leaf changes nothing the differential above publishes, so here every occurrence's answer, its items whole with their
- * leaves, is the same with the sharing on and off, in both orders, over #1196's controls.
+ * leaves, is the same with the sharing on and off, in both orders, over #1196's controls and #1210's programs.
  */
 test("every occurrence over host data names each ingress's leaf with the sharing on and off, in both orders (#1196)", () => {
   const itemText = ({ ingress, writer, ...rest }: Item): string =>
@@ -292,21 +498,75 @@ test("every occurrence over host data names each ingress's leaf with the sharing
       .join("\n");
   };
   const differing: string[] = [];
-  for (const { name, files } of DIRECT_INGRESS_PROGRAMS) {
+  for (const { name, files } of [
+    ...DIRECT_INGRESS_PROGRAMS,
+    ...PROJECTED_INGRESS_PROGRAMS.map(({ name, lines }) =>
+      one(`#1210 ${name}`, unmarked(lines).source),
+    ),
+  ]) {
     const request = coreRequest(files, GLOBALS);
     assert.ok(request !== null, `${name}: its files parse and resolve`);
     for (const reversed of [false, true]) {
-      const run = (): string =>
-        reversed
-          ? withConsumerOrder(
-              (list) => [...list].reverse(),
-              () => withSolverSeam({ reverseWorklist: true }, () => occurrences(request)),
-            )
-          : occurrences(request);
+      const run = (): string => inOrder(reversed, () => occurrences(request));
       if (run() !== withoutSharing(run)) differing.push(`${name}${reversed ? " (reversed)" : ""}`);
     }
   }
   assert.deepEqual(differing, []);
+});
+
+/**
+ * #1210: a projection of a host read carries its ingress's leaf (S6-CARRIERS §3.1), so a literal's one entry for k such
+ * reads unions their leaves and no identity merge drops a read. With the sharing on and off, in both orders, the
+ * receiving place's contract and the receiving read name exactly the leaves of the reads the source marks, and the four
+ * publish the same checks, each with its target, domain and site (a dropped read published a loose boundary).
+ */
+test("a projection of a host read names its ingress's leaf and publishes the same checks with the sharing on and off, in both orders (#1210)", () => {
+  const leaves = (items: readonly Item[]): string =>
+    [
+      ...new Set(
+        items.flatMap(({ ingress }) =>
+          ingress === undefined
+            ? []
+            : ingressLeaves(ingress).map(({ start, end }) => `${start}-${end}`),
+        ),
+      ),
+    ]
+      .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
+      .join(",");
+  const wrong: string[] = [];
+  for (const { name, lines, place, read } of PROJECTED_INGRESS_PROGRAMS) {
+    const { source, spans } = unmarked(lines);
+    const expected = `${spans.join(",")} / ${spans.join(",")}`;
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, `${name}: its source parses and resolves`);
+    const id = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === place[0],
+    )!.id;
+    // (the place's contract and the read's answer, by their leaves; the checks whole)
+    const answer = (): { readonly leaves: string; readonly checks: string } => {
+      const answers = analyseCore(request);
+      const node = answers.graph.nodes.find(
+        ({ span }) => span !== null && source.slice(span.start.offset, span.end.offset) === read,
+      )!;
+      return {
+        leaves: `${leaves(answers.place(id, place[1]).contract.kinds)} / ${leaves(answers.valueAt(node, []).items)}`,
+        checks: JSON.stringify(answers.checks),
+      };
+    };
+    let checks: string | undefined;
+    for (const reversed of [false, true])
+      for (const shared of [true, false]) {
+        const run = shared
+          ? inOrder(reversed, answer)
+          : withoutSharing(() => inOrder(reversed, answer));
+        const mode = `${reversed ? "reversed" : "source"} order, sharing ${shared ? "on" : "off"}`;
+        if (run.leaves !== expected)
+          wrong.push(`${name} (${mode}): leaves ${run.leaves}, expected ${expected}`);
+        if ((checks ??= run.checks) !== run.checks)
+          wrong.push(`${name} (${mode}): its checks differ from the first run's`);
+      }
+  }
+  assert.deepEqual(wrong, []);
 });
 
 /**
