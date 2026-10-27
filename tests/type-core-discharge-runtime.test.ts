@@ -1278,6 +1278,7 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
   );
   // an own written destination that admits every kind below the call (`object`'s fields: V30 §13) types nothing there:
   // a parse's or a load's open part stays on the route, plain, optional or as a list's element (Sol's r1 B2 on #1218)
+  // (route and runs only: the plan's expected type there reads the default's fields, #1223)
   for (const [type, fallback, json] of [
     ["object", "{n: 0}", '{"n": "text"}'],
     ["object?", "{n: 0}", "null"],
