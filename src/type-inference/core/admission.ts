@@ -1522,57 +1522,109 @@ export class Admission {
     const { cycleOf, order } = cyclesOf(bySource, work);
     const cycles = new Map<PlaceId, Set<string>>();
     this.#inherits = { seeds, into, cycleOf, cycles, order };
-    // a cycle's landed paths, sources before it: a copy from outside it brings every path landed below its strip, and
-    // within it a copy brings its source's base paths only, kept base by a whole copy alone, so no path grows by going
-    // round (Sol's round 4 B1)
+    // a cycle's landed paths, sources before it: a copy from outside it brings its own path and every path landed below
+    // its strip, as base; within it a copy brings its source's base paths only, kept base by a whole copy alone, so no
+    // path grows by going round (Sol's round 4 B1)
     for (const component of order) {
       const cycle = cycleOf.get(component[0]!);
       if (cycle === undefined) continue;
-      const all = new Map<PlaceId, Set<string>>();
-      const base = new Map<PlaceId, Set<string>>();
-      for (const member of component) {
-        all.set(member, new Set(seeds.get(member)?.keys() ?? []));
-        base.set(member, new Set(seeds.get(member)?.keys() ?? []));
+      const brings = (copy: InheritedCopy, land: (path: readonly string[]) => void): void => {
+        land(copy.path);
+        for (const text of this.#landedBelow(copy.from, copy.strip)) {
+          const steps = splitPath(text);
+          if (steps.length > copy.strip.length)
+            land(keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)));
+        }
+      };
+      // (a cycle of whole copies: each member's base paths reach every other's whole, so its members land one set, their
+      // own, their copies' from outside, and the root each whole copy lands)
+      if (this.#wholeCycle(component)) {
+        const shared = new Set<string>([""]);
+        const land = (path: readonly string[]): void => {
+          work.charge("indexSteps");
+          shared.add(keptText(this.#work, path));
+        };
+        for (const member of component) {
+          for (const text of seeds.get(member)?.keys() ?? []) land(splitPath(text));
+          for (const copy of into.get(member) ?? [])
+            if (cycleOf.get(copy.from) !== cycle) brings(copy, land);
+        }
+        for (const member of component) cycles.set(member, shared);
+        continue;
       }
+      const all = new Map<PlaceId, Set<string>>();
+      // (each member's base paths in the order they came, so a copy reads only those it has not read)
+      const base = new Map<PlaceId, { readonly paths: Set<string>; readonly list: string[] }>();
+      for (const member of component) {
+        const own = [...(seeds.get(member)?.keys() ?? [])];
+        all.set(member, new Set(own));
+        base.set(member, { paths: new Set(own), list: own });
+      }
+      // a path landed in a member, kept base by a copy that keeps it; whether its base grew
       const land = (member: PlaceId, path: readonly string[], keeps: boolean): boolean => {
         work.charge("indexSteps");
         const text = keptText(this.#work, path);
-        let grew = false;
-        for (const paths of keeps ? [all.get(member)!, base.get(member)!] : [all.get(member)!])
-          if (!paths.has(text)) {
-            paths.add(text);
-            grew = true;
-          }
-        return grew;
+        all.get(member)!.add(text);
+        const kept = base.get(member)!;
+        if (!keeps || kept.paths.has(text)) return false;
+        kept.paths.add(text);
+        kept.list.push(text);
+        return true;
       };
-      const below = (copy: InheritedCopy, text: string, keeps: boolean): boolean => {
-        const steps = splitPath(text);
-        return (
-          steps.length > copy.strip.length &&
-          isPrefix(copy.strip, steps) &&
-          land(copy.place, keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)), keeps)
-        );
-      };
+      const outgoing = new Map<PlaceId, InheritedCopy[]>();
       for (const member of component)
-        for (const copy of into.get(member) ?? [])
+        for (const copy of into.get(member) ?? []) {
           if (cycleOf.get(copy.from) !== cycle) {
-            land(member, copy.path, true);
-            for (const text of this.#landedBelow(copy.from, copy.strip)) below(copy, text, true);
+            brings(copy, (path) => land(member, path, true));
+            continue;
           }
-      for (let grew = true; grew;) {
-        grew = false;
-        for (const member of component)
-          for (const copy of into.get(member) ?? []) {
-            if (cycleOf.get(copy.from) !== cycle) continue;
-            const keeps = copy.path.length === 0 && copy.strip.length === 0;
-            grew = land(member, copy.path, keeps) || grew;
-            // (a path it lands meanwhile is a fixpoint's next step, met in the same pass or the next)
-            for (const text of base.get(copy.from)!) grew = below(copy, text, keeps) || grew;
+          const list = outgoing.get(copy.from);
+          if (list === undefined) outgoing.set(copy.from, [copy]);
+          else list.push(copy);
+        }
+      // (a member taken again only where its base paths grew; each copy reads its source's from where it stopped)
+      const read = new Map<InheritedCopy, number>();
+      const queue = [...component];
+      const queued = new Set(queue);
+      for (let index = 0; index < queue.length; index += 1) {
+        const from = queue[index]!;
+        queued.delete(from);
+        for (const copy of outgoing.get(from) ?? []) {
+          const keeps = copy.path.length === 0 && copy.strip.length === 0;
+          let grew = land(copy.place, copy.path, keeps);
+          const list = base.get(from)!.list;
+          for (let at = read.get(copy) ?? 0; at < list.length; at += 1) {
+            const steps = splitPath(list[at]!);
+            if (steps.length > copy.strip.length && isPrefix(copy.strip, steps))
+              grew =
+                land(
+                  copy.place,
+                  keptSteps(this.#work, copy.path, steps.slice(copy.strip.length)),
+                  keeps,
+                ) || grew;
           }
+          read.set(copy, list.length);
+          if (grew && !queued.has(copy.place)) {
+            queued.add(copy.place);
+            queue.push(copy.place);
+          }
+        }
       }
       for (const member of component) cycles.set(member, all.get(member)!);
     }
     return this.#inherits;
+  }
+
+  /** Whether a cycle of copies holds only whole copies within it (no step added or taken), its members' one landing. */
+  #wholeCycle(component: readonly PlaceId[]): boolean {
+    const { into, cycleOf } = this.#inheritance();
+    const cycle = cycleOf.get(component[0]!);
+    return component.every((member) =>
+      (into.get(member) ?? []).every(
+        (copy) =>
+          cycleOf.get(copy.from) !== cycle || (copy.path.length === 0 && copy.strip.length === 0),
+      ),
+    );
   }
 
   /**
@@ -1732,6 +1784,64 @@ export class Admission {
     }
     for (const component of order) {
       if (cycleOf.has(component[0]!)) {
+        const cycle = cycleOf.get(component[0]!);
+        if (this.#wholeCycle(component)) {
+          // a cycle of whole copies holds what all its members' stores and its copies from outside bring, at its one
+          // landing: its candidates the members', and a path hot where any member's contents may not fit there
+          const shared = cycles.get(component[0]!)!;
+          const candidates = new Map<string, readonly string[]>();
+          const put = (path: readonly string[]): void => {
+            work.charge("indexSteps");
+            candidates.set(keptText(this.#work, path), path);
+          };
+          const types = new Map<string, Set<TypeTerm>>();
+          const classes = new Map<string, InheritedCopy>();
+          for (const member of component) {
+            for (const [text, levels] of seeds.get(member) ?? []) {
+              put(keptSplit(this.#work, text));
+              let found = types.get(text);
+              if (found === undefined) types.set(text, (found = new Set()));
+              for (const level of levels) found.add(level);
+            }
+            const own = this.#ownStructure(member);
+            for (const path of own?.points ?? []) if (shared.has(pathText(path))) put(path);
+            for (const prefix of own?.below ?? [])
+              for (const text of this.#landedBelow(member, prefix))
+                put(keptSplit(this.#work, text));
+            for (const copy of into.get(member) ?? []) {
+              if (cycleOf.get(copy.from) === cycle) continue;
+              const origin = origins.get(copy.from) ?? copy.from;
+              const id = keptParts(this.#work, origin, copy.path, copy.strip);
+              if (!classes.has(id))
+                classes.set(id, origin === copy.from ? copy : { ...copy, from: origin });
+            }
+          }
+          for (const copy of classes.values())
+            for (const path of hots.get(copy.from) ?? []) {
+              work.charge("indexSteps");
+              if (isPrefix(copy.strip, path))
+                put(keptSteps(this.#work, copy.path, path.slice(copy.strip.length)));
+            }
+          for (const path of this.#meeting(
+            types.size > 0 ? types : undefined,
+            [...classes.values()],
+            sizes,
+          ))
+            put(path);
+          const hot: (readonly string[])[] = [];
+          for (const path of candidates.values())
+            if (component.some((member) => this.#hotAt(member, path))) hot.push(path);
+          for (const member of component)
+            for (const path of retaken.get(member) ?? [])
+              if (shared.has(pathText(path))) hot.push(path);
+          for (const member of component) {
+            hots.set(member, hot);
+            origins.set(member, member);
+            sizes.set(member, shared.size);
+          }
+          continue;
+        }
+        // (a cycle whose copies add or take steps: every landed path of each member tested)
         for (const member of component) {
           const hot: (readonly string[])[] = [];
           for (const text of cycles.get(member)!) {
@@ -1787,7 +1897,7 @@ export class Admission {
       for (const path of own?.points ?? []) if (this.#landed(place, path)) put(path);
       for (const prefix of own?.below ?? [])
         for (const text of this.#landedBelow(place, prefix)) put(keptSplit(this.#work, text));
-      for (const path of this.#meeting(place, [...classes.values()], sizes)) put(path);
+      for (const path of this.#meeting(seeds.get(place), [...classes.values()], sizes)) put(path);
       const hot: (readonly string[])[] = [];
       for (const path of candidates.values()) if (this.#hotAt(place, path)) hot.push(path);
       for (const path of retaken.get(place) ?? []) if (this.#landed(place, path)) hot.push(path);
@@ -1854,15 +1964,15 @@ export class Admission {
   }
 
   /**
-   * Where a place's copies of different sources, or its written types, meet (`#hotSets`): the paths two of them land,
-   * a written type at a path beside another or a copy's. The largest copy is asked of each path the others land.
+   * Where a place's copies of different sources, or its written types (`types`, by path), meet (`#hotSets`): the paths
+   * two of them land, a written type at a path beside another or a copy's. The largest copy is asked of each path the
+   * others land.
    */
   #meeting(
-    place: PlaceId,
+    types: ReadonlyMap<string, ReadonlySet<TypeTerm>> | undefined,
     copies: readonly InheritedCopy[],
     sizes: ReadonlyMap<PlaceId, number>,
   ): (readonly string[])[] {
-    const types = this.#inheritance().seeds.get(place);
     if (types === undefined && copies.length < 2) return [];
     const work = this.pass.program.work;
     const met = new Map<string, { readonly path: readonly string[]; count: number }>();
