@@ -1701,13 +1701,13 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-projected-fan-in",
     measures:
-      "Sol's review r3 B2: k literals each holding a root of k written-typed fields and storing a plain field, their held roots read into one list",
+      "Sol's review r3 B2: k literals each holding a root of k written-typed fields beside a plain field they store, their held roots read into one list",
     program: (k) =>
       main(
         lines(
           "let typed: integer = 1",
           `let root = {${fields(k, () => "typed")}, extra: 1}`,
-          rows(k, (i) => `let a${i} = {p: root}\na${i}.extra = 2`),
+          rows(k, (i) => `let a${i} = {p: root, extra: 1}\na${i}.extra = 2`),
           `let out = [${Array.from({ length: k }, (_, i) => `a${i}.p`).join(", ")}]`,
           "exit",
         ),
