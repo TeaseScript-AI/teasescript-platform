@@ -1695,6 +1695,21 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  ...(["is", "is not"] as const).map((test): WorkFamily => ({
+    name: `N1-wide-union-${test.replace(" ", "-")}`,
+    measures: `N1: \`${test}\` a union naming one kind k times, read k times: each kind filtered once`,
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "if flagHost { n = null }",
+          `if n ${test} ${rows(k, () => "integer").replaceAll("\n", " | ")} | null {`,
+          rows(k, () => "say n"),
+          "}",
+          "exit",
+        ),
+      ),
+  })),
 ];
 
 /**

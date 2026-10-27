@@ -474,7 +474,7 @@ export class NarrowingRoutes {
         ? null
         : (arm) =>
             arm.entry !== null &&
-            this.index.atEntry(arm.entry, location).some((g) => removes(g.form, tag)),
+            this.index.atEntry(arm.entry, location).some((g) => removes(g.form, tag, this.#work)),
     );
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);

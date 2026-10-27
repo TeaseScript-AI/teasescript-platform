@@ -40,8 +40,12 @@ interface EventList {
   readonly own: boolean;
 }
 
-/** Whether every kind of `items` lies within `kinds` (an integer within a number; anything within `unknown`). */
-function keptWithin(items: readonly Item[], kinds: readonly ItemTag[]): boolean {
+/**
+ * Whether every kind of `items` lies within `kinds` (an integer within a number; anything within `unknown`): each item
+ * compared with each kind, charged.
+ */
+function keptWithin(items: readonly Item[], kinds: readonly ItemTag[], work: WorkLedger): boolean {
+  work.charge("exactValues", (items.length + 1) * Math.max(1, kinds.length));
   if (kinds.includes("unknown")) return true;
   return items.every(
     (item) =>
@@ -51,8 +55,9 @@ function keptWithin(items: readonly Item[], kinds: readonly ItemTag[]): boolean 
   );
 }
 
-/** The kind set's signature: its tags, sorted. */
-function kindsText(kinds: readonly ItemTag[]): string {
+/** The kind set's signature: its tags, each once, sorted (a sort charged). */
+function kindsText(kinds: readonly ItemTag[], work: WorkLedger): string {
+  work.charge("eventSteps", sortCost(kinds.length) + 1);
   return [...new Set(kinds)].sort().join(",");
 }
 
@@ -320,7 +325,7 @@ export class NarrowingEvents {
    */
   *#subset(g: Narrowing, kinds: readonly ItemTag[]): Work<readonly number[]> {
     const program = this.pass.program;
-    const signature = joinParts(g.location, kindsText(kinds));
+    const signature = joinParts(g.location, kindsText(kinds, program.work));
     const known = this.#subsets.get(signature);
     if (known !== undefined) return known;
     const positions: number[] = [];
@@ -370,13 +375,13 @@ export class NarrowingEvents {
    * the location taken as those kinds, has kinds within them. Once per (store, kind set).
    */
   public *preserves(store: Definition, location: string, kinds: readonly ItemTag[]): Work<boolean> {
-    const memo = joinParts(store.uid, kindsText(kinds));
+    const memo = joinParts(store.uid, kindsText(kinds, this.#work));
     const known = this.#preserves.get(memo);
     if (known !== undefined) return known;
     this.#work.charge("exactQueries");
     const value =
       store.value === undefined ? [] : yield* this.#value(store.value, store.node, location, kinds);
-    const preserving = store.value !== undefined && keptWithin(value, kinds);
+    const preserving = store.value !== undefined && keptWithin(value, kinds, this.#work);
     keepText(this.#work, memo.length);
     this.#preserves.set(memo, preserving);
     return preserving;
@@ -414,6 +419,7 @@ export class NarrowingEvents {
         const path =
           expression === undefined || at === null ? null : stablePath(program, at.file, expression);
         if (path !== null && locationOf(path) === location) {
+          program.work.charge("exactValues", kinds.length);
           done.set(
             top.place,
             kinds.map((tag) => makeItem(tag, null, { cert: "pos" })),

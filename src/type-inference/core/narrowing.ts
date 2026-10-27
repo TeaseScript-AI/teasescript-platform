@@ -166,7 +166,9 @@ export function narrowedItems(
   items: readonly Item[],
   scope: ItemScope,
 ): Item[] {
-  scope.work.charge("mergeItems", items.length + 1);
+  // an item compared with each of a type test's kinds
+  const kinds = form.kind === "is" || form.kind === "is-not" ? form.kinds.length : 1;
+  scope.work.charge("mergeItems", items.length * Math.max(1, kinds) + 1);
   const kept: Item[] = [];
   for (const item of items) {
     if (item.tag === "empty") {
@@ -181,7 +183,6 @@ export function narrowedItems(
         if (item.tag === "null" || item.tag === "unknown") kept.push({ ...item, tag: "null" });
         break;
       case "is":
-        scope.work.charge("mergeItems", form.kinds.length);
         for (const kind of form.kinds) {
           const tag = overlap(item.tag, kind, form.fractional === true);
           if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
@@ -194,13 +195,17 @@ export function narrowedItems(
   }
   const merged = mergeItems(kept, scope);
   if (form.kind === "is-not") return merged;
-  const kinds = merged.filter((item) => item.tag !== "empty");
-  if (kinds.length !== 1 || kinds[0]!.tag === "unknown" || kinds[0]!.cert === "def") return merged;
-  return merged.map((item) => (item === kinds[0] ? { ...item, cert: "def" } : item));
+  const left = merged.filter((item) => item.tag !== "empty");
+  if (left.length !== 1 || left[0]!.tag === "unknown" || left[0]!.cert === "def") return merged;
+  return merged.map((item) => (item === left[0] ? { ...item, cert: "def" } : item));
 }
 
-/** Whether a narrowing of this form removes items of kind `tag` (a G of the needed form for N3's offending kind). */
-export function removes(form: NarrowingForm, tag: ItemTag): boolean {
+/**
+ * Whether a narrowing of this form removes items of kind `tag` (a G of the needed form for N3's offending kind): a
+ * comparison per kind of a type test, charged.
+ */
+export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): boolean {
+  work.charge("eventSteps", form.kind === "is" || form.kind === "is-not" ? form.kinds.length : 1);
   switch (form.kind) {
     case "non-null":
       return tag === "null";
@@ -225,7 +230,8 @@ interface TestedType {
 }
 
 function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
-  const kinds: ValueKind[] = [];
+  // (each kind once, however often the type names it: a filter's visits are bounded by the value kinds)
+  const kinds = new Set<ValueKind>();
   const constrained = new Set<ValueKind>();
   const elements: TypeAnnotation[] = [];
   let others = 0;
@@ -235,20 +241,20 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
     work.charge("indexSteps");
     switch (type.kind) {
       case "namedType":
-        kinds.push(type.name);
+        kinds.add(type.name);
         if (type.name !== "null") others += 1;
         break;
       case "listType":
       case "setType":
       case "dictType": {
         const kind = type.kind === "listType" ? "list" : type.kind === "setType" ? "set" : "dict";
-        kinds.push(kind);
+        kinds.add(kind);
         constrained.add(kind);
         elements.push(type.element);
         break;
       }
       case "optionalType":
-        kinds.push("null");
+        kinds.add("null");
         pending.push(type.value);
         break;
       case "unionType":
@@ -257,7 +263,7 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
     }
   }
   return {
-    kinds,
+    kinds: [...kinds],
     constrained,
     element: elements.length === 1 && others === 0 ? elements[0]! : null,
   };
@@ -283,12 +289,13 @@ function opposite(fact: Fact): Fact {
  * each item's overlap with the type, and an element step's test per element type the type names; for one that fails,
  * only the items wholly within the type removed (never a collection kind the type names with an element type).
  */
-function formOf(fact: Fact): {
-  readonly form: NarrowingForm;
-  readonly element: TypeAnnotation | null;
-} {
+function formOf(
+  fact: Fact,
+  work: WorkLedger,
+): { readonly form: NarrowingForm; readonly element: TypeAnnotation | null } {
   const type = fact.type;
   if (type === null) return { form: fact.holds ? ONLY_NULL : NON_NULL, element: null };
+  work.charge("indexSteps", type.kinds.length);
   return fact.holds
     ? { form: { kind: "is", kinds: type.kinds }, element: type.element }
     : {
@@ -589,7 +596,7 @@ export class NarrowingIndex {
         if (index > 1) break;
         proven.length = 0;
         facts(use.operand, index === 0, proven, work);
-        for (const fact of proven) define(branch, use.file, fact.tested, formOf(fact));
+        for (const fact of proven) define(branch, use.file, fact.tested, formOf(fact, work));
       }
     // `switch` cases: `case null`, a literal case by its value, `default` and later cases after `case null`
     for (const use of flow.switchUses) {
@@ -674,7 +681,7 @@ export class NarrowingIndex {
             [or, opposite(test)],
           ] as const)
             if (node !== null && top !== null)
-              define(node, file, fact.tested, formOf(fact), {
+              define(node, file, fact.tested, formOf(fact, work), {
                 file,
                 start: expression.span.end.offset,
                 end: top.span.end.offset,
