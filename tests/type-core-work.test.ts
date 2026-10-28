@@ -290,6 +290,22 @@ test("a question asked by every read of one place, read k times, takes work that
 const many = (k: number, row: (index: number) => string, by = "\n"): string =>
   Array.from({ length: k }, (_, index) => row(index)).join(by);
 
+/** #1199's list with each object `around` the same way, the wide one at `at` among the k small ones. */
+const nestedObjects = (
+  k: number,
+  around: (object: string) => string,
+  at: number,
+): readonly SourceFile[] => {
+  const objects = Array.from({ length: k }, (_, i) => around(`{f${i}: 2}`));
+  objects.splice(at, 0, around(`{${many(k, (i) => `f${i}: t`, ", ")}}`));
+  return [
+    {
+      path: "main.tease",
+      source: ["let t: integer = 1", `let a = [${objects.join(", ")}]`, "exit"].join("\n"),
+    },
+  ];
+};
+
 /**
  * Scripts that compile and whose work grew with a product of two of their dimensions, each with the counter that grew:
  * a written type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written
@@ -299,10 +315,12 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
  * (#1230); a ring of k copies through a k-element list, the list's index built again for each element and its read
  * re-run whole for each changed element (#1229); k properties read below a choice of k objects holding one value, or k
  * unchanged aliases or wrappers of it, each read walking every object (#1233); a list of a wide object and k small
- * ones, each small one's contract asked at every property of the wide one (#1199); a list of k reads of host data, or
- * of k loads defaulting to such a read or to one named copy of it, read at k properties, each element read again at
- * each (#1207); and k/4 loads, parses and reads of host data beside an object of k properties, the list's touch trie
- * walking the object again for each (#1307). A read of host data compiles with its runtime check.
+ * ones, each small one's contract asked at every property of the wide one (#1199), also with all of them below one or
+ * two properties they share or in one-element lists there, the wide one first, amid or last (Astra's review B1); a list
+ * of k reads of host data, or of k loads defaulting to such a read or to one named copy of it, read at k properties,
+ * each element read again at each (#1207); and k/4 loads, parses and reads of host data beside an object of k
+ * properties, the list's touch trie walking the object again for each (#1307). A read of host data compiles with its
+ * runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -470,6 +488,24 @@ const PRODUCTS: readonly (WorkFamily & {
         ].join("\n"),
       },
     ],
+  },
+  {
+    name: "nested-wide-object-beside-small-ones",
+    measures: "#1199: each object asked at its own properties only, below the property they share",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: ${object}}`, 0),
+  },
+  {
+    name: "twice-nested-wide-object-amid-small-ones",
+    measures: "#1199: each object asked at its own properties only, two properties below the list",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: {box: ${object}}}`, k >> 1),
+  },
+  {
+    name: "listed-wide-object-after-small-ones",
+    measures: "#1199: each object asked at its own properties only, through a list",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: [${object}]}`, k),
   },
   {
     name: "host-reads-read-at-properties",

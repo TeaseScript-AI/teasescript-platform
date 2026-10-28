@@ -5798,52 +5798,101 @@ export class Admission {
   }
 
   /**
-   * The elements whose contracts may hold a kind at a path below them (`literalElements`), in their order: an object
-   * literal's only at its own properties (F11: without the path's first property it holds `missing` there), any other
-   * element's at every path, as a selection's step (V30 §19) and the element itself. The objects' properties are
-   * listed at the first path asked, where each element's contract would be read anyway.
+   * The elements whose contracts may hold a kind at a path below them (`literalElements`), in their order. Step by step
+   * along the path, an element whose literal holds objects alone at a step (one kind, no read or other value beside
+   * them) is asked only where they have the next property (F11: without it they hold `missing` there and below), one
+   * that holds a collection alone there only below its element step, and below any other step as its derived member's
+   * owner; any other element is asked at every path below the step (a copy, a read, an operation), as at a selection's
+   * step (V30 §19) and at the path's end. Each step's properties are listed at the first path asked below it, where each
+   * element's contract would be read anyway, so a wide object beside k small ones takes their sizes, not their product,
+   * at any depth and through lists (#1199, Astra's review B1).
    */
   #holdersByProperty(
     elements: readonly Definition[],
   ): (path: readonly string[]) => readonly Definition[] {
     const { program, contract } = this.pass;
-    const always: number[] = [];
-    let byProperty: Map<string, number[]> | null = null;
-    const list = (): Map<string, number[]> => {
-      const out = new Map<string, number[]>();
-      for (const [at, d] of elements.entries()) {
-        const index = program.hasOf.has(d.value!) ? contract.literalIndex(d.value!) : null;
-        const objects = index?.objects.get("");
-        // (a literal of an object alone: its root's one kind)
-        if (objects === undefined || index!.terms.get("")?.size !== 1) {
-          always.push(at);
-          continue;
-        }
-        for (const object of objects.list)
-          for (const name of object.names) {
-            program.work.charge("checks");
-            const holders = out.get(name);
-            if (holders === undefined) out.set(name, [at]);
-            else if (holders.at(-1) !== at) holders.push(at);
-          }
-      }
+    // per step walked: the elements asked at every path below it and those holding objects or a collection alone there,
+    // each in their order; the objects' properties with their elements, listed once; the steps one longer
+    type Holders = {
+      readonly text: string;
+      readonly always: readonly number[];
+      readonly objects: readonly number[];
+      readonly collections: readonly number[];
+      named: Map<string, number[]> | null;
+      readonly below: Map<string, Holders>;
+    };
+    // (two lists merged in the elements' order)
+    const merged = (a: readonly number[], b: readonly number[]): number[] => {
+      const out: number[] = [];
+      for (let i = 0, j = 0; i < a.length || j < b.length;)
+        out.push(j >= b.length || (i < a.length && a[i]! < b[j]!) ? a[i++]! : b[j++]!);
       return out;
     };
+    const holders = (
+      text: string,
+      candidates: readonly number[],
+      always: readonly number[],
+    ): Holders => {
+      const objects: number[] = [];
+      const collections: number[] = [];
+      const others: number[] = [];
+      for (const at of candidates) {
+        program.work.charge("checks");
+        const value = elements[at]!.value!;
+        const index = program.hasOf.has(value) ? contract.literalIndex(value) : null;
+        const kinds = index?.terms.get(text);
+        if (index === null || kinds?.size !== 1 || index.reads.has(text) || index.others.has(text))
+          others.push(at);
+        else if (index.objects.has(text)) objects.push(at);
+        else if (kinds.has("list") || kinds.has("set") || kinds.has("dict")) collections.push(at);
+        else others.push(at);
+      }
+      return {
+        text,
+        always: others.length === 0 ? always : merged(always, others),
+        objects,
+        collections,
+        named: null,
+        below: new Map(),
+      };
+    };
+    let root: Holders | null = null;
     return (path) => {
-      const step = path[0];
-      if (step === undefined || step === SELECTED_VALUE || step === SELECTED_TEXT) return elements;
-      const own = (byProperty ??= list()).get(step) ?? [];
-      // (the two lists merged in the elements' order)
-      const out: Definition[] = [];
-      for (let a = 0, b = 0; a < always.length || b < own.length;)
-        out.push(
-          elements[
-            b >= own.length || (a < always.length && always[a]! < own[b]!)
-              ? always[a++]!
-              : own[b++]!
-          ]!,
-        );
-      return out;
+      const first = path[0];
+      if (first === undefined || first === SELECTED_VALUE || first === SELECTED_TEXT)
+        return elements;
+      root ??= holders("", [...elements.keys()], []);
+      let at = root;
+      for (let length = 0; length < path.length; length += 1) {
+        const step = path[length]!;
+        if (step === SELECTED_VALUE || step === SELECTED_TEXT) break;
+        let next = at.below.get(step);
+        if (next === undefined) {
+          if (at.named === null) {
+            const named = new Map<string, number[]>();
+            for (const element of at.objects)
+              for (const name of contract
+                .literalIndex(elements[element]!.value!)
+                .objects.get(at.text)!
+                .count.keys()) {
+                program.work.charge("checks");
+                const list = named.get(name);
+                if (list === undefined) named.set(name, [element]);
+                else list.push(element);
+              }
+            at.named = named;
+          }
+          const element = step === "element";
+          next = holders(
+            keptText(this.#work, path.slice(0, length + 1)),
+            element ? at.collections : (at.named.get(step) ?? []),
+            element || at.collections.length === 0 ? at.always : merged(at.always, at.collections),
+          );
+          at.below.set(step, next);
+        }
+        at = next;
+      }
+      return merged(at.always, merged(at.objects, at.collections)).map((index) => elements[index]!);
     };
   }
 
