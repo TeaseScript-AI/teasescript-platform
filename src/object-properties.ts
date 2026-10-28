@@ -130,7 +130,7 @@ function alternatives(names: readonly string[]): string {
 }
 
 /** Up to ten names in quotes, joined as in `'a', 'b', and 'c'`, with how many more there are. */
-function nameList(names: readonly string[]): string {
+export function nameList(names: readonly string[]): string {
   const quoted = names.slice(0, 10).map((name) => `'${name}'`);
   const more = names.length - quoted.length;
   if (more > 0) return `${quoted.join(", ")}, and ${more} more`;

@@ -116,6 +116,12 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #defVal spread": [1, "items, no path"],
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
+  // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
+  "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
+  "messages.ts errorSentence step": [4, "a sentence's period before its fix, no path"],
+  "messages.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],
+  "messages.ts memberWarningFix step": [1, "a receiver and its property as the fix's code"],
+  "messages.ts shownFix step": [1, "an object's code and its first property as the fix's code"],
   "operator-table.ts DURATIONS composite": [2, "the operator table's constant text"],
   "result.ts targetName join": [1, "a target's name, made by the tests alone"],
   "result.ts targetName spread": [1, "a target's name, made by the tests alone"],
@@ -282,19 +288,19 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     "a decision's prefixes, returned and read once by the decision, not kept",
   ],
   "admission.ts #ownLeaves memoKey": [1, "a definition's id and a flag"],
-  "answers.ts #propertyNames at": [
+  "property-names.ts propertyNames at": [
     1,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
-  "answers.ts #propertyNames inline": [
+  "property-names.ts propertyNames inline": [
     4,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
-  "answers.ts #propertyNames slice": [
+  "property-names.ts propertyNames slice": [
     3,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
-  "answers.ts #propertyNames id": [
+  "property-names.ts propertyNames id": [
     1,
     "a properties query's walk, its texts ending with the query (S9b's, TABLE r4.78 (3))",
   ],

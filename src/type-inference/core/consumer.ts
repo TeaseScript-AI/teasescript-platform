@@ -437,11 +437,13 @@ export function coreCheckResult(
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const source = messageSource(request.files.map((file) => file.source));
   const sited = new Set<string>();
+  const shown = new Set(reportedDiagnostics(answers));
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "operator")
       throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
     sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
-    diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
+    if (shown.has(diagnostic))
+      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
   }
   const { checks, core } = runtimeChecks(answers, index, request);
   // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets
@@ -1226,6 +1228,33 @@ function levelsOf(plan: TypePlan): string[][] {
 function unionOf(plans: readonly TypePlan[]): TypePlan {
   const members = plans.flatMap((plan) => (plan.kind === "union" ? plan.members : [plan]));
   return members.length === 1 ? members[0]! : { kind: "union", members };
+}
+
+/**
+ * The diagnostics the compiler reports (#1195): every one but a warning whose expression never runs once its file,
+ * function or block runs, as code after an `exit` or the right side of `false and …`, which the warning for code that
+ * never runs (TSV065) reports; an error there stays (ADR 0021 rule 1.8). An expression the flow graph has no node for
+ * runs with its statement.
+ */
+export function reportedDiagnostics(answers: Answers): CoreDiagnostic[] {
+  const { graph } = answers;
+  let reached: Set<FlowNode> | null = null;
+  return answers.diagnostics.filter((diagnostic) => {
+    if (diagnostic.class === "compile-error") return true;
+    // the nodes a way over live edges reaches from their region's entry, once
+    if (reached === null) {
+      reached = new Set(graph.regions.map((region) => region.entry));
+      const pending = [...reached];
+      for (let node = pending.pop(); node !== undefined; node = pending.pop())
+        for (const next of node.successors)
+          if (!reached.has(next) && !graph.isDeadEdge(node, next)) {
+            reached.add(next);
+            pending.push(next);
+          }
+    }
+    const node = graph.expressionAt(diagnostic.site) ?? graph.statementAt(diagnostic.site);
+    return node === undefined || reached.has(node);
+  });
 }
 
 /**

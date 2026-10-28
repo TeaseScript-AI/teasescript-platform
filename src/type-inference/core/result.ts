@@ -108,21 +108,39 @@ export type DiagnosticRule =
       readonly decider: SourceSite | null;
       /** A2's deferred field (ADR 0021 rule 1.1): the copy or store that brought the value of another kind. */
       readonly brought: SourceSite | null;
+      /** The variable, parameter or function result the place is or lies in, which a fix declares (rule 1.1). */
+      readonly root: StoreRoot | null;
+      /** The steps from the root to the place: a property, or the collection an element or a dict value is in. */
+      readonly steps: readonly StoreStep[];
     }
-  /** C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for. */
-  | { readonly rule: "fallback"; readonly fallback: boolean; readonly type: readonly ItemTag[] }
+  /**
+   * C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for, and the variable or
+   * parameter that value lands in directly, whose written union may hold both (ADR 0021 rule 7.3).
+   */
+  | {
+      readonly rule: "fallback";
+      readonly fallback: boolean;
+      readonly type: readonly ItemTag[];
+      readonly root: StoreRoot | null;
+    }
   | { readonly rule: "count"; readonly use: CountUse }
   /** C3: a condition (`operator` null), or an operand of `and`, `or`, `not`. */
   | { readonly rule: "boolean"; readonly operator: string | null }
-  /** C4: an operand of an operator, with the kinds it takes there, or the operation where no operand alone offends. */
+  /**
+   * C4: an operand of an operator, with the kinds it takes there, or the operation where no operand alone offends; the
+   * operation's operands, which a fix rewrites (a date and time through a conversion), and where the operation offends as
+   * a whole the kinds of its operands there (`pair`, one per operand).
+   */
   | {
       readonly rule: "operator";
       readonly operator: string;
       readonly operand: boolean;
       readonly domain: readonly ItemTag[];
+      readonly operands: readonly SourceSite[];
+      readonly pair: readonly ItemTag[];
     }
-  /** C11: a value `${...}` shows, or an element of a list it shows. */
-  | { readonly rule: "shown"; readonly element: boolean }
+  /** C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead. */
+  | { readonly rule: "shown"; readonly element: boolean; readonly property: string | null }
   /** C12: a dict key. */
   | { readonly rule: "key" }
   /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
@@ -143,6 +161,8 @@ export type DiagnosticRule =
       readonly receiver: string;
       readonly property: string;
       readonly store: SourceSite | null;
+      /** The properties the receiver's objects have, which a read's sentence names (ADR 1.8). */
+      readonly properties: readonly string[];
     }
   /** C6: an element selection (`.first`, `.removeLast()`, `${...}`) of `collection`. */
   | { readonly rule: "selection"; readonly collection: string; readonly member: string }
@@ -151,8 +171,23 @@ export type DiagnosticRule =
       readonly rule: "mixed";
       readonly collection: "list" | "set" | "dict";
       readonly path: readonly string[];
+      /** The earliest element's own kinds there (a whole number as such). */
       readonly type: readonly ItemTag[];
+      /** The variable whose start value the literal is, which a fix declares; `null` for any other literal. */
+      readonly root: StoreRoot | null;
     };
+
+/** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */
+export interface StoreRoot {
+  readonly kind: "let" | "global" | "parameter" | "result";
+  readonly name: string;
+  /** A parameter's default: a number or `true`/`false` as written, else `...`; `null` without one. */
+  readonly start: string | null;
+}
+
+/** A step below a store's root: a property by its name, or the collection whose element or dict value comes next. */
+export type StoreStep =
+  { readonly property: string } | { readonly collection: "list" | "set" | "dict" };
 
 /**
  * A written type that V30 §13 does not allow: a union that holds a whole list, set or dict beside another type
@@ -196,6 +231,11 @@ export type CoreDiagnostic =
       readonly kinds: readonly ItemTag[];
       readonly provenance: Provenance;
       readonly obligation: Obligation;
+      /**
+       * The value's other known kinds that the rule takes: what a type test narrows it to (ADR 0021 rule 3.5) and what
+       * a fallback stands in for (rule 1.9). None where every known kind offends, which takes the error's fix.
+       */
+      readonly fits: readonly ItemTag[];
     };
 
 export interface CoreResult {

@@ -165,6 +165,7 @@ function warning(
     kinds: [item.tag],
     provenance: provenanceOf(item, NO_DETAIL),
     obligation: { ...obligation, boundary: false },
+    fits: [],
   };
 }
 

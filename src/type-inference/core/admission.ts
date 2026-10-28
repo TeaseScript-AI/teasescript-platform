@@ -6528,7 +6528,8 @@ export class Admission {
    * or a copy of a written binding's written type (A4), unless the literal lands directly in a written place, whose
    * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
    * (r4.35) and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
-   * store, the literal's cell, the path, the earliest element's kinds there and the offending element's (D1).
+   * store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a sentence
+   * names) and the offending element's (D1).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
@@ -6539,6 +6540,7 @@ export class Admission {
         readonly cell: PlaceId;
         readonly path: readonly string[];
         readonly decided: readonly ItemTag[];
+        readonly earliest: readonly ItemTag[];
         readonly kinds: readonly ItemTag[];
       },
     ) => void,
@@ -6610,7 +6612,11 @@ export class Admission {
       }
       const first = new Map<
         string,
-        { readonly tags: readonly ItemTag[]; readonly written: boolean }
+        {
+          readonly tags: readonly ItemTag[];
+          readonly written: boolean;
+          readonly own: readonly ItemTag[];
+        }
       >();
       // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
       // number fits a written integer, a fraction does not), an earliest element's by their family
@@ -6638,6 +6644,7 @@ export class Admission {
           cell,
           path,
           decided: first.get(at)!.tags,
+          earliest: first.get(at)!.own,
           kinds: [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))],
         });
         this.reject(d, cell, path);
@@ -6664,12 +6671,10 @@ export class Admission {
                 ? null
                 : (this.#drive(this.#earliestDecider(d.value, d.node, path, null))?.term ?? null);
             const kinds = [...new Set(own.map(family))];
-            if (copied !== null)
-              first.set(at, {
-                tags: typeTags(copied).filter((tag) => tag !== "null"),
-                written: true,
-              });
-            else if (kinds.length === 1) first.set(at, { tags: kinds, written: false });
+            if (copied !== null) {
+              const tags = typeTags(copied).filter((tag) => tag !== "null");
+              first.set(at, { tags, written: true, own: tags });
+            } else if (kinds.length === 1) first.set(at, { tags: kinds, written: false, own });
             continue;
           }
           if (!offends(at, own)) continue;
