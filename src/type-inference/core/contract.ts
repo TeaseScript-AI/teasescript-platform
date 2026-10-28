@@ -609,6 +609,14 @@ const NESTING = 256;
 /** The contributions of one kind a value-side gather reads inline; past it, a balanced tree of demands (`gathered`). */
 export const WIDE = 8;
 
+/** What a cell stores, as a class (`Contract.#storedClass`): its name, and the source extent of its writers. */
+interface StoredClass {
+  readonly name: string;
+  readonly file: number;
+  readonly start: number;
+  readonly end: number;
+}
+
 /** An object of a literal at a path (a selection's alternative, `#selectedAt`). */
 type LiteralObject = NonNullable<ReturnType<LiteralIndex["objects"]["get"]>>["list"][number];
 
@@ -696,6 +704,11 @@ export class Contract {
   readonly #literals = new Map<PlaceId, LiteralIndex>();
   /** The literals whose index is being built, each its own cycle's stop (`#own`). */
   readonly #indexing = new Set<PlaceId>();
+  /** Per literal, path, selected key and depth, the objects a contract-side selection reads (`#selectionObjects`). */
+  readonly #selections = new Map<string, readonly LiteralObject[]>();
+  /** Per cell, the class of what it stores (`#storedClass`), and per class's text, its name. */
+  readonly #storedClasses = new Map<PlaceId, StoredClass | null>();
+  readonly #storedNames = new Map<string, string>();
   /**
    * The paths of the literal indexes, each made once per pass (TABLE r4.58): a path is its parent's and one step, with
    * one text that the indexes of nested literals share; its id orders and names it in a literal's signature and
@@ -4800,10 +4813,157 @@ export class Contract {
       ))
         out.push(item);
     else
-      for (const object of objects)
+      for (const object of exact
+        ? objects
+        : this.#selectionObjects(literal, index, path, byValue, below))
         for (const item of yield* this.#selectedObject(object, byValue, after, node, exact, below))
           out.push(item);
     return { items: out, sources };
+  }
+
+  /**
+   * The objects a contract-side selection reads (#1233), once per literal, path, selected key and depth: those that
+   * select by the key, each left out whose contribution at every path an earlier one's holds. A contract answer is merged
+   * before it is read (each kind once, its earliest writer, kinds in the order they first come), so of the objects whose
+   * selected properties store one value (`#storedClass`) one counts, the earliest: its span ends before the others'
+   * start, so every writer of its answer comes first. So do the objects with unknown keys and those with neither key.
+   * So k questions below a choice of k objects storing one value read one object each, not k.
+   */
+  #selectionObjects(
+    literal: PlaceId,
+    index: LiteralIndex,
+    path: string,
+    byValue: boolean,
+    below: boolean,
+  ): readonly LiteralObject[] {
+    const memoKey = joinParts(literal, path, byValue, below);
+    const known = this.#selections.get(memoKey);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    const kept: LiteralObject[] = [];
+    // per class of alike objects, the kept one whose span ends first (every writer of its answer lies in its span)
+    const firsts = new Map<string, Writer | null>();
+    for (const object of index.objects.get(path)?.list ?? []) {
+      program.work.charge("invSteps");
+      const { selected } = object;
+      if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
+        continue;
+      let alike: readonly [string, Writer | null] | null = null;
+      if (object.term.properties === null) alike = ["o", null];
+      else if (selected === null) alike = [joinParts("m", object.token.file), object.token];
+      else if (selected.type.kind === "ref") {
+        const stored = this.#storedClass(selected.type.place);
+        const { token } = object;
+        if (
+          stored !== null &&
+          (stored.end < stored.start ||
+            (stored.file === token.file && stored.start >= token.start && stored.end <= token.end))
+        )
+          alike = [joinParts("h", token.file, stored.name), token];
+      }
+      if (alike !== null) {
+        const [key, writer] = alike;
+        const first = firsts.get(key);
+        if (first !== undefined && (writer === null || first!.end <= writer.start)) continue;
+        if (first === undefined || (writer !== null && writer.end < first!.end))
+          firsts.set(key, writer);
+      }
+      kept.push(object);
+    }
+    this.#keepText(memoKey.length);
+    this.#keep(1 + kept.length);
+    this.#selections.set(memoKey, kept);
+    return kept;
+  }
+
+  /**
+   * #1233: what a cell stores, as a class: two cells of one class answer every contract-side question below them alike
+   * but for their writers, which lie inside the extent kept with the class. The rule: a cell stores the sequence of its
+   * live definitions' values; a read stores its read class (`readClass`: its source resolved through unchanged whole
+   * copies, its own steps, the guards that hold it at and below its path) and whether its identity is guarded; an inline
+   * literal stores its structure (an object its properties in order, each its cell's class; a list, set or dict its
+   * element cell's; a kind its name); a computed value, external data, a reference kind, an object of unknown properties
+   * and a written property type store no class. So a store into a copy makes it no alias (its own read class), a guard
+   * holding a read is part of its class, and an ingress gives none. Once per cell, each class named by a short name, so
+   * wrappers k deep cost k.
+   */
+  #storedClass(cell: PlaceId): StoredClass | null {
+    const known = this.#storedClasses.get(cell);
+    if (known !== undefined) return known;
+    // (a cell its own literal holds has no class)
+    this.#storedClasses.set(cell, null);
+    const { program, definitions, lists } = this.pass;
+    let file = -1;
+    let start = Infinity;
+    let end = -Infinity;
+    const take = (at: {
+      readonly file: number;
+      readonly start: number;
+      readonly end: number;
+    }): boolean => {
+      if (at.end < at.start) return true;
+      if (file !== -1 && at.file !== file) return false;
+      file = at.file;
+      start = Math.min(start, at.start);
+      end = Math.max(end, at.end);
+      return true;
+    };
+    const term = (type: TypeTerm): string | null => {
+      program.work.charge("invSteps");
+      if (type.kind === "ref") {
+        const inner = this.#storedClass(type.place);
+        return inner !== null && take(inner) ? inner.name : null;
+      }
+      if (type.kind === "list" || type.kind === "set" || type.kind === "dict") {
+        const element = term(type.element);
+        return element === null ? null : `${type.kind}[${element}]`;
+      }
+      if (type.kind === "atom") return REFERENCE.has(type.name) ? null : type.name;
+      if (type.kind !== "object" || type.properties === null) return null;
+      const parts: string[] = [];
+      for (const property of type.properties) {
+        const inner = term(property.type);
+        if (inner === null) return null;
+        parts.push(`${property.name}:${inner}`);
+      }
+      return `{${parts.join(",")}}`;
+    };
+    const value = (stored: PlaceId): string | null => {
+      const literals = program.hasOf.get(stored) ?? [];
+      if (literals.length > 0) {
+        const parts: string[] = [];
+        for (const has of literals) {
+          const inner = take(has.site) ? term(has.type) : null;
+          if (inner === null) return null;
+          parts.push(inner);
+        }
+        return `l(${parts.join("&")})`;
+      }
+      if (this.copiedKey(stored) === null || this.#ingressLeaf(stored) !== undefined) return null;
+      const read = this.readClass(stored, false);
+      return read === null ? null : `r${this.identityOf(stored).guarded ? "g" : ""}(${read})`;
+    };
+    const parts: string[] = [];
+    for (const d of definitions.cellDefs.get(cell) ?? []) {
+      program.work.charge("invSteps");
+      if (!lists.live(d)) continue;
+      const stored =
+        d.value !== undefined && definitions.writerOf(d) !== null && take(d.site)
+          ? value(d.value)
+          : null;
+      if (stored === null) return null;
+      parts.push(stored);
+    }
+    const text = parts.join(";");
+    let name = this.#storedNames.get(text);
+    if (name === undefined) {
+      this.#keepText(text.length);
+      this.#storedNames.set(text, (name = `s${this.#storedNames.size}`));
+    }
+    const found: StoredClass = { name, file, start, end };
+    this.#keep(2);
+    this.#storedClasses.set(cell, found);
+    return found;
   }
 
   /** One object's contribution to a selection (`#selectedAt`): its selected key's items at `after`, or none. */
