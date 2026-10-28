@@ -1608,6 +1608,33 @@ test("the named exception for #1216 stands at its counted stops", () => {
 });
 
 /**
+ * TABLE r4.100, S3 revision 21: a settled walk stop leaves a typed parse's nested paths undecided (admission decides
+ * them lazily, never after a stop); source 4 decides them from its default literal's syntax, so the store's check stays
+ * whole (#1165's class, a named exception of the oracle before: 984 and 1,180 stop points over four modes, the first
+ * walk stop among them). At the first walk stop and one halfway through the walk.
+ */
+test("a settled stop decides a typed parse's nested default by its syntax, its check whole", () => {
+  for (const source of [
+    'let value = fromJson(hostValue, default: {list: [{n: fromJson("3", default: 0), open: null}]})\nsay value.list.get(0, default: {n: 0, open: null}).n\nsay "DONE"\nexit\n',
+    "let parsed = fromJson(hostValue, default: {chunks: [[{id: 5}]]})\nsay parsed.chunks.get(0, default: [{id: 4}])[0].id\nexit\n",
+  ]) {
+    const unstopped = stopRun(source);
+    const [low, high] = walkEnds(source);
+    for (const allowance of [low, Math.floor((low + high) / 2)])
+      assert.deepEqual(
+        stopProblems({
+          unstopped,
+          stopped: stopRun(source, allowance),
+          fitting: [],
+          violating: [],
+        }),
+        [],
+        `@${allowance}`,
+      );
+  }
+});
+
+/**
  * The per-demand fallback (S3 §5, TABLE B1, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
  * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
  * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
