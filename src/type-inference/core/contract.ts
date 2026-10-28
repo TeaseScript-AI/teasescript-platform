@@ -62,6 +62,7 @@ import {
   firstContext,
   firstWriter,
   differsIn,
+  holdsLeaves,
   MIXED_FAN,
   MIXED_LEAF,
   makeItem,
@@ -736,6 +737,13 @@ export class Contract {
   ];
   /** Per literal path's computed values on either side (`#othersAt`), its computed-key loads below their root. */
   readonly #loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
+  /** Per group of a mixed class (`#othersAt`), the leaves its other members name by role (`#othersLeaves`), or `null`. */
+  readonly #othersLeavesOf = new WeakMap<OtherGroup, IngressNode | null>();
+  /** Per value and side, the leaves it names by role in its class (`#leafRoles`). */
+  readonly #leafRolesOf = [
+    new Map<PlaceId, readonly IngressNode[] | null>(),
+    new Map<PlaceId, readonly IngressNode[] | null>(),
+  ];
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`#othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of
@@ -4752,14 +4760,9 @@ export class Contract {
           rest,
           false,
         );
-      const out: Item[] = [];
-      for (const entry of group.read)
-        out.push(...withWriter(yield* this.contractOfValueAt(entry.value, rest), group.writer));
-      // (a mixed class's values differ where their answer holds a leaf or an operand's identity: each is read)
-      if (group.rest.length > 0 && out.some((item) => differsIn(item, group.mixed)))
-        for (const entry of group.rest)
-          out.push(...withWriter(yield* this.contractOfValueAt(entry.value, rest), group.writer));
-      return out;
+      return yield* this.#groupItems(group, false, (entry) =>
+        this.contractOfValueAt(entry.value, rest),
+      );
     }
     if (site.kind === "selected")
       return yield* this.#selectedObject(
@@ -4778,13 +4781,108 @@ export class Contract {
         true,
         node,
       );
+    return yield* this.#groupItems(group, true, (entry) =>
+      values.valueItems(entry.value, entry.g?.node ?? node, rest),
+    );
+  }
+
+  /**
+   * A group's answer at a path (`#othersAt`), on the contract side with the group's writer: its read members', and where
+   * they hold external data, its other members' too, which differ from them only by the leaves they name (C9). Those
+   * are read one by one where their leaves differ by more than their roles' (`#othersLeaves`); else the read members'
+   * external data names the others' leaves as well, so a class of k loads of host data read at k properties reads one
+   * load at each (#1207).
+   */
+  *#groupItems(
+    group: OtherGroup,
+    exact: boolean,
+    answer: (entry: ValueEntry) => Work<readonly Item[]>,
+  ): Work<Item[]> {
     const out: Item[] = [];
-    for (const entry of group.read)
-      out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, rest)));
-    if (group.rest.length > 0 && out.some((item) => differsIn(item, group.mixed)))
-      for (const entry of group.rest)
-        out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, rest)));
+    const answers: (readonly Item[])[] = [];
+    const read = function* (entry: ValueEntry): Work<readonly Item[]> {
+      const items = yield* answer(entry);
+      return exact ? items : withWriter(items, group.writer);
+    };
+    for (const entry of group.read) {
+      const items = yield* read(entry);
+      answers.push(items);
+      for (const item of items) out.push(item);
+    }
+    // (a mixed class's values differ where their answer holds a leaf or an operand's identity)
+    const differing = out.find((item) => differsIn(item, group.mixed));
+    if (group.rest.length === 0 || differing === undefined) return out;
+    const leaves = this.#othersLeaves(group, answers, exact);
+    if (leaves !== null) out.push({ ...differing, ingress: leaves });
+    else for (const entry of group.rest) for (const item of yield* read(entry)) out.push(item);
     return out;
+  }
+
+  /**
+   * #1207: the leaves a group's other members name (`#groupItems`), where they differ from its read members' by their
+   * roles' alone: a class mixed by leaves alone (`MIXED_LEAF`), each member naming its roles' leaves (`#leafRoles`), and
+   * each read member's external data here naming all of its own, so each other member's names its own in their place.
+   * `null` where any of that fails, or a leaf lies in a fixpoint's growing cell.
+   */
+  #othersLeaves(
+    group: OtherGroup,
+    answers: readonly (readonly Item[])[],
+    exact: boolean,
+  ): IngressNode | null {
+    const { program } = this.pass;
+    if (group.mixed !== MIXED_LEAF) return null;
+    let roles = -1;
+    for (const [at, entry] of group.read.entries()) {
+      const own = this.#leafRoles(entry.value, exact);
+      if (own === null || (roles >= 0 && own.length !== roles)) return null;
+      roles = own.length;
+      for (const item of answers[at]!)
+        if (differsIn(item, group.mixed) && !holdsLeaves(item.ingress, own, program.scope))
+          return null;
+    }
+    if (this.#othersLeavesOf.has(group)) return this.#othersLeavesOf.get(group)!;
+    let leaves: IngressNode | undefined;
+    for (const entry of group.rest) {
+      const own = this.#leafRoles(entry.value, exact);
+      if (own === null || own.length !== roles) {
+        leaves = undefined;
+        break;
+      }
+      for (const leaf of own) leaves = program.scope.ingress.union(leaves, leaf);
+    }
+    this.#keep(1);
+    this.#othersLeavesOf.set(group, leaves ?? null);
+    return leaves ?? null;
+  }
+
+  /**
+   * The leaves a value of a class mixed by leaves alone names where its answer holds external data, by role: its own
+   * as an ingress (`entered`), then those of its mixed parts (`#classParts`), each an ingress whose parts are not mixed
+   * (a `load`'s default that reads host data); `null` for any other. Once per value and side.
+   */
+  #leafRoles(value: PlaceId, exact: boolean): readonly IngressNode[] | null {
+    const memo = this.#leafRolesOf[exact ? 1 : 0]!;
+    if (memo.has(value)) return memo.get(value)!;
+    const { definitions } = this.pass;
+    const out: IngressNode[] = [];
+    const own = (of: PlaceId): boolean => {
+      const leaf = definitions.ingress.has(of) ? this.#ingressLeaf(of) : undefined;
+      if (leaf !== undefined) out.push(leaf);
+      return leaf !== undefined;
+    };
+    let found = this.classMixed(value, exact) === MIXED_LEAF;
+    if (found && definitions.ingress.has(value)) found = own(value);
+    for (const part of found ? this.#classParts(value, exact) : []) {
+      if (this.classMixed(part, exact) === 0) continue;
+      found &&=
+        this.classMixed(part, exact) === MIXED_LEAF &&
+        this.#classParts(part, exact).every((inner) => this.classMixed(inner, exact) === 0) &&
+        own(part);
+    }
+    const roles = found && out.length > 0 ? out : null;
+    this.#keep(1 + out.length);
+    memo.set(value, roles);
+    return roles;
   }
 
   *#selectedAt(

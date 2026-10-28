@@ -290,6 +290,22 @@ test("a question asked by every read of one place, read k times, takes work that
 const many = (k: number, row: (index: number) => string, by = "\n"): string =>
   Array.from({ length: k }, (_, index) => row(index)).join(by);
 
+/** #1199's list with each object `around` the same way, the wide one at `at` among the k small ones. */
+const nestedObjects = (
+  k: number,
+  around: (object: string) => string,
+  at: number,
+): readonly SourceFile[] => {
+  const objects = Array.from({ length: k }, (_, i) => around(`{f${i}: 2}`));
+  objects.splice(at, 0, around(`{${many(k, (i) => `f${i}: t`, ", ")}}`));
+  return [
+    {
+      path: "main.tease",
+      source: ["let t: integer = 1", `let a = [${objects.join(", ")}]`, "exit"].join("\n"),
+    },
+  ];
+};
+
 /**
  * Scripts that compile and whose work grew with a product of two of their dimensions, each with the counter that grew:
  * a written type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written
@@ -298,17 +314,20 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
  * index keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's
  * (#1230); a ring of k copies through a k-element list, the list's index built again for each element and its read
  * re-run whole for each changed element (#1229); k properties read below a choice of k objects holding one value, or k
- * unchanged aliases or wrappers of it, each read walking every object (#1233); and k/4 loads, parses and reads of host
- * data beside an object of k properties, the list's touch trie walking the object again for each (#1307). A read of
- * host data compiles with its runtime check.
+ * unchanged aliases or wrappers of it, each read walking every object (#1233); a list of a wide object and k small
+ * ones, each small one's contract asked at every property of the wide one (#1199), also with all of them below one or
+ * two properties they share or in one-element lists there, the wide one first, amid or last (Astra's review B1); a list
+ * of k reads of host data, or of k loads defaulting to such a read or to one named copy of it, read at k properties,
+ * each element read again at each (#1207); k such loads beside a wide object, each property's decision reading every
+ * load before the object (Astra's review B2); and k/4 loads, parses and reads of host data beside an object of k
+ * properties, the list's touch trie walking the object again for each (#1307). A read of host data compiles with its
+ * runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
   /** A script that stops at run time, measured for its work alone, its outcome not pinned. */
   readonly stops?: true;
   readonly outcome?: Answers["outcome"];
-  /** The total left ungated: the value side reads such a list's elements at each property until #1297. */
-  readonly total?: false;
 })[] = [
   {
     name: "repeated-written-type-copies",
@@ -455,11 +474,113 @@ const PRODUCTS: readonly (WorkFamily & {
     ],
   },
   {
+    name: "wide-object-beside-small-ones",
+    measures: "#1199: each object of a list asked at its own properties only",
+    counter: "mergeItems",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let t: integer = 1",
+          `let a = [{${many(k, (i) => `f${i}: t`, ", ")}}, ${many(k, (i) => `{f${i}: 2}`, ", ")}]`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "nested-wide-object-beside-small-ones",
+    measures: "#1199: each object asked at its own properties only, below the property they share",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: ${object}}`, 0),
+  },
+  {
+    name: "twice-nested-wide-object-amid-small-ones",
+    measures: "#1199: each object asked at its own properties only, two properties below the list",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: {box: ${object}}}`, k >> 1),
+  },
+  {
+    name: "listed-wide-object-after-small-ones",
+    measures: "#1199: each object asked at its own properties only, through a list",
+    counter: "mergeItems",
+    program: (k) => nestedObjects(k, (object) => `{box: [${object}]}`, k),
+  },
+  {
+    name: "host-reads-read-at-properties",
+    measures: "#1207: the reads of one host global one class of a list's elements",
+    counter: "checks",
+    outcome: "warning-runtime-check",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let wide = [${many(k, () => "hostValue", ", ")}]`,
+          many(k, (i) => `let a${i}: integer = wide[0].f${i}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "host-loads-read-at-properties",
+    measures: "#1207: one load of a class read at each property, naming every load's leaves",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let wide = [${many(k, () => 'load("k", default: hostValue)', ", ")}]`,
+          many(k, (i) => `let a${i}: integer = wide[0].f${i}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "named-default-loads-read-at-properties",
+    measures: "#1207: one load of a class read at each property, its named default once",
+    counter: "eventSteps",
+    outcome: "warning-runtime-check",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let raw = hostValue",
+          `let wide = [${many(k, () => 'load("k", default: raw)', ", ")}]`,
+          "let first = wide[0]",
+          many(k, (i) => `let a${i}: integer = first.f${i}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "host-loads-beside-a-wide-object",
+    measures: "#1207: each property decided by the loads' first of a class, then the object",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) => {
+      const elements = Array.from({ length: k }, () => 'load("k", default: hostValue)');
+      elements.splice(k >> 1, 0, `{${many(k, (i) => `f${i}: 1`, ", ")}}`);
+      return [
+        {
+          path: "main.tease",
+          source: [
+            `let xs = [${elements.join(", ")}]`,
+            many(k, (i) => `let a${i}: integer = xs[0].f${i}`),
+            "exit",
+          ].join("\n"),
+        },
+      ];
+    },
+  },
+  {
     name: "host-data-beside-a-wide-object",
     measures: "#1307: the touch trie walks only the nodes a merge asks, never the object again",
     counter: "indexSteps",
     outcome: "warning-runtime-check",
-    total: false,
     program: (k) => {
       const kinds = [
         'load("k", default: hostValue)',
@@ -483,10 +604,9 @@ const PRODUCTS: readonly (WorkFamily & {
  * Each family's total and its counter in either order under the standard gates; only the named counter, since the
  * helper's parameter's k definitions are sorted and lifted (the TABLE's `n log n` structures), which measure 2.37 here,
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
- * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256). The touch family's total is left
- * ungated: the value side still reads each host-data element at each property (2.95 here), which #1297 removes.
+ * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1229, #1230, #1233, #1255–#1257, #1307)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1307)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
@@ -502,7 +622,7 @@ test("each product a repair removed grows with the program in either order (#122
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
       const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (family.total !== false && doubling(small!.total, large!.total) > DOUBLING)
+      if (doubling(small!.total, large!.total) > DOUBLING)
         steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
       const [before, after] = [small!, large!].map(
         (budget) => budget.counts.get(family.counter) ?? 0,

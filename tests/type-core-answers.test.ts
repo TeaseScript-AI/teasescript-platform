@@ -18,6 +18,21 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
  * contract and the literal index know (review r1).
  */
 
+/** A program's outcome, diagnostics and checks, and every occurrence's answer, its items whole with their leaves. */
+function everyAnswer(answers: Answers): string {
+  const occurrences = answers.graph.nodes.flatMap((node) => {
+    const at = node.kind === "expression" ? answers.at(node) : null;
+    if (at === null) return [];
+    const items = at.items.map((item) => ({
+      ...item,
+      ingress: item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey),
+    }));
+    return [[node.span?.start.offset, at.route, at.place, at.obligations, items]];
+  });
+  const { outcome, diagnostics, checks } = answers;
+  return JSON.stringify({ outcome, diagnostics, checks, occurrences });
+}
+
 function analysed(source: string): {
   readonly answers: Answers;
   readonly node: (text: string, kind?: string) => FlowNode;
@@ -686,17 +701,7 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
           errors.map((text) => source.indexOf(text)),
           source,
         );
-      const occurrences = answers.graph.nodes.flatMap((node) => {
-        const at = node.kind === "expression" ? answers.at(node) : null;
-        if (at === null) return [];
-        const items = at.items.map((item) => ({
-          ...item,
-          ingress: item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey),
-        }));
-        return [[node.span?.start.offset, at.route, at.place, at.obligations, items]];
-      });
-      const { outcome, diagnostics, checks } = answers;
-      return JSON.stringify({ outcome, diagnostics, checks, occurrences });
+      return everyAnswer(answers);
     };
     for (const reversed of [false, true])
       assert.equal(
@@ -714,6 +719,78 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
       ),
     (error) => error instanceof CandidateOutsideSlice && error.what === "this load expression",
   );
+});
+
+/**
+ * #1207: k loads whose default reads host data, directly or through one named copy, are one class, mixed by the leaves
+ * they name (each load's, and a direct default's, C9). A property read below their list reads one of them and names
+ * every other's leaves beside its own: each load's and each default's, as with the sharing off (`withoutSharing`),
+ * where each load is read by itself. Every occurrence's answer, its items whole with their leaves, and the program's
+ * diagnostics and checks are the same either way, in both orders, for a guarded list and two classes in one list too.
+ */
+test("a property read of loads defaulting to host data names every load's and default's leaf (#1207)", () => {
+  const loads = (n: number, fallback: string): string =>
+    Array.from({ length: n }, () => `load("k", default: ${fallback})`).join(", ");
+  // per program a read with the texts whose sites its unknown names, `null` where only the sharing is compared
+  const programs: readonly (readonly [source: string, read: string, named: RegExp | null])[] = [
+    [
+      `let wide = [${loads(3, "hostValue")}]\nlet first = wide[0]\nlet a: integer = first.f0\nsay wide[1].f1\nexit\n`,
+      "first.f0",
+      /load|hostValue/g,
+    ],
+    [
+      `let raw = hostValue\nlet wide = [${loads(3, "raw")}]\nsay wide[0].f0\nexit\n`,
+      "wide[0].f0",
+      /load|hostValue/g,
+    ],
+    [
+      `if hostValue.f0 is integer {\n  let wide = [${loads(2, "hostValue")}]\n  say wide[0].f0\n}\nexit\n`,
+      "wide[0].f0",
+      null,
+    ],
+    [
+      `let raw = hostValue\nlet wide = [${loads(2, "hostValue")}, ${loads(2, "raw")}]\nsay wide[0].f1\nexit\n`,
+      "wide[0].f1",
+      null,
+    ],
+  ];
+  for (const [source, text, named] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const published = (sharing: boolean, reversed: boolean): string => {
+      const run = (): Answers =>
+        sharing ? analyseCore(request) : withoutSharing(() => analyseCore(request));
+      const answers = reversed
+        ? withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), run),
+          )
+        : run();
+      if (named !== null) {
+        const start = source.indexOf(text);
+        const read = answers.graph.expressionAt({ file: 0, start, end: start + text.length });
+        assert.ok(read !== undefined, text);
+        assert.deepEqual(
+          answers
+            .at(read)!
+            .items.map((item) => [
+              item.tag,
+              item.ingress === undefined
+                ? []
+                : ingressLeaves(item.ingress).map(({ start }) => start),
+            ]),
+          [["unknown", [...source.matchAll(named)].map((match) => match.index)]],
+          source,
+        );
+      }
+      return everyAnswer(answers);
+    };
+    for (const reversed of [false, true])
+      assert.equal(
+        published(true, reversed),
+        published(false, reversed),
+        `${source}, reversed: ${reversed}`,
+      );
+  }
 });
 
 test("a written union of one type repeated answers as that type does (V30 §13, #1256)", () => {
