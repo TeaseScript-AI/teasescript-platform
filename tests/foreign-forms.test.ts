@@ -185,6 +185,7 @@ const USES: Readonly<
     "&&": between(ab),
     "&": between(ab),
     "||": between(ab),
+    "|": between(ab),
     "!": { names: "let a = true\n", sources: ['if @·a { say "x" }', 'let c = @·a\nsay "${c}"'] },
     "??": {
       names: "let nickname: string? = null\n",

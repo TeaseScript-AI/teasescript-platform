@@ -964,7 +964,8 @@ export class Parser {
   public *parseOr(): ParseTask<Expression | null> {
     let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null) {
-      const operator = this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbolicOr();
+      const operator =
+        this.#matchOperator(TokenKind.KeywordOr) ?? this.#matchSymbol(TokenKind.Pipe, "oneOrTwo");
       if (operator === null) break;
       this.skipContinuationNewlines();
       const mark = this.mark();
@@ -2361,23 +2362,10 @@ export class Parser {
     return this.match(TokenKind.KeywordNot) || this.#matchSymbol(TokenKind.Bang, "one") !== null;
   }
 
-  /** `|` or `||` between values: report the word operator and continue as `or` (V30 §5, §39). */
-  #matchSymbolicOr(): SourceSpan | null {
-    if (!this.check(TokenKind.Pipe)) return null;
-    if (this.peek(1).kind === TokenKind.Pipe) return this.#matchSymbol(TokenKind.Pipe, "oneOrTwo");
-    const span = this.advance().span;
-    this.reportSpan(
-      parserDiagnosticCode.foreignForm,
-      "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
-      span,
-    );
-    return span;
-  }
-
   /**
    * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once
    * (`FOREIGN_FORMS`) and returns the symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns
-   * `null` when it does not come next. The symbol is one token of `kind`, as `!`, one or two, as `&` or `&&`, or two
+   * `null` when it does not come next. The symbol is one token of `kind`, as `!`, one or two, as `|` or `||`, or two
    * that touch, as `??`, which is not the `?` of a type.
    */
   #matchSymbol(kind: TokenKind, form: "one" | "oneOrTwo" | "two"): SourceSpan | null {

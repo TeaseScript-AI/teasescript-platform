@@ -412,7 +412,7 @@ test("'|' outside a type points to 'or'", () => {
   assert.deepEqual(diagnostics("let both = true | false"), [
     [
       "TSP037",
-      "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
+      "TeaseScript writes 'or' with a space on each side instead of '|': if a or b { say \"one or both\" }",
       "|",
     ],
   ]);

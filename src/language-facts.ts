@@ -368,7 +368,7 @@ function foreignForm(
  */
 export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   ...["&&", "&"].map((symbol) => foreignForm(symbol, "and", 'if a and b { say "both" }')),
-  foreignForm("||", "or", 'if a or b { say "one or both" }'),
+  ...["||", "|"].map((symbol) => foreignForm(symbol, "or", 'if a or b { say "one or both" }')),
   foreignForm("!", "not", 'if not a { say "not a" }'),
   foreignForm("??", "otherwise", 'let name = nickname otherwise "pet"'),
   foreignForm("===", "==", 'if a == b { say "same" }'),
@@ -437,7 +437,8 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
       statement: "else if",
     }),
   ),
-  foreignForm("print", "say", 'say "Hello"', { statement: "say", name: true }),
+  // Only a call, as `let f = print` cannot read `say`.
+  foreignForm("print", "say", 'say "Hello"', { statement: "say", name: "call" }),
   ...["console.log", "console.error", "console.warn"].map((written) =>
     foreignForm(written, "say", 'say "Hello"', { name: true }),
   ),
