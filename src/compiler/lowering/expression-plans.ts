@@ -6,14 +6,15 @@ import type {
   UnitExpression,
 } from "../../ast.js";
 import type { SourceSpan } from "../../source.js";
-import type {
-  ExpressionPlan,
-  TemplatePartPlan,
-  TypeCheckPlan,
-  PlanSourceLocation,
-  TagQueryExpressionPlan,
-  TypePlan,
-  UnitPlan,
+import {
+  repairedObject,
+  type ExpressionPlan,
+  type TemplatePartPlan,
+  type TypeCheckPlan,
+  type PlanSourceLocation,
+  type TagQueryExpressionPlan,
+  type TypePlan,
+  type UnitPlan,
 } from "../../plan/model.js";
 import { canonicalRegexFlags } from "../../regex.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
@@ -124,11 +125,13 @@ export function withFallbackCheck(check: TypeCheckPlan | undefined): {
 }
 
 /**
- * The `repair` of the instruction that selects the default of a load or a `fromJson` that reads an object type (see
- * `StoreTemporaryInstruction.repair`); nothing for any other type.
+ * The `repair` of the instruction that selects the default of a load or a `fromJson` that reads a record per field (see
+ * `StoreTemporaryInstruction.repair`, `repairedObject`); nothing for any other type.
  */
 export function repairedBy(type: TypePlan | null | undefined): { repair?: TypePlan } {
-  return type !== null && type !== undefined && type.kind === "object" ? { repair: type } : {};
+  return type !== null && type !== undefined && repairedObject(type) !== undefined
+    ? { repair: type }
+    : {};
 }
 
 /** A call's content only the coarse core gives (`CoreRuntimeChecks`): a `get`'s index check, `fromJson`'s expected type. */

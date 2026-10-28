@@ -6,7 +6,7 @@ import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 import type { PlainKind, ScalarKind } from "../value-kinds.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 103;
+export const INSTRUCTION_PLAN_VERSION = 104;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -1215,9 +1215,9 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly default: ExpressionPlan | null;
   readonly type: TypePlan | null;
   /**
-   * With an object `type`: a stored object whose fields do not all fit is repaired field by field instead of replaced
-   * (ADR 0021 rule 6.5): each missing or wrong field takes the default's, with `TSW016` naming it, and the stored value
-   * stays as it is. Only the coarse core emits it.
+   * With an object `type`, or a union with one (`repairedObject`): a stored object whose fields do not all fit is
+   * repaired field by field instead of replaced (ADR 0021 rule 6.5): each missing or wrong field takes the default's,
+   * with `TSW016` naming it, and the stored value stays as it is. Only the coarse core emits it.
    */
   readonly repair?: true;
 }
@@ -1266,7 +1266,16 @@ export interface TypeCheckPlan {
 export type TypePlan =
   | { readonly kind: TypePlanName }
   | { readonly kind: "list" | "set" | "dict"; readonly element: TypePlan | null }
-  | { readonly kind: "object"; readonly properties: readonly TypePropertyPlan[] }
+  | {
+      readonly kind: "object";
+      readonly properties: readonly TypePropertyPlan[];
+      /**
+       * In the type a typed `fromJson` or `load` reads its value as, at each level of a written `object` (#1223): a JSON
+       * object keeps its other keys, as a stored object always does, instead of leaving them out. Only the coarse core
+       * emits it; a type check, which checks only the listed properties a value has, ignores it.
+       */
+      readonly keepExtra?: true;
+    }
   | { readonly kind: "union"; readonly members: readonly TypePlan[] };
 
 /** The types a plan names without parts: every kind of value but collections and objects, and `never`. */
@@ -1275,6 +1284,17 @@ export type TypePlanName = ScalarKind | PlainKind | "never";
 export interface TypePropertyPlan {
   readonly name: string;
   readonly type: TypePlan;
+}
+
+/**
+ * The object type by which a reading as `type` repairs a record per field (ADR 0021 rules 2.6 and 6.5): the type itself,
+ * or a union's object member, as an `object?`'s (#1223); `undefined` for any other type.
+ */
+export function repairedObject(type: TypePlan): Extract<TypePlan, { kind: "object" }> | undefined {
+  if (type.kind === "object") return type;
+  if (type.kind !== "union") return undefined;
+  const member = type.members.find((candidate) => candidate.kind === "object");
+  return member?.kind === "object" ? member : undefined;
 }
 
 export interface PreparedReferenceExpressionPlan extends ExpressionPlanBase {
@@ -1374,8 +1394,9 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly fallbackCheck?: TypeCheckPlan;
   /**
    * For `fromJson`: the type it reads the JSON as (ADR 0021 rule 2.6). JSON of another kind gives the default, with
-   * `TSW020`; an object type reads a JSON object as an object of its properties, each missing or wrong one taken from the
-   * default, with `TSW020` naming it, and the JSON's other keys left out. Only the coarse core emits it.
+   * `TSW020`; an object type, also a union's object member, reads a JSON object as an object of its properties, each
+   * missing or wrong one taken from the default, with `TSW020` naming it, and the JSON's other keys left out unless the
+   * type keeps them (`keepExtra`). Only the coarse core emits it.
    */
   readonly expected?: TypePlan;
 }

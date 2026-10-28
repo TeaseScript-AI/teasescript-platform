@@ -545,9 +545,17 @@ function validateExpressionNode(
       } else if (value.type !== null) {
         validateTypePlan(value.type, `${path}.type`, errors);
       }
+      // (an object type, or a union with an object member: `repairedObject`)
       if (
         "repair" in value &&
-        (value.repair !== true || !isRecord(value.type) || value.type.kind !== "object")
+        (value.repair !== true ||
+          !isRecord(value.type) ||
+          (value.type.kind !== "object" &&
+            !(
+              value.type.kind === "union" &&
+              Array.isArray(value.type.members) &&
+              value.type.members.some((member) => isRecord(member) && member.kind === "object")
+            )))
       )
         errors.push(
           planError("TSC002", "Only a load of an object type repairs it.", `${path}.repair`),

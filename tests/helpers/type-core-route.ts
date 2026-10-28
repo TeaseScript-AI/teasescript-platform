@@ -10,6 +10,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime
 import {
   defaultSites,
   derivedText,
+  repairsRecord,
   type DerivedContent,
   type DerivedStore,
   type PredictedRun,
@@ -43,7 +44,7 @@ function planText(type: TypePlan | null): string {
   if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
     return `${type.kind}<${planText(type.element)}>`;
   if (type.kind === "object")
-    return `{${type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`).join(", ")}}`;
+    return `{${[...type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`), ...(type.keepExtra === true ? ["..."] : [])].join(", ")}}`;
   return type.kind;
 }
 
@@ -148,7 +149,7 @@ export function derivedContent(content: DerivedContent, source: string): string[
     ]
       .filter(
         (entry) =>
-          entry.type.kind === "object" &&
+          repairsRecord(entry.type) &&
           defaults.some((fallback) => fallback.owner === entry.owner && fallback.lowered),
       )
       .map((entry) => `repair ${entry.owner} ${derivedText(entry.type)}`),

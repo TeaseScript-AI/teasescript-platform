@@ -47,6 +47,8 @@ export type DerivedType =
   | {
       readonly kind: "object";
       readonly properties: readonly { readonly name: string; readonly type: DerivedType }[];
+      /** A typed parse's or load's reading at or below a written `object`: every other key kept (#1223). */
+      readonly keepExtra?: true;
     }
   | { readonly kind: "union"; readonly members: readonly DerivedType[] };
 
@@ -103,8 +105,16 @@ export function derivedText(type: DerivedType): string {
       .join("|");
   if (type.kind === "union") return type.members.map(derivedText).sort().join("|");
   if (type.kind === "object")
-    return `{${type.properties.map(({ name, type }) => `${name}: ${derivedText(type)}`).join(", ")}}`;
+    return `{${[...type.properties.map(({ name, type }) => `${name}: ${derivedText(type)}`), ...(type.keepExtra === true ? ["..."] : [])].join(", ")}}`;
   return `${type.kind}<${type.element === null ? "any" : derivedText(type.element)}>`;
+}
+
+/** Whether a typed parse or load reads a record of this type per field: an object type, or a union with one. */
+export function repairsRecord(type: DerivedType): boolean {
+  return (
+    type.kind === "object" ||
+    (type.kind === "union" && type.members.some((member) => member.kind === "object"))
+  );
 }
 
 /** A source as the rules read it: its text and its statements, parsed once for all its derivations and runs. */
@@ -689,10 +699,65 @@ function expectedType(
   if (seen.has(key)) return null; // this contribution adds no source structure; an earlier store may decide it
   const next = new Set([...seen, key]);
   const written = writtenLanding(owner, [], statements);
-  if (written !== undefined) return written;
   const fallback = fallbackOf(owner);
+  // (a written type without an object takes nothing from the default)
+  if (written !== undefined)
+    return written === null
+      ? null
+      : writtenReading(
+          written,
+          fallback === null || !holdsObject(written)
+            ? null
+            : literalType(fallback, statements, next),
+        );
   const literal = fallback === null ? null : literalType(fallback, statements, next);
   return literal === null ? null : withoutNull(literal);
+}
+
+/** Whether a type has an object at some level. */
+function holdsObject(type: DerivedType): boolean {
+  if (type.kind === "object") return true;
+  if (type.kind === "union") return type.members.some(holdsObject);
+  return type.kind !== "kinds" && type.element !== null && holdsObject(type.element);
+}
+
+/**
+ * What a typed parse or load reads where it lands in a written type: that type, each level of it that is any object
+ * (`object`) read as the default's object there, which names its properties with the default's types and keeps every
+ * other key, there and at every level below (#1223, the lead's rulings 1 and 2).
+ */
+function writtenReading(written: DerivedType, literal: DerivedType | null): DerivedType {
+  if (written.kind === "union")
+    return unionTypes(written.members.map((member) => writtenReading(member, literal)));
+  if (written.kind === "kinds") return written;
+  if (written.kind === "object") {
+    const object =
+      literal?.kind === "union"
+        ? literal.members.find((member) => member.kind === "object")
+        : literal;
+    return keepingKeys(object?.kind === "object" ? object : written);
+  }
+  return {
+    kind: written.kind,
+    element:
+      written.element === null ? null : writtenReading(written.element, partOf(literal, "element")),
+  };
+}
+
+/** `type` with every object in it keeping its other keys. */
+function keepingKeys(type: DerivedType): DerivedType {
+  if (type.kind === "kinds") return type;
+  if (type.kind === "union") return unionTypes(type.members.map(keepingKeys));
+  if (type.kind === "object")
+    return {
+      kind: "object",
+      properties: type.properties.map((property) => ({
+        name: property.name,
+        type: keepingKeys(property.type),
+      })),
+      keepExtra: true,
+    };
+  return { kind: type.kind, element: type.element === null ? null : keepingKeys(type.element) };
 }
 
 /** Whether a type holds `null`. */
@@ -817,7 +882,11 @@ export function derive(
   for (const owner of new Set(owners)) {
     if (owner.kind === "loadExpression") {
       const type = expectedType(owner, statements);
-      content.loads.push({ owner: site(owner), type, repair: type?.kind === "object" });
+      content.loads.push({
+        owner: site(owner),
+        type,
+        repair: type !== null && repairsRecord(type),
+      });
     } else if (
       owner.kind === "callExpression" &&
       owner.callee.kind === "identifier" &&
@@ -1232,12 +1301,13 @@ function readJson(
       (value.kind !== "dict" && value.kind !== "object")
     )
       return undefined;
+    const fields =
+      value.kind === "dict"
+        ? value.entries.map((entry) => ({ name: entry.key, value: entry.value }))
+        : value.properties;
     const properties: { name: string; value: SerializableRuntimeValue }[] = [];
     for (const property of type.properties) {
-      const held =
-        value.kind === "dict"
-          ? value.entries.find((entry) => entry.key === property.name)?.value
-          : value.properties.find((entry) => entry.name === property.name)?.value;
+      const held = fields.find((entry) => entry.name === property.name)?.value;
       const supplied =
         fallback !== null && typeof fallback === "object" && fallback?.kind === "object"
           ? fallback.properties.find((entry) => entry.name === property.name)?.value
@@ -1246,7 +1316,16 @@ function readJson(
       if (read === undefined && supplied === undefined) return undefined;
       properties.push({ name: property.name, value: read === undefined ? supplied! : read });
     }
-    return { kind: "object", properties };
+    if (type.keepExtra !== true) return { kind: "object", properties };
+    // every key in the JSON's order, a listed one as read, those it lacks after them
+    const read = (name: string) => properties.find((property) => property.name === name);
+    return {
+      kind: "object",
+      properties: [
+        ...fields.map((field) => read(field.name) ?? field),
+        ...properties.filter((property) => !fields.some((field) => field.name === property.name)),
+      ],
+    };
   }
   if (
     type.kind !== "kinds" &&

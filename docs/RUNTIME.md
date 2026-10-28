@@ -1216,9 +1216,10 @@ structured validation errors. Storage values, loaded values, and action payloads
 Each `storageLoad` carries `type`, the type its `load` reads the stored value as, or `null` for a load the compiler
 cannot type ([ADR 0021 §6](decisions/0021-static-types.md)). A stored value that does not fit it is ignored for that
 load: developer warning `TSW016` at the load, then the default; the entry stays in the view. A `storageLoad` with
-`repair: true`, which only the new type analysis emits for an object `type`, repairs a stored object instead: each
-missing field, or one of another type, nested objects field by field, takes the default's, with one `TSW016` naming each
-such field, and the load's copy keeps the stored object's other fields. Its default runs only when a field needs it;
+`repair: true`, which only the new type analysis emits for an object `type` or a union with one, as an `object?`'s,
+repairs a stored object instead, by that object type: each missing field, or one of another type, nested objects field
+by field, takes the default's, with one `TSW016` naming each such field, and the load's copy keeps the stored object's
+other fields. Its default runs only when a field needs it;
 when the default runs as instructions, the load leaves the stored object in the result's temporary, and the
 `storeTemporary` that selects the default carries `repair`, the type it repairs that object against.
 `InstructionPlan.storageTypes` lists, unique and in key order, the type that every typed load of a storage key written
@@ -1586,8 +1587,11 @@ JSON reading does not for keys that look like whole numbers, and so that any dep
   ([ADR 0021 rule 2.6](decisions/0021-static-types.md)), reads the JSON as that type. JSON of another kind gives the
   default with developer warning `TSW020`, before any file is stored. An object type reads a JSON object as an object of
   its properties, nested objects the same way: each missing property, or one of another type, takes the default's, with
-  one `TSW020` naming each, and the JSON's other keys are left out. The file store stores only the files of the parts
-  the call keeps: a key the type leaves out, or a property the default supplies, is never stored. The default runs only
+  one `TSW020` naming each, and the JSON's other keys are left out. An object type with `keepExtra: true`, which the
+  analysis gives every level of a written `object`, keeps them instead, in the JSON's order, with a property the default
+  supplies for a missing key after them; a union's object member reads a JSON object the same way. The file store
+  stores only the files of the parts the call keeps: a key the type leaves out, or a property the default supplies, is
+  never stored. The default runs only
   when a property needs it; one that runs as instructions finds the JSON's dict in the result's temporary, and the
   `storeTemporary` that selects it carries `repair`, the type it reads that dict as. Text that is not JSON still gives
   the default without a warning.
@@ -2071,9 +2075,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 103 | The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`, and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore` of `fromJson` `expected`, and a `storageLoad` `repair`, which plan validation previously rejected; a plan without them runs as before. |
+| Instruction plan | 104 | A typed reading into a written `object` (#1223; only the new type analysis's plans carry it): an object type may carry `keepExtra: true`, with which a typed `fromJson` keeps a JSON object's other keys, and a `storageLoad` may carry `repair` beside a union with an object member, as an `object?`'s; plan validation previously rejected both. |
 | Runtime snapshot | 91 | Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the presentation in force when the session was restored. |
-| Checkpoint | 128 | The form-presentation snapshot contract. |
+| Checkpoint | 129 | The plan contract of a typed reading into a written `object`. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2105,6 +2109,11 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Instruction plan history
 
+- Revision 103: The new type analysis's runtime checks (the port of the coarse core, step S7; only its plans carry them
+  until it is selected): an `assign` of a property may carry `requireExisting`, a call `indexCheck`, `fallbackCheck`,
+  and `expected`, a `binary` `otherwise` `fallbackCheck`, a `storeTemporary` `fallbackCheck` and `repair`, a `fileStore`
+  of `fromJson` `expected`, and a `storageLoad` `repair`, which plan validation previously rejected; a plan without them
+  runs as before.
 - Revision 102: Player profile (owner decision, 2026-10-23): the instruction that copies the player profile into
   `player` is `copyPlayerProfile`, and a read of one of its person fields is `{ kind: "playerProfileField", name }`;
   plan validation previously accepted `copyAccount` and `accountField` instead.
@@ -2477,6 +2486,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 128: The form-presentation snapshot contract.
 - Revision 127: The plan contract of the new type analysis's runtime checks.
 - Revision 126: The player-profile plan and snapshot contracts.
 - Revision 125: The plan and snapshot contracts of files entered at their top.

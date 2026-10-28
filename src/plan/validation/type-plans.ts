@@ -56,7 +56,11 @@ export function validateTypePlan(
           pending.push({ value: type.element, path: `${typePath}.element` });
         break;
       case "object": {
-        rejectUnknownFields(type, ["kind", "properties"], typePath, errors);
+        rejectUnknownFields(type, ["kind", "properties", "keepExtra"], typePath, errors);
+        if ("keepExtra" in type && type.keepExtra !== true)
+          errors.push(
+            planError("TSC002", "Object type keepExtra must be true.", `${typePath}.keepExtra`),
+          );
         if (!Array.isArray(type.properties)) {
           errors.push(
             planError(
