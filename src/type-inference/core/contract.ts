@@ -29,6 +29,7 @@ import {
   keptKeyBelow,
   keyBelow,
   keyOf,
+  keptPath,
   keyPath,
   keyPlace,
   recordPath,
@@ -903,7 +904,44 @@ export class Contract {
   /** The value-side literal reads that passed an element step over a copy, by literal, path and node (F12). */
   readonly #overCopy = new Set<string>();
 
+  /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
+  readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
+
   public constructor(readonly pass: CorePass) {}
+
+  /**
+   * TABLE B1, S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
+   * the reason `budget` for every read from then on, and every key's below it: `contractOf` and every value read of such
+   * a key (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it;
+   * what finished before the stop keeps its result, as a stopped demand's finished work does.
+   */
+  public stop(place: PlaceId, path: readonly string[]): void {
+    const paths = this.#stopped.get(place);
+    if (paths === undefined) this.#stopped.set(place, [path]);
+    else paths.push(path);
+  }
+
+  /** Whether any decision stopped (`stop`). */
+  public get anyStopped(): boolean {
+    return this.#stopped.size > 0;
+  }
+
+  /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`). */
+  public stopped(place: PlaceId, path: readonly string[]): boolean {
+    const paths = this.#stopped.get(place);
+    if (paths === undefined) return false;
+    this.#work.charge("checks");
+    return paths.some((at) => at.length <= path.length && at.every((step, i) => path[i] === step));
+  }
+
+  /** `stopped` for a key. */
+  public keyStopped(key: Key): boolean {
+    return (
+      this.anyStopped &&
+      this.#stopped.has(keyPlace(key)) &&
+      this.stopped(keyPlace(key), keptPath(this.#work, key))
+    );
+  }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
   get #work(): WorkLedger {
@@ -919,6 +957,7 @@ export class Contract {
 
   /** The contract of a key (§3.2): a demand, once per key and pass. */
   public *contractOf(key: Key): Work<readonly Item[]> {
+    if (this.keyStopped(key)) return STOPPED;
     const site = this.pass.program.places[keyPlace(key)]?.site ?? null;
     return yield {
       key: joinParts("c", key),

@@ -117,6 +117,8 @@ export class Values {
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
   public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
+    // (a key whose decision stopped: its contract, `budget`, for every read, `Contract.stop`)
+    if (this.pass.contract.keyStopped(key)) return STOPPED;
     const read = yield* this.#keyRead(key, node, before);
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
     return read.guardable && this.pass.guards.narrowed(key, node!)
@@ -373,7 +375,9 @@ export class Values {
     if (program.speakerPlaces.has(value) || program.isHost(value)) return "contract";
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined)
-      return recorded(keyOf(binding, path), program.occNode.get(value) ?? at);
+      return contract.keyStopped(keyOf(binding, path))
+        ? "contract"
+        : recorded(keyOf(binding, path), program.occNode.get(value) ?? at);
     const call = program.callOutOf.has(value) ? program.opOf.get(value) : undefined;
     if (call?.kind === "call")
       return recorded(

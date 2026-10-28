@@ -1993,12 +1993,14 @@ test("an admission decision past its allowance stops: its key undecided, its rea
 });
 
 /**
- * Astra r1 B1 on #1165: a decision stopped at its allowance stays undecided at every reader, also after a program stop
- * where admission had settled, when the finishing path asks retained, lazily decided and syntax sources (source 4 tells
- * a stopped decision from a path admission decides lazily). `tally`'s decision scans its 14 stores; its place stays
- * undecided and its read answers `budget` before the program stop and at its first settled and its last stop, a list
- * literal's element holding it decides nothing, and the stop changes nothing the oracle does not excuse, no boundary
- * among it. The generated family (shapes, readers, caps and allowances around the stop) runs outside CI.
+ * Astra r1 B1 and Codex c-r7 B1 on #1165: a decision stopped at its allowance leaves its key's contract `budget` for
+ * every read from then on (`Contract.stop`), a read composed in a literal or its projection included, also after a
+ * program stop where admission had settled, when the finishing path asks retained, lazily decided and syntax sources
+ * (source 4 tells a stopped decision from a path admission decides lazily). `tally`'s decision scans its 14 stores; its
+ * place stays undecided and its read, an object literal's property holding it and that property's read answer `budget`
+ * before the program stop and at its first settled and its last stop, and the stop changes nothing the oracle does not
+ * excuse, no boundary among it. The generated family (shapes, readers, caps and allowances around the stop) runs outside
+ * CI.
  */
 test("a stopped decision stays undecided at every reader, also after a settled program stop (S3 §5)", () => {
   const source =
@@ -2007,8 +2009,8 @@ test("a stopped decision stays undecided at every reader, also after a settled p
       ...Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}`),
       "tally = hostValue",
       "let picked: integer = tally",
-      "let pair = [tally]",
       "let other = tally",
+      "repeat {kept: tally}.kept {}",
       "repeat tally {}",
       "repeat other {}",
       'say "DONE"',
@@ -2020,7 +2022,7 @@ test("a stopped decision stays undecided at every reader, also after a settled p
     ({ kind }) => kind.kind === "binding" && kind.name === "tally",
   )!.id;
   const read = source.indexOf("tally {}");
-  const pair = source.indexOf("[tally]");
+  const kept = source.indexOf("{kept: tally}");
   for (const reversed of [false, true]) {
     const inOrder = <T>(make: () => T): T =>
       reversed
@@ -2055,18 +2057,14 @@ test("a stopped decision stays undecided at every reader, also after a settled p
       const budget = (items: readonly { tag: string; reasons: number }[]) =>
         items.map((item) => `${item.tag}/${item.reasons}`);
       assert.deepEqual(budget(answers.at(node(read, "identifier"))!.items), ["unknown/16"], where);
-      // (a literal's element decides nothing either: `budget` where the question composes it from its child's own read,
-      // after a stop, else the solver's value of the read, host data here)
       assert.deepEqual(
-        [
-          ...new Set(
-            answers
-              .valueAt(node(pair, "listLiteral"), ["element"])
-              .items.filter((item) => item.tag !== "empty")
-              .map((item) => item.tag),
-          ),
-        ],
-        ["unknown"],
+        budget(answers.valueAt(node(kept, "objectLiteral"), ["kept"]).items),
+        ["unknown/16"],
+        where,
+      );
+      assert.deepEqual(
+        budget(answers.at(node(kept, "propertyAccessExpression"))!.items),
+        ["unknown/16"],
         where,
       );
       if (allowance !== undefined)

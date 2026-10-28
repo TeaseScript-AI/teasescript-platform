@@ -681,7 +681,7 @@ export class Consumers {
    * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
    * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
    * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
-   * `#required`. A read of a key whose decision stopped, or of a key below one, is `STOPPED` before any source (S3 §5).
+   * `#required`.
    */
   #finishingRead(
     value: PlaceId,
@@ -689,7 +689,6 @@ export class Consumers {
     rest: readonly string[],
     requirement = false,
   ): readonly Item[] {
-    if (this.admission.readsStoppedDecision(value, rest)) return STOPPED;
     // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
     // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126)
     const { program } = this.pass;
@@ -1124,8 +1123,6 @@ export class Consumers {
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
   #valueRun(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
-    // (a read of a key whose decision stopped: `unknown` with the reason `budget`, S3 §5)
-    if (this.admission.readsStoppedDecision(value, rest)) return STOPPED;
     return this.#run(this.pass.values.valueItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );
@@ -5122,20 +5119,17 @@ export class Consumers {
     )) {
       if (!this.#runs(d.site)) continue;
       this.#reading = d.prep ?? d.node;
-      const recvPath = keyPath(d.recv!);
-      // (a receiver whose decision stopped: `unknown` with the reason `budget`, S3 §5)
       const receiver = withoutEmpty(
-        this.admission.decisionStopped(keyPlace(d.recv!), recvPath)
-          ? STOPPED
-          : this.#finishing
-            ? this.#finishingKeyRead(d.recv!, d.prep ?? d.node)
-            : this.#run(values.keyItems(d.recv!, d.prep ?? d.node), () =>
-                this.pass.contract.contractOf(d.recv!),
-              ),
+        this.#finishing
+          ? this.#finishingKeyRead(d.recv!, d.prep ?? d.node)
+          : this.#run(values.keyItems(d.recv!, d.prep ?? d.node), () =>
+              this.pass.contract.contractOf(d.recv!),
+            ),
       );
       const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
       // §3.4: the whole member or element access, including a mutator's call.
       const at = d.into !== undefined ? this.#own(d.into, d.site) : d.site;
+      const recvPath = keyPath(d.recv!);
       const label =
         owner !== undefined
           ? this.#keyLabel(owner)

@@ -38,10 +38,6 @@ export const READS = new Map([
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],
   ["ownIngress", "whether an item is the store's own ingress: a test"],
   ["ownReadItem", "whether external data is an operation's own read's alone: a test"],
-  [
-    "readsStoppedDecision",
-    "whether a read reaches a key whose decision stopped at its demand allowance: a test",
-  ],
   ["reject", "records a rejected store (A6): the C1 error that rejects it is the consumer's own"],
   ["retained", "the decision admission retained before a stop: a decision's answer"],
   ["siteAt", "the site of an error for a store's contribution: a site, read"],

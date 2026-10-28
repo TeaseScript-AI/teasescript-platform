@@ -45,7 +45,6 @@ import {
   ingressLeaves,
   MIXED_LEAF,
   REASON,
-  STOPPED,
   writerKey,
   type IngressNode,
   type Item,
@@ -940,19 +939,6 @@ export interface AdmissionHost {
   read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
 }
 
-/** What of the stopped decisions' paths a read's key reaches: its depth below its place, the paths it is still a
- * prefix of, and whether it is at or below one (`Admission.readsStoppedDecision`). */
-interface StoppedReach {
-  readonly depth: number;
-  readonly live: readonly (readonly string[])[];
-  readonly stopped: boolean;
-}
-
-/** Whether `path` begins with `prefix`. */
-function startsWith(path: readonly string[], prefix: readonly string[]): boolean {
-  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
-}
-
 export class Admission {
   /** The decider's kinds per key (§5). */
   readonly decided = new Map<Key, readonly ItemTag[]>();
@@ -963,10 +949,6 @@ export class Admission {
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
   readonly readChecks: Obligation[] = [];
   readonly #rejectedKeys = new Set<Key>();
-  /** The paths whose decision stopped at its demand allowance (S3 §5), by place: undecided, each read `budget`. */
-  readonly #stoppedPaths = new Map<PlaceId, (readonly string[])[]>();
-  /** Per value read, what of the stopped paths its key reaches (`readsStoppedDecision`), made from its owner's. */
-  readonly #stoppedReach = new Map<PlaceId, StoppedReach | null>();
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
@@ -1715,8 +1697,6 @@ export class Admission {
   public valueAt(d: Definition, at: readonly string[]): Item[] {
     this.pass.program.work.charge("checks");
     if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
-    // (a value reading a key whose decision stopped: `unknown` with the reason `budget`, S3 §5)
-    if (this.readsStoppedDecision(d.value!, at)) return [...STOPPED];
     return this.#items(d.value!, d.node, at);
   }
 
@@ -2734,7 +2714,8 @@ export class Admission {
 
   /**
    * A decision that stopped at its demand allowance (S3 §5): what it had made of its key is taken back, so the key is
-   * undecided and every read of it, or of a key below it, answers `unknown` with the reason `budget`.
+   * undecided, and its contract answers every read of it, or of a key below it, `unknown` with the reason `budget`
+   * (`Contract.stop`).
    */
   public stopDecision(root: PlaceId, path: readonly string[]): void {
     const key = keptKey(this.#work, root, path);
@@ -2744,86 +2725,12 @@ export class Admission {
     this.#inheritsWritten.delete(key);
     this.#unrestricted.delete(key);
     this.#deciderSites.delete(key);
-    const paths = this.#stoppedPaths.get(root);
-    if (paths === undefined) this.#stoppedPaths.set(root, [path]);
-    else paths.push(path);
-    // (what was found of the reads before it reached no stopped key here)
-    this.#stoppedReach.clear();
+    this.pass.contract.stop(root, path);
   }
 
   /** Whether the decision of `place` at `path` or at a key above it stopped (`stopDecision`). */
   public decisionStopped(place: PlaceId, path: readonly string[]): boolean {
-    const stopped = this.#stoppedPaths.get(place);
-    if (stopped === undefined) return false;
-    this.#work.charge("checks");
-    return stopped.some((at) => startsWith(path, at));
-  }
-
-  /**
-   * Whether a value, at `rest` below it, reads a key whose decision stopped or a key below one: its key's reach made
-   * once per value from its owner's by its step (a chain of k projections k steps, not k walks to its root).
-   */
-  public readsStoppedDecision(value: PlaceId, rest: readonly string[]): boolean {
-    if (this.#stoppedPaths.size === 0) return false;
-    const reach = this.#reachOf(value);
-    if (reach === null) return false;
-    // (the read's own steps below its value continue the paths it is still a prefix of)
-    return (
-      reach.stopped ||
-      reach.live.some(
-        (stop) =>
-          stop.length - reach.depth <= rest.length &&
-          stop.every((step, index) => index < reach.depth || rest[index - reach.depth] === step),
-      )
-    );
-  }
-
-  #reachOf(value: PlaceId): StoppedReach | null {
-    const { program } = this.pass;
-    const chain: PlaceId[] = [];
-    let at = value;
-    for (
-      let projection = program.projOf.get(at);
-      !this.#stoppedReach.has(at) && projection !== undefined;
-    ) {
-      chain.push(at);
-      at = projection.owner;
-      projection = program.projOf.get(at);
-    }
-    let reach = this.#stoppedReach.get(at);
-    if (reach === undefined) {
-      program.work.charge("checks");
-      const binding = program.occurrenceOf.get(at);
-      if (binding === undefined) reach = null;
-      else {
-        const { root, path } = program.targetRoot(binding);
-        const paths = this.#stoppedPaths.get(root) ?? [];
-        reach = {
-          depth: path.length,
-          live: paths.filter((stop) => stop.length > path.length && startsWith(stop, path)),
-          stopped: paths.some((stop) => startsWith(path, stop)),
-        };
-      }
-      this.#stoppedReach.set(at, reach);
-    }
-    for (const next of chain.reverse()) {
-      program.work.charge("checks");
-      const projection = program.projOf.get(next)!;
-      if (reach === null || projection.step === "iteration") reach = null;
-      else {
-        const step = stepName(projection.step);
-        const from: StoppedReach = reach;
-        const depth: number = from.depth + 1;
-        const live: (readonly string[])[] = from.live.filter((stop) => stop[from.depth] === step);
-        reach = {
-          depth,
-          live: live.filter((stop) => stop.length > depth),
-          stopped: from.stopped || live.some((stop) => stop.length === depth),
-        };
-      }
-      this.#stoppedReach.set(next, reach);
-    }
-    return reach ?? null;
+    return this.pass.contract.stopped(place, path);
   }
 
   /**
