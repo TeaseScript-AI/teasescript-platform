@@ -349,16 +349,18 @@ export function callDict(
 
 /**
  * Before a method changes its receiver in place, freezes the current values that `+=` reads which may hold the receiver
- * or lead into it: those read from the variable that holds the receiver, or every one when that variable is not known. A
- * receiver read from a temporary or a detached reference is a copy that no variable holds.
+ * or lead into it (`freezeCurrentValuesForChange`): those read from the variable that holds the receiver, or every one
+ * when that variable is not known. A receiver read from a temporary or a detached reference is a copy that no variable
+ * holds, unless its path goes through a speaker.
  */
 function freezeCurrentValuesBeforeChange(evaluator: Evaluator, receiverPlan: ExpressionPlan): void {
   if (snapshotValidationAnalysis(evaluator.plan).currentValueTemporaries.size === 0) return;
   let base = receiverPlan;
   while (base.kind === "property" || base.kind === "index" || base.kind === "group")
     base = base.kind === "group" ? base.expression : base.object;
-  if (base.kind === "temporary") return;
-  let root: PreparedReferenceDescriptor | { rootFrameId: number; rootName: string } | null = null;
+  let root:
+    PreparedReferenceDescriptor | { rootFrameId: number; rootName: string } | "copy" | null =
+    base.kind === "temporary" ? "copy" : null;
   if (base.kind === "identifier") {
     const location = findBindingLocation(evaluator.snapshot, evaluator.plan, base.name);
     if (location !== undefined) root = { rootFrameId: location.frame.id, rootName: base.name };
@@ -367,7 +369,7 @@ function freezeCurrentValuesBeforeChange(evaluator: Evaluator, receiverPlan: Exp
       readTemporary(evaluator.snapshot.temporaries, base.temporaryId, base.span),
       base.span,
     );
-    if (root.detached) return;
+    if (root.detached) root = "copy";
   }
   freezeCurrentValuesForChange(evaluator.snapshot, evaluator.plan, root);
 }

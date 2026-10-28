@@ -1,4 +1,6 @@
 import type {
+  AssignmentStatement,
+  BinaryExpression,
   Block,
   Expression,
   MediaParts,
@@ -35,6 +37,7 @@ import {
   isTakePhotoCall,
 } from "../../capture-call.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
+import { listDraw } from "../../list-methods.js";
 import {
   NO_CORE_CHECKS,
   type CoreRuntimeChecks,
@@ -490,13 +493,16 @@ export class InstructionCompiler {
             span: planSpan(statement.target.span),
           });
         }
+        const appended = this.#appendedJoin(statement);
+        const operator = appended === null ? statement.operator : "+=";
+        const operand = appended?.right ?? statement.value;
         // A compound assignment reads the current value before any instruction-emitting operand runs. `+=` reads it
         // through a reference, which holds a list until something may change it, so that a list nothing changed is
         // joined in place instead of copied (`currentValueTemporaries` of the runtime).
         const current =
-          statement.operator === "=" || !this.emitsInstructions(statement.value)
+          operator === "=" || !this.emitsInstructions(operand)
             ? null
-            : statement.operator === "+="
+            : operator === "+="
               ? this.prepareReferenceExpression(
                   { plan: target.plan, temporaryIds: [] },
                   statement.target.span,
@@ -505,16 +511,16 @@ export class InstructionCompiler {
                   { plan: target.plan, temporaryIds: [] },
                   statement.target.span,
                 );
-        const value = this.lowerExpression(statement.value);
+        const value = this.lowerExpression(operand);
         const assigned: ExpressionPlan =
-          statement.operator === "="
+          operator === "="
             ? value.plan
             : {
                 kind: "binary",
-                operator: statement.operator === "+=" ? "+" : "-",
+                operator: operator === "+=" ? "+" : "-",
                 left: current?.plan ?? target.plan,
                 right: value.plan,
-                span: planSpan(statement.span),
+                span: planSpan(appended?.span ?? statement.span),
               };
         this.instructions.push({
           kind: "assign",
@@ -1176,6 +1182,22 @@ export class InstructionCompiler {
     throw new TypeError("AST assignment target is not assignable.");
   }
 
+  /**
+   * The join of `items = items + more`, which reads its current value as `items += more` does, when `more` runs
+   * instructions and `items` is the target itself: reading it again before `more` runs gives the target's value.
+   * `null` for any other assignment.
+   */
+  #appendedJoin(statement: AssignmentStatement): BinaryExpression | null {
+    if (statement.operator !== "=") return null;
+    const value = unwrapParentheses(statement.value);
+    return value.kind === "binaryExpression" &&
+      value.operator === "+" &&
+      this.emitsInstructions(value.right) &&
+      samePlace(unwrapParentheses(value.left), statement.target)
+      ? value
+      : null;
+  }
+
   #lowerAssignmentObject(expression: Expression): LoweredExpression {
     const lowered = this.lowerExpression(expression);
     return this.prepareReferenceExpression(lowered, expression.span);
@@ -1351,4 +1373,46 @@ export class InstructionCompiler {
 export interface LoweredExpression {
   readonly plan: ExpressionPlan;
   readonly temporaryIds: readonly number[];
+}
+
+/**
+ * Whether two places are the same stable path (V30 §13), so that reading both in a row reads one value: the same
+ * variable, followed by the same properties, none of which selects anew as `.random` does, and the same positions and
+ * keys, each a literal or a plain variable.
+ */
+function samePlace(first: Expression, second: Expression): boolean {
+  for (;;) {
+    if (first.kind === "identifier")
+      return second.kind === "identifier" && first.name === second.name;
+    if (first.kind === "propertyAccessExpression") {
+      if (
+        second.kind !== "propertyAccessExpression" ||
+        first.property.name !== second.property.name ||
+        listDraw(first.property.name, "property") !== undefined
+      )
+        return false;
+      [first, second] = [first.object, second.object];
+    } else if (first.kind === "indexExpression") {
+      if (second.kind !== "indexExpression" || !sameKey(first.index, second.index)) return false;
+      [first, second] = [first.object, second.object];
+    } else return false;
+  }
+}
+
+function sameKey(first: Expression, second: Expression): boolean {
+  if (first.kind === "identifier")
+    return second.kind === "identifier" && first.name === second.name;
+  if (first.kind === "numberLiteral")
+    return second.kind === "numberLiteral" && first.value === second.value;
+  const text = (key: Expression): string | null => {
+    if (key.kind !== "stringLiteral") return null;
+    let value = "";
+    for (const part of key.parts) {
+      if (part.kind !== "stringText") return null;
+      value += part.value;
+    }
+    return value;
+  };
+  const firstText = text(first);
+  return firstText !== null && firstText === text(second);
 }

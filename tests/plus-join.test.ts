@@ -163,12 +163,73 @@ test("+= on a property, element, or dict value appends, and with a call joins wi
   );
 });
 
-test("+= on a property, element, or dict value, or with a call or an ask on the right, copies no whole list", () => {
-  // Diagnostic scale evidence, not a capacity contract (#1186): four additions copy as many list items, whatever the
-  // length of the list they add to.
+test("items = items + more, and += on a speaker's list through any name, join with the value read before a call", () => {
+  // As for `+=` above (V30 §14). A speaker's list may change through another name for the speaker, or through a call
+  // that gives the speaker.
+  assert.deepEqual(
+    said(
+      [
+        "speaker guide {",
+        '    displayName: "Guide"',
+        "    items: [1]",
+        '    rows: [dict{"a": 1}]',
+        "}",
+        "let s = guide",
+        "let t = [1]",
+        "function same(n) {\n    return n\n}",
+        "function getGuide {\n    return guide\n}",
+        "function grows(n) {\n    t.add(99)\n    return n\n}",
+        "function viaName(n) {\n    s.items.add(99)\n    return n\n}",
+        "function viaCall(n) {\n    getGuide().items[0] = 50\n    return n\n}",
+        "function appends(n) {\n    guide.items += [same(n * 10)]\n    return n\n}",
+        'function addsKey(n) {\n    s.rows[0]["b"] = 2\n    return dict{"c": n}\n}',
+        "t = t + [grows(2)]",
+        "guide.items += [5]",
+        "guide.items += [viaName(2)]",
+        "s.items = s.items + [viaCall(3)]",
+        "getGuide().items += [appends(4)]",
+        "guide.rows += [addsKey(3)]",
+        "say t",
+        "say guide.items",
+        "say guide.rows",
+        "exit",
+      ].join("\n"),
+    ),
+    ["[1, 2]", "[1, 5, 2, 3, 4]", '[dict{ "a": 1 }, dict{ "c": 3 }]'],
+  );
+});
+
+test("items = items + more reads a place that selects anew, as .random does, on each side", () => {
+  // Each `.random` draws (V30 §13: it is no stable path), so the target and the joined list may be different rows.
+  // Adding an empty list changes neither the values nor the draws, but makes the left operand a join of its own.
+  const run = (assignment: string): string[] =>
+    sayTexts(
+      runValidSource(
+        [
+          "let rows = [{ items: [10] }, { items: [20] }, { items: [30] }]",
+          "function same(n) {\n    return n\n}",
+          assignment,
+          "say rows",
+          "say randomInteger(1..=100)",
+          "exit",
+        ].join("\n"),
+        0x12345678,
+      ),
+    );
+  const joined = run("rows.random.items = (rows.random.items + []) + [same(99)]");
+  assert.deepEqual(run("rows.random.items = rows.random.items + [same(99)]"), joined);
+  // With this seed, reading the place once, as `+=` does, gives another result.
+  assert.notDeepEqual(run("rows.random.items += [same(99)]"), joined);
+});
+
+test("+= and items = items + more on any list place, also with a call or an ask on the right, copy no whole list", () => {
+  // Diagnostic scale evidence, not a capacity contract (#1186, #1197): four additions copy as many list items, whatever
+  // the length of the list they add to.
   const copied = (length: number, addition: string): number => {
     const plan = compileValidPlan(
       [
+        'speaker guide {\n    displayName: "Guide"\n    items: [0]\n}',
+        "let s = guide",
         "let o = { items: [0] }",
         'let d = dict{"a": [0]}',
         "let rows = [[0]]",
@@ -176,7 +237,7 @@ test("+= on a property, element, or dict value, or with a call or an ask on the 
         'let words = ["a"]',
         "function same(n) {\n    return n\n}",
         `repeat ${length} {`,
-        '    o.items.add(0)\n    d["a"].add(0)\n    rows[0].add(0)\n    t.add(0)\n    words.add("a")',
+        '    o.items.add(0)\n    d["a"].add(0)\n    rows[0].add(0)\n    t.add(0)\n    words.add("a")\n    guide.items.add(0)',
         "}",
         `repeat 4 {\n    ${addition}\n}`,
         "exit",
@@ -214,6 +275,9 @@ test("+= on a property, element, or dict value, or with a call or an ask on the 
     "t += [same(1)]",
     "o.items += [same(1)]",
     'words += [askText "Word?"]',
+    "t = t + [same(1)]",
+    "guide.items += [1]",
+    "s.items += [same(1)]",
   ])
     assert.equal(copied(2_000, addition), copied(4, addition), addition);
 });

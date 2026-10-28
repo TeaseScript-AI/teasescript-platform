@@ -230,6 +230,7 @@ export function detachPreparedReferencesForMutation(
 ): void {
   if (mutation.rootFrameId === null || mutation.rootName === null) return;
   const currentValues = snapshotValidationAnalysis(plan).currentValueTemporaries;
+  let changedProperties: PreparedSpeakerPath | null | undefined;
   for (const temporaries of allTemporaryCollections(snapshot)) {
     for (const temporary of temporaries) {
       if (!isObject(temporary.value)) continue;
@@ -239,15 +240,24 @@ export function detachPreparedReferencesForMutation(
       } catch {
         continue;
       }
-      // A current value is attached only to a list it reads from a variable, through no speaker.
+      // A current value is attached only to a list, which it reads from a variable, or, in a speaker's properties, from
+      // the speaker's global, though a store may change them through any name for the speaker.
       if (currentValues.has(temporary.id)) {
-        if (
-          !descriptor.detached &&
+        if (descriptor.detached) continue;
+        let changes =
           descriptor.rootFrameId === mutation.rootFrameId &&
           descriptor.rootName === mutation.rootName &&
-          (pathStartsWith(descriptor.path, mutation.path) ||
-            pathStartsWith(mutation.path, descriptor.path))
-        )
+          pathsOverlap(descriptor.path, mutation.path);
+        if (!changes) {
+          changedProperties ??= storedSpeakerPath(snapshot, mutation);
+          const read =
+            changedProperties === null ? null : preparedReferenceSpeakerPath(snapshot, descriptor);
+          changes =
+            read !== null &&
+            read.speakerId === changedProperties!.speakerId &&
+            pathsOverlap(read.path, changedProperties!.path);
+        }
+        if (changes)
           freezePreparedReference(snapshot, temporary.value, descriptor, descriptor.path.length);
         continue;
       }
@@ -264,12 +274,14 @@ export function detachPreparedReferencesForMutation(
 /**
  * Freezes, before a method changes a list, set, or dict in place, the current values (see
  * `detachPreparedReferencesForMutation`) that may hold it or lead into it: those read from the variable `root` that holds
- * the receiver, or with `null`, when that variable is not known, every one.
+ * the receiver, with `null`, when that variable is not known, every one, and with `"copy"`, for a receiver no variable
+ * holds, none. Those read from a speaker's properties are frozen in every case, since the receiver may be read through
+ * any name for the speaker, or through a copy of its reference.
  */
 export function freezeCurrentValuesForChange(
   snapshot: RuntimeSnapshot,
   plan: InstructionPlan,
-  root: { readonly rootFrameId: number | null; readonly rootName: string | null } | null,
+  root: { readonly rootFrameId: number | null; readonly rootName: string | null } | "copy" | null,
 ): void {
   const currentValues = snapshotValidationAnalysis(plan).currentValueTemporaries;
   for (const temporaries of allTemporaryCollections(snapshot)) {
@@ -284,7 +296,10 @@ export function freezeCurrentValuesForChange(
       if (
         descriptor.detached ||
         (root !== null &&
-          (descriptor.rootFrameId !== root.rootFrameId || descriptor.rootName !== root.rootName))
+          (root === "copy" ||
+            descriptor.rootFrameId !== root.rootFrameId ||
+            descriptor.rootName !== root.rootName) &&
+          preparedReferenceSpeakerPath(snapshot, descriptor) === null)
       )
         continue;
       freezePreparedReference(snapshot, temporary.value, descriptor, descriptor.path.length);
@@ -517,7 +532,7 @@ function freezePreparedReference(
  * speakers, list elements, and dict entries. `null` when there is none, as when the rest reads a property derived at
  * each read, such as a dict's `values`, which no change of the dict follows.
  */
-function speakerOnPath(
+export function speakerOnPath(
   snapshot: RuntimeSnapshot,
   descriptor: PreparedReferenceDescriptor,
   minimumDepth: number,
@@ -694,6 +709,35 @@ function resolvePreparedReferenceStep(
     return derived === undefined ? { found: false, value: null } : { found: true, value: derived };
   }
   return { found: false, value: null };
+}
+
+/**
+ * The place in the properties of the last speaker on its path that a store at `mutation` changes, or `null` when it
+ * changes none. Unlike `speakerPath`, it also names a key or property that the store adds, and a property that holds a
+ * speaker reference, rather than that speaker.
+ */
+function storedSpeakerPath(
+  snapshot: RuntimeSnapshot,
+  mutation: PreparedReferenceMutation,
+): PreparedSpeakerPath | null {
+  const last = mutation.path.at(-1);
+  if (last === undefined) return null;
+  const holder = preparedReferenceSpeakerPath(snapshot, {
+    rootFrameId: mutation.rootFrameId,
+    rootName: mutation.rootName,
+    path: mutation.path.slice(0, -1),
+    capturedRoot: undefined,
+    detached: false,
+  });
+  return holder === null ? null : { speakerId: holder.speakerId, path: [...holder.path, last] };
+}
+
+/** Whether one of two paths from the same root starts with the other, so that a change at one changes the other. */
+function pathsOverlap(
+  first: readonly PreparedReferenceStep[],
+  second: readonly PreparedReferenceStep[],
+): boolean {
+  return pathStartsWith(first, second) || pathStartsWith(second, first);
 }
 
 function pathStartsWith(

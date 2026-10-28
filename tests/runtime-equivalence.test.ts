@@ -186,9 +186,12 @@ test("a list joined with += under a prepared receiver leaves the receiver the va
 });
 
 test("+= with a call that waits appends in place across checkpoints, and joins the value it read when a block changed it", () => {
-  // A value read before the call is stored as it was (V30 §14), so the element the block adds meanwhile is lost.
+  // A value read before the call is stored as it was (V30 §14), so the element a block adds meanwhile is lost, also to a
+  // speaker's list that it changes through another name.
   const result = assertRuntimeResumeEquivalent(
     [
+      'speaker guide {\n    displayName: "Guide"\n    items: [1]\n}',
+      "let s = guide",
       "let t = [1]",
       "let o = { items: [1] }",
       "function slow(n) {",
@@ -198,10 +201,15 @@ test("+= with a call that waits appends in place across checkpoints, and joins t
       "timer async 1 s {",
       "    t.add(9)",
       "}",
+      "timer async 5 s {",
+      "    s.items.add(8)",
+      "}",
       "t += [slow(2)]",
       "o.items += [slow(3)]",
+      "guide.items = guide.items + [slow(4)]",
       "say t",
       "say o",
+      "say guide.items",
       "exit",
     ].join("\n"),
   );
@@ -209,7 +217,7 @@ test("+= with a call that waits appends in place across checkpoints, and joins t
   assert.equal(result.finalSnapshot.failure, null);
   assert.deepEqual(
     result.events.filter((event) => event.kind === "say").map((event) => event.text),
-    ["[1, 2]", "{ items: [1, 3] }"],
+    ["[1, 2]", "{ items: [1, 3] }", "[1, 4]"],
   );
 });
 

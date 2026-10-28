@@ -12,6 +12,7 @@ import {
   readPreparedReference,
   scopeBindings,
   serializePreparedReference,
+  speakerOnPath,
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
 } from "../scopes/prepared-references.js";
@@ -68,6 +69,7 @@ import { type SourceSpan, fault, receiverLabel, readTemporary } from "./support.
 import type { Evaluator } from "../evaluator.js";
 import { getProperty, dictKey, listPosition, notIndexable } from "./access.js";
 import { speakerById, setSpeakerProperty } from "./speakers.js";
+import type { RuntimeSpeakerSnapshot } from "../snapshot/state.js";
 import { binary } from "./operators.js";
 import { findBindingLocation } from "./bindings.js";
 import { mayChangeValue } from "./effect-facts.js";
@@ -144,7 +146,12 @@ export function assign(
         ),
         target.span,
       );
-    detachForStore(evaluator, receiverDescriptor, { kind: "property", name: target.name });
+    detachForStore(
+      evaluator,
+      receiverDescriptor,
+      { kind: "property", name: target.name },
+      target.span,
+    );
     if (isObject(object)) {
       setCapturedSerializableProperty(object, target.name, value);
       if (evaluator.trace !== null)
@@ -154,18 +161,7 @@ export function assign(
     // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
     if (isSpeakerReference(object)) {
       const speaker = speakerById(evaluator, object.speakerId, target.span);
-      // A reference prepared to the property, through any name for the speaker, keeps the value it leads to now; so
-      // does one to a property read through it, as a term through `gender`.
-      const has = (name: string) => speaker.properties.some((property) => property.name === name);
-      for (const name of [target.name, ...propertiesReadThrough(has, target.name)]) {
-        const path: PreparedReferenceStep[] = [{ kind: "property", name }];
-        detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
-          rootFrameId: GLOBAL_SCOPE_ID,
-          rootName: speaker.identifier,
-          path,
-          speakerPath: { speakerId: speaker.id, path },
-        });
-      }
+      detachForSpeakerStore(evaluator, speaker, target.name);
       setSpeakerProperty(speaker, target.name, value, target.span);
       if (evaluator.trace !== null)
         evaluator.writeState(object, target.name, value, target.span, { property: target.name });
@@ -209,7 +205,7 @@ export function assign(
         target.span,
         object.entries.length + 1,
       );
-    detachForStore(evaluator, receiverDescriptor, { kind: "key", key });
+    detachForStore(evaluator, receiverDescriptor, { kind: "key", key }, target.span);
     setCapturedSerializableDictValue(object, key, value);
     if (evaluator.trace !== null)
       evaluator.traceVariableChange("assignment", receiverDescriptor, target.span);
@@ -224,7 +220,7 @@ export function assign(
     evaluator.evaluate(target.index),
     "assign",
   );
-  detachForStore(evaluator, receiverDescriptor, { kind: "index", index });
+  detachForStore(evaluator, receiverDescriptor, { kind: "index", index }, target.span);
   object.items[index] = cloneCapturedSerializableValue(value);
   if (evaluator.trace !== null)
     evaluator.traceVariableChange("assignment", receiverDescriptor, target.span);
@@ -247,27 +243,65 @@ function storeReceiver(
     : null;
 }
 
-/** Freezes the prepared references that a store at `step` of an attached receiver changes the value of. */
+/**
+ * Freezes the prepared references that a store at `step` of a receiver changes the value of. A detached receiver holds a
+ * copy of its root, which no variable holds, but where its path goes through a speaker, the store changes that speaker's
+ * properties, as a store through the speaker's global does.
+ */
 function detachForStore(
   evaluator: Evaluator,
   receiver: PreparedReferenceDescriptor | null,
   step: PreparedReferenceStep,
+  span: SourceSpan,
 ): void {
-  if (receiver === null || receiver.detached) return;
+  if (receiver === null) return;
+  const speakerPath = preparedReferenceSpeakerPath(evaluator.snapshot, receiver, [step]);
+  if (!receiver.detached) {
+    detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
+      rootFrameId: receiver.rootFrameId,
+      rootName: receiver.rootName,
+      path: [...receiver.path, step],
+      speakerPath,
+    });
+    return;
+  }
+  const holder = preparedReferenceSpeakerPath(evaluator.snapshot, receiver);
+  if (holder === null) return;
   detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
-    rootFrameId: receiver.rootFrameId,
-    rootName: receiver.rootName,
-    path: [...receiver.path, step],
-    speakerPath: preparedReferenceSpeakerPath(evaluator.snapshot, receiver, [step]),
+    rootFrameId: GLOBAL_SCOPE_ID,
+    rootName: speakerById(evaluator, holder.speakerId, span).identifier,
+    path: [...holder.path, step],
+    speakerPath,
   });
 }
 
 /**
- * Runs `items += more`, or `items = items + more`, while the target, a variable, a property of an object, an element of a
- * list, or a value of a dict, holds a list. When the joined list would start with the very list the target still holds,
- * copies of the added elements are appended to it in place, as `addAll` adds them, instead of storing a copy of the
- * whole list for every addition. `+=` reads its current value from the target, or with a call or an ask in `more`,
- * through the reference that read it first, which holds that list until something may change it
+ * Freezes the prepared references that a store into the property `name` of `speaker` changes the value of: those to the
+ * property through any name for the speaker, and those to a property read through it, as a term through `gender`.
+ */
+function detachForSpeakerStore(
+  evaluator: Evaluator,
+  speaker: RuntimeSpeakerSnapshot,
+  name: string,
+): void {
+  const has = (property: string) => speaker.properties.some((item) => item.name === property);
+  for (const changed of [name, ...propertiesReadThrough(has, name)]) {
+    const path: PreparedReferenceStep[] = [{ kind: "property", name: changed }];
+    detachPreparedReferencesForMutation(evaluator.snapshot, evaluator.plan, {
+      rootFrameId: GLOBAL_SCOPE_ID,
+      rootName: speaker.identifier,
+      path,
+      speakerPath: { speakerId: speaker.id, path },
+    });
+  }
+}
+
+/**
+ * Runs `items += more`, or `items = items + more`, while the target, a variable, a property of an object or a speaker, an
+ * element of a list, or a value of a dict, holds a list. When the joined list would start with the very list the target
+ * still holds, copies of the added elements are appended to it in place, as `addAll` adds them, instead of storing a
+ * copy of the whole list for every addition. `+=` reads its current value from the target, or with a call or an ask in
+ * `more`, through the reference that read it first, which holds that list until something may change it
  * (`currentValueTemporaries`). The result, its type check, its failures, and the prepared references it freezes are
  * those of the assignment. Gives `false`, having evaluated nothing, for an assignment of another form or to a variable
  * that holds no list, and while Debug traces, which explains the joined value.
@@ -338,7 +372,7 @@ export function appendAssigned(
 
 /**
  * The list that `target` holds now, with the freezing of the prepared references that a store there does, or `null` for
- * any other value, and for a property of a speaker or handle, which keeps its properties as runtime state.
+ * any other value. No property of a handle holds a list.
  */
 function heldList(
   evaluator: Evaluator,
@@ -361,6 +395,12 @@ function heldList(
   let held: SerializableRuntimeValue | undefined;
   let step: PreparedReferenceStep;
   if (target.kind === "property") {
+    if (isSpeakerReference(object)) {
+      const speaker = speakerById(evaluator, object.speakerId, target.span);
+      const list = speaker.properties.find((property) => property.name === target.name)?.value;
+      if (list === undefined || !isList(list)) return null;
+      return { list, detach: () => detachForSpeakerStore(evaluator, speaker, target.name) };
+    }
     if (!isObject(object)) return null;
     held = getSerializableProperty(object, target.name);
     step = { kind: "property", name: target.name };
@@ -376,7 +416,7 @@ function heldList(
     step = { kind: "index", index };
   } else return null;
   if (held === undefined || !isList(held)) return null;
-  return { list: held, detach: () => detachForStore(evaluator, receiver, step) };
+  return { list: held, detach: () => detachForStore(evaluator, receiver, step, target.span) };
 }
 
 /**
@@ -395,21 +435,34 @@ export function prepareReference(
   let descriptor = prepared.descriptor!;
   // A reference extended from one that keeps a copy for its own preparation shares that copy.
   if (!keepsRoot && !descriptor.detached) descriptor = { ...descriptor, capturedRoot: undefined };
-  // A current value stays attached only to a list it reads from a variable through no speaker, whose changes freeze it
-  // first (`detachPreparedReferencesForMutation`). It keeps any other value as a copy, as a temporary does.
-  if (
-    currentValue &&
-    !descriptor.detached &&
-    (!isList(prepared.value) ||
-      preparedReferenceSpeakerPath(evaluator.snapshot, descriptor) !== null)
-  )
-    descriptor = {
-      rootFrameId: null,
-      rootName: null,
-      path: [],
-      capturedRoot: prepared.value,
-      detached: true,
-    };
+  // A current value stays attached only to a list, whose changes freeze it first (`detachPreparedReferencesForMutation`,
+  // `freezeCurrentValuesForChange`): one it reads from a variable through no speaker, or one in a speaker's properties,
+  // which it then reads from the speaker's global, whatever name or copy of its reference it was read through. It keeps
+  // any other value as a copy, as a temporary does.
+  if (currentValue) {
+    const speaker = isList(prepared.value)
+      ? speakerOnPath(evaluator.snapshot, descriptor, 0)
+      : null;
+    if (speaker !== null)
+      descriptor = {
+        rootFrameId: GLOBAL_SCOPE_ID,
+        rootName: speaker.reference.identifier,
+        path: descriptor.path.slice(speaker.depth),
+        capturedRoot: keepsRoot ? cloneCapturedSerializableValue(speaker.reference) : undefined,
+        detached: false,
+      };
+    else if (
+      (!descriptor.detached && !isList(prepared.value)) ||
+      preparedReferenceSpeakerPath(evaluator.snapshot, descriptor) !== null
+    )
+      descriptor = {
+        rootFrameId: null,
+        rootName: null,
+        path: [],
+        capturedRoot: prepared.value,
+        detached: true,
+      };
+  }
   return {
     reference: serializePreparedReference(
       restorableDescriptor(evaluator, descriptor, expression.span),
