@@ -28,6 +28,7 @@ export function* parseTypeTask(
   context: TypeContext,
 ): ParseTask<TypeAnnotation | null> {
   const members: TypeAnnotation[] = [];
+  const first = parser.peek();
   do {
     if (members.length > 0) parser.skipContinuationNewlines();
     const member = yield* parseChild(parsePostfixTypeTask(parser, context));
@@ -38,7 +39,8 @@ export function* parseTypeTask(
   return Object.freeze({
     kind: "unionType",
     members: Object.freeze(members),
-    span: spanFrom(members[0]!.span, members.at(-1)!.span),
+    // From its first token to its last, because a group without a postfix spans only its inner type.
+    span: spanFrom(first.span, parser.previous().span),
   });
 }
 
