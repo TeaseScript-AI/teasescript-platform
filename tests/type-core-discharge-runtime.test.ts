@@ -15,6 +15,7 @@ import {
 } from "../src/runtime/snapshot/checkpoint.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
+import { readExpected, repairedRecord } from "../src/runtime/values/expected-reading.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
@@ -83,7 +84,8 @@ function typeText(type: TypePlan): string {
     case "dict":
       return `${type.kind}<${type.element === null ? "any" : typeText(type.element)}>`;
     case "object":
-      return `{${type.properties.map((property) => `${property.name}: ${typeText(property.type)}`).join(", ")}}`;
+      // `...`: a written `object`'s other keys, kept (#1223)
+      return `{${[...type.properties.map((property) => `${property.name}: ${typeText(property.type)}`), ...(type.keepExtra === true ? ["..."] : [])].join(", ")}}`;
     default:
       return type.kind;
   }
@@ -123,7 +125,7 @@ function contentOf(plan: InstructionPlan): string[] {
       found.push(`${field} ${at} ${typeText(type)}`);
     }
     if (fields["kind"] === "storageLoad" && fields["repair"] === true) {
-      // EVIDENCE: invariant: plan validation admits `repair` only beside an object type.
+      // EVIDENCE: invariant: plan validation admits `repair` only beside an object type or a union with one.
       const type = fields["type"] as TypePlan;
       found.push(`type ${at} ${typeText(type)}`);
     }
@@ -697,6 +699,23 @@ test("a file store keeps the files of the fields fromJson keeps, never of a key 
       assert.deepEqual(ran(refused), halted(["0"], [`TSW019@${parse}`]), source);
     }
   }
+  // a written `object` keeps every key (#1223): another key's file is stored and kept, a wrong field's data URL is the
+  // default's and never stored
+  const written = "let out: object = fromJson(hostValue, default: {n: 0})\nsay out.n\nexit\n";
+  const parse = at(written, "fromJson(hostValue, default: {n: 0})");
+  const plan = candidatePlan(written);
+  for (const checkpoints of [false, true]) {
+    const json = `{"n": "${pngDataUrl(1)}", "extra": "${pngDataUrl(2)}"}`;
+    const kept = throughFileStore(
+      plan,
+      json,
+      { kind: "stored", references: [STORED] },
+      checkpoints,
+    );
+    assert.equal(kept.stored, 1);
+    assert.deepEqual(ran(kept), halted(["0"], [`TSW020@${parse}`]));
+    assert.deepEqual(bound(kept.snapshot, "out"), object({ n: 0, extra: STORED }));
+  }
 });
 
 test("a field fromJson keeps whole beside a sibling its default repairs keeps its files, at depths one and two, across the store's answer and its checkpoints, on both lowerings (Astra r2 B4)", () => {
@@ -792,9 +811,10 @@ test("a field fromJson keeps whole beside a sibling its default repairs keeps it
 /** A stored value of the records below, as the host gives it: a record of its fields, nested records too. */
 function stored(value: unknown): SerializableRuntimeValue {
   if (typeof value !== "object" || value === null) {
-    // EVIDENCE: fixture: the scenarios' stored values are JSON data, records and scalars.
+    // EVIDENCE: fixture: the scenarios' stored values are JSON data, records, lists and scalars.
     return value as SerializableRuntimeValue;
   }
+  if (Array.isArray(value)) return { kind: "list", items: value.map(stored) };
   return object(
     Object.fromEntries(Object.entries(value).map(([name, field]) => [name, stored(field)])),
   );
@@ -945,6 +965,17 @@ test("a load repairs a stored record per field, the stored value kept, each bad 
   assertRuntimeResumeEquivalent(lowered, {
     scriptStorage: profile,
     transformPlan: () => candidatePlan(lowered),
+  });
+  // the same into a written `object` (#1223): the record keeps its other fields, its wrong one the default's
+  const lazy = 'load("profile", default: fromJson("{\\"n\\": 1}", default: {n: 0}))';
+  const written = `let profile: object = ${lazy}\nsay profile.n\nexit\n`;
+  const other = [{ key: "profile", value: stored({ n: "bad", m: 2 }) }];
+  const repaired = runWith(candidatePlan(written), null, other);
+  assert.deepEqual(ran(repaired), halted(["1"], [`TSW016@${at(written, lazy)}`]));
+  assert.deepEqual(bound(repaired.snapshot, "profile"), stored({ n: 1, m: 2 }));
+  assertRuntimeResumeEquivalent(written, {
+    scriptStorage: other,
+    transformPlan: () => candidatePlan(written),
   });
 });
 
@@ -1276,21 +1307,6 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
       error instanceof CandidateOutsideSlice &&
       error.what === "an open part of a typed parse's or load's default that its destination types",
   );
-  // an own written destination that admits every kind below the call (`object`'s fields: V30 §13) types nothing there:
-  // a parse's or a load's open part stays on the route, plain, optional or as a list's element (Sol's r1 B2 on #1218)
-  // (route and runs only: the plan's expected type there reads the default's fields, #1223)
-  for (const [type, fallback, json] of [
-    ["object", "{n: 0}", '{"n": "text"}'],
-    ["object?", "{n: 0}", "null"],
-    ["object[]", "[{n: 0}]", '[{"n": "text"}]'],
-  ] as const)
-    for (const call of [
-      `fromJson(hostValue, default: ${fallback}, files: false)`,
-      `load("k", default: ${fallback})`,
-    ]) {
-      const plan = candidatePlan(`let p: ${type} = ${call}\nsay "DONE"\nexit\n`);
-      assert.deepEqual(ran(runWith(plan, json)), halted(["DONE"]), `${type} = ${call}`);
-    }
   // where nothing else types it, it stays unknown: any JSON value there, the others read as typed
   const open =
     'let p = fromJson(hostValue, default: {a: 1, b: null}, files: false)\nsay p.a\nsay "AFTER"\nexit\n';
@@ -1312,6 +1328,176 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
   assert.deepEqual(contentOf(candidatePlan(ordered)), [
     `expected call@${at(ordered, "fromJson(hostValue, default: {a: 1, b: 2}, files: false)")} {a: integer, b: integer}`,
   ]);
+});
+
+test("a typed parse into a written `object` repairs a deep property without copying the levels below each level again, every key kept, counted through the reader at one doubling, in both orders (#1223, Astra r1 B1)", () => {
+  // a `next` chain `depth` deep in the default and the JSON, its deepest `score` wrong: the run's value, and the reader's
+  // reads of the JSON's objects (their `kind`, as every reading and copy of one reads it) for that value, which a copy of
+  // each level's whole contents at every level makes grow with the square of the depth
+  const work = (depth: number): number => {
+    const fallback = `${"{next: ".repeat(depth)}{score: 4}${"}".repeat(depth)}`;
+    const call = `fromJson(hostValue, default: ${fallback}, files: false)`;
+    const source = `let parcel: object = ${call}\nsay "complete"\nexit\n`;
+    const plan = candidatePlan(source);
+    let json = '{"score":"bad","kept":0}';
+    let value = object({ score: 4, kept: 0 });
+    let given = object({ score: 4 });
+    for (let level = 1; level <= depth; level += 1) {
+      json = `{"next":${json},"kept":${level}}`;
+      value = object({ next: value, kept: level });
+      given = object({ next: given });
+    }
+    const result = runWith(plan, json);
+    assert.deepEqual(ran(result), halted(["complete"], [`TSW020@${at(source, call)}`]));
+    assert.deepEqual(bound(result.snapshot, "parcel"), value);
+    let reads = 0;
+    const counted = (raw: unknown): SerializableRuntimeValue => {
+      if (raw === null || typeof raw !== "object") {
+        // EVIDENCE: fixture: the JSON's scalars are text and numbers.
+        return raw as SerializableRuntimeValue;
+      }
+      const entries = Object.entries(raw).map(([key, field]) => ({ key, value: counted(field) }));
+      return {
+        get kind(): "dict" {
+          reads += 1;
+          return "dict";
+        },
+        entries,
+      };
+    };
+    const parse = planNodes(plan).find((node) => node["kind"] === "call" && "expected" in node);
+    // EVIDENCE: invariant: the plan's typed parse carries its expected type, validated with the plan.
+    const type = parse!["expected"] as TypePlan;
+    const parsed = counted(JSON.parse(json));
+    assert.equal(readExpected(parsed, type, true).kind, "fields");
+    assert.deepEqual(repairedRecord(parsed, given, type, true), value);
+    return reads;
+  };
+  const small = work(16);
+  const large = work(32);
+  assert.ok(large <= 2.15 * small, `reads at depth 16: ${small}, at 32: ${large}`);
+});
+
+test("a typed parse or load into a written `object` keeps every key and takes each property its default names from it per field, plain, nested, optional or as a list's element, in three layers, in both orders (#1223)", () => {
+  // the written type stays the store's (`{}`); the call reads the default's properties with their types, every other
+  // key kept: a missing or wrong one is the default's, named by its warning, never the whole value, and JSON or a stored
+  // value of another kind gives the whole default
+  for (const [type, fallback, said, cases] of [
+    [
+      "object",
+      "{n: 0}",
+      "p.n",
+      [
+        ['{"n": 3}', { n: 3 }, ["3"], []],
+        ['{"m": 1}', { m: 1, n: 0 }, ["0"], ["n"]],
+        ['{"n": "text"}', { n: 0 }, ["0"], ["n"]],
+        ['{"n": "text", "m": 1}', { n: 0, m: 1 }, ["0"], ["n"]],
+        ["[]", { n: 0 }, ["0"], [null]],
+      ],
+    ],
+    // a `null` in the default stays open, as without a written type
+    [
+      "object",
+      "{n: null}",
+      '"DONE"',
+      [['{"n": "text", "m": 1}', { n: "text", m: 1 }, ["DONE"], []]],
+    ],
+    // every level below a written `object` keeps its keys; a list field is one field (the lead's ruling 1)
+    [
+      "object",
+      "{a: {n: 0}, xs: [0]}",
+      '"DONE"',
+      [
+        [
+          '{"a": {"n": "text", "extra": 2}, "xs": ["text"], "other": 3}',
+          { a: { n: 0, extra: 2 }, xs: [0], other: 3 },
+          ["DONE"],
+          ["a.n", "xs"],
+        ],
+      ],
+    ],
+    // `object?` reads its object member so, `null` as it is; `object[]` keeps each element's keys, and a list with an
+    // element that does not fit gives the whole default (the lead's ruling 2)
+    ["object?", "{n: 0}", '"DONE"', [['{"n": "text", "m": 1}', { n: 0, m: 1 }, ["DONE"], ["n"]]]],
+    [
+      "object[]",
+      "[{n: 0}]",
+      '"DONE"',
+      [
+        ['[{"n": 1, "m": 2}]', [{ n: 1, m: 2 }], ["DONE"], []],
+        ['[{"n": "text", "m": 1}]', [{ n: 0 }], ["DONE"], [null]],
+      ],
+    ],
+  ] as const)
+    for (const call of [
+      `fromJson(hostValue, default: ${fallback}, files: false)`,
+      `load("k", default: ${fallback})`,
+    ]) {
+      const source = `let p: ${type} = ${call}\nsay ${said}\nexit\n`;
+      const where = at(source, call);
+      const parse = call.startsWith("fromJson");
+      const plan = candidatePlan(source);
+      if (type === "object" && fallback === "{n: 0}") {
+        assert.deepEqual(checkedStores(plan), ["'p' {}"], source);
+        assert.deepEqual(
+          contentOf(plan),
+          parse
+            ? [`expected call@${where} {n: integer, ...}`]
+            : [`repair storageLoad@${where}`, `type storageLoad@${where} {n: integer, ...}`],
+          source,
+        );
+      }
+      for (const [input, value, says, fields] of cases) {
+        const storage = parse ? [] : [{ key: "k", value: stored(JSON.parse(input)) }];
+        const result = runWith(plan, parse ? input : null, storage);
+        const code = parse ? "TSW020" : "TSW016";
+        assert.deepEqual(
+          ran(result),
+          halted(
+            says,
+            fields.map(() => `${code}@${where}`),
+          ),
+          `${source} with ${input}`,
+        );
+        assert.deepEqual(bound(result.snapshot, "p"), stored(value), `${source} with ${input}`);
+        const warnings = result.events.filter((event) => event.kind === "developerWarning");
+        fields.forEach((field, index) => {
+          if (field !== null)
+            assert.match(warnings[index]!.message, new RegExp(`'${field}'`), `${source}: ${input}`);
+        });
+        assert.deepEqual(result.snapshot.scriptStorage, storage, `${source} with ${input}`);
+      }
+    }
+  // `null` JSON into `object?` is `null`
+  const optional = "let p: object? = fromJson(hostValue, default: {n: 0}, files: false)\nexit\n";
+  assert.equal(bound(runWith(candidatePlan(optional), "null").snapshot, "p"), null);
+  // an object default without a written type still leaves the other keys of JSON out, its stored record keeps them
+  const inferred = runWith(
+    candidatePlan("let p = fromJson(hostValue, default: {n: 0}, files: false)\nexit\n"),
+    '{"n": "text", "m": 1}',
+  );
+  assert.deepEqual(bound(inferred.snapshot, "p"), stored({ n: 0 }));
+  const kept = [{ key: "k", value: stored({ n: "text", m: 1 }) }];
+  const loaded = runWith(candidatePlan('let p = load("k", default: {n: 0})\nexit\n'), null, kept);
+  assert.deepEqual(bound(loaded.snapshot, "p"), stored({ n: 0, m: 1 }));
+  // a checkpoint keeps the marker, and one of another value fails the plan's and the checkpoint's validation
+  const marked = candidatePlan(optional);
+  const start = createImmediatePacingRuntimeSnapshot(marked, { globals: { hostValue: "{}" } });
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(marked, start)));
+  assert.deepEqual(restored.plan, marked);
+  const malformed = structuredClone(marked);
+  const marker = planNodes(malformed).find((node) => node["keepExtra"] === true);
+  assert.ok(marker !== undefined);
+  marker["keepExtra"] = false;
+  assert.ok(
+    JSON.stringify(validateInstructionPlan(malformed).errors).includes(
+      "Object type keepExtra must be true.",
+    ),
+  );
+  assert.throws(
+    () => deserializeCheckpoint(serializeCheckpoint(createCheckpoint(malformed, start))),
+    (error) => error instanceof Error && !(error instanceof TypeError),
+  );
 });
 
 test("a known `null` reads as the `null` type, an unknown stays open, and each record keeps its own fields' order, in three layers, in both orders (S7 review r5 B1, N1)", () => {

@@ -14,7 +14,12 @@ import type {
 import { messageColorDiagnostics } from "../../authored-presentation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import { isRepeatCount, repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
-import type { TypeCheckPlan, TypePlan, TypePropertyPlan } from "../../plan/model.js";
+import {
+  repairedObject,
+  type TypeCheckPlan,
+  type TypePlan,
+  type TypePropertyPlan,
+} from "../../plan/model.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
 import type { SourceSpan } from "../../source.js";
 import { KnownValues } from "../../static-evaluation.js";
@@ -33,6 +38,8 @@ import type {
 } from "../backend.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
+import { joinSteps } from "./budget.js";
+import { typedDefault as defaultKinds } from "./contract.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
@@ -584,7 +591,7 @@ function runtimeChecks(
     if (type === null) continue;
     typed.add(load);
     checks.set(load, { type, place: `Storage key ${textOf(unwrap(load.key))}` });
-    if (type.kind === "object") core.repairs.add(load);
+    if (repairedObject(type) !== undefined) core.repairs.add(load);
   }
   for (const call of index.calls)
     if (call.callee.kind === "identifier" && call.callee.name === "fromJson") {
@@ -805,7 +812,11 @@ class Contracts {
       );
     const landing = this.#landing(call);
     const expected = runCompileTask(
-      this.#answerTask({ node: nodeOf(this.answers, this.index, call), call, landing }, [], [call]),
+      this.#answerTask(
+        { node: nodeOf(this.answers, this.index, call), call, landing, keeps: false },
+        [],
+        [call],
+      ),
     );
     // a copy of a written type is F18's receiving context (A4, TABLE r4.75 (1), (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
@@ -997,7 +1008,14 @@ class Contracts {
     path: readonly string[],
     records: readonly Expression[],
   ): CompileTask<TypePlan | null> {
-    const answer = this.answers.valueAt(at.node, path);
+    const found = this.answers.valueAt(at.node, path);
+    // below a written `object` the default's own answer, as F18 takes a default's kinds (`contract.ts`'s `typedDefault`):
+    // a `null` field stays open there too
+    const decision = at.keeps ? defaultKinds(path, false) : null;
+    const answer =
+      decision === null
+        ? found
+        : { ...found, items: decision.answer(decision.choose(found.items), found.items) };
     const held = new Set<ItemTag>();
     let lacking = false;
     for (const item of answer.items) {
@@ -1037,26 +1055,55 @@ class Contracts {
         // elements that take every value leave the collection open, as a store's check has it
         members.push({ kind: tag, element: element === ANY_VALUE ? null : element });
       } else if (tag === "object") {
+        // a level the place's written type leaves any object (`object`), and every level below one, keeps every key of
+        // the value; its properties are the default's, each by the literal data's own answer, as the call's below a
+        // written `object` takes every value (#1223, the lead's ruling 1)
+        const opens = !at.keeps && this.#writtenObject(at.landing, path);
+        const literal = opens ? this.#literalOf(at.call) : null;
+        const inner =
+          literal === null
+            ? at
+            : { ...at, node: nodeOf(this.answers, this.index, literal), keeps: true };
+        const names = !opens
+          ? answer.properties
+          : inner === at
+            ? []
+            : this.answers.valueAt(inner.node, path).properties;
         const properties: TypePropertyPlan[] = [];
-        for (const name of fieldOrder(answer.properties, below ?? NO_RECORDS, this.index))
+        for (const name of fieldOrder(names, below ?? NO_RECORDS, this.index))
           properties.push({
             name,
             // EVIDENCE: invariant: below the call a level always has a plan (`ANY_VALUE` at the least).
             type: (yield* compileChild(
-              this.#answerTask(at, [...path, propertyStep(name)], below?.fields.get(name) ?? []),
+              this.#answerTask(inner, [...path, propertyStep(name)], below?.fields.get(name) ?? []),
             ))!,
           });
-        members.push({ kind: "object", properties });
+        members.push(
+          opens || at.keeps
+            ? { kind: "object", properties, keepExtra: true }
+            : { kind: "object", properties },
+        );
       } else members.push(kindPlan(tag));
     return unionOf(members);
   }
+
+  /** Whether the place a call lands in admits any object at `path` below it by its written type (`object`). */
+  #writtenObject(landing: Landing | null, path: readonly string[]): boolean {
+    if (landing === null) return false;
+    const { admitted } = this.answers.place(landing.id, joinSteps(landing.path, path));
+    return admitted.by === "written" && admitted.kinds.includes("object");
+  }
 }
 
-/** A typed parse or load whose expected type `Contracts.#answerTask` reads: its node, where it lands. */
+/**
+ * A typed parse or load whose expected type `Contracts.#answerTask` reads: the node it answers by, where it lands, and
+ * whether the level is below a written `object`, where the node is its default's literal data (`#literalOf`).
+ */
 interface AnsweredCall {
   readonly node: FlowNode;
   readonly call: Expression;
   readonly landing: Landing | null;
+  readonly keeps: boolean;
 }
 
 /**

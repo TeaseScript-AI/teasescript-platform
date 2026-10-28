@@ -755,6 +755,28 @@ test("the S7 oracle derives object admissions and default structures from their 
       "expected",
       `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
     ],
+    // a written `object` reads the default's properties with their types and keeps every other key, at every level of
+    // it, as an optional's member and as a list's element (#1223)
+    [
+      "let p: object = fromJson(hostValue, default: {n: 0, k: null}, files: false)\nsay p.n\nsay p.m\nexit\n",
+      "expected",
+      `{n: integer, k: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, ...}`,
+    ],
+    [
+      'let p: object = load("p", default: {n: 0})\nsay p.n\nexit\n',
+      "load",
+      "{n: integer, ...} repair=true",
+    ],
+    [
+      'let p: object? = fromJson(hostValue, default: {a: {n: 0}, xs: [{m: 1.5}]}, files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "null|{a: {n: integer, ...}, xs: list<{m: number, ...}>, ...}",
+    ],
+    [
+      'let p: object[] = fromJson(hostValue, default: [{n: 0}], files: false)\nsay "DONE"\nexit\n',
+      "expected",
+      "list<{n: integer, ...}>",
+    ],
   ] as const;
   const inputs: readonly SerializableRuntimeValue[] = [
     // the fixture route's domain
@@ -768,6 +790,10 @@ test("the S7 oracle derives object admissions and default structures from their 
     "{}",
     '{"n":3}',
     '{"stats":{"n":3}}',
+    // (#1223: other keys beside a wrong or missing field, at two levels and in a list)
+    '{"n":"text","m":1}',
+    '{"a":{"n":"text","extra":2},"xs":[{"m":2,"z":3}],"other":3}',
+    '[{"n":1,"m":2}]',
     { kind: "object", properties: [{ name: "n", value: 3 }] },
     { kind: "object", properties: [{ name: "n", value: "bad" }] },
     {
@@ -814,7 +840,7 @@ test("the S7 oracle derives object admissions and default structures from their 
       assert.ok(
         (check === "store"
           ? derivedStores(derived.stores)
-          : content.filter((entry) => entry.startsWith("expected "))
+          : content.filter((entry) => entry.startsWith(`${check} `))
         ).some((entry) => entry.endsWith(` ${expected}`)),
         source,
       );

@@ -1796,10 +1796,12 @@ An object default, or an expected object type, reads the JSON as that object: th
 have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a
 missing key takes that property's value from the default, and so does a key whose value has the wrong type; in debug
 or test mode, the developer warning names the key. Extra keys are ignored, and nested objects follow the same rules
-inside. Malformed text, or JSON of another kind than the default, such as a list or text where the default is an
-object, gives the whole default. A property that is `null` in the default and gets no type anywhere else in the script
-stays unknown, to be tested with `is` before use, as with `default: null`; there is no warning. A dict
-default, or a written dict type, gives a dict.
+inside. When the destination variable is explicitly declared as `object`, all JSON properties are preserved, including
+those in nested objects. Properties named in the default are checked against their default types, and subsequent
+property accesses are checked at runtime. Malformed text, or JSON of another kind than the default, such as a list or
+text where the default is an object, gives the whole default. A property that is `null` in the default and gets no type
+anywhere else in the script stays unknown, to be tested with `is` before use, as with `default: null`; there is no
+warning. A dict default, or a written dict type, gives a dict.
 
 ```text
 let tasks: string[] = fromJson(saved, default: [])      // a string[]; JSON that is not a list of text gives []
@@ -4223,8 +4225,9 @@ A stored value that does not fit the load's type, such as a value that an older 
 returned. `load` reports developer warning `TSW016`, which names the key and both types, and evaluates and returns the
 default. With an object default, `load` works per field, as `fromJson` reads JSON as an object
 ([§13](#json-and-base64)): a missing field, or one whose stored value has the wrong type, takes that field's value from
-the default, and `TSW016` names the field, instead of the whole default being returned. The stored value stays as it
-is, and each such `load` warns again until a `save` replaces it. A saved value
+the default, and `TSW016` names the field, instead of the whole default being returned. A written `object` reads the
+stored object the same way: the properties the object default names are checked, and every other property is kept. The
+stored value stays as it is, and each such `load` warns again until a `save` replaces it. A saved value
 that the compiler cannot know, also under a computed key that equals a key a load reads, must fit the type every load
 of that key accepts, or the `save` raises runtime error `TSR058`.
 
