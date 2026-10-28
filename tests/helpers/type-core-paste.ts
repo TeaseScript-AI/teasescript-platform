@@ -9,7 +9,8 @@ import { coreRequest } from "./type-core-analysis.js";
  * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
- * loop's iterable, a range's bound, a variable or a parameter without a type, as its reads take it).
+ * loop's iterable, a range's bound, a side of `otherwise`, a variable or a parameter without a type, as its reads
+ * take it, also in a compound assignment).
  * The parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
  */
 
@@ -128,6 +129,13 @@ const SITES: readonly Site[] = [
     before: "function count(p) {\n  return p + 1\n}",
     line: "say count(@)",
   },
+  { name: "untyped compound", before: "", line: 'let v = @\nv += "x"\nsay v' },
+  {
+    name: "untyped compound argument",
+    before: 'function f(p) {\n  p += "x"\n  say p\n}',
+    line: "f(@)",
+  },
+  { name: "fallback", before: "let n: integer? = null", line: "say n otherwise @", operand: true },
   {
     name: "untyped returned argument",
     before: "function id(p) {\n  return p\n}",

@@ -1,4 +1,5 @@
 import type { Expression } from "../../ast.js";
+import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
@@ -153,6 +154,9 @@ const SHOWN: readonly ValueKind[] = [
 const SHOWN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].shown !== null,
 );
+
+/** A site no fact describes: no value is proved to fit it. */
+const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
 
 /** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
@@ -1400,30 +1404,35 @@ export class Consumers {
    * this value decides it, unwritten, what every read of it takes); a use, the kind it requires; nothing, where `say` shows
    * the value, what `say` shows (V30 §8: text, numbers and the other shown kinds, a list, set, dict or object in
    * notation), else nothing a fix can prove (a command the core does not model, such as `wait`). Where the consumer's
-   * own result depends on the value (an operator's, a member's), the
-   * kinds it takes whose result its own site takes in turn, up the expression to a consumer that does not; a comparison,
-   * a logic operator, an interpolation give one type whatever they take. Any other consumer takes nothing a fix can
-   * prove. A divisor's value divides, and so does a calculation's operand or a member's receiver whose result does.
+   * own result depends on the value (an operator's, a member's), the kinds it takes whose result its own site takes in
+   * turn, up the expression to a consumer that does not; a comparison, a logic operator, an interpolation give one type
+   * whatever they take. Any other consumer takes nothing a fix can prove. A divisor's value divides, and so does any
+   * value an operation, a member or a fallback computes its result from where that result divides (TABLE r4.159).
    */
   #expected(site: SourceSite): SiteExpectation {
+    // (one task per site or place, on the driver's own stack: a long chain of them is no native call depth, Codex r8)
+    return runCompileTask(this.#expectedTask(site));
+  }
+
+  *#expectedTask(site: SourceSite): CompileTask<SiteExpectation> {
     const { program } = this.pass;
     const key = siteKey(site);
     const known = this.#expectations.get(key);
     if (known !== undefined) return known;
     // (once per site, shared by every diagnosis below it and charged; a consumer that leads back to the site, as a `for`
     // loop's iterable does, proves nothing, Codex r6)
-    this.#expectations.set(key, { takes: [], binds: "whole" });
+    this.#expectations.set(key, UNPROVED);
     program.work.charge("checks");
     const place = program.placeBySite.get(key);
     const consumers = place === undefined ? [] : (program.consumersOf.get(place) ?? []);
     const found: SiteExpectation =
       consumers.length > 1
-        ? { takes: [], binds: "whole" }
+        ? UNPROVED
         : consumers.length === 1
-          ? this.#consumerTakes(consumers[0]!)
+          ? yield* compileChild(this.#consumerTakesTask(consumers[0]!))
           : program.effectNode(site)?.statement?.kind === "sayStatement"
             ? { takes: SAID, binds: "whole", elements: null }
-            : { takes: [], binds: "whole" };
+            : UNPROVED;
     this.#expectations.set(key, found);
     return found;
   }
@@ -1435,11 +1444,11 @@ export class Consumers {
    * What every read of an unwritten place takes, a function's result each call (`read` consumptions): a kind each read
    * takes, by `fits`, and their elements'; any where nothing reads it. Once per place, charged per read.
    */
-  #readsTake(place: PlaceId): SiteExpectation {
+  *#readsTakeTask(place: PlaceId): CompileTask<SiteExpectation> {
     const known = this.#placeExpectations.get(place);
     if (known !== undefined) return known;
     // (a read that leads back to the place, as a recursive call's argument does, proves nothing)
-    this.#placeExpectations.set(place, { takes: [], binds: "whole" });
+    this.#placeExpectations.set(place, UNPROVED);
     const { program } = this.pass;
     const both = (a: readonly ItemTag[], b: readonly ItemTag[]): ItemTag[] => [
       ...a.filter((tag) => b.some((other) => fits(tag, other, true))),
@@ -1451,8 +1460,7 @@ export class Consumers {
       if (consumer.kind !== "read") continue;
       program.work.charge("checks");
       const site = program.place(consumer.occurrence).site;
-      const read: SiteExpectation =
-        site === null ? { takes: [], binds: "whole" } : this.#expected(site);
+      const read = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
       if (read.takes !== null) takes = takes === null ? read.takes : both(takes, read.takes);
       elements =
         elements === undefined || read.elements === undefined
@@ -1472,41 +1480,44 @@ export class Consumers {
     return found;
   }
 
-  /** `#readsTake`'s answer per place. */
+  /** `#readsTakeTask`'s answer per place. */
   readonly #placeExpectations = new Map<PlaceId, SiteExpectation>();
 
-  #consumerTakes(consumer: Consumption): SiteExpectation {
-    const { program } = this.pass;
-    const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
-    // (a place's admitted type, and its elements' where it holds a collection: any where unrestricted; where this
-    // value decides it, unwritten, what its reads take, Codex r7, TABLE r4.160)
-    const placeTakes = (root: PlaceId, path: readonly string[]): SiteExpectation => {
-      if (program.cellOwner.has(root)) return UNPROVED;
-      const admitted = (at: readonly string[]): ItemTag[] | null => {
-        const tags = this.admission.admitted(root, at).filter((tag) => tag !== "empty");
-        return tags.length === 0 || tags.includes("unknown") ? null : tags;
-      };
-      const takes = admitted(path);
-      if (takes === null) {
-        // (decided beside values of other types, or below the place's root, it is not this value's alone)
-        const others = this.admission
-          .admitted(root, path)
-          .some((tag) => tag !== "empty" && tag !== "unknown");
-        return path.length > 0 || others ? UNPROVED : this.#readsTake(root);
-      }
-      return {
-        takes,
-        binds: "whole",
-        elements:
-          takes !== null && takes.some((tag) => tag === "list" || tag === "set" || tag === "dict")
-            ? admitted(joinSteps(path, ["element"]))
-            : null,
-      };
+  /**
+   * A place's admitted type, and its elements' where it holds a collection; where this value decides it, unwritten, what
+   * its reads take (Codex r7, TABLE r4.160); beside values of other types, or below the place's root, nothing proved.
+   */
+  *#placeTakesTask(root: PlaceId, path: readonly string[]): CompileTask<SiteExpectation> {
+    if (this.pass.program.cellOwner.has(root)) return UNPROVED;
+    const admitted = (at: readonly string[]): ItemTag[] | null => {
+      const tags = this.admission.admitted(root, at).filter((tag) => tag !== "empty");
+      return tags.length === 0 || tags.includes("unknown") ? null : tags;
     };
+    const takes = admitted(path);
+    if (takes === null) {
+      const others = this.admission
+        .admitted(root, path)
+        .some((tag) => tag !== "empty" && tag !== "unknown");
+      return path.length > 0 || others ? UNPROVED : yield* compileChild(this.#readsTakeTask(root));
+    }
+    return {
+      takes,
+      binds: "whole",
+      elements: takes.some((tag) => tag === "list" || tag === "set" || tag === "dict")
+        ? admitted(joinSteps(path, ["element"]))
+        : null,
+    };
+  }
+
+  *#consumerTakesTask(consumer: Consumption): CompileTask<SiteExpectation> {
+    const { program } = this.pass;
+    // (a value whose consumer computes its result from it divides where that result does)
+    const dividing = (outer: SiteExpectation): { divides?: true } =>
+      outer.divides === true ? { divides: true } : {};
     switch (consumer.kind) {
       case "store": {
         const target = program.targetRoot(consumer.into, true);
-        return placeTakes(target.root, target.path);
+        return yield* compileChild(this.#placeTakesTask(target.root, target.path));
       }
       case "argument": {
         const fn = program.functionOf(consumer.fn);
@@ -1514,23 +1525,30 @@ export class Consumers {
           typeof consumer.parameter === "number"
             ? fn.parameters[consumer.parameter]
             : program.parameterPlace(consumer.fn, consumer.parameter);
-        return parameter === undefined ? UNPROVED : placeTakes(parameter, []);
+        return parameter === undefined
+          ? UNPROVED
+          : yield* compileChild(this.#placeTakesTask(parameter, []));
       }
       case "return":
-        return placeTakes(program.functionOf(consumer.fn).result, []);
+        return yield* compileChild(
+          this.#placeTakesTask(program.functionOf(consumer.fn).result, []),
+        );
       case "operand": {
         const c = consumer.operation;
         const { family } = c.contract;
-        if (family === "interpolation") return { takes: SHOWN_KINDS, binds: "whole" };
-        if (family === "logic") return { takes: ["boolean"], binds: "operand" };
+        const outer = yield* compileChild(this.#expectedTask(c.site));
+        if (family === "interpolation")
+          return { takes: SHOWN_KINDS, binds: "whole", ...dividing(outer) };
+        if (family === "logic") return { takes: ["boolean"], binds: "operand", ...dividing(outer) };
         // (a range's bounds are whole numbers, and it is a range whatever they are)
-        if (family === "range") return { takes: ["integer"], binds: "operand" };
+        if (family === "range") return { takes: ["integer"], binds: "operand", ...dividing(outer) };
         const operator = operatorOf(c);
-        if (operator === null) return { takes: [], binds: "operand" };
         const node = program.exprAt(c.site);
-        const operands = c.arguments.map((argument) =>
-          node === null ? [] : this.#kindsOf(argument, node),
-        );
+        // (an operation the table does not hold, or whose operands have no flow point, as a compound assignment's have
+        // not: nothing proved of what it takes, Codex r8)
+        if (operator === null || node === null)
+          return { takes: [], binds: "operand", ...dividing(outer) };
+        const operands = c.arguments.map((argument) => this.#kindsOf(argument, node));
         const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);
         const domain = operandDomain(rows, operands, consumer.index).filter(
           (kind): kind is ValueKind => kind !== "unknown" && kind !== "non-null",
@@ -1538,8 +1556,7 @@ export class Consumers {
         // (a comparison gives true or false whatever it takes; a calculation's result is its operands', which its own
         // site takes in turn)
         if (COMPARISONS.some((found) => found === operator))
-          return { takes: domain, binds: "operand" };
-        const outer = this.#expected(c.site);
+          return { takes: domain, binds: "operand", ...dividing(outer) };
         const results = (kind: ValueKind): ValueKind[] =>
           rows
             .filter(
@@ -1548,6 +1565,7 @@ export class Consumers {
                 operands.every(
                   (items, other) =>
                     other === consumer.index ||
+                    items.length === 0 ||
                     items.some(
                       (item) => item.tag === "unknown" || row.operands[other] === item.tag,
                     ),
@@ -1559,11 +1577,14 @@ export class Consumers {
           (DIVISIONS.some((found) => found === operator) && consumer.index === 1) ||
           outer.divides === true;
         return {
-          takes: domain.filter(
-            (kind) =>
-              outer.takes === null ||
-              results(kind).every((result) => outer.takes!.some((tag) => fits(result, tag, true))),
-          ),
+          takes: domain.filter((kind) => {
+            if (outer.takes === null) return true;
+            const found = results(kind);
+            return (
+              found.length > 0 &&
+              found.every((result) => outer.takes!.some((tag) => fits(result, tag, true)))
+            );
+          }),
           binds: "operand",
           ...(outer.takes === null
             ? { elements: null }
@@ -1575,7 +1596,7 @@ export class Consumers {
       }
       case "method": {
         // (a method's result the core reads by its receiver's kind, which no fix proves: any where its site takes any)
-        const outer = this.#expected(consumer.site);
+        const outer = yield* compileChild(this.#expectedTask(consumer.site));
         return {
           takes:
             outer.takes === null
@@ -1583,14 +1604,14 @@ export class Consumers {
               : [],
           binds: "receiver",
           elements: null,
-          ...(outer.divides === true ? { divides: true } : {}),
+          ...dividing(outer),
         };
       }
       case "access": {
         const step = consumer.step.step;
         // (a loop's iterable: what its variable then holds the loop's body reads, which no fact here follows)
         if (step === "iteration") return { takes: [], binds: "receiver" };
-        const outer = this.#expected(consumer.step.site);
+        const outer = yield* compileChild(this.#expectedTask(consumer.step.site));
         // (a member's result: a length a whole number, any other read's only where its site takes any)
         const property = typeof step === "object" ? step.property : null;
         const gives: readonly ValueKind[] | null = property === "length" ? ["integer"] : null;
@@ -1608,7 +1629,18 @@ export class Consumers {
                 : [],
           binds: "receiver",
           elements: null,
-          ...(outer.divides === true ? { divides: true } : {}),
+          ...dividing(outer),
+        };
+      }
+      case "fallback": {
+        // (a side of `otherwise` is its result where it is taken: what the result's site takes, in parentheses beside
+        // the operator)
+        const outer = yield* compileChild(this.#expectedTask(consumer.site));
+        return {
+          takes: outer.takes,
+          binds: "operand",
+          ...(outer.elements === undefined ? {} : { elements: outer.elements }),
+          ...dividing(outer),
         };
       }
       case "use": {

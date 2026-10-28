@@ -65,8 +65,9 @@ export type ValueConstraint = Extract<
  * What consumes a value place (TABLE r4.151), as its constraint or use is registered: a store into `into`; an operand
  * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
  * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
- * demand on the value a fix does not read (a `get`'s key, a fallback's side, a save). A variable's or a parameter's
- * place is consumed by each read of it, a function's result by each call (`read`, the value read there; TABLE r4.160).
+ * demand on the value a fix does not read (a `get`'s receiver and key, a save). A side of `otherwise` and a `get`'s
+ * default are the result at `site` (`fallback`). A variable's or a parameter's place is consumed by each read of it, a
+ * function's result by each call (`read`, the value read there; TABLE r4.160).
  */
 export type Consumption =
   | { readonly kind: "store"; readonly into: PlaceId }
@@ -80,6 +81,7 @@ export type Consumption =
   | { readonly kind: "argument"; readonly fn: number; readonly parameter: number | string }
   | { readonly kind: "return"; readonly fn: number }
   | { readonly kind: "read"; readonly occurrence: PlaceId }
+  | { readonly kind: "fallback"; readonly site: SourceSite }
   | {
       readonly kind: "use";
       readonly what: "index" | "count" | "condition" | "key";
@@ -425,11 +427,11 @@ export class CoreProgram {
       case "get":
         this.#consumed(constraint.receiver, other);
         if (constraint.key !== null) this.#consumed(constraint.key, other);
-        this.#consumed(constraint.fallback, other);
+        this.#consumed(constraint.fallback, { kind: "fallback", site: constraint.site });
         break;
       case "fallback":
-        this.#consumed(constraint.left, other);
-        this.#consumed(constraint.right, other);
+        this.#consumed(constraint.left, { kind: "fallback", site: constraint.site });
+        this.#consumed(constraint.right, { kind: "fallback", site: constraint.site });
         break;
       case "save":
       case "speakerStore":

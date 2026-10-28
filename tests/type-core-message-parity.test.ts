@@ -1172,6 +1172,25 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
   assert.ok(pasted > 0, `${pasted} forms pasted`);
 });
 
+test("what a site takes is read through a long chain of untyped copies or calls (#1241, Codex r8)", () => {
+  const lines = (count: number, line: (index: number) => string): string =>
+    Array.from({ length: count }, (_, index) => line(index)).join("\n");
+  const call = (index: number): string => (index === 1023 ? "p" : `f${index + 1}(p)`);
+  for (const source of [
+    `let t = "x"\nlet v0 = t.size\n${lines(2048, (i) => `let v${i + 1} = v${i}`)}\nsay v2048.trim()\nexit\n`,
+    `let t = "x"\n${lines(1024, (i) => `function f${i}(p) {\n  return ${call(i)}\n}`)}\nlet v: string = f0(t.size)\nsay v\nexit\n`,
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const text = messageSource([source]);
+    assert.ok(
+      analyseCore(request).diagnostics.some((diagnostic) =>
+        coreMessage(diagnostic, text).endsWith(" Use the length property."),
+      ),
+    );
+  }
+});
+
 test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
   for (const [marked, pick, says] of REPAIRS) {
     const source = marked.replace(/[⟦⟧]/g, "");
@@ -1559,6 +1578,12 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Use the length property.",
     ],
     ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
+    // (Codex r8: a compound assignment's operands, which have no flow point here)
+    ['let t = "hello"\nlet v = t.size\nv += "x"\nsay v\nexit\n', "Use the length property."],
+    [
+      'let t = "hello"\nfunction f(p) {\n  p += "x"\n  say p\n}\nf(t.size)\nexit\n',
+      "Use the length property.",
+    ],
     [
       'let d = dict{a: " hello "}\nsay d["missing"].trim\nexit\n',
       "Call the trim method with parentheses.",
@@ -1574,6 +1599,8 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "let xs = [4, null]\nsay 7 % xs[1]\nexit\n",
       "let xs = [4, null]\nsay 1 / (xs[1] * 2)\nexit\n",
       'let xs = ["ab", null]\nsay 4 / xs[1].length\nexit\n',
+      // (Codex r8: through a side of 'otherwise')
+      'let xs = ["ab", null]\nsay 1 / (xs[1].length otherwise 1)\nexit\n',
     ].map(
       (source) =>
         [
