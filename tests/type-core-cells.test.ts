@@ -1654,8 +1654,8 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
  * a test proves no element, #1245), so C6 keeps a selection's `empty-check` and its warning at the selection. #1303's
  * two witnesses as exact records; then its matrix: `first`, `last` and `random`, with and without a collection test, on
  * a host list written, with nullable elements, copied, nested, below a property or untyped, beside the `fromJson`,
- * `load` and literal controls, where only a literal with an element is quiet; and beside it a computed key's load, a
- * written parameter, a loop over a host list filling another (F5a) and an `add` that proves an element. Every program
+ * `load` and literal controls, where only a literal with an element is quiet; and beside it the same data through a
+ * computed key's load, a parameter, loops and an interpolation, with an opaque and a literal control. Every program
  * alike forward, with the sharing of answers off, and with the consumers' and solver's orders reversed.
  */
 test("a host list's selection keeps its empty-check under a written type or a collection test (#1303)", () => {
@@ -1711,7 +1711,7 @@ test("a host list's selection keeps its empty-check under a written type or a co
       .filter((check) => check.kind === "empty-check")
       .map((check) => `${check.target} [${check.against.join(", ")}] ${at(check.site)}`);
     const expected = owed.map(([target, read]) => {
-      const start = source.indexOf(read);
+      const start = source.lastIndexOf(read);
       return `${target} [list] ${start}:${start + read.length}`;
     });
     const unwarned = record.checks
@@ -1754,19 +1754,45 @@ test("a host list's selection keeps its empty-check under a written type or a co
           carrier === "let xs: integer[] = [1]" ? [] : [[owner, read]],
         );
       }
-  const loop = "let ys: integer[] = []\nfor x in xs {\n    ys.add(x)\n}\nlet out = ys.first";
-  // a computed key's load is host data (F19); so is a written parameter's host argument; a loop over a host list may
-  // not run, so the list it fills may stay empty (F5a); an add proves an element, in a list by its written type
+  // a computed key's load is host data (F19), below a property, written or tested, and gathered in a literal too (one
+  // answer for every path below its root, whose mark is the path's, in either order); so is a written parameter's host
+  // argument; a loop over a host list may not run, so the list it fills may stay empty (F5a); a loop's variable over a
+  // host list, nested and written, tested or copied to a written place, may be empty; so may an interpolated written
+  // host list (C11); an opaque value stored after `[]` keeps its check; a literal with a host element holds one
+  const computed = 'let k = askText "key?"\n';
+  const raw = "let key: string = hostValue\nlet raw = load(key, default: {items: [1]})\n";
+  const loads = `${computed}let rows = [load(k, default: [1]), load(k, default: [2])]\n`;
+  expect(`${computed}let xs: integer[] = load(k, default: [1])\nlet out = xs.first\nexit\n`, [
+    ["xs", "xs.first"],
+  ]);
+  expect(`${raw}let xs: integer[] = raw.items\nlet out = xs.first\nexit\n`, [["xs", "xs.first"]]);
+  expect(`${raw}if raw.items is integer[] {\n    let out = raw.items.first\n}\nexit\n`, [
+    ["raw.items", "raw.items.first"],
+  ]);
+  expect(`${loads}let xs: integer[] = rows[0]\nlet out = xs.first\nexit\n`, [["xs", "xs.first"]]);
   expect(
-    'let k = askText "key?"\nlet xs: integer[] = load(k, default: [1])\nlet out = xs.first\nexit\n',
+    "let rows = hostValue\nfor row in rows {\n    let xs: integer[] = row\n    let out = xs.first\n}\nexit\n",
     [["xs", "xs.first"]],
   );
   expect("function f(xs: integer[]) {\n    return xs.first\n}\nlet out = f(hostValue)\nexit\n", [
     ["f.xs", "xs.first"],
   ]);
-  expect(`let xs: integer[] = hostValue\n${loop}\nexit\n`, [["ys", "ys.first"]]);
-  expect("let xs: integer[] = hostValue\nxs.add(1)\nlet out = xs.first\nexit\n", []);
-  expect(`let xs: integer[] = hostValue\nxs.add(1)\n${loop}\nexit\n`, []);
+  expect(
+    "let xs: integer[] = hostValue\nlet ys: integer[] = []\nfor x in xs {\n    ys.add(x)\n}\nlet out = ys.first\nexit\n",
+    [["ys", "ys.first"]],
+  );
+  expect("let rows: integer[][] = hostValue\nfor xs in rows {\n    let out = xs.first\n}\nexit\n", [
+    ["xs", "xs.first"],
+  ]);
+  expect(
+    "let rows = hostValue\nfor xs in rows {\n    if xs is integer[] {\n        let out = xs.first\n    }\n}\nexit\n",
+    [["xs", "xs.first"]],
+  );
+  expect('let xs: string[] = hostValue\nsay "${xs}"\nexit\n', [["xs", "xs"]]);
+  expect('let s = "zzz"\nlet xs: string[] = []\nxs = s.findAll(/a/)\nlet out = xs.first\nexit\n', [
+    ["xs", "xs.first"],
+  ]);
+  expect("let xs: integer[] = [hostValue]\nlet out = xs.first\nexit\n", []);
   assert.deepEqual(differing, []);
 });
 

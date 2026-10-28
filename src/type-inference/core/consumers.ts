@@ -2051,7 +2051,12 @@ export class Consumers {
           ["element"],
         );
         this.#selection(value, node, c.site, "${...}");
-      }
+      } else if (
+        // an unknown under a written list type (host data): the type's own check covers its elements, not one's presence
+        kinds.some((item) => item.tag === "unknown") &&
+        this.#run(this.pass.contract.contractOfValue(value)).some((item) => item.tag === "list")
+      )
+        this.#selection(value, node, c.site, "${...}");
       return;
     }
     const operator = operatorOf(c);
@@ -2521,12 +2526,10 @@ export class Consumers {
     }
     const read = this.#run(values.valueItems(value, node, ["element"]));
     const kinds = this.#kindsOf(value, node);
-    // the exact value holds one, in a collection by its kinds or by its contract's (a written type over host data)
     if (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
-      (!kinds.some((item) => item.tag === "unknown") ||
-        !this.#run(contract.contractOfValue(value)).some((item) => item.tag === "unknown"))
+      !kinds.some((item) => item.tag === "unknown")
     )
       return;
     // the obligation answers for every collection and every unknown that may be one

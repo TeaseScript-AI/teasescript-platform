@@ -1723,7 +1723,8 @@ export class Contract {
             item,
           ]),
         );
-      else if (item.tag === "unknown") out.push(item);
+      // (an unknown's element: a collection below it may hold none)
+      else if (item.tag === "unknown") out.push(item, ...emptyAt(rest));
     }
     return mergeItems(out, this.pass.program.scope);
   }
@@ -4596,23 +4597,25 @@ export class Contract {
   ): Work<readonly Item[]> {
     const { program, values } = this.pass;
     program.work.charge("invSteps");
-    const known = this.#loadsBelowOf.get(groups);
-    if (known !== undefined) return known;
-    const items: Item[] = [];
-    for (const group of groups) {
-      if (!group.loads) continue;
-      for (const members of [group.read, group.rest])
-        for (const entry of members) {
-          const answer = exact
-            ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
-            : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
-          for (const item of answer) items.push(item);
-        }
+    let merged = this.#loadsBelowOf.get(groups);
+    if (merged === undefined) {
+      const items: Item[] = [];
+      for (const group of groups) {
+        if (!group.loads) continue;
+        for (const members of [group.read, group.rest])
+          for (const entry of members) {
+            const answer = exact
+              ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
+              : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
+            for (const item of answer) items.push(item);
+          }
+      }
+      merged = withoutEmpty(mergeItems(items, program.scope));
+      this.#keep(1 + merged.length);
+      this.#loadsBelowOf.set(groups, merged);
     }
-    const below = mergeItems(items, program.scope);
-    this.#keep(1 + below.length);
-    this.#loadsBelowOf.set(groups, below);
-    return below;
+    // (the one answer is every step's but for the mark of an element step there, `hostAt`)
+    return [...merged, ...emptyAt(after)];
   }
 
   /**

@@ -397,10 +397,7 @@ export class Values {
     return (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
-      (!(yield* this.valueItems(facts.value, facts.node, [])).some(
-        (item) => item.tag === "unknown",
-      ) ||
-        !(yield* contract.contractOfValue(facts.value)).some((item) => item.tag === "unknown"))
+      !(yield* this.valueItems(facts.value, facts.node, [])).some((item) => item.tag === "unknown")
     );
   }
 
@@ -651,7 +648,8 @@ export class Values {
             [item],
           ),
         );
-      else if (item.tag === "unknown") out.push(item);
+      // (an unknown's element: a collection below it may hold none)
+      else if (item.tag === "unknown") out.push(item, ...emptyAt(rest));
     }
     return mergeItems(out, this.pass.program.scope);
   }
@@ -734,13 +732,15 @@ export class Values {
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
     const below = rest.length > 0 && c.kind === "load" && c.key === null;
-    return yield {
+    const items = yield {
       key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, rest),
       kind: "value",
       file: site.file,
       offset: site.start,
       make: () => this.operationValue(c, node, rest),
     };
+    // (the one answer below the root is the path's but for the mark of an element step there, `hostAt`)
+    return below ? [...items, ...emptyAt(rest)] : items;
   }
 
   /** The demand of `#operationItems`. */
@@ -801,7 +801,8 @@ export class Values {
       ];
     } else if (c.kind === "load" && c.key === null) {
       // F19: a computed key is host data
-      if (rest.length > 0) out = hostAt(rest);
+      // (below the root one answer for every path, `#operationItems`, which marks an element step)
+      if (rest.length > 0) out = external();
       else {
         const nullDefault =
           c.fallback !== null && (yield* this.onlyNull(c.fallback, at)).length > 0;
