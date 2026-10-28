@@ -161,7 +161,7 @@ test("sum adds angles, while the other statistics and the numeric functions do n
     assert.deepEqual(failure(`say ${hidden}`)[1], wraps(name), hidden);
   }
   const numeric =
-    "abs(...) needs a number, not an angle. Convert it to a number of degrees with toDeg(...) first.";
+    "abs(...) needs a number, not an angle. Convert the angle to a number of degrees with the toDeg function first.";
   assert.deepEqual(
     errors("say abs(-90 deg)").map(([, message]) => message),
     [numeric],

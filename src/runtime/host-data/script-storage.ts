@@ -35,7 +35,7 @@ export function storageKey(
   if (typeof value === "string") return value;
   const fix =
     typeof value === "number"
-      ? ` Use "${value}" as the key, or convert it with toString(...).`
+      ? ` Use "${value}" as the key, or convert the number with the toString function.`
       : use === "load" && typeof value === "boolean"
         ? ` If you meant to compare the loaded value, write 'let value: string? = load("k", default: null)', then 'value == null'.`
         : " Use text as the key.";

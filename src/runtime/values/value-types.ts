@@ -99,7 +99,7 @@ function typeFix({ value, type }: TypeMismatch): string {
       return " Convert the text with the toBoolean function.";
   }
   if ((typeof value === "number" || typeof value === "boolean") && kinds.has("string"))
-    return " Convert it with toString(...) first.";
+    return " To show the value as text, put it in a text with '${...}'.";
   return "";
 }
 

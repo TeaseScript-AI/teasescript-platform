@@ -268,7 +268,7 @@ export function temporalMemberMessage(
     use === "property" && kind === "absoluteDateTime" && isTemporalField(name)
       ? ` Convert it first, as in '${label}.toDateTime().${name}'.`
       : isTextMember(name)
-        ? " Convert it to text first with toString(...)."
+        ? " Convert the value to text first with the toString function."
         : "";
   return `${subject} has no ${use} '${name}'.${fix}`;
 }

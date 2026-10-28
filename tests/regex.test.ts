@@ -598,7 +598,7 @@ test("the regex operations check their arguments", () => {
   );
   assert.equal(
     firstDiagnostic('let at = "a".lastIndexOf(4)\nexit')?.[1],
-    "lastIndexOf() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+    "lastIndexOf() needs text (string) or a regex for 'part', not a whole number (integer). Convert the value with the toString function.",
   );
   // A regex that matches empty text is a valid search.
   assert.deepEqual(diagnostics('let t = "a".replace(/x*/, "")\nexit'), []);
@@ -606,7 +606,7 @@ test("the regex operations check their arguments", () => {
   assert.equal(runtime.snapshot.failure?.code, "TSV043");
   assert.equal(
     runtime.snapshot.failure?.message,
-    "split() needs text (string) or a regex for 'separator', not a whole number (integer). Convert it with toString(...).",
+    "split() needs text (string) or a regex for 'separator', not a whole number (integer). Convert the value with the toString function.",
   );
 });
 
@@ -724,7 +724,7 @@ test("the regex methods and a regex's members are checked", () => {
   ]);
   assert.deepEqual(
     diagnostics('let at = "a".indexOf(4)\nexit')[0]?.[1],
-    "indexOf() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+    "indexOf() needs text (string) or a regex for 'part', not a whole number (integer). Convert the value with the toString function.",
   );
   assert.deepEqual(diagnostics('let r = /a/\nlet ok = r.matches("a")\nexit'), [
     [

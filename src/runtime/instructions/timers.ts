@@ -216,7 +216,7 @@ function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
   if (typeof value !== "string")
     throw fault(
       "TSR050",
-      `A timer label must be text (string), but this is ${describeShownValue(value)}. Convert it with toString(...) first.`,
+      `A timer label must be text (string), but this is ${describeShownValue(value)}. Convert the label with the toString function first.`,
       span,
     );
   return value;

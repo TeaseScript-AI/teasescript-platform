@@ -55,6 +55,6 @@ export function textOperandMessage(callee: TextOperandCallee, given: string, fix
 export function escapeMarkupFix(kind: ValueKind | undefined, elementsShown: boolean): string {
   if (kind === undefined) return "";
   if (kind !== "null" && VALUE_KINDS[kind].shown !== null)
-    return " Convert it with toString(...) first.";
+    return " Convert the value with the toString function first.";
   return kind === "list" && elementsShown ? " Use .join() to combine its elements as text." : "";
 }

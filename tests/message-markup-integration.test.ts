@@ -52,7 +52,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
   for (const [argument, message] of [
     [
       "1",
-      "escapeMarkup(...) takes text (string), not a whole number (integer). Convert it with toString(...) first.",
+      "escapeMarkup(...) takes text (string), not a whole number (integer). Convert the value with the toString function first.",
     ],
     [
       "[1]",
