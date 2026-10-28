@@ -303,15 +303,10 @@ test("the stop's warning names the heaviest place and marks each function it lef
 
 /**
  * S8's obligations (TABLE r4.55 (3)): the finishing path is bounded when the setup, admission's passes, or a recursive
- * contract spend the allowance. Each stop compiles, with one warning and its checks, its finishing work small; where
- * every store's syntax decides what the program owes (`f(2)` decides `p`: TABLE r4.122), a stop defers nothing.
+ * contract spend the allowance. Each stop compiles, with one warning and its checks, its finishing work small.
  */
 test("the finishing path is bounded after a stop in the setup, in admission's passes and in a recursive contract", () => {
-  const cases: readonly (readonly [
-    string,
-    readonly { path: string; source: string }[],
-    boolean,
-  ])[] = [
+  const cases: readonly (readonly [string, readonly { path: string; source: string }[]])[] = [
     [
       "the setup (every file calls every file)",
       [
@@ -324,24 +319,21 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
           source: 'call "parts/*.tease"\nend',
         })),
       ],
-      false,
     ],
     [
       "admission's passes (a chain of rejections)",
       main(
         `let v0 = 0\nv0 = "x"\n${Array.from({ length: 12 }, (_, i) => `let v${i + 1} = v${i}\nv${i + 1} = "x"`).join("\n")}\nlet final: integer = v12\nexit`,
       ),
-      true,
     ],
     [
       "a recursive record type",
       main(
         "function f(n: integer) {\n  if n == 0 { return {custom: 1} }\n  if n == 1 { return {custom: f(0)} }\n  return f(n - 1).custom\n}\nrepeat f(3) {}\nexit",
       ),
-      true,
     ],
   ];
-  for (const [name, files, defers] of cases) {
+  for (const [name, files] of cases) {
     const request = requestOf(files);
     // (the stops are sampled below 100,000 units: a run to that point gives the program's size and its own total)
     const full = analysed(request, false, 100_000);
@@ -360,7 +352,7 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
           1,
           where,
         );
-        assert.equal(answers.budget.deferred.length > 0, defers, where);
+        assert.ok(answers.budget.deferred.length > 0, where);
         assert.ok(
           answers.budget.finishing <= 16 * nodes,
           `${where}: ${answers.budget.finishing} units`,

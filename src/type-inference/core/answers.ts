@@ -1173,18 +1173,8 @@ class CoreAnswers implements Answers {
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
     // (each kind once: `(null | string)?` admits `null` and `string`)
     if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
-    // (after a stop before admission settled, only what is written and what a cheap decider decides, TABLE r4.89 (2))
-    if (this.#stopped && !this.#consumers.settled) {
-      const decided = this.#consumers.cheapDecided(id, path);
-      return decided === null
-        ? { by: "undecided" }
-        : {
-            by: "decided",
-            kinds: decided.kinds,
-            decider: decided.decider.site,
-            inherited: decided.inherited,
-          };
-    }
+    // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
+    if (this.#stopped && !this.#consumers.settled) return { by: "undecided" };
     const { admission } = this.#consumers;
     const kinds = admission.admitted(id, path);
     // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every

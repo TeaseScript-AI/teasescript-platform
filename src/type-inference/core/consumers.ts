@@ -19,9 +19,7 @@ import {
   isExternal,
   isOpaque,
   requiredKind,
-  writtenKinds,
   type Decision,
-  type Fixed,
 } from "./admission.js";
 import type { CorePass } from "./answers.js";
 import {
@@ -678,7 +676,7 @@ export class Consumers {
    * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
    * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
    * decided, or a copy's through the copy forest, `Admission.retained`); what the stores' syntax decides there
-   * (`cheapDecided`, TABLE r4.100, r4.122, part 3's source); `STOPPED` (`unknown` with the reason `budget`) only where
+   * at a settled stop (`cheapDecided`, source 4: TABLE r4.100, r4.135); `STOPPED` (`unknown` with the reason `budget`) only where
    * none of these decides it, so its consumer owes its check when the script runs. Only a leaf's kind and the
    * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
    * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
@@ -839,7 +837,8 @@ export class Consumers {
     const term = written === null ? null : termAt(written, rest);
     const retained =
       term !== null ? typeTags(term) : this.settled ? (this.#retainedRead(value, rest) ?? []) : [];
-    // else the stores' syntax (TABLE r4.100, r4.89 (2)): every store's syntax decides the key together, in any pass
+    // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
+    // together
     const tags =
       typedTags ?? (retained.length > 0 ? retained : (this.#syntaxRead(value, rest) ?? []));
     if (requirement) return this.#required(tags);
@@ -1344,10 +1343,11 @@ export class Consumers {
    * derivation): C1 against a written type at a store's path (`#admittedStores`); ADR 0021 1.3's mixed literal elements
    * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`#markHolder`);
    * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
-   * (`publish`), or against the type every store's syntax decides (`#boundaryFixed`); the walk, which finishes every
-   * unit, the read boundaries. A store into an inferred place every store's syntax decides (source 4, `cheapDecided`)
-   * owes its check against that type (TABLE r4.122, S3 revision 21); every other store and transfer into an inferred
+   * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
    * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
+   * No syntax decision is made here (TABLE r4.135): admission decides an inferred place from its contract, which a fresh
+   * pass has not solved, so only a settled stop's finishing read asks the stores' syntax, after the decision admission
+   * retained.
    */
   #freshStores(): void {
     const { program, definitions } = this.pass;
@@ -1359,18 +1359,6 @@ export class Consumers {
       const written = writtenOf(program.place(d.place).kind);
       const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
       if (written !== null && termAt(written, path) !== null) continue;
-      // source 4 at every stop (TABLE r4.122): where every store's syntax decides an inferred place, a store its syntax
-      // tells is among what decides it, and any other (a host value) owes its check against that type, as C1 does
-      const decided = this.cheapDecided(d.place, path);
-      if (decided !== null && !this.#toldBySyntax(d.value)) {
-        this.#decidedStore(d, path, decided);
-        continue;
-      }
-      // (a store its literals' syntax tells is among what decides the place. One it tells only through a typed parse or
-      // load is that ingress's, its own checks published with it unstopped; one holding a copy of a written place is
-      // checked by admission's A4 against the type the copy inherits, from the copied value: each marked, standing for
-      // its records within it, TABLE r4.111)
-      if (decided !== null && this.#toldBySyntax(d.value, false, false)) continue;
       this.#storeMark(d, path);
     }
     // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
@@ -1383,9 +1371,8 @@ export class Consumers {
     );
     this.#rule = 1;
     this.#admittedStores(true);
-    // (the publication first: its landing index, of the stores into places whose type it knows alone, is the one F18's
-    // asks)
-    this.admission.publish((d) => this.#boundaryFixed(d));
+    // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
+    this.admission.publish(true);
     this.#rule = 2;
     const open = this.admission.ingressStores((site) => this.#inMarkedValue(site));
     for (const { site, label } of open) this.#ingressMark(site, label);
@@ -1394,69 +1381,18 @@ export class Consumers {
   }
 
   /**
-   * What the finishing path before admission settled knows of a place's type without solving (TABLE r4.110 (3),
-   * r4.122): its written type, else what every store's syntax decides at a path (`cheapDecided`).
-   */
-  #fixedOf(place: PlaceId): Fixed {
-    return (
-      writtenKinds(writtenOf(this.pass.program.place(place).kind)) ??
-      ((path) => this.cheapDecided(place, path)?.kinds ?? null)
-    );
-  }
-
-  /**
-   * The type a store's boundary is checked against after a stop before admission settled (`Admission.publish`): its
-   * destination's written type; else, for a store its syntax does not tell (a literal tells all it holds but host data),
-   * what every store's syntax decides there; else none, its boundary not formed here.
-   */
-  #boundaryFixed(d: Definition): Fixed | null {
-    const written = writtenKinds(writtenOf(this.pass.program.place(d.place).kind));
-    if (written !== null) return written;
-    // (a typed parse or load is an ingress, whatever its default tells)
-    return d.value === undefined || this.#toldBySyntax(d.value, false)
-      ? null
-      : this.#fixedOf(d.place);
-  }
-
-  /**
-   * C1 of a store its syntax does not tell into an inferred place every store's syntax decides (`cheapDecided`), before
-   * admission settled: its own leaf's kinds against that type, a check when the script runs (never an error: what the
-   * syntax decides is a domain), its rule naming the store that decided it.
-   */
-  #decidedStore(d: Definition, path: readonly string[], decided: CheapDecision): void {
-    const fixed = this.#fixedOf(d.place);
-    const items = withoutEmpty(this.#leafKind(d.value!, []) ?? STOPPED);
-    const fitting = (item: Item): boolean =>
-      concrete(item) && decided.kinds.some((tag) => fits(item.tag, tag, false));
-    if (items.every(fitting)) return;
-    this.#storeWarning(
-      d.site,
-      this.admission.pathLabel(d.place, path, fixed),
-      items.find((item) => !fitting(item)) ?? STOPPED[0]!,
-      decided.kinds,
-      {
-        rule: "store",
-        into: this.#placeText(d.place, path),
-        type: decided.kinds,
-        written: false,
-        decider: decided.decider.site,
-        brought: null,
-        root: this.#storeRoot(d.place),
-        steps: this.#storeSteps(d.place, path, fixed),
-      },
-      items.filter(fitting),
-    );
-  }
-
-  /**
-   * A cheap decider (TABLE r4.89 (2), after a stop before admission settled): the type a place has at `path` where every
-   * store into the key or a key above it gives a value its syntax tells there: a literal (its own types there, a `null`
-   * deciding nothing but admitting `null`), a copy of a place with a written type (that type there), or a host value
-   * (external, deciding nothing). Integers beside numbers decide numbers, as admission's family does (ADR 1.2); `null`
-   * where any other store, or only `null`s, reach it, which only admission decides (option (a)). Asks no demand; made
-   * once per key and path from each key's shape, which each store's syntax enters once.
+   * The syntax decision, source 4 (TABLE r4.89 (2), r4.100, r4.135): at a settled stop, where admission retained no
+   * decision at `path`, the type a place has there where every store into the key or a key above it gives a value its
+   * syntax tells there: a literal (its own types there, a `null` deciding nothing but admitting `null`), a copy of a place
+   * with a written type (that type there), a typed parse or load by its default (F18), or a host value (external,
+   * deciding nothing). Integers beside numbers decide numbers, as admission's family does (ADR 1.2); `null` where any
+   * other store, or only `null`s, reach it, or where object literals with other properties or a store of another kind
+   * meet it. Asks no demand; made once per key and path from each key's shape, which each store's syntax enters once.
    */
   public cheapDecided(root: PlaceId, path: readonly string[]): CheapDecision | null {
+    // (before admission settled nothing: admission's decision rests on a contract a fresh pass has not solved, TABLE
+    // r4.135)
+    if (this.#finishing && !this.settled) return null;
     const memo = keptKey(this.pass.program.work, root, path);
     const known = this.#cheapDecisions.get(memo);
     if (known !== undefined) return known;
@@ -1656,42 +1592,7 @@ export class Consumers {
     return steps;
   }
 
-  /**
-   * Whether a value's syntax tells its whole type: a scalar literal, a collection or object literal whose every part
-   * does, (`copies`) a copy of a place with a written type, or (`typed`) a typed parse or load by its default (F18). A
-   * host value anywhere in it does not (Codex c-r3 B1c: a literal holding one is checked at its store like the host value
-   * itself).
-   */
-  #toldBySyntax(value: PlaceId | undefined, typed = true, copies = true): boolean {
-    if (value === undefined) return false;
-    const { program } = this.pass;
-    const pending = [value];
-    while (pending.length > 0) {
-      const at = pending.pop()!;
-      program.work.charge("checks");
-      const place = program.places[at]?.kind;
-      const node = place?.kind === "value" ? place.node : null;
-      if (node !== null && LITERALS.has(node)) continue;
-      const own = node === null ? undefined : OWN_TAGS.get(node);
-      if (own !== undefined) {
-        for (const step of this.#literalSteps(at, own))
-          for (const child of this.admission.literalChildren(at, step)) {
-            if (child.value === undefined) return false;
-            pending.push(child.value);
-          }
-        continue;
-      }
-      const fallback = this.#typedFallback(at);
-      if (fallback !== null) {
-        if (fallback === undefined || !typed) return false;
-        pending.push(fallback);
-        continue;
-      }
-      const source = copies ? this.#copySource(at) : null;
-      if (source === null || source === "external") return false;
-    }
-    return true;
-  }
+
 
   /**
    * What a copy copies by its syntax: a written place's type and the path it is copied from; `external` for a host
@@ -2818,19 +2719,27 @@ export class Consumers {
 
   /**
    * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
-   * `fixed` knows it (the finishing path before admission settled: the written type or the stores' syntax, TABLE
-   * r4.120, r4.122), the collection it has there, final at every stop and asking no solver.
+   * the root's written type reaches it (the finishing path's descent, TABLE r4.120), the collection written there,
+   * final at every stop and asking no solver.
    */
-  #storeSteps(root: PlaceId, path: readonly string[], fixed: Fixed | null = null): StoreStep[] {
+  #storeSteps(
+    root: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): StoreStep[] {
+    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+    let below = written;
     return path.map((step, index): StoreStep => {
+      const term = below;
+      if (below !== null) below = termAt(below, [step]);
       if (step === "entry") return { collection: "dict" };
       if (step !== "element") return { property: propertyName(step) };
-      const prefix = path.slice(0, index);
       const above =
-        fixed?.(prefix) ??
-        withoutEmpty(this.#run(this.pass.contract.contractOf(keyOf(root, prefix)))).map(
-          (item) => item.tag,
-        );
+        term !== null
+          ? typeTags(term)
+          : withoutEmpty(
+              this.#run(this.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
+            ).map((item) => item.tag);
       return {
         collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list",
       };
@@ -3462,11 +3371,7 @@ export class Consumers {
         decider: decider?.site ?? null,
         brought,
         root: this.#storeRoot(root),
-        steps: this.#storeSteps(
-          root,
-          path,
-          written ? writtenKinds(writtenOf(program.place(root).kind)) : null,
-        ),
+        steps: this.#storeSteps(root, path, written ? writtenOf(program.place(root).kind) : null),
       });
       // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,

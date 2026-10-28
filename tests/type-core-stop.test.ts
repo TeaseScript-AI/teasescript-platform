@@ -854,45 +854,113 @@ test("a stop before admission settled leaves to the analysis what a store's synt
 
 /**
  * Before admission settled nothing it decided is read (TABLE r4.110 (3); A6: a later pass may admit a store this one
- * rejected), and what every store's syntax decides is (r4.122): a store into an inferred place whose stores the syntax
- * does not all tell (a copy of an inferred place among them) is marked at its site, its type undecided; a host value stored beside a
- * literal owes its check against the literal's type; one into a written type keeps its check and its boundary. At a stop
- * in the setup and at the last before admission settled, the oracle finds nothing else.
+ * rejected): a store into an inferred place is marked at its site, its type undecided, and one into a written type
+ * keeps its check and its boundary; at a stop in the setup and at the last before admission settled, the oracle finds
+ * nothing else, the inferred store's check moved to the runtime with its mark.
  */
-test("a stop before admission settled marks the stores into inferred places syntax leaves undecided", () => {
-  for (const [source, marked] of [
+test("a stop before admission settled marks the stores into inferred places and keeps the written ones", () => {
+  const source = 'let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n';
+  const unstopped = stopRun(source);
+  const store = source.indexOf("hostValue");
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+    const stopped = stopRun(source, allowance);
+    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (d) =>
+          d.code === "TSV041" &&
+          d.site.start === store &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown",
+      ),
+      `@${allowance}`,
+    );
+    assert.deepEqual(
+      stopProblems({
+        unstopped,
+        stopped,
+        fitting: [host(2, 3)],
+        violating: [host(1.5, 3), host(2, 1.5)],
+      }),
+      [],
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
+ * TABLE r4.135: before admission settled no syntax decision is made, so every store into an inferred place is marked at
+ * its site whatever its literals give, a store the unstopped analysis rejects among them (its error stands for the
+ * mark's content, r4.111); at a settled stop, as unstopped, the error stands. Disagreements of a scalar, a list, an
+ * object and an object's nested field, an integer then a decimal (no error), and a later copy (`let m = n`), in both
+ * orders, at a stop in the setup, the last stop before admission settled, the first after it and the last. Every stop
+ * of every one in both orders, outside CI: 0 differing (13,542 analyses).
+ */
+test("before admission settled every store into an inferred place is marked, after it a rejection's error stands", () => {
+  const tail = '\nsay n\nrepeat 2 { say "AFTER" }\nexit\n';
+  const at = (source: string, text: string, skip = 0): number => source.indexOf(text) + skip;
+  for (const [source, values] of [
+    ['let n = 1\nn = "wrong"' + tail, ["= 1", 2, '"wrong"', 0]],
+    ['let n = [1]\nn = ["wrong"]' + tail, ["[1]", 0, '["wrong"]', 0]],
+    ['let n = {x: 1}\nn = {x: "wrong"}' + tail, ["{x: 1}", 0, '{x: "wrong"}', 0]],
     [
-      'let base = 1\nlet count = base\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n',
-      true,
+      'let n = {x: {y: 1}}\nn = {x: {y: "wrong"}}' + tail,
+      ["{x: {y: 1}}", 0, '{x: {y: "wrong"}}', 0],
     ],
-    ['let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n', false],
+    ["let n = 1\nn = 2.5" + tail, ["= 1", 2, "2.5", 0]],
+    ['let n = 1\nn = "wrong"\nlet m = n' + tail, ["= 1", 2, '"wrong"', 0, "= n\n", 2]],
   ] as const) {
-    const unstopped = stopRun(source);
-    const store = source.indexOf("hostValue");
-    for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
-      const stopped = stopRun(source, allowance);
-      assert.equal(stopped.answers.budget.settled, false, `${source} @${allowance}`);
-      assert.equal(
-        stopped.answers.budget.deferred.some(
-          (d) =>
-            d.code === "TSV041" &&
-            d.site.start === store &&
-            d.obligation.against.length === 1 &&
-            d.obligation.against[0] === "unknown",
-        ),
-        marked,
-        `${source} @${allowance}`,
-      );
-      assert.deepEqual(
-        stopProblems({
-          unstopped,
-          stopped,
-          fitting: [host(2, 3)],
-          violating: [host(1.5, 3), host(2, 1.5)],
-        }),
-        [],
-        `${source} @${allowance}`,
-      );
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const sites: number[] = [];
+    for (let index = 0; index < values.length; index += 2)
+      sites.push(at(source, values[index] as string, values[index + 1] as number));
+    const wrong = source.indexOf('"wrong"');
+    for (const reversed of [false, true]) {
+      const analyse = (allowance?: number): Answers => {
+        const go = (): Answers =>
+          allowance === undefined
+            ? analyseCore(request)
+            : withTestAllowance(allowance, () => analyseCore(request));
+        return reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), go),
+            )
+          : go();
+      };
+      const errors = (answers: Answers): string[] =>
+        answers.diagnostics
+          .filter((d) => d.class === "compile-error")
+          .map((d) => `${d.code} ${d.site.start}`);
+      const unstopped = analyse();
+      assert.deepEqual(errors(unstopped), wrong < 0 ? [] : [`TSV041 ${wrong}`], source);
+      // (settledness is monotone in the allowance: the first settled stop by bisection)
+      let [low, high] = [1, unstopped.budget.total - 1];
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if (analyse(mid).budget.settled) high = mid;
+        else low = mid + 1;
+      }
+      for (const allowance of [1, low - 1, low, unstopped.budget.total - 1]) {
+        const stopped = analyse(allowance);
+        const where = `${source} @${allowance}${reversed ? " reversed" : ""}`;
+        assert.equal(stopped.budget.exhausted, "work", where);
+        if (stopped.budget.settled) assert.deepEqual(errors(stopped), errors(unstopped), where);
+        else {
+          assert.deepEqual(errors(stopped), [], where);
+          for (const site of sites)
+            assert.ok(
+              stopped.budget.deferred.some(
+                (d) =>
+                  d.code === "TSV041" &&
+                  d.site.start === site &&
+                  d.obligation.against.length === 1 &&
+                  d.obligation.against[0] === "unknown",
+              ),
+              `${where}: a mark at ${site}`,
+            );
+        }
+      }
     }
   }
 });
@@ -1665,156 +1733,6 @@ test("a settled stop decides a typed parse's nested default by its syntax, its c
         [],
         `@${allowance}`,
       );
-  }
-});
-
-/**
- * The per-demand fallback (S3 §5, TABLE B1, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
- * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
- * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
- * read of `y` stops with its key's contract and the reason `budget`, so its check runs when the script runs, while
- * `count`'s error stays an error.
- */
-const chain = (reads: number, count: boolean): string =>
-  [
-    "let x = 1.5",
-    ...Array.from({ length: 30 }, (_, i) => `let y${i + 1} = ${i === 0 ? "x" : `y${i}`}`),
-    ...Array.from({ length: reads }, () => "repeat y30 {}"),
-    "y30 = 2",
-    ...(count ? ["let count = 1", "count = 0.5", "repeat count {}"] : []),
-    'say "AFTER"',
-    "exit",
-  ].join("\n") + "\n";
-
-/** Three quarters of the longest demand a source's analysis bounds, unbounded: below the chain's, above a short read's. */
-function demandAllowance(source: string): number {
-  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
-  assert.ok(request !== null);
-  const bounded = analyseCore(request).budget.demands.filter((read) => read.bounded);
-  return Math.floor(0.75 * Math.max(...bounded.map((read) => read.units)));
-}
-
-test("a demand past its allowance moves its read's check to the runtime, an independent proof staying an error (S3 §5)", () => {
-  const source = chain(1, true);
-  const read = source.indexOf("y30 {}");
-  const count = source.indexOf("count {}");
-  const diagnostics = withTestDemandAllowance(demandAllowance(source), () =>
-    inBothOrders(() =>
-      compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).diagnostics.map(
-        (d) => `${d.severity} ${d.code} @${d.span.start.offset}`,
-      ),
-    ),
-  );
-  assert.deepEqual(diagnostics, [`warning TSV011 @${read}`, `error TSV011 @${count}`]);
-  // without the independent error: the moved check runs and stops the fraction before the next effect
-  const runnable = chain(1, false);
-  const plan = withTestDemandAllowance(demandAllowance(runnable), () =>
-    inBothOrders(() => compileSourceWithBackend(runnable, OPTIONS, CORE_BACKEND).plan),
-  );
-  assert.ok(plan !== null);
-  const failed = ran(plan, 0);
-  assert.deepEqual(failed.said, []);
-  assert.match(failed.failure ?? "", new RegExp(`^TSR043@${runnable.indexOf("y30 {}")}:`, "u"));
-});
-
-test("a stopped demand's proof is not reused by a later demand of its key, in either order (S3 §5)", () => {
-  // two reads of `y30`: the one asked first stops; the other, an independent demand, keeps its allowance and proves
-  const source = chain(2, false);
-  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
-  assert.ok(request !== null);
-  const first = source.indexOf("repeat y30") + "repeat ".length;
-  const second = source.indexOf("repeat y30", first) + "repeat ".length;
-  const allowance = demandAllowance(source);
-  for (const reversed of [false, true]) {
-    const analyse = (): Answers => withTestDemandAllowance(allowance, () => analyseCore(request));
-    const answers: Answers = reversed
-      ? withSolverSeam({ reverseWorklist: true }, () =>
-          withConsumerOrder((list) => [...list].reverse(), analyse),
-        )
-      : analyse();
-    const at = (start: number): string[] =>
-      answers.diagnostics
-        .filter((d) => d.site.start === start)
-        .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
-    const [stopped, proved] = reversed ? [second, first] : [first, second];
-    assert.deepEqual(at(stopped), ["warning-runtime-check budget"], `reversed: ${reversed}`);
-    assert.deepEqual(at(proved), ["compile-error -"], `reversed: ${reversed}`);
-  }
-});
-
-test("after an early stop a store into a place a literal or a copy of a written type decides keeps its check", () => {
-  // the stop in the setup, before admission decides anything: the cheap deciders of TABLE r4.89 (2)
-  const stats = (n: SerializableRuntimeValue): SerializableRuntimeValue => ({
-    kind: "object",
-    properties: [
-      { name: "stats", value: { kind: "object", properties: [{ name: "n", value: n }] } },
-    ],
-  });
-  for (const [source, fitting, violating] of [
-    ['let b = 1\nb = hostValue\nsay "AFTER"\nexit\n', 2, "wrong"],
-    ['let a: integer = 0\nlet b = a\nb = hostValue\nsay "AFTER"\nexit\n', 2, "wrong"],
-    ['let b = {stats: {n: 1}}\nb = hostValue\nsay "AFTER"\nexit\n', stats(2), stats("wrong")],
-    // a literal holding a host value is checked at its store as the host value is (Codex c-r3 B1c)
-    ['let b = {n: 1}\nb = {n: hostValue}\nsay "AFTER"\nexit\n', 2, "wrong"],
-    ['let b = [1]\nb = [hostValue]\nsay "AFTER"\nexit\n', 2, "wrong"],
-  ] as const) {
-    const { plan } = compiled(source, 1);
-    assert.ok(plan !== null, source);
-    assert.deepEqual(ran(plan, fitting), { said: ["AFTER"], failure: null }, source);
-    assert.match(ran(plan, violating).failure ?? "", /^TSR058@/u, source);
-  }
-  // every store decides together, as admission would: a `null` decides nothing but admits `null`, a fraction widens an
-  // integer (Codex c-r1 B1: a first literal's own type alone failed each of these fitting values)
-  const object = (n: SerializableRuntimeValue): SerializableRuntimeValue => ({
-    kind: "object",
-    properties: [{ name: "n", value: n }],
-  });
-  const list = (item: SerializableRuntimeValue): SerializableRuntimeValue => ({
-    kind: "list",
-    items: [item],
-  });
-  for (const [stores, fitting] of [
-    ["let b = null", 2],
-    ["let b = 1\nb = 1.5", 1.5],
-    ["let b = 1\nb = null", null],
-    ["let b = {n: null}", object(2)],
-    ["let b = {n: 1}\nb.n = null", object(null)],
-    ["let b = [null]", list(2)],
-    ["let b = [{n: null}]", list(object(2))],
-  ] as const) {
-    const source = `${stores}\nb = hostValue\nsay "AFTER"\nexit\n`;
-    const { plan } = compiled(source, 1);
-    assert.ok(plan !== null, source);
-    assert.deepEqual(ran(plan, fitting), { said: ["AFTER"], failure: null }, source);
-  }
-});
-
-test("after an early stop an add, an addAll and a dict's values decide a place's elements as admission does", () => {
-  // through the analysis: the candidate route does not take these forms yet (Codex c-r2 B1: an `addAll` gave its list,
-  // not its elements; a dict literal gave no values, so a later store alone decided them)
-  for (const [stores, kinds] of [
-    ["let b = [1]\nb.add(1.5)", ["number"]],
-    ["let b = [1]\nb.addAll([1.5])", ["number"]],
-    ["let b = [1]\nb.addAll([null])", ["integer", "null"]],
-    ['let b = dict{a: 1.5}\nb["a"] = 1', ["number"]],
-    ['let b = dict{a: null}\nb["a"] = 1', ["integer", "null"]],
-  ] as const) {
-    const source = `${stores}\nb = hostValue\nsay "AFTER"\nexit\n`;
-    const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
-    assert.ok(request !== null);
-    const place = new CoreProgram(request).places.find(
-      ({ kind }) => kind.kind === "binding" && kind.name === "b",
-    )!;
-    const elements = (answers: Answers): string[] => {
-      const admitted = answers.place(place.id, ["element"]).admitted;
-      return admitted.by === "undecided" ? [] : [...admitted.kinds].sort();
-    };
-    assert.deepEqual(elements(analyseCore(request)), kinds, stores);
-    assert.deepEqual(
-      withTestAllowance(1, () => inBothOrders(() => elements(analyseCore(request)))),
-      kinds,
-      stores,
-    );
   }
 });
 

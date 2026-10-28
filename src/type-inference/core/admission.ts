@@ -930,22 +930,6 @@ function compatible(items: readonly Item[], term: TypeTerm | null): boolean {
 }
 
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
-/**
- * Where a finishing pass knows a place's kinds at a path without solving (TABLE r4.120, r4.122): the written type where
- * it reaches the path, or the stores' syntax (`Consumers.cheapDecided`); else `null`.
- */
-export type Fixed = (path: readonly string[]) => readonly ItemTag[] | null;
-
-/** A written type's kinds at each path it reaches (`Fixed`). */
-export function writtenKinds(written: TypeTerm | null): Fixed | null {
-  return written === null
-    ? null
-    : (path) => {
-        const term = termAt(written, path);
-        return term === null ? null : typeTags(term);
-      };
-}
-
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
@@ -1744,23 +1728,30 @@ export class Admission {
 
   /**
    * A place's path in the contract's vocabulary: an element step below a dict is its `entry`, the collection above it as
-   * the contract holds it or, where `fixed` knows it (the finishing path before admission settled: the written type or
-   * the stores' syntax, TABLE r4.122), as that has it, final at every stop and asking no solver.
+   * the contract holds it or, where the place's written type `written` reaches it (the finishing path before admission
+   * settled, TABLE r4.122), as the written type has it, final at every stop and asking no solver.
    */
-  public pathLabel(place: PlaceId, path: readonly string[], fixed: Fixed | null = null): string {
+  public pathLabel(
+    place: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
+    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+    let term = written;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
-        const prefix = path.slice(0, index);
         const tags =
-          fixed?.(prefix) ??
-          withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
-            (item) => item.tag,
-          );
+          term !== null
+            ? typeTags(term)
+            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
+                (item) => item.tag,
+              );
         label = stepText(label, elementStep(tags));
       }
+      if (term !== null) term = termAt(term, [step]);
     });
     return label;
   }
@@ -2945,7 +2936,7 @@ export class Admission {
       label: this.pathLabel(
         root,
         path,
-        byWritten ? writtenKinds(writtenOf(this.pass.program.place(root).kind)) : null,
+        byWritten ? writtenOf(this.pass.program.place(root).kind) : null,
       ),
       tags,
       written: byWritten,
@@ -7472,15 +7463,10 @@ export class Admission {
    * argument's own kinds at the boundary's path (a record carrying the ingress its record, a typed ingress its expected
    * kinds, F18, with their `null`), none for external data alone (`unknown`: the runtime's validation of it).
    */
-  #againstOf(d: Definition, path: readonly string[], fixed: Fixed | null = null): ItemTag[] {
+  #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
     if (!this.#besideDefault(d)) {
-      // (the type `fixed` knows there, as `admitted` gives a written one; else the admitted type)
-      const known = fixed?.(path) ?? null;
-      const tags =
-        known === null
-          ? this.admitted(d.place, path)
-          : [...new Set(known.filter((tag) => tag !== "unknown"))];
-      // (after a stop, where neither retained anything at the destination, the stored value's read below it as the
+      const tags = this.admitted(d.place, path);
+      // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
       // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
       // TABLE r4.126)
       const destination = this.#destPath(d);
@@ -7517,25 +7503,24 @@ export class Admission {
    * least evaluation key; owed where a consumer met one of its ingresses' items, where a typed ingress lands where a
    * type is admitted (a parameter default too, r4.28; an argument or a return that carries a typed `load` or
    * `fromJson`, Sol M3 r8), or where one of its ingress stops stands where a type is admitted (the owner's F1).
-   * `fixedOf`, a stop before admission settled: only the stores whose destination's type it knows for them (the written
-   * type, else the stores' syntax: TABLE r4.110 (3), r4.122), against that type.
+   * `written`: only the stores whose destination has a written type (a stop before admission settled).
    */
-  public publish(fixedOf: ((d: Definition) => Fixed | null) | null = null): void {
+  public publish(written = false): void {
     const { definitions, lists, program } = this.pass;
-    const written = fixedOf !== null;
-    const writtenAt = (d: Definition): boolean =>
-      (fixedOf?.(d)?.(this.#destPath(d)) ?? null) !== null;
-    // (`fixedOf`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
+    const writtenAt = (d: Definition): boolean => {
+      const type = writtenOf(program.place(d.place).kind);
+      return type !== null && termAt(type, this.#destPath(d)) !== null;
+    };
+    // (`written`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
     const index = this.#landingIndex(written ? writtenAt : undefined);
     const stores = new Set(definitions.storeDefs);
     const elements = elementsBelow;
     for (const [d, stops] of index.byStore) {
       program.work.charge("checks");
       if (stops.length === 0) continue;
-      // (`fixedOf`: a stop before admission settled reads no decision, so only a boundary against a type it knows forms;
+      // (`written`: a stop before admission settled reads no decision, so only a written destination's boundary forms;
       // any other ingress store is marked, TABLE r4.110 (3))
       if (written && !writtenAt(d)) continue;
-      const fixed = fixedOf?.(d) ?? null;
       const destination = this.#destPath(d);
       // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
       // one)
@@ -7556,12 +7541,11 @@ export class Admission {
       const owed =
         this.#pending.has(d.uid) ||
         (typed
-          ? this.#againstOf(d, destination, fixed).length > 0
+          ? this.#againstOf(d, destination).length > 0
           : lists.live(d) &&
             stops.some(
               (stop) =>
-                this.#againstOf(d, joinSteps(destination, elements(d, stop.path)), fixed).length >
-                0,
+                this.#againstOf(d, joinSteps(destination, elements(d, stop.path))).length > 0,
             ));
       if (!owed) continue;
       const record = elements(d, stops[0]!.recordPath);
@@ -7574,8 +7558,12 @@ export class Admission {
         common = length;
       }
       const path = joinSteps(destination, record.slice(0, common));
-      const tags = this.#againstOf(d, path, fixed);
-      const label = this.pathLabel(d.place, path, fixed);
+      const tags = this.#againstOf(d, path);
+      const label = this.pathLabel(
+        d.place,
+        path,
+        written ? writtenOf(program.place(d.place).kind) : null,
+      );
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const key = keptKey(this.#work, d.place, path);
       const message = `validate external data entering ${label} against ${against.join("|")}`;
