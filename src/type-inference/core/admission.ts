@@ -964,13 +964,19 @@ export class Admission {
   /** Per chain of a walk's operations, its signature (`#viaSignature`), and per signature's parts, its name. */
   readonly #viaSignatures = new WeakMap<ViaChain, string>();
   readonly #viaNames = new Map<string, string>();
+  /** Per chain of operations, its name by its values' classes (`#viaClasses`), and those names by their parts. */
+  readonly #viaClassNames = new WeakMap<ViaChain, string>();
+  readonly #viaClassParts = new Map<string, string>();
   /** Per chain, whether its operations give the operand the walk took (`#chosen`), and surely give it. */
   readonly #chosenLinks = [new WeakMap<ViaChain, boolean>(), new WeakMap<ViaChain, boolean>()];
   /** Per set of a store's inline ingresses, per chain, whether one of its operations' values is one (`named`). */
   readonly #inlineLinks = new WeakMap<ReadonlySet<PlaceId>, WeakMap<ViaChain, boolean>>();
   /** Per store, its landing stops by ingress (`#storeIngresses`). */
   readonly #byIngress = new Map<number, StoreIngresses>();
-  /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
+  /**
+   * Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones, each also with the first of a
+   * class alone (`#snapshots`).
+   */
   readonly #snapshotLists = new WeakMap<readonly Stop[], (readonly Stop[] | undefined)[]>();
   readonly #resolved = new Map<IngressNode, boolean>();
   readonly #f18 = new Map<
@@ -5081,11 +5087,13 @@ export class Admission {
     }
     // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
     const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
-    // (a value a projection selects stands for its parts below the path, never at it)
+    // (a value a projection selects stands for its parts below the path, never at it; of the values of one class the
+    // first alone, the others answering as it does, Astra's review B2)
     for (let length = 0; length <= at.length; length += 1) {
       const list = this.#snapshots(
         stops.values.get(pathText(at.slice(0, length))),
         length === at.length,
+        true,
       );
       if (list !== undefined) lists.push({ list, length });
     }
@@ -5135,17 +5143,59 @@ export class Admission {
    * r4.68 (1)), so of the reads of one key through one chain of operations at one strip that read the same only the
    * first is read, the later ones holding what it holds (k reads of one host global, decided at k paths: Codex r23 F1);
    * so too k calls of one function (r4.15, Codex r24 F2's neighbours); `shallow` leaves out the values a projection
-   * selects.
+   * selects, `classes` all but the first of a class (`#classFirsts`).
    */
-  #snapshots(list: readonly Stop[] | undefined, shallow: boolean): readonly Stop[] | undefined {
+  #snapshots(
+    list: readonly Stop[] | undefined,
+    shallow: boolean,
+    classes = false,
+  ): readonly Stop[] | undefined {
     if (list === undefined) return undefined;
     let memo = this.#snapshotLists.get(list);
     if (memo === undefined) this.#snapshotLists.set(list, (memo = []));
-    const known = memo[shallow ? 1 : 0];
+    const slot = (shallow ? 1 : 0) + (classes ? 2 : 0);
+    const known = memo[slot];
     if (known !== undefined) return known;
-    const out = this.#distinct(shallow ? list.filter((stop) => !stop.deep) : list);
-    this.pass.program.work.charge("checks", list.length);
-    memo[shallow ? 1 : 0] = out;
+    let out: readonly Stop[];
+    if (classes) out = this.#classFirsts(this.#snapshots(list, shallow)!);
+    else {
+      out = this.#distinct(shallow ? list.filter((stop) => !stop.deep) : list);
+      this.pass.program.work.charge("checks", list.length);
+    }
+    memo[slot] = out;
+    return out;
+  }
+
+  /**
+   * Of a decider's values (`#earliestDecider`), the first of each value-side class (`Contract.classOf`) at one node,
+   * strip and chain of operations: the values of one class answer alike at every path but for their roles' writers and
+   * the leaves or operands they name (C9, F16), none of which decides, so a later one decides as the first does and is
+   * never read where the first decides nothing (k loads of one default before a literal's object, decided at its k
+   * properties, Astra's review B2). Each value of no class as itself.
+   */
+  #classFirsts(list: readonly Stop[]): readonly Stop[] {
+    if (!sharing() || list.length < 2) return list;
+    const { program, contract } = this.pass;
+    const seen = new Set<string>();
+    const out: Stop[] = [];
+    for (const stop of list) {
+      program.work.charge("checks");
+      const cls = contract.classOf(stop.value, true);
+      if (cls !== null) {
+        const key = joinParts(
+          cls,
+          stop.node.id,
+          this.#viaClasses(stop.via),
+          stop.strip,
+          stop.deep,
+          stop.single,
+        );
+        if (seen.has(key)) continue;
+        keepText(this.#work, key.length);
+        seen.add(key);
+      }
+      out.push(stop);
+    }
     return out;
   }
 
@@ -5202,6 +5252,40 @@ export class Admission {
         this.#viaNames.set(parts, (known = `${this.#viaNames.size}`));
       }
       this.#viaSignatures.set(unnamed[index]!, (name = known));
+    }
+    return name;
+  }
+
+  /**
+   * A chain of operations by its values' classes (`#classFirsts`): each level's value-side class (`Contract.classOf`),
+   * else its value, with its role, node, strip and path's length, all a decider asks of it (`#chosen`, `#through`), so k
+   * loads of one class, each the operation the walk reaches its default through, have one name. Once per chain, named
+   * as `#viaSignature` names it.
+   */
+  #viaClasses(via: ViaChain | null): string {
+    const unnamed: ViaChain[] = [];
+    let at = via;
+    for (; at !== null && !this.#viaClassNames.has(at); at = at.outer) unnamed.push(at);
+    let name = at === null ? "" : this.#viaClassNames.get(at)!;
+    for (let index = unnamed.length - 1; index >= 0; index -= 1) {
+      const { level } = unnamed[index]!;
+      this.pass.program.work.charge("checks");
+      const cls = this.pass.contract.classOf(level.value, true);
+      const parts = joinParts(
+        name,
+        cls === null ? "v" : "c",
+        cls ?? level.value,
+        level.role,
+        level.node.id,
+        level.strip,
+        level.path.length,
+      );
+      let known = this.#viaClassParts.get(parts);
+      if (known === undefined) {
+        keepText(this.#work, parts.length);
+        this.#viaClassParts.set(parts, (known = `${this.#viaClassParts.size}`));
+      }
+      this.#viaClassNames.set(unnamed[index]!, (name = known));
     }
     return name;
   }
