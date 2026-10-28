@@ -2,7 +2,7 @@ import type { Expression, TypeAnnotation } from "../../ast.js";
 import { expressionChildren } from "../../expression-children.js";
 import { dictMethod } from "../../dict-operations.js";
 import { listMethod } from "../../list-methods.js";
-import { caseValueKey } from "../../switch-cases.js";
+import { caseLiteral } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
@@ -92,18 +92,18 @@ function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof co
 }
 
 /**
- * A literal index's or case's key (`caseValueKey`), the parentheses and sign it walks charged, and the literal's text it
- * reads and makes charged as a kept text is (TABLE r4.58).
+ * A literal index's or case's kind and key (`caseLiteral`), the parentheses and sign it walks charged, and the literal's
+ * text it reads and makes charged as a kept text is (TABLE r4.58).
  */
-function literalKey(expression: Expression, work: WorkLedger): string | undefined {
+function literalOf(expression: Expression, work: WorkLedger): ReturnType<typeof caseLiteral> {
   const node = peel(expression, work);
   if (node.kind === "unaryExpression" && (node.operator === "-" || node.operator === "+"))
     peel(node.operand, work);
   // (a string's parts, read up to its first interpolation)
   if (node.kind === "stringLiteral") work.charge("indexSteps", node.parts.length);
-  const key = caseValueKey(node);
-  if (key !== undefined) keepText(work, key.length);
-  return key;
+  const literal = caseLiteral(node);
+  if (literal !== undefined) keepText(work, literal.key.length);
+  return literal;
 }
 
 /**
@@ -165,7 +165,7 @@ export function stablePath(
     }
     if (current.kind !== "indexExpression") return null;
     const index = peel(current.index, work);
-    const fixed = literalKey(index, work);
+    const fixed = literalOf(index, work)?.key;
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
     if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
       outermost.push({ kind: "fixed", text: fixed });
@@ -1027,19 +1027,21 @@ function mutates(name: string): boolean {
   return (listMethod(name)?.changes ?? dictMethod(name)?.changes) !== undefined;
 }
 
-/** A `switch` case's form (N1): `case null`, or one literal by its value; other cases (several values, a range) none. */
+/**
+ * A `switch` case's form (N1): `case null`, or one literal by its value's kind (the shared `caseLiteral`): a whole
+ * number as `is integer`, a fractional one as `is number` without `integer`, text, a truth value, a duration, a calendar
+ * duration or an angle as `is` its kind; other cases (several values, a range, `case is T`) none.
+ */
 function caseForm(
   values: readonly Expression[],
   typeTest: { readonly negated: boolean } | null,
   work: WorkLedger,
 ): NarrowingForm | null {
   if (typeTest !== null || values.length !== 1) return null;
-  const key = literalKey(values[0]!, work);
-  if (key === undefined) return null;
-  if (key === "null") return ONLY_NULL;
-  if (key.startsWith("string:")) return { kind: "is", kinds: ["string"] };
-  if (!key.startsWith("number:")) return null;
-  return Number.isInteger(Number(key.substring("number:".length)))
-    ? { kind: "is", kinds: ["integer"] }
-    : { kind: "is", kinds: ["number"], fractional: true };
+  const literal = literalOf(values[0]!, work);
+  if (literal === undefined) return null;
+  if (literal.of === "null") return ONLY_NULL;
+  return literal.of === "number"
+    ? { kind: "is", kinds: ["number"], fractional: true }
+    : { kind: "is", kinds: [literal.of] };
 }

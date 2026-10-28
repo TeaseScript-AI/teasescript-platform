@@ -261,12 +261,15 @@ export class NarrowingRoutes {
     // `load(key, default: …)`: storage may lack the key on any run (the storage premise)
     if (c?.kind === "load") return c.fallback !== null && literalTag(program, c.fallback) === tag;
     if (rest.length > 0) return false;
-    // `a otherwise <literal>`: live, and selected where `a`'s own `null` is certified at that node
+    // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at that
+    // node
     if (c?.kind === "fallback") {
       const right = program.places[c.right]?.site;
       const fallback = right === undefined || right === null ? null : program.exprAt(right);
       if (literalTag(program, c.right) !== tag || fallback === null || !program.live(fallback))
         return false;
+      if (literalTag(program, c.left) === "null")
+        return d.how !== "parameter default" || !this.#argued().has(d.key);
       const read = this.#scalarRead(c.left);
       return read === null ? false : { key: read.key, tag: "null", node: read.node };
     }

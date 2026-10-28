@@ -249,6 +249,14 @@ export function caseValueKey(expression: Expression): string | undefined {
   return literalValue(unwrapParentheses(expression))?.key;
 }
 
+/** A literal case value's kind (`duration` for `2 s`, `integer` for `2.0`) and key (`caseValueKey`), or `undefined`. */
+export function caseLiteral(
+  expression: Expression,
+): { readonly of: ValueKind; readonly key: string } | undefined {
+  const literal = literalValue(unwrapParentheses(expression));
+  return literal === undefined ? undefined : { of: literal.of, key: literal.key };
+}
+
 /** A literal case value as written, such as `5.0` or `"open"`, or `undefined` for another value. */
 export function caseValueText(expression: Expression): string | undefined {
   return literalValue(unwrapParentheses(expression))?.text;

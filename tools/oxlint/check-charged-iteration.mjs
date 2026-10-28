@@ -112,9 +112,8 @@ const CHARGING = [
 const STEP = [
   "lib:Number",
   "lib:String.startsWith",
-  "lib:String.substring",
   ...core("expression-children.ts", ["expressionChildren"]),
-  ...core("switch-cases.ts", ["caseValueKey"]),
+  ...core("switch-cases.ts", ["caseLiteral"]),
   ...core("type-inference/core/budget.ts", ["joinParts"]),
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
   ...core("type-inference/core/exact-path.ts", ["withoutEmpty"]),
