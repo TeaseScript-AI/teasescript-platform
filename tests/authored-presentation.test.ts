@@ -142,38 +142,85 @@ test("rejects invalid constant colours and presentation options at compile time"
   assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"\nexit').plan, null);
 });
 
-test("a colour error names the value, and says that a see-through CSS colour must be opaque", () => {
-  const messages = (source: string) =>
-    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
-      diagnostic.code,
-      diagnostic.message,
-    ]);
-  const seeThrough = (value: string) =>
-    `A message's color must be opaque, not "${value}", which is see-through. Use an opaque colour, such as "#336699".`;
-  for (const [source, message] of [
-    [
-      'let shade = "nope"\nsay bubble(color: shade) "Kneel."',
-      'A message\'s color must be a CSS colour, such as "#336699", not "nope".',
-    ],
-    ['let shade = "transparent"\nsay bubble(color: shade) "Kneel."', seeThrough("transparent")],
-    ['speaker vera { color: "rgb(255 0 0 / 0.5)" }', seeThrough("rgb(255 0 0 / 0.5)")],
-    [
-      'let line = "[color=inherit]Kneel.[/color]"\nsay line',
-      "'[color=inherit]' does not name a CSS colour. Use a CSS colour, as in '[color=#336699]'.",
-    ],
-    [
-      'say "[bg=transparent]Kneel.[/bg]"',
-      "'[bg=transparent]' names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in '[bg=#336699]'.",
-    ],
-  ] as const)
-    assert.deepEqual(messages(source), [["TSC008", message]], source);
-  // Each example compiles in its place, and a known null keeps the default colour.
-  for (const source of [
-    'say bubble(color: "#336699") "Kneel."',
-    'say "[bg=#336699]Kneel.[/bg]"',
-    'let c: string? = null\nsay bubble(color: c) "x"',
-  ])
-    assert.notEqual(compileSource(`${source}\nexit`).plan, null, source);
+test("a colour error names the rejected value and why, and each example it offers compiles there", () => {
+  // Written values by what is wrong with them: no CSS colour, a CSS colour that is see-through, or nothing.
+  const values = [
+    ["nope", "invalid"],
+    ["inherit", "invalid"],
+    ["transparent", "seeThrough"],
+    ["#33669980", "seeThrough"],
+    ["rgb(255 0 0 / 0.5)", "seeThrough"],
+    ["rebeccapurple", "valid"],
+  ] as const;
+  const colourErrors = (source: string) =>
+    compileSource(`${source}\nexit`)
+      .diagnostics.filter((diagnostic) => diagnostic.code === "TSC008")
+      .map((diagnostic) => diagnostic.message);
+  // Every place a presentation option takes a colour, with the value written there or held by a variable.
+  const options = [
+    ['say bubble(color: #) "x"', "color"],
+    ['say prose(background: #) "x"', "background"],
+    ["speaker vera { color: # }", "color"],
+    ["speaker vera { prose: { background: # } }", "background"],
+    ['let a = askBoolean prose(color: #) "Sure?"', "color"],
+  ] as const;
+  for (const [site, name] of options)
+    for (const [value, problem] of values)
+      for (const [before, written] of [
+        ["", `"${value}"`],
+        // A speaker is declared for the whole script, so it reads a global.
+        [`${site.startsWith("speaker") ? "global" : "let"} shade = "${value}"\n`, "shade"],
+      ] as const) {
+        const source = `${before}${site.replace("#", written)}`;
+        const expected = {
+          invalid: [`A message's ${name} must be a CSS colour, such as "#336699", not "${value}".`],
+          seeThrough: [
+            `A message's ${name} must be opaque, not "${value}", which is see-through. Use an opaque colour, such as "#336699".`,
+          ],
+          valid: [],
+        }[problem];
+        assert.deepEqual(colourErrors(source), expected, source);
+        if (problem !== "valid")
+          assert.deepEqual(colourErrors(site.replace("#", '"#336699"')), [], source);
+      }
+  // A colour tag of markup, also beside a tag that is text (in a code span, escaped, or never closed) or valid, in
+  // either order.
+  const around = [
+    ["", ""],
+    ["`[color=nope]literal[/color]` ", ""],
+    ["\\\\[color=nope]x ", ""],
+    ["[color=nope]open ", ""],
+    ["[bg=#336699]ok[/bg] ", ""],
+    ["", " [bg=#336699]ok[/bg]"],
+    ["", " [color=nope]open"],
+  ] as const;
+  for (const name of ["color", "bg"])
+    for (const [value, problem] of values)
+      for (const [before, after] of around) {
+        const tag = `[${name}=${value}]`;
+        const said = (opener: string) => `say "${before}${opener}x[/${name}]${after}"`;
+        const source = said(tag);
+        const expected = {
+          invalid: [
+            `'${tag}' does not name a CSS colour. Use a CSS colour, as in '[${name}=#336699]'.`,
+          ],
+          seeThrough: [
+            `'${tag}' names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in '[${name}=#336699]'.`,
+          ],
+          valid: [],
+        }[problem];
+        assert.deepEqual(colourErrors(source), expected, source);
+        if (problem !== "valid")
+          assert.deepEqual(colourErrors(said(`[${name}=#336699]`)), [], source);
+      }
+  // The value a variable holds, and a known null, which keeps the default colour.
+  assert.deepEqual(colourErrors('let line = "[color=inherit]Kneel.[/color]"\nsay line'), [
+    "'[color=inherit]' does not name a CSS colour. Use a CSS colour, as in '[color=#336699]'.",
+  ]);
+  assert.notEqual(
+    compileSource('let c: string? = null\nsay bubble(color: c) "x"\nexit').plan,
+    null,
+  );
 });
 
 test("a presentation option without a value is reported instead of dropped", () => {

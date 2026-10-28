@@ -3,7 +3,7 @@ import type { Expression, ObjectLiteral, Program, Statement } from "./ast.js";
 import { isSeeThroughColor, normalizeColor } from "./color.js";
 import { knownVisibleText, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { parseMessageMarkup, rejectedColorTag } from "./message-markup.js";
+import { rejectedColorTag } from "./message-markup.js";
 import { messageText } from "./runtime/values/text-length.js";
 import { quotedText } from "./runtime/values/value-text.js";
 
@@ -60,44 +60,13 @@ export function messageColorDiagnostics(
   shown: Shown = staticVisibleText,
 ): readonly Diagnostic[] {
   const text = shown(expression);
-  if (text === undefined) return [];
-  const content = parseMessageMarkup(text);
-  for (const block of content.blocks) {
-    const lines =
-      block.kind === "heading"
-        ? [block.line]
-        : block.kind === "list"
-          ? block.items.map((item) => item.line)
-          : block.lines;
-    if (
-      lines.some((line) =>
-        line.spans.some(
-          (span) =>
-            (span.kind === "color" || span.kind === "backgroundColor") && span.value === "inherit",
-        ),
-      )
-    )
-      return [
-        createDiagnostic(
-          DiagnosticSeverity.Error,
-          "TSC008",
-          markupColorMessage(text),
-          expression.span,
-        ),
-      ];
-  }
-  return [];
-}
-
-/** The problem with a colour that the markup of `text` rejects, naming the tag as written. */
-function markupColorMessage(text: string): string {
-  const rejected = rejectedColorTag(text);
-  if (rejected === null)
-    return "A colour in the markup of the text is not an opaque CSS colour. Use an opaque colour, as in '[color=#336699]'.";
+  const rejected = text === undefined ? null : rejectedColorTag(text);
+  if (rejected === null) return [];
   const [written, example] = [`'${messageText(rejected.written)}'`, `'[${rejected.name}=#336699]'`];
-  return isSeeThroughColor(rejected.color)
+  const message = isSeeThroughColor(rejected.color)
     ? `${written} names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in ${example}.`
     : `${written} does not name a CSS colour. Use a CSS colour, as in ${example}.`;
+  return [createDiagnostic(DiagnosticSeverity.Error, "TSC008", message, expression.span)];
 }
 
 /**
