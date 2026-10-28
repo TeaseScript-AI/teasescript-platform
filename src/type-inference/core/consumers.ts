@@ -1,6 +1,6 @@
 import type { Expression } from "../../ast.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
-import type { ValueKind } from "../../value-kinds.js";
+import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
 import * as collections from "../adapters/collections.js";
 import * as handles from "../adapters/handles.js";
@@ -61,9 +61,16 @@ import {
   selectsElement,
 } from "./method-categories.js";
 import { Laminar } from "./narrowing.js";
-import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
+import { COMPARISONS, OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
-import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
+import {
+  propertyName,
+  propertyStep,
+  siteKey,
+  stepName,
+  type Consumption,
+  type ValueConstraint,
+} from "./program.js";
 import { codeOf, pathPhrase } from "./messages.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import {
@@ -81,6 +88,7 @@ import {
   type Obligation,
   type ObligationKind,
   type RequiredKind,
+  type SiteExpectation,
   type StoreRoot,
   type StoreStep,
 } from "./result.js";
@@ -134,6 +142,14 @@ const SHOWN: readonly ValueKind[] = [
   "script",
   "regex",
 ];
+
+/** The kinds `${...}` shows as text (V30 §8), by their own `shown` (TABLE r4.151 reads it from there). */
+const SHOWN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
+  (kind) => VALUE_KINDS[kind].shown !== null,
+);
+
+/** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
+const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
 
 /** The order an operand's domain lists the kinds of the operator table's rows in (F16), as the rows name them. */
 const DOMAIN_ORDER: readonly ValueKind[] = [
@@ -238,6 +254,27 @@ function hasProperty(kind: ItemTag, name: string): boolean {
 
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
+
+/**
+ * An operand's domain (C4): the operator's rows' kinds at `index`, given the other operands' kinds; every row's when none
+ * takes them.
+ */
+function operandDomain(
+  rows: readonly (typeof OPERATOR_ROWS)[number][],
+  operands: readonly (readonly Item[])[],
+  index: number,
+): RequiredKind[] {
+  const taking = rows.filter((row) =>
+    operands.every(
+      (items, other) =>
+        other === index ||
+        items.some((item) => item.tag === "unknown" || row.operands[other] === item.tag),
+    ),
+  );
+  return inDomainOrder((taking.length > 0 ? taking : rows).map((row) => row.operands[index]!)).map(
+    (tag) => requiredKind(tag),
+  );
+}
 
 /** A consumer's operand domain in the order the operator rows list it. */
 function inDomainOrder(kinds: Iterable<ItemTag>): ItemTag[] {
@@ -1322,7 +1359,11 @@ export class Consumers {
     return { file: site.file, start: site.start, end: site.end };
   }
 
-  /** An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code). */
+  /**
+   * An error of `rule` at `site`, the offending value's kinds `kinds` (D1, D3: its sentence and code); a member's read or
+   * call and an operation, whose fixes write code in place of the value at `site`, with what that value's place takes
+   * (TABLE r4.151).
+   */
   #error(
     kind: DiagnosticKind,
     site: SourceSite,
@@ -1330,6 +1371,10 @@ export class Consumers {
     kinds: readonly ItemTag[],
   ): void {
     // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
+    const expects =
+      (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
+        ? this.#expected(site)
+        : undefined;
     const diagnostic: CoreDiagnostic = {
       class: "compile-error",
       kind,
@@ -1337,9 +1382,197 @@ export class Consumers {
       site: this.#site(site),
       rule,
       kinds: [...new Set(kinds)],
+      ...(expects === undefined ? {} : { expects }),
     };
     this.diagnostics.push(diagnostic);
     this.rules.set(diagnostic, this.#rule);
+  }
+
+  /**
+   * TABLE r4.151: what the place the value at `site` lands in takes, read from what consumes it
+   * (`CoreProgram.consumersOf`): a store's, an argument's or a result's place, its admitted type and its elements' (any
+   * where it is unrestricted or where this value decides it); a use, the kind it requires; nothing, where `say` shows
+   * the value, what `say` shows (V30 §8: text, numbers and the other shown kinds, a list, set, dict or object in
+   * notation), else nothing a fix can prove (a command the core does not model, such as `wait`). Where the consumer's
+   * own result depends on the value (an operator's, a member's), the
+   * kinds it takes whose result its own site takes in turn, up the expression to a consumer that does not; a comparison,
+   * a logic operator, an interpolation give one type whatever they take. Any other consumer takes nothing a fix can
+   * prove.
+   */
+  #expected(site: SourceSite): SiteExpectation {
+    const { program } = this.pass;
+    const key = siteKey(site);
+    const known = this.#expectations.get(key);
+    if (known !== undefined) return known;
+    // (once per site, shared by every diagnosis below it and charged; a consumer that leads back to the site, as a `for`
+    // loop's iterable does, proves nothing, Codex r6)
+    this.#expectations.set(key, { takes: [], binds: "whole" });
+    program.work.charge("checks");
+    const place = program.placeBySite.get(key);
+    const consumers = place === undefined ? [] : (program.consumersOf.get(place) ?? []);
+    const found: SiteExpectation =
+      consumers.length > 1
+        ? { takes: [], binds: "whole" }
+        : consumers.length === 1
+          ? this.#consumerTakes(consumers[0]!)
+          : program.effectNode(site)?.statement?.kind === "sayStatement"
+            ? { takes: SAID, binds: "whole", elements: null }
+            : { takes: [], binds: "whole" };
+    this.#expectations.set(key, found);
+    return found;
+  }
+
+  /** `#expected`'s answer per site. */
+  readonly #expectations = new Map<string, SiteExpectation>();
+
+  #consumerTakes(consumer: Consumption): SiteExpectation {
+    const { program } = this.pass;
+    const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
+    // (a place's admitted type, and its elements' where it holds a collection: any where unrestricted or undecided)
+    const placeTakes = (root: PlaceId, path: readonly string[]): SiteExpectation => {
+      if (program.cellOwner.has(root)) return UNPROVED;
+      const admitted = (at: readonly string[]): ItemTag[] | null => {
+        const tags = this.admission.admitted(root, at).filter((tag) => tag !== "empty");
+        return tags.length === 0 || tags.includes("unknown") ? null : tags;
+      };
+      const takes = admitted(path);
+      return {
+        takes,
+        binds: "whole",
+        elements:
+          takes !== null && takes.some((tag) => tag === "list" || tag === "set" || tag === "dict")
+            ? admitted(joinSteps(path, ["element"]))
+            : null,
+      };
+    };
+    switch (consumer.kind) {
+      case "store": {
+        const target = program.targetRoot(consumer.into, true);
+        return placeTakes(target.root, target.path);
+      }
+      case "argument": {
+        const fn = program.functionOf(consumer.fn);
+        const parameter =
+          typeof consumer.parameter === "number"
+            ? fn.parameters[consumer.parameter]
+            : program.parameterPlace(consumer.fn, consumer.parameter);
+        return parameter === undefined ? UNPROVED : placeTakes(parameter, []);
+      }
+      case "return":
+        return placeTakes(program.functionOf(consumer.fn).result, []);
+      case "operand": {
+        const c = consumer.operation;
+        const { family } = c.contract;
+        if (family === "interpolation") return { takes: SHOWN_KINDS, binds: "whole" };
+        if (family === "logic") return { takes: ["boolean"], binds: "operand" };
+        // (a range's bounds are whole numbers, and it is a range whatever they are)
+        if (family === "range") return { takes: ["integer"], binds: "operand" };
+        const operator = operatorOf(c);
+        if (operator === null) return { takes: [], binds: "operand" };
+        const node = program.exprAt(c.site);
+        const operands = c.arguments.map((argument) =>
+          node === null ? [] : this.#kindsOf(argument, node),
+        );
+        const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);
+        const domain = operandDomain(rows, operands, consumer.index).filter(
+          (kind): kind is ValueKind => kind !== "unknown" && kind !== "non-null",
+        );
+        // (a comparison gives true or false whatever it takes; a calculation's result is its operands', which its own
+        // site takes in turn)
+        if (COMPARISONS.some((found) => found === operator))
+          return { takes: domain, binds: "operand" };
+        const outer = this.#expected(c.site);
+        const results = (kind: ValueKind): ValueKind[] =>
+          rows
+            .filter(
+              (row) =>
+                row.operands[consumer.index] === kind &&
+                operands.every(
+                  (items, other) =>
+                    other === consumer.index ||
+                    items.some(
+                      (item) => item.tag === "unknown" || row.operands[other] === item.tag,
+                    ),
+                ),
+            )
+            .map((row) => row.result);
+        return {
+          takes: domain.filter(
+            (kind) =>
+              outer.takes === null ||
+              results(kind).every((result) => outer.takes!.some((tag) => fits(result, tag, true))),
+          ),
+          binds: "operand",
+          ...(outer.takes === null
+            ? { elements: null }
+            : outer.elements === undefined
+              ? {}
+              : { elements: outer.elements }),
+        };
+      }
+      case "method": {
+        // (a method's result the core reads by its receiver's kind, which no fix proves: any where its site takes any)
+        const outer = this.#expected(consumer.site);
+        return {
+          takes:
+            outer.takes === null
+              ? VALUE_KIND_NAMES.filter((kind) => hasMethod(kind, consumer.name))
+              : [],
+          binds: "receiver",
+          elements: null,
+        };
+      }
+      case "access": {
+        const step = consumer.step.step;
+        // (a loop's iterable: what its variable then holds the loop's body reads, which no fact here follows)
+        if (step === "iteration") return { takes: [], binds: "receiver" };
+        const outer = this.#expected(consumer.step.site);
+        // (a member's result: a length a whole number, any other read's only where its site takes any)
+        const property = typeof step === "object" ? step.property : null;
+        const gives: readonly ValueKind[] | null = property === "length" ? ["integer"] : null;
+        const holds =
+          outer.takes === null ||
+          (gives !== null &&
+            gives.every((kind) => outer.takes!.some((tag) => fits(kind, tag, true))));
+        return {
+          takes: !holds
+            ? []
+            : property !== null
+              ? VALUE_KIND_NAMES.filter((kind) => hasProperty(kind, property))
+              : step === "index"
+                ? ["list", "dict"]
+                : [],
+          binds: "receiver",
+          elements: null,
+        };
+      }
+      case "use": {
+        if (consumer.what !== "index")
+          return {
+            takes:
+              consumer.what === "condition"
+                ? ["boolean"]
+                : consumer.what === "count"
+                  ? ["integer"]
+                  : ["string"],
+            binds: "whole",
+          };
+        // (an index takes a list's whole number or a dict's text, by its receiver)
+        const owner = this.#indexOwner(consumer.span);
+        const kinds =
+          owner === undefined
+            ? []
+            : this.#kindsOf(owner, program.exprAt(consumer.span)).map((item) => item.tag);
+        const only = (tag: ItemTag): boolean =>
+          kinds.length > 0 && kinds.every((found) => found === tag);
+        return {
+          takes: only("list") ? ["integer"] : only("dict") ? ["string"] : [],
+          binds: "whole",
+        };
+      }
+      case "other":
+        return UNPROVED;
+    }
   }
 
   /**
@@ -3159,23 +3392,15 @@ export class Consumers {
     );
     const matches = (row: (typeof rows)[number], index: number, tag: ItemTag): boolean =>
       row.operands[index] === tag;
-    // an operand's domain: the rows' kinds there, given the other operands' kinds; every row's when none takes them
-    const domain = (index: number): RequiredKind[] => {
-      const taking = rows.filter((row) =>
-        operands.every(
-          (items, other) =>
-            other === index ||
-            items.some((item) => item.tag === "unknown" || matches(row, other, item.tag)),
-        ),
-      );
-      return inDomainOrder(
-        (taking.length > 0 ? taking : rows).map((row) => row.operands[index]!),
-      ).map((tag) => requiredKind(tag));
-    };
+    const domain = (index: number): RequiredKind[] => operandDomain(rows, operands, index);
     // D1: an operand's rule names the kinds its place takes; the operation's, none
     // r4.10: an operand's diagnostic sits on its own span, its `operand` obligation names its text
     const operandSite = (index: number): SourceSite => this.#own(c.arguments[index]!, c.site);
-    const rule = (index: number | null, pair: readonly ItemTag[] = []): DiagnosticRule => ({
+    const rule = (
+      index: number | null,
+      pair: readonly ItemTag[] = [],
+      elements?: readonly ItemTag[],
+    ): DiagnosticRule => ({
       rule: "operator",
       operator: c.contract.name,
       operand: index !== null,
@@ -3187,6 +3412,7 @@ export class Consumers {
             ),
       operands: c.arguments.map((_, index) => operandSite(index)),
       pair,
+      ...(elements === undefined ? {} : { elements }),
     });
     // an operand's items its domain takes; none for the operation
     const taken = (index: number | null): Item[] => {
@@ -3218,6 +3444,17 @@ export class Consumers {
       const offending = operands.flatMap((items, index) =>
         items.every((item) => !rows.some((row) => matches(row, index, item.tag))) ? [index] : [],
       );
+      // (`+` beside a list: the list's elements' type, which a fix's list must hold, TABLE r4.151)
+      const list =
+        operator === "+"
+          ? operands.findIndex((items) => items.every((item) => item.tag === "list"))
+          : -1;
+      const elements =
+        list < 0
+          ? undefined
+          : withoutEmpty(
+              this.#run(this.pass.contract.contractOfValueAt(c.arguments[list]!, ["element"])),
+            ).map((item) => item.tag);
       if (offending.length === 0)
         this.#error(
           "operator",
@@ -3225,6 +3462,7 @@ export class Consumers {
           rule(
             null,
             operands.map((items) => items[0]!.tag),
+            elements,
           ),
           operands.map((items) => items[0]!.tag),
         );
@@ -3233,7 +3471,7 @@ export class Consumers {
           this.#error(
             "operator",
             operandSite(index),
-            rule(index),
+            rule(index, [], elements),
             operands[index]!.map((item) => item.tag),
           );
       return;
@@ -3456,7 +3694,7 @@ export class Consumers {
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
-    // (a list's `join` read as a property: its elements' type, every value its elements may take, which decides whether
+    // (a list's `join` read: its elements' type, every value they may take, at its `element` step, which decides whether
     // the fix's call is valid; its current contents may be empty, Codex r4)
     const elements =
       property === "join" && owners.some((item) => item.tag === "list")
@@ -4037,14 +4275,17 @@ export class Consumers {
 
   /** The owner of the index projection at a span. */
   #indexProjection(span: Expression["span"], file: number): PlaceId | undefined {
+    return this.#indexOwner({ file, start: span.start.offset, end: span.end.offset });
+  }
+
+  /** The owner of the index projection at a site. */
+  #indexOwner(site: SourceSite): PlaceId | undefined {
     if (this.#indexProjections === null) {
       this.#indexProjections = new Map();
       for (const c of this.pass.program.constraints)
         if (c.kind === "project") this.#indexProjections.set(siteKey(c.site), c.owner);
     }
-    return this.#indexProjections.get(
-      siteKey({ file, start: span.start.offset, end: span.end.offset }),
-    );
+    return this.#indexProjections.get(siteKey(site));
   }
 
   // ----------------------------------------------------------------------------------------- receivers

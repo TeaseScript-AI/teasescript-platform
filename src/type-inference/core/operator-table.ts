@@ -41,7 +41,8 @@ export interface OperatorRow {
 
 const CALCULATIONS = ["+", "-", "*", "/", "%", "neg"] as const;
 
-const COMPARISONS = ["<", "<=", ">", ">="] as const;
+/** The comparisons: each gives true or false, whatever it compares. */
+export const COMPARISONS = ["<", "<=", ">", ">="] as const;
 
 const DURATIONS = [
   "duration duration duration",

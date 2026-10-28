@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileProject } from "../src/compiler.js";
-import { CONVERSIONS } from "../src/conversions.js";
 import { createFreshRuntimeSession } from "../src/index.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -14,6 +13,7 @@ import {
 import type { CoreDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
+import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
@@ -59,6 +59,10 @@ const form = (...parts: readonly (string | RegExp)[]): RegExp =>
 
 const code = (pattern: string): RegExp => new RegExp(pattern);
 
+/** One of several forms: a fix's code where its predicate holds at the site, else its words (TABLE r4.151). */
+const oneOf = (...forms: readonly RegExp[]): RegExp =>
+  new RegExp(forms.map((found) => `(?:${found.source})`).join("|"));
+
 /**
  * Whether a subject is a stable path as written (TABLE §13 N1), the only subject a fix's example names (Astra r1, r2):
  * a variable, then properties other than `random`, fixed indexes or keys, or indexes held in plain variables; a literal
@@ -72,12 +76,6 @@ const STABLE = new RegExp(
 );
 const stablePath = (text: string): boolean => STABLE.test(text);
 const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
-/** Whether a subject is a text literal (`KEY`'s form) that the conversion `name` reads (Codex r3: '"bad"' is not). */
-const readsText = (name: string, subject: string): boolean => {
-  const conversion = Object.entries(CONVERSIONS).find(([key]) => key === name)?.[1];
-  if (conversion?.takes !== "value" || !new RegExp(`^${KEY}$`).test(subject)) return false;
-  return conversion.textProblem(JSON.parse(subject)) === undefined;
-};
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
 
@@ -346,69 +344,67 @@ const PORTS: readonly Port[] = [
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
-  // #1241 under TABLE r4.146: a code form replaces the diagnosed site whole, the stored value or the member access,
-  // with the actual operand; the stored value's own code before a unit (the current checker writes '5 s' into an
-  // element and a result) and inside its conversion; where the form is not complete, the function or the step in words
+  // #1241 under TABLE r4.151: each code form where its predicate holds at the diagnosed site (`codeAt`, which the paste
+  // test below proves), the same fix in words where it does not; so a kept fix is one of the two, with the actual
+  // operand and the receiver as the source writes it (the current checker writes '5 s' into an element and a result)
   {
     from: /^Give the number a unit, such as '.+ (s|deg)'\.$/,
     to: ([, unit], { subject }) =>
-      form("Give the number a unit, such as '", code(grouped(subject)), ` ${unit}'.`),
+      oneOf(
+        form("Give the number a unit, such as '", code(grouped(subject)), ` ${unit}'.`),
+        exact("Give the number a unit."),
+      ),
   },
   {
     from: /^Convert the text with (\w+)\(\.\.\.\)\.$/,
     to: ([, conversion = ""], { subject }) =>
-      exact(
-        readsText(conversion, subject)
-          ? `Convert the text with '${conversion}(${subject})'.`
-          : `Convert the text with the ${conversion} function.`,
+      oneOf(
+        exact(`Convert the text with '${conversion}(${subject})'.`),
+        exact(`Convert the text with the ${conversion} function.`),
       ),
   },
-  // #1241: members of a type without them, the receiver named where it is a stable path
   {
     from: /^Use '(toDeg|toRad)\(.+\)' for its size in (degrees|radians)\.$/,
     to: ([, conversion, unit], { subject }) =>
-      exact(
-        stablePath(subject)
-          ? `Use '${conversion}(${subject})' for its size in ${unit}.`
-          : `Use the ${conversion} function for its size in ${unit}.`,
+      oneOf(
+        exact(`Use '${conversion}(${subject})' for its size in ${unit}.`),
+        exact(`Use the ${conversion} function for its size in ${unit}.`),
       ),
   },
   { from: /^Use a dict to look up by name\.$/, to: ([text]) => exact(text) },
+  // (an object's property is in words: no fact proves the object has it, Codex r1)
   {
     from: /^Read a fixed property as '.+\.(\w+)'\.$/,
     to: ([, key], { subject }) =>
       exact(
-        stablePath(subject)
-          ? `If '${subject}' has a property '${key}', write '${subject}.${key}' instead.`
-          : `If the object has a property '${key}', use a dot instead of brackets.`,
+        `If ${stablePath(subject) ? `'${subject}'` : "the object"} has a property '${key}', use a dot instead of ` +
+          "brackets.",
       ),
   },
-  // (an add's key is the script's to choose; a property's store takes its key)
+  // (an add's key is the script's to choose, and a store's value is not proved a dict value: both in words)
   {
     from: /^Store a value by its key, as in dict\[(.+)\] = value\.$/,
-    to: ([, key], { subject }) =>
+    to: ([, key]) =>
       exact(
         key === "key"
           ? "Assign the value to a key of the dict instead."
-          : stablePath(subject)
-            ? `If '${subject}' can hold the value, write '${subject}[${key}]' to store it by its key.`
-            : "To store a value by its key, write the key in brackets.",
+          : "To store a value by its key, write the key in brackets.",
       ),
   },
+  // (a key's value is there only where the dict has the key, which no fact proves: in words, Codex r6)
   {
     from: /^To read a value by its key, write '.+(\[.+\])'\.$/,
-    to: ([, key], { subject }) =>
+    to: (_, { subject }) =>
       exact(
-        stablePath(subject)
-          ? `To read a value by its key, write '${subject}${key}'.`
-          : "To read a value by its key, write the key in brackets.",
+        `To read a value by its key, write the key in brackets, where '${subject}' has that key.`,
       ),
   },
   {
     from: /^Use (length, keys, or values|contains, remove, clear, or get)\.$/,
     to: ([, names]) =>
       exact(
-        `Use one of its ${names!.startsWith("length") ? "properties" : "methods"} instead: ${names}.`,
+        `Use one of the dict's ${names!.startsWith("length") ? "properties" : "methods"} instead: ` +
+          `${names!.replace(/(\w+)/g, "'$1'").replace("'or' ", "or ")}.`,
       ),
   },
   {
@@ -421,53 +417,63 @@ const PORTS: readonly Port[] = [
   {
     from: /^Use (\w+)(\(\.\.\.\)|\(\))?\.$/,
     to: ([, member, call], { subject }) =>
-      exact(
-        call === "(...)"
-          ? `Use the ${member} method.`
-          : stablePath(subject)
-            ? `Use '${subject}.${member}${call ?? ""}'.`
-            : `Use the ${member} ${call === undefined ? "property" : "method"}.`,
-      ),
+      call === "(...)"
+        ? exact(`Use the ${member} method.`)
+        : oneOf(
+            exact(`Use '${subject}.${member}${call ?? ""}'.`),
+            exact(`Use the ${member} ${call === undefined ? "property" : "method"}.`),
+          ),
   },
-  // (a list whose elements the join method cannot show gets words, Astra r2: no classified pair has one, since the
-  // current checker's call fails there too)
+  // (a join's words also say what its elements must be, Astra r2, Codex r4)
   {
     from: /^Write \.?(\w+)(\(\.\.\.\)|\(\))? (with|without) parentheses\.$/,
     to: ([, member, call], { subject }) =>
-      exact(
-        call === "(...)"
-          ? `Call the ${member} method with its arguments in parentheses.`
-          : call === undefined
-            ? stablePath(subject)
-              ? `Write '${subject}.${member}' without parentheses.`
-              : `Read the ${member} property without parentheses.`
-            : stablePath(subject)
-              ? `Write '${subject}.${member}()' with parentheses.`
-              : `Call the ${member} method with parentheses.`,
-      ),
+      call === "(...)"
+        ? exact(`Call the ${member} method with its arguments in parentheses.`)
+        : call === undefined
+          ? oneOf(
+              exact(`Write '${subject}.${member}' without parentheses.`),
+              exact(`Read the ${member} property without parentheses.`),
+            )
+          : oneOf(
+              exact(`Write '${subject}.${member}()' with parentheses.`),
+              exact(`Call the ${member} method with parentheses.`),
+              exact(
+                `Call the ${member} method with parentheses, on elements that can be shown as text.`,
+              ),
+              exact(
+                `The ${member} method joins only elements that can be shown as text, so select an element or a ` +
+                  "property first.",
+              ),
+            ),
   },
-  // #1241: '+' of a list and a value that is not one: a list at the diagnosed site, the operation or the operand it
-  // names (`subject`), the list named where it is a stable path, else words; the value put in the list where the list
-  // can hold it (Codex r1), an add on a line of its own (it gives no list, Astra r1 B2)
+  // #1241: '+' of a list and a value that is not one: a new list at the diagnosed site, the operation or the operand
+  // it names (`subject`), and an add only on a line of its own (it gives no list, Astra r1 B2), each in words where
+  // its predicate does not hold
   {
     from: /^To add one element, use '.+', or write '.+' for a new list\.$/,
     to: (_, { subject, operands: [list = "", value = ""] }) =>
-      exact(
-        stablePath(list) && ownText(value)
-          ? `If '${list}' can hold '${value}', write '${subject === value ? "" : `${list} + `}[${value}]' for a ` +
-              `new list, or add it to '${list}' itself with '${list}.add(${value})' on a line of its own.`
-          : "To add one element, put the element in brackets for a new list, or call the add method on a line " +
-              "of its own.",
+      form(
+        code(
+          `(?:Write '${grouped(subject === value ? `[${value}]` : `${list} + [${value}]`)}' for a new list|` +
+            "To add one element, put the element in brackets for a new list)",
+        ),
+        code(
+          `, or (?:add the element to '${escaped(list)}' itself with '${escaped(`${list}.add(${value})`)}'|` +
+            "call the add method) on a line of its own\\.",
+        ),
       ),
   },
   {
     from: /^Write '\[.+\] \+ .+' for a new list\.$/,
     to: (_, { subject, operands: [value = "", list = ""] }) =>
-      exact(
-        stablePath(list) && ownText(value)
-          ? `If '${list}' can hold '${value}', write '[${value}]${subject === value ? "" : ` + ${list}`}' for a ` +
-              "new list."
-          : "Put the element in brackets for a new list.",
+      oneOf(
+        form(
+          "Write '",
+          code(grouped(subject === value ? `[${value}]` : `[${value}] + ${list}`)),
+          "' for a new list.",
+        ),
+        exact("Put the element in brackets for a new list."),
       ),
   },
   // (the range as a list, the current checker's code for it beside the list operand, at the operand or the operation
@@ -476,17 +482,17 @@ const PORTS: readonly Port[] = [
     from: /^To add the numbers of a range, write '(.+)'\.$/,
     to: ([, both = ""], { subject, operands: [first = "", second = ""] }) => {
       const listFirst = both.startsWith(`${first} + `);
-      const [list, range] = listFirst ? [first, second] : [second, first];
+      const range = listFirst ? second : first;
       const numbers = listFirst
         ? both.slice(first.length + 3)
         : both.slice(0, both.length - second.length - 3);
-      if (!stablePath(list) || !ownText(range))
-        return exact(
-          "To add the numbers of a range, convert the range with the toList method first.",
-        );
-      const written = subject === range ? numbers : both;
-      return exact(
-        `If '${list}' can hold whole numbers, write '${written}' to add the numbers of the range.`,
+      return oneOf(
+        form(
+          "Write '",
+          code(grouped(subject === range ? numbers : both)),
+          "' to add the numbers of the range.",
+        ),
+        exact("To add the numbers of a range, convert the range with the toList method first."),
       );
     },
   },
@@ -882,8 +888,9 @@ test("each member, conversion and list fix of the current checker is kept on the
   );
   // (each source pairs a diagnostic with a fix)
   assert.equal(new Set(found.map((pair) => pair.record)).size, CLASSIFIED.length);
-  // (Codex r1: a property stored on a type without it gets no read's repair, as the current checker gives none; a key
-  // the object may lack is read as a property only where it has one, and a value put in a list where it can hold it)
+  // TABLE r4.151 (Codex r1, r4, r5, Astra r2): a code form where its predicate holds at the site, the same fix in words
+  // where it does not: what the site takes (a typed declaration, an operand), the elements' type, a store's target,
+  // an object's property no fact proves; a property stored on a type without it gets no read's repair
   const messages = (source: string): string[] => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
@@ -896,22 +903,54 @@ test("each member, conversion and list fix of the current checker is kept on the
   assert.deepEqual(messages("let a = 90 deg\na.degrees = 2\nexit\n"), [
     "An angle has no property 'degrees', so 'a.degrees' cannot be used.",
   ]);
-  assert.deepEqual(messages('let a = {n: 1}\nsay a["missing"]\nexit\n'), [
-    `An object has no elements, so 'a["missing"]' cannot be used. Use a dict to look up by name. If 'a' has a ` +
-      "property 'missing', write 'a.missing' instead.",
-  ]);
-  assert.deepEqual(messages('let d = dict{a: 1}\nd.b = "x"\nexit\n'), [
-    "A dict has no property 'b', so 'd.b' cannot be used. If 'd' can hold the value, write 'd[\"b\"]' to store it " +
-      "by its key.",
-  ]);
-  assert.deepEqual(messages('let box = {n: 1}\nbox["n"] = "x"\nexit\n'), [
-    `An object has no elements, so 'box["n"]' cannot be used. Use a dict to look up by name. If 'box' has a ` +
-      "property 'n' that can hold the value, write 'box.n' instead.",
-  ]);
-  assert.deepEqual(messages('let xs = [1]\nsay xs + "x"\nexit\n'), [
-    `'+' cannot combine a list and text (string). If 'xs' can hold '"x"', write 'xs + ["x"]' for a new list, or ` +
-      `add it to 'xs' itself with 'xs.add("x")' on a line of its own.`,
-  ]);
+  const T = 'let t = "hello"\n';
+  for (const [source, fix] of [
+    [`${T}let size: string = t.size\nsay size\nexit\n`, "Use the length property."],
+    [`${T}let n: integer = t.size\nsay n\nexit\n`, "Use 't.length'."],
+    [`${T}if t.size > 2 {\n  say "long"\n}\nexit\n`, "Use 't.length'."],
+    [
+      'let items = ["a"]\nlet value: integer = items.join\nexit\n',
+      "Call the join method with parentheses.",
+    ],
+    // (Codex r6: no fact proves the dict has the key, so a key's read is in words at any site)
+    [
+      "let d = dict{k: 1}\nlet v: integer = d.k\nexit\n",
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      "let a = 90 deg\nlet n: string = a.degrees\nexit\n",
+      "Use the toDeg function for its size in degrees.",
+    ],
+    [
+      "let xs = [1]\nlet s: string = xs + 2\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      "let xs = [1]\nsay xs + 2\nexit\n",
+      "Write 'xs + [2]' for a new list, or add the element to 'xs' itself with 'xs.add(2)' on a line of its own.",
+    ],
+    // (a value no constraint consumes: what `say` shows, but nothing proved where a command the core does not model
+    // takes it)
+    [`${T}wait t.size\nexit\n`, "Use the length property."],
+    [
+      'let xs = [1]\nsay xs + "x"\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let a = {n: 1}\nsay a["missing"]\nexit\n',
+      "If 'a' has a property 'missing', use a dot instead of brackets.",
+    ],
+    [
+      'let d = dict{a: 1}\nd.b = "x"\nexit\n',
+      "To store a value by its key, write the key in brackets.",
+    ],
+  ] as const) {
+    const found = messages(source);
+    assert.ok(
+      found.some((message) => message.endsWith(` ${fix}`)),
+      `${source}: ${found.join(" | ")}`,
+    );
+  }
 });
 
 /**
@@ -992,9 +1031,10 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     '⟦let result: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
     /as '([^']*)'/,
   ],
-  // #1241 (TABLE r4.146): each code form pasted whole at the site its diagnostic sits on: a number given a unit, also an
-  // operation's value; text converted; a member the type has; a dict's key, read and stored; an object's property, read
-  // and stored; a list for a join, also where a written list takes it (Astra r1 B2)
+  // #1241 (TABLE r4.151): each code form a fix offers, pasted whole at the site its diagnostic sits on, where its
+  // predicate holds: a number given a unit, also an operation's value; text converted; a member the type has, on a
+  // receiver written plainly, nested, as an element and as a dict value, also as a range's bound; a join's elements
+  // ones it shows; a new list where the site takes one (an untyped or a written list, an operand, a receiver)
   ["let pause: duration = ⟦3⟧\nsay pause\nexit\n", /such as '([^']*)'/],
   ["let n = 2\nlet p: duration = ⟦n + 1⟧\nsay p\nexit\n", /such as '([^']*)'/],
   ['let day: date = ⟦"2026-10-28"⟧\nsay day.year\nexit\n', /with '([^']*)'\./, ["2026"]],
@@ -1005,43 +1045,50 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     /with '([^']*)'\./,
   ],
   ["let a = 90 deg\nsay ⟦a.degrees⟧\nexit\n", /Use '([^']*)' for its size/, ["90"]],
-  ['let door = {name: "hall"}\nsay ⟦door["name"]⟧\nexit\n', /write '([^']*)' instead/, ["hall"]],
-  ['let box = {n: 1}\n⟦box["n"]⟧ = 2\nsay box.n\nexit\n', /write '([^']*)' instead/, ["2"]],
-  ["let toys = dict{collar: 1}\nsay ⟦toys.collar⟧\nexit\n", /key, write '([^']*)'/, ["1"]],
-  ['let d = dict{a: 1}\n⟦d.b⟧ = 2\nsay d["b"]\nexit\n', /write '([^']*)' to store it/, ["2"]],
-  // (Astra r2: each member's code on a nested receiver, an element and a dict value, valid where its receiver holds
-  // only the type it is for; a join's elements ones it shows)
   [
-    'let box = {d: dict{a: 1}}\n⟦box.d.b⟧ = 2\nsay box.d["b"]\nexit\n',
-    /write '([^']*)' to store it/,
-    ["2"],
+    "let a = 90 deg\nlet n: number = ⟦a.degrees⟧\nsay n\nexit\n",
+    /Use '([^']*)' for its size/,
+    ["90"],
   ],
-  ["let ds = dict{collar: {n: 1}}\nsay ⟦ds.collar⟧.n\nexit\n", /key, write '([^']*)'/, ["1"]],
-  ["let ds = [dict{collar: 1}]\nsay ⟦ds[0].collar⟧\nexit\n", /key, write '([^']*)'/, ["1"]],
-  [
-    "let box = {toys: dict{collar: 1}}\nsay ⟦box.toys.collar⟧\nexit\n",
-    /key, write '([^']*)'/,
-    ["1"],
-  ],
+  ['let t = "hello"\nsay ⟦t.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let t = "hello"\nlet n: integer = ⟦t.size⟧\nsay n\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let t = "hello"\nif ⟦t.size⟧ > 2 {\n  say "long"\n}\nexit\n', /Use '([^']*)'/, ["long"]],
   ['let box = {label: "hello"}\nsay ⟦box.label.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
   ['let items = ["hello"]\nsay ⟦items[0].size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
-  ['let d = dict{a: " hello "}\nsay ⟦d["a"].trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
-  ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
-  ['let lists = [["a"]]\nsay ⟦lists[0].join⟧\nexit\n', /Write '([^']*)'/],
-  ["let items: integer[] = []\nsay ⟦items.join⟧\nexit\n", /Write '([^']*)'/],
-  ['let t = "hello"\nsay ⟦t.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  [
+    'let t = "hello"\nfor i in 1..⟦t.size⟧ {\n  say i\n}\nexit\n',
+    /Use '([^']*)'/,
+    ["1", "2", "3", "4"],
+  ],
   ['let t = "hello"\nsay ⟦t.toUpperCase()⟧\nexit\n', /Use '([^']*)'/, ["HELLO"]],
   ['let t = "hello"\nsay ⟦t.length()⟧\nexit\n', /Write '([^']*)'/, ["5"]],
   ['let t = " hello "\nsay ⟦t.trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
+  ['let d = dict{a: " hello "}\nsay ⟦d["a"].trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
   ['let items = ["a", "b"]\nsay ⟦items.join⟧\nexit\n', /Write '([^']*)'/],
-  ['let names = ["Ann"]\nsay ⟦names + "Bo"⟧\nexit\n', /write '([^']*)' for a new list/],
+  ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
+  ['let lists = [["a"]]\nsay ⟦lists[0].join⟧\nexit\n', /Write '([^']*)'/],
+  ["let items: integer[] = []\nsay ⟦items.join⟧\nexit\n", /Write '([^']*)'/],
   [
-    "let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n",
-    /write '([^']*)' for a new list/,
+    'let names = ["Ann"]\nlet more = ⟦names + "Bo"⟧\nsay more.length\nexit\n',
+    /Write '([^']*)' for a new list/,
     ["2"],
   ],
-  ["let xs = [1]\nsay ⟦2 + xs⟧\nexit\n", /write '([^']*)' for a new list/],
-  ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /write '([^']*)' to add the numbers/, ["3"]],
+  [
+    "let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n",
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  [
+    "let xs = [1]\nlet ys = ⟦2 + xs⟧\nsay ys.length\nexit\n",
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  [
+    'let names = ["Ann"]\nsay (⟦names + "Bo"⟧).length\nexit\n',
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /Write '([^']*)' to add the numbers/, ["3"]],
 ];
 
 /**
@@ -1061,7 +1108,7 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
     const text = messageSource([source]);
     const found = analyseCore(request)
       .diagnostics.map((diagnostic) =>
-        /add it to '([^']*)' itself with '([^']*)' on a line of its own/.exec(
+        /add the element to '([^']*)' itself with '([^']*)' on a line of its own/.exec(
           coreMessage(diagnostic, text),
         ),
       )
@@ -1088,6 +1135,27 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
       fixed,
     );
   }
+});
+
+/**
+ * TABLE r4.151 (#1241): the paste family's sample (`type-core-paste.ts`): every offer once, the sites in turn, every
+ * code form its fix offers pasted at its own position compiles and runs. The whole family, every offer at every site,
+ * is the step's evidence outside CI.
+ */
+test("every code form a fix offers compiles and runs where pasted, on the paste family's sample (TABLE r4.151)", () => {
+  const failures: string[] = [];
+  let pasted = 0;
+  for (const { name, source, start, end } of pasteCases(true)) {
+    const { diagnosed, forms } = pastedForms(source, start, end);
+    if (!diagnosed) failures.push(`${name}: no error at the expression`);
+    for (const form of forms) {
+      pasted += 1;
+      const failure = pasteFailure(form.source);
+      if (failure !== null) failures.push(`${name}: '${form.code}': ${failure}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+  assert.ok(pasted > 0, `${pasted} forms pasted`);
 });
 
 test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
@@ -1403,7 +1471,25 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     ],
     [
       "let ds = [dict{a: 1}]\nsay ds.random.collar\nexit\n",
-      "To read a value by its key, write the key in brackets.",
+      "To read a value by its key, write the key in brackets, where 'ds.random' has that key.",
+    ],
+    // (Codex r6: a key the dict may not have, also a value of objects; a loop's iterable, whose variable the body reads;
+    // a list of objects, whose element's properties the fix cannot prove)
+    [
+      "let d = dict{k: 1}\nsay d.missing\nexit\n",
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      'let d = dict{k: {n: 1}}\nlet v = {n: "x"}\nv = d.k\nexit\n',
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      "let xs = [1]\nfor v in xs + 2 {\n  say v\n}\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let xs = [{n: 1}]\nsay xs + {n: "x"}\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
     ],
     [
       "let ds = [dict{a: 1}]\nds.random.b = 2\nexit\n",
