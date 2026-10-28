@@ -9,6 +9,7 @@ import {
   joinParts,
   joinSteps,
   keepText,
+  keptSlice,
   splitPath,
   type BudgetLimit,
   type WorkCounter,
@@ -29,6 +30,7 @@ import {
   DefinitionIndex,
   DefinitionLists,
   joinedOperand,
+  keptKey,
   keyOf,
   type Definition,
   type Key,
@@ -39,6 +41,7 @@ import type { Callable, FileRegion, FlowGraph, FlowNode, FunctionRegion } from "
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
 import { EMPTY, makeItem, REASON, STOPPED, type Item, type ItemTag } from "./items.js";
+import { selectsElement } from "./method-categories.js";
 import {
   CoreProgram,
   propertyStep,
@@ -86,16 +89,21 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
+/** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`). */
+type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
+
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
- * `stopped` stopped from its start (TABLE r4.180).
+ * `stopped` stopped from its start (TABLE r4.180), a store below an object's own `first`, `last` or `random` at its
+ * target in `targets` (#1275).
  */
 function createPass(
   program: CoreProgram,
   rejected: ReadonlyMap<number, unknown> = new Map(),
   stopped: readonly StoppedKey[] = [],
+  targets: StoreTargets = new Map(),
 ): CorePass {
-  const definitions = new DefinitionIndex(program);
+  const definitions = new DefinitionIndex(program, targets);
   const parts: {
     program: CoreProgram;
     definitions: DefinitionIndex;
@@ -133,6 +141,84 @@ function createPass(
   const values = new Values(pass);
   for (const key of stopped) contract.stop(key.place, key.path);
   return pass;
+}
+
+/**
+ * #1275 (ADR 0021 §1.1, §1.4, F11): the stores whose receivers select a `first`, `last` or `random` above the stored
+ * place (`box.first.n = 2`), by their places. The runtime reads such a receiver as an object's own property or as a
+ * list's or a set's element, so these stores' targets follow what admission admits there (`storeTargets`).
+ */
+function selectingStores(program: CoreProgram): SelectingStore[] {
+  const out: SelectingStore[] = [];
+  for (const c of program.constraints) {
+    if (c.kind !== "store") continue;
+    // (the stored place's own step is #1260's: always the property)
+    const own = program.projOf.get(c.into);
+    let at = own === undefined ? undefined : (program.occurrenceOf.get(own.owner) ?? own.owner);
+    let selects = false;
+    let depth = 1;
+    for (
+      let projection = at === undefined ? undefined : program.projOf.get(at);
+      projection !== undefined;
+      depth += 1
+    ) {
+      program.work.charge("indexSteps");
+      if (selectsElement(projection.step)) selects = true;
+      at = program.occurrenceOf.get(projection.owner) ?? projection.owner;
+      projection = program.projOf.get(at);
+    }
+    if (selects) out.push({ into: c.into, value: c.value, depth });
+  }
+  // (shallow first: a receiver a deeper store reads may be one a shallower store sets)
+  program.work.charge("indexSteps", out.length);
+  return out.sort((a, b) => a.depth - b.depth);
+}
+
+/** A store `selectingStores` finds: its place, its value, and its target's length. */
+interface SelectingStore {
+  readonly into: PlaceId;
+  readonly value: PlaceId;
+  readonly depth: number;
+}
+
+/**
+ * The targets of `stores` (`selectingStores`) by a pass's admission: such a step above the stored place is an object's
+ * own property where the receiver holds only objects (and null), the receiver's own steps settled first: by admission's
+ * kinds there where it admits any (A2: an unknown or a rejected store after them takes nothing back), else by the
+ * earliest deciding value that one of the shallower of these stores sets there by its target settled here, which this
+ * pass's definitions still key as an element; a list's or a set's element otherwise, as a read takes it (F11).
+ */
+function storeTargets(
+  program: CoreProgram,
+  pass: CorePass,
+  admission: Consumers["admission"],
+  stores: readonly SelectingStore[],
+): StoreTargets {
+  const out = new Map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>();
+  // (per target, the kinds of the earliest value set there that decides: each value asked once, until one decides)
+  const settled = new Map<Key, readonly ItemTag[]>();
+  const objects = (kinds: readonly ItemTag[]): boolean =>
+    kinds.includes("object") && kinds.every((kind) => kind === "object");
+  for (const { into, value } of stores) {
+    const target = program.targetRoot(into, true, (root, steps, length) => {
+      const path = keptSlice(program.work, steps, 0, length);
+      admission.decide(root, path, true);
+      const admitted = admission.admitted(root, path).filter((kind) => kind !== "null");
+      return objects(admitted.length > 0 ? admitted : (settled.get(keyOf(root, path)) ?? []));
+    });
+    out.set(into, target);
+    const key = keptKey(program.work, target.root, target.path);
+    if (settled.has(key)) continue;
+    const items = withoutEmpty(pass.solver.run(pass.contract.contractOfValue(value)));
+    const kinds = [...new Set(items.filter((item) => item.tag !== "null").map((item) => item.tag))];
+    if (kinds.length > 0 && !kinds.includes("unknown")) settled.set(key, kinds);
+  }
+  return out;
+}
+
+/** Store targets as one text, for comparing passes' targets. */
+function targetsText(targets: StoreTargets): string {
+  return [...targets.values()].map((target) => keyOf(target.root, target.path)).join("|");
 }
 
 /** Which path answered a read (§3.3, §3.1, §3.2); a value that is no read: `value`. */
@@ -314,6 +400,9 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
   let stops: readonly StoppedKey[] = [];
+  // #1275: the stores below a selection, their targets by the receivers each pass admits; new targets start the passes
+  // again from no rejection, and targets a pass has used before are kept (no cycle of targets)
+  let targets: StoreTargets = new Map();
   if (stopped !== undefined) program.work.stop(stopped);
   else
     try {
@@ -324,15 +413,50 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
       // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
+      const selecting = selectingStores(program);
+      const used = new Set<string>();
       for (let last = false, restarted = false; ;) {
-        const pass = createPass(program, rejected, stops);
-        const consumers = new Consumers(pass, rejected, cycling, last, false, restarted);
+        const pass = createPass(program, rejected, stops, targets);
+        // (the targets the pass's admission gives, asked before its walk: new ones start the passes again, and a pass
+        // that stops before them settles nothing, its finishing path keying by them)
+        const asked: { next: StoreTargets | null } = { next: null };
+        const consumers = new Consumers(
+          pass,
+          rejected,
+          cycling,
+          last,
+          false,
+          restarted,
+          (admission) => {
+            if (selecting.length === 0 || last) return true;
+            used.add(targetsText(targets));
+            const next = storeTargets(program, pass, admission, selecting);
+            if (used.has(targetsText(next))) return true;
+            asked.next = next;
+            return false;
+          },
+        );
         analysed = { pass, consumers };
         consumers.check();
-        if (consumers.stopped !== null) break;
-        if (pass.contract.stoppedCount > stops.length) {
+        if (consumers.stopped !== null) {
+          targets = asked.next ?? targets;
+          break;
+        }
+        const stoppedMore = pass.contract.stoppedCount > stops.length;
+        if (stoppedMore) {
           program.work.charge("stopPasses");
           stops = pass.contract.stoppedKeys();
+        }
+        if (asked.next !== null) {
+          program.work.charge("rejectPasses");
+          targets = asked.next;
+          rejected = new Map();
+          cycling = new Set();
+          sets.splice(0, sets.length, rejected);
+          restarted = stoppedMore;
+          continue;
+        }
+        if (stoppedMore) {
           restarted = true;
           continue;
         }
@@ -365,7 +489,7 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
     }
   // the written types' own errors (V30 §13's union rule), from the declarations alone
   const written = writtenTypeErrors(request.files.map((file) => file.program));
-  if (program.work.stopped !== null) return finished(program, analysed, rejected, written);
+  if (program.work.stopped !== null) return finished(program, analysed, rejected, targets, written);
   // statements nested past the limit, the analysis run to its end: their checks run when the script runs
   const { pass, consumers } = analysed!;
   if (program.deep.length > 0) program.work.apart(() => consumers.finish(false));
@@ -395,6 +519,7 @@ function finished(
   program: CoreProgram,
   analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null,
   rejected: ReadonlyMap<number, ReadonlySet<Key>>,
+  targets: StoreTargets,
   written: readonly WrittenTypeError[],
 ): Answers {
   const limit = program.work.stopped!;
@@ -403,7 +528,7 @@ function finished(
   const { pass, consumers } =
     standing ??
     (() => {
-      const pass = createPass(program, rejected, analysed?.pass.contract.stoppedKeys());
+      const pass = createPass(program, rejected, analysed?.pass.contract.stoppedKeys(), targets);
       return { pass, consumers: new Consumers(pass, rejected, new Set(), true, true) };
     })();
   const phase = analysed?.consumers.stopPhase() ?? "setup";

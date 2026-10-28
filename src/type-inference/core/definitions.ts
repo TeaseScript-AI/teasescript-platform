@@ -363,7 +363,11 @@ export class DefinitionIndex {
   readonly ordinary: ReadonlySet<Callable>;
   #serial = 0;
 
-  public constructor(readonly program: CoreProgram) {
+  public constructor(
+    readonly program: CoreProgram,
+    /** Stores whose receivers select an object's own `first`, `last` or `random`, by their place: their targets (#1275). */
+    readonly storeTargets: ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>> = new Map(),
+  ) {
     const work = program.work;
     this.stored = new KeyTrie(work, "rdWalk", () => [
       ...this.byKey.keys(),
@@ -499,7 +503,8 @@ export class DefinitionIndex {
 
   #store(constraint: Extract<CoreProgram["constraints"][number], { kind: "store" }>): void {
     const program = this.program;
-    const target = program.targetRoot(constraint.into, true);
+    const target =
+      this.storeTargets.get(constraint.into) ?? program.targetRoot(constraint.into, true);
     const projection = program.projOf.get(constraint.into);
     const add =
       ["element", "elements", "entry"].includes(constraint.how) &&

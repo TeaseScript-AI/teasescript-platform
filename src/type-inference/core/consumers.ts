@@ -100,7 +100,10 @@ export class Consumers {
   rule = 0;
   /** The limit the walk stopped at, or `null`. */
   stopped: BudgetLimit | null = null;
-  /** Whether admission settled in this pass: its rejections are the pass's own (A6), so its findings stand. */
+  /**
+   * Whether admission settled in this pass: its rejections and its store targets are the pass's own (A6, #1275), so its
+   * findings stand.
+   */
   settled = false;
   /** Whether admission's boundary checks were published (`Admission.publish`), the walk's last step. */
   published = false;
@@ -114,6 +117,8 @@ export class Consumers {
   finishing = false;
   readonly #last: boolean;
   readonly #rejected: ReadonlyMap<number, ReadonlySet<Key>>;
+  /** Whether the store targets the pass keys by are its admission's own (#1275), asked before the walk. */
+  readonly #ownTargets: (admission: Admission) => boolean;
   /** Admission's decisions, rejections and boundary checks (§5, C9). */
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -168,10 +173,12 @@ export class Consumers {
     last = false,
     finishing = false,
     restarted = false,
+    ownTargets: (admission: Admission) => boolean = () => true,
   ) {
     this.#rejected = rejected;
     this.#last = last;
     this.restarted = restarted;
+    this.#ownTargets = ownTargets;
     // (a walk made for the finishing path asks nothing from its start: admission's own setup asks values too)
     this.finishing = finishing;
     this.order = consumerOrder ?? ((list) => [...list]);
@@ -346,8 +353,11 @@ export class Consumers {
       this.rule = 3;
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
-      // (a pass in which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
+      // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      const own = this.#ownTargets(this.admission);
       this.settled =
+        own &&
         (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&
         !this.decisionStopped;
       // (admission's findings are the walk's before its first unit)

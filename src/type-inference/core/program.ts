@@ -491,24 +491,35 @@ export class CoreProgram {
    * The place a value is stored into or read from, with the path of steps below it: through every projection to the
    * binding or literal at its root (`state.party.element.hp`). A store (`store`) through a property sets that property,
    * as the runtime assigns it, so the stored place's own `first`, `last` or `random` is an object's property there (V30
-   * §15, ADR 0021 §1.4); only a read takes the name as the collector's element selection (F11).
+   * §15, ADR 0021 §1.4); only a read takes the name as the collector's element selection (F11). Above the stored place
+   * the store reads its receivers as the runtime does: such a name is an object's own property where `owns` says the
+   * receiver there, the root and the steps before it, is an object (#1275), else a list's or a set's element.
    */
   public targetRoot(
     id: PlaceId,
     store = false,
+    owns?: (root: PlaceId, steps: readonly string[], length: number) => boolean,
   ): { readonly root: PlaceId; readonly path: readonly string[] } {
     const steps: string[] = [];
     let current = id;
     for (let projection = this.projOf.get(current); projection !== undefined;) {
       steps.push(
-        store && current === id && selectsElement(projection.step)
+        store && (current === id || owns !== undefined) && selectsElement(projection.step)
           ? projection.step
           : stepName(projection.step),
       );
       current = this.occurrenceOf.get(projection.owner) ?? projection.owner;
       projection = this.projOf.get(current);
     }
-    return { root: current, path: steps.reverse() };
+    steps.reverse();
+    // (from the root outward, each receiver's steps already settled)
+    if (owns !== undefined)
+      for (let index = 0; index + 1 < steps.length; index += 1) {
+        this.work.charge("indexSteps");
+        if (selectsElement(steps[index]!) && !owns(current, steps, index))
+          steps[index] = stepName(steps[index]!);
+      }
+    return { root: current, path: steps };
   }
 
   /** A file's whole text as a site. */

@@ -599,7 +599,7 @@ export function joinElements(
   }) => void,
   undecided?: (value: PlaceId) => void,
 ): void {
-  const { program, contract } = admission.pass;
+  const { program, contract, definitions } = admission.pass;
   const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
   const joins = new Map<PlaceId, Join>();
   for (const c of program.constraints)
@@ -654,13 +654,23 @@ export function joinElements(
       continue;
     }
     const written = contract.landsIn(root.result, []);
+    // (a `+=`'s left operand reads the place its store sets, a selection there an own property where the store's
+    // target keeps it, #1275)
+    const target = (definitions.byValue.get(root.result) ?? []).find(
+      (d) => d.kind === "whole" && d.how === "compound",
+    );
+    const stored = (operand: PlaceId): boolean =>
+      target !== undefined && operand === root.arguments[0];
     const isList = (operand: PlaceId, node: FlowNode): boolean =>
-      admission.items(operand, node, []).some((item) => item.tag === "list");
+      stored(operand)
+        ? admission.admitted(target!.place, target!.path).includes("list")
+        : admission.items(operand, node, []).some((item) => item.tag === "list");
     // the place an operand reads, whose admitted type is its type: a variable's or a property's, a call's result
-    // (F20: a written result's type decides, Codex r5 on #1310)
+    // (F20: a written result's type decides, Codex r5 on #1310), a `+=`'s target
     const placeOf = (
       operand: PlaceId,
     ): { readonly place: PlaceId; readonly path: readonly string[] } | null => {
+      if (stored(operand)) return target!;
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
       return key === null ? null : { place: keyPlace(key), path: keyPath(key) };
     };

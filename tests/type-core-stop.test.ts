@@ -1008,6 +1008,86 @@ test("before admission settled every store into an inferred place is marked, aft
 });
 
 /**
+ * #1275 (Codex r7's B2 on #1310): a pass keys the stores below an own selection by the targets the pass before it gave,
+ * and where its admission gives others the passes start again, so a stop before they do settles nothing (TABLE r4.110
+ * (3)): its finishing path marks such a store as it marks every store into an inferred place, and the store's error
+ * stands as that mark. Each own selection, both orders, each end of the first pass's walk.
+ */
+test("a stop before a store below an own selection takes its target settles nothing and marks the store", () => {
+  const options = { globals: ["hostValue", "hostOther"] };
+  const phases = ["setup", "admission", "walk", "publication"];
+  for (const own of ["first", "last", "random"])
+    for (const reversed of [false, true]) {
+      const source = `let box = {${own}: {n: 1}}\nbox.${own}.n = "bad"\nsay "AFTER"\nexit\n`;
+      const where = `${own} reversed: ${reversed}`;
+      const inOrder = <T>(make: () => T): T =>
+        reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), make),
+            )
+          : make();
+      const request = coreRequest([{ path: "main.tease", source }], options.globals);
+      assert.ok(request !== null);
+      const both = () =>
+        inOrder(() => ({
+          result: compileSourceWithBackend(source, options, CORE_BACKEND),
+          answers: analyseCore(request),
+        }));
+      const runAt = (allowance?: number): StopRun => {
+        const allowed = <T>(make: () => T): T =>
+          allowance === undefined ? make() : withTestAllowance(allowance, make);
+        return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
+      };
+      const unstopped = runAt();
+      const value = source.indexOf('"bad"');
+      assert.deepEqual(
+        unstopped.answers.diagnostics
+          .filter((d) => d.class === "compile-error")
+          .map((d) => `${d.code} ${d.site.start}`),
+        [`TSV041 ${value}`],
+        where,
+      );
+      // (how far a stop at the allowance came: the passes started again, its phase in its pass)
+      const reached = (allowance: number): number => {
+        const { counts, stoppedIn } = withTestAllowance(allowance, () =>
+          inOrder(() => analyseCore(request)),
+        ).budget;
+        return (counts.get("rejectPasses") ?? 0) * phases.length + phases.indexOf(stoppedIn ?? "");
+      };
+      const lowest = (at: number): number => {
+        let [low, high] = [1, unstopped.answers.budget.total];
+        while (low < high) {
+          const middle = (low + high) >> 1;
+          if (reached(middle) >= at) high = middle;
+          else low = middle + 1;
+        }
+        return low;
+      };
+      const walk = phases.indexOf("walk");
+      for (const allowance of [lowest(walk), lowest(walk + 1) - 1]) {
+        assert.equal(reached(allowance), walk, `${where} @${allowance}`);
+        const stopped = runAt(allowance);
+        assert.equal(stopped.answers.budget.settled, false, `${where} @${allowance}`);
+        assert.ok(
+          stopped.answers.budget.deferred.some(
+            (d) =>
+              d.code === "TSV041" &&
+              d.site.start === value &&
+              d.obligation.against.length === 1 &&
+              d.obligation.against[0] === "unknown",
+          ),
+          `${where} @${allowance}`,
+        );
+        assert.deepEqual(
+          stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
+          [],
+          `${where} @${allowance}`,
+        );
+      }
+    }
+});
+
+/**
  * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
  * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
  * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value,

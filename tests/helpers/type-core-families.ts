@@ -3414,6 +3414,20 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  {
+    name: "own-selection-stores",
+    measures:
+      "#1275 (Codex r1 on #1310): k stores of a receiver below an own selection, then k stores below it",
+    program: (k) =>
+      main(
+        lines(
+          "let a = {first: {last: {random: {n: 1}}}}",
+          rows(k, () => "a.first.last = {random: {n: 1}}"),
+          rows(k, () => "a.first.last.random.n = 2"),
+          "exit",
+        ),
+      ),
+  },
   ...INHERITED_FIELD_FAMILIES,
 ];
 
