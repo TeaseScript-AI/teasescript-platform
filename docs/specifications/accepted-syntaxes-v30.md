@@ -6431,7 +6431,7 @@ written, so no other error follows from it. `!=` stays the comparison, and `?` a
 ```text
 TeaseScript writes 'and' with a space on each side instead of '&&': if a and b { say "both" }
 TeaseScript writes 'or' with a space on each side instead of '||': if a or b { say "one or both" }
-TeaseScript writes 'not' and a space instead of '!': if not a { say "not a" }
+TeaseScript writes 'not' with a space on each side instead of '!': if not a { say "not a" }
 TeaseScript writes 'otherwise' with a space on each side instead of '??': let name = nickname otherwise "pet"
 ```
 

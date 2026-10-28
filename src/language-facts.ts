@@ -387,7 +387,7 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   ),
   foreignForm(
     ";",
-    { words: "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'." },
+    { words: "TeaseScript ends a statement with a line break instead of ';'." },
     null,
   ),
   foreignForm("#", "//", "// a comment"),
@@ -425,7 +425,9 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
     { name: "call" },
   ),
   ...["def", "fn", "func", "fun"].map((word) =>
-    foreignForm(word, "function", 'function countTo(n) { say "${n}" }', { statement: "function" }),
+    foreignForm(word, "function", 'function greet(name) { say "Hi ${name}" }', {
+      statement: "function",
+    }),
   ),
   ...["var", "local"].map((word) =>
     foreignForm(word, "let", "let count = 1", { statement: "let" }),

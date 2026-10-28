@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
@@ -18,14 +19,14 @@ function diagnostics(source: string): [string, string, string][] {
 const writes = (teaseScript: string, written: string, example: string) =>
   `TeaseScript writes '${teaseScript}' instead of '${written}': ${example}`;
 
-const SEMICOLON = "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'.";
+const SEMICOLON = "TeaseScript ends a statement with a line break instead of ';'.";
 const COLON = `TeaseScript writes a block between '{' and '}' instead of after ':': if done { say "done" }`;
 
 test("each form of another language is one error that names the TeaseScript form", () => {
   const cases: [string, [string, string, string][]][] = [
     ...["def", "fn", "func", "fun"].map((word): [string, [string, string, string][]] => [
       `${word} countTo(n: integer) {\n  say "\${n}"\n}\ncountTo(3)\nexit`,
-      [["TSP037", writes("function", word, 'function countTo(n) { say "${n}" }'), word]],
+      [["TSP037", writes("function", word, 'function greet(name) { say "Hi ${name}" }'), word]],
     ]),
     ...["var", "local"].map((word): [string, [string, string, string][]] => [
       `${word} count = 1\nsay "\${count}"\nexit`,
@@ -271,10 +272,19 @@ test("the code that such an error shows compiles where it is pasted, in every sp
   }
 });
 
+test("V30 quotes the messages of the forms of other languages as the compiler writes them", () => {
+  const messages = new Set([...FOREIGN_FORMS.values()].map(({ message }) => message));
+  const quoted = readFileSync("docs/specifications/accepted-syntaxes-v30.md", "utf8")
+    .split("\n")
+    .filter((line) => line.startsWith("TeaseScript writes "));
+  assert.notEqual(quoted.length, 0);
+  for (const line of quoted) assert.ok(messages.has(line), line);
+});
+
 test("the example of a missing switch value or case value compiles", () => {
   for (const [source, code] of [
     ['let answer = "yes"\nswitch {\n  case "yes" { say "yes" }\n}\nexit', "TSP012"],
-    ['let answer = "open"\nswitch answer {\n  case { say "x" }\n}\nexit', "TSP012"],
+    ['let answer = "yes"\nswitch answer {\n  case { say "x" }\n}\nexit', "TSP012"],
   ] as const) {
     const [error] = compileSource(source).diagnostics;
     assert.equal(error?.code, code, source);
