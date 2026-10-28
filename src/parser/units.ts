@@ -232,7 +232,7 @@ function reportMistakenUnit(
   );
   const fixed = `${amount.raw} ${meant}`;
   parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
-    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed },
+    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
   ]);
 }
 

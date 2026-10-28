@@ -166,6 +166,8 @@ function timerDuration(
         start: written.span.start.offset,
         end: written.span.end.offset,
         code: `(${range}) ${unit}`,
+        // A wait or timer keeps the unit apart from the range, so no node holds both.
+        expression: false,
       },
     ],
   );
