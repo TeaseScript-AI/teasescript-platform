@@ -402,7 +402,7 @@ test("a package file the host could not load is an error where a path written ou
         0,
         "warning",
         "TSV065",
-        `No 'goto' or 'call' that can run starts 'scenes/broken.tease', so the file is not used. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${broken.reason}`,
+        `The code of 'scenes/broken.tease' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${broken.reason}`,
       ],
       [locked.path, 0, "warning", "TSC011", locked.reason],
       [bell.path, 0, "warning", "TSC011", bell.reason],
@@ -411,7 +411,7 @@ test("a package file the host could not load is an error where a path written ou
         0,
         "warning",
         "TSV065",
-        `No code that can run uses a file in the folder 'attic', so the folder is not used. Remove the folder, or use the files of 'attic' once the Player can read the folder. ${attic.reason}`,
+        `No code that can run uses a file in the folder 'attic'. Remove the folder, or use the files of 'attic' once the Player can read the folder. ${attic.reason}`,
       ],
     ],
   );

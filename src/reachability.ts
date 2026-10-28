@@ -758,7 +758,7 @@ export class Reachability {
         createDiagnostic(
           DiagnosticSeverity.Warning,
           "TSV065",
-          `The code of '${file.path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`,
+          `${unstartedFileSentence(file.path)} Remove the file, or start the file with a 'goto' or 'call'.`,
           first.span,
         ),
       );
@@ -1030,14 +1030,19 @@ function laterCallMessage(
     : `This call runs later, ${block.when}, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, ${block.stop} while such a file runs.`;
 }
 
+/** Why the code of a file never runs (TSV065, #595), whether or not the host could load the file. */
+function unstartedFileSentence(path: string): string {
+  return `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file.`;
+}
+
 /**
  * Why a file or folder that the host could not load is code that never runs (TSV065, #595): no code that can run uses
  * it. The host's reason follows, which says why it cannot be read and what to do.
  */
 export function unusedUnreadableMessage(entry: UnreadablePackageFile): string {
   return entry.folder === true
-    ? `No code that can run uses a file in the folder '${entry.path}', so the folder is not used. Remove the folder, or use the files of '${entry.path}' once the Player can read the folder. ${entry.reason}`
-    : `No 'goto' or 'call' that can run starts '${entry.path}', so the file is not used. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${entry.reason}`;
+    ? `No code that can run uses a file in the folder '${entry.path}'. Remove the folder, or use the files of '${entry.path}' once the Player can read the folder. ${entry.reason}`
+    : `${unstartedFileSentence(entry.path)} Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${entry.reason}`;
 }
 
 /**

@@ -312,7 +312,7 @@ test("a package lists every .tease file it can read, and compiling it reports th
     unreadableFiles: listed.unreadable,
   });
   const unused = (path: string, reason: string) =>
-    `No 'goto' or 'call' that can run starts '${path}', so the file is not used. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${reason}`;
+    `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${reason}`;
   const clean = compilePlayerProject(project("exit"));
   assert.notEqual(clean.plan, null);
   assert.deepEqual(clean.diagnostics, [
@@ -404,7 +404,7 @@ test("a package lists every .tease file it can read, and compiling it reports th
           "rooms/locked.tease",
           "warning",
           "TSV065",
-          `No code that can run uses a file in the folder 'rooms/locked.tease', so the folder is not used. Remove the folder, or use the files of 'rooms/locked.tease' once the Player can read the folder. ${folder}`,
+          `No code that can run uses a file in the folder 'rooms/locked.tease'. Remove the folder, or use the files of 'rooms/locked.tease' once the Player can read the folder. ${folder}`,
         ],
         ["latin1.tease", "warning", "TSV065", unused("latin1.tease", latin1)],
         ["locked.tease", "warning", "TSV065", unused("locked.tease", locked.unreadable[2].reason)],
