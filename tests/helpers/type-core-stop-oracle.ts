@@ -341,4 +341,18 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     issue: "#1165",
     count: 802,
   },
+  {
+    // (#1165's class, a typed parse's nested default: Astra r4's N1, TABLE r4.126)
+    source:
+      "let parsed = fromJson(hostValue, default: {chunks: [[{id: 5}]]})\nsay parsed.chunks.get(0, default: [{id: 4}])[0].id\nexit\n",
+    problems: [
+      "plan /instructions/5/typeCheck/type/properties/0/type/element",
+      "plan /instructions/5/typeCheck/type/properties/0/type/element/element",
+      "plan /instructions/5/typeCheck/type/properties/0/type/element/element/properties",
+    ],
+    mechanism:
+      "a settled walk stop leaves `parsed.chunks.element` undecided (admission decides it lazily, never after a stop), so the store's check opens there; part 3's syntax decision (source 4) decides it from the default literal",
+    issue: "#1165",
+    count: 1024,
+  },
 ];
