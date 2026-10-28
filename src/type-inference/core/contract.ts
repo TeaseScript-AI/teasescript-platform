@@ -613,12 +613,13 @@ export const WIDE = 8;
 type LiteralObject = NonNullable<ReturnType<LiteralIndex["objects"]["get"]>>["list"][number];
 
 /**
- * A wide gather of the value side (`Contract.gathered`): a literal's exact entries, its copies past an element step or
- * its computed values' groups at a path (`deeper`: a path the read goes below), or a selection's objects there.
+ * A wide gather (`Contract.gathered`): on the value side a literal's exact entries, its copies past an element step or
+ * its computed values' groups at a path (`deeper`: a path the read goes below), or a selection's objects there; on the
+ * contract side its reads or its computed values' groups at a path (`reads`, `groups`).
  */
 export type GatherSite =
   | {
-      readonly kind: "exact" | "copies" | "others";
+      readonly kind: "exact" | "copies" | "others" | "reads" | "groups";
       readonly literal: PlaceId;
       readonly path: string;
       readonly deeper: boolean;
@@ -693,6 +694,8 @@ export class Contract {
   readonly #aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
   readonly #holders = new Map<string, Holder>();
   readonly #literals = new Map<PlaceId, LiteralIndex>();
+  /** The literals whose index is being built, each its own cycle's stop (`#own`). */
+  readonly #indexing = new Set<PlaceId>();
   /**
    * The paths of the literal indexes, each made once per pass (TABLE r4.58): a path is its parent's and one step, with
    * one text that the indexes of nested literals share; its id orders and names it in a literal's signature and
@@ -2890,7 +2893,10 @@ export class Contract {
    * value itself; the read's guard an annotation, each with its mark holder (§8 r4.23).
    */
   public identityOf(value: PlaceId): Identity {
-    if (!this.#identities.has(value)) this.#settle(this.#identityWork(value));
+    if (!this.#identities.has(value)) {
+      if (this.#indexing.has(value)) return this.#own(value);
+      this.#settle(this.#identityWork(value));
+    }
     return this.#identities.get(value)!;
   }
 
@@ -2990,7 +2996,10 @@ export class Contract {
    * by it.
    */
   public structureOf(value: PlaceId): string {
-    if (!this.#structures.has(value)) this.#settle(this.#structureWork(value));
+    if (!this.#structures.has(value)) {
+      if (this.#indexing.has(value)) return `v${value}`;
+      this.#settle(this.#structureWork(value));
+    }
     return this.#structures.get(value)!;
   }
 
@@ -3080,7 +3089,10 @@ export class Contract {
   }
 
   *#needStructure(value: PlaceId): Generator<() => IdentityWork, string, void> {
-    if (!this.#structures.has(value)) yield () => this.#structureWork(value);
+    if (!this.#structures.has(value)) {
+      if (this.#indexing.has(value)) return `v${value}`;
+      yield () => this.#structureWork(value);
+    }
     return this.#structures.get(value)!;
   }
 
@@ -3101,8 +3113,22 @@ export class Contract {
   }
 
   *#needValue(value: PlaceId): Generator<() => IdentityWork, Identity, void> {
-    if (!this.#identities.has(value)) yield () => this.#identityWork(value);
+    if (!this.#identities.has(value)) {
+      if (this.#indexing.has(value)) return this.#own(value);
+      yield () => this.#identityWork(value);
+    }
     return this.#identities.get(value)!;
+  }
+
+  /**
+   * #1229: a literal whose index is being built, read back by its own cycle (an element's identity reaching the literal
+   * again through copies, as a ring of copies through one list does), stands as itself, as one holding a reference does,
+   * so its index is built once, never again for each element on the way; kept nowhere, so its own identity, structure
+   * and signature are made from its finished index.
+   */
+  #own(literal: PlaceId): Identity {
+    const id = `v${literal}`;
+    return { id, key: null, guarded: false, holder: this.#holders.get(id) ?? this.#newHolder(id) };
   }
 
   *#needPrefix(prefix: Key): Generator<() => IdentityWork, PrefixStores, void> {
@@ -3116,7 +3142,10 @@ export class Contract {
   }
 
   *#needSignature(literal: PlaceId): Generator<() => IdentityWork, string, void> {
-    if (!this.#signatures.has(literal)) yield () => this.#signatureWork(literal);
+    if (!this.#signatures.has(literal)) {
+      if (this.#indexing.has(literal)) return `v${literal}`;
+      yield () => this.#signatureWork(literal);
+    }
     return this.#signatures.get(literal)!;
   }
 
@@ -4144,6 +4173,7 @@ export class Contract {
 
   *#indexWork(literal: PlaceId): IdentityWork {
     if (this.#literals.has(literal)) return;
+    this.#indexing.add(literal);
     const { program, definitions } = this.pass;
     // (TABLE r4.58: each object, collection, array element and map entry it keeps charged one unit as it is made, each
     // kept text its `textUnits`; here the index's own ten)
@@ -4329,6 +4359,7 @@ export class Contract {
         pending.push({ kind: "term", site, term: element, path: this.#pathAt(path, "element") });
       }
     }
+    this.#indexing.delete(literal);
     this.#literals.set(literal, index);
   }
 
@@ -4338,7 +4369,10 @@ export class Contract {
    * marks of its reads are never identity (r4.17).
    */
   public literalSignature(literal: PlaceId): string {
-    if (!this.#signatures.has(literal)) this.#settle(this.#signatureWork(literal));
+    if (!this.#signatures.has(literal)) {
+      if (this.#indexing.has(literal)) return `v${literal}`;
+      this.#settle(this.#signatureWork(literal));
+    }
     return this.#signatures.get(literal)!;
   }
 
@@ -4430,7 +4464,7 @@ export class Contract {
     exact: boolean,
     below = false,
   ): Work<readonly Item[]> {
-    const { program, definitions } = this.pass;
+    const { program } = this.pass;
     const index = this.literalIndex(literal);
     // an element cell, or a literal read as one (`below`): every path below lies below an element step
     const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
@@ -4461,36 +4495,17 @@ export class Contract {
       let tail: readonly string[] | undefined;
       const after = (): readonly string[] => (tail ??= rest.slice(length));
       if (!exact) {
-        for (const entry of index.reads.get(path) ?? [])
-          out.push(
-            ...this.#annotated(
-              entry,
-              after(),
-              withWriter(
-                yield* this.contractOfValueAt(entry.value, after()),
-                entry.g === null ? null : definitions.writerOf(entry.g),
-              ),
-            ),
-          );
-        const groups = this.#othersAt(index.others.get(path), false);
-        for (const group of length < rest.length
-          ? (this.#othersBelowOf.get(groups) ?? groups)
-          : groups) {
-          if (group === null) {
-            for (const item of yield* this.#loadsBelow(groups, after(), false)) out.push(item);
-            continue;
-          }
-          const from = out.length;
-          for (const entry of group.read)
-            out.push(
-              ...withWriter(yield* this.contractOfValueAt(entry.value, after()), group.writer),
-            );
-          // (a mixed class's values differ where their answer holds a leaf or an operand's identity: each is read)
-          if (group.rest.length > 0 && out.slice(from).some((item) => differsIn(item, group.mixed)))
-            for (const entry of group.rest)
-              out.push(
-                ...withWriter(yield* this.contractOfValueAt(entry.value, after()), group.writer),
-              );
+        // (each kind read one by one, or past `WIDE` of them as a tree of demands, so a ring of copies through a wide
+        // literal changes only the nodes above each changed read, never the whole literal, #1229)
+        const deeper = length < rest.length;
+        for (const kind of ["reads", "groups"] as const) {
+          const site: GatherSite = { kind, literal, path, deeper };
+          const count = this.#gatherCount(site);
+          if (count <= WIDE)
+            for (let at = 0; at < count; at += 1)
+              out.push(...(yield* this.#gatherAt(site, node, after(), at)));
+          else
+            for (const item of yield* this.gathered(site, node, after(), 0, count)) out.push(item);
         }
       } else {
         const copies = length < rest.length && elementAbove ? (index.reads.get(path) ?? []) : null;
@@ -4636,7 +4651,7 @@ export class Contract {
         site.path,
         rest,
       ),
-      kind: "value",
+      kind: site.kind === "reads" || site.kind === "groups" ? "contract" : "value",
       file: at?.file ?? -1,
       offset: at?.start ?? -1,
       make: () => this.#gatheredMade(site, node, rest, lo, hi),
@@ -4668,15 +4683,19 @@ export class Contract {
   #gatherCount(site: GatherSite): number {
     const index = this.literalIndex(site.literal);
     if (site.kind === "exact") return (index.exact.get(site.path) ?? []).length;
-    if (site.kind === "copies") return (index.reads.get(site.path) ?? []).length;
+    if (site.kind === "copies" || site.kind === "reads")
+      return (index.reads.get(site.path) ?? []).length;
     if (site.kind === "selected") return (index.objects.get(site.path)?.list ?? []).length;
     return this.#gatherGroups(site).length;
   }
 
   /** A gather site's computed values' groups at its path (`#othersAt`), past a step those below it. */
   #gatherGroups(site: GatherSite): readonly (OtherGroup | null)[] {
-    const groups = this.#othersAt(this.literalIndex(site.literal).others.get(site.path), true);
-    return site.kind === "others" && site.deeper
+    const groups = this.#othersAt(
+      this.literalIndex(site.literal).others.get(site.path),
+      site.kind !== "groups",
+    );
+    return (site.kind === "others" || site.kind === "groups") && site.deeper
       ? (this.#othersBelowOf.get(groups) ?? groups)
       : groups;
   }
@@ -4697,6 +4716,34 @@ export class Contract {
     if (site.kind === "copies") {
       const entry = index.reads.get(site.path)![at]!;
       return this.#annotated(entry, rest, yield* this.#belowRead(entry.value, rest));
+    }
+    if (site.kind === "reads") {
+      const entry = index.reads.get(site.path)![at]!;
+      return this.#annotated(
+        entry,
+        rest,
+        withWriter(
+          yield* this.contractOfValueAt(entry.value, rest),
+          entry.g === null ? null : this.pass.definitions.writerOf(entry.g),
+        ),
+      );
+    }
+    if (site.kind === "groups") {
+      const group = this.#gatherGroups(site)[at]!;
+      if (group === null)
+        return yield* this.#loadsBelow(
+          this.#othersAt(index.others.get(site.path), false),
+          rest,
+          false,
+        );
+      const out: Item[] = [];
+      for (const entry of group.read)
+        out.push(...withWriter(yield* this.contractOfValueAt(entry.value, rest), group.writer));
+      // (a mixed class's values differ where their answer holds a leaf or an operand's identity: each is read)
+      if (group.rest.length > 0 && out.some((item) => differsIn(item, group.mixed)))
+        for (const entry of group.rest)
+          out.push(...withWriter(yield* this.contractOfValueAt(entry.value, rest), group.writer));
+      return out;
     }
     if (site.kind === "selected")
       return yield* this.#selectedObject(

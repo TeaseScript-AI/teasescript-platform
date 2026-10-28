@@ -1533,8 +1533,7 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
     name,
     measures:
       "N5 (Astra's G2): a wide surviving store whose k operands' facts are lost one by one, each loss one operand's work",
-    // (the k operands summed as a balanced tree: a stored left-deep run of k terms keeps text quadratic in k on its
-    // own, outside N5)
+    // (the k operands summed as a balanced tree)
     program: (k) =>
       main(
         lines(
@@ -2976,6 +2975,27 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // TABLE r4.78 (5)'s and r4.88 (1)'s product, linear since #1230 (admission's stop index keeps each operation's
+  // evaluation key and chain once, a link onto the one around it): k nested own defaults, 3.94, 3.05 and 3.60 before,
+  // and a sum of k terms of one list, 2.45 before
+  nestedOwn("otherwise", (inner) => `null otherwise (${inner})`),
+  nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`),
+  nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`),
+  {
+    name: "S6c-nested-sum",
+    measures:
+      "TABLE r4.88: a sum of k terms of one list of a k-field record, every field of its last element read",
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          "let piece = [root]",
+          `let gathered = ${Array.from({ length: k }, () => "piece").join(" + ")}`,
+          rows(k, (i) => `repeat gathered.last.f${i} {}`),
+          "exit",
+        ),
+      ),
+  },
   ...INHERITED_FIELD_FAMILIES,
 ];
 
@@ -2999,9 +3019,8 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
- * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested own
- * defaults, a sum of k terms and k nested choices (direct, and in lists of two), one product of admission's stop index
- * with six witnesses: accepted in the same form (TABLE r4.78 (5), option A; r4.88 (1); r4.93).
+ * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested
+ * choices (direct, and in lists of two), accepted in the same form (TABLE r4.93).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -3070,47 +3089,15 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
         ),
       ),
   },
-  // One known product with three witnesses, a gated known limit by the owner's decision (TABLE r4.78 (5), option A;
-  // evaluation keys that share their prefixes are a possible follow-up): admission's stop index keeps an evaluation
-  // key and a chain of operations per nested operation, each one entry longer than the one around it, now charged as
-  // kept, so k nested own defaults keep about k²/2 entries. In both orders at k = 64, 128 (`main` in brackets, the keys
-  // uncharged): `otherwise` 9,797 / 37,798 units (3.937; 2.074), `get` 21,712 / 65,555 (3.040; 2.047), `load` 7,150 /
-  // 25,167 (3.592; 2.054), re-measured with the snapshots charged (3.937, 3.046 and 3.593 before); at k = 1,024 8.6 %,
-  // 10.9 % and 5.2 % of the 30,000,000; the allowance reached at k = 3,471, 3,141 and 4,472
-  { ...nestedOwn("otherwise", (inner) => `null otherwise (${inner})`), measured: 3.94 },
-  { ...nestedOwn("get", (inner) => `[1].get(7, default: ${inner})`), measured: 3.05 },
-  { ...nestedOwn("load", (inner, i) => `load("k${i}", default: ${inner})`), measured: 3.6 },
-  // A fourth witness of the same product (TABLE r4.88 (1)): a sum of k terms of one list, k - 1 nested `+` carriers whose
-  // evaluation keys grow one step each (review r5 B2; the value side reads three `+` per field, `plusRepeatOf`): 42,063 /
-  // 101,824 units at k = 64, 128 (2.4364; reversed 2.4426; `main` 81,074 / 261,795, 3.25), `literalUnits` 3.64; the
-  // allowance reached between 3,328 terms (29,257,112 units) and 3,584
-  {
-    name: "S6c-nested-sum",
-    measures:
-      "TABLE r4.88: a sum of k terms of one list of a k-field record, every field of its last element read",
-    measured: 2.45,
-    program: (k) =>
-      main(
-        lines(
-          `let root = {${fields(k, () => "1")}}`,
-          "let piece = [root]",
-          `let gathered = ${Array.from({ length: k }, () => "piece").join(" + ")}`,
-          rows(k, (i) => `repeat gathered.last.f${i} {}`),
-          "exit",
-        ),
-      ),
-  },
-  // A fifth witness of the same product (TABLE r4.93, #1106): a list literal of k choices, which nests them, each the
-  // last option of the one before; a choice's answer is a scalar button, so each walk reaches each choice once, and its
-  // stops keep a carrier chain and an evaluation key one entry longer per choice: 37,053 / 164,122 units at k = 64, 128
-  // in both orders (4.4841; `literalUnits` 5.38, each kept array's first 32 entries uncharged; `indexSteps` 2.00); the
-  // allowance reached between 1,536 choices (27,849,550 units) and 1,600. `main` reached it at k = 11, each choice's four
-  // option rows multiplying the paths every walk follows by four (4,480 / 1,203,140 units at k = 4, 8)
+  // A witness of TABLE r4.93's product (#1106): a list literal of k choices, which nests them, each the last option of
+  // the one before; a choice's answer is a scalar button, so each walk reaches each choice once. Its stops' carrier
+  // chains and evaluation keys are kept once since #1230 (4.4841 before); what stays is the contract's class of each
+  // choice's options (`literalUnits` 3.62): 28,228 / 85,185 units at k = 64, 128 in both orders (3.0550)
   {
     name: "I1106-nested-choices",
     measures:
       'TABLE r4.93: `[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
-    measured: 4.49,
+    measured: 3.06,
     program: (k) =>
       main(
         lines(
@@ -3123,12 +3110,12 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
   // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
   // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
-  // allowance at k = 224); the allowance reached between 1,216 choices (27,838,631 units) and 1,280
+  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays
   {
     name: "I1106-nested-choice-lists",
     measures:
       'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
-    measured: 4.26,
+    measured: 3.46,
     program: (k) => {
       let expression = 'askChoice "seed"';
       for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
