@@ -2306,7 +2306,8 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * fed by the root, each with a store below it and read through a record into a list (Astra's B3); and k such cycles
  * split by their two rejected copies, each stored whole into a third place (the design's own); and a merge place of two
  * wide records, whose k meetings no decision makes hot, copied into k places that each store into it, each beside it in
- * a list or a place (Sol r6, #1270). Each at size k, linear.
+ * a list or a place (Sol r6, #1270), also projected out of an object holding a whole-copy ring beside it (Astra's
+ * review B2 of #1311). Each at size k, linear.
  */
 export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
   {
@@ -2470,29 +2471,56 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  ...(["literal", "place"] as const).map((form): WorkFamily => ({
-    name: `touch-dormant-meetings-${form}`,
-    measures: `a merge place's k meetings beside k copies of it, each with a store of its own, in a ${form} with it`,
-    program: (k) =>
-      main(
+  // (the merge place itself, or projected beside a whole-copy ring at its own path or one deeper (Astra's review B2 of
+  // #1311): a ring-free sibling of a ring is no ring node, so its meetings are not owed again; each placement and
+  // consumer is sampled, not their product)
+  ...(
+    [
+      ["literal", ""],
+      ["place", ""],
+      ["literal", "sibling"],
+      ["place", "nested"],
+    ] as const
+  ).map(([form, beside]): WorkFamily => ({
+    name: `touch-dormant-meetings-${form}${beside === "" ? "" : `-${beside}-ring`}`,
+    measures: `a merge place's k meetings beside k copies of it, each with a store of its own, in a ${form} with it${beside === "" ? "" : `, projected beside a ring (${beside})`}`,
+    program: (k) => {
+      // (the merge place, or the object holding it beside a ring, and the projection taken of it)
+      const ring =
+        beside === ""
+          ? []
+          : [
+              "let r0 = {v: typed}",
+              "let r1 = {v: typed}",
+              "r0 = r1",
+              "r1 = r0",
+              beside === "sibling"
+                ? "let holder = {cycle: r0, data: container}"
+                : "let holder = {inner: {cycle: r0, data: container}}",
+              `let selected = ${beside === "sibling" ? "holder.data" : "holder.inner.data"}`,
+            ];
+      const source = beside === "" ? "container" : "selected";
+      return main(
         lines(
           "let typed: integer = 17",
           `let exact = {${fields(k, () => "typed")}}`,
           `let fraction = {${fields(k, () => "1.5")}}`,
           "let container = fraction",
           "container = exact",
+          ...ring,
           rows(k, (i) =>
             lines(
-              `let alias${i} = container`,
+              `let alias${i} = ${source}`,
               `alias${i}.f${i} = typed`,
               form === "literal"
-                ? `let final${i} = [container, alias${i}]`
-                : lines(`let final${i} = container`, `final${i} = alias${i}`),
+                ? `let final${i} = [${source}, alias${i}]`
+                : lines(`let final${i} = ${source}`, `final${i} = alias${i}`),
             ),
           ),
           "exit",
         ),
-      ),
+      );
+    },
   })),
   {
     name: "touch-literal-contributors",

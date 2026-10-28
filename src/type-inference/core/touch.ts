@@ -62,12 +62,10 @@ export interface Touch {
    * it differs from the other, as the other's landed types may decide the place merging them (§2.4 (d)).
    */
   readonly met: Found;
-  /**
-   * Whether a whole-copy ring's shared trie, or a projection of one, stood in its parts when it was made (`Touches.ring`;
-   * a ring marked later is seen only on the ring's own node and the projections taken of it after): a containment there
-   * owes as the accepted design has it, as each member decides by its own first store (#1270, Astra's review B1).
-   */
+  /** Whether a ring node stands in it at any depth (`Touches.#rings` defines the mark). */
   readonly ring: boolean;
+  /** Whether it is a ring node: a ring's trie stands at its own level (`Touches.#rings`). */
+  readonly ringHere: boolean;
 }
 
 /** A node's deltas down to a shared base, nearest the node first (`Touches.#hop`). */
@@ -286,7 +284,17 @@ export class Touches {
   };
   readonly #owes = new Map<string, Found>();
   readonly #metOwes = new Map<number, Found>();
-  /** The tries of whole-copy rings, each the trie of every member of its live group, and their projections. */
+  /**
+   * The ring mark (#1270; Astra's reviews B1 and B2), defined here once. A whole-copy ring's members share one trie, each
+   * deciding by its own first store, so two elements copying different members may offend each other where their nodes
+   * are one node; a containment over such a node owes as the accepted design has it. A node is a *ring node* where a
+   * ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more members), a node one of
+   * whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps through a ring node
+   * (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free sibling of a ring) is
+   * no ring node. A node *holds* a ring where a ring node stands in it at any depth (`Touch.ring`). Both flags are set
+   * when a node is made: a ring marked later is seen only on its own node and on the projections taken of it after.
+   * This set holds the ring tries and the ring projections, both marked after they were made.
+   */
   readonly #rings = new Set<number>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
@@ -440,14 +448,16 @@ export class Touches {
     this.#entries(branch.right, out);
   }
 
-  #node(fields: Omit<Touch, "id" | "ring">): Touch {
+  #node(fields: Omit<Touch, "id" | "ring" | "ringHere">): Touch {
     this.#charge();
-    // (a ring stands in a node where it stands in one of its parts, or in a path node's one child)
+    // (a node is a ring node where one of its parts is, and holds a ring where a part or a path node's one child does)
+    const { parts, branches } = fields;
+    const ringHere = parts !== null && (this.#isRingHere(parts[0]) || this.#isRingHere(parts[1]));
     const ring =
-      fields.parts !== null
-        ? this.#isRing(fields.parts[0]) || this.#isRing(fields.parts[1])
-        : fields.branches !== null && this.#isRing(fields.branches.node);
-    return { id: this.#ids++, ...fields, ring };
+      parts !== null
+        ? this.#isRing(parts[0]) || this.#isRing(parts[1])
+        : branches !== null && this.#isRing(branches.node);
+    return { id: this.#ids++, ...fields, ring, ringHere };
   }
 
   /**
@@ -460,6 +470,10 @@ export class Touches {
 
   #isRing(node: Touch): boolean {
     return node.ring || this.#rings.has(node.id);
+  }
+
+  #isRingHere(node: Touch): boolean {
+    return node.ringHere || this.#rings.has(node.id);
   }
 
   /** The payload of one opaque contributor, one per ref. */
@@ -734,17 +748,20 @@ export class Touches {
     // (the node there, and the contributors of the opaque nodes above it, who hold anything there too)
     let at: Touch | null = node;
     let above: Payload | null = null;
+    // (whether the walk steps through a ring node: the projection is then one, `#rings`)
+    let through = false;
     for (let index = 0; index < path.length && at !== null; index += 1) {
       this.#charge(this.#depth(at.branches));
       if (at.opaque !== null)
         above = this.unitePayloads(above, this.#shiftPayload(at.opaque, path.slice(index)));
+      through ||= this.#isRingHere(at);
       at = this.#get(at.branches, path[index]!) ?? null;
     }
     let found: Touch | null = at;
     if (above !== null)
       found = at === null ? this.#payloadLeaf(above) : this.#withOpaque(at, above);
     if (found !== null && this.#shared.has(node.id)) this.#shared.add(found.id);
-    if (found !== null && this.#isRing(node)) this.#rings.add(found.id);
+    if (found !== null && through) this.#rings.add(found.id);
     this.#subs.set(key, found);
     return found;
   }
