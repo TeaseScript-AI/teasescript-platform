@@ -1343,7 +1343,8 @@ delete "progress"
 
 - **Gives:** the stored value, or the default (evaluated only then) when the key is missing. For a literal key, a
   stored value of the wrong type also takes the default. With a computed key the compiler cannot know the type; the
-  receiving variable checks the value at runtime, which can fail.
+  receiving variable checks the value at runtime, which can fail. Into a written `object`, every stored property is
+  kept, and a property the object default names takes the default's value when it is missing or of the wrong type.
 - **Fails:** no default; `default: null` on a literal key without a declared type.
 - **Status:** Implemented. Type rule ahead: an object default fixes wrong fields one by one; today the whole default is
   used · [§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys)
@@ -1359,7 +1360,8 @@ let nickname: string? = load("nickname", default: null)
 `fromJson(text, default: v, files: false)` · `toBase64(text)` · `fromBase64(text, default: v)`
 
 - **Gives:** JSON or Base64 text; decoding gives the value, or the default for malformed input. Stored files become
-  `data:` URLs unless `files: false`.
+  `data:` URLs unless `files: false`. Into a written `object`, every JSON key is kept, and a property the object default
+  names takes the default's value when it is missing or of the wrong type.
 - **Fails:** calendar durations, ranges, scripts, regexes and handles in JSON.
 - **Status:** Implemented. Type rule ahead: JSON of the wrong shape gives the default, JSON objects decode to objects,
   and a default of another type needs a declared union; today such JSON is returned unchanged, JSON objects decode to
