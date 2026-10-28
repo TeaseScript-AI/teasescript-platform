@@ -151,10 +151,25 @@ function timerDuration(
   const end = written.end.kind === "durationLiteral" ? written.end.amount : written.end.operand;
   const range = `${parser.textOf(written.start.span, end.span)}`;
   const unit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
+  // The range in parentheses, which only compiles where nothing else in the statement is wrong (see `Parser.offerFix`).
+  const message = "A unit after a range belongs to its end alone. Put the range in parentheses";
   parser.reportSpan(
     parserDiagnosticCode.unsupportedDurationUnit,
-    `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${command} (${range}) ${unit}'.`,
+    `${message}, with the unit after the closing parenthesis.`,
     written.span,
+  );
+  parser.offerFix(
+    parser.diagnostics.length - 1,
+    `${message}, as in '${command} (${range}) ${unit}'.`,
+    [
+      {
+        start: written.span.start.offset,
+        end: written.span.end.offset,
+        code: `(${range}) ${unit}`,
+        // A wait or timer keeps the unit apart from the range, so no node holds both.
+        expression: false,
+      },
+    ],
   );
   return {
     duration: Object.freeze({ ...written, end, span: spanFrom(written.start.span, end.span) }),

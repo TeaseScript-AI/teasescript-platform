@@ -15,6 +15,11 @@ import {
   elapsedDurationUnit,
   UNIT_OPERANDS,
 } from "../duration.js";
+import {
+  CALENDAR_DURATION_UNITS,
+  DURATION_UNITS,
+  MISTAKEN_DURATION_UNIT_NAMES,
+} from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -180,10 +185,55 @@ export function parseDurationUnit(
     return result;
   }
   const calendar = calendarDurationUnit(token.lexeme);
-  if (calendar === undefined) return amount;
+  if (calendar === undefined) {
+    const meant = MISTAKEN_DURATION_UNIT_NAMES.get(token.lexeme);
+    if (meant === undefined) return amount;
+    // Read as the unit meant, so that its error is the only one.
+    const result = literal({ calendar: false, unit: meant }, parser.advance());
+    reportMistakenUnit(parser, amount, token, meant);
+    return result;
+  }
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
   reportCalendarUnitWithoutCalendar(parser, amount.raw, token, result);
   return result;
+}
+
+/** The unit names a mistaken unit is written in, by the unit meant. */
+const MEANT_UNITS: Readonly<Record<string, string>> = {
+  ms: "milliseconds",
+  s: "seconds",
+  min: "minutes",
+  h: "hours",
+};
+
+/** A list of units for a message, as in "d, w, mo, and y". */
+const unitList = (units: readonly string[]) =>
+  `${units.slice(0, -1).join(", ")}, and ${units.at(-1)!}`;
+/** The units of time, for a message: the exact ones, then those after `calendar`. */
+const UNITS_OF_TIME = `The units of time are ${unitList(DURATION_UNITS)}. After 'calendar', the units are ${unitList(CALENDAR_DURATION_UNITS)}.`;
+
+/**
+ * A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. It
+ * shows the amount with the unit only where that compiles in the statement (see `Parser.offerFix`).
+ */
+function reportMistakenUnit(
+  parser: Parser,
+  amount: NumberLiteral,
+  word: Token,
+  meant: DurationUnit,
+): void {
+  const why = word.lexeme === "m" ? ", because it could mean minutes or months" : "";
+  const message = (fix: string) =>
+    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. ${UNITS_OF_TIME}`;
+  parser.reportToken(
+    parserDiagnosticCode.unsupportedDurationUnit,
+    message(`use the unit ${meant}`),
+    word,
+  );
+  const fixed = `${amount.raw} ${meant}`;
+  parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
+    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
+  ]);
 }
 
 /**

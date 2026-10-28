@@ -627,6 +627,22 @@ export const DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[nu
   ["weeks", "w"],
 ]);
 
+/**
+ * Words taken for a unit of time that are none, each with the exact unit meant: `m`, which could mean minutes or months
+ * (V30 §35), and common short forms.
+ */
+export const MISTAKEN_DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[number]> =
+  new Map([
+    ["m", "min"],
+    ["msec", "ms"],
+    ["msecs", "ms"],
+    ["sec", "s"],
+    ["secs", "s"],
+    ["mins", "min"],
+    ["hr", "h"],
+    ["hrs", "h"],
+  ]);
+
 /** Each name of a unit after `calendar`, short or long, and the unit it names. */
 export const CALENDAR_DURATION_UNIT_NAMES: ReadonlyMap<
   string,
