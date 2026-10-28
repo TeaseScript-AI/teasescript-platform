@@ -854,6 +854,29 @@ test("a store a stop before admission settled marks stands for its records withi
 });
 
 /**
+ * A host read's ingress is structural (TABLE r4.113, Codex r12's B1): whatever the script stores into the host global,
+ * the read's external data meets its boundary check at any stop, settled or not; its kinds come from the read itself
+ * only where the script stores at no path at or above it. At a stop in the setup each compile keeps every record but
+ * the marks' own.
+ */
+test("a host read keeps its boundary check at a stop whatever the script stores into the host global", () => {
+  for (const source of [
+    "hostValue.n = 2\nexit\n",
+    'hostValue.n = null\nsay hostValue.n otherwise "ok"\nexit\n',
+    "hostValue.n = 2\nsay hostValue.n.x\nexit\n",
+    "say hostValue.m\nhostValue.n = 2\nexit\n",
+  ]) {
+    const stopped = stopRun(source, ALLOWANCE);
+    assert.equal(stopped.answers.budget.settled, false, source);
+    assert.deepEqual(
+      stopProblems({ unstopped: stopRun(source), stopped, fitting: [], violating: [] }),
+      [],
+      source,
+    );
+  }
+});
+
+/**
  * The oracle's named exception for #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of
  * `state.ticks`, read by its key's contract that lost the ingress origin; counted at every stop of the settled phases in
  * the analysis's own order, the test fails where the count moves (the exception goes when #1216 lands).

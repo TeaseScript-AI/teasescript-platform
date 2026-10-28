@@ -450,9 +450,25 @@ export class Consumers {
     rest: readonly string[],
     requirement = false,
   ): readonly Item[] {
-    const { contract, values } = this.pass;
     const own = this.#leafKind(value, rest);
     if (own !== null) return own;
+    const items = this.#laterSources(value, node, rest, requirement);
+    // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
+    // beside the kinds the later sources give, TABLE r4.113)
+    const ingress = requirement ? null : this.#hostIngress(value);
+    return ingress === null || items.some((item) => item.ingress !== undefined)
+      ? items
+      : [...items, ...ingress];
+  }
+
+  /** `#finishingRead`'s sources after a leaf's own kind: the read's finished answer, then the domains. */
+  #laterSources(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement: boolean,
+  ): readonly Item[] {
+    const { contract, values } = this.pass;
     // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
       const items = this.#run(work());
@@ -489,10 +505,21 @@ export class Consumers {
    * into a property no source has keeps its error at the literal (TABLE r4.108).
    */
   #finishingKeyRead(key: Key, node: FlowNode): readonly Item[] {
-    const { contract, values, program } = this.pass;
-    // (a host global the script never stores into holds its own external data, as its reads do: `#leafKind`)
-    if (program.isHost(keyPlace(key)) && !this.#storedHosts().has(keyPlace(key)))
+    const { program } = this.pass;
+    // (a host global holds its own external data where the script stores at no path at or above the key, as its reads
+    // do: `#leafKind`; that data is there whatever it stores, so its C9 boundary forms, TABLE r4.113)
+    const host = program.isHost(keyPlace(key));
+    if (host && !this.#storedAbove(keyPlace(key), keyPath(key)))
       return [unknownItem(REASON.external)];
+    const items = this.#laterKeySources(key, node);
+    return host && !items.some((item) => isExternal(item))
+      ? [...items, unknownItem(REASON.external)]
+      : items;
+  }
+
+  /** `#finishingKeyRead`'s sources after a host global's own data: the key's finished answer, then the domains. */
+  #laterKeySources(key: Key, node: FlowNode): readonly Item[] {
+    const { contract, values, program } = this.pass;
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
       const items = this.#run(work());
       return items.some(unsettledItem) ? null : items;
@@ -579,11 +606,11 @@ export class Consumers {
   /**
    * A leaf's own kind (S3 §5 revision 18, TABLE r4.109 (1)): a literal's own kind at the read, and below it its
    * children's, or a host read's own ingress, directly or through projections (`Contract.ingressOf`), where the script
-   * stores nothing into its host global: what the value is, known from the program's structure without solving; else
-   * `null`.
+   * stores into its host global at no path at or above the read's own: what the value is, known from the program's
+   * structure without solving; else `null`.
    */
   #leafKind(value: PlaceId, rest: readonly string[]): readonly Item[] | null {
-    const { contract, program } = this.pass;
+    const { program } = this.pass;
     const own = rest.length === 0 ? this.#literalKind(value) : null;
     if (own !== null) return own;
     // (below a collection or record literal, its own children's, each a leaf: `[hostValue]` at its element)
@@ -598,9 +625,23 @@ export class Consumers {
       }
       return items.length === 0 ? null : items;
     }
+    // (a host read: its kinds only where the script stores at no path at or above the read's own, TABLE r4.113)
+    const ingress = this.#hostIngress(value);
+    const key = ingress === null ? null : this.#readKey(value);
+    return key !== null && !this.#storedAbove(keyPlace(key), joinSteps(keyPath(key), rest))
+      ? ingress
+      : null;
+  }
+
+  /**
+   * A host read's ingress, directly or through projections (`Contract.ingressOf`): its external data named by its leaf,
+   * known from the program's structure whatever the script stores into the global (TABLE r4.113); else `null`.
+   */
+  #hostIngress(value: PlaceId): readonly Item[] | null {
+    const { contract, program } = this.pass;
     const ingress = contract.ingressOf(value);
     const binding = ingress === null ? undefined : program.occurrenceOf.get(ingress);
-    return binding !== undefined && program.isHost(binding) && !this.#storedHosts().has(binding)
+    return binding !== undefined && program.isHost(binding)
       ? contract.entered(value, [unknownItem(REASON.external)])
       : null;
   }
@@ -627,21 +668,30 @@ export class Consumers {
     return out;
   }
 
-  /** The host globals the script stores into, at any path (`#leafKind`), found once. */
-  #storedHosts(): ReadonlySet<PlaceId> {
+  /**
+   * Whether the script stores into the host global `place` at `path` or at a path above it (a store below or beside it
+   * does not replace the value read there), each global's stored paths found once (`#leafKind`, TABLE r4.113).
+   */
+  #storedAbove(place: PlaceId, path: readonly string[]): boolean {
     if (this.#hostStores === null) {
       const { program, definitions } = this.pass;
-      const stored = new Set<PlaceId>();
+      const stored = new Map<PlaceId, (readonly string[])[]>();
       for (const d of definitions.storeDefs) {
         program.work.charge("checks");
-        if (program.isHost(d.place)) stored.add(d.place);
+        if (!program.isHost(d.place)) continue;
+        const at = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
+        const list = stored.get(d.place);
+        if (list === undefined) stored.set(d.place, [at]);
+        else list.push(at);
       }
       this.#hostStores = stored;
     }
-    return this.#hostStores;
+    return (this.#hostStores.get(place) ?? []).some(
+      (at) => at.length <= path.length && at.every((step, index) => path[index] === step),
+    );
   }
 
-  #hostStores: ReadonlySet<PlaceId> | null = null;
+  #hostStores: Map<PlaceId, (readonly string[])[]> | null = null;
 
   #literalKind(value: PlaceId): readonly Item[] | null {
     const { program } = this.pass;
