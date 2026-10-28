@@ -41,7 +41,7 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    store `c = b`. Where the other type reaches the place only through a cycle of copies that moves an object a level
    deeper or higher each time, such as `a.inner = a` or `a = a.inner`, the property is checked at its first direct read
    or store instead, and the error there names the copy that brought it: following such a cycle would make the
-   compiler's work grow faster than the program. The decided type holds wherever the place is used, also before the
+   compiler's work grow faster than the script. The decided type holds wherever the place is used, also before the
    value that decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime
    does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
