@@ -156,6 +156,10 @@ test("a colour error names the rejected value and why, and each example it offer
     compileSource(`${source}\nexit`)
       .diagnostics.filter((diagnostic) => diagnostic.code === "TSC008")
       .map((diagnostic) => diagnostic.message);
+  const compiles = (source: string) => compileSource(`${source}\nexit`).plan !== null;
+  // A valid colour compiles, and so does the example that a rejected one offers.
+  const accepted = (source: string, problem: string, example: string) =>
+    assert.ok(problem === "valid" ? compiles(source) : compiles(example), source);
   // Every place a presentation option takes a colour, with the value written there or held by a variable.
   const options = [
     ['say bubble(color: #) "x"', "color"],
@@ -180,14 +184,15 @@ test("a colour error names the rejected value and why, and each example it offer
           valid: [],
         }[problem];
         assert.deepEqual(colourErrors(source), expected, source);
-        if (problem !== "valid")
-          assert.deepEqual(colourErrors(site.replace("#", '"#336699"')), [], source);
+        accepted(source, problem, site.replace("#", '"#336699"'));
       }
-  // A colour tag of markup, also beside a tag that is text (in a code span, escaped, or never closed) or valid, in
-  // either order.
+  // A colour tag of markup, also before or after a tag that is text (in a code span, escaped, or never closed) or
+  // valid.
   const around = [
     ["", ""],
     ["`[color=nope]literal[/color]` ", ""],
+    ["", " `[color=nope]literal[/color]`"],
+    ["", " \\\\[color=nope]x"],
     ["\\\\[color=nope]x ", ""],
     ["[color=nope]open ", ""],
     ["[bg=#336699]ok[/bg] ", ""],
@@ -210,8 +215,7 @@ test("a colour error names the rejected value and why, and each example it offer
           valid: [],
         }[problem];
         assert.deepEqual(colourErrors(source), expected, source);
-        if (problem !== "valid")
-          assert.deepEqual(colourErrors(said(`[${name}=#336699]`)), [], source);
+        accepted(source, problem, said(`[${name}=#336699]`));
       }
   // The value a variable holds, and a known null, which keeps the default colour.
   assert.deepEqual(colourErrors('let line = "[color=inherit]Kneel.[/color]"\nsay line'), [
