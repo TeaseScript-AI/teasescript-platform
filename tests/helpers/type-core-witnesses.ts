@@ -721,4 +721,64 @@ export const BOUNDED_ADMISSION_WITNESSES: readonly (readonly [string, string, st
     `outcome compile-error
     D written-target error 124:127 -`,
   ],
+  [
+    "A5: copies of one preset, each storing its own property",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0,p2:0}}\n" +
+      "let state=initial\n" +
+      "let c0=initial\n" +
+      'c0.nest.p0="bad"\n' +
+      "if flag {state=c0}\n" +
+      "let c1=initial\n" +
+      'c1.nest.p1="bad"\n' +
+      "if flag {state=c1}\n" +
+      "let c2=initial\n" +
+      'c2.nest.p2="bad"\n' +
+      "if flag {state=c2}\n" +
+      "let sink0:integer=state.nest.p0\n" +
+      "let sink1:integer=state.nest.p1\n" +
+      "let sink2:integer=state.nest.p2\n",
+    `outcome compile-error
+    D written-target error 107:112 -
+    D written-target error 158:163 -
+    D written-target error 209:214 -`,
+  ],
+  [
+    "A5: copies storing one property and the object above it",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0}}\n" +
+      "let state=initial\n" +
+      "let c0=initial\n" +
+      'c0.nest.p0="bad"\n' +
+      "if flag {state=c0}\n" +
+      "let c1=initial\n" +
+      "c1.nest.p0=2\n" +
+      "if flag {state=c1}\n" +
+      "let c2=initial\n" +
+      "c2.nest={p0:true,p1:1}\n" +
+      "if flag {state=c2}\n" +
+      "let sink0:integer=state.nest.p0\n" +
+      "let sink1:integer=state.nest.p1\n" +
+      "let whole=state.nest\n",
+    `outcome compile-error
+    D written-target error 102:107 -
+    D written-target error 249:262 - related 227:229`,
+  ],
+  [
+    "A5: a chain of preset copies joined again",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0}}\n" +
+      "let c0=initial\n" +
+      'c0.nest.p1="bad"\n' +
+      "let state=c0\n" +
+      "let c1=state\n" +
+      "c1.nest.p0=false\n" +
+      "let other=c1\n" +
+      "if flag {other=c0}\n" +
+      "let sink0:integer=other.nest.p0\n" +
+      "let sink1:integer=other.nest.p1\n",
+    `outcome compile-error
+    D written-target error 84:89 -
+    D written-target error 127:132 -`,
+  ],
 ];

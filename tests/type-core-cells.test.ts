@@ -4944,7 +4944,10 @@ test("#1188's witnesses give their exact records, in both orders (rule (a), cycl
  *   earliest, where one class for every element would lose them);
  * - a written type's element levels, read once per type (#1194): copies of a written type through an optional level,
  *   with a union or an optional element, and of an open element type beside a deep written one, each deep misfit an
- *   error and each fitting store accepted.
+ *   error and each fitting store accepted;
+ * - the sources a read takes from the copies joined into a place, by the full path of their own stores (#1078): k
+ *   copies of one preset, each storing its own property, each read's error at its own copy's store; copies storing one
+ *   property and the object above it, both taken; a chain of preset copies joined again.
  */
 test("the bounded admission repairs' witnesses give their exact records, in both orders (#1078, #1194)", () => {
   for (const [name, source, text] of BOUNDED_ADMISSION_WITNESSES) {

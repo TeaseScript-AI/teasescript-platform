@@ -2500,8 +2500,9 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
  * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
  * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
- * it, added to a list), and k method results or conversions of one class beside an object in one literal (#1078); each
- * at size k, linear.
+ * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), and k
+ * copies of one nested preset joined into one place, each storing its own property below one step (#1078); each at size
+ * k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -3213,6 +3214,24 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  {
+    name: "A5-nested-preset-copies",
+    measures:
+      "A5 (#1078): k copies of one nested preset joined into one place, each storing its own property below one step, read at each property",
+    program: (k) =>
+      main(
+        lines(
+          `let initial = {nest: {${fields(k, () => "0", "p")}}}`,
+          "let state = initial",
+          rows(
+            k,
+            (i) => `let c${i} = initial\nc${i}.nest.p${i} = "bad"\nif hostValue { state = c${i} }`,
+          ),
+          rows(k, (i) => `let sink${i}: integer = state.nest.p${i}`),
+          "exit",
+        ),
+      ),
+  },
   ...INHERITED_FIELD_FAMILIES,
 ];
 

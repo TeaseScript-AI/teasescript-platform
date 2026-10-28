@@ -276,9 +276,9 @@ export function recordDifferences(expected: CompactRecord, actual: CompactRecord
 
 /**
  * A compact record written as lines, the carrier witnesses' notation: `outcome …`; a diagnostic per `D kind class
- * start:end context` (`class` `warning` or `error`, `context` `-` where none is asserted); a check per `B kind target
- * [against] start:end`, a boundary check, or `C …` for any other; every site in `main.tease`. Read as a fixture's record
- * is, each field checked (`readCompactRecord`).
+ * start:end context`, with ` related start:end` after it where it has one (`class` `warning` or `error`, `context` `-`
+ * where none is asserted); a check per `B kind target [against] start:end`, a boundary check, or `C …` for any other;
+ * every site in `main.tease`. Read as a fixture's record is, each field checked (`readCompactRecord`).
  */
 export function recordOf(text: string): CompactRecord {
   const [head, ...lines] = text
@@ -295,14 +295,17 @@ export function recordOf(text: string): CompactRecord {
   const diagnostics: unknown[] = [];
   const checks: unknown[] = [];
   for (const line of lines) {
-    const diagnostic = /^D (\S+) (warning|error) (\d+):(\d+) (\S+)$/u.exec(line);
+    const diagnostic = /^D (\S+) (warning|error) (\d+):(\d+) (\S+)(?: related (\d+):(\d+))?$/u.exec(
+      line,
+    );
     if (diagnostic !== null) {
-      const [, kind, severity, start, end, context] = diagnostic;
+      const [, kind, severity, start, end, context, from, to] = diagnostic;
       diagnostics.push({
         kind,
         class: severity === "warning" ? "warning-runtime-check" : "compile-error",
         site: site(start!, end!),
         context: context === "-" ? null : context,
+        ...(from === undefined ? {} : { related: site(from, to!) }),
       });
       continue;
     }

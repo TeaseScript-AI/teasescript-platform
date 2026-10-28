@@ -18,6 +18,7 @@ import {
   keptText,
   pathText,
   splitPath,
+  stepText,
   textUnits,
   type WorkLedger,
 } from "./budget.js";
@@ -398,6 +399,16 @@ interface SubLayer {
   readonly byStep: Map<string, Map<number, Set<SubLayer>>>;
 }
 
+/**
+ * A prefix's layers under a step (`Contract.relevantSubs`), by their positions among the layers it inherits or joins:
+ * the sources each lists there in its own map, by the positions listing them, and the layers one of whose ancestors
+ * lists the step.
+ */
+interface StepLayers {
+  readonly own: ReadonlyMap<Key, readonly number[]>;
+  readonly deep: readonly number[];
+}
+
 /** What a prefix stores into the keys below it. */
 export interface PrefixStores {
   readonly list: readonly PrefixEntry[];
@@ -726,6 +737,12 @@ export class Contract {
   /** The prefixes under discovery (`#prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
   readonly #discovering = new Map<Key, PrefixFrame>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
+  /**
+   * Per relative path of a source's own live keys, the sources holding it (`#ownPaths`); per prefix and step, its
+   * layers there (`#stepLayers`).
+   */
+  readonly #subsByPath = new Map<string, Set<Key>>();
+  readonly #stepLayers = new WeakMap<PrefixStores, Map<string, StepLayers>>();
   readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly #projectedLayers = new Map<string, SubLayer | null>();
   readonly #keys = new Map<Key, Identity>();
@@ -3761,6 +3778,12 @@ export class Contract {
       if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d)))
         paths.add(keptText(this.#work, keyPath(below).slice(base.length)));
     }
+    for (const path of paths) {
+      this.#keep(1);
+      const subs = this.#subsByPath.get(path);
+      if (subs === undefined) this.#subsByPath.set(path, new Set([sub]));
+      else subs.add(sub);
+    }
     this.#subPaths.set(sub, paths);
     return paths;
   }
@@ -3769,40 +3792,111 @@ export class Contract {
    * The sources a prefix's property reads apart from the shared entries: those listed under the property's first step
    * with stores of their own at the property's path or above it below their root; per layer the prefix inherits or
    * joins (one lookup each), the layers asked are that layer and, per depth at which a layer lists the step, its
-   * ancestor there, with the stores that brought that layer.
+   * ancestor there, with the stores that brought that layer (`#walkLayer`). The first read under a step walks every
+   * layer and keeps which can hold such a source (`#stepLayers`): the sources each lists in its own map, and the layers
+   * one of whose ancestors lists the step, without listing the ancestors' sources. A later read walks, in their order,
+   * those layers and the ones whose own sources include one with a store at a prefix of its path, found per prefix from
+   * the smaller of those sources and the sources with a store there (`#subsByPath`). So k copies joined into one place,
+   * each storing its own property below one step, are not each walked per read of one of those properties (#1078).
    */
   public relevantSubs(stores: PrefixStores, rest: readonly string[]): readonly SubSource[] {
     if (rest.length === 0) return [];
     const work = this.pass.program.work;
     const step = rest[0]!;
+    let bySteps = this.#stepLayers.get(stores);
+    if (bySteps === undefined) this.#stepLayers.set(stores, (bySteps = new Map()));
+    // (the layers it inherits or joins, by position: the one it inherits first, then those it joins)
+    const inherited = stores.subs === null ? 0 : 1;
+    const topAt = (at: number): (typeof stores.also)[number] =>
+      at < inherited
+        ? { layer: stores.subs!, defs: stores.inheritedBy }
+        : stores.also[at - inherited]!;
+    const count = inherited + stores.also.length;
     const found = new Map<Key, Set<Definition | null>>();
-    const tops = [
-      ...(stores.subs === null ? [] : [{ layer: stores.subs, defs: stores.inheritedBy }]),
-      ...stores.also,
-    ];
-    for (const { layer: top, defs: brought } of tops)
-      for (const [depth, layers] of (top.root ?? top).byStep.get(step) ?? []) {
-        work.charge("invSteps");
-        if (depth > top.depth) continue;
-        const layer = this.#ancestorAt(top, depth);
-        if (!layers.has(layer)) continue;
-        for (const sub of layer.own.get(step) ?? []) {
+    const known = bySteps.get(step);
+    if (known === undefined) {
+      const own = new Map<Key, number[]>();
+      const deep: number[] = [];
+      for (let at = 0; at < count; at += 1) {
+        const { layer: top, defs } = topAt(at);
+        for (const sub of top.own.get(step) ?? []) {
           work.charge("invSteps");
-          const own = this.#ownPaths(sub);
-          let held = false;
-          for (let length = 1; length <= rest.length && !held; length += 1) {
-            work.charge("invSteps");
-            held = own.has(pathText(rest.slice(0, length)));
-          }
-          if (!held) continue;
-          let defs = found.get(sub);
-          if (defs === undefined) found.set(sub, (defs = new Set()));
-          for (const d of brought) defs.add(d);
+          this.#ownPaths(sub);
+          this.#keep(1);
+          const listed = own.get(sub);
+          if (listed === undefined) own.set(sub, [at]);
+          else listed.push(at);
         }
+        if (this.#walkLayer(top, defs, step, rest, found)) deep.push(at);
       }
+      this.#keep(1 + deep.length);
+      bySteps.set(step, { own, deep });
+    } else {
+      const { own, deep } = known;
+      const walked = new Set(deep);
+      let text = "";
+      for (let length = 1; length <= rest.length && own.size > 0; length += 1) {
+        work.charge("invSteps");
+        text = length === 1 ? step : stepText(text, rest[length - 1]!);
+        const having = this.#subsByPath.get(text);
+        if (having === undefined) continue;
+        if (having.size <= own.size)
+          for (const sub of having) {
+            work.charge("invSteps");
+            for (const at of own.get(sub) ?? []) walked.add(at);
+          }
+        else
+          for (const [sub, at] of own) {
+            work.charge("invSteps");
+            if (having.has(sub)) for (const each of at) walked.add(each);
+          }
+      }
+      work.charge("invSteps", walked.size);
+      for (const at of [...walked].sort((a, b) => a - b)) {
+        const { layer, defs } = topAt(at);
+        this.#walkLayer(layer, defs, step, rest, found);
+      }
+    }
     return [...found]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, defs]) => ({ key, defs }));
+  }
+
+  /**
+   * One layer's part of `relevantSubs`: the layer and, per depth at which a layer lists the step, its ancestor there,
+   * each source listed under the step with a store of its own at a prefix of the path taken with the stores that
+   * brought the layer; whether an ancestor lists the step.
+   */
+  #walkLayer(
+    top: SubLayer,
+    brought: ReadonlySet<Definition | null>,
+    step: string,
+    rest: readonly string[],
+    found: Map<Key, Set<Definition | null>>,
+  ): boolean {
+    const work = this.pass.program.work;
+    let deep = false;
+    for (const [depth, layers] of (top.root ?? top).byStep.get(step) ?? []) {
+      work.charge("invSteps");
+      if (depth > top.depth) continue;
+      const layer = this.#ancestorAt(top, depth);
+      if (!layers.has(layer)) continue;
+      if (depth < top.depth) deep = true;
+      for (const sub of layer.own.get(step) ?? []) {
+        work.charge("invSteps");
+        const paths = this.#ownPaths(sub);
+        let held = false;
+        for (let length = 1; length <= rest.length && !held; length += 1) {
+          work.charge("invSteps");
+          held = paths.has(pathText(rest.slice(0, length)));
+        }
+        if (!held) continue;
+        let defs = found.get(sub);
+        if (defs === undefined) found.set(sub, (defs = new Set()));
+        for (const d of brought) defs.add(d);
+      }
+    }
+    return deep;
   }
 
   /** Every source of a prefix's layers, inherited and joined (the answers' properties). */
