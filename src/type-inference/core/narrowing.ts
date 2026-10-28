@@ -633,6 +633,8 @@ export class NarrowingIndex {
   readonly #atEntry = new Map<string, Narrowing[]>();
   /** Per collection key, its mutating method calls (N2). */
   readonly #invalidations = new Map<Key, Invalidations>();
+  /** Every narrowing definition, in the order they are made (the solver's component test finds one by its key). */
+  readonly all: Narrowing[] = [];
   private constructor(
     readonly program: CoreProgram,
     readonly statements: StatementTree,
@@ -713,6 +715,7 @@ export class NarrowingIndex {
           input,
           form,
         };
+        this.all.push(g);
         if (region === null) {
           const list = lists.get(location);
           const entry = { start: program.position(node), end: program.positionEnd(node), item: g };
@@ -955,6 +958,12 @@ export class NarrowingIndex {
   public invalidations(key: Key): Invalidations | undefined {
     this.program.work.charge("eventSteps");
     return this.#invalidations.get(key);
+  }
+
+  /** Whether a test names a path of `root` (a read of any other root has no narrowing definition). */
+  public tests(root: PlaceId): boolean {
+    this.program.work.charge("eventSteps");
+    return this.#tested.has(root);
   }
 
   /** The nearest narrowing definition of `location` whose region holds `node` (N2): a binary search and a climb. */

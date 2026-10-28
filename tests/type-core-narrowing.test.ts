@@ -2,15 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CorePass } from "../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { makeItem, type Item, type ItemTag } from "../src/type-inference/core/items.js";
 import { narrowedItems, type NarrowingForm } from "../src/type-inference/core/narrowing.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingAt, narrowingPass, nodeAt, routeAt } from "./helpers/type-core-narrowing.js";
+import type { CompactRecord } from "./helpers/type-core-records.js";
 
 /*
- * Stage 3b's narrowing index (TABLE §13, S10's first part), asked directly: no consumer reads it yet. Per N1 form and
- * per N2 event a control that holds and a case that changes only the premise (§13.4), taken from the expectation set's
- * 3b shapes; G's filter on items; N5's preserving and breaking stores; N3's route witnesses for §13's own examples.
+ * Stage 3b's narrowing index (TABLE §13, S10's first part), asked directly, and the stored values that read it (S10
+ * part 2b; the other consumers read it in part 2c). Per N1 form and per N2 event a control that holds and a case that
+ * changes only the premise (§13.4), taken from the expectation set's 3b shapes; G's filter on items; N5's preserving and
+ * breaking stores, one location and a component; N3's route witnesses for §13's own examples.
  */
 
 const FLAG = 'let flagHost = askBoolean "flag"';
@@ -909,6 +914,123 @@ test("N5 evaluates a long preserving store without deepening the native stack", 
     `if n != null { repeat 2 { say n\n n = n${" + 1".repeat(2_048)} } }`,
   );
   assert.equal(at(long, "say n", 4), "non-null: holds");
+});
+
+/** `at` with the solver's worklist reversed, its pass made under the seam (a solver reads it as it is made). */
+function atReversed(lines: readonly string[], marker: string, delta: number): string {
+  return withSolverSeam({ reverseWorklist: true }, () => at(pass(...lines), marker, delta));
+}
+
+test("N5's component: stores that read one another, through copies too, preserve together in either order (r4.33)", () => {
+  const loop = (body: readonly string[]): readonly string[] => [
+    FLAG,
+    "let v = 1",
+    "let w = 1",
+    "if flagHost { v = null\n w = null }",
+    'if v != null { if w != null { while askBoolean "More?" {',
+    ...body,
+    "repeat v {}",
+    "} } }",
+  ];
+  const cases: Case[] = [
+    // the expectation set's indirect pair: the copy reads the tested location, the store reads the copy
+    ["through a copy, held", loop(["let c = v", "v = c + 1"]), "repeat v", 7, "non-null: holds"],
+    [
+      "through a copy, `otherwise null` keeps its fallback (F17a)",
+      loop(["let c = v", "v = c otherwise null"]),
+      "repeat v",
+      7,
+      "non-null: loop",
+    ],
+    // the expectation set's component pair: two locations, each store reading the other
+    ["two locations, held", loop(["v = w", "w = v"]), "repeat v", 7, "non-null: holds"],
+    ["two locations, broken", loop(["v = w", "w = null"]), "repeat v", 7, "non-null: loop"],
+    [
+      "a store reading the other's copy, broken by it",
+      loop(["let c = w", "w = null", "v = c"]),
+      "repeat v",
+      7,
+      "non-null: loop",
+    ],
+  ];
+  check(cases, at);
+  for (const [name, lines, marker, delta, expected] of cases)
+    assert.equal(atReversed(lines, marker, delta), expected, `${name}, reversed`);
+});
+
+test("a read in a stored value takes its narrowing where it holds, and its mark where it fails (S10 part 2b)", () => {
+  const record = (...lines: readonly string[]): CompactRecord => {
+    const request = coreRequest([{ path: "main.tease", source: `${lines.join("\n")}\nexit\n` }]);
+    assert.ok(request !== null, lines.join("\n"));
+    const modes = [
+      compactAnalysis(request),
+      withoutSharing(() => compactAnalysis(request)),
+      withSolverSeam({ reverseWorklist: true }, () =>
+        withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => compactAnalysis(request),
+        ),
+      ),
+    ];
+    for (const other of modes.slice(1)) assert.deepEqual(other, modes[0], lines.join("\n"));
+    return modes[0]!;
+  };
+  const outcome = (...lines: readonly string[]): string => record(...lines).outcome;
+  const real = "let n = 2.0";
+  // a whole number passes `is integer`: the stored value is the tested kind
+  assert.equal(outcome(real, "if n is integer { let whole: integer = n }"), "valid");
+  assert.equal(outcome(real, "if n is not integer { let whole: integer = n }"), "compile-error");
+  // through a copy and an operation of the stored value
+  assert.equal(
+    outcome(real, "if n is integer { let copy = n\n let whole: integer = copy }"),
+    "valid",
+  );
+  assert.equal(outcome(real, "if n is integer { let whole: integer = n + 1 }"), "valid");
+  // a call storing the location between the test and the read drops G: the read keeps its mark
+  assert.equal(
+    outcome(
+      real,
+      "function halve { n = n / 2 }",
+      "if n is integer { halve()\n let whole: integer = n }",
+    ),
+    "warning-runtime-check",
+  );
+  // a definition after the test answers the read itself (the nearest candidate, §13.2 (2))
+  assert.equal(
+    outcome(
+      FLAG,
+      "let v: number? = 2.5",
+      "if flagHost { v = null }",
+      "if v != null { v = 2\n let whole: integer = v }",
+    ),
+    "valid",
+  );
+  // a test whose input is a definition in a loop around it reads the contract, never that definition's value, which
+  // would wait on the test's own component (Sol's U3 build review r2): the inner loop's stores preserve both facts
+  assert.equal(
+    outcome(
+      FLAG,
+      "let a: integer? = 1",
+      "if flagHost { a = null }",
+      "if a != null { repeat 2 { let n = a",
+      "if n != null { repeat 2 { a = n",
+      "n = n + 1",
+      "let m: integer = n",
+      "a = m } } } }",
+    ),
+    "valid",
+  );
+  // an element test's input is the element key's read at the test, never the collection's narrowing
+  assert.equal(
+    outcome(
+      FLAG,
+      "let xs = [1]",
+      "if flagHost { xs = [null] }",
+      "if flagHost { xs = null }",
+      "if xs != null { if xs is integer[] { let first: integer = xs[0] } }",
+    ),
+    "valid",
+  );
 });
 
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */

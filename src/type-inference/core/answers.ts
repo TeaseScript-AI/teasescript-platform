@@ -13,7 +13,14 @@ import {
 } from "./budget.js";
 import { Consumers } from "./consumers.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
-import { Contract, typeTags, termAt, writtenOf, type ContractFacts } from "./contract.js";
+import {
+  Contract,
+  typeTags,
+  termAt,
+  writtenOf,
+  type ContractFacts,
+  type GatherSite,
+} from "./contract.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -44,7 +51,7 @@ import {
   type WrittenTypeError,
 } from "./result.js";
 import { Solver, type DemandWork, type Work } from "./solver.js";
-import { Values } from "./values.js";
+import { narrowingKey, Values } from "./values.js";
 import { writtenTypeErrors } from "./written.js";
 
 /*
@@ -319,7 +326,7 @@ export function solveDemands(
 
 /**
  * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
- * `vdn|`, as the parts write them).
+ * `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -367,6 +374,70 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       const node = parts[1] === "-" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
       return values.onlyNull(Number(parts[0]), node);
     }
+    case "lp": {
+      // (`Contract.gathered`: its kind, literal, range, node, flags, path and rest)
+      const node = parts[4] === "-" ? null : (program.flow.nodes[Number(parts[4])] ?? null);
+      const [kind, flags, path] = [parts[0]!, parts[5] ?? "", parts[6] ?? ""];
+      const literal = Number(parts[1]);
+      let site: GatherSite;
+      if (kind === "selected")
+        site = { kind, literal, path, byValue: flags.includes("v"), below: flags.includes("b") };
+      else if (kind === "exact" || kind === "copies" || kind === "others")
+        site = { kind, literal, path, deeper: flags === "d" };
+      else throw new Error(`No gather is written '${key}'.`);
+      return contract.gathered(
+        site,
+        node,
+        splitPath(parts[7] ?? ""),
+        Number(parts[2]),
+        Number(parts[3]),
+      );
+    }
+    case "cr": {
+      // (`Values.choiceRange`: its choice's result, range, node and rest)
+      const c = program.opOf.get(Number(parts[0]));
+      if (c?.kind !== "operation") throw new Error(`No choice is written '${key}'.`);
+      const node = parts[3] === "-" ? null : (program.flow.nodes[Number(parts[3])] ?? null);
+      return values.choiceRange(
+        c,
+        node,
+        splitPath(parts[4] ?? ""),
+        Number(parts[1]),
+        Number(parts[2]),
+      );
+    }
+    case "ce": {
+      // (`Values.choiceElements`: its choice's result, option, range, node and rest)
+      const c = program.opOf.get(Number(parts[0]));
+      if (c?.kind !== "operation") throw new Error(`No choice is written '${key}'.`);
+      const node = parts[4] === "-" ? null : (program.flow.nodes[Number(parts[4])] ?? null);
+      return values.choiceElements(
+        c,
+        node,
+        splitPath(parts[5] ?? ""),
+        Number(parts[1]),
+        Number(parts[2]),
+        Number(parts[3]),
+      );
+    }
+    case "vg": {
+      const node = parts[1] === "" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
+      return values.valueItems(Number(parts[0]), node, []);
+    }
+    case "gv": {
+      const g = pass.guards.narrowing.all.find((each) => narrowingKey(each) === key);
+      if (g === undefined) throw new Error(`No narrowing is written '${key}'.`);
+      return values.narrowingValue(g);
+    }
+    // (the location last: a text key in it may hold the separator)
+    case "n5":
+      return pass.guards
+        .narrowings(pass)
+        .events.treeDemand(parts.slice(2).join("|"), Number(parts[0]), Number(parts[1]), null);
+    case "n5-loop":
+      return pass.guards
+        .narrowings(pass)
+        .events.treeDemand(parts.slice(1).join("|"), 0, 0, program.flow.nodes[Number(parts[0])]!);
     default:
       throw new Error(`No demand is written '${key}'.`);
   }

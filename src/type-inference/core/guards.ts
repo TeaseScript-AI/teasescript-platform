@@ -33,7 +33,8 @@ import { siteKey, stepName, type CoreProgram } from "./program.js";
  * Stage 3b's narrowing definitions (§13, S10) join this index: built with the program's first one (`NarrowingIndex`, N1
  * and N2's lists, and the statements with N3's shared layer, `StatementTree`), and asked per pass through `narrowings`
  * (N2 with N5, N3).
- * No consumer reads them yet (S10's second part): every test is still a guard.
+ * A read in a stored value takes its narrowing where it holds (`Values`, S10 part 2b); every other read still takes a
+ * test as a guard until its consumer reads the narrowings (part 2c).
  */
 
 /** A list of guard regions sorted by where they start, with the running maximum of where they end. */

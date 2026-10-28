@@ -1,7 +1,5 @@
-import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { joinParts, keepText, textUnits, type WorkLedger } from "./budget.js";
-import { operatorOf } from "./contract.js";
+import { joinParts, keepText, keptParts, type WorkLedger } from "./budget.js";
 import {
   keptPrefixes,
   keyPlace,
@@ -9,9 +7,8 @@ import {
   type Key,
   type PositionRange,
 } from "./definitions.js";
-import { withoutEmpty } from "./exact-path.js";
 import type { FlowLoop, FlowNode } from "./flow-graph.js";
-import { makeItem, mergeItems, type ContextWord, type Item, type ItemTag } from "./items.js";
+import { makeItem, type ContextWord, type Item, type ItemTag } from "./items.js";
 import { locationOf, stablePath, type Narrowing, type NarrowingIndex } from "./narrowing.js";
 import {
   copied,
@@ -25,7 +22,6 @@ import {
   steps,
 } from "./narrowing-iteration.js";
 import { countIn, lowerBound } from "./narrowing-statements.js";
-import { operationItems } from "./operator-table.js";
 import type { Work } from "./solver.js";
 
 /*
@@ -36,18 +32,39 @@ import type { Work } from "./solver.js";
  * of the path, lies outside its activation, and the invalidation lists of the path's collections. Another narrowing is
  * never an event. Every event is counted in intervals of the dominator walk by binary search in those existing lists,
  * never in a copy per (key × node). N5: for a read inside a loop that does not enclose G, and between G and the read, a
- * **preserving store** to the refined location itself is no event: a store whose value, evaluated with the location's
- * reads taken as G's filtered kinds, keeps its kinds within them. Each (store, filtered kind set) is evaluated once and
- * enters the sparse subset of its location and kind set, which is subtracted from the location key's own list only:
- * q(I) = count(E in I) − count(P in I).
+ * **preserving store** to the refined location itself is no event: a store whose value keeps its kinds within G's
+ * filtered kinds. That value is the store's own value demand (`ExactPath.defVal`), whose reads of a component location
+ * take their G (`Values`) and so ask this test again: the stores whose values depend on one another are one component
+ * of the solver, solved from bottom (no items: every store preserving) to its greatest fixpoint and published only when
+ * stable. A location's stores (its candidates, sorted) carry one tree of union demands, each node the kinds of its
+ * range's values, whatever kind set asks: a query over a range checks O(log c) nodes, and a lost fact re-runs only the
+ * nodes above its store and their readers.
  */
 
 /** An event list of G with the word a first event in it gives (§3.4). */
 interface EventList {
   readonly positions: readonly number[];
   readonly word: ContextWord;
-  /** The location key's own list, from which the preserving subset is subtracted. */
+  /** The location key's own list, whose candidates N5 decides. */
   readonly own: boolean;
+}
+
+/**
+ * What G's lists answer in a range set before N5 (`NarrowingEvents.#static`): the first event's position and word, the
+ * own list's events no candidate is counted in, and the own list's ranges that hold candidates.
+ */
+interface StaticEvents {
+  readonly ranges: readonly PositionRange[];
+  readonly candidates: boolean;
+  readonly at: number;
+  readonly word: ContextWord | null;
+  readonly owned: readonly PositionRange[];
+}
+
+/** A refined location's stores (N5's candidates), by dominator position, with their positions. */
+interface Candidates {
+  readonly positions: readonly number[];
+  readonly stores: readonly Definition[];
 }
 
 /**
@@ -68,17 +85,27 @@ function keptWithin(items: readonly Item[], kinds: readonly ItemTag[], work: Wor
   );
 }
 
-/** The kind set's signature: its tags, each once, sorted. */
-function kindsText(kinds: readonly ItemTag[], work: WorkLedger): string {
+/** `ranges` without the positions `cuts` cover, each range compared with each cut charged. */
+function without(
+  ranges: readonly PositionRange[],
+  cuts: readonly PositionRange[],
+  work: WorkLedger,
+): PositionRange[] {
   work.charge("eventSteps");
-  const seen = new Set<ItemTag>();
-  for (const kind of each(work, "eventSteps", kinds)) seen.add(kind);
-  const tags = sorted(work, "eventSteps", copied(work, "eventSteps", seen), (a, b) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  );
-  // (`joinParts` walks the tags once more)
-  work.charge("eventSteps", tags.length);
-  return joinParts(tags);
+  let left = copied(work, "eventSteps", ranges);
+  for (const [cut, end] of each(work, "eventSteps", cuts)) {
+    const next: PositionRange[] = [];
+    for (const [low, high] of each(work, "eventSteps", left)) {
+      if (high < cut || low > end) {
+        next.push([low, high]);
+        continue;
+      }
+      if (low < cut) next.push([low, cut - 1]);
+      if (high > end) next.push([end + 1, high]);
+    }
+    left = next;
+  }
+  return left;
 }
 
 export class NarrowingEvents {
@@ -86,12 +113,13 @@ export class NarrowingEvents {
   readonly #outside = new Map<Key, boolean>();
   /** Per key, its assignments by the refined location they store, made on the key's first question (N5's candidates). */
   readonly #stored = new Map<Key, ReadonlyMap<string, readonly Definition[]>>();
-  /** Per (store, filtered kind set): whether the store preserves the kinds (N5). */
-  readonly #preserves = new Map<string, boolean>();
-  /** Per (location, filtered kind set): the positions of its preserving stores, sorted (N5's sparse subset). */
-  readonly #subsets = new Map<string, readonly number[]>();
+  /** Per refined location, its candidates by dominator position, sorted (N5). */
+  readonly #candidates = new Map<string, Candidates>();
   /** Per key (and per key with its descendants), its definitions' text offsets by file (an operand region's X6). */
   readonly #text = new Map<string, ReadonlyMap<number, readonly number[]>>();
+  /** Per narrowing, the word of its condition's window (`#inWindow`), and its lists' static answers per range set. */
+  readonly #windowWords = new Map<Narrowing, ContextWord | null>();
+  readonly #statics = new Map<Narrowing, Map<number, Map<number, StaticEvents[]>>>();
   /** Per narrowing, its event lists (X6's, by position) and its prefixes' keys, made once. */
   readonly #eventsOf = new Map<Narrowing, readonly EventList[]>();
   readonly #prefixesOf = new Map<Narrowing, readonly Key[]>();
@@ -131,20 +159,22 @@ export class NarrowingEvents {
     if (program.dom.edom(g.node) !== boundary)
       return boundary?.statement?.kind === "labelStatement" ? "label" : "call"; // X4
     const events = this.#events(g);
-    // X5 with N5: every event of a dependency key inside a loop around the read that does not enclose G
+    // X5 with N5: every event of a dependency key inside a loop around the read that does not enclose G; the code of
+    // the loops it passes holds no event and no breaking store, so X6 asks its span without it
+    const passed: PositionRange[] = [];
     for (const head of each(program.work, "eventSteps", node.loops)) {
       if (holds(program.work, "eventSteps", g.node.loops, head)) continue;
       const loop = this.#loops.get(head);
       if (loop === undefined) return "loop";
-      if ((yield* this.#first(g, events, this.#inside(loop), kinds)) !== null) return "loop";
+      const inside = this.#inside(loop);
+      if ((yield* this.#first(g, events, inside, kinds, loop)) !== null) return "loop";
+      for (const range of each(program.work, "eventSteps", inside)) passed.push(range);
     }
     // X6 with N5: the events after the test, in the rest of its condition, then strictly after G and not after the read
-    const window = g.window;
-    // (a call that ends the condition completes before the entry: the window holds its end)
-    const before =
-      window === null ? null : this.#textEvent(g, window.file, window.start, window.end + 1);
+    const before = this.#inWindow(g);
     if (before !== null) return before;
-    const word = yield* this.#first(g, events, this.pass.lists.spanBetween(g.node, node), kinds);
+    const span = without(this.pass.lists.spanBetween(g.node, node), passed, program.work);
+    const word = yield* this.#first(g, events, span, kinds);
     if (word !== null) return word;
     // X7: block code, and the flat veto of a handler store with a registration before the read
     if (program.blockReachable(node)) return "handler";
@@ -174,12 +204,45 @@ export class NarrowingEvents {
     return null;
   }
 
+  /** X6 in G's condition after its test (`#textEvent`), once per G. */
+  #inWindow(g: Narrowing): ContextWord | null {
+    this.#work.charge("eventSteps");
+    const known = this.#windowWords.get(g);
+    if (known !== undefined) return known;
+    const window = g.window;
+    // (a call that ends the condition completes before the entry: the window holds its end)
+    const word =
+      window === null ? null : this.#textEvent(g, window.file, window.start, window.end + 1);
+    this.#windowWords.set(g, word);
+    return word;
+  }
+
   /**
    * The word of G's first event completed in [`from`, `to`) of one file's text, or `null`: inside one expression (an
    * operand region, or a branch's condition after its test) the events are calls, adds, removals and invalidations, in
    * the order the expression completes them (a call after its arguments); a binary search in each of G's text lists.
    */
   #textEvent(g: Narrowing, file: number, from: number, to: number): ContextWord | null {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    let first = Infinity;
+    let word: ContextWord | null = null;
+    for (const [byFile, found] of each(work, "eventSteps", this.#textLists(g))) {
+      const offsets = byFile?.get(file);
+      if (offsets === undefined) continue;
+      const index = lowerBound(work, offsets, from);
+      if (index < offsets.length && offsets[index]! < to && offsets[index]! < first) {
+        first = offsets[index]!;
+        word = found;
+      }
+    }
+    return word;
+  }
+
+  /** G's text lists (`#textEvent`), each with the word its first event gives. */
+  #textLists(
+    g: Narrowing,
+  ): (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] {
     this.#work.charge("eventSteps");
     const work = this.#work;
     const lists: (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] = [
@@ -192,18 +255,53 @@ export class NarrowingEvents {
     for (const collection of each(work, "eventSteps", g.collections))
       lists.push([this.index.invalidations(collection)?.texts, "branch"]);
     if (this.#ownedAway(g)) lists.push([this.index.statements.callTexts, "call"]);
-    let first = Infinity;
-    let word: ContextWord | null = null;
-    for (const [byFile, found] of each(work, "eventSteps", lists)) {
-      const offsets = byFile?.get(file);
-      if (offsets === undefined) continue;
-      const index = lowerBound(work, offsets, from);
-      if (index < offsets.length && offsets[index]! < to && offsets[index]! < first) {
-        first = offsets[index]!;
-        word = found;
-      }
+    return lists;
+  }
+
+  /**
+   * What `holds` reads of G at `node` (S10 part 2b, the value classes' environment), as one text: what makes G's items
+   * (its location, form and element steps, and its input's exact-path signature, `readSignature`), G's own and the
+   * read's places among G's event lists (each one's dominator interval's two ends, as `aliasSignature` cuts them: the
+   * events of every span between them), their loops, boundaries and liveness, G's window's word, and the read's block
+   * reach, handlers' registration and, in an operand region, its place among G's text lists. Two reads with one
+   * environment get one answer, whichever of two such narrowings each finds.
+   */
+  public environment(g: Narrowing, node: FlowNode): string {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    const { program, lists } = this.pass;
+    const cuts: string[] = [];
+    for (const [side, at] of each(work, "eventSteps", [
+      ["g", g.node],
+      ["r", node],
+    ] as const)) {
+      const begin = program.position(at);
+      const end = program.positionEnd(at) + 1;
+      cuts.push(`${side}${program.dom.edom(at)?.id ?? "-"}${program.live(at) ? "l" : ""}`);
+      for (const loop of each(work, "eventSteps", at.loops)) cuts.push(`${side}l${loop.id}`);
+      for (const list of each(work, "eventSteps", this.#events(g)))
+        cuts.push(
+          `${side}${lowerBound(work, list.positions, begin)},${lowerBound(work, list.positions, end)}`,
+        );
     }
-    return word;
+    if (g.region !== null && node.span !== null)
+      for (const [byFile] of each(work, "eventSteps", this.#textLists(g)))
+        cuts.push(`t${lowerBound(work, byFile?.get(node.file) ?? [], node.span.start.offset)}`);
+    const form = g.form;
+    return keptParts(
+      work,
+      g.location,
+      form.kind,
+      form.kind === "is" || form.kind === "is-not" ? form.kinds : [],
+      form.kind === "is" && form.fractional === true ? "f" : "",
+      g.elements,
+      g.region?.start ?? -1,
+      this.#inWindow(g) ?? "",
+      lists.readSignature(g.key, g.input),
+      program.blockReachable(node) ? "b" : "",
+      this.#registered(node) ? "h" : "",
+      cuts,
+    );
   }
 
   /**
@@ -358,20 +456,76 @@ export class NarrowingEvents {
   }
 
   /**
-   * The word of G's first event in `ranges` that is no preserving store, or `null`: per list two binary searches per
-   * range, and for the location key's own list, where its count exceeds the preserving subset's, a binary search over
-   * its ranks for the first event the subset does not hold.
+   * The word of G's first event in `ranges` that is no preserving store, or `null`: the lists' events (`#static`), and
+   * which candidates preserve `kinds`, which N5 alone decides and only where the other events leave the word open:
+   * then one query of the candidates in the own list's ranges (before the first call site where one comes first: the
+   * own list wins a tie), the same set of nodes whatever the values. For X5 (`loop`) any event fails G, and the query is
+   * the loop's one union (`#inLoop`).
    */
   *#first(
     g: Narrowing,
     events: readonly EventList[],
     ranges: readonly PositionRange[],
     kinds: readonly ItemTag[] | null,
+    loop: FlowLoop | null = null,
   ): Work<ContextWord | null> {
     this.#work.charge("eventSteps");
     const work = this.#work;
+    const { at, word, owned } = this.#static(g, events, ranges, kinds !== null);
+    if (word === "branch" || owned.length === 0 || kinds === null) return word;
+    if (loop !== null)
+      return word !== null || keptWithin(yield* this.#inLoop(g, loop, ranges), kinds, work)
+        ? word
+        : "branch";
+    const asked =
+      word === "call"
+        ? mapped(
+            work,
+            "eventSteps",
+            passing(work, "eventSteps", owned, ([low]) => low <= at),
+            ([low, high]): PositionRange => [low, high < at ? high : at],
+          )
+        : owned;
+    return keptWithin(yield* this.#unionIn(g, asked), kinds, work) ? word : "branch";
+  }
+
+  /**
+   * `#first` before N5: per list two binary searches per range, and for the own list (`candidates`: where N5 decides
+   * its stores), where its count exceeds its candidates', a binary search over its ranks for the first event no
+   * candidate is. Once per (G, range set): it rests on the program alone.
+   */
+  #static(
+    g: Narrowing,
+    events: readonly EventList[],
+    ranges: readonly PositionRange[],
+    candidates: boolean,
+  ): StaticEvents {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    // (by the first range's two ends, then the ranges compared: no text kept)
+    let byStart = this.#statics.get(g);
+    if (byStart === undefined) this.#statics.set(g, (byStart = new Map()));
+    const [start, end] = ranges.length === 0 ? [-1, -1] : ranges[0]!;
+    let byEnd = byStart.get(start);
+    if (byEnd === undefined) byStart.set(start, (byEnd = new Map()));
+    let entries = byEnd.get(end);
+    if (entries === undefined) byEnd.set(end, (entries = []));
+    for (const entry of each(work, "eventSteps", entries))
+      if (
+        entry.candidates === candidates &&
+        entry.ranges.length === ranges.length &&
+        every(
+          work,
+          "eventSteps",
+          entry.ranges.entries(),
+          ([index, [low, high]]) => ranges[index]![0] === low && ranges[index]![1] === high,
+        )
+      )
+        return entry;
     let at = Infinity;
     let word: ContextWord | null = null;
+    // the own list's ranges that hold candidates, which only N5 decides
+    const owned: PositionRange[] = [];
     for (const list of each(work, "eventSteps", events))
       for (const [low, high] of each(work, "eventSteps", ranges)) {
         if (low > high) continue;
@@ -379,17 +533,18 @@ export class NarrowingEvents {
         const to = lowerBound(work, list.positions, high + 1);
         if (from >= to || list.positions[from]! >= at) continue;
         let first = from;
-        if (list.own && kinds !== null) {
-          const subset = yield* this.#subset(g, kinds);
-          const base = lowerBound(work, subset, low);
-          if (to - from <= countIn(work, subset, low, high + 1)) continue;
-          // the first rank j with more events than preserving stores up to its position
+        if (list.own && candidates) {
+          const stores = this.#candidatesOf(g).positions;
+          owned.push([low, high]);
+          const base = lowerBound(work, stores, low);
+          if (to - from <= countIn(work, stores, low, high + 1)) continue;
+          // the first rank j with more events than candidates up to its position
           let lo = from;
           let hi = to - 1;
           for (const _ of steps(work, "eventSteps", () => lo < hi)) {
             const middle = (lo + hi) >> 1;
-            const preserving = lowerBound(work, subset, list.positions[middle]! + 1) - base;
-            if (middle - from + 1 > preserving) hi = middle;
+            const below = lowerBound(work, stores, list.positions[middle]! + 1) - base;
+            if (middle - from + 1 > below) hi = middle;
             else lo = middle + 1;
           }
           first = lo;
@@ -399,31 +554,146 @@ export class NarrowingEvents {
           word = list.word;
         }
       }
-    return word;
+    const made: StaticEvents = { ranges, candidates, at, word, owned };
+    entries.push(made);
+    return made;
   }
 
   /**
-   * N5's sparse subset of a location and filtered kind set: the positions of the location's preserving stores, sorted,
-   * built once: one evaluation per (store, kind set), asked only for stores whose path text is the location.
+   * The kinds of G's location's candidates inside a loop's code (X5's N5 query), one demand per (location, loop): the
+   * reads inside the loop ask one answer, which changes only when the loop's union does.
    */
-  *#subset(g: Narrowing, kinds: readonly ItemTag[]): Work<readonly number[]> {
+  *#inLoop(g: Narrowing, loop: FlowLoop, ranges: readonly PositionRange[]): Work<readonly Item[]> {
     this.#work.charge("eventSteps");
-    const program = this.pass.program;
-    const signature = joinParts(g.location, kindsText(kinds, program.work));
-    const known = this.#subsets.get(signature);
+    const head = loop.head;
+    return yield {
+      key: joinParts("n5-loop", head.id, g.location),
+      kind: "value",
+      file: head.file,
+      offset: head.span?.start.offset ?? -1,
+      make: () => {
+        this.#work.charge("eventSteps");
+        return this.#unionIn(g, ranges);
+      },
+    };
+  }
+
+  /**
+   * Test-only (`answers.ts`'s `solveDemands`): a tree demand of `location`, its first narrowing standing for it: the
+   * node over the candidates [lo, hi) (`#union`), or with `head` the loop's union (`#inLoop`).
+   */
+  public *treeDemand(
+    location: string,
+    lo: number,
+    hi: number,
+    head: FlowNode | null,
+  ): Work<readonly Item[]> {
+    this.#work.charge("eventSteps");
+    const g = passing(
+      this.#work,
+      "eventSteps",
+      this.index.all,
+      (each) => each.location === location,
+    )[0]!;
+    if (head === null) return yield* this.#union(g, this.#candidatesOf(g), lo, hi);
+    const loop = this.#loops.get(head)!;
+    return yield* this.#inLoop(g, loop, this.#inside(loop));
+  }
+
+  /** G's location's candidates (N5): its stores (`#storesOf`) by dominator position, with their positions, once. */
+  #candidatesOf(g: Narrowing): Candidates {
+    this.#work.charge("indexSteps");
+    const known = this.#candidates.get(g.location);
     if (known !== undefined) return known;
-    const positions: number[] = [];
-    for (const store of each(
+    const program = this.pass.program;
+    const stores = sorted(
       program.work,
       "indexSteps",
-      this.#storesOf(g.key).get(g.location) ?? [],
-    ))
-      if (yield* this.preserves(store, g.location, kinds))
-        positions.push(program.position(store.node));
-    sorted(program.work, "indexSteps", positions, (a, b) => a - b);
-    keepText(program.work, signature.length);
-    this.#subsets.set(signature, positions);
-    return positions;
+      copied(program.work, "indexSteps", this.#storesOf(g.key).get(g.location) ?? []),
+      (a, b) => program.position(a.node) - program.position(b.node),
+    );
+    const made: Candidates = {
+      positions: mapped(program.work, "indexSteps", stores, (store) =>
+        program.position(store.node),
+      ),
+      stores,
+    };
+    keepText(program.work, g.location.length);
+    this.#candidates.set(g.location, made);
+    return made;
+  }
+
+  /**
+   * The kinds G's location's candidates in `ranges` hold (N5): each range's candidates as the O(log c) canonical nodes
+   * of the location's union tree, with an explicit stack.
+   */
+  *#unionIn(g: Narrowing, ranges: readonly PositionRange[]): Work<readonly Item[]> {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    const candidates = this.#candidatesOf(g);
+    const out: Item[] = [];
+    for (const [low, high] of each(work, "eventSteps", ranges)) {
+      if (low > high) continue;
+      const from = lowerBound(work, candidates.positions, low);
+      const to = lowerBound(work, candidates.positions, high + 1);
+      const pending: (readonly [number, number])[] = [[0, candidates.stores.length]];
+      for (const _ of steps(work, "eventSteps", () => from < to && pending.length > 0)) {
+        const [lo, hi] = pending.pop()!;
+        if (hi <= from || lo >= to) continue;
+        if (from <= lo && hi <= to) {
+          for (const item of each(work, "exactValues", yield* this.#union(g, candidates, lo, hi)))
+            out.push(item);
+          continue;
+        }
+        const middle = (lo + hi) >> 1;
+        pending.push([middle, hi], [lo, middle]);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The union tree's node over the candidates [lo, hi): the kinds their values hold, one demand per node, whatever kind
+   * set asks, so it changes only when one of them grows, and only the nodes above that store run again.
+   */
+  *#union(g: Narrowing, candidates: Candidates, lo: number, hi: number): Work<readonly Item[]> {
+    this.#work.charge("eventSteps");
+    const site = candidates.stores[lo]!.site;
+    return yield {
+      key: joinParts("n5", lo, hi, g.location),
+      kind: "value",
+      file: site.file,
+      offset: site.start,
+      make: () => {
+        this.#work.charge("eventSteps");
+        return this.#unionOf(candidates, g, lo, hi);
+      },
+    };
+  }
+
+  /** The demand of `#union`: a leaf, its store's value (`ExactPath.defVal`); an inner node, its children's kinds. */
+  *#unionOf(candidates: Candidates, g: Narrowing, lo: number, hi: number): Work<readonly Item[]> {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    const parts: (readonly Item[])[] = [];
+    if (hi - lo === 1) parts.push(yield* this.pass.exact.defVal(candidates.stores[lo]!, []));
+    else {
+      const middle = (lo + hi) >> 1;
+      parts.push(yield* this.#union(g, candidates, lo, middle));
+      parts.push(yield* this.#union(g, candidates, middle, hi));
+    }
+    const tags = new Set<ItemTag>();
+    for (const items of each(work, "eventSteps", parts))
+      for (const item of each(work, "exactValues", items))
+        if (item.tag !== "empty") tags.add(item.tag);
+    return mapped(
+      work,
+      "exactValues",
+      sorted(work, "exactValues", copied(work, "exactValues", tags), (a, b) =>
+        a < b ? -1 : a > b ? 1 : 0,
+      ),
+      (tag) => makeItem(tag),
+    );
   }
 
   /** A key's live assignments outside block code by the refined location their target's path text names, once. */
@@ -453,115 +723,5 @@ export class NarrowingEvents {
     keepText(program.work, key.length);
     this.#stored.set(key, byLocation);
     return byLocation;
-  }
-
-  /**
-   * N5: whether a store to `location` preserves `kinds`: its value, evaluated through §2's transfers with every read of
-   * the location taken as those kinds, has kinds within them. Once per (store, kind set).
-   */
-  public *preserves(store: Definition, location: string, kinds: readonly ItemTag[]): Work<boolean> {
-    this.#work.charge("eventSteps");
-    const memo = joinParts(store.uid, kindsText(kinds, this.#work));
-    const known = this.#preserves.get(memo);
-    if (known !== undefined) return known;
-    this.#work.charge("exactQueries");
-    const value =
-      store.value === undefined ? [] : yield* this.#value(store.value, store.node, location, kinds);
-    const preserving = store.value !== undefined && keptWithin(value, kinds, this.#work);
-    keepText(this.#work, memo.length);
-    this.#preserves.set(memo, preserving);
-    return preserving;
-  }
-
-  /**
-   * A value's items with every read of `location` taken as `kinds`: reads, operators and `otherwise` here, every other
-   * value read through `Values`. Post-order with an explicit stack, so a long expression never deepens the native stack.
-   */
-  *#value(
-    value: PlaceId,
-    node: FlowNode,
-    location: string,
-    kinds: readonly ItemTag[],
-  ): Work<readonly Item[]> {
-    this.#work.charge("exactValues");
-    const { program, values } = this.pass;
-    const done = new Map<PlaceId, readonly Item[]>();
-    const pending: { readonly place: PlaceId; parts: readonly PlaceId[] | null }[] = [
-      { place: value, parts: null },
-    ];
-    for (const _ of steps(program.work, "exactValues", () => pending.length > 0)) {
-      const top = pending.at(-1)!;
-      if (done.has(top.place)) {
-        pending.pop();
-        continue;
-      }
-      const c = program.opOf.get(top.place);
-      const operator = c === undefined ? null : operatorOf(c);
-      // an operation's operands and an `otherwise`'s two sides first
-      if (top.parts === null) {
-        program.work.charge("exactValues");
-        const site = program.places[top.place]?.site ?? null;
-        const at = site === null ? null : program.exprAt(site);
-        const expression = at?.expression;
-        const path =
-          expression === undefined || at === null ? null : stablePath(program, at.file, expression);
-        const text = path === null ? null : locationOf(path, program.work);
-        if (text !== null) program.work.charge("exactValues", textUnits(text.length));
-        if (text === location) {
-          done.set(
-            top.place,
-            mapped(program.work, "exactValues", kinds, (tag) =>
-              makeItem(tag, null, { cert: "pos" }),
-            ),
-          );
-          continue;
-        }
-        top.parts =
-          c?.kind === "operation" && operator !== null
-            ? c.arguments
-            : c?.kind === "fallback"
-              ? [c.left, c.right]
-              : [];
-        if (top.parts.length === 0) {
-          done.set(top.place, yield* values.valueItems(top.place, at ?? node, []));
-          continue;
-        }
-        for (const part of each(program.work, "exactValues", top.parts))
-          pending.push({ place: part, parts: null });
-        continue;
-      }
-      pending.pop();
-      // (each value's items merged by kind, so a chain's intermediate values stay as small as its kinds)
-      if (c?.kind === "operation" && operator !== null) {
-        const operands = mapped(program.work, "exactValues", top.parts, (part) => {
-          const items = done.get(part)!;
-          // (`withoutEmpty` walks the operand's items)
-          program.work.charge("exactValues", items.length);
-          return withoutEmpty(items);
-        });
-        done.set(
-          top.place,
-          mergeItems(operationItems(operator, operands, program.scope, c.site), program.scope),
-        );
-      } else {
-        const left = done.get(top.parts[0]!)!;
-        const right = done.get(top.parts[1]!)!;
-        if (
-          !some(
-            program.work,
-            "exactValues",
-            left,
-            (item) => item.tag === "null" || item.tag === "unknown",
-          )
-        )
-          done.set(top.place, left);
-        else {
-          const joined = passing(program.work, "exactValues", left, (item) => item.tag !== "null");
-          for (const item of each(program.work, "exactValues", right)) joined.push(item);
-          done.set(top.place, mergeItems(joined, program.scope));
-        }
-      }
-    }
-    return done.get(value)!;
   }
 }

@@ -15,10 +15,19 @@ import {
   REFERENCE,
   typedDefault,
   unknownItem,
+  WIDE,
   withOwnSelection,
+  type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
-import { keyOf, keyPlace, type ForLoopFacts, type Key } from "./definitions.js";
+import {
+  keptKey,
+  keyOf,
+  keyPlace,
+  type Definition,
+  type ForLoopFacts,
+  type Key,
+} from "./definitions.js";
 import { belowSelected, withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
@@ -49,6 +58,7 @@ import {
   type Item,
   type ItemTag,
 } from "./items.js";
+import { Laminar, narrowedItems, type Narrowing } from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import type { Work } from "./solver.js";
@@ -56,9 +66,11 @@ import type { Work } from "./solver.js";
 /*
  * The value side of the coarse core (checkpoint 9, TABLE §3): a read of a key at a node takes, in this order, the host
  * or reference answer (§3 step 1), the exact path's value at D (§3.1), or the contract (§3.2), and under a guard of
- * its key its kinds are possible and marked (§3.2). The value of an expression at its node follows the read through
- * projections, call results (F20), operations (F7, F10, F16–F19, F25, F26b) and literals (F12). Literals and
- * operations are demands, once per value and path.
+ * its key its kinds are possible and marked (§3.2). A read inside a stored value takes its narrowing definition G
+ * where G holds (§13 N2, S10 part 2b): so a copy, an operation or a store check sees the tested kinds, and N5's
+ * preserving test, which reads a store's own value, takes them too. The value of an expression at its node follows the
+ * read through projections, call results (F20), operations (F7, F10, F16–F19, F25, F26b) and literals (F12). Literals
+ * and operations are demands, once per value and path.
  */
 
 const COLLECTIONS = new Set(["list", "set", "dict", "object"]);
@@ -69,15 +81,60 @@ const COPIED: ReadonlySet<ItemTag> = new Set(["list", "set", "range"]);
 /** Which path answered a read (S3 §1's route): the exact path's definition, or the contract (§3 step 1 included). */
 export type ReadRoute = "exact" | "contract";
 
+/**
+ * A read that takes its narrowing (S10 part 2b, `Values.#narrowingOf`): its G and its node, and the key, binding
+ * occurrence and node the exact path reads it by.
+ */
+interface NarrowedRead {
+  readonly g: Narrowing;
+  readonly read: FlowNode;
+  readonly root: PlaceId;
+  readonly key: Key;
+  readonly node: FlowNode | null;
+}
+
+/** Per program, per file, the spans of its stored values (`Values.#inStoredValue`), made on the first question. */
+const STORED_SPANS = new WeakMap<CoreProgram, ReadonlyMap<number, Laminar<null>>>();
+
+/**
+ * G's items' demand key (`Values.narrowingValue`): its entry, its input (whose stable path, with the element steps,
+ * is its location), its form and its element steps.
+ */
+export function narrowingKey(g: Narrowing): string {
+  return joinParts("gv", g.node.id, g.input.id, g.form.kind, g.elements);
+}
+
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
   readonly #routes = new Map<string, ReadRoute>();
+  /** Per read, the narrowing it takes (`#narrowingOf`). */
+  readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
 
   public constructor(readonly pass: CorePass) {}
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
   public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
-    const { program, exact, contract, lists, guards } = this.pass;
+    const read = yield* this.#keyRead(key, node, before);
+    // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
+    return read.guardable && this.pass.guards.narrowed(key, node!)
+      ? marked(read.items)
+      : read.items;
+  }
+
+  /**
+   * `keyItems` before §3.2's mark: the host or reference answer, the exact path's value at D (`def`, where D answers),
+   * or the contract; `guardable` where the mark applies.
+   */
+  *#keyRead(
+    key: Key,
+    node: FlowNode | null,
+    before: boolean,
+  ): Work<{
+    readonly items: readonly Item[];
+    readonly def: Definition | null;
+    readonly guardable: boolean;
+  }> {
+    const { program, exact, contract, lists } = this.pass;
     const route = (taken: ReadRoute): void => {
       const at = joinParts(key, node?.id ?? "-", before ? 1 : 0);
       // (a route's text charged where it is kept first, TABLE r4.58)
@@ -86,15 +143,15 @@ export class Values {
     };
     if (program.isHost(keyPlace(key))) {
       route("contract");
-      return [unknownItem(REASON.external)];
+      return { items: [unknownItem(REASON.external)], def: null, guardable: false };
     }
     if (yield* contract.refReceiver(key)) {
       route("contract");
-      return [OPAQUE_MEMBER];
+      return { items: [OPAQUE_MEMBER], def: null, guardable: false };
     }
     if (node === null) {
       route("contract");
-      return yield* contract.contractOf(key);
+      return { items: yield* contract.contractOf(key), def: null, guardable: false };
     }
     const answer = exact.exactPath(key, node, before);
     // F5a: the loop ran only over a held iterable, and nothing between the add and the body's end may change the
@@ -116,8 +173,172 @@ export class Values {
             loop || ("fail" in answer && answer.later === true),
           );
     route("def" in answer && !loop ? exact.defRoute(answer.def, answer.rest) : "contract");
-    // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
-    return guards.narrowed(key, node) ? marked(items) : items;
+    return { items, def: "def" in answer && !loop ? answer.def : null, guardable: true };
+  }
+
+  /**
+   * S10 part 2b: the narrowing a read takes, `null` for none. A read of a stable path at its own path (a binding's
+   * occurrence, or a chain of its properties and indexes) inside a stored value (`#inStoredValue`) takes the nearest
+   * narrowing definition its node finds (N2, `NarrowingIndex.nearestAt`: one walk of its steps down the tested paths);
+   * any other read keeps the mark until its consumer reads G (§13.2's order, the consumers' part). A selection, a
+   * length or a member step answers by itself (N1: G proves kinds only). Once per read.
+   */
+  #narrowingOf(value: PlaceId): NarrowedRead | null {
+    const known = this.#narrowings.get(value);
+    if (known !== undefined) return known;
+    const { program, guards } = this.pass;
+    program.work.charge("eventSteps");
+    let found: NarrowedRead | null = null;
+    const outer = program.projOf.get(value);
+    const read = outer === undefined ? (program.occNode.get(value) ?? null) : outer.node;
+    // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
+    const steps: string[] = [];
+    let at = value;
+    let node: FlowNode | null = null;
+    let stable = read !== null && read.span !== null;
+    for (let projection = outer; projection !== undefined && stable;) {
+      program.work.charge("eventSteps");
+      const step = projection.step;
+      stable =
+        step !== "iteration" &&
+        !selectsElement(step) &&
+        !measuresLength(step) &&
+        memberStep([step], 0) < 0;
+      steps.push(stepName(step));
+      node = projection.node ?? node;
+      at = projection.owner;
+      projection = program.projOf.get(at);
+    }
+    const binding = stable ? program.occurrenceOf.get(at) : undefined;
+    // (a root no test names is never narrowed: one lookup before the stored values and the tested paths)
+    if (binding !== undefined && guards.narrowing.tests(binding) && this.#inStoredValue(read!)) {
+      const g = guards.narrowing.nearestAt(read!);
+      if (g !== null)
+        found = {
+          g,
+          read: read!,
+          root: at,
+          key: keptKey(program.work, binding, steps.reverse()),
+          node: program.occNode.get(at) ?? node,
+        };
+    }
+    this.#narrowings.set(value, found);
+    return found;
+  }
+
+  /**
+   * Whether a read lies in a stored value: the value of a store, an add, an argument binding, a parameter default or a
+   * return (their definitions' values), one laminar list of their spans per file, made once per program (the
+   * definitions are the program's: a pass's rejections act through its lists, A6).
+   */
+  #inStoredValue(read: FlowNode): boolean {
+    const { program, definitions } = this.pass;
+    const work = program.work;
+    let storedSpans = STORED_SPANS.get(program);
+    if (storedSpans === undefined) {
+      const byFile = new Map<number, { start: number; end: number; item: null }[]>();
+      for (const list of [definitions.storeDefs, definitions.transferDefs])
+        for (const d of list) {
+          work.charge("indexSteps");
+          const site = d.value === undefined ? null : (program.places[d.value]?.site ?? null);
+          if (site === null) continue;
+          const spans = byFile.get(site.file);
+          const span = { start: site.start, end: site.end, item: null };
+          if (spans === undefined) byFile.set(site.file, [span]);
+          else spans.push(span);
+        }
+      const made = new Map<number, Laminar<null>>();
+      for (const [file, spans] of byFile) made.set(file, new Laminar(work, spans));
+      STORED_SPANS.set(program, (storedSpans = made));
+    }
+    const spans = storedSpans.get(read.file);
+    if (spans === undefined || read.span === null) return false;
+    // (the innermost span holding its start, and those holding that one, until one holds its end)
+    for (let index = spans.innermostIndex(read.span.start.offset); index >= 0;) {
+      work.charge("eventSteps");
+      if (spans.ends[index]! >= read.span.end.offset) return true;
+      index = spans.parents[index]!;
+    }
+    return false;
+  }
+
+  /**
+   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items, or, where the exact path's
+   * definition D reaches the read, D's value (after G's entry: a preserving store there, the read's nearest candidate,
+   * §13.2 (2)) or D's value filtered by G's form (before it); where G fails, the read as before, marked (§3.2's
+   * fallback). A demand per read. The read, G's items and N2's query are always asked, so what it reads never depends
+   * on what they answer. G's kinds never wait on the read's own component (`narrowingValue`); were they still being
+   * solved, the read would ask N2 with no preserving store, the conservative answer.
+   */
+  *#narrowedRead(narrowed: NarrowedRead, node: FlowNode | null): Work<readonly Item[]> {
+    const { program, contract, guards, solver } = this.pass;
+    const { g, root, key } = narrowed;
+    const at = narrowed.node ?? node;
+    const read = yield* this.#keyRead(key, at, false);
+    const items = yield* this.narrowingValue(g);
+    const kinds =
+      solver.answer(narrowingKey(g)) === undefined
+        ? null
+        : withoutEmpty(items).map((item) => item.tag);
+    const fails = yield* guards.narrowings(this.pass).events.holds(g, narrowed.read, kinds);
+    if (fails !== null)
+      return contract.entered(
+        root,
+        read.guardable && guards.narrowed(key, at!) ? marked(read.items) : read.items,
+      );
+    // (the exact path's definition, where it reaches the read, is the value G tested: after G's entry itself, before it
+    // filtered by G's form)
+    if (read.def !== null)
+      return contract.entered(
+        root,
+        program.dom.dominates(g.node, read.def.node)
+          ? read.items
+          : narrowedItems(g.form, read.items, program.scope),
+      );
+    return contract.entered(root, items);
+  }
+
+  /**
+   * G's items (N1): its key read at its input, as part 1 reads it (the exact path's definition value at the test, else
+   * the contract; unmarked, no other narrowing), filtered by its form; a definition inside a loop around the test is
+   * read as the contract, since its value may read the loop's own narrowings (through a store of the loop, by copies),
+   * so G's kinds never wait on the component they decide, and a read the definition still reaches filters its value
+   * itself (`#narrowedRead`). A demand per G.
+   */
+  public *narrowingValue(g: Narrowing): Work<readonly Item[]> {
+    return yield {
+      key: narrowingKey(g),
+      kind: "value",
+      file: g.input.file,
+      offset: g.input.span?.start.offset ?? -1,
+      make: () => this.#narrowingMade(g),
+    };
+  }
+
+  /** The demand of `narrowingValue`. */
+  *#narrowingMade(g: Narrowing): Work<readonly Item[]> {
+    const { program, contract, exact } = this.pass;
+    // (the contract chosen before any definition's value is asked: asking it would make G wait on it)
+    const loopDefinition =
+      g.input.loops.length > 0 &&
+      !program.isHost(keyPlace(g.key)) &&
+      !(yield* contract.refReceiver(g.key)) &&
+      "def" in exact.exactPath(g.key, g.input);
+    const input = loopDefinition
+      ? yield* contract.contractOf(g.key)
+      : (yield* this.#keyRead(g.key, g.input, false)).items;
+    return narrowedItems(g.form, input, program.scope);
+  }
+
+  /**
+   * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
+   * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
+   * alike).
+   */
+  public narrowingMark(value: PlaceId): string {
+    const narrowed = this.#narrowingOf(value);
+    if (narrowed === null) return "";
+    return `n${this.pass.guards.narrowings(this.pass).events.environment(narrowed.g, narrowed.read)}`;
   }
 
   /**
@@ -309,6 +530,18 @@ export class Values {
       const { program, contract } = this.pass;
       if (program.speakerPlaces.has(value))
         return [makeItem("unknown", null, { reasons: REASON.opaque, context: "unmodelled" })];
+      // S10 part 2b: a read in a stored value takes its narrowing
+      const narrowed = rest.length === 0 ? this.#narrowingOf(value) : null;
+      if (narrowed !== null) {
+        const site = program.places[value]?.site ?? null;
+        return yield {
+          key: joinParts("vg", value, narrowed.node === null ? (node?.id ?? "-") : ""),
+          kind: "value",
+          file: site?.file ?? -1,
+          offset: site?.start ?? -1,
+          make: () => this.#narrowedRead(narrowed, node),
+        };
+      }
       const binding = program.occurrenceOf.get(value);
       if (binding !== undefined)
         return contract.entered(
@@ -571,6 +804,128 @@ export class Values {
    * F18 (r4.5): the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
    * the runtime checks the value against the default's type.
    */
+  /**
+   * A wide choice's options [lo, hi) (V30 §19, S10 part 2b), read at `rest` and merged by kind, as its operation's merge
+   * takes them anyway: a balanced tree of demands, so where the options' answers change one by one (a component of N5's
+   * stores reading them), a change re-runs only the nodes above it (`Contract.gathered` for a literal's).
+   */
+  public *choiceRange(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    return yield {
+      key: joinParts("cr", c.result, lo, hi, at?.id ?? "-", rest),
+      kind: "value",
+      file: c.site.file,
+      offset: c.site.start,
+      make: () => this.#choiceRangeMade(c, at, rest, lo, hi),
+    };
+  }
+
+  /** The demand of `choiceRange`. */
+  *#choiceRangeMade(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    const { contract, program } = this.pass;
+    program.work.charge("invSteps");
+    if (hi - lo <= WIDE) {
+      const options = contract.choiceOptions(c, true);
+      return mergeItems(
+        yield* choiceItems(c, rest, this.#choiceRead(at), contract.choiceKeysStored(), options, {
+          ...this.#choiceWide(c, at),
+          lo,
+          hi,
+        }),
+        program.scope,
+      );
+    }
+    const middle = (lo + hi) >> 1;
+    return mergeItems(
+      [
+        ...(yield* this.choiceRange(c, at, rest, lo, middle)),
+        ...(yield* this.choiceRange(c, at, rest, middle, hi)),
+      ],
+      program.scope,
+    );
+  }
+
+  /** A choice's part whose wide written lists read their elements as trees of demands (`choiceElements`). */
+  #choiceWide(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+  ): ChoicePart {
+    return { wide: (index, count, rest) => this.choiceElements(c, at, rest, index, 0, count) };
+  }
+
+  /**
+   * A choice's written list or set option's elements [lo, hi) (V30 §19, S10 part 2b), as `choiceRange` reads its
+   * options: a balanced tree of demands, each node its range's items merged by kind.
+   */
+  public *choiceElements(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    index: number,
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    return yield {
+      key: joinParts("ce", c.result, index, lo, hi, at?.id ?? "-", rest),
+      kind: "value",
+      file: c.site.file,
+      offset: c.site.start,
+      make: () => this.#choiceElementsMade(c, at, rest, index, lo, hi),
+    };
+  }
+
+  /** The demand of `choiceElements`. */
+  *#choiceElementsMade(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    index: number,
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    const { contract, program } = this.pass;
+    program.work.charge("invSteps");
+    if (hi - lo <= WIDE)
+      return mergeItems(
+        yield* choiceItems(
+          c,
+          rest,
+          this.#choiceRead(at),
+          contract.choiceKeysStored(),
+          contract.choiceOptions(c, true),
+          { elements: { index, lo, hi } },
+        ),
+        program.scope,
+      );
+    const middle = (lo + hi) >> 1;
+    return mergeItems(
+      [
+        ...(yield* this.choiceElements(c, at, rest, index, lo, middle)),
+        ...(yield* this.choiceElements(c, at, rest, index, middle, hi)),
+      ],
+      program.scope,
+    );
+  }
+
+  /** How a choice's options are read at its node `at` (`choiceItems`). */
+  #choiceRead(
+    at: FlowNode | null,
+  ): (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]> {
+    return (value, path, element) =>
+      element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path);
+  }
+
   public *defaultKinds(
     fallback: PlaceId,
     at: FlowNode | null,
@@ -763,15 +1118,20 @@ export class Values {
     const clock = family === "clock" ? clockResult(name) : undefined;
     if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options")
+    if (interaction?.kind === "options") {
+      const options = contract.choiceOptions(c, true);
+      // (a wide choice's options as a tree of demands, `choiceRange`)
+      if (options.length > WIDE)
+        return [...(yield* this.choiceRange(c, at, rest, 0, options.length))];
       return yield* choiceItems(
         c,
         rest,
-        (value, path, element) =>
-          element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+        this.#choiceRead(at),
         contract.choiceKeysStored(),
-        contract.choiceOptions(c, true),
+        options,
+        this.#choiceWide(c, at),
       );
+    }
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's
