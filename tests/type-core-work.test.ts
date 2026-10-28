@@ -17,6 +17,7 @@ import {
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
   DIRECT_INGRESS_PROGRAMS,
+  HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
@@ -448,6 +449,16 @@ test("every admission family's work and each of its counters grow with the progr
 });
 
 /**
+ * #1188: admission's hot-candidate discovery by touch tries lists no contribution once per context that reaches it (a
+ * configuration prefix, a group's place, a read, a literal, a merge place or a cycle), so each family's total and each
+ * of its counters grow with the program in either order. The series to k = 1,024, both orders and the sharing off, is
+ * the step's evidence, outside CI.
+ */
+test("every hot-candidate family's work and each of its counters grow with the program in either order (#1188)", () => {
+  assert.deepEqual(steepCounters(HOT_CANDIDATE_FAMILIES), []);
+});
+
+/**
  * A4 through copies (the owner's reviewer's F1 on #1049, TABLE r4.80): the inherited-field families, gated above with
  * the admission families, are gated with the sharing off too, so what a copy costs never hangs on equivalent answers
  * being shared; and his budget witness, a chain of 1,024 whole copies of a root of 1,024 written-typed fields (a source
@@ -653,6 +664,7 @@ test("every alias member answers as its class does at every decided path, in bot
     ...W44_VARIANTS,
     ...W45_VARIANTS,
     ...ADMISSION_FAMILIES,
+    ...HOT_CANDIDATE_FAMILIES,
     ...ADMISSION_SAME_SOURCES,
     ...VALUE_CLASS_SITES,
   ])

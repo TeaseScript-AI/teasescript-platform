@@ -304,3 +304,191 @@ export const WRITTEN_COPY_MATRIX: readonly WrittenCopyCase[] = (() => {
   }
   return out;
 })();
+
+/*
+ * #1188's witnesses, each a name, its program before its final `exit` and its exact record: the cells test compares
+ * them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
+ */
+export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string])[] = [
+  [
+    "rule (a) form 1: a list whose elements still disagree after a rejected element is ignored",
+    "let count:integer=11\n" +
+      'let parcel={meta:{score:count},label:"ok"}\n' +
+      'let broken=[{meta:{score:false},label:"ok"},parcel]\n' +
+      "let capsule={value:broken.first}\n" +
+      "let relay=capsule\n" +
+      "let picked=relay.value\n" +
+      "let final=[picked.meta,parcel.meta]\n",
+    `outcome compile-error
+    D written-target error 108:114 -
+    D written-target error 213:224 -`,
+  ],
+  [
+    "rule (a) form 2: no warning or check about a rejected value",
+    "let unit:integer | string=7\n" +
+      "let wide={f:unit}\n" +
+      "let wide2={f:unit}\n" +
+      "let inner=[{f:true},wide]\n" +
+      "let result=[inner.first,wide2]\n",
+    `outcome compile-error
+    D written-target error 85:89 -
+    D written-target error 115:120 -`,
+  ],
+  [
+    "rule (a) form 3: a later store against the surviving type",
+    "let count:integer=11\n" +
+      "let parcel={score:count}\n" +
+      "let broken=[{score:false},parcel]\n" +
+      "let capsule={value:broken.first}\n" +
+      "let relay=capsule\n" +
+      "let final=relay.value\n" +
+      "final=parcel\n",
+    `outcome compile-error
+    D written-target error 72:78 -
+    D written-target error 159:165 -`,
+  ],
+  [
+    "rule (a) form 3: a rejected list's surviving value against the receiving place's type",
+    "let sample:integer=29\n" +
+      "let parcel={weight:sample}\n" +
+      "let damaged=[{weight:false},parcel]\n" +
+      "let outcome=parcel\n" +
+      "outcome=damaged.first\n",
+    `outcome compile-error
+    D written-target error 77:83 -
+    D written-target error 112:125 -`,
+  ],
+  [
+    "a whole cycle split by its two rejected copies",
+    "let nvalue:integer=23\n" +
+      'let wordvalue:string="s"\n' +
+      "let left={f:nvalue}\n" +
+      "let right={f:wordvalue}\n" +
+      "left=right\n" +
+      "right=left\n" +
+      "let box={a:left,b:right}\n" +
+      "let final=[box.a,box.b]\n",
+    `outcome compile-error
+    D written-target error 96:101 -
+    D written-target error 108:112 -
+    D written-target error 155:160 -`,
+  ],
+  [
+    "a fed cycle whose feeder's store is rejected",
+    "let amount:integer=29\n" +
+      "let origin={f:amount}\n" +
+      "let fractional={f:1.75}\n" +
+      "let inlet=origin\n" +
+      "inlet=fractional\n" +
+      "let a0=inlet\n" +
+      "let a1=a0\n" +
+      "let a2=a1\n" +
+      "a0=a2\n" +
+      "let final=[fractional,a2]\n",
+    `outcome compile-error
+    D written-target error 91:101 -`,
+  ],
+  [
+    "a literal deciding by a copy its merge place contains",
+    "let typed:integer=4\n" +
+      "let s={x:1.5}\n" +
+      "let y={x:typed}\n" +
+      "let d=s\n" +
+      "d=y\n" +
+      "let b=[y,d]\n",
+    `outcome warning-runtime-check
+    D written-target warning 68:73 member
+    C copy-type b.element.x [integer] 68:73`,
+  ],
+  [
+    "a live nested union",
+    "let score:integer | string=13\n" +
+      "let source={score:score}\n" +
+      "let grid=[{rows:[{score:false}]},{rows:[source]}]\n" +
+      "let final=[grid.first.rows.first,source]\n",
+    `outcome compile-error
+    D written-target warning 64:104 member
+    D written-target warning 64:104 member
+    D written-target error 138:144 -
+    C copy-type grid.element.rows.element.score [boolean] 64:104
+    C copy-type grid.element.rows.element.score [boolean] 64:104`,
+  ],
+  [
+    "a load default's contributor beside a shared record in two lists, the first fitting (Astra's PR review B1)",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=[load("one", default:good),peer]\n' +
+      'let second=[load("two", default:bad),peer]\n',
+    `outcome compile-error
+    D written-target error 144:148 -
+    B copy-type first.element [object] 75:100
+    B copy-type second.element [object] 119:143`,
+  ],
+  [
+    "the same two lists in the other order",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let second=[load("two", default:bad),peer]\n' +
+      'let first=[load("one", default:good),peer]\n',
+    `outcome compile-error
+    D written-target error 101:105 -
+    B copy-type second.element [object] 76:100
+    B copy-type first.element [object] 118:143`,
+  ],
+  [
+    "a fromJson default's contributor in two sets",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      "let first=set[fromJson(hostValue, default:good, files:false),peer]\n" +
+      "let second=set[fromJson(hostValue, default:bad, files:false),peer]\n",
+    `outcome compile-error
+    D written-target error 192:196 -
+    B copy-type first.element [object] 78:124
+    B copy-type second.element [object] 146:191`,
+  ],
+  [
+    "a load default's contributor after the shared record in two dicts",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=dict{a:peer,b:load("one", default:good)}\n' +
+      'let second=dict{a:peer,b:load("two", default:bad)}\n',
+    `outcome compile-error
+    D written-target error 140:164 -
+    B copy-type first.entry [object] 88:113
+    B copy-type second.entry [object] 140:164`,
+  ],
+  [
+    "a load default's contributor in a nested position",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=[{inner:load("one", default:good)},{inner:peer}]\n' +
+      'let second=[{inner:load("two", default:bad)},{inner:peer}]\n',
+    `outcome compile-error
+    D written-target error 168:180 -
+    B copy-type first.element [object] 82:107
+    B copy-type second.element [object] 142:166`,
+  ],
+  [
+    "a fromJson default's contributor in a nested position",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      "let first=[{inner:fromJson(hostValue, default:good, files:false)},{inner:peer}]\n" +
+      "let second=[{inner:fromJson(hostValue, default:bad, files:false)},{inner:peer}]\n",
+    `outcome compile-error
+    D written-target error 210:222 -
+    B copy-type first.element [object] 82:128
+    B copy-type second.element [object] 163:208`,
+  ],
+];
