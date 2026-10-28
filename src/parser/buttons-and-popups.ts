@@ -335,7 +335,12 @@ export function* parseShowPermanentButtonParts(
     return null;
   }
   const handler = yield* parseChild(
-    parser.asStatements(parsePermanentButtonBlock(parser, text, textStart, textEnd)),
+    parser.asStatements(
+      parser.parseOnce(
+        "permanentButtonBlock",
+        parsePermanentButtonBlock(parser, text, textStart, textEnd),
+      ),
+    ),
   );
   if (handler === null || options === null) return null;
   return {

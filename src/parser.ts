@@ -14,7 +14,6 @@ import type {
   Program,
   PropertyAccessExpression,
   RangeExpression,
-  SayParts,
   PlayMediaStatement,
   NumberLiteral,
   Statement,
@@ -201,10 +200,12 @@ interface SharedParse {
   /** For each opening delimiter, the index of the delimiter that closes it, once one is looked up. */
   closers: ReadonlyMap<number, number> | null;
   /**
-   * The `say` values parsed so far, by token position. Telling a mode or skip word from a value parses ahead, also the
-   * `say` values nested there, so each is parsed once per context; parsed again at every level, nesting is exponential.
+   * The `say` values and statement blocks that a speculation read, by token position. Telling a mode or skip word from
+   * a value, or the bounded text of a `say` statement from a grouped value, parses ahead, over every `say` and block
+   * nested there; a statement inside the value is in a block. Each is read once per form and context, and every later
+   * parse takes over what it left behind; read again at every level, nesting is exponential (see `Parser.parseOnce`).
    */
-  readonly sayValues: Map<number, ParsedSayValue[]>;
+  readonly parsedParts: Map<number, ParsedPart[]>;
   /**
    * Strings with an interpolation that reported an error. They keep what parsed, so that what they belong to stays in
    * the program; where only text written out in quotes is allowed, they count as failed, without a further error.
@@ -236,13 +237,24 @@ export interface ParseMark {
   readonly diagnostics: number;
   readonly unclosedLiterals: number;
 }
-/** A `say` value parsed at a token position in one parsing context, with what its parse left behind. */
-interface ParsedSayValue {
+/** A fix that `Parser.offerFix` offers for the error at `index`, which waits for its statement to end. */
+interface FixOffer {
+  readonly index: number;
+  readonly error: Diagnostic;
+  readonly quoted: string;
+  readonly pastes: readonly FixPaste[];
+}
+/** What `Parser.parseOnce` reads: a `say` value, or the block of a statement, of a permanent button, or of media. */
+type PartForm = "sayValue" | "block" | "permanentButtonBlock" | "mediaBlock";
+/** A part that a speculation read at a token position in one form and parsing context, with what its parse left behind. */
+interface ParsedPart {
+  readonly form: PartForm;
   readonly insideDelimiters: boolean;
   readonly storageDelimiters: ReadonlySet<StorageDelimiter>;
   readonly blockEndsCompactInteraction: boolean;
   readonly recoveredAtStatementBoundary: boolean;
-  readonly parts: SayParts | null;
+  /** What the parse of `form` returned. */
+  readonly result: unknown;
   readonly end: number;
   readonly diagnostics: readonly Diagnostic[];
   /** The literals without their closing delimiter that its parse failed to read (see `Parser.unclosedLiterals`). */
@@ -251,11 +263,13 @@ interface ParsedSayValue {
   readonly regexStarts: readonly number[];
   /** The statement and command ranges its parse recorded. */
   readonly ranges: RangeSegment;
+  /** The fixes offered for its errors that wait for the statement around it, by their index among `diagnostics`. */
+  readonly fixOffers: readonly FixOffer[];
   readonly recovered: boolean;
 }
 /**
- * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a `say` value lists its
- * segment rather than a copy of its ranges, so a value nested in others is not copied into each of them.
+ * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a part lists its
+ * segment rather than a copy of its ranges, so a part nested in others is not copied into each of them.
  */
 interface RangeSegment {
   readonly list: readonly (StatementRange | CommandRange | RangeSegment)[];
@@ -346,15 +360,12 @@ function parseSource(source: string, offers: boolean): ParseResult {
 export class Parser {
   public readonly diagnostics: Diagnostic[] = [];
   /** The fixes offered for errors of the statement being read, which wait for it to end (see `offerFix`). */
-  readonly #fixOffers: {
-    readonly index: number;
-    readonly error: Diagnostic;
-    readonly quoted: string;
-    readonly pastes: readonly FixPaste[];
-  }[] = [];
+  readonly #fixOffers: FixOffer[] = [];
+  /** Whether this parser reads ahead for another, which keeps what it reads for the parse that counts (see `parseOnce`). */
+  #speculative = false;
   /**
    * The statement and command ranges. A speculative parser keeps its own, so only those of the parse that counts are
-   * listed, also those of a `say` value it reuses.
+   * listed, also those of a part it takes over (see `parseOnce`).
    */
   public readonly statementRanges: (StatementRange | CommandRange | RangeSegment)[] = [];
   /**
@@ -407,7 +418,7 @@ export class Parser {
     shared: SharedParse = {
       openers: innermostOpeners(tokens),
       closers: null,
-      sayValues: new Map(),
+      parsedParts: new Map(),
       recoveredStrings: new WeakSet(),
       faultyOtherwise: new WeakSet(),
       newlineRuns: newlineRuns(tokens),
@@ -634,9 +645,7 @@ export class Parser {
     statement: boolean,
     afterModifier: TokenKind | undefined,
   ): ParseTask<boolean> {
-    const speculative = new Parser(this.tokens, this.shared);
-    speculative.current = this.current;
-
+    const speculative = this.#speculation(this.current);
     const value = yield* parseChild(speculative.parseOr());
     if (value === null) return false;
     // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
@@ -664,8 +673,7 @@ export class Parser {
    * Grouping parentheses, valid or not, hold one value.
    */
   public *opensBoundedSayText(): ParseTask<boolean> {
-    const speculative = new Parser(this.tokens, this.shared);
-    speculative.current = this.current + 1;
+    const speculative = this.#speculation(this.current + 1);
     speculative.skipNewlines();
     const value = yield* parseChild(speculative.withinDelimiters(speculative.parseOr()));
     if (value === null) return false;
@@ -686,10 +694,81 @@ export class Parser {
   /** `instant` remains an identifier unless it fills the entire pacing slot. */
   public canParseInstantPacingAlias(statement: boolean): boolean {
     if (!this.checkIdentifier("instant")) return false;
-    const speculative = new Parser(this.tokens, this.shared);
-    speculative.current = this.current;
+    const speculative = this.#speculation(this.current);
     speculative.advance();
     return speculative.#isSayBoundary(statement);
+  }
+
+  /** A parser that reads ahead from token `at`, and leaves this one as it is. */
+  #speculation(at: number): Parser {
+    const speculative = new Parser(this.tokens, this.shared);
+    speculative.current = at;
+    speculative.#speculative = true;
+    return speculative;
+  }
+
+  /**
+   * Parses with `parse` the part of `form` that starts here, or takes over what a speculation left behind when it read
+   * that part at this position and in this context: the result, the position after it, its diagnostics and ranges, and
+   * the fixes it offered that wait for the statement around it. A speculation keeps what it reads, so no part is read
+   * twice in one context, however deeply the parts that parse ahead nest (see `SharedParse.parsedParts`).
+   */
+  public *parseOnce<T>(form: PartForm, parse: ParseTask<T>): ParseTask<T> {
+    const start = this.current;
+    const parsed = this.shared.parsedParts.get(start);
+    const known = parsed?.find(
+      (part) =>
+        part.form === form &&
+        part.insideDelimiters === this.insideDelimiters &&
+        part.storageDelimiters === this.storageDelimiters &&
+        part.blockEndsCompactInteraction === this.blockEndsCompactInteraction &&
+        part.recoveredAtStatementBoundary === this.recoveredAtStatementBoundary,
+    );
+    if (known !== undefined) {
+      const diagnosticCount = this.diagnostics.length;
+      // A part such as a block may hold many, more than a spread passes as arguments.
+      for (const diagnostic of known.diagnostics) this.diagnostics.push(diagnostic);
+      for (const offer of known.fixOffers)
+        this.#fixOffers.push({ ...offer, index: diagnosticCount + offer.index });
+      this.unclosedLiterals += known.unclosedLiterals;
+      for (const offset of known.regexStarts) this.regexStarts.push(offset);
+      this.statementRanges.push(known.ranges);
+      this.current = known.end;
+      this.recoveredAtStatementBoundary = known.recovered;
+      // EVIDENCE: invariant: a part of `form` is parsed by one function, whose result type is `T`.
+      return known.result as T;
+    }
+    if (!this.#speculative) return yield* parseChild(parse);
+    const context = {
+      form,
+      insideDelimiters: this.insideDelimiters,
+      storageDelimiters: this.storageDelimiters,
+      blockEndsCompactInteraction: this.blockEndsCompactInteraction,
+      recoveredAtStatementBoundary: this.recoveredAtStatementBoundary,
+    };
+    const diagnosticCount = this.diagnostics.length;
+    const fixOfferCount = this.#fixOffers.length;
+    const unclosedLiterals = this.unclosedLiterals;
+    const regexStartCount = this.regexStarts.length;
+    const rangeCount = this.statementRanges.length;
+    const result = yield* parseChild(parse);
+    const part: ParsedPart = {
+      ...context,
+      result,
+      end: this.current,
+      diagnostics: this.diagnostics.slice(diagnosticCount),
+      // The part's statements settle their own offers, and leave only those for the statement around it.
+      fixOffers: this.#fixOffers
+        .slice(fixOfferCount)
+        .map((offer) => ({ ...offer, index: offer.index - diagnosticCount })),
+      unclosedLiterals: this.unclosedLiterals - unclosedLiterals,
+      regexStarts: this.regexStarts.slice(regexStartCount),
+      ranges: { list: this.statementRanges, from: rangeCount, to: this.statementRanges.length },
+      recovered: this.recoveredAtStatementBoundary,
+    };
+    if (parsed === undefined) this.shared.parsedParts.set(start, [part]);
+    else parsed.push(part);
+    return result;
   }
 
   /** The source text from the start of `first` to the end of `last`, from tokens already read. */
@@ -810,7 +889,9 @@ export class Parser {
 
   /** A statement block; statements inside it are not part of an enclosing cue position or switch subject. */
   public *parseBlock(): ParseTask<Block | null> {
-    return yield* parseChild(this.asStatements(this.#parseBlockStatements()));
+    return yield* parseChild(
+      this.asStatements(this.parseOnce("block", this.#parseBlockStatements())),
+    );
   }
 
   *#parseBlockStatements(): ParseTask<Block | null> {

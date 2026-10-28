@@ -307,7 +307,9 @@ function* parseNamedMedia(
  */
 function* parseMediaHandlers(parser: Parser): ParseTask<MediaHandlers | null | false> {
   if (!parser.check(TokenKind.LeftBrace)) return null;
-  return yield* parseChild(parser.asStatements(parseMediaHandlerBlock(parser)));
+  return yield* parseChild(
+    parser.asStatements(parser.parseOnce("mediaBlock", parseMediaHandlerBlock(parser))),
+  );
 }
 
 function* parseMediaHandlerBlock(parser: Parser): ParseTask<MediaHandlers | false> {
