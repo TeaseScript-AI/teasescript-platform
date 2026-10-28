@@ -439,8 +439,11 @@ export function argumentFix(parameter: TextParameter, kind: ArgumentKind): strin
       ? " Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...)."
       : "";
   if (takesText(parameter))
-    return kind !== null && kind !== "string" ? " Convert the value with the toString function." : "";
-  if (kind === "number") return " Convert the number with the toInteger function, which drops the fraction.";
+    return kind !== null && kind !== "string"
+      ? " Convert the value with the toString function."
+      : "";
+  if (kind === "number")
+    return " Convert the number with the toInteger function, which drops the fraction.";
   return kind === "string" ? " Convert the text with the toInteger function." : "";
 }
 
