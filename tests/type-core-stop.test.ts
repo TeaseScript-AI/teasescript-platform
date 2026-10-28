@@ -1221,29 +1221,48 @@ test("the named exception for #1216 stands at its counted stops", () => {
 
 /**
  * The derivation inventory (TABLE r4.138): every method of `Admission` that creates an obligation is in
- * `OBLIGATION_SITES`, with its exits after a stop before admission settled, and the fresh pass runs each where the list
- * says (`Consumers.#freshStores`, or its walk). A method that comes to create one fails here until it is listed.
+ * `OBLIGATION_SITES`, and so is each method whose answer a consumer method turns into one (`decide`, whose C1 the
+ * consumers check); and the fresh pass calls each listed derivation where the list says (`Consumers.#freshStores`, its
+ * comments left out, or its walk). A method that comes to create one, or a call the fresh pass drops, fails here.
  */
 test("every admission derivation that creates an obligation is in the inventory the fresh pass runs", () => {
   const source = (file: string): string =>
     readFileSync(new URL(`../../src/type-inference/core/${file}`, import.meta.url), "utf8");
+  // each class method's lines, comments left out
+  const methods = (file: string): Map<string, string> => {
+    const out = new Map<string, string>();
+    let method: string | null = null;
+    for (const line of source(file).split("\n")) {
+      const header = /^ {2}(?:public |private |static )*(#?\w+)(?:<[^>]*>)?\(/.exec(line);
+      if (header !== null) method = header[1]!;
+      const code = line.replace(/\/\/.*$/, "").trim();
+      if (method === null || line.startsWith("function ") || code.startsWith("*") || code === "")
+        continue;
+      out.set(method, `${out.get(method) ?? ""}\n${code}`);
+    }
+    return out;
+  };
+  const admission = methods("admission.ts");
+  const consumers = methods("consumers.ts");
   const creating = new Set<string>();
-  let method: string | null = null;
-  for (const line of source("admission.ts").split("\n")) {
-    const header = /^ {2}(?:public |private |static )*(#?\w+)(?:<[^>]*>)?\(/.exec(line);
-    if (header !== null) method = header[1]!;
-    if (line.trimStart().startsWith("//") || line.startsWith("function ")) continue;
-    if (method !== null && /boundaryCheck\(|readChecks\.push\(|^\s+error\(/.test(line))
-      creating.add(method);
-  }
+  for (const [method, body] of admission)
+    if (/boundaryCheck\(|readChecks\.push\(|^error\(/m.test(body)) creating.add(method);
+  // (an answer the consumers turn into an obligation: the methods of theirs that create one and ask admission)
+  for (const body of consumers.values())
+    if (/#storeWarning\(|#error\(/.test(body))
+      for (const [, asked] of body.matchAll(/admission\.(decide)\(|#(decide)\(/g))
+        creating.add(asked ?? "decide");
   const listed = new Set<string>(OBLIGATION_SITES.map((site) => site.method));
   assert.deepEqual(
     [...creating].filter((found) => !listed.has(found)),
     [],
   );
-  assert.ok(creating.size >= 5, [...creating].join(", "));
-  const fresh =
-    /#freshStores\(\): void \{([\s\S]*?)\n {2}\}/.exec(source("consumers.ts"))?.[1] ?? "";
+  assert.deepEqual(
+    [...listed].filter((name) => !creating.has(name)),
+    [],
+  );
+  const fresh = consumers.get("#freshStores") ?? "";
   for (const site of OBLIGATION_SITES)
-    if (site.runs !== "the walk") assert.ok(fresh.includes(site.runs), site.runs);
+    if (site.runs !== "the walk")
+      assert.match(fresh, new RegExp(`(?:\\.|#)${site.runs.replace("#", "")}\\(`), site.runs);
 });
