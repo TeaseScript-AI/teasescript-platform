@@ -111,19 +111,19 @@ function recordOf(code: string, site: Span): string {
 
 /**
  * What to leave out of a compile (`StopRun.without`): the warnings and marks with the records `records` names (each
- * `code start:end`), and the boundary checks at the sites `boundaries` names (each `start:end`), with its key.
+ * `code start:end`), and the boundary checks within `spans`, with its key.
  */
 function omission(
   records: ReadonlySet<string>,
-  boundaries: ReadonlySet<string> = new Set(),
+  spans: readonly Span[] = [],
 ): readonly [Omission, string] {
   return [
     {
       diagnostic: (d: CoreDiagnostic) => records.has(recordOf(d.code, d.site)),
       check: (check: Obligation) =>
-        check.boundary && boundaries.has(`${check.site.start}:${check.site.end}`),
+        check.boundary && spans.some((span) => within(check.site, span)),
     },
-    `${[...records].sort().join("|")}#${[...boundaries].sort().join("|")}`,
+    `${[...records].sort().join("|")}#${spans.map((span) => `${span.start}:${span.end}`).join("|")}`,
   ];
 }
 
@@ -149,14 +149,15 @@ function within(inner: Span, outer: Span): boolean {
 }
 
 /**
- * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108, r4.109), none at a
- * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else. The diagnostics and
- * the checks are compared in their published order (r4.86 (1)) besides those records and the stop's own warning. The
- * plans are compared whole; a difference stands only inside the plan content of a mark whose obligation is not the
- * unstopped one at its code and site (one that is owes the same check): the content that leaving it, and the unstopped
- * warning with its code and site, out of each compile's discharge removes. The fitting runs are unchanged; a violating
- * run differs only where the run that stops first fails in a node holding such content. C5's error at a literal moves
- * to its store's mark only where admission had not settled, its receiver's shape undecided (r4.108 (2)).
+ * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108–r4.111), none at a
+ * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
+ * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
+ * brought, and C5's error at a literal for the mark of the store that owes it. The diagnostics and the checks are
+ * compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
+ * own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose obligation
+ * is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's records: the
+ * content that leaving them out of each compile's analysis and discharge removes. The fitting runs are unchanged; a
+ * violating run differs only where the run that stops first fails in a node holding such content.
  */
 export function stopProblems(c: StopCase): string[] {
   const { unstopped, stopped } = c;
@@ -172,18 +173,40 @@ export function stopProblems(c: StopCase): string[] {
       if (a !== b) problems.push(`fitting ${b} against ${a}`);
     });
   const excused = new Set(marks.map((mark) => recordOf(mark.code, mark.site)));
-  // (before admission settled, a receiver's shape is undecided: C5's error at the literal may stand as the mark of the
-  // store that owes it, r4.108 (2))
+  // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
+  // records within its value and for the errors it brought (r4.111), and C5's error at a literal may stand as the mark
+  // of the store that owes it, its receiver's shape undecided (r4.108 (2))
+  const stores = stopped.answers.budget.settled
+    ? []
+    : marks
+        .filter(
+          (mark) =>
+            mark.rule.rule === "store" &&
+            mark.obligation.against.length === 1 &&
+            mark.obligation.against[0] === "unknown",
+        )
+        .map((mark) => mark.site);
+  const ofStore = (site: Span): boolean => stores.some((span) => within(site, span));
+  const storeRecords = new Set<string>();
   if (!stopped.answers.budget.settled)
-    for (const d of unstopped.answers.diagnostics)
+    for (const d of unstopped.answers.diagnostics) {
+      if (!("rule" in d)) continue;
+      const { rule } = d;
       if (
-        d.class === "compile-error" &&
-        "rule" in d &&
-        d.rule.rule === "absent" &&
-        d.rule.store !== null &&
-        excused.has(recordOf(d.code, d.rule.store))
+        ofStore(d.site) ||
+        (rule.rule === "store" &&
+          rule.brought !== null &&
+          stores.some(
+            (span) => span.start === rule.brought!.start && span.end === rule.brought!.end,
+          )) ||
+        (d.class === "compile-error" &&
+          rule.rule === "absent" &&
+          rule.store !== null &&
+          excused.has(recordOf(d.code, rule.store)))
       )
-        excused.add(recordOf(d.code, d.site));
+        storeRecords.add(recordOf(d.code, d.site));
+    }
+  for (const record of storeRecords) excused.add(record);
   // the diagnostics, in their published order
   const shown = (each: StopRun): string[] =>
     each.result.diagnostics
@@ -194,30 +217,16 @@ export function stopProblems(c: StopCase): string[] {
   const [before, after] = [shown(unstopped), shown(stopped)];
   if (JSON.stringify(before) !== JSON.stringify(after))
     problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
-  // the checks, in their published order: an unstopped one a mark's record owns, or the boundary of a store a stop
-  // before admission settled marks (r4.110 (3)); a stopped one a mark's record owns, or one that forms only with the
-  // marks, their content (r4.110 (a): the stopped analysis without them lacks it)
+  // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
+  // stopped one a mark's record owns, or one that forms only with the marks, their content (r4.110 (a): the stopped
+  // analysis without them lacks it)
   const marked = new Set<Obligation>(
     [...unstopped.answers.diagnostics, ...stopped.answers.diagnostics, ...marks].flatMap((d) =>
       "obligation" in d && excused.has(recordOf(d.code, d.site)) ? [d.obligation] : [],
     ),
   );
-  const storeSites = new Set(
-    marks
-      .filter(
-        (mark) =>
-          mark.rule.rule === "store" &&
-          mark.obligation.against.length === 1 &&
-          mark.obligation.against[0] === "unknown",
-      )
-      .map((mark) => `${mark.site.start}:${mark.site.end}`),
-  );
   const owed = unstopped.answers.checks
-    .filter(
-      (check) =>
-        !marked.has(check) &&
-        !(check.boundary && storeSites.has(`${check.site.start}:${check.site.end}`)),
-    )
+    .filter((check) => !marked.has(check) && !ofStore(check.site))
     .map((check) => JSON.stringify(check));
   let kept = stopped.answers.checks
     .filter((check) => !marked.has(check))
@@ -260,7 +269,7 @@ export function stopProblems(c: StopCase): string[] {
     const own = (each: StopRun): PlanDifference[] =>
       planDifferences(
         each.without(...omission(new Set())).result.plan,
-        each.without(...omission(changing, storeSites)).result.plan,
+        each.without(...omission(new Set([...changing, ...storeRecords]), stores)).result.plan,
       );
     content.push(...own(unstopped), ...own(stopped));
   }
@@ -326,16 +335,3 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     count: 802,
   },
 ];
-
-/** A stop's problems in `source` that are no named exception, and the named exceptions it shows. */
-export function namedExceptions(
-  source: string,
-  problems: readonly string[],
-): { readonly rest: readonly string[]; readonly named: readonly NamedException[] } {
-  const known = NAMED_EXCEPTIONS.filter((exception) => exception.source === source);
-  const named = known.filter((exception) => exception.problems.some((p) => problems.includes(p)));
-  return {
-    rest: problems.filter((problem) => !named.some((n) => n.problems.includes(problem))),
-    named,
-  };
-}

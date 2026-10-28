@@ -6065,7 +6065,9 @@ export class Admission {
     // an operation's own read is an own read wherever it stands (C10): one no walk reached is its own landing, the
     // outermost first, so a nested own read its enclosing one's walk reaches is walked once (not for some stores' stops)
     const owns: { readonly operand: PlaceId; readonly site: SourceSite }[] = [];
-    for (const carrier of keep === undefined ? [...program.projOf.keys(), ...program.opOf.keys()] : [])
+    for (const carrier of keep === undefined
+      ? [...program.projOf.keys(), ...program.opOf.keys()]
+      : [])
       for (const { operand, own } of operandsOf(program, carrier)) {
         program.work.charge("indexSteps");
         const site = own ? program.places[operand]?.site : null;

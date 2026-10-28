@@ -773,6 +773,76 @@ test("a stop before admission settled marks the stores into inferred places and 
 });
 
 /**
+ * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
+ * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
+ * inside a typed default, and a copy's error reported where it is read. Each rule only so far: the mark narrowed off
+ * the record, or the error's store moved elsewhere, and the oracle reports the record.
+ */
+test("a store a stop before admission settled marks stands for its records within its value and the errors it brought", () => {
+  const inner =
+    'let a = {inner: {n: 1, title: "ok"}}\nlet b = a\nb = {inner: hostValue}\nsay b.inner.n\nsay b.inner.title\nexit\n';
+  const copied =
+    'let good = {n:1}\nlet bad = {n:"x"}\nlet copy = good\ncopy = bad\nsay copy.n\nlet n: integer = hostValue\nexit\n';
+  const typed =
+    'let value = fromJson(hostValue, default: {list: [{n: fromJson("3", default: 0), open: null}]})\nsay value.list.get(0, default: {n: 0, open: null}).n\nsay "DONE"\nexit\n';
+  const problems = (
+    unstopped: StopRun,
+    stopped: StopRun,
+    fitting: readonly Globals[] = [],
+    violating: readonly Globals[] = [],
+  ) => stopProblems({ unstopped, stopped, fitting, violating });
+  const fields = (n: SerializableRuntimeValue) => host(object({ n, title: "yes" }), 3);
+  for (const [source, fitting, violating] of [
+    [inner, [fields(2)], [fields(1.5)]],
+    [copied, [], []],
+    [typed, [], []],
+  ] as const) {
+    const stopped = stopRun(source, ALLOWANCE);
+    assert.equal(stopped.answers.budget.settled, false, source);
+    assert.deepEqual(problems(stopRun(source), stopped, fitting, violating), [], source);
+  }
+  // the store's mark narrowed to its first character: the C1 warning inside its value is no longer its record
+  const literal = inner.indexOf("{inner: hostValue}");
+  const stopped = stopRun(inner, ALLOWANCE);
+  const narrowed: StopRun = {
+    ...stopped,
+    answers: {
+      ...stopped.answers,
+      budget: {
+        ...stopped.answers.budget,
+        deferred: stopped.answers.budget.deferred.map((d) =>
+          d.site.start === literal ? { ...d, site: { ...d.site, end: literal + 1 } } : d,
+        ),
+      },
+    },
+  };
+  assert.notDeepEqual(problems(stopRun(inner), narrowed), []);
+  // the copy's error brought by another store than the marked one
+  const unstopped = stopRun(copied);
+  const elsewhere: StopRun = {
+    ...unstopped,
+    answers: {
+      ...unstopped.answers,
+      diagnostics: unstopped.answers.diagnostics.map((d) =>
+        d.class === "compile-error" && "rule" in d && d.rule.rule === "store"
+          ? { ...d, rule: { ...d.rule, brought: { file: 0, start: 0, end: 3 } } }
+          : d,
+      ),
+    },
+  };
+  assert.ok(
+    unstopped.answers.diagnostics.some(
+      (d) =>
+        d.class === "compile-error" &&
+        "rule" in d &&
+        d.rule.rule === "store" &&
+        d.rule.brought !== null,
+    ),
+  );
+  assert.notDeepEqual(problems(elsewhere, stopRun(copied, ALLOWANCE)), []);
+});
+
+/**
  * The oracle's named exception for #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of
  * `state.ticks`, read by its key's contract that lost the ingress origin; counted at every stop of the settled phases in
  * the analysis's own order, the test fails where the count moves (the exception goes when #1216 lands).
