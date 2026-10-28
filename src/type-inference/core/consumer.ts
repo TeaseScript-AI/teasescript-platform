@@ -650,8 +650,15 @@ function runtimeChecks(
     if (type !== null)
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
+  // (a boundary carries the kinds it was retained with through the discharge, never derived again: TABLE r4.138)
   for (const check of answers.checks)
-    if (check.boundary && !leftOutCheck(check)) owed.push({ obligation: check, kinds: null });
+    if (check.boundary && !leftOutCheck(check))
+      owed.push({
+        obligation: check,
+        kinds: check.against.filter(
+          (kind): kind is Exclude<typeof kind, "non-null"> => kind !== "non-null",
+        ),
+      });
   // the types a typed load and a `fromJson` read their value as (F18)
   const typed = new Set<Expression>();
   for (const load of index.loads) {
