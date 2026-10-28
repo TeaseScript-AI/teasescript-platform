@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
@@ -7,7 +6,6 @@ import { compileSourceWithBackend } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
-import { OBLIGATION_SITES } from "../src/type-inference/core/admission.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
@@ -1217,52 +1215,4 @@ test("the named exception for #1216 stands at its counted stops", () => {
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, exception.settled);
-});
-
-/**
- * The derivation inventory (TABLE r4.138): every method of `Admission` that creates an obligation is in
- * `OBLIGATION_SITES`, and so is each method whose answer a consumer method turns into one (`decide`, whose C1 the
- * consumers check); and the fresh pass calls each listed derivation where the list says (`Consumers.#freshStores`, its
- * comments left out, or its walk). A method that comes to create one, or a call the fresh pass drops, fails here.
- */
-test("every admission derivation that creates an obligation is in the inventory the fresh pass runs", () => {
-  const source = (file: string): string =>
-    readFileSync(new URL(`../../src/type-inference/core/${file}`, import.meta.url), "utf8");
-  // each class method's lines, comments left out
-  const methods = (file: string): Map<string, string> => {
-    const out = new Map<string, string>();
-    let method: string | null = null;
-    for (const line of source(file).split("\n")) {
-      const header = /^ {2}(?:public |private |static )*(#?\w+)(?:<[^>]*>)?\(/.exec(line);
-      if (header !== null) method = header[1]!;
-      const code = line.replace(/\/\/.*$/, "").trim();
-      if (method === null || line.startsWith("function ") || code.startsWith("*") || code === "")
-        continue;
-      out.set(method, `${out.get(method) ?? ""}\n${code}`);
-    }
-    return out;
-  };
-  const admission = methods("admission.ts");
-  const consumers = methods("consumers.ts");
-  const creating = new Set<string>();
-  for (const [method, body] of admission)
-    if (/boundaryCheck\(|readChecks\.push\(|^error\(/m.test(body)) creating.add(method);
-  // (an answer the consumers turn into an obligation: the methods of theirs that create one and ask admission)
-  for (const body of consumers.values())
-    if (/#storeWarning\(|#error\(/.test(body))
-      for (const [, asked] of body.matchAll(/admission\.(decide)\(|#(decide)\(/g))
-        creating.add(asked ?? "decide");
-  const listed = new Set<string>(OBLIGATION_SITES.map((site) => site.method));
-  assert.deepEqual(
-    [...creating].filter((found) => !listed.has(found)),
-    [],
-  );
-  assert.deepEqual(
-    [...listed].filter((name) => !creating.has(name)),
-    [],
-  );
-  const fresh = consumers.get("#freshStores") ?? "";
-  for (const site of OBLIGATION_SITES)
-    if (site.runs !== "the walk")
-      assert.match(fresh, new RegExp(`(?:\\.|#)${site.runs.replace("#", "")}\\(`), site.runs);
 });

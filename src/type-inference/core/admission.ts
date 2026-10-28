@@ -6797,8 +6797,11 @@ function boundaryCheck(
  * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled
  * (TABLE r4.126, r4.138): where the fresh pass runs it (`Consumers.#freshStores`, or its walk, which finishes every
  * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A C1 obligation
- * comes from a decision (`decide`), which the consumers check. `type-core-stop`'s inventory test finds every method of
- * `Admission` that creates an obligation in this file and fails where one is missing here.
+ * comes from a decision (`decide`), which the consumers check. The lint check `check-obligation-inventory` reads the
+ * syntax tree: every method here that creates one, and every `Admission` method a consumer method that creates one
+ * calls, is an entry here or a read it lists with why (TABLE r4.143).
+ *
+ * @public (read by that check from the syntax tree, not imported)
  */
 export const OBLIGATION_SITES = [
   {
