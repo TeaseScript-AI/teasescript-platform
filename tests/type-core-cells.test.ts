@@ -3484,6 +3484,42 @@ test("A2's witnesses: whole copies err where they meet the place or the list, re
         `compile-error written-target 'c.${read}' related '${second}'`,
       ]);
     }
+  // Codex r2's six permutations (#1293): a ring of three whole copies, two members starting with one object and the
+  // third with another; the copy that first brings the third's type errs or is checked where it meets its member
+  const objects = { good: "{n:1}", bad: '{n:"x"}', flag: "{n:true}" } as const;
+  for (const first of ["good", "bad", "flag"] as const)
+    for (const other of ["good", "bad", "flag"] as const) {
+      if (first === other) continue;
+      const ring =
+        `let good=${objects.good}\nlet bad=${objects.bad}\nlet flag=${objects.flag}\n` +
+        `let a2=${other}\nlet a0=${first}\nlet a1=${other}\na2=a0\na1=a2\na0=a1\nexit`;
+      expect(`a ring of ${other}, ${first} and ${other}`, ring, [
+        "compile-error",
+        "check copy-type a2.n 'a0'",
+        "compile-error written-target 'a2'",
+        "warning-runtime-check written-target 'a0'",
+      ]);
+    }
+  // Codex r3's B4 and the second store of the same object (#1293): a ring of three copies fed an object of three
+  // properties, each relay then taking an empty object, or the same object again, and the first member another of
+  // three other-typed properties; one error per property where it meets the first member (the same-object relays are
+  // asked there too: a known cost, G5, #1339)
+  const fields = (value: string): string => `p0:${value},p1:${value},p2:${value}`;
+  for (const [axis, second] of [
+    ["an empty object", "{}"],
+    ["the same object", "good"],
+  ] as const)
+    expect(
+      `a fed ring whose relays each also take ${axis}`,
+      `let good={${fields("1")}}\nlet bad={${fields('"x"')}}\nlet a0=good\nlet a1=a0\nlet a2=a1\na0=a2\n` +
+        `a1=${second}\na2=${second}\na0=bad\nexit`,
+      [
+        "compile-error",
+        "compile-error written-target 'bad'",
+        "compile-error written-target 'bad'",
+        "compile-error written-target 'bad'",
+      ],
+    );
   // a written `object?` place holds any object, its properties unchecked, inline or copied (A1)
   expect(
     "a written object? place",
@@ -3512,6 +3548,22 @@ test("the copied-property check grows with the program, not with its copies time
     Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
   const copies = (k: number, copy: string): string =>
     Array.from({ length: k }, () => copy).join(", ");
+  // a ring of k whole copies fed the first record, each relay's second store after it closes, then the other record at
+  // its first member; and a ring whose steps each pass a chain of `length` copies (r3's axes, #1293)
+  const ring = (k: number, second: (i: number) => string): string =>
+    `${records(k)}let a0 = good\n` +
+    `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\na0 = a${k - 1}\n` +
+    `${Array.from({ length: k - 1 }, (_, i) => second(i + 1)).join("\n")}\na0 = bad\nexit`;
+  const chained = (k: number, length: number): string =>
+    `${records(k)}let a0 = good\n` +
+    Array.from({ length: k - 1 }, (_, i) =>
+      Array.from({ length }, (_, step) =>
+        step === length - 1
+          ? `let a${i + 1} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`
+          : `let c${i}_${step} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`,
+      ).join("\n"),
+    ).join("\n") +
+    `\na0 = a${k - 1}\na0 = bad\nexit`;
   const shapes: readonly (readonly [string, (k: number) => string])[] = [
     [
       "elements",
@@ -3587,6 +3639,9 @@ test("the copied-property check grows with the program, not with its copies time
         `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
         `a0 = a${k - 1}\na${k - 1} = {${fields(k, "2")}}\nexit`,
     ],
+    // rings through chains of two and of three copies, their relays of one store each (r3's axes, #1293)
+    ["a fed ring through chains of two copies", (k) => chained(k, 2)],
+    ["a fed ring through chains of three copies", (k) => chained(k, 3)],
     [
       "property cycles beside self-grafts",
       (k) =>
@@ -3642,6 +3697,46 @@ test("the copied-property check grows with the program, not with its copies time
           doubling(small.get(counter) ?? 0, after) > 2.35
         )
           steep.push(`${label} ${counter}: ${doubling(small.get(counter) ?? 0, after).toFixed(3)}`);
+    }
+  // the fed ring's relays each also taking an empty object (r3's B4) or a conflicting object of one property (r3's axes,
+  // #1293): A2's own work, the candidates it lists and its index, grows with the program; what its checks at the ring's
+  // members then ask of the value side is `main`'s ring cost (#1078, #1339: the G5 design round), so not the total. The
+  // second store of the same object is a known cost too (G5), its record in the witnesses above
+  for (const [name, second, count] of [
+    ["an empty object", "{}", (k: number) => k],
+    ["a conflicting object of one property", '{f0: "x"}', (k: number) => 2 * k - 1],
+  ] as const)
+    for (const reversed of [false, true]) {
+      const counted = (k: number): ReadonlyMap<string, number> => {
+        const request = coreRequest([
+          { path: "main.tease", source: ring(k, (i) => `a${i} = ${second}`) },
+        ]);
+        assert.ok(request !== null, name);
+        const answers = reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder(
+                (list) => [...list].reverse(),
+                () => analyseCore(request),
+              ),
+            )
+          : analyseCore(request);
+        assert.equal(
+          answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
+          count(k),
+          name,
+        );
+        return answers.budget.counts;
+      };
+      const [small, large] = [counted(16), counted(32)];
+      const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
+      for (const counter of ["eligibility", "indexSteps"]) {
+        const doubling =
+          (2 * ((large.get(counter) ?? 0) / Math.max(1, small.get(counter) ?? 0))) / scale;
+        if (doubling > 2.35)
+          steep.push(
+            `relays with ${name}${reversed ? " reversed" : ""} ${counter}: ${doubling.toFixed(3)}`,
+          );
+      }
     }
   assert.deepEqual(steep, []);
 });

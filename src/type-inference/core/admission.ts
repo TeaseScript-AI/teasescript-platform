@@ -6,6 +6,7 @@ import {
   joinSteps,
   keep,
   keepText,
+  keptArray,
   keptParts,
   keptSplit,
   keptSlice,
@@ -1099,11 +1100,10 @@ export class Admission {
   readonly #helds = new Map<PlaceId, Touch | null>();
   /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
   readonly #atCopies = new Set<Key>();
-  /** Each live group of several members and the paths where its parts meet (`#finishHeld`, read by `groups`). */
-  readonly #groupMeetings: {
-    readonly members: readonly PlaceId[];
-    readonly paths: readonly (readonly string[])[];
-  }[] = [];
+  /** The keys a member of a live group owes where the group's contributions meet (`#finishHeld`, read by `groups`). */
+  readonly #groupMeetings: Key[] = [];
+  /** Each place's live stores, each with its own points and reads (`#liveOwn`), for a live group's members. */
+  readonly #liveStores = new Map<PlaceId, readonly OwnStructure[]>();
   /** The places with definitions, every one of them dead in this pass (`#liveOwn`). */
   readonly #deadOnly = new Set<PlaceId>();
   readonly #touchLandings = new Map<PlaceId, Touch | null>();
@@ -1833,19 +1833,13 @@ export class Admission {
           tracked.add(key);
           this.#atCopies.add(key);
         }
-    // (and where a live group's parts meet: each member holds them all, so a member with two stores or more, one of
-    // which may bring the other type, is checked there, a member with one store having nothing to check; the groups the
-    // discovery above made, so every order of the consumers sees the same)
-    for (const { members, paths } of this.#groupMeetings)
-      for (const member of members) {
-        work.charge("indexSteps");
-        if ((byPlace.get(member)?.length ?? 0) < 2) continue;
-        for (const path of paths) {
-          const key = keptKey(this.#work, member, path);
-          tracked.add(key);
-          this.#atCopies.add(key);
-        }
-      }
+    // (and where a live group's members owe its meetings, `#finishHeld`; the groups the discovery above made, so every
+    // order of the consumers sees the same)
+    for (const key of this.#groupMeetings) {
+      work.charge("indexSteps");
+      tracked.add(key);
+      this.#atCopies.add(key);
+    }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
     // consumer reads the place or not (the owner's F1): its landings' contribution paths (§3.2)
     for (const [d, stops] of this.#landingIndex().byStore)
@@ -4815,6 +4809,8 @@ export class Admission {
     const points: (readonly string[])[] = [];
     const below: (readonly string[])[] = [];
     const reads: { readonly at: readonly string[]; readonly source: Key }[] = [];
+    // (each live store's own slice of them, A2's stores of a live group's member, `#finishHeld`)
+    const stores: OwnStructure[] = [];
     const root = keyOf(place, []);
     let live = false;
     let dead = false;
@@ -4826,24 +4822,32 @@ export class Admission {
           continue;
         }
         live = true;
+        const [fromPoints, fromBelow, fromReads] = [points.length, below.length, reads.length];
         if (d.kind === "const") {
           points.push(d.path);
         }
-        if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
-        const base =
-          d.kind === "add" && d.how !== "elements"
-            ? keptSteps(this.#work, d.path, ["element"])
-            : d.path;
-        this.#ownOf(
-          d,
-          d.value,
-          base,
-          copies,
-          { points, below, reads },
-          undefined,
-          this.#deadCells(d.value),
-        );
+        if ((d.kind === "whole" || d.kind === "add") && d.value !== undefined) {
+          const base =
+            d.kind === "add" && d.how !== "elements"
+              ? keptSteps(this.#work, d.path, ["element"])
+              : d.path;
+          this.#ownOf(
+            d,
+            d.value,
+            base,
+            copies,
+            { points, below, reads },
+            undefined,
+            this.#deadCells(d.value),
+          );
+        }
+        stores.push({
+          points: keptArray(this.#work, points.slice(fromPoints)),
+          below: keptArray(this.#work, below.slice(fromBelow)),
+          reads: keptArray(this.#work, reads.slice(fromReads)),
+        });
       }
+    this.#liveStores.set(place, stores);
     const found =
       points.length === 0 && below.length === 0 && reads.length === 0
         ? null
@@ -4901,8 +4905,8 @@ export class Admission {
    * The held tries of a component of the places live stores read (A2, TABLE r4.131 and r4.154: design §2.1.2 as
    * accepted). Its members that hold each other through whole copies (a place read whole into a place) form live
    * groups, the strongly connected components of those copies: each group one trie, its members' own points and what
-   * their reads bring from outside the group, sources first; where those meet, each member with two stores or more is
-   * checked (`#groupMeetings`). Every other read is by reference, its source's held trie at its path where it stands. A
+   * their reads bring from outside the group, sources first; where those meet, a member owes what its own contribution
+   * brings there (`#groupHeld`). Every other read is by reference, its source's held trie at its path where it stands. A
    * read within the component that adds or takes steps (`a.inner = a`, `a = b.right`) closes a cycle outside that class
    * and brings nothing definite: what reaches a place only through it is found where it is read.
    */
@@ -4931,41 +4935,125 @@ export class Admission {
       }
     }
     // (the live groups, sources first: a whole copy from an earlier group brings its trie by reference)
+    const fold = (parts: Touch[], heard?: (found: Found) => void): Touch | null => {
+      work.charge("indexSteps", parts.length + sortCost(parts.length));
+      parts.sort((a, b) => b.size - a.size || a.id - b.id);
+      let node: Touch | null = null;
+      for (const part of parts) {
+        const merged = touches.merge(node, part, "copies");
+        node = merged.node;
+        heard?.(merged.found);
+      }
+      return node;
+    };
     for (const group of keyComponents(
       members.map((_, at) => at),
       (at) => copies[at]!,
       () => work.charge("indexSteps"),
     )) {
       const inside = new Set(group);
-      const parts: Touch[] = [];
-      for (const at of group) {
-        for (const part of own[at]!) parts.push(part);
+      let held: Touch | null;
+      if (group.length === 1) {
+        const at = group[0]!;
+        const parts = [...own[at]!];
         for (const from of copies[at]!) {
-          const held = inside.has(from) ? null : this.#helds.get(members[from]!);
-          if (held !== null && held !== undefined) parts.push(held);
+          const earlier = from === at ? undefined : this.#helds.get(members[from]!);
+          if (earlier !== null && earlier !== undefined) parts.push(earlier);
         }
-      }
-      work.charge("indexSteps", parts.length + sortCost(parts.length));
-      parts.sort((a, b) => b.size - a.size || a.id - b.id);
-      // (where its parts meet, a group of several members holds them in each: the paths, once per group, `groups`)
-      const met = new Map<string, readonly string[]>();
-      let held: Touch | null = null;
-      for (const part of parts) {
-        const merged = touches.merge(held, part, "copies");
-        held = merged.node;
-        if (group.length < 2) continue;
-        const paths: (readonly string[])[] = [];
-        touches.paths(merged.found, [], paths);
-        for (const path of paths) if (path.length > 0) met.set(keptText(this.#work, path), path);
-      }
-      if (met.size > 0)
-        this.#groupMeetings.push({
-          members: group.map((at) => members[at]!),
-          paths: [...met.values()],
-        });
+        held = fold(parts);
+      } else
+        held = this.#groupHeld(
+          group.map((at) => members[at]!),
+          inside,
+          index,
+          members,
+          fold,
+        );
       touches.share(held);
       for (const at of group) this.#helds.set(members[at]!, held);
     }
+  }
+
+  /**
+   * A live group's held trie, its members' own contributions merged, and what each member owes where they meet (A2,
+   * `#groupMeetings`). A store's own contribution is what it brings itself, its own points and its reads from outside
+   * the group (a whole copy from an earlier group by reference), or, for a whole copy of a member of the group, that
+   * member's own contribution. A member owes a meeting path where one of its stores' own contribution stands, beside a
+   * whole copy of a member (which brings what the group holds there, another kind): its own conflicting contribution,
+   * one decision for a ring fed at its members and for a relay of two members' copies. A member whose stores bring
+   * nothing there (a relay of relays, an empty object) owes nothing, and one store alone has nothing to meet. Each
+   * contribution is asked once against the group's meetings (`Touches.standsAt`), so the work follows the
+   * contributions, never a member for every path.
+   */
+  #groupHeld(
+    group: readonly PlaceId[],
+    inside: ReadonlySet<number>,
+    index: ReadonlyMap<PlaceId, number>,
+    members: readonly PlaceId[],
+    fold: (parts: Touch[], heard?: (found: Found) => void) => Touch | null,
+  ): Touch | null {
+    const touches = this.#touchesOf();
+    const work = this.pass.program.work;
+    // (each member's stores: a whole copy of a member of the group by that member, else its own contribution)
+    const stores = group.map((member) =>
+      (this.#liveStores.get(member) ?? []).map((store) => {
+        let copyOf: PlaceId | null = null;
+        const parts: Touch[] = [];
+        for (const path of store.points) {
+          work.charge("indexSteps");
+          parts.push(touches.leaf(path, [this.#touchRef(member, path, false)]));
+        }
+        for (const { at: where, source } of store.reads) {
+          work.charge("indexSteps");
+          const from = index.get(keyPlace(source));
+          const whole = where.length === 0 && keptPath(this.#work, source).length === 0;
+          if (from === undefined) {
+            const held = this.#heldRead(source, where);
+            if (held !== null) parts.push(held);
+          } else if (whole && inside.has(from)) copyOf = members[from]!;
+          else if (whole) {
+            const earlier = this.#helds.get(members[from]!);
+            if (earlier !== null && earlier !== undefined) parts.push(earlier);
+          }
+          // (a read within the component that adds or takes steps brings nothing definite, `#finishHeld`)
+        }
+        return { copyOf, own: fold(parts) };
+      }),
+    );
+    // (each member's own contribution, and the group's trie, with the paths where they meet: in a member's own stores
+    // or between members)
+    const meetings: { met: Found | null } = { met: null };
+    const heard = (found: Found): void => {
+      meetings.met = meetings.met === null ? found : touches.unite(meetings.met, found);
+    };
+    const owns = new Map<PlaceId, Touch | null>();
+    for (const [at, member] of group.entries())
+      owns.set(
+        member,
+        fold(
+          stores[at]!.flatMap(({ own }) => (own === null ? [] : [own])),
+          heard,
+        ),
+      );
+    const held = fold(
+      [...owns.values()].filter((own): own is Touch => own !== null),
+      heard,
+    );
+    const met = meetings.met;
+    if (met === null) return held;
+    // (what each member owes there)
+    for (const [at, member] of group.entries()) {
+      const copies = stores[at]!.filter(({ copyOf }) => copyOf !== null).length;
+      const owed: (readonly string[])[] = [];
+      for (const { copyOf, own } of stores[at]!) {
+        work.charge("indexSteps");
+        if (copies < (copyOf === null ? 1 : 2)) continue;
+        touches.paths(touches.standsAt(copyOf === null ? own : owns.get(copyOf)!, met), [], owed);
+      }
+      for (const path of owed)
+        if (path.length > 0) this.#groupMeetings.push(keptKey(this.#work, member, path));
+    }
+    return held;
   }
 
   /**

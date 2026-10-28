@@ -285,6 +285,7 @@ export class Touches {
   readonly #leaves = new Map<string, Touch>();
   readonly #memo = new Map<string, { readonly node: Touch | null; readonly found: Found }>();
   readonly #expanded = new Map<string, Found>();
+  readonly #standing = new Map<string, Found>();
   /** Per mode, whether a node or a branch holds a node `#expand` asks, at or below it (`#asksBelow`). */
   readonly #asking: Readonly<Record<TouchMode, WeakMap<Touch | Branch, boolean>>> = {
     meet: new WeakMap(),
@@ -1539,6 +1540,50 @@ export class Touches {
         mode === "meet" ? this.#unite(this.#unite(a.met, b.met), found) : this.#unite(a.met, b.met),
     });
     return { node, found };
+  }
+
+  /** The paths of both found tries, each once (`#unite`). */
+  public unite(a: Found, b: Found): Found {
+    return this.#unite(a, b);
+  }
+
+  /**
+   * The paths of `where` at which `node` stands (contributors at its node there), as a found trie: at each level the
+   * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once (A2:
+   * where a store's own contribution stands at a live group's meetings, `Admission.#groupHeld`).
+   */
+  public standsAt(node: Touch | null, where: Found): Found {
+    if (node === null || where === NONE) return NONE;
+    const key = keptParts(this.host.work, "s", node.id, where.id);
+    const known = this.#standing.get(key);
+    if (known !== undefined) {
+      this.#charge();
+      return known;
+    }
+    let out: Found = where.here && node.here ? HERE : NONE;
+    const take = (step: string, child: Touch, inner: Found): void => {
+      const below = this.standsAt(child, inner);
+      if (below !== NONE) out = this.#unite(out, this.#under(step, below));
+    };
+    if (countOf(node.branches) <= foundCount(where.branches)) {
+      const entries: [string, Touch][] = [];
+      this.#entries(node.branches, entries);
+      for (const [step, child] of entries) {
+        this.#charge(1 + Math.ceil(Math.log2(1 + foundCount(where.branches))));
+        const inner = this.#foundGet(where.branches, step);
+        if (inner !== undefined) take(step, child, inner);
+      }
+    } else {
+      const entries: [string, Found][] = [];
+      this.#foundEntries(where.branches, entries);
+      for (const [step, inner] of entries) {
+        this.#charge(this.#depth(node.branches));
+        const child = this.#get(node.branches, step);
+        if (child !== undefined) take(step, child, inner);
+      }
+    }
+    this.#standing.set(key, out);
+    return out;
   }
 
   /** The paths a found trie holds, each under `prefix`. */
