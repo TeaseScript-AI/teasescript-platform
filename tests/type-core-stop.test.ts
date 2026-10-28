@@ -1090,8 +1090,8 @@ test("a stop before admission settled checks a written store by admission's own 
 /**
  * Before admission settled, a literal whose element needs a decision admission did not make (here a copy of an inferred
  * place) is not compared for mixed elements: the store holding it is marked at its site, its type undecided, standing for
- * its records within its value (TABLE r4.126). At every stop before admission settled the mark stands and the oracle
- * finds nothing else.
+ * its records within its value (TABLE r4.126). At a stop in the setup and at the last before admission settled the
+ * mark stands.
  */
 test("a stop before admission settled marks the store of a literal whose element needs a decision", () => {
   const source =
@@ -1099,12 +1099,9 @@ test("a stop before admission settled marks the store of a literal whose element
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
   assert.ok(request !== null);
   const literal = source.indexOf("[base");
-  const unstopped = analyseCore(request);
-  let stops = 0;
-  for (let allowance = 1; allowance < unstopped.budget.total; allowance += 1) {
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
     const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
-    if (stopped.budget.settled) continue;
-    stops += 1;
+    assert.equal(stopped.budget.settled, false, `@${allowance}`);
     assert.ok(
       stopped.budget.deferred.some(
         (d) =>
@@ -1116,7 +1113,6 @@ test("a stop before admission settled marks the store of a literal whose element
       `@${allowance}`,
     );
   }
-  assert.ok(stops > 0);
 });
 
 /**
