@@ -675,23 +675,28 @@ export class Consumers {
   #storedAbove(place: PlaceId, path: readonly string[]): boolean {
     if (this.#hostStores === null) {
       const { program, definitions } = this.pass;
-      const stored = new Map<PlaceId, (readonly string[])[]>();
+      const stored = new Map<PlaceId, Definition[]>();
       for (const d of definitions.storeDefs) {
         program.work.charge("checks");
         if (!program.isHost(d.place)) continue;
-        const at = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
         const list = stored.get(d.place);
-        if (list === undefined) stored.set(d.place, [at]);
-        else list.push(at);
+        if (list === undefined) stored.set(d.place, [d]);
+        else list.push(d);
       }
       this.#hostStores = stored;
     }
-    return (this.#hostStores.get(place) ?? []).some(
-      (at) => at.length <= path.length && at.every((step, index) => path[index] === step),
-    );
+    // (an add stores at its path's element)
+    return (this.#hostStores.get(place) ?? []).some((d) => {
+      const length = d.path.length + (d.kind === "add" ? 1 : 0);
+      return (
+        length <= path.length &&
+        d.path.every((step, index) => path[index] === step) &&
+        (d.kind !== "add" || path[d.path.length] === "element")
+      );
+    });
   }
 
-  #hostStores: Map<PlaceId, (readonly string[])[]> | null = null;
+  #hostStores: Map<PlaceId, Definition[]> | null = null;
 
   #literalKind(value: PlaceId): readonly Item[] | null {
     const { program } = this.pass;
