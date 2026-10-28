@@ -1949,11 +1949,12 @@ test("an admission decision past its allowance stops: its key undecided, its rea
       const b = new CoreProgram(request).places.find(
         ({ kind }) => kind.kind === "binding" && kind.name === "b",
       )!.id;
-      // three quarters of `b`'s decision in the unbounded analysis in this order: far above `count`'s
+      // half of `b`'s decision in the unbounded analysis in this order, still far above `count`'s (the solver's steps
+      // decide where it stops: since A2, #1293, three quarters is crossed only after the last of them)
       const { decisions } = inOrder(() => analyseCore(request)).budget;
       const own = decisions.filter((d) => d.place === b && d.path.length === 0);
       assert.equal(own.length, 1);
-      const allowance = Math.floor(0.75 * own[0]!.units);
+      const allowance = Math.floor(0.5 * own[0]!.units);
       const where = `reversed: ${reversed}, count: ${count}`;
       const answers: Answers = withTestDemandAllowance(allowance, () =>
         inOrder(() => analyseCore(request)),
