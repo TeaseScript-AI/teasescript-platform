@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
@@ -169,6 +170,47 @@ test("filter refuses a pattern whose only matches are in a node_modules folder, 
     const both = filter("*/*.test.mjs");
     assert.equal(both.status, 0, both.stderr);
     assert.match(both.stdout, /ℹ tests 1/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the full suite runs every file once, each in its own process, with the costly files first", async () => {
+  // EVIDENCE: tools/costly-test-files.mjs exports `costlyTestFiles` as an array of file names, as the filter reads it.
+  const { costlyTestFiles } = (await import(
+    pathToFileURL(resolve(process.cwd(), "tools/costly-test-files.mjs")).href
+  )) as { costlyTestFiles: string[] };
+  const files = [...costlyTestFiles, "a.test.js", "z.test.js"];
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+  for (const file of files) {
+    // A file that ran in the process of another would find its mark.
+    writeFileSync(
+      resolve(directory, "dist/tests", file),
+      `const assert = require("node:assert/strict");
+       assert.equal(globalThis.testFile, undefined);
+       globalThis.testFile = ${JSON.stringify(file)};
+       require("node:test")(${JSON.stringify(file)}, () => {
+         ${file === "z.test.js" ? 'assert.fail("deliberate failure");' : ""}
+       });`,
+    );
+  }
+  try {
+    const result = spawnSync(process.execPath, [filterPath, "--full-output"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+
+    assert.equal(result.status, 1, result.stderr);
+    // Node reports the files in the order the runner starts them, whichever ends first.
+    const results = result.stdout.slice(0, result.stdout.indexOf("ℹ tests"));
+    assert.deepEqual(
+      [...results.matchAll(/^([✔✖] \S+) \(/gmu)].map((match) => match[1]),
+      files.map((file) => `${file === "z.test.js" ? "✖" : "✔"} ${file}`),
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

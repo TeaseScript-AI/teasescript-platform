@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { costlyTestFiles } from "./costly-test-files.mjs";
 
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 
@@ -12,12 +13,17 @@ function isPassingTestLine(line) {
 const arguments_ = process.argv.slice(2);
 const fullOutput = arguments_[0] === "--full-output";
 if (fullOutput) arguments_.shift();
-const testFiles =
-  arguments_.length > 0
-    ? arguments_
-    : readdirSync("dist/tests")
-        .filter((file) => file.endsWith(".test.js"))
-        .map((file) => join("dist/tests", file));
+const fullSuite = arguments_.length === 0;
+let testFiles = arguments_;
+if (fullSuite) {
+  const files = readdirSync("dist/tests")
+    .filter((file) => file.endsWith(".test.js"))
+    .sort();
+  testFiles = [
+    ...costlyTestFiles.filter((file) => files.includes(file)),
+    ...files.filter((file) => !costlyTestFiles.includes(file)),
+  ].map((file) => join("dist/tests", file));
+}
 
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
 // path beside a valid one would let a focused run pass without running its test. Its runner globs with the same
@@ -40,7 +46,12 @@ if (unmatched.length > 0) {
   process.exit(1);
 }
 
-const child = spawn(process.execPath, ["--test", "--test-reporter=spec", ...testFiles], {
+// Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
+// first: started late, one of them would run alone at the end.
+const nodeArguments = fullSuite
+  ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
+  : ["--test", "--test-reporter=spec", ...testFiles];
+const child = spawn(process.execPath, nodeArguments, {
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
 });
 
