@@ -672,6 +672,46 @@ const PRODUCTS: readonly (WorkFamily & {
     outcome: "warning-runtime-check",
     program: (k) => named(k, (i) => (i % 2 === 0 ? "hostValue" : "{f0: 1}")),
   },
+  {
+    name: "choice-own-objects",
+    measures:
+      "#1278: a choice's objects each holding its own property, which reads a value, read only where they may hold it",
+    counter: "invSteps",
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let n = 1",
+          many(k, (i) => `let p${i} = {f${i}: n}`),
+          `let options = [${many(k, (i) => `{text: "${i}", value: p${i}}`, ", ")}]`,
+          "let picked = askChoice options",
+          many(k, (i) => `repeat picked.f${i} {}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "choice-redefined-object",
+    measures:
+      "#1278: a choice's object read through a binding stored k objects, each added to its names once",
+    counter: "invSteps",
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let p = {f: 1}",
+          many(k - 1, (i) => `p = {f: ${i + 2}}`),
+          'let options = [{text: "a", value: p}, {text: "b", value: p}]',
+          "let picked = askChoice options",
+          "repeat picked.f {}",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
@@ -680,7 +720,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1304, #1307, #1313)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1304, #1307, #1313)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];

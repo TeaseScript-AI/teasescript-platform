@@ -310,6 +310,16 @@ interface Holder {
   readonly guarded: Set<string>;
   depth?: number;
   memo?: Map<string, boolean>;
+  /** #1278: the first steps of the paths its mark can depend on (`#markFirsts`), `null` for any. */
+  firsts?: ReadonlySet<string> | null;
+  /** #1278: per path it holds references at, those references by the first step their marks can depend on. */
+  byStep?: Map<string, ReferencesByStep>;
+}
+
+/** A holder's references at a path (`Contract.#marksAt`), by the first step each one's mark can depend on, or any. */
+interface ReferencesByStep {
+  readonly byStep: Map<string, HolderReference[]>;
+  readonly any: readonly HolderReference[];
 }
 
 /** A source's identity, with the guard bit and the mark holder beside it, never in it (§8 r4.15). */
@@ -638,9 +648,39 @@ interface StoredClass {
 type LiteralObject = NonNullable<ReturnType<LiteralIndex["objects"]["get"]>>["list"][number];
 
 /**
+ * #1278: a selection's objects on one side (`Contract.#selectionOf`): those it reads, in order, and by position those whose
+ * selected value may hold any property (`open`) and those that hold only their names (`closed`), with per property the
+ * names' sets that hold it and per set the positions of its objects (one set per source, shared by its reads); per
+ * property read below, the parts a read takes (`#selectionPieces`).
+ */
+interface Selection {
+  readonly objects: readonly LiteralObject[];
+  readonly open: readonly number[];
+  readonly closed: readonly number[];
+  readonly sets: ReadonlyMap<string, readonly ReadonlySet<string>[]>;
+  readonly holding: ReadonlyMap<ReadonlySet<string>, readonly number[]>;
+  /** Every object's position, the parts of a read that answers no property alike. */
+  readonly every: readonly number[];
+  readonly pieces: Map<string, readonly SelectionPiece[]>;
+}
+
+/** A part of a selection's answer (`#selectionPieces`): an object's position, or a run [lo, hi) of its closed objects. */
+type SelectionPiece = number | { readonly lo: number; readonly hi: number };
+
+/** A gather site of a literal's index (`Contract.#gatherCount`). */
+type IndexSite = Exclude<GatherSite, { readonly byValue: boolean }>;
+
+/**
+ * A property no source holds (`Contract.#selectionOf`): a quoted step that is no internal step's, so no identifier's
+ * (`propertyStep`).
+ */
+const ABSENT = "'absent";
+
+/**
  * A wide gather (`Contract.gathered`): on the value side a literal's exact entries, its copies past an element step or
- * its computed values' groups at a path (`deeper`: a path the read goes below), or a selection's objects there; on the
- * contract side its reads or its computed values' groups at a path (`reads`, `groups`).
+ * its computed values' groups at a path (`deeper`: a path the read goes below), or a selection's parts there; on the
+ * contract side its reads or its computed values' groups at a path (`reads`, `groups`); on either side a selection's
+ * closed objects, each read at `ABSENT` (`absent`).
  */
 export type GatherSite =
   | {
@@ -655,6 +695,14 @@ export type GatherSite =
       readonly path: string;
       readonly byValue: boolean;
       readonly below: boolean;
+    }
+  | {
+      readonly kind: "absent";
+      readonly literal: PlaceId;
+      readonly path: string;
+      readonly byValue: boolean;
+      readonly below: boolean;
+      readonly exact: boolean;
     };
 
 /** The kinds that may have a member an unknown receiver is asked for (A7 r4.10). */
@@ -723,6 +771,11 @@ export class Contract {
   readonly #indexing = new Set<PlaceId>();
   /** Per literal, path, selected key and depth, the objects a contract-side selection reads (`#selectionObjects`). */
   readonly #selections = new Map<string, readonly LiteralObject[]>();
+  /** Per literal, path, selected key, depth and side, its objects by their names (`#selectionOf`). */
+  readonly #selectionsOf = new Map<string, Selection>();
+  /** Per selected cell and per binding read there, the names it holds, or `null` (`#heldNames`). */
+  readonly #heldNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
+  readonly #bindingNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
   /** Per cell, the class of what it stores (`#storedClass`), and per class's text, its name. */
   readonly #storedClasses = new Map<PlaceId, StoredClass | null>();
   readonly #storedNames = new Map<string, string>();
@@ -4118,12 +4171,17 @@ export class Contract {
    * §3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
    * read at a prefix, the references standing at a prefix (each asked once, for the rest under its shift), its own
    * reads; a choice's selection step as the record key it reads. A walk on an explicit stack: a holder's ask waits on the
-   * references it asks.
+   * references it asks. #1278: a mark at a path cut by a property no source holds (`ABSENT`) holds at the path it cuts,
+   * and a reference whose mark depends on no path starting with the next step (`#markFirsts`; no test reads that step)
+   * answers as there: so the references at a path are asked by that step (`#referencesBy`) and, for the rest, the
+   * holder once at the path and `ABSENT`. k references asked below k different properties are asked once each, not
+   * k times.
    */
   #marksAt(holder: Holder | null, read: readonly string[]): boolean {
     if (holder === null) return false;
     this.#collectMarks();
     const work = this.pass.program.work;
+    const tested = this.pass.guards.testedSteps();
     const stack: {
       readonly holder: Holder;
       readonly rest: readonly string[];
@@ -4132,6 +4190,8 @@ export class Contract {
       /** The id of the rest's first `length` steps, -1 where no literal index holds them (`#pathBelow`). */
       path: number;
       references: readonly HolderReference[];
+      /** The holder is still to be asked at the rest's first `length` steps and `ABSENT` (`#referencesAt`). */
+      absent: boolean;
       index: number;
       hit: boolean;
     }[] = [];
@@ -4149,13 +4209,15 @@ export class Contract {
       this.#keepText(memoKey.length);
       asked.memo.set(memoKey, false);
       work.charge("eventSteps", 1 + rest.length);
+      const { references, absent } = this.#referencesAt(asked, "", rest, 0, tested);
       stack.push({
         holder: asked,
         rest,
         memoKey,
         length: 0,
         path: 0,
-        references: asked.refsAt.get("") ?? [],
+        references,
+        absent,
         index: 0,
         hit: asked.guarded.has(""),
       });
@@ -4166,6 +4228,12 @@ export class Contract {
       const frame = stack.at(-1)!;
       if (answer === true) frame.hit = true;
       answer = undefined;
+      if (frame.absent) {
+        frame.absent = false;
+        if (!frame.hit)
+          answer = ask(frame.holder, joinSteps(frame.rest.slice(0, frame.length), [ABSENT]));
+        continue;
+      }
       if (frame.index < frame.references.length) {
         const reference = frame.references[frame.index++]!;
         work.charge("eventSteps");
@@ -4187,7 +4255,13 @@ export class Contract {
         }
         const at = this.#pathTexts[frame.path]!;
         if (frame.holder.guarded.has(at)) frame.hit = true;
-        frame.references = frame.holder.refsAt.get(at) ?? [];
+        ({ references: frame.references, absent: frame.absent } = this.#referencesAt(
+          frame.holder,
+          at,
+          frame.rest,
+          frame.length,
+          tested,
+        ));
         continue;
       }
       if (
@@ -4201,6 +4275,120 @@ export class Contract {
       answer = frame.hit;
     }
     return answer!;
+  }
+
+  /**
+   * #1278: the references a holder's mark walk asks at `where`, the rest's first `length` steps (`#marksAt`): where the
+   * next step is a property no test reads and several stand there, those whose mark can depend on a path starting with
+   * it, and every one that may depend on any (`#referencesBy`), with the holder asked at the path and `ABSENT` for the
+   * others (`absent`); else all of them.
+   */
+  #referencesAt(
+    holder: Holder,
+    where: string,
+    rest: readonly string[],
+    length: number,
+    tested: ReadonlySet<string>,
+  ): { readonly references: readonly HolderReference[]; readonly absent: boolean } {
+    const references = holder.refsAt.get(where) ?? [];
+    const step = rest[length];
+    if (references.length < 2 || step === undefined || step === ABSENT || tested.has(step))
+      return { references, absent: false };
+    const by = this.#referencesBy(holder, where, references);
+    const stepping = by.byStep.get(step) ?? [];
+    return { references: by.any.length === 0 ? stepping : [...stepping, ...by.any], absent: true };
+  }
+
+  /** A holder's references at a path by the first steps their marks can depend on (`#markFirsts`), once per path. */
+  #referencesBy(
+    holder: Holder,
+    where: string,
+    references: readonly HolderReference[],
+  ): ReferencesByStep {
+    holder.byStep ??= new Map();
+    const known = holder.byStep.get(where);
+    if (known !== undefined) return known;
+    const byStep = new Map<string, HolderReference[]>();
+    const any: HolderReference[] = [];
+    let units = 3 + references.length;
+    for (const reference of references) {
+      this.pass.program.work.charge("eventSteps");
+      const firsts = reference.shift.length > 0 ? null : this.#markFirsts(reference.to);
+      if (firsts === null) {
+        any.push(reference);
+        continue;
+      }
+      for (const step of firsts) {
+        this.pass.program.work.charge("eventSteps");
+        const list = byStep.get(step);
+        units += list === undefined ? 2 : 1;
+        if (list === undefined) byStep.set(step, [reference]);
+        else list.push(reference);
+      }
+    }
+    const by: ReferencesByStep = { byStep, any };
+    this.#keep(units);
+    holder.byStep.set(where, by);
+    return by;
+  }
+
+  /**
+   * #1278: the first steps of the paths a holder's mark can depend on, `null` for any: those its guarded reads and its
+   * references stand below, and those of each holder it refers to where it stands (a reference with a shift: any; a
+   * cycle: any). Its own reads are marked by tests (`#readsAt`), so a step a test reads is never left out
+   * (`#referencesAt`). Once per holder, on an explicit walk; one set where a holder only refers to one.
+   */
+  #markFirsts(holder: Holder): ReadonlySet<string> | null {
+    if (holder.firsts !== undefined) return holder.firsts;
+    const stack: Holder[] = [holder];
+    const opened = new Set<Holder>();
+    const done = new Set<Holder>();
+    while (stack.length > 0) {
+      const top = stack.at(-1)!;
+      if (!opened.has(top)) {
+        opened.add(top);
+        // (a cycle back to it may depend on any step)
+        top.firsts = null;
+        for (const reference of top.refsAt.get("") ?? [])
+          if (reference.shift.length === 0 && reference.to.firsts === undefined)
+            stack.push(reference.to);
+        continue;
+      }
+      stack.pop();
+      if (done.has(top)) continue;
+      done.add(top);
+      top.firsts = this.#ownFirsts(top);
+    }
+    return holder.firsts!;
+  }
+
+  /** A holder's first steps (`#markFirsts`), those of the holders it refers to known. */
+  #ownFirsts(holder: Holder): ReadonlySet<string> | null {
+    const own = new Set<string>();
+    const sources = new Set<ReadonlySet<string>>();
+    const add = (where: string): void => {
+      this.pass.program.work.charge("eventSteps");
+      if (where === "") return;
+      const end = where.indexOf(".");
+      const step = end < 0 ? where : where.slice(0, end);
+      if (own.has(step)) return;
+      this.#keepText(step.length);
+      own.add(step);
+    };
+    for (const where of holder.guarded) add(where);
+    for (const [where, references] of holder.refsAt) {
+      add(where);
+      if (where !== "") continue;
+      for (const reference of references) {
+        this.pass.program.work.charge("eventSteps");
+        if (reference.shift.length > 0) return null;
+        const inner = reference.to.firsts;
+        if (inner === null || inner === undefined) return null;
+        this.#addSource(sources, inner);
+      }
+    }
+    if (own.size > 0) this.#addSource(sources, own);
+    return this.#unionOf(sources);
   }
 
   /**
@@ -4697,7 +4885,7 @@ export class Contract {
         // literal changes only the nodes above each changed read, never the whole literal, #1229)
         const deeper = length < rest.length;
         for (const kind of ["reads", "groups"] as const) {
-          const site: GatherSite = { kind, literal, path, deeper };
+          const site: IndexSite = { kind, literal, path, deeper };
           const count = this.#gatherCount(site);
           if (count <= WIDE)
             for (let at = 0; at < count; at += 1)
@@ -4711,7 +4899,7 @@ export class Contract {
         // (each kind of contribution read one by one, or past `WIDE` of them as a tree of demands, `gathered`)
         const deeper = length < rest.length;
         for (const kind of [copies !== null ? "copies" : "exact", "others"] as const) {
-          const site: GatherSite = { kind, literal, path, deeper };
+          const site: IndexSite = { kind, literal, path, deeper };
           const count = this.#gatherCount(site);
           if (count <= WIDE)
             for (let at = 0; at < count; at += 1)
@@ -4838,7 +5026,12 @@ export class Contract {
   ): Work<readonly Item[]> {
     const { program } = this.pass;
     const at = program.places[site.literal]?.site ?? null;
-    const flags = `${site.kind === "selected" ? `${site.byValue ? "v" : ""}${site.below ? "b" : ""}` : site.deeper ? "d" : ""}`;
+    const flags =
+      site.kind === "selected" || site.kind === "absent"
+        ? `${site.byValue ? "v" : ""}${site.below ? "b" : ""}${site.kind === "absent" && site.exact ? "x" : ""}`
+        : site.deeper
+          ? "d"
+          : "";
     return yield {
       key: joinParts(
         "lp",
@@ -4851,7 +5044,10 @@ export class Contract {
         site.path,
         rest,
       ),
-      kind: site.kind === "reads" || site.kind === "groups" ? "contract" : "value",
+      kind:
+        site.kind === "reads" || site.kind === "groups" || (site.kind === "absent" && !site.exact)
+          ? "contract"
+          : "value",
       file: at?.file ?? -1,
       offset: at?.start ?? -1,
       make: () => this.#gatheredMade(site, node, rest, lo, hi),
@@ -4879,13 +5075,12 @@ export class Contract {
     return mergeItems(out, this.pass.program.scope);
   }
 
-  /** How many contributions a gather site reads. */
-  #gatherCount(site: GatherSite): number {
+  /** How many contributions a gather site of a literal's index reads. */
+  #gatherCount(site: IndexSite): number {
     const index = this.literalIndex(site.literal);
     if (site.kind === "exact") return (index.exact.get(site.path) ?? []).length;
     if (site.kind === "copies" || site.kind === "reads")
       return this.#readGroupsAt(index.reads.get(site.path), site.kind === "copies").length;
-    if (site.kind === "selected") return (index.objects.get(site.path)?.list ?? []).length;
     return this.#gatherGroups(site).length;
   }
 
@@ -4936,15 +5131,41 @@ export class Contract {
         this.contractOfValueAt(entry.value, rest),
       );
     }
-    if (site.kind === "selected")
-      return yield* this.#selectedObject(
-        index.objects.get(site.path)!.list[at]!,
+    if (site.kind === "selected") {
+      const selection = this.#selectionOf(
+        site.literal,
+        index,
+        site.path,
         site.byValue,
+        site.below,
+        true,
+      );
+      return yield* this.#selectionPiece(
+        { ...site, kind: "absent", exact: true },
+        selection,
+        this.#selectionPieces(selection, rest)[at]!,
         rest,
         node,
-        true,
+      );
+    }
+    if (site.kind === "absent") {
+      const selection = this.#selectionOf(
+        site.literal,
+        index,
+        site.path,
+        site.byValue,
+        site.below,
+        site.exact,
+      );
+      return yield* this.#selectedObject(
+        selection.objects[selection.closed[at]!]!,
+        site.byValue,
+        [ABSENT],
+        null,
+        site.exact,
         site.below,
       );
+    }
     const group = this.#gatherGroups(site)[at]!;
     if (group === null)
       return yield* this.#loadsBelow(
@@ -5092,23 +5313,331 @@ export class Contract {
       for (const [tag, token] of terms) out.push(makeItem(tag, token));
     if (byValue && index.references.has(path))
       out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-    // (on the value side past `WIDE` objects as a tree of demands, `gathered`)
-    if (exact && objects.length > WIDE)
+    const selection = this.#selectionOf(literal, index, path, byValue, below, exact);
+    const pieces = this.#selectionPieces(selection, after);
+    // (on the value side past `WIDE` parts as a tree of demands, `gathered`)
+    if (exact && pieces.length > WIDE)
       for (const item of yield* this.gathered(
         { kind: "selected", literal, path, byValue, below },
         node,
         after,
         0,
-        objects.length,
+        pieces.length,
       ))
         out.push(item);
-    else
-      for (const object of exact
-        ? objects
-        : this.#selectionObjects(literal, index, path, byValue, below))
-        for (const item of yield* this.#selectedObject(object, byValue, after, node, exact, below))
+    else {
+      const site: GatherSite = { kind: "absent", literal, path, byValue, below, exact };
+      for (const piece of pieces)
+        for (const item of yield* this.#selectionPiece(site, selection, piece, after, node))
           out.push(item);
+    }
     return { items: out, sources };
+  }
+
+  /**
+   * #1278: a selection's objects on one side, once per literal, path, selected key and depth: those that select by the
+   * key (on the contract side one of each stored class, `#selectionObjects`), each closed where its selected value holds
+   * only its names (`#heldNames`), indexed by them.
+   */
+  #selectionOf(
+    literal: PlaceId,
+    index: LiteralIndex,
+    path: string,
+    byValue: boolean,
+    below: boolean,
+    exact: boolean,
+  ): Selection {
+    const memoKey = joinParts(literal, path, byValue, below, exact);
+    const known = this.#selectionsOf.get(memoKey);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    let objects: readonly LiteralObject[];
+    if (!exact) objects = this.#selectionObjects(literal, index, path, byValue, below);
+    else {
+      const selecting: LiteralObject[] = [];
+      for (const object of index.objects.get(path)?.list ?? []) {
+        program.work.charge("invSteps");
+        if (
+          object.term.properties === null
+            ? byValue
+            : (object.selected?.name === "value") === byValue
+        )
+          selecting.push(object);
+      }
+      objects = selecting;
+    }
+    const open: number[] = [];
+    const closed: number[] = [];
+    const sets = new Map<string, ReadonlySet<string>[]>();
+    const holding = new Map<ReadonlySet<string>, number[]>();
+    let units = 6 + 3 * objects.length;
+    objects.forEach((object, position) => {
+      program.work.charge("invSteps");
+      const names = this.#heldNames(object);
+      if (names === null) {
+        open.push(position);
+        return;
+      }
+      closed.push(position);
+      const positions = holding.get(names);
+      if (positions !== undefined) {
+        positions.push(position);
+        return;
+      }
+      holding.set(names, [position]);
+      units += 2;
+      for (const name of names) {
+        program.work.charge("invSteps");
+        const list = sets.get(name);
+        units += list === undefined ? 2 : 1;
+        if (list === undefined) sets.set(name, [names]);
+        else list.push(names);
+      }
+    });
+    const selection: Selection = {
+      objects,
+      open,
+      closed,
+      sets,
+      holding,
+      every: objects.map((_, position) => position),
+      pieces: new Map(),
+    };
+    this.#keepText(memoKey.length);
+    this.#keep(units);
+    this.#selectionsOf.set(memoKey, selection);
+    return selection;
+  }
+
+  /**
+   * #1278: the parts a selection's read takes at `after`, once per selection and property: where `after` starts with an
+   * author's property no test reads (`testedSteps`: a mark at any other such path is the mark at its prefix, §3.2), the
+   * objects that may hold it in order (the open ones and those whose names hold it), and between them the runs of closed
+   * objects that lack it, each answering there as at `ABSENT`, at any path below; else every object. A read's answer is
+   * merged before it is read (each kind once, its earliest writer, kinds in the order they first come), so a run's
+   * answers merged at its place leave it unchanged. So k reads of k properties below a choice of k objects each holding
+   * its own read one object and a run or two each, never k objects.
+   */
+  #selectionPieces(selection: Selection, after: readonly string[]): readonly SelectionPiece[] {
+    const step = after[0];
+    if (
+      step === undefined ||
+      selection.closed.length === 0 ||
+      !propertyOnly(step) ||
+      this.pass.guards.testedSteps().has(step)
+    )
+      return selection.every;
+    const known = selection.pieces.get(step);
+    if (known !== undefined) return known;
+    const { program } = this.pass;
+    const holders = selection.sets.get(step) ?? [];
+    // (each closed object's names are one set: where the sets holding the property hold every closed object, every
+    // object is read)
+    let count = 0;
+    for (const names of holders) {
+      program.work.charge("invSteps");
+      count += selection.holding.get(names)!.length;
+    }
+    if (count === selection.closed.length) {
+      this.#keepText(step.length);
+      this.#keep(2);
+      selection.pieces.set(step, selection.every);
+      return selection.every;
+    }
+    const read = [...selection.open];
+    for (const names of holders) read.push(...selection.holding.get(names)!);
+    program.work.charge("invSteps", sortCost(read.length));
+    read.sort((a, b) => a - b);
+    const { closed } = selection;
+    const pieces: SelectionPiece[] = [];
+    let from = 0;
+    for (const position of read) {
+      // (the closed objects before the position: a binary search)
+      let lo = from;
+      let hi = closed.length;
+      while (lo < hi) {
+        program.work.charge("invSteps");
+        const middle = (lo + hi) >> 1;
+        if (closed[middle]! < position) lo = middle + 1;
+        else hi = middle;
+      }
+      if (lo > from) pieces.push({ lo: from, hi: lo });
+      pieces.push(position);
+      from = closed[lo] === position ? lo + 1 : lo;
+    }
+    if (from < closed.length) pieces.push({ lo: from, hi: closed.length });
+    this.#keepText(step.length);
+    this.#keep(2 + 2 * pieces.length);
+    selection.pieces.set(step, pieces);
+    return pieces;
+  }
+
+  /** One part of a selection's answer (`#selectionPieces`): an object's at `after`, or a run's (`#absentRun`). */
+  *#selectionPiece(
+    site: Extract<GatherSite, { readonly kind: "absent" }>,
+    selection: Selection,
+    piece: SelectionPiece,
+    after: readonly string[],
+    node: FlowNode | null,
+  ): Work<readonly Item[]> {
+    if (typeof piece === "number")
+      return yield* this.#selectedObject(
+        selection.objects[piece]!,
+        site.byValue,
+        after,
+        node,
+        site.exact,
+        site.below,
+      );
+    const out: Item[] = [];
+    yield* this.#absentRun(site, 0, selection.closed.length, piece.lo, piece.hi, out);
+    return out;
+  }
+
+  /**
+   * A run [a, b) of a selection's closed objects, each read at `ABSENT`, from the balanced tree of demands over all of
+   * them (`gathered`, node [lo, hi)): each node inside the run whole, a leaf's part object by object, in order. So a
+   * run's answer re-runs where its objects' answers change, and a read reads O(log k) nodes of the tree, never k objects.
+   */
+  *#absentRun(
+    site: Extract<GatherSite, { readonly kind: "absent" }>,
+    lo: number,
+    hi: number,
+    a: number,
+    b: number,
+    out: Item[],
+  ): Work<void> {
+    this.pass.program.work.charge("invSteps");
+    if (b <= lo || hi <= a) return;
+    if (a <= lo && hi <= b) {
+      for (const item of yield* this.gathered(site, null, [], lo, hi)) out.push(item);
+      return;
+    }
+    if (hi - lo <= WIDE) {
+      for (let at = Math.max(lo, a); at < Math.min(hi, b); at += 1)
+        for (const item of yield* this.#gatherAt(site, null, [], at)) out.push(item);
+      return;
+    }
+    const middle = (lo + hi) >> 1;
+    yield* this.#absentRun(site, lo, middle, a, b, out);
+    yield* this.#absentRun(site, middle, hi, a, b, out);
+  }
+
+  /**
+   * #1278: the properties a choice object's selected value may hold, such that its answer at any other author's property
+   * that no test reads, at any path below, is its answer at `ABSENT` (a property no source holds); `null` where it may
+   * hold any. Its cell holds objects of known properties, or reads of unwritten bindings each holding such objects
+   * (`#bindingNames`): their names. Anything else there (a reference, a computed value, a projection, external data, a
+   * kind other than an object) may answer a property by its name. One set per source, shared by the cells that hold it
+   * alone; once per cell.
+   */
+  #heldNames(object: LiteralObject): ReadonlySet<string> | null {
+    const { selected } = object;
+    if (selected === null || selected.type.kind !== "ref") return null;
+    const cell = selected.type.place;
+    const known = this.#heldNamesOf.get(cell);
+    if (known !== undefined) return known;
+    this.#heldNamesOf.set(cell, null);
+    const index = this.literalIndex(cell);
+    const sources = new Set<ReadonlySet<string>>();
+    const own = this.#literalNames(index);
+    if (own === null) return null;
+    if (own.size > 0 || (index.objects.get("")?.list.length ?? 0) > 0)
+      this.#addSource(sources, own);
+    for (const entry of [...(index.reads.get("") ?? []), ...(index.exact.get("") ?? [])]) {
+      this.pass.program.work.charge("invSteps");
+      const names = this.#bindingNames(entry.value);
+      if (names === null) return null;
+      this.#addSource(sources, names);
+    }
+    if (sources.size === 0) return null;
+    const names = this.#unionOf(sources);
+    this.#heldNamesOf.set(cell, names);
+    return names;
+  }
+
+  /**
+   * The names a read of a binding holds (`#heldNames`): a `let` or `global` without a written type, no element added in a
+   * loop, whose live definitions are all objects of known properties, with the first step of each store below it (a
+   * property store; any other step: `null`); `null` for any other read (a projection, external data, a host global, a
+   * parameter). Once per binding.
+   */
+  #bindingNames(value: PlaceId): ReadonlySet<string> | null {
+    const { program, definitions, lists } = this.pass;
+    const binding = program.occurrenceOf.get(value);
+    if (binding === undefined || definitions.ingress.has(value) || program.isHost(binding))
+      return null;
+    const known = this.#bindingNamesOf.get(binding);
+    if (known !== undefined) return known;
+    this.#bindingNamesOf.set(binding, null);
+    const kind = program.place(binding).kind;
+    if (kind.kind !== "binding" || writtenOf(kind) !== null) return null;
+    const key = keyOf(binding, []);
+    if ((definitions.loopAdds.get(key)?.length ?? 0) > 0) return null;
+    const sources = new Set<ReadonlySet<string>>();
+    for (const d of definitions.byKey.get(key) ?? []) {
+      program.work.charge("invSteps");
+      if (!lists.live(d)) continue;
+      if (d.kind !== "whole" || d.value === undefined || !program.hasOf.has(d.value)) return null;
+      const literal = this.literalIndex(d.value);
+      const names = this.#literalNames(literal);
+      if (names === null || (literal.objects.get("")?.list.length ?? 0) === 0) return null;
+      this.#addSource(sources, names);
+    }
+    if (sources.size === 0) return null;
+    const stored = new Set<string>();
+    for (const below of definitions.keysBelow(key)) {
+      program.work.charge("invSteps");
+      const step = keyPath(below)[0]!;
+      if (!propertyOnly(step)) return null;
+      if (stored.has(step)) continue;
+      this.#keepText(step.length);
+      stored.add(step);
+    }
+    if (stored.size > 0) this.#addSource(sources, stored);
+    const names = this.#unionOf(sources);
+    this.#bindingNamesOf.set(binding, names);
+    return names;
+  }
+
+  /**
+   * The names a literal's index holds at its root (`#heldNames`): its objects' there, each of known properties, where
+   * nothing but objects stands (no read, no computed value, no reference, no other kind); else `null`.
+   */
+  #literalNames(index: LiteralIndex): ReadonlySet<string> | null {
+    if (index.references.has("") || (index.others.get("")?.length ?? 0) > 0) return null;
+    for (const [tag] of index.terms.get("") ?? []) if (tag !== "object") return null;
+    const sources = new Set<ReadonlySet<string>>();
+    for (const object of index.objects.get("")?.list ?? []) {
+      this.pass.program.work.charge("invSteps");
+      if (object.term.properties === null) return null;
+      this.#addSource(sources, object.names);
+    }
+    return this.#unionOf(sources);
+  }
+
+  /**
+   * A name set's source added once (#1278): by its identity, in order, its membership charged as kept, so one binding of
+   * k definitions or a holder of k references adds each in constant time.
+   */
+  #addSource(sources: Set<ReadonlySet<string>>, names: ReadonlySet<string>): void {
+    if (sources.has(names)) return;
+    this.#keep(1);
+    sources.add(names);
+  }
+
+  /** The union of name sets: the one set itself where there is one, else a new set, charged. */
+  #unionOf(sources: ReadonlySet<ReadonlySet<string>>): ReadonlySet<string> {
+    if (sources.size === 1) return sources.values().next().value!;
+    const union = new Set<string>();
+    for (const names of sources)
+      for (const name of names) {
+        this.pass.program.work.charge("invSteps");
+        if (union.has(name)) continue;
+        this.#keep(1);
+        union.add(name);
+      }
+    return union;
   }
 
   /**
@@ -5512,6 +6041,21 @@ function plainStep(step: string): boolean {
     !measuresLength(step) &&
     dictList(step) === undefined &&
     memberStep([step], 0) < 0
+  );
+}
+
+/**
+ * #1278: whether a step is an author's property read as any property (F11), which a closed object of a selection answers
+ * by its names alone (`Contract.#selectionPieces`): no element, index or selection step, nor a member a built-in value
+ * answers by itself (`plainStep`).
+ */
+function propertyOnly(step: string): boolean {
+  return (
+    step !== "index" &&
+    step !== "element" &&
+    step !== SELECTED_VALUE &&
+    step !== SELECTED_TEXT &&
+    plainStep(step)
   );
 }
 
