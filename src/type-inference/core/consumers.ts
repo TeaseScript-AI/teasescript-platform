@@ -2287,17 +2287,19 @@ export class Consumers {
     path: readonly string[],
     written: TypeTerm | null = null,
   ): StoreStep[] {
+    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+    let below = written;
     return path.map((step, index): StoreStep => {
+      const term = below;
+      if (below !== null) below = termAt(below, [step]);
       if (step === "entry") return { collection: "dict" };
       if (step !== "element") return { property: propertyName(step) };
-      const prefix = path.slice(0, index);
-      const term = written === null ? null : termAt(written, prefix);
       const above =
         term !== null
           ? typeTags(term)
-          : withoutEmpty(this.#run(this.pass.contract.contractOf(keyOf(root, prefix)))).map(
-              (item) => item.tag,
-            );
+          : withoutEmpty(
+              this.#run(this.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
+            ).map((item) => item.tag);
       return {
         collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list",
       };

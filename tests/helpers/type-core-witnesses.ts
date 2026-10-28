@@ -531,3 +531,293 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     B copy-type second.element [object] 163:208`,
   ],
 ];
+
+/*
+ * The bounded admission repairs' witnesses (#1078, #1194), each a name, its program before its final `exit` and its
+ * exact record: the cells test compares them in both orders, the sharing differential runs them (the cells test's
+ * comment lists what each is).
+ */
+export const BOUNDED_ADMISSION_WITNESSES: readonly (readonly [string, string, string])[] = [
+  [
+    "A8: a narrowed selection's identity apart from a class, by first",
+    "let normal={x:1,y:1}\n" +
+      'let root={x:"bad",y:1}\n' +
+      "if root.y is integer {\n" +
+      " let out=[normal,[root].first]\n" +
+      " say out[1].x\n" +
+      "}\n",
+    `outcome compile-error
+    D written-target error 84:96 -`,
+  ],
+  [
+    "A8: a narrowed selection's identity apart from a class, by first, before the object",
+    "let normal={x:1,y:1}\n" +
+      'let root={x:"bad",y:1}\n' +
+      "if root.y is integer {\n" +
+      " let out=[[root].first,normal]\n" +
+      " say out[0].x\n" +
+      "}\n",
+    `outcome compile-error
+    D written-target error 90:96 -`,
+  ],
+  [
+    "A8: a narrowed selection's identity apart from a class, by index",
+    "let normal={x:1,y:1}\n" +
+      'let root={x:"bad",y:1}\n' +
+      "if root.y is integer {\n" +
+      " let out=[normal,[root][0]]\n" +
+      " say out[1].x\n" +
+      "}\n",
+    `outcome compile-error
+    D written-target error 84:93 -`,
+  ],
+  [
+    "A8: a narrowed selection's identity apart from a class, by get",
+    "let normal={x:1,y:1}\n" +
+      'let root={x:"bad",y:1}\n' +
+      "if root.y is integer {\n" +
+      " let out=[normal,[root].get(0,default:normal)]\n" +
+      " say out[1].x\n" +
+      "}\n",
+    `outcome compile-error
+    D written-target error 84:112 -`,
+  ],
+  [
+    "A8: method results of one class, the object last",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[[a0].count(a0),[a1].count(a1),root]\n" +
+      "repeat out[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 84:88 -
+    D member-read error 97:106 -`,
+  ],
+  [
+    "A8: method results of one class, the object first",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[root,[a0].count(a0),[a1].count(a1)]\n" +
+      "repeat out[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 59:73 -
+    D written-target error 74:88 -`,
+  ],
+  [
+    "A8: conversions of one class, the object last",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[toInteger(a0.f0,default:0),toInteger(a1.f0,default:0),root]\n" +
+      "repeat out[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 108:112 -
+    D member-read error 121:130 -`,
+  ],
+  [
+    "A8: conversions of one class, the object first",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[root,toInteger(a0.f0,default:0),toInteger(a1.f0,default:0)]\n" +
+      "repeat out[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 59:85 -
+    D written-target error 86:112 -`,
+  ],
+  [
+    "A8: the object between two results of one class",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[[a0].count(a0),root,[a1].count(a1)]\n" +
+      "let again=[out[1],root]\n" +
+      "repeat out[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 69:73 -
+    D written-target error 108:112 -
+    D member-read error 121:130 -`,
+  ],
+  [
+    "A8: two literals of one class landing in one place",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let xs=[[a0].count(a0),root]\n" +
+      "xs=[root,[a1].count(a1)]\n" +
+      "repeat xs[0].f0 {}\n",
+    `outcome compile-error
+    D written-target error 68:72 -
+    D written-target error 78:82 -
+    D written-target error 83:97 -
+    D member-read error 106:114 -`,
+  ],
+  [
+    "A8: conversions of one class beside written text, in either order",
+    'let word:string="w"\n' +
+      "let root={f0:word,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[toInteger(a0.f1,default:0),toInteger(a1.f1,default:0),root.f0]\n" +
+      "let back=[root.f0,toInteger(a0.f1,default:0),toInteger(a1.f1,default:0)]\n",
+    `outcome compile-error
+    D written-target error 131:138 -
+    D written-target error 158:184 -
+    D written-target error 185:211 -`,
+  ],
+  [
+    "A8: lists of one class beside a list of the object, in either order",
+    "let root={f0:1,f1:{g:1}}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let b0=[a0.f1]\n" +
+      "let b1=[a1.f1]\n" +
+      "let out=[b0,b1,[root]]\n" +
+      "let other=[[root],b0,b1]\n" +
+      "repeat out[0][0].g {}\n",
+    `outcome warning-runtime-check
+    D member-read warning 134:145 missing
+    D integer-use warning 134:145 missing
+    C null-check out.element.element [non-null] 134:145
+    C integer-check out.element.element.g [integer] 134:145`,
+  ],
+  [
+    "A8: method results of one class beside an object holding host data",
+    "let raw=hostValue\n" +
+      "let root={f0:1,f1:raw}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      "let out=[[a0].count(a0),[a1].count(a1),root]\n" +
+      "repeat out[2].f1 {}\n",
+    `outcome compile-error
+    D written-target error 104:108 -
+    D member-read error 117:126 -`,
+  ],
+  [
+    "A8: objects of one class holding the object, beside one that differs below, last",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      'let out=[{g:a0},{g:a1},{g:{f0:"x",f1:1}}]\n' +
+      "repeat out[0].g.f0 {}\n",
+    `outcome compile-error
+    D written-target error 75:78 -`,
+  ],
+  [
+    "A8: objects of one class holding the object, beside one that differs below, first",
+    "let root={f0:1,f1:1}\n" +
+      "let a0=root\n" +
+      "let a1=root\n" +
+      'let out=[{g:{f0:"x",f1:1}},{g:a0},{g:a1}]\n' +
+      "repeat out[0].g.f0 {}\n",
+    `outcome compile-error
+    D written-target error 72:78 -
+    D written-target error 79:85 -
+    D integer-use error 94:105 -`,
+  ],
+  [
+    "A1, A4: copies of a written type through an optional level",
+    "let typed:integer[]?[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[null]]\n" +
+      'out=[[["x"]]]\n',
+    `outcome compile-error
+    D written-target error 72:75 -`,
+  ],
+  [
+    "A1, A4: copies of a written type with a union element",
+    "let typed:(integer | string)[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      'out=[["two"]]\n' +
+      "out=[[true]]\n",
+    `outcome compile-error
+    D written-target error 80:84 -`,
+  ],
+  [
+    "A1, A4: copies of a written type with an optional leaf",
+    "let typed:integer?[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[null],[2]]\n" +
+      'out=[["x"]]\n',
+    `outcome compile-error
+    D written-target error 73:76 -`,
+  ],
+  [
+    "A1, A4: copies of an open element type and of a deep written type",
+    "let typed:list[]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[1]]\n" +
+      'out=[["x"]]\n' +
+      "let deep:integer[][][]=[]\n" +
+      "let copy=deep\n" +
+      "copy=deep\n" +
+      'copy=[[["y"]]]\n',
+    `outcome compile-error
+    D written-target error 124:127 -`,
+  ],
+  [
+    "A5: copies of one preset, each storing its own property",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0,p2:0}}\n" +
+      "let state=initial\n" +
+      "let c0=initial\n" +
+      'c0.nest.p0="bad"\n' +
+      "if flag {state=c0}\n" +
+      "let c1=initial\n" +
+      'c1.nest.p1="bad"\n' +
+      "if flag {state=c1}\n" +
+      "let c2=initial\n" +
+      'c2.nest.p2="bad"\n' +
+      "if flag {state=c2}\n" +
+      "let sink0:integer=state.nest.p0\n" +
+      "let sink1:integer=state.nest.p1\n" +
+      "let sink2:integer=state.nest.p2\n",
+    `outcome compile-error
+    D written-target error 107:112 -
+    D written-target error 158:163 -
+    D written-target error 209:214 -`,
+  ],
+  [
+    "A5: copies storing one property and the object above it",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0}}\n" +
+      "let state=initial\n" +
+      "let c0=initial\n" +
+      'c0.nest.p0="bad"\n' +
+      "if flag {state=c0}\n" +
+      "let c1=initial\n" +
+      "c1.nest.p0=2\n" +
+      "if flag {state=c1}\n" +
+      "let c2=initial\n" +
+      "c2.nest={p0:true,p1:1}\n" +
+      "if flag {state=c2}\n" +
+      "let sink0:integer=state.nest.p0\n" +
+      "let sink1:integer=state.nest.p1\n" +
+      "let whole=state.nest\n",
+    `outcome compile-error
+    D written-target error 102:107 -
+    D written-target error 249:262 - related 227:229`,
+  ],
+  [
+    "A5: a chain of preset copies joined again",
+    'let flag=askBoolean "flag"\n' +
+      "let initial={nest:{p0:0,p1:0}}\n" +
+      "let c0=initial\n" +
+      'c0.nest.p1="bad"\n' +
+      "let state=c0\n" +
+      "let c1=state\n" +
+      "c1.nest.p0=false\n" +
+      "let other=c1\n" +
+      "if flag {other=c0}\n" +
+      "let sink0:integer=other.nest.p0\n" +
+      "let sink1:integer=other.nest.p1\n",
+    `outcome compile-error
+    D written-target error 84:89 -
+    D written-target error 127:132 -`,
+  ],
+];

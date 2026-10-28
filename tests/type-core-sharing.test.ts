@@ -34,6 +34,7 @@ import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
 import {
+  BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
   HOT_CANDIDATE_WITNESSES,
   WRITTEN_COPY_MATRIX,
@@ -296,6 +297,8 @@ function programs(): Program[] {
     out.push(one(`witness ${name}`, `${source}exit\n`));
   for (const [name, source] of HOT_CANDIDATE_WITNESSES)
     out.push(one(`#1188 witness ${name}`, `${source}exit\n`));
+  for (const [name, source] of BOUNDED_ADMISSION_WITNESSES)
+    out.push(one(`bounded admission witness ${name}`, `${source}exit\n`));
   for (const families of [
     WORK_FAMILIES,
     W34_VARIANTS,

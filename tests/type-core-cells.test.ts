@@ -9,7 +9,11 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
-import { CARRIER_WITNESSES, HOT_CANDIDATE_WITNESSES } from "./helpers/type-core-witnesses.js";
+import {
+  BOUNDED_ADMISSION_WITNESSES,
+  CARRIER_WITNESSES,
+  HOT_CANDIDATE_WITNESSES,
+} from "./helpers/type-core-witnesses.js";
 import {
   recordDifferences,
   recordOf,
@@ -4915,6 +4919,41 @@ test("the carrier design's witnesses give their exact records, in both orders (S
  */
 test("#1188's witnesses give their exact records, in both orders (rule (a), cycles, containment, contributors)", () => {
   for (const [name, source, text] of HOT_CANDIDATE_WITNESSES) {
+    const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
+    assert.ok(request !== null, name);
+    const expected = recordOf(text);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], name);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${name} reversed`);
+  }
+});
+
+/**
+ * The bounded admission repairs' witnesses (#1078, #1194), as exact records in both orders:
+ * - A8's conflict paths per class of the elements' contracts (`Contract.classOf`): a narrowed selection, which has no
+ *   class, beside an object of another kind, its identity kept apart from every class (Codex r1's B1: a carrier's
+ *   identity read like the object's class id, and the error was lost); k method results or conversions of
+ *   one class beside an object, the object last (its own error, and the read of the integer element's property) or
+ *   first (an error at each result, each its own element); the object between two results of one class; two literals
+ *   of one class landing in one place, each with its own error; conversions beside written text, and lists of one class
+ *   beside a list of the object, in either order; results beside an object holding host data; objects of one class
+ *   each holding the object beside one that differs below it, last or first (an error at each that differs from the
+ *   earliest, where one class for every element would lose them);
+ * - a written type's element levels, read once per type (#1194): copies of a written type through an optional level,
+ *   with a union or an optional element, and of an open element type beside a deep written one, each deep misfit an
+ *   error and each fitting store accepted;
+ * - the sources a read takes from the copies joined into a place, by the full path of their own stores (#1078): k
+ *   copies of one preset, each storing its own property, each read's error at its own copy's store; copies storing one
+ *   property and the object above it, both taken; a chain of preset copies joined again.
+ */
+test("the bounded admission repairs' witnesses give their exact records, in both orders (#1078, #1194)", () => {
+  for (const [name, source, text] of BOUNDED_ADMISSION_WITNESSES) {
     const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
     assert.ok(request !== null, name);
     const expected = recordOf(text);

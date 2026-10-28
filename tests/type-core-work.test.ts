@@ -5,6 +5,7 @@ import { withMemberOracle, withoutChains } from "../src/type-inference/core/admi
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import type { WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { writtenTypeSteps } from "../src/type-inference/core/contract.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../src/type-inference/core/program.js";
@@ -766,6 +767,34 @@ test("each product a repair removed grows with the program in either order (#119
     }
   }
   assert.deepEqual(steep, []);
+});
+
+/**
+ * #1194: a written type's levels are read once per type, and each walk of it steps on from the prefix before, so k
+ * copies of a value of a type k levels deep walk the type about k² steps (each decided path still asks it from its
+ * root: the per-path questions, a design round), never k³ (each copy and each label reading every level from the root,
+ * 7.45 per doubling before). The walk is uncharged work (`writtenTypeSteps` counts it), gated at its measured doubling.
+ */
+test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
+  const measured = (k: number): { steps: number; nodes: number } => {
+    const source = [
+      `let typed: integer${"[]".repeat(k)} = []`,
+      "let out = typed",
+      ...Array.from({ length: k }, () => "out = typed"),
+      "exit",
+    ].join("\n");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, `${k} levels: its file parses and resolves`);
+    const before = writtenTypeSteps();
+    const answers = analyseCore(request);
+    return {
+      steps: writtenTypeSteps() - before,
+      nodes: answers.budget.counts.get("syntaxNodes") ?? 0,
+    };
+  };
+  const [small, large] = [measured(32), measured(64)];
+  const doubling = (2 * (large.steps / small.steps)) / (large.nodes / small.nodes);
+  assert.ok(doubling <= 4.15, `${doubling.toFixed(3)} per doubling of the source`);
 });
 
 /**

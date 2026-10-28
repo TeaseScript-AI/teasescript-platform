@@ -4,6 +4,7 @@ import type { CorePass } from "./answers.js";
 import {
   joinParts,
   joinSteps,
+  keep,
   keepText,
   keptParts,
   keptSplit,
@@ -917,6 +918,8 @@ export class Admission {
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
    */
   #reach = 0;
+  /** Per written type, its element levels (`#levelsOf`). */
+  readonly #termLevels = new Map<TypeTerm, readonly TypeTerm[]>();
   #resolving = false;
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -940,8 +943,9 @@ export class Admission {
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
   #demands: Map<Key, (readonly string[])[]> | null = null;
   readonly #representative = new Map<Definition, Definition>();
-  /** The expected types of typed ingresses by identity, for `#conflictClass`. */
+  /** The expected types of typed ingresses by identity, and the contract-side classes, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
+  readonly #classIds = new Map<string, number>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
   readonly #structures = new Map<string, Structure>();
   readonly #depths = new Map<Key, number>();
@@ -1102,12 +1106,8 @@ export class Admission {
             });
         }
       }
-    for (const { path, term } of this.#a4Copies) {
-      let depth = path.length;
-      for (let step = ["element"]; termAt(term, step) !== null; step = joinSteps(step, ["element"]))
-        depth = path.length + step.length;
-      this.#reach = Math.max(this.#reach, depth);
-    }
+    for (const { path, term } of this.#a4Copies)
+      this.#reach = Math.max(this.#reach, path.length + this.#levelsOf(term).length - 1);
     for (const { path } of this.#a4Inherits) this.#reach += path.length;
   }
 
@@ -1534,6 +1534,24 @@ export class Admission {
     return this.pass.program.work;
   }
 
+  /**
+   * A written type's element levels (A1, A4, A8): the type, its element type, that one's, as deep as the type goes, each
+   * one step below the one before (`termAt`), once per type and pass: k copies of a type d levels deep read its levels
+   * once, never once per copy and each level from the root (#1194).
+   */
+  #levelsOf(term: TypeTerm): readonly TypeTerm[] {
+    const known = this.#termLevels.get(term);
+    if (known !== undefined) return known;
+    const levels = [term];
+    for (let at = termAt(term, ["element"]); at !== null; at = termAt(at, ["element"])) {
+      this.#work.charge("indexSteps");
+      levels.push(at);
+    }
+    keep(this.#work, levels.length);
+    this.#termLevels.set(term, levels);
+    return levels;
+  }
+
   #run<T>(work: Work<T>): T {
     return this.host.run(work);
   }
@@ -1603,19 +1621,20 @@ export class Admission {
   ): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
+    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+    let term = written;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
-        const prefix = path.slice(0, index);
-        const term = written === null ? null : termAt(written, prefix);
         const tags =
           term !== null
             ? typeTags(term)
-            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
+            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
                 (item) => item.tag,
               );
         label = stepText(label, elementStep(tags));
       }
+      if (term !== null) term = termAt(term, [step]);
     });
     return label;
   }
@@ -1730,12 +1749,9 @@ export class Admission {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
       if (written === null || paths === undefined) continue;
-      for (
-        let path = ["element"];
-        termAt(written, path) !== null;
-        path = joinSteps(path, ["element"])
-      )
-        paths.add(keptText(this.#work, path));
+      let path: readonly string[] = [];
+      for (let level = 1; level < this.#levelsOf(written).length; level += 1)
+        paths.add(keptText(this.#work, (path = joinSteps(path, ["element"]))));
     }
     const at = (place: PlaceId): Set<string> => {
       let paths = roots.get(place);
@@ -1793,7 +1809,7 @@ export class Admission {
       if (paths === undefined) seeds.set(place, (paths = new Map()));
       // (each element level with the written type there)
       let step: readonly string[] = [];
-      for (let level: TypeTerm | null = term; level !== null; level = termAt(term, step)) {
+      for (const level of this.#levelsOf(term)) {
         work.charge("indexSteps");
         const text = keptText(this.#work, joinSteps(path, step));
         let levels = paths.get(text);
@@ -5898,9 +5914,9 @@ export class Admission {
     // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
     const named = (d: Definition): boolean =>
       d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
-    // per landing and the distinct classes of a literal's elements' contracts (flow-insensitive: a source identity, or
-    // a typed ingress's type and default), the paths below them where their contracts hold more than one kind: only there
-    // can one element offend another (F2)
+    // per landing and the distinct groups of a literal's elements' contracts (flow-insensitive: by source identity,
+    // class or a typed ingress's type and default, `#conflictGroups`), the paths below them where their contracts hold
+    // more than one kind: only there can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
     cells: for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
@@ -5917,9 +5933,7 @@ export class Admission {
         // (elements of one source identity hold one value: none offends another)
         if (distinct.length === 1) continue;
         const landing = this.#landing(owner.owner);
-        const classes = list.map((d) =>
-          d.value === undefined ? "" : this.#conflictClass(d.value),
-        );
+        const classes = this.#conflictGroups(list);
         const kinds = [...new Set(classes)].sort();
         const key = joinParts(landing ?? "", kinds.join(","));
         let paths = conflicts.get(key);
@@ -6145,26 +6159,71 @@ export class Admission {
   }
 
   /**
+   * A literal's elements grouped for the conflict paths of `literalElements` (§8): elements of one source identity, or
+   * of one class (`#conflictClass`), have the same kinds at every path, so the elements either joins are one group,
+   * asked once; each group named by its least identity or class, so literals of alike groups share one discovery. (An
+   * identity may join what a class keeps apart, k bindings of alike objects, #1313, and a class what identities keep
+   * apart, k method results of one class, #1078.)
+   */
+  #conflictGroups(list: readonly Definition[]): string[] {
+    const { program, contract } = this.pass;
+    const tags = list.map((d) =>
+      d.value === undefined
+        ? [""]
+        : [joinParts("identity", contract.identityOf(d.value).id), this.#conflictClass(d.value)],
+    );
+    // (a union-find over the elements, joined by each tag they share)
+    const parent = list.map((_, index) => index);
+    const find = (at: number): number => {
+      while (parent[at] !== at) at = parent[at] = parent[parent[at]!]!;
+      return at;
+    };
+    const byTag = new Map<string, number>();
+    for (const [index, own] of tags.entries())
+      for (const tag of own) {
+        program.work.charge("checks");
+        const other = byTag.get(tag);
+        if (other === undefined) byTag.set(tag, index);
+        else parent[find(index)] = find(other);
+      }
+    const least = new Map<number, string>();
+    for (const [index, own] of tags.entries()) {
+      const root = find(index);
+      for (const tag of own) {
+        const known = least.get(root);
+        if (known === undefined || tag < known) least.set(root, tag);
+      }
+    }
+    return list.map((_, index) => least.get(find(index))!);
+  }
+
+  /**
    * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
    * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
-   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data
-   * as the default the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
+   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15), and a default reading
+   * host data counts by the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
    * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
    * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads
-   * of one default, #1313, each share one discovery); any other value its source identity. Values of one class have the
-   * same kinds at every path.
+   * of one default, #1313, each share one discovery); any other value its contract-side class (`Contract.classOf`, so k
+   * method results or conversions beside an object are not each asked at each of its properties, #1078), or without
+   * one its source identity. Values of one class have the same kinds at every path.
    */
   #conflictClass(value: PlaceId): string {
     const { program, contract, definitions } = this.pass;
+    // (a class and an identity tagged apart, as an identity may read like any short id, a carrier's `c<n>` among
+    // them; a short id per class, as a class's text may hold the "," that joins a literal's classes into its key)
+    const tagged = (cls: string | null, of: PlaceId): string => {
+      if (cls === null) return joinParts("identity", contract.identityOf(of).id);
+      let id = this.#classIds.get(cls);
+      if (id === undefined) this.#classIds.set(cls, (id = this.#classIds.size));
+      return joinParts("class", id);
+    };
+    const own = (of: PlaceId): string => tagged(contract.classOf(of, false), of);
     const c = program.opOf.get(value);
     if (c === undefined || c.kind === "fallback") {
-      const own = contract.boundClass(value, false);
-      return (own.mixed === MIXED_LEAF ? own.cls : null) ?? contract.identityOf(value).id;
+      const bound = contract.boundClass(value, false);
+      return bound.mixed === MIXED_LEAF ? tagged(bound.cls, value) : own(value);
     }
-    const source = (of: PlaceId): string =>
-      (program.occurrenceOf.has(of) && definitions.ingress.has(of)
-        ? contract.classOf(of, false)
-        : null) ?? contract.identityOf(of).id;
     let fallback: PlaceId | undefined;
     if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;
     else if (
@@ -6173,7 +6232,7 @@ export class Admission {
       conversionCategory(c.contract.name)?.kind === "parses"
     )
       fallback = defaultOf(c);
-    else return contract.identityOf(value).id;
+    else return own(value);
     const expected = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
     let term = "";
     if (expected !== null) {
@@ -6181,7 +6240,20 @@ export class Admission {
       this.#termIds.set(expected, term);
     }
     const by = c.kind === "load" ? "load" : c.contract.name;
-    return joinParts("f18", by, term, fallback === undefined ? "" : source(fallback));
+    const host =
+      fallback !== undefined &&
+      program.occurrenceOf.has(fallback) &&
+      definitions.ingress.has(fallback);
+    return joinParts(
+      "f18",
+      by,
+      term,
+      fallback === undefined
+        ? ""
+        : host
+          ? own(fallback)
+          : joinParts("identity", contract.identityOf(fallback).id),
+    );
   }
 
   // ------------------------------------------------------------------------------------------- the landing index
