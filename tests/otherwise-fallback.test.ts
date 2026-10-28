@@ -52,8 +52,8 @@ function bump {
 }
 let missing: integer? = hide(null)
 let found: integer? = hide(4)
-say null otherwise 1 == 1
-say found otherwise 1 == 4
+say (null otherwise 1) == 1
+say (found otherwise 1) == 4
 say missing otherwise bump()
 say found otherwise bump()
 say calls
@@ -512,86 +512,173 @@ exit`;
   assert.deepEqual(sayTexts(source("null", "null")), ["pet 123"]);
 });
 
-test("otherwise beside arithmetic or a range needs parentheses, and one error names both readings", () => {
-  const cases: [string, string, string][] = [];
+test("otherwise beside any other operator needs parentheses, and one error names both readings", () => {
+  const cases: [string, string, string, string, string][] = [];
   for (const operator of ["+", "-", "*", "/", "%"])
     cases.push(
       [
         `a otherwise 3 ${operator} 2`,
         `(a otherwise 3) ${operator} 2`,
         `a otherwise (3 ${operator} 2)`,
+        "uses 3 when 'a' is null",
+        `uses '3 ${operator} 2' when 'a' is null`,
       ],
       [
         `3 ${operator} a otherwise 2`,
         `3 ${operator} (a otherwise 2)`,
         `(3 ${operator} a) otherwise 2`,
+        "uses 2 when 'a' is null",
+        `uses 2 when '3 ${operator} a' is null`,
       ],
     );
   cases.push(
-    ["-a otherwise 2", "-(a otherwise 2)", "(-a) otherwise 2"],
-    ["+a otherwise 2", "+(a otherwise 2)", "(+a) otherwise 2"],
-    ["a otherwise 1..=3", "(a otherwise 1)..=3", "a otherwise (1..=3)"],
-    ["1..a otherwise 3", "1..(a otherwise 3)", "(1..a) otherwise 3"],
+    [
+      "-a otherwise 2",
+      "-(a otherwise 2)",
+      "(-a) otherwise 2",
+      "uses 2 when 'a' is null",
+      "uses 2 when '-a' is null",
+    ],
+    [
+      "+a otherwise 2",
+      "+(a otherwise 2)",
+      "(+a) otherwise 2",
+      "uses 2 when 'a' is null",
+      "uses 2 when '+a' is null",
+    ],
+    [
+      "a otherwise 1..=3",
+      "(a otherwise 1)..=3",
+      "a otherwise (1..=3)",
+      "uses 1 when 'a' is null",
+      "uses '1..=3' when 'a' is null",
+    ],
+    [
+      "1..a otherwise 3",
+      "1..(a otherwise 3)",
+      "(1..a) otherwise 3",
+      "uses 3 when 'a' is null",
+      "uses 3 when '1..a' is null",
+    ],
+    // The operators that bind more loosely: a comparison on either side, a type test, `not`, `and`, and `or`.
+    [
+      "a otherwise 3 == 2",
+      "(a otherwise 3) == 2",
+      "a otherwise (3 == 2)",
+      "uses 3 when 'a' is null",
+      "uses '3 == 2' when 'a' is null",
+    ],
+    [
+      "3 <= a otherwise 2",
+      "3 <= (a otherwise 2)",
+      "(3 <= a) otherwise 2",
+      "uses 2 when 'a' is null",
+      "uses 2 when '3 <= a' is null",
+    ],
+    [
+      "a otherwise 3 is integer",
+      "(a otherwise 3) is integer",
+      "a otherwise (3 is integer)",
+      "uses 3 when 'a' is null",
+      "uses '3 is integer' when 'a' is null",
+    ],
+    [
+      "not c otherwise true",
+      "not (c otherwise true)",
+      "(not c) otherwise true",
+      "uses true when 'c' is null",
+      "uses true when 'not c' is null",
+    ],
+    [
+      "c otherwise false and true",
+      "(c otherwise false) and true",
+      "c otherwise (false and true)",
+      "uses false when 'c' is null",
+      "uses 'false and true' when 'c' is null",
+    ],
+    [
+      "true or c otherwise false",
+      "true or (c otherwise false)",
+      "(true or c) otherwise false",
+      "uses false when 'c' is null",
+      "uses false when 'true or c' is null",
+    ],
+    [
+      '"${a otherwise 3 != 2}"',
+      "(a otherwise 3) != 2",
+      "a otherwise (3 != 2)",
+      "uses 3 when 'a' is null",
+      "uses '3 != 2' when 'a' is null",
+    ],
     // Both sides, a chain, and the issue's own example: the error quotes what was written.
-    ["2 * a otherwise 3 + 1", "2 * (a otherwise 3) + 1", "(2 * a) otherwise (3 + 1)"],
+    [
+      "2 * a otherwise 3 + 1",
+      "2 * (a otherwise 3) + 1",
+      "(2 * a) otherwise (3 + 1)",
+      "uses 3 when 'a' is null",
+      "uses '3 + 1' when '2 * a' is null",
+    ],
     [
       "a otherwise b otherwise 3 + 1",
       "(a otherwise b otherwise 3) + 1",
       "a otherwise b otherwise (3 + 1)",
+      "uses 3 when 'a otherwise b' is null",
+      "uses '3 + 1' when 'a otherwise b' is null",
+    ],
+    [
+      "a otherwise b otherwise 3 > 1",
+      "(a otherwise b otherwise 3) > 1",
+      "a otherwise b otherwise (3 > 1)",
+      "uses 3 when 'a otherwise b' is null",
+      "uses '3 > 1' when 'a otherwise b' is null",
     ],
     [
       'path.lastIndexOf("/") otherwise -1 + 1',
       '(path.lastIndexOf("/") otherwise -1) + 1',
       'path.lastIndexOf("/") otherwise (-1 + 1)',
+      "uses -1 when 'path.lastIndexOf(\"/\")' is null",
+      "uses '-1 + 1' when 'path.lastIndexOf(\"/\")' is null",
     ],
   );
-  for (const [written, nearest, all] of cases)
+  for (const [written, nearest, all, nearestMeaning, allMeaning] of cases)
     assert.deepEqual(
       diagnostics(
-        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
+        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
       ),
       [
         [
           "error",
           "TSP041",
-          `Put parentheses around what 'otherwise' belongs to: '${nearest}' or '${all}'.`,
+          `It is unclear what 'otherwise' belongs to. Put parentheses around that part: '${nearest}' ${nearestMeaning}; '${all}' ${allMeaning}.`,
           "otherwise",
         ],
       ],
       written,
     );
-  // A reading too long to quote is named by an example.
+  // A reading too long to quote gets only the explanation and instruction.
   assert.deepEqual(
     diagnostics(
       'let a: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\nexit',
     ).map((diagnostic) => diagnostic[2]),
-    [
-      "Put parentheses around what 'otherwise' belongs to, as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'.",
-    ],
+    ["It is unclear what 'otherwise' belongs to. Put parentheses around that part."],
   );
 });
 
-test("otherwise needs no parentheses beside comparisons, not, and, or, in a chain, and before a sign or a unit", () => {
+test("otherwise needs no parentheses in a chain, in an interpolation, and before a sign or a unit", () => {
   assert.deepEqual(
     sayTexts(
       `${HIDE}let path = "a/b/c"
 let count: integer? = hide(null)
 let nickname: string? = hide(null)
-let ready: boolean? = hide(null)
 let delay: duration? = hide(null)
 say path.lastIndexOf("/") otherwise -1
 say "abc".lastIndexOf("/") otherwise -1
-say nickname otherwise "pet" == "pet"
-say count otherwise "none" is string
-say not ready otherwise false
-say ready otherwise true and count otherwise 0 == 0
-say ready otherwise false or nickname otherwise "" != ""
-say delay otherwise 5 s == 5 s
+say (delay otherwise 5 s) == 5 s
 say nickname otherwise count otherwise "you"
 say "\${nickname otherwise "you"} \${count otherwise 0}"
 exit`,
     ),
-    ["3", "-1", "true", "true", "true", "true", "false", "true", "you", "you 0"],
+    ["3", "-1", "true", "you", "you 0"],
   );
 });
 
@@ -609,6 +696,9 @@ say 2 * (known otherwise 5)
 say (2 * known) otherwise 5
 say -(none otherwise 1)
 say (-known) otherwise 1
+let off: boolean? = hide(false)
+say (off otherwise true) == false
+say off otherwise (true == false)
 let total = 0
 for step in (none otherwise 1)..=3 {
     total += step
@@ -619,7 +709,7 @@ for step in none otherwise (1..=2) {
 say total
 exit`,
     ),
-    ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "36"],
+    ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "true", "false", "36"],
   );
 });
 

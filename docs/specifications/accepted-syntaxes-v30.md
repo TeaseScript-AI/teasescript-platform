@@ -564,10 +564,11 @@ minimum < value and value < maximum // valid
 minimum < value < maximum           // compile error
 ```
 
-An operand of `otherwise` that is arithmetic or a range needs parentheses ([§18](#fallback-with-otherwise)):
+`otherwise` next to any other operator needs parentheses ([§18](#fallback-with-otherwise)):
 
 ```text
 count otherwise 0 + 1   // compile error
+count otherwise 0 == 1  // compile error
 (count otherwise 0) + 1 // valid
 count otherwise (0 + 1) // valid
 ```
@@ -2732,7 +2733,8 @@ copy, nor for a handle, such as a timer's. A loaded value can instead get a defa
 
 ### Fallback with `otherwise`
 
-**Status:** Accepted (Owner decision on #850, 2026-10-12; the fallback's type: owner decisions, 2026-10-19)
+**Status:** Accepted (Owner decision on #850, 2026-10-12; the fallback's type: owner decisions, 2026-10-19; parentheses
+next to every operator: owner decision on #1243, 2026-10-28)
 
 `a otherwise b` evaluates `a` once and gives it unless it is `null`; then it evaluates and gives `b`. It does not assign
 to `a`. `b` is evaluated only when `a` is `null`, so a fallback that calls a function or asks runs only then:
@@ -2749,19 +2751,20 @@ let answer = nickname otherwise askText "Name?"
   another type is a compile error, also inside `say "${...}"`: `name otherwise 0` on a `string?` is an error, unless
   the value lands directly in a place with a written union that holds both ([below](#defaults-follow-the-same-rule)).
 - A chain runs from left to right and gives the first value that is not `null`.
-- An operand of `otherwise` that is arithmetic or a range needs parentheses, because the fallback could be meant for
-  the value next to it or for the whole operand ([§5](#expression-precedence-and-associativity)). Arithmetic is `+`,
-  `-`, `*`, `/`, `%`, a sign before the left operand, as in `-x otherwise 0`, and a range `..` or `..=`. The compile
-  error names both readings, with the code as written:
+- `otherwise` next to any other operator needs parentheses, on either side and also inside `say "${...}"`, because the
+  fallback could be meant for the value next to it or for all of that operator's operand
+  ([§5](#expression-precedence-and-associativity)). The operators are `+`, `-`, `*`, `/`, `%`, a sign before the left
+  operand, as in `-x otherwise 0`, a range `..` or `..=`, the comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, a type test
+  `is`, `not`, `and`, and `or`. A chain of `otherwise` needs none, because every grouping gives the same first value
+  that is not `null`. The compile error names both readings, with the code as written:
 
   ```text
-  Put parentheses around what 'otherwise' belongs to: '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'.
+  It is unclear what 'otherwise' belongs to. Put parentheses around that part: '(count otherwise 0) + 1' uses 0 when 'count' is null; 'count otherwise (0 + 1)' uses '0 + 1' when 'count' is null.
   ```
 
-- A sign before the fallback can be read only one way, as in `path.lastIndexOf("/") otherwise -1`. `otherwise` binds
-  more strongly than comparisons, type tests, `not`, `and`, and `or`, so `nickname otherwise "pet" == "pet"` compares
-  the result, and a chain or an interpolation needs no parentheses. A unit belongs to the number it follows: in
-  `delay otherwise 5 s`, the fallback is `5 s`, so a number of seconds with a fallback is `(delay otherwise 5) s`.
+- A sign before the fallback can be read only one way, as in `path.lastIndexOf("/") otherwise -1`. A unit belongs to
+  the number it follows: in `delay otherwise 5 s`, the fallback is `5 s`, so a number of seconds with a fallback is
+  `(delay otherwise 5) s`.
 - A value that the compiler knows can never be `null`, also one narrowed by a check, gets warning `TSV062`, because
   its fallback is never used. The message names what to remove, such as
   `'count' is never null here, so the fallback after 'otherwise' is never used. Remove 'otherwise 0'.` In a chain, the
