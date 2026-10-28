@@ -23,6 +23,7 @@ import {
 } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
+import { expressionChildren } from "../expression-children.js";
 import { staticNumber } from "../static-evaluation.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
@@ -145,13 +146,40 @@ const UNIT_WITHOUT_SPACE = "A unit needs a space before it.";
 
 /**
  * Whether the amount of the calendar duration `duration` gives whole days or months, also where the known-value fold
- * gives it, as in `(3 / 2) month`, or the amount is not known, as in `n months`.
+ * gives it, as in `(3 / 2) month`, or only the type checker knows it, as in `n months` (see `knownAmount`).
  */
 function wholeAmount(duration: DurationLiteral | UnitExpression): boolean {
   if (!duration.calendar) return true;
   const amount =
-    duration.kind === "durationLiteral" ? duration.amount.value : staticNumber(duration.operand);
-  return amount === undefined || typeof unitValue(amount, duration) !== "string";
+    duration.kind === "durationLiteral" ? duration.amount.value : knownAmount(duration.operand);
+  return (
+    amount === "deferred" ||
+    (amount !== "unproved" && typeof unitValue(amount, duration) !== "string")
+  );
+}
+
+/** The values whose number only the type checker knows. */
+const NAMED_VALUES: ReadonlySet<Expression["kind"]> = new Set([
+  "identifier",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+]);
+
+/**
+ * What the parser knows of the number `amount`: its value where the known-value fold gives it, `"deferred"` where a
+ * name, member, element, or call in it leaves the number to the type checker, as in `n + 1`, and otherwise
+ * `"unproved"`, as for `true` or `1 / 0`, which no fix may take for a number.
+ */
+export function knownAmount(amount: Expression): number | "deferred" | "unproved" {
+  const value = staticNumber(amount);
+  if (value !== undefined) return value;
+  const pending = [amount];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (NAMED_VALUES.has(node.kind)) return "deferred";
+    for (const child of expressionChildren(node)) pending.push(child);
+  }
+  return "unproved";
 }
 
 /**

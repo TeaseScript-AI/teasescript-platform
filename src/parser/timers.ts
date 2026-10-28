@@ -11,12 +11,11 @@ import type {
 } from "../ast.js";
 import { startsCallForm } from "../language-facts.js";
 import { emptyRangeProblem, rangeStartProblem } from "../range-checks.js";
-import { staticNumber } from "../static-evaluation.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
-import { requireExactDuration } from "./units.js";
+import { knownAmount, requireExactDuration } from "./units.js";
 import { parseStringLiteral } from "./literals.js";
 
 // `wait` and timers: durations, the short and named timer forms, and their handlers.
@@ -185,8 +184,8 @@ function timerDuration(
 
 /**
  * Whether the range from the start of `range` to `end`, which a wait or timer counts in `unit`s, holds the rules of such
- * a range (`range-checks.ts`) as far as the parser knows its bounds (see `knownBound`). A bound the known-value fold
- * does not know, such as a name, is the type checker's to check.
+ * a range (`range-checks.ts`) as far as the parser knows its bounds (see `knownBound`). A bound that only the type
+ * checker knows, such as a name, is the type checker's to check, and one that is no proved number, such as `true`, fails.
  */
 function knownRangeHolds(
   range: RangeExpression,
@@ -197,24 +196,27 @@ function knownRangeHolds(
 ): boolean {
   const start = knownBound(range.start);
   const stop = knownBound(end);
-  if ([start, stop].some(({ value, whole }) => value !== undefined && !whole)) return false;
+  if ([start, stop].some(({ value, whole }) => value !== "deferred" && !whole)) return false;
   const timer = command === "wait" ? "wait" : "timer";
-  if (start.value !== undefined && rangeStartProblem(timer, repeat, start.value, unit, "") !== null)
+  if (
+    typeof start.value === "number" &&
+    rangeStartProblem(timer, repeat, start.value, unit, "") !== null
+  )
     return false;
   return (
-    start.value === undefined ||
-    stop.value === undefined ||
+    typeof start.value !== "number" ||
+    typeof stop.value !== "number" ||
     emptyRangeProblem("", { start: start.value, end: stop.value, inclusive: range.inclusive }) ===
       null
   );
 }
 
 /**
- * A range bound's value where the known-value fold gives it, and whether it is a whole number by its type: one written as
- * it is, also with a sign or in parentheses. Another known value, such as `4 / 2`, may be of type `number`.
+ * What the parser knows of a range bound (see `knownAmount`), and whether it is a whole number by its type: one written
+ * as it is, also with a sign or in parentheses. Another known value, such as `4 / 2`, may be of type `number`.
  */
 function knownBound(bound: Expression): {
-  readonly value: number | undefined;
+  readonly value: ReturnType<typeof knownAmount>;
   readonly whole: boolean;
 } {
   let written = bound;
@@ -224,7 +226,7 @@ function knownBound(bound: Expression): {
   )
     written = written.kind === "parenthesizedExpression" ? written.expression : written.operand;
   return {
-    value: staticNumber(bound),
+    value: knownAmount(bound),
     whole: written.kind === "numberLiteral" && written.numericType === "integer",
   };
 }

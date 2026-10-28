@@ -631,6 +631,14 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
     { form: "(3) months", written: "(3) months", calendar: "(3) calendar months", name: "month" },
     { form: "(1.5) month", written: "(1.5) month", calendar: "", name: "month", whole: false },
     { form: "(3 / 2) month", written: "(3 / 2) month", calendar: "", name: "month", whole: false },
+    // An amount with a name is the type checker's to check, and one that the fold cannot give is no proved number.
+    {
+      form: "(n + 1) months",
+      written: "(n + 1) months",
+      calendar: "(n + 1) calendar months",
+      name: "month",
+    },
+    { form: "(1 / 0) month", written: "(1 / 0) month", calendar: "", name: "month", whole: false },
     ...(
       [
         ["2calendar months", "2 calendar months", "month"],

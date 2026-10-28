@@ -262,6 +262,11 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     ["wait # s", "-1..n", false],
     ["timer # s", "5..5", false],
     ["timer(duration: # s, repeat: true, async: true)", "0..5", false],
+    // A bound with a name is the type checker's to check, and one that the fold cannot give is no proved number.
+    ["wait # s", "n + 1..5", true],
+    ["wait # s", "true..3", false],
+    ["wait # s", "1..(1 / 0)", false],
+    ["timer(duration: # s, repeat: true, async: true)", "1 calendar month..3", false],
   ] as const) {
     const source = `let n = 3\n${statement.replace("#", range)}\nexit`;
     const command = statement.startsWith("timer(")
