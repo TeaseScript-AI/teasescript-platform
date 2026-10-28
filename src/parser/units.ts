@@ -9,7 +9,12 @@ import type {
 } from "../ast.js";
 import { angleUnit } from "../angle.js";
 import { createDiagnostic, DiagnosticSeverity } from "../diagnostics.js";
-import { calendarDurationUnit, elapsedDurationUnit, UNIT_OPERANDS } from "../duration.js";
+import {
+  calendarDurationUnit,
+  durationLiteralValue,
+  elapsedDurationUnit,
+  UNIT_OPERANDS,
+} from "../duration.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -198,7 +203,7 @@ function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | u
 }
 
 /** The advice for a month or a year without `calendar` that names both choices, wherever neither is known to fit. */
-function calendarUnitWords(unit: "month" | "year"): string {
+function calendarUnitWords(unit: string): string {
   return `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`;
 }
 
@@ -248,17 +253,19 @@ export function adviseDeclaredDuration(
   subject: string,
 ): void {
   const names = type === null ? null : writtenNames(type);
-  if (type === null || names?.has("calendarDuration") === true)
-    adviseDuration(parser, value, "calendar");
+  if (names === null || names.has("calendarDuration")) adviseDuration(parser, value, "calendar");
   else if (
-    names?.has("duration") === true &&
+    names.has("duration") &&
     [...names].every((name) => name === "duration" || name === "null")
   )
     adviseDuration(parser, value, { exact: subject });
 }
 
-/** The type names a written type is made of, through `?` and unions, or `null` when it has a collection type. */
-function writtenNames(type: TypeAnnotation): ReadonlySet<string> | null {
+/**
+ * The type names a written type is made of at its top, through `?` and unions, with a list, set, or dict, which holds
+ * no duration as a whole, as `collection`.
+ */
+function writtenNames(type: TypeAnnotation): ReadonlySet<string> {
   const names = new Set<string>();
   const pending = [type];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
@@ -266,8 +273,7 @@ function writtenNames(type: TypeAnnotation): ReadonlySet<string> | null {
       names.add("null");
       pending.push(next.value);
     } else if (next.kind === "unionType") for (const member of next.members) pending.push(member);
-    else if (next.kind === "namedType") names.add(next.name);
-    else return null;
+    else names.add(next.kind === "namedType" ? next.name : "collection");
   }
   return names;
 }
@@ -283,23 +289,34 @@ function adviseDuration(
   value: Expression,
   place: { readonly exact: string } | "calendar",
 ): void {
-  const pending = [value];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+  const pending = [{ node: value, signed: false }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { node, signed } = next;
     const error = parser.calendarUnitErrors.get(node);
     const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
       const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
+      // Either fix fails, so the words stay, for a written calendar amount that is not whole, as in `1.5 month`, and
+      // for a length after a sign where only an exact duration fits, as in `wait -(1 month)`.
+      const proved =
+        place === "calendar"
+          ? node.kind !== "durationLiteral" || typeof durationLiteralValue(node) !== "string"
+          : !signed;
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        place === "calendar"
-          ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
-          : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+        !proved
+          ? calendarUnitWords(unit)
+          : place === "calendar"
+            ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
+            : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
         error!.diagnostic.span,
       );
       // A command that takes the value as an argument knows its place, and its advice comes after.
       parser.calendarUnitErrors.set(node, { ...error!, diagnostic: parser.diagnostics[index]! });
-    } else if (node.kind === "parenthesizedExpression") pending.push(node.expression);
-    else if (node.kind === "unaryExpression" && node.operator !== "not") pending.push(node.operand);
+    } else if (node.kind === "parenthesizedExpression")
+      pending.push({ node: node.expression, signed });
+    else if (node.kind === "unaryExpression" && node.operator !== "not")
+      pending.push({ node: node.operand, signed: true });
   }
 }

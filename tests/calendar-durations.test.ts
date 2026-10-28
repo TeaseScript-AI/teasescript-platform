@@ -611,12 +611,15 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     // A global, which a global's start value may read too.
     "global n = 2\nlet elapsed = 10 s\nlet c = 1 calendar month\nfunction rest(length: duration) {\n  wait length\n}\n" +
     "function f2(value) {\n  return value\n}\nlet t = timer async 10 s {\n}\n";
-  // Each form, with its amount and unit, and its place inside the value.
+  // Each form, with its amount and unit, and its place inside the value: after a sign, and with a written amount that
+  // is not a whole number of months, or is one.
   const forms = [
     ["1 month", "1", "month"],
     ["n months", "n", "months"],
     ["(2 years)", "2", "years"],
     ["-1 month", "1", "month"],
+    ["1.5 month", "1.5", "month"],
+    ["0.5 year", "0.5", "year"],
   ] as const;
   const places: readonly (readonly [string, "calendar" | "words" | string])[] = [
     // Places that take any duration: the calendar unit compiles there.
@@ -627,6 +630,8 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     ['function f(d = #) {\n  say "${d}"\n}', "calendar"],
     ["say #", "calendar"],
     ['say "${#}"', "calendar"],
+    ["let d: calendarDuration | duration[] = #", "calendar"],
+    ["global g: calendarDuration = 1 calendar month, default: #", "calendar"],
     // Places that take only an exact duration: a length in days or weeks compiles there.
     ["wait #", "A wait"],
     ["let d: duration = #", "'d'"],
@@ -634,6 +639,7 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     ["function f(d: duration = #) {\n  wait d\n}", "'d'"],
     ['say "x", #', "Say pacing"],
     ["timer(duration: #)", "A timer"],
+    ["global g: duration = #, default: 1 s", "'g'"],
     // Places whose type is not known here, and calculations: both choices in words.
     ["rest(#)", "words"],
     ["f2(#)", "words"],
@@ -644,28 +650,36 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     ["let xs = [#]", "words"],
     ["let s: string = #", "words"],
     ["wait # + 1 h", "words"],
+    ["let d: duration | duration[] = #", "words"],
+    // Without a written type, a global's value and its start value fix each other's type.
+    ["global g = #, default: 1 s", "words"],
+    ["global g = 1 s, default: #", "words"],
   ];
   for (const [place, advice] of places)
     for (const [form, amount, unit] of forms) {
-      // A negative wait or length is wrong whatever its unit.
-      if (form.startsWith("-") && advice !== "calendar") continue;
       const written = `${amount} ${unit}`;
       const source = place.replace("#", form);
       const name = unit.startsWith("y") ? "year" : "month";
+      // A calendar amount must be whole, and a negative length is wrong whatever its unit, so neither fix compiles.
+      const fix =
+        (advice === "calendar" && form === "1.5 month") ||
+        (advice !== "calendar" && advice !== "words" && form.startsWith("-"))
+          ? "words"
+          : advice;
       const offered =
-        advice === "calendar"
+        fix === "calendar"
           ? `${amount} calendar ${unit}`
-          : advice === "words"
+          : fix === "words"
             ? null
             : name === "year"
               ? "365 days"
               : "30 days";
       const expected =
-        advice === "calendar"
+        fix === "calendar"
           ? `A ${name} has no fixed length. Write '${offered}'.`
-          : advice === "words"
+          : fix === "words"
             ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
-            : `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks, as in '${offered}'.`;
+            : `${fix} needs an exact length, and a ${name} has none. Write the length in days or weeks, as in '${offered}'.`;
       assert.deepEqual(diagnostics(`${header}${source}\nexit`), [["TSP033", expected]], source);
       if (offered !== null) {
         const pasted = `${header}${source.replace(written, offered)}\nexit`;
