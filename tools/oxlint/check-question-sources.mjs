@@ -7,11 +7,11 @@ import { ts } from "ts-morph";
  * `CoreAnswers.#items` answers every question's items, direct or composed, so in `src/type-inference/core/` the two
  * sources it alone reads after a stop, the finishing read's domains (`Consumers.finishedItems`) and the place's lazily
  * decided type (`#lazilyDecided`), are named only inside `#items`, and the finishing read itself
- * (`Consumers.#finishingRead`) only inside `finishedItems` and the consumers' own reads `FINISHING_READERS` lists. Every
- * reference by name counts: a call, a property access, an alias, a destructured or quoted name. `#items` names both
- * sources and `finishedItems` the finishing read. A reference the syntax does not name (an inherited member reached
- * through an inferred wrapper, a generic receiver, a computed name) is outside this check, a review matter against
- * r4.158 (r4.165).
+ * (`Consumers.#finishingRead`) only inside `finishedItems` and the consumers' own reads `FINISHING_READERS` lists, each
+ * trusted by its reason, as the inventory check's host reads are (r4.152 (3)). Every reference by name counts: a call, a
+ * property access, an alias, a destructured or quoted name. `#items` names both sources and `finishedItems` the
+ * finishing read. A reference the syntax does not name (an inherited member reached through an inferred wrapper, a
+ * generic receiver, a computed name) is outside this check, a review matter against r4.158 (r4.165).
  */
 const CORE = "src/type-inference/core";
 
