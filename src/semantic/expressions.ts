@@ -14,6 +14,21 @@ export function literalText(expression: Expression): string | undefined {
   return text;
 }
 
+/**
+ * The texts around the `${...}` of a string literal, looking through parentheses: `["rooms/", ".tease"]` for
+ * `"rooms/${room}.tease"`. `undefined` for any other expression.
+ */
+export function interpolatedTexts(expression: Expression): string[] | undefined {
+  const literal = unwrapParentheses(expression);
+  if (literal.kind !== "stringLiteral") return undefined;
+  const texts = [""];
+  for (const part of literal.parts) {
+    if (part.kind === "stringText") texts[texts.length - 1] += part.value;
+    else texts.push("");
+  }
+  return texts;
+}
+
 export function unwrapParentheses(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;

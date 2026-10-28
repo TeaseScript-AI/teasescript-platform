@@ -65,7 +65,7 @@ import {
   validateShowPopupArguments,
 } from "./semantic/call-arguments.js";
 import { semanticCode, type NamePassCode } from "./semantic/diagnostics.js";
-import { literalText, unwrapParentheses } from "./semantic/expressions.js";
+import { interpolatedTexts, literalText, unwrapParentheses } from "./semantic/expressions.js";
 import { checkInitialization, type FlowContext } from "./semantic/initialization.js";
 import { ProjectNames } from "./semantic/project-names.js";
 import {
@@ -124,6 +124,11 @@ export interface FileSemanticResult {
    * `findScripts(...)` lists, or `null` for any file (see `ProjectNames.referencedScripts`).
    */
   readonly referencedScripts: ReadonlySet<string> | null;
+  /**
+   * The files and folders the host could not load that a media or image file of the whole project known only when the
+   * script runs may be, or `null` for any (see `ProjectNames.computedMedia`).
+   */
+  readonly computedMedia: ReadonlySet<string> | null;
   /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
   readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** The declarations of the shared variables that a block assigns or changes in place, with how. */
@@ -190,6 +195,7 @@ export function validateProjectSemantics(
       taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
       fileCalls: validators[index]?.fileCalls ?? new Map<Statement, FileCallTarget>(),
       referencedScripts: project.referencedScripts,
+      computedMedia: project.computedMedia,
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       sharedWrites: validators[index]?.sharedWrites ?? new Map<VariableSite, Sharing>(),
       writtenLets: validators[index]?.writtenLets ?? new Set<LetStatement>(),
@@ -901,10 +907,15 @@ export class SemanticValidator {
     }
   }
 
-  /** A media or image file written out names it, not a glob. */
+  /**
+   * A media or image file written out names it, not a glob. One known only when the script runs may be any file, or one
+   * that a text with `${...}` allows, but a tagged pick picks an image the host loaded.
+   */
   #reportUnreadableMedia(file: Expression): void {
     const path = literalText(file);
     if (path !== undefined) reportUnreadableFiles(this, path, file.span, false);
+    else if (unwrapParentheses(file).kind !== "tagQueryExpression")
+      this.project.referMedia(interpolatedTexts(file) ?? null);
   }
 
   /** The files that each `goto tagged` or `call tagged` may pick, by its tag tests and literal tag lists. */

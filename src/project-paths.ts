@@ -102,6 +102,38 @@ export function globMayReach(pattern: string, entry: UnreadablePackageFile): boo
 }
 
 /**
+ * Whether a text with `${...}`, given as the texts around its `${...}`, may give `path`: it starts with the first text,
+ * ends with the last, and holds the ones between in order, whatever the values give between them.
+ */
+export function textsMayName(texts: readonly string[], path: string): boolean {
+  if (texts.length === 1) return path === texts[0];
+  const first = texts[0]!;
+  const last = texts.at(-1)!;
+  if (path.length < first.length + last.length || !path.startsWith(first) || !path.endsWith(last))
+    return false;
+  let at = first.length;
+  const end = path.length - last.length;
+  for (let index = 1; index < texts.length - 1; index += 1) {
+    const text = texts[index]!;
+    const found = path.indexOf(text, at);
+    if (found < 0 || found + text.length > end) return false;
+    at = found + text.length;
+  }
+  return true;
+}
+
+/** Whether a text with `${...}`, as in {@link textsMayName}, may give the file the host could not load, or a path in the folder. */
+export function textsMayReach(texts: readonly string[], entry: UnreadablePackageFile): boolean {
+  if (texts.length === 1) return liesIn(texts[0]!, entry);
+  if (entry.folder !== true) return textsMayName(texts, entry.path);
+  if (entry.path === ".") return true;
+  // A value may give the rest of the folder's path after a shorter first text.
+  const folder = `${entry.path}/`;
+  const first = texts[0]!;
+  return first.length < folder.length ? folder.startsWith(first) : first.startsWith(folder);
+}
+
+/**
  * Whether one folder or file name matches a glob segment, where `*` stands for any characters. Each `*` resumes from
  * the latest one only, so the work stays proportional to the two lengths' product, without backtracking blowup.
  */

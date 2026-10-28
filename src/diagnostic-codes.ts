@@ -473,7 +473,10 @@ export const DIAGNOSTIC_CODES = {
           "could not read, as the target of a `goto` or `call`, in `script(...)`, as the `from:` of a tag query, or " +
           "as the file of `showImage`, `playAudio`, or `playVideo`, with the host's reason as its text",
         "the same rule with the same text for `main.tease`, where every session starts, and as a warning at each " +
-          "other file or folder the host could not load that no such path or glob names",
+          "other file or folder the host could not load that no such path or glob names, where code that can run may " +
+          "use it: a computed `goto` or `call` that can run, by a script reference that may name the file, or for a " +
+          "folder also a media or image file known only when the script runs. A `.tease` file or folder that no such " +
+          "code may use is `TSV065`, with the host's reason after its own text",
       ],
     },
   },
