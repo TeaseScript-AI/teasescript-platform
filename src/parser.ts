@@ -777,13 +777,18 @@ export class Parser {
   *#parseIndentedBlock(): ParseTask<Block> {
     const colon = this.advance();
     this.reportToken(parserDiagnosticCode.foreignForm, FOREIGN_FORMS.get(":")!.message, colon);
-    // The first line of the head, past the line breaks inside its parentheses, as in `if (a or\n    b):`.
+    // The first line of the head, past the line breaks inside its parentheses and brackets, as in `if (a or\n    b):`,
+    // but not into a block before it, as in `} else if b:`.
     let lineStart = this.current - 1;
     for (let depth = 0; lineStart > 0; lineStart -= 1) {
       const before = this.tokens[lineStart - 1]!.kind;
       if (before === TokenKind.Newline && depth === 0) break;
-      if (CLOSERS[before] !== undefined) depth += 1;
-      else if (OPENING_TOKENS.has(before) && depth > 0) depth -= 1;
+      if (before === TokenKind.RightParenthesis || before === TokenKind.RightBracket) depth += 1;
+      else if (
+        (before === TokenKind.LeftParenthesis || before === TokenKind.LeftBracket) &&
+        depth > 0
+      )
+        depth -= 1;
     }
     const indent = this.tokens[lineStart]!.span.start.column;
     const statements: Statement[] = [];

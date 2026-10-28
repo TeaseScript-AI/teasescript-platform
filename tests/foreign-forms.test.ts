@@ -101,9 +101,9 @@ test("each form of another language is one error that names the TeaseScript form
         ],
       ],
     ],
-    // The lines indented deeper than the head are the block, also of an `else` and a function.
+    // The lines indented deeper than the first line of the head are the block, also of an `else` and a function.
     [
-      'let a = 1\nif (a == 1 or\n    a == 2):\n    say "one"\nelse:\n    say "other"\nsay "after"\nexit',
+      'let a = 1\n    if a == 2 {\n        say "two"\n} else if (a == 1 or\n    a == 3):\n    say "one"\nelse:\n    say "other"\nsay "after"\nexit',
       [
         ["TSP037", COLON, ":"],
         ["TSP037", COLON, ":"],
