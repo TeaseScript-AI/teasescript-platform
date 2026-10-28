@@ -542,6 +542,7 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
     ['showButton "Go", timeout: #', "A showButton timeout", "1 month"],
     [`let a = ${form} #`, "An askForm timeout", "n years"],
     ['playVideo(file: "videos/intro.mp4", startAt: #)', "A media position", "1 month"],
+    ['playVideo(file: "videos/intro.mp4", endAt: #)', "A media position", "1 month"],
     ['playVideo(file: "videos/intro.mp4", repeat: #)', "A repeat budget", "1 month"],
     [
       'playVideo "videos/intro.mp4" {\n  beforeEnd # {\n    say "x"\n  }\n}',
