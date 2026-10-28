@@ -6536,7 +6536,7 @@ export class Admission {
    */
   public ingressStores(skip?: (site: SourceSite) => boolean): void {
     for (const c of this.pass.program.constraints) {
-      if (skip !== undefined && "result" in c && skip(c.site)) continue;
+      if (skip !== undefined && "result" in c && typedIngress(c) && skip(c.site)) continue;
       const found = this.#f18Admission(c);
       if (found === null) continue;
       this.readChecks.push(

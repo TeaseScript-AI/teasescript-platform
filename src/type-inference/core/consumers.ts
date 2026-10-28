@@ -60,6 +60,7 @@ import {
   measuresLength,
   selectsElement,
 } from "./method-categories.js";
+import { Laminar } from "./narrowing.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
@@ -585,19 +586,27 @@ export class Consumers {
         ? null
         : settled(() => values.valueItems(value, node, rest));
     if (exact !== null) return exact;
-    // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it
+    // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
+    // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it
     const typed = this.#typedRead(value, rest);
-    if (typed !== null) return typed;
+    if (typed !== null && typed.some(isExternal)) return typed;
+    const typedTags =
+      typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
     // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
-    const held = settled(() => contract.contractOfValueAt(value, rest));
+    const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
     if (held !== null)
       return requirement ? this.#required(withoutEmpty(held).map((item) => item.tag)) : held;
     // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
     // decision or a copy's only where admission settled
-    const written = this.#writtenRead(value);
+    const written = typedTags === null ? this.#writtenRead(value) : null;
     const term = written === null ? null : termAt(written, rest);
     const tags =
-      term !== null ? typeTags(term) : this.settled ? (this.#retainedRead(value, rest) ?? []) : [];
+      typedTags ??
+      (term !== null
+        ? typeTags(term)
+        : this.settled
+          ? (this.#retainedRead(value, rest) ?? [])
+          : []);
     if (requirement) return this.#required(tags);
     if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
     const items = tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
@@ -1136,24 +1145,39 @@ export class Consumers {
 
   readonly #marked = new Set<number>();
 
-  /** Whether a site lies inside the value of a store or transfer the fresh pass marked (`#storeMark`). */
+  /**
+   * Whether a site lies inside the value of a store or transfer the fresh pass marked (`#storeMark`): one laminar list of
+   * their values' spans per file, made once, and a walk up from the innermost span holding the site's start.
+   */
   #inMarkedValue(site: SourceSite): boolean {
     const { program, definitions } = this.pass;
+    const work = program.work;
     if (this.#markedSpans === null) {
-      this.#markedSpans = [];
-      for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
-        if (this.#marked.has(d.uid) && d.value !== undefined) {
-          const at = program.places[d.value]?.site ?? null;
-          if (at !== null) this.#markedSpans.push(at);
-        }
+      const byFile = new Map<number, { start: number; end: number; item: null }[]>();
+      for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+        work.charge("checks");
+        if (!this.#marked.has(d.uid) || d.value === undefined) continue;
+        const at = program.places[d.value]?.site ?? null;
+        if (at === null) continue;
+        const spans = byFile.get(at.file);
+        const span = { start: at.start, end: at.end, item: null };
+        if (spans === undefined) byFile.set(at.file, [span]);
+        else spans.push(span);
+      }
+      this.#markedSpans = new Map();
+      for (const [file, spans] of byFile) this.#markedSpans.set(file, new Laminar(work, spans));
     }
-    program.work.charge("checks", this.#markedSpans.length);
-    return this.#markedSpans.some(
-      (span) => span.file === site.file && span.start <= site.start && site.end <= span.end,
-    );
+    const spans = this.#markedSpans.get(site.file);
+    if (spans === undefined) return false;
+    for (let index = spans.innermostIndex(site.start); index >= 0;) {
+      work.charge("checks");
+      if (spans.ends[index]! >= site.end) return true;
+      index = spans.parents[index]!;
+    }
+    return false;
   }
 
-  #markedSpans: SourceSite[] | null = null;
+  #markedSpans: Map<number, Laminar<null>> | null = null;
 
   /**
    * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
