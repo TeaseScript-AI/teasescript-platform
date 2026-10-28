@@ -4,6 +4,7 @@ import type { CorePass } from "./answers.js";
 import {
   joinParts,
   joinSteps,
+  keep,
   keepText,
   keptParts,
   keptSplit,
@@ -917,6 +918,8 @@ export class Admission {
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
    */
   #reach = 0;
+  /** Per written type, its element levels (`#levelsOf`). */
+  readonly #termLevels = new Map<TypeTerm, readonly TypeTerm[]>();
   #resolving = false;
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
@@ -1103,12 +1106,8 @@ export class Admission {
             });
         }
       }
-    for (const { path, term } of this.#a4Copies) {
-      let depth = path.length;
-      for (let step = ["element"]; termAt(term, step) !== null; step = joinSteps(step, ["element"]))
-        depth = path.length + step.length;
-      this.#reach = Math.max(this.#reach, depth);
-    }
+    for (const { path, term } of this.#a4Copies)
+      this.#reach = Math.max(this.#reach, path.length + this.#levelsOf(term).length - 1);
     for (const { path } of this.#a4Inherits) this.#reach += path.length;
   }
 
@@ -1535,6 +1534,24 @@ export class Admission {
     return this.pass.program.work;
   }
 
+  /**
+   * A written type's element levels (A1, A4, A8): the type, its element type, that one's, as deep as the type goes, each
+   * one step below the one before (`termAt`), once per type and pass: k copies of a type d levels deep read its levels
+   * once, never once per copy and each level from the root (#1194).
+   */
+  #levelsOf(term: TypeTerm): readonly TypeTerm[] {
+    const known = this.#termLevels.get(term);
+    if (known !== undefined) return known;
+    const levels = [term];
+    for (let at = termAt(term, ["element"]); at !== null; at = termAt(at, ["element"])) {
+      this.#work.charge("indexSteps");
+      levels.push(at);
+    }
+    keep(this.#work, levels.length);
+    this.#termLevels.set(term, levels);
+    return levels;
+  }
+
   #run<T>(work: Work<T>): T {
     return this.host.run(work);
   }
@@ -1604,19 +1621,20 @@ export class Admission {
   ): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
+    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+    let term = written;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
-        const prefix = path.slice(0, index);
-        const term = written === null ? null : termAt(written, prefix);
         const tags =
           term !== null
             ? typeTags(term)
-            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
+            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
                 (item) => item.tag,
               );
         label = stepText(label, elementStep(tags));
       }
+      if (term !== null) term = termAt(term, [step]);
     });
     return label;
   }
@@ -1731,12 +1749,9 @@ export class Admission {
       const written = writtenOf(place.kind);
       const paths = roots.get(place.id);
       if (written === null || paths === undefined) continue;
-      for (
-        let path = ["element"];
-        termAt(written, path) !== null;
-        path = joinSteps(path, ["element"])
-      )
-        paths.add(keptText(this.#work, path));
+      let path: readonly string[] = [];
+      for (let level = 1; level < this.#levelsOf(written).length; level += 1)
+        paths.add(keptText(this.#work, (path = joinSteps(path, ["element"]))));
     }
     const at = (place: PlaceId): Set<string> => {
       let paths = roots.get(place);
@@ -1794,7 +1809,7 @@ export class Admission {
       if (paths === undefined) seeds.set(place, (paths = new Map()));
       // (each element level with the written type there)
       let step: readonly string[] = [];
-      for (let level: TypeTerm | null = term; level !== null; level = termAt(term, step)) {
+      for (const level of this.#levelsOf(term)) {
         work.charge("indexSteps");
         const text = keptText(this.#work, joinSteps(path, step));
         let levels = paths.get(text);

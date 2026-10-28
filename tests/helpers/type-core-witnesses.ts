@@ -677,4 +677,48 @@ export const BOUNDED_ADMISSION_WITNESSES: readonly (readonly [string, string, st
     D written-target error 79:85 -
     D integer-use error 94:105 -`,
   ],
+  [
+    "A1, A4: copies of a written type through an optional level",
+    "let typed:integer[]?[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[null]]\n" +
+      'out=[[["x"]]]\n',
+    `outcome compile-error
+    D written-target error 72:75 -`,
+  ],
+  [
+    "A1, A4: copies of a written type with a union element",
+    "let typed:(integer | string)[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      'out=[["two"]]\n' +
+      "out=[[true]]\n",
+    `outcome compile-error
+    D written-target error 80:84 -`,
+  ],
+  [
+    "A1, A4: copies of a written type with an optional leaf",
+    "let typed:integer?[][]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[null],[2]]\n" +
+      'out=[["x"]]\n',
+    `outcome compile-error
+    D written-target error 73:76 -`,
+  ],
+  [
+    "A1, A4: copies of an open element type and of a deep written type",
+    "let typed:list[]=[]\n" +
+      "let out=typed\n" +
+      "out=typed\n" +
+      "out=[[1]]\n" +
+      'out=[["x"]]\n' +
+      "let deep:integer[][][]=[]\n" +
+      "let copy=deep\n" +
+      "copy=deep\n" +
+      'copy=[[["y"]]]\n',
+    `outcome compile-error
+    D written-target error 124:127 -`,
+  ],
 ];

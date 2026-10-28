@@ -4941,7 +4941,10 @@ test("#1188's witnesses give their exact records, in both orders (rule (a), cycl
  *   of one class landing in one place, each with its own error; conversions beside written text, and lists of one class
  *   beside a list of the object, in either order; results beside an object holding host data; objects of one class
  *   each holding the object beside one that differs below it, last or first (an error at each that differs from the
- *   earliest, where one class for every element would lose them).
+ *   earliest, where one class for every element would lose them);
+ * - a written type's element levels, read once per type (#1194): copies of a written type through an optional level,
+ *   with a union or an optional element, and of an open element type beside a deep written one, each deep misfit an
+ *   error and each fitting store accepted.
  */
 test("the bounded admission repairs' witnesses give their exact records, in both orders (#1078, #1194)", () => {
   for (const [name, source, text] of BOUNDED_ADMISSION_WITNESSES) {

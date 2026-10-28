@@ -103,10 +103,6 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "contract.ts #keyContract spread": [2, "items, no path"],
   "contract.ts #levelsOf spread": [2, "a copy of a set of path ids, charged by `#keep`"],
   "contract.ts #pathAt step": [1, "the interner's text, charged by `#keepText` before it is made"],
-  "contract.ts typeAtPath spread": [
-    1,
-    "the steps below one level of a written type, one copy per level",
-  ],
   "definitions.ts keyBelow join": [2, "a helper itself"],
   "definitions.ts keyBelow step": [1, "a helper itself"],
   "definitions.ts keyOf composite": [1, "a helper itself"],

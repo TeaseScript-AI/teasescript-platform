@@ -257,32 +257,46 @@ function typeKinds(term: TypeTerm): ItemTag[] {
 export type TypeAt =
   { readonly term: TypeTerm } | { readonly place: PlaceId; readonly rest: readonly string[] };
 
-function typeAtPath(term: TypeTerm, path: readonly string[]): TypeAt | null {
-  if (path.length === 0) return { term };
-  const [step, ...rest] = path;
-  // an optional or union collection: its members' elements
-  if (term.kind === "union") {
-    const members = term.members
-      .map((member) => typeAtPath(member, path))
-      .filter((member) => member !== null);
-    if (members.length === 1) return members[0]!;
-    const terms = members.flatMap((member) => ("term" in member ? [member.term] : []));
-    if (members.length > 1 && terms.length === members.length)
-      return { term: { kind: "union", members: terms } };
-    return null;
+/**
+ * The steps every walk of a written type took (`typeAtPath`), uncharged work no ledger reaches: the work test counts
+ * them for #1194's gate (`writtenTypeSteps`).
+ */
+let typeSteps = 0;
+
+/** The steps the walks of written types took so far in this process (`typeAtPath`): the work test's count, #1194. */
+export function writtenTypeSteps(): number {
+  return typeSteps;
+}
+
+/** The written type at `path` from its step `from` on, a step at a time: no copy of the path's rest per step (#1194). */
+function typeAtPath(term: TypeTerm, path: readonly string[], from = 0): TypeAt | null {
+  let at = term;
+  for (let index = from; index < path.length; index += 1) {
+    typeSteps += 1;
+    // an optional or union collection: its members' elements
+    if (at.kind === "union") {
+      const members = at.members
+        .map((member) => typeAtPath(member, path, index))
+        .filter((member) => member !== null);
+      if (members.length === 1) return members[0]!;
+      const terms = members.flatMap((member) => ("term" in member ? [member.term] : []));
+      if (members.length > 1 && terms.length === members.length)
+        return { term: { kind: "union", members: terms } };
+      return null;
+    }
+    const step = path[index]!;
+    let below: TypeTerm;
+    if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && step === "element")
+      below = at.element;
+    else if (at.kind === "object" && at.properties !== null) {
+      const property = at.properties.find((candidate) => propertyStep(candidate.name) === step);
+      if (property === undefined) return null;
+      below = property.type;
+    } else return null;
+    if (below.kind === "ref") return { place: below.place, rest: path.slice(index + 1) };
+    at = below;
   }
-  if ((term.kind === "list" || term.kind === "set" || term.kind === "dict") && step === "element")
-    return term.element.kind === "ref"
-      ? { place: term.element.place, rest }
-      : typeAtPath(term.element, rest);
-  if (term.kind === "object" && term.properties !== null) {
-    const property = term.properties.find((candidate) => propertyStep(candidate.name) === step);
-    if (property === undefined) return null;
-    return property.type.kind === "ref"
-      ? { place: property.type.place, rest }
-      : typeAtPath(property.type, rest);
-  }
-  return null;
+  return { term: at };
 }
 
 /** The term of a written type at a path, when the path stays in the written type. */
