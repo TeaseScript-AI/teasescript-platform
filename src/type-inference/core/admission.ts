@@ -48,7 +48,7 @@ import {
   type Writer,
 } from "./items.js";
 import { conversionCategory, dictList, measuresLength } from "./method-categories.js";
-import { propertyStep, stepName } from "./program.js";
+import { propertyStep, stepName, type CoreProgram } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import { sharing } from "./sharing.js";
 import type { Work } from "./solver.js";
@@ -790,24 +790,36 @@ interface Via {
 
 /**
  * A chain of operations (`Stop.via`): its innermost one and the chain outside it, `null` for none. Each operand's chain
- * is one link onto its operation's, so k nested operations keep k links, never k chains up to k long (#1230).
+ * is one link onto its operation's, so k nested operations keep k links, never k chains up to k long, and what a stop
+ * asks of its chain is each link's answer from the one outside it, never a walk of the chain per stop (#1230). A walk
+ * descends through syntactic operations only (a call is a source, never a carrier), so of a chain's operations only the
+ * innermost takes the stop's own value as its operand.
  */
 interface ViaChain {
   readonly level: Via;
   readonly outer: ViaChain | null;
+  /** Whether some operation of the chain is an own read's (`OWN_ROLES`), one of no typed default's, a typed default's. */
+  readonly own: boolean;
+  readonly ownUntyped: boolean;
+  readonly typed: boolean;
+  /** Whether some operation of the chain combines or removes a literal operand (`COMBINING_ROLES`). */
+  readonly combining: boolean;
 }
 
-/** Whether some operation of a chain passes `test`. */
-function someLevel(via: ViaChain | null, test: (level: Via) => boolean): boolean {
-  for (let at = via; at !== null; at = at.outer) if (test(at.level)) return true;
-  return false;
-}
-
-/** A chain's operations, the outermost first. */
-function levelsOf(via: ViaChain | null): Via[] {
-  const levels: Via[] = [];
-  for (let at = via; at !== null; at = at.outer) levels.push(at.level);
-  return levels.reverse();
+/** The chain one operation, `level`, inside `outer`. */
+function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaChain {
+  const own = OWN_ROLES.has(level.role);
+  const typed = TYPED_ROLES.has(level.role);
+  return {
+    level,
+    outer,
+    own: own || outer?.own === true,
+    ownUntyped: (own && !typed) || outer?.ownUntyped === true,
+    typed: typed || outer?.typed === true,
+    combining:
+      (COMBINING_ROLES.has(level.role) && program.hasOf.has(level.operand)) ||
+      outer?.combining === true,
+  };
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -1082,6 +1094,10 @@ export class Admission {
   /** Per chain of a walk's operations, its signature (`#viaSignature`), and per signature's parts, its name. */
   readonly #viaSignatures = new WeakMap<ViaChain, string>();
   readonly #viaNames = new Map<string, string>();
+  /** Per chain, whether its operations give the operand the walk took (`#chosen`), and surely give it. */
+  readonly #chosenLinks = [new WeakMap<ViaChain, boolean>(), new WeakMap<ViaChain, boolean>()];
+  /** Per set of a store's inline ingresses, per chain, whether one of its operations' values is one (`named`). */
+  readonly #inlineLinks = new WeakMap<ReadonlySet<PlaceId>, WeakMap<ViaChain, boolean>>();
   /** Per store, its landing stops by ingress (`#storeIngresses`). */
   readonly #byIngress = new Map<number, StoreIngresses>();
   /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
@@ -5940,9 +5956,9 @@ export class Admission {
           pending.push([current, at, path, strip, deep, via, true, single, longerKey(key, OWN)]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
             const [operand, rest, role, position] = carried[index]!;
-            const through: ViaChain | null = program.projOf.has(current)
+            const through = program.projOf.has(current)
               ? via
-              : { level: { value: current, node: at, path, strip, operand, role }, outer: via };
+              : viaLink(program, via, { value: current, node: at, path, strip, operand, role });
             pending.push([
               operand,
               at,
@@ -6083,6 +6099,7 @@ export class Admission {
     const literals = this.#snapshots(stops.literals.get(pathText(at)), true);
     if (literals !== undefined) lists.push({ list: literals, length: at.length });
     const positions = lists.map(() => 0);
+    const throughs = new Map<string, WeakMap<ViaChain, boolean>>();
     for (;;) {
       let best = -1;
       for (let index = 0; index < lists.length; index += 1)
@@ -6103,23 +6120,20 @@ export class Admission {
       positions[best]! += 1;
       // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
       // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
-      if (someLevel(next.via, (level) => TYPED_ROLES.has(level.role))) continue;
+      if (next.via?.typed === true) continue;
       const rest = at.slice(lists[best]!.length);
       const items = withoutEmpty(
         this.#run(values.valueItems(next.value, next.node, joinSteps(next.strip, rest))),
       );
       const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
       // (an operand its operation does not give decides nothing, F17a, F17b)
-      if (
-        definite.length > 0 &&
-        this.#chosen(next.via) &&
-        this.#through(
-          next.via,
-          at,
-          definite.map((item) => item.tag),
-        )
-      )
-        return { term: null, site: siteOf(next) };
+      if (definite.length === 0 || !this.#chosen(next.via)) continue;
+      // (each chain's operations asked once per set of kinds at the path, whatever stops share them)
+      const tags = definite.map((item) => item.tag);
+      const kinds = [...tags].sort().join(",");
+      let holds = throughs.get(kinds);
+      if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
+      if (this.#through(next.via, at, tags, holds)) return { term: null, site: siteOf(next) };
     }
   }
 
@@ -6201,10 +6215,15 @@ export class Admission {
 
   /**
    * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
-   * definitely in its own value there.
+   * definitely in its own value there; per link in `holds` (one decision's, for these kinds).
    */
-  #through(via: ViaChain | null, at: readonly string[], definite: readonly ItemTag[]): boolean {
-    for (const level of levelsOf(via)) {
+  #through(
+    via: ViaChain | null,
+    at: readonly string[],
+    definite: readonly ItemTag[],
+    holds: WeakMap<ViaChain, boolean>,
+  ): boolean {
+    return this.#perLink(holds, via, true, (level) => {
       const carried = withoutEmpty(
         this.#run(
           this.pass.values.valueItems(
@@ -6214,10 +6233,32 @@ export class Admission {
           ),
         ),
       );
-      if (!definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def")))
-        return false;
+      return definite.every((tag) => carried.some((own) => own.tag === tag && own.cert === "def"));
+    });
+  }
+
+  /**
+   * A chain's answer kept per link in `memo` (#1230): `every` operation passes `test`, else some does, each link's
+   * answer from the chain outside it and its own operation, asked outermost first and only where the answer outside it
+   * leaves it open, as `every` and `some` ask them; each link once, so the chains of a walk's k stops cost their links
+   * once, never a chain per stop.
+   */
+  #perLink(
+    memo: WeakMap<ViaChain, boolean>,
+    via: ViaChain | null,
+    every: boolean,
+    test: (level: Via) => boolean,
+  ): boolean {
+    const open: ViaChain[] = [];
+    let at = via;
+    for (; at !== null && !memo.has(at); at = at.outer) open.push(at);
+    let answer = at === null ? every : memo.get(at)!;
+    for (let index = open.length - 1; index >= 0; index -= 1) {
+      this.pass.program.work.charge("checks");
+      if (answer === every) answer = test(open[index]!.level);
+      memo.set(open[index]!, answer);
     }
-    return true;
+    return answer;
   }
 
   /**
@@ -6238,7 +6279,7 @@ export class Admission {
    */
   #chosen(via: ViaChain | null, surely = false): boolean {
     const { program, values } = this.pass;
-    return levelsOf(via).every((level) => {
+    return this.#perLink(this.#chosenLinks[surely ? 1 : 0]!, via, true, (level) => {
       const c = program.opOf.get(level.value);
       const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
       // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
@@ -6385,7 +6426,7 @@ export class Admission {
         const out: Siting[] = [];
         for (const stop of selected) {
           program.work.charge("checks");
-          if (someLevel(stop.via, (level) => OWN_ROLES.has(level.role))) continue;
+          if (stop.via?.own === true) continue;
           if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
             out.push(
               definitions.ingress.has(baseOf(stop.value))
@@ -6408,6 +6449,8 @@ export class Admission {
       named: () => {
         if (named !== null) return named;
         const { inline } = this.#storeIngresses(d);
+        let inlineLinks = this.#inlineLinks.get(inline);
+        if (inlineLinks === undefined) this.#inlineLinks.set(inline, (inlineLinks = new WeakMap()));
         const out: Stop[] = [];
         for (const stop of selected) {
           program.work.charge("checks");
@@ -6420,7 +6463,8 @@ export class Admission {
           if (
             !definitions.ingress.has(base) &&
             this.#sourceOf(stop.value) !== null &&
-            !someLevel(stop.via, (level) => inline.has(level.value) || OWN_ROLES.has(level.role))
+            stop.via?.own !== true &&
+            !this.#perLink(inlineLinks, stop.via, false, (level) => inline.has(level.value))
           )
             out.push(stop);
         }
@@ -6454,12 +6498,11 @@ export class Admission {
   #namedMember(stop: Stop): boolean {
     const { program, definitions, values } = this.pass;
     if (definitions.ingress.has(stop.value) || this.#sourceOf(stop.value) === null) return false;
+    // (only the innermost operation takes the stop's value as its operand, `ViaChain`)
+    const level = stop.via?.level;
     const member =
       program.projOf.has(stop.value) ||
-      someLevel(
-        stop.via,
-        (level) => RECEIVER_ROLES.has(level.role) && level.operand === stop.value,
-      );
+      (level !== undefined && RECEIVER_ROLES.has(level.role) && level.operand === stop.value);
     return (
       member && this.#run(values.valueItems(stop.value, stop.node, stop.strip)).some(isExternal)
     );
@@ -6470,17 +6513,16 @@ export class Admission {
    * (`[a] + [named]`, `[k, named].removeAt(1)`): the operand that brought the kind, C1's site (TABLE r4.63 (2)).
    */
   #namedBelowCombining(stop: Stop): boolean {
-    const { program, definitions, values } = this.pass;
+    const { definitions, values } = this.pass;
+    // (only the innermost operation takes the stop's value as its operand, `ViaChain`)
+    const via = stop.via;
+    const combining =
+      via !== null &&
+      (via.level.operand === stop.value ? via.outer?.combining === true : via.combining);
     return (
       !definitions.ingress.has(stop.value) &&
       this.#sourceOf(stop.value) !== null &&
-      someLevel(
-        stop.via,
-        (level) =>
-          COMBINING_ROLES.has(level.role) &&
-          level.operand !== stop.value &&
-          program.hasOf.has(level.operand),
-      ) &&
+      combining &&
       this.#run(values.valueItems(stop.value, stop.node, stop.strip)).some(isExternal)
     );
   }
@@ -6504,9 +6546,7 @@ export class Admission {
       if (withoutEmpty(this.#run(contract.contractOf(key))).some(concrete)) continue;
       if (this.#run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
         // (an operation's own read: the destination's check at the store's value, TABLE r4.63 (3))
-        return someLevel(stop.via, (level) => OWN_ROLES.has(level.role))
-          ? d.site
-          : this.#contributionSite(stop, d);
+        return stop.via?.own === true ? d.site : this.#contributionSite(stop, d);
     }
     return null;
   }
@@ -6555,13 +6595,7 @@ export class Admission {
         for (const list of map.values())
           for (const stop of list) {
             program.work.charge("checks");
-            if (
-              !someLevel(
-                stop.via,
-                (level) => OWN_ROLES.has(level.role) && (typed || !TYPED_ROLES.has(level.role)),
-              )
-            )
-              continue;
+            if ((typed ? stop.via?.own : stop.via?.ownUntyped) !== true) continue;
             let base = stop.value;
             while (!definitions.ingress.has(base) && program.projOf.has(base)) {
               program.work.charge("checks");
