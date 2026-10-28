@@ -38,6 +38,7 @@ import type {
 } from "../backend.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
+import { joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
@@ -1089,7 +1090,7 @@ class Contracts {
   /** Whether the place a call lands in admits any object at `path` below it by its written type (`object`). */
   #writtenObject(landing: Landing | null, path: readonly string[]): boolean {
     if (landing === null) return false;
-    const { admitted } = this.answers.place(landing.id, [...landing.path, ...path]);
+    const { admitted } = this.answers.place(landing.id, joinSteps(landing.path, path));
     return admitted.by === "written" && admitted.kinds.includes("object");
   }
 }
