@@ -17,7 +17,7 @@ function diagnostics(source: string): [string, string, string][] {
 
 // A `!` there names no code to paste in its place, which the error for the `not` gives.
 const BANG_AFTER_OPERATOR =
-  "TeaseScript uses 'not' instead of '!', but 'not' cannot directly follow the operator before the '!'.";
+  "TeaseScript uses 'not' instead of '!', but 'not' cannot follow the operator before the '!' directly.";
 
 function sayTexts(source: string): string[] {
   const result = runValidSource(source);

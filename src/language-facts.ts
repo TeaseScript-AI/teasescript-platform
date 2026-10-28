@@ -370,12 +370,12 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   ...["&&", "&"].map((symbol) => foreignForm(symbol, "and", 'if a and b { say "both" }')),
   ...["||", "|"].map((symbol) => foreignForm(symbol, "or", 'if a or b { say "one or both" }')),
   foreignForm("!", "not", 'if not a { say "not a" }'),
-  // A `!` right after an operator that `not` cannot follow, as in `a == !b`: the error for the `not` names the fix.
+  // A `!` right after an operator that `not` cannot follow, as in `a == !b`, where `not` in its place fails too.
   foreignForm(
     "! after an operator",
     {
       words:
-        "TeaseScript uses 'not' instead of '!', but 'not' cannot directly follow the operator before the '!'.",
+        "TeaseScript uses 'not' instead of '!', but 'not' cannot follow the operator before the '!' directly.",
     },
     null,
   ),
