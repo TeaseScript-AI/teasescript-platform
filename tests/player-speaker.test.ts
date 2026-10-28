@@ -358,7 +358,7 @@ test("the player profile reads like a speaker, and a field it lacks fails when t
   assert.equal(result.snapshot.failure?.code, "TSR017");
   assert.equal(
     result.snapshot.failure?.message,
-    "'playerProfile' has no 'lastName': the player's profile does not give one. Give the player a value of its own instead, as in 'player.lastName = ...'.",
+    "'playerProfile' has no 'lastName': the player's profile does not give one. Assign a value to 'player.lastName' and read 'player.lastName' instead.",
   );
   // A session without a player profile has none of the fields, and a copy clears the player's.
   const empty = play(
