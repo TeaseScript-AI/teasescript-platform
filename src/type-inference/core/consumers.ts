@@ -1971,7 +1971,14 @@ export class Consumers {
   #operation(c: Extract<ValueConstraint, { kind: "operation" }>, node: FlowNode): void {
     const { family, name } = c.contract;
     if (c.receiver !== null && family !== "operator") {
-      if ((name === "removeAt" || name === "take" || name === "takeLast") && c.arguments.length > 0)
+      // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
+      if (
+        (name === "removeAt" || name === "take" || name === "takeLast") &&
+        c.arguments.length > 0 &&
+        this.#kindsOf(c.receiver, node).some(
+          (item) => item.tag === "unknown" || hasMethod(item.tag, name),
+        )
+      )
         this.#integerOnly(
           c.arguments[0]!,
           node,
@@ -2716,7 +2723,8 @@ export class Consumers {
   }
 
   /**
-   * C2 and C12 by the receiver's kind: a list's index is a whole number, a dict's key text; a receiver whose kinds hold
+   * C2 and C12 by the receiver's kind: a list's index is a whole number, a dict's key text, and a receiver of any other
+   * kind owes neither, its own check reporting it (C5b: an object is not indexed, V30 §15); a receiver whose kinds hold
    * `unknown`, or a dict beside another kind, dispatches to neither as an error (C2 r4.33): a `get`'s key owes each
    * possible receiver's obligation as a warning whether or not the key fits it; an index expression keeps the
    * receiver's dispatch, its misfits warnings.
@@ -2732,6 +2740,7 @@ export class Consumers {
     const kinds = this.#kindsOf(receiver, node);
     const unknown = kinds.find((item) => item.tag === "unknown");
     const dict = kinds.find((item) => item.tag === "dict");
+    const list = kinds.find((item) => item.tag === "list") ?? unknown;
     // (a null receiver is the member read's)
     const other = kinds.find((item) => item.tag !== "dict" && item.tag !== "null");
     const soft = unknown !== undefined || (dict !== undefined && other !== undefined);
@@ -2751,14 +2760,14 @@ export class Consumers {
         owed,
       );
     }
-    if (other !== undefined)
+    if (list !== undefined)
       this.#integerOnly(
         index,
         node,
         site,
         what,
         get ? "get" : "index",
-        soft ? (get ? (unknown ?? other) : true) : false,
+        soft ? (get ? (unknown ?? list) : true) : false,
       );
   }
 

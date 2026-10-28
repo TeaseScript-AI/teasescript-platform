@@ -1317,6 +1317,45 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
 });
 
+/**
+ * #1242 (V30 §15, ADR 0021 §1.8, TABLE C2, C12, C5b): an index or a key owes a list's whole number or a dict's text
+ * only where the receiver may be a list or a dict, and a `removeAt`, `take` or `takeLast` argument only where it may
+ * have the method; any other receiver gets its own error alone, as the current checker gives it: an object indexed by
+ * text, a truth value or a number, read or stored, by `get`; a whole number, true or false, text. A list's index and a
+ * dict's key keep their rules.
+ */
+test("a receiver without an index gets its own error alone, never a list index's (#1242)", () => {
+  const original = inBothOrders(() =>
+    candidate('let door = {name: "hall"}\nsay door["name"]\nexit\n'),
+  );
+  assert.deepEqual(sited(original), ["error TSV043@30"]);
+  assert.match(original.diagnostics[0]!.message, /^An object has no elements, so 'door\["name"\]'/);
+  const rules = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.map((diagnostic) =>
+      diagnostic.kind === "written-type"
+        ? diagnostic.kind
+        : `${diagnostic.class} ${diagnostic.rule.rule} ${source.slice(diagnostic.site.start, diagnostic.site.end)}`,
+    );
+  };
+  for (const [source, expected] of [
+    ['let box = {n: 1}\nbox["n"] = 2\nexit\n', 'member box["n"]'],
+    ["let a = {n: 1}\nsay a[true]\nexit\n", "member a[true]"],
+    ["let a = {n: 1}\nsay a[1.5]\nexit\n", "member a[1.5]"],
+    ['let a = {n: 1}\nsay a.get("n", default: 0)\nexit\n', 'member a.get("n", default: 0)'],
+    ['let a = 1\nsay a["n"]\nexit\n', 'member a["n"]'],
+    ["let a = true\na[false] = 2\nexit\n", "member a[false]"],
+    ['let t = "abc"\nsay t["n"]\nexit\n', 'member t["n"]'],
+    ['let a = {n: 1}\na.removeAt("x")\nexit\n', 'member a.removeAt("x")'],
+    ['let t = "abc"\nsay t.take("x")\nexit\n', 'member t.take("x")'],
+    ['let a = [1]\nsay a["n"]\nexit\n', 'count "n"'],
+    ["let a = dict{n: 1}\nsay a[0]\nexit\n", "key 0"],
+    ['let xs = [1, 2]\nsay xs.take("x")\nexit\n', 'count "x"'],
+  ] as const)
+    assert.deepEqual(rules(source), [`compile-error ${expected}`], source);
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";
