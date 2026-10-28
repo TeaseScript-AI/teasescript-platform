@@ -231,12 +231,14 @@ export function stopProblems(c: StopCase): string[] {
   let kept = stopped.answers.checks
     .filter((check) => !marked.has(check))
     .map((check) => JSON.stringify(check));
-  if (beyond(kept, owed).length > 0 && marks.length > 0) {
+  // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
+  const extra = beyond(kept, owed);
+  if (extra.length > 0 && marks.length > 0) {
     const without = stopped.without(...omission(excused)).answers.checks;
     kept = beyond(
       kept,
       beyond(
-        kept,
+        extra,
         without.map((check) => JSON.stringify(check)),
       ),
     );
