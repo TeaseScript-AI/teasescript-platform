@@ -3307,12 +3307,14 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
   // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
   // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
-  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays
+  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays;
+  // 45,355 / 156,458 (3.4675) with S8's stop (#1063): fewer index steps at both sizes (25,209 / 91,385 against 25,579 /
+  // 92,075), more of them saved at 64 than at 128
   {
     name: "I1106-nested-choice-lists",
     measures:
       'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
-    measured: 3.46,
+    measured: 3.47,
     program: (k) => {
       let expression = 'askChoice "seed"';
       for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
