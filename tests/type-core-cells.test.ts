@@ -1758,7 +1758,8 @@ test("a host list's selection keeps its empty-check under a written type or a co
   // answer for every path below its root, whose mark is the path's, in either order); so is a written parameter's host
   // argument; a loop over a host list may not run, so the list it fills may stay empty (F5a); a loop's variable over a
   // host list, nested and written, tested or copied to a written place, may be empty; so may an interpolated written
-  // host list (C11); an opaque value stored after `[]` keeps its check; a literal with a host element holds one
+  // host list (C11); an opaque value stored after `[]` keeps its check, selected or looped over (F5a); a literal with a
+  // host element holds one
   const computed = 'let k = askText "key?"\n';
   const raw = "let key: string = hostValue\nlet raw = load(key, default: {items: [1]})\n";
   const loads = `${computed}let rows = [load(k, default: [1]), load(k, default: [2])]\n`;
@@ -1789,9 +1790,12 @@ test("a host list's selection keeps its empty-check under a written type or a co
     [["xs", "xs.first"]],
   );
   expect('let xs: string[] = hostValue\nsay "${xs}"\nexit\n', [["xs", "xs"]]);
-  expect('let s = "zzz"\nlet xs: string[] = []\nxs = s.findAll(/a/)\nlet out = xs.first\nexit\n', [
-    ["xs", "xs.first"],
-  ]);
+  const opaque = 'let s = "zzz"\nlet xs: string[] = []\nxs = s.findAll(/a/)\n';
+  expect(`${opaque}let out = xs.first\nexit\n`, [["xs", "xs.first"]]);
+  expect(
+    `${opaque}let ys: string[] = []\nfor x in xs {\n    ys.add(x)\n}\nlet out = ys.first\nexit\n`,
+    [["ys", "ys.first"]],
+  );
   expect("let xs: integer[] = [hostValue]\nlet out = xs.first\nexit\n", []);
   assert.deepEqual(differing, []);
 });
