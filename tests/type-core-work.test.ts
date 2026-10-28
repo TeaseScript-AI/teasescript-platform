@@ -368,8 +368,9 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * object, directly or each in an object, each member read again at each property (#1304); k named bindings of
  * loads, of host reads or of alike objects beside one, each binding read again at each (#1313); and a run of k joined
  * lists ending in a list of another type, the class of each join naming the joins below it in full, also with each
- * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them (#1357).
- * A read of host data compiles with its runtime check.
+ * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them, and two
+ * bindings of one class of k roles read together in k lists, each list comparing their writers and walking their leaves
+ * again (#1357). A read of host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -765,6 +766,27 @@ const PRODUCTS: readonly (WorkFamily & {
             "let xs: (integer | string)[] = [0]",
             `let s = ${joined} + ["x"]`,
             "say s.length",
+            "exit",
+          ].join("\n"),
+        },
+      ];
+    },
+  },
+  {
+    name: "peer-bindings-read-in-k-lists",
+    measures:
+      "#1357: a class's members chosen once by their writers' sources, a binding's leaves walked once",
+    counter: "invSteps",
+    outcome: "warning-runtime-check",
+    program: (k) => {
+      const chain = `${"max(".repeat(k)}hostValue${many(k, (i) => `, ${i})`, "")}`;
+      return [
+        {
+          path: "main.tease",
+          source: [
+            `let left = ${chain}`,
+            `let right = ${chain}`,
+            many(k, (i) => `let xs${i} = [left, right]\nlet n${i}: integer = xs${i}[hostValue.i]`),
             "exit",
           ].join("\n"),
         },

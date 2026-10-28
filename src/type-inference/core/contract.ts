@@ -546,16 +546,25 @@ export interface ChoiceGroup {
 
 /**
  * A member's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`), as
- * `roleMinima` reads them: the writers only where another member of its class compares them (#1357).
+ * `roleMinima` reads them: the writers only where another member of its class compares them, by what they are read from
+ * (#1357).
  */
 export interface ValueClass {
   readonly cls: string | null;
   readonly writers: () => readonly (Writer | null)[];
+  /** What the writers are read from (a value, a binding and its value, a label), the same text for the same writers. */
+  readonly source: string;
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
   readonly mixed: number;
 }
 
-const NO_CLASS: ValueClass = { cls: null, writers: () => [], mixed: 0 };
+const NO_CLASS: ValueClass = { cls: null, writers: () => [], source: "", mixed: 0 };
+
+/** The role minima `roleMinima` made for one side, by their members' writers' sources, and the ledger they charge. */
+interface RoleSelections {
+  readonly made: Map<string, readonly number[]>;
+  readonly work: WorkLedger;
+}
 
 /**
  * A value's class as `classOf` keeps it: its roles' writers (`classWriters`) are its own, then its parts' in turn, read
@@ -583,57 +592,78 @@ function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): 
  * TABLE r4.85: the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
  * answer alike at every path apart from the writers of their roles (`classWriters`), each role's writer standing for
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
- * earliest in some role, merged, answer as all of them, whatever order the writers come in; a class's roles are read
- * once a second member comes, so a member alone in its class reads none. A member without a class stands by itself. Per
- * class in the order of its first member: the members read, each once and in role order (the first member for a role
- * no later one is earlier in), the others where the class is mixed (`Contract.classMixed`: read where the read ones'
- * answer holds a leaf or an operand's identity), and all.
+ * earliest in some role, merged, answer as all of them, whatever order the writers come in. A member without a class
+ * stands by itself. Per class in the order of its first member: the members read, each once and in role order (the
+ * first member for a role no later one is earlier in), the others where the class is mixed (`Contract.classMixed`: read
+ * where the read ones' answer holds a leaf or an operand's identity), and all. A class's members are chosen by their
+ * writers alone, so each sequence of their sources is chosen once per side (`selections`), whichever site asks, and a
+ * member alone in its class reads no writers: k sites of one class's long roles read them once, not k times (#1357).
  */
 function roleMinima(
   members: readonly ValueClass[],
   charge: () => void,
+  selections: RoleSelections,
 ): readonly {
   readonly read: readonly number[];
   readonly rest: readonly number[];
   readonly all: readonly number[];
   readonly mixed: number;
 }[] {
-  const classes: { read: number[]; best: (Writer | null)[] | null; readonly all: number[] }[] = [];
+  const classes: number[][] = [];
   const byClass = new Map<string, number>();
-  for (const [index, { cls, writers }] of members.entries()) {
+  for (const [index, { cls }] of members.entries()) {
     charge();
     const at = cls === null ? undefined : byClass.get(cls);
-    if (at === undefined) {
+    if (at !== undefined) classes[at]!.push(index);
+    else {
       if (cls !== null) byClass.set(cls, classes.length);
-      classes.push({ read: [index], best: null, all: [index] });
-      continue;
-    }
-    const into = classes[at]!;
-    if (into.best === null) {
-      const first = into.all[0]!;
-      into.best = [...members[first]!.writers()];
-      if (into.best.length > 0) into.read = into.best.map(() => first);
-    }
-    into.all.push(index);
-    for (const [role, mine] of writers().entries()) {
-      charge();
-      const best = into.best[role] ?? null;
-      if (mine !== null && best !== null && firstWriter(best, mine) !== best) {
-        into.best[role] = mine;
-        into.read[role] = index;
-      }
+      classes.push([index]);
     }
   }
-  return classes.map(({ read, all }) => {
-    const chosen = new Set(read);
+  return classes.map((all) => {
+    const read =
+      all.length === 1
+        ? all
+        : chosen(
+            all.map((member) => members[member]!),
+            charge,
+            selections,
+          ).map((at) => all[at]!);
     const mixed = members[all[0]!]!.mixed;
-    return {
-      read: [...chosen],
-      rest: mixed !== 0 ? all.filter((m) => !chosen.has(m)) : [],
-      all,
-      mixed,
-    };
+    const reads = new Set(read);
+    return { read, rest: mixed !== 0 ? all.filter((m) => !reads.has(m)) : [], all, mixed };
   });
+}
+
+/**
+ * Of two or more members of one class (`roleMinima`), those it reads, by their places among them: per role the first
+ * whose writer is earliest, each once in role order. Once per sequence of their writers' sources and side.
+ */
+function chosen(
+  group: readonly ValueClass[],
+  charge: () => void,
+  { made, work }: RoleSelections,
+): readonly number[] {
+  // (no spread into a call: a class may hold as many members as the source has values)
+  const key = JSON.stringify(group.map((member) => member.source));
+  const known = made.get(key);
+  if (known !== undefined) return known;
+  const best = [...group[0]!.writers()];
+  const read = best.length === 0 ? [0] : best.map(() => 0);
+  for (let at = 1; at < group.length; at += 1)
+    for (const [role, mine] of group[at]!.writers().entries()) {
+      charge();
+      const first = best[role] ?? null;
+      if (mine !== null && first !== null && firstWriter(first, mine) !== first) {
+        best[role] = mine;
+        read[role] = at;
+      }
+    }
+  const out = [...new Set(read)];
+  keepText(work, key.length);
+  keep(work, 1 + out.length);
+  made.set(key, out);
+  return out;
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
@@ -856,6 +886,11 @@ export class Contract {
   /** Per value, its class on the contract side and on the value side (`classOf`); per class text, its short name. */
   readonly #valueClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
   readonly #classIds = new Map<string, string>();
+  /** Per side, the role minima of a class's members by their writers' sources (`roleMinima`), whichever site asks. */
+  readonly #roleSelections = [
+    new Map<string, readonly number[]>(),
+    new Map<string, readonly number[]>(),
+  ];
   /** Per value, its roles' writers on the contract side and on the value side (`classWriters`), where asked. */
   readonly #classWriters = [
     new Map<PlaceId, readonly (Writer | null)[] | null>(),
@@ -2494,6 +2529,17 @@ export class Contract {
     return memo.get(value)!;
   }
 
+  /** The role minima `roleMinima` made on one side, and the ledger it charges. */
+  #minima(exact: boolean): RoleSelections {
+    return { made: this.#roleSelections[exact ? 1 : 0]!, work: this.#work };
+  }
+
+  /** What a kept class's roles' writers are read from (`#writersOf`): its own writer and its parts, as a text. */
+  #writersSource(kept: KeptClass): string {
+    const own = kept.own.map((w) => (w === null ? null : [w.kind, w.file, w.start, w.end]));
+    return JSON.stringify([own, kept.parts]);
+  }
+
   /**
    * A kept class's roles' writers (`classWriters`, `boundClass`): its own, then each part's in turn, read from the parts'
    * kept classes on an explicit walk; `null` for no class.
@@ -2794,6 +2840,7 @@ export class Contract {
       members.push({
         cls: key,
         writers: () => this.classWriters(entry.value, exact) ?? [],
+        source: `v${entry.value}`,
         mixed: key === null ? 0 : this.classMixed(entry.value, exact),
       });
     }
@@ -2801,7 +2848,7 @@ export class Contract {
     const below: (OtherGroup | null)[] = [];
     let summarised = false;
     const charge = (): void => program.work.charge("invSteps");
-    for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
+    for (const { read, rest, all, mixed } of roleMinima(members, charge, this.#minima(exact))) {
       let writer: Writer | null = null;
       // (F19's loads of a computed key with no receiver, whatever their defaults' class, which no read below their root
       // consults, and wherever they land: the loads of one path land alike; with the sharing off every value is read at
@@ -2878,13 +2925,13 @@ export class Contract {
       members.push({
         cls: key,
         writers: () => this.#writersOf(bound, value) ?? [],
+        source: key === null ? "" : this.#writersSource(bound),
         mixed: key === null ? 0 : bound.mixed,
       });
     }
     const groups: ReadClassGroup[] = [];
-    for (const { read, rest, all, mixed } of roleMinima(members, () =>
-      program.work.charge("invSteps"),
-    )) {
+    const charge = (): void => program.work.charge("invSteps");
+    for (const { read, rest, all, mixed } of roleMinima(members, charge, this.#minima(value))) {
       let writer: Writer | null = null;
       for (const member of all) writer = firstWriter(writer, cellWriter(list[member]!));
       this.#keep(2 + read.length + rest.length);
@@ -2919,12 +2966,18 @@ export class Contract {
       if (sharing() && member !== null) {
         const cls = member.place === undefined ? null : this.classOf(member.place, exact);
         if (member.place === undefined)
-          classed = { cls: keptParts(this.#work, "l", member.label!), writers: () => [], mixed: 0 };
+          classed = {
+            cls: keptParts(this.#work, "l", member.label!),
+            writers: () => [],
+            source: "l",
+            mixed: 0,
+          };
         else if (cls !== null) {
           const place = member.place;
           classed = {
             cls: keptParts(this.#work, member.object ? "o" : "c", cls),
             writers: () => this.classWriters(place, exact) ?? [],
+            source: `v${place}`,
             mixed: this.classMixed(place, exact),
           };
         }
@@ -2933,7 +2986,7 @@ export class Contract {
     }
     const options: ChoiceGroup[] = [];
     const charge = (): void => program.work.charge("invSteps");
-    for (const { read, rest, mixed } of roleMinima(members, charge)) {
+    for (const { read, rest, mixed } of roleMinima(members, charge, this.#minima(exact))) {
       this.#keep(2 + read.length + rest.length);
       options.push({ read, rest, mixed });
     }
@@ -5426,15 +5479,23 @@ export class Contract {
    * binding its value's (`#boundOf`, #1313); a literal's read entry of host data each read's it stands for (its
    * unioned leaves, `#indexWork`), so literals of one and of two reads of one global differ by their roles' count;
    * `null` where a mixed part is mixed by more than its leaves, a leaf lies in a fixpoint's cell, or none names one.
-   * Once per value and side, on an explicit walk.
+   * Once per value and side, on an explicit walk, and a bound binding's value once for all its reads (#1357).
    */
   #leafRoles(value: PlaceId, exact: boolean): readonly IngressNode[] | null {
     const memo = this.#leafRolesOf[exact ? 1 : 0]!;
     if (memo.has(value)) return memo.get(value)!;
+    // (a read of a bound binding walks the binding's value, kept as that value's own where it is no bound read itself)
+    const root = this.#boundOf(value, exact)?.value ?? value;
+    const shared = root !== value && this.#boundOf(root, exact) === null;
+    if (shared && memo.has(root)) {
+      this.#keep(1);
+      memo.set(value, memo.get(root)!);
+      return memo.get(root)!;
+    }
     const { definitions, program } = this.pass;
     const out: IngressNode[] = [];
     const seen = new Set<PlaceId>();
-    const pending = [this.#boundOf(value, exact)?.value ?? value];
+    const pending = [root];
     let found = true;
     while (found && pending.length > 0) {
       const at = pending.pop()!;
@@ -5462,6 +5523,7 @@ export class Contract {
     }
     const roles = found && out.length > 0 ? out : null;
     this.#keep(1 + out.length);
+    if (shared) memo.set(root, roles);
     memo.set(value, roles);
     return roles;
   }
