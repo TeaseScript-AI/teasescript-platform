@@ -6,7 +6,8 @@ import { Project, ts } from "ts-morph";
  * (admission.ts) lists every derivation of admission's that creates an obligation; a stop before admission settled runs
  * each in the fresh pass. The check rejects:
  * - an `Admission` method that creates an obligation itself (a `boundaryCheck(…)` call, a push onto its `readChecks`, a
- *   call of a parameter named `error`) and is not an inventory entry;
+ *   call of a parameter named `error`, or of an `AdmissionHost` member whose implementation in `Consumers` calls a
+ *   consumer method that creates one) and is not an inventory entry;
  * - a call from a consumer method that creates an obligation (one that records a diagnostic or a check, or calls one
  *   that does, within `Consumers`) into an `Admission` method that is neither an inventory entry nor a read `READS`
  *   lists with why it creates none;
@@ -88,6 +89,14 @@ export function obligationInventoryDiagnostics(program, root, files) {
     if (found === null) throw new Error(`No class ${name} in ${sourceFile.fileName}.`);
     return found;
   };
+  const interfaceOf = (sourceFile, name) => {
+    let found = null;
+    sourceFile.forEachChild((node) => {
+      if (ts.isInterfaceDeclaration(node) && node.name.text === name) found = node;
+    });
+    if (found === null) throw new Error(`No interface ${name} in ${sourceFile.fileName}.`);
+    return found;
+  };
   const nameOf = (member) =>
     member.name === undefined
       ? null
@@ -161,35 +170,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
       : null;
   };
 
-  // 1. an Admission method that creates an obligation itself
-  const direct = new Set();
-  for (const [name, method] of admissionMethods) {
-    const errorParameters = new Set();
-    for (const parameter of method.parameters)
-      if (ts.isIdentifier(parameter.name) && parameter.name.text === "error")
-        errorParameters.add(parameter.name.text);
-    const creates = calls(method).some((call) => {
-      const callee = call.expression;
-      if (ts.isIdentifier(callee))
-        return callee.text === "boundaryCheck" || errorParameters.has(callee.text);
-      return (
-        ts.isPropertyAccessExpression(callee) &&
-        callee.name.text === "push" &&
-        ts.isPropertyAccessExpression(callee.expression) &&
-        callee.expression.name.text === "readChecks"
-      );
-    });
-    if (creates) direct.add(name);
-    if (creates && !entries.has(name))
-      report(method, `Admission.${name} creates an obligation; list it in OBLIGATION_SITES.`);
-  }
-
-  // (a listed read creates none directly)
-  for (const name of files.reads.keys())
-    if (direct.has(name))
-      report(admissionMethods.get(name), `Admission.${name} creates an obligation; it is no read.`);
-
-  // 2. the consumer methods that create an obligation: those that record a diagnostic or a check, and their callers
+  // the consumer methods that create an obligation: those that record a diagnostic or a check, and their callers
   const recordsHere = (method) =>
     calls(method).some((call) => {
       const callee = call.expression;
@@ -231,6 +212,65 @@ export function obligationInventoryDiagnostics(program, root, files) {
       }
     }
   }
+  // the host's members that create an obligation: those whose implementation in `Consumers` (the host object's property
+  // of that name) calls a consumer method that does, as `undecidedIngress` marks a typed call
+  const host = interfaceOf(admissionFile, "AdmissionHost");
+  const hostMembers = new Set(host.members.map(nameOf).filter((name) => name !== null));
+  const sinks = new Set();
+  const visitHost = (node) => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      hostMembers.has(nameOf(node)) &&
+      calls(node.initializer).some((call) => {
+        const callee = call.expression;
+        return (
+          ts.isPropertyAccessExpression(callee) &&
+          callee.expression.kind === ts.SyntaxKind.ThisKeyword &&
+          creating.has(callee.name.text)
+        );
+      })
+    )
+      sinks.add(nameOf(node));
+    node.forEachChild(visitHost);
+  };
+  visitHost(consumers);
+  // the host member a call reaches, `null` for any other callee
+  const hostCallee = (call) => {
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee)) return null;
+    const declaration = checker.getSymbolAtLocation(callee.name)?.declarations?.[0];
+    return declaration !== undefined && declaration.parent === host ? nameOf(declaration) : null;
+  };
+
+  // 1. an Admission method that creates an obligation itself
+  const direct = new Set();
+  for (const [name, method] of admissionMethods) {
+    const errorParameters = new Set();
+    for (const parameter of method.parameters)
+      if (ts.isIdentifier(parameter.name) && parameter.name.text === "error")
+        errorParameters.add(parameter.name.text);
+    const creates = calls(method).some((call) => {
+      const callee = call.expression;
+      if (sinks.has(hostCallee(call))) return true;
+      if (ts.isIdentifier(callee))
+        return callee.text === "boundaryCheck" || errorParameters.has(callee.text);
+      return (
+        ts.isPropertyAccessExpression(callee) &&
+        callee.name.text === "push" &&
+        ts.isPropertyAccessExpression(callee.expression) &&
+        callee.expression.name.text === "readChecks"
+      );
+    });
+    if (creates) direct.add(name);
+    if (creates && !entries.has(name))
+      report(method, `Admission.${name} creates an obligation; list it in OBLIGATION_SITES.`);
+  }
+
+  // (a listed read creates none directly)
+  for (const name of files.reads.keys())
+    if (direct.has(name))
+      report(admissionMethods.get(name), `Admission.${name} creates an obligation; it is no read.`);
+
   // (and the consumer methods those call, whatever records the obligation: `#decide` asks admission's decision)
   for (let grown = true; grown;) {
     grown = false;

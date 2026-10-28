@@ -86,3 +86,31 @@ test("an Admission method that creates an obligation itself must be listed", () 
     messages.join("\n"),
   );
 });
+
+test("a call of a host member whose consumer implementation marks creates an obligation, in a new method or a read", () => {
+  const call = '    this.host.undecidedIngress?.({ file: 0, start: 0, end: 0 }, "x");\n';
+  const added = messagesWith({
+    [ADMISSION]: (text) =>
+      text.replace(
+        "  public valueAt(",
+        `  public openIngress(): void {\n${call}  }\n\n  public valueAt(`,
+      ),
+  });
+  assert.ok(
+    added.some((message) => message.includes("Admission.openIngress creates an obligation")),
+    added.join("\n"),
+  );
+  const read = messagesWith({
+    [ADMISSION]: (text) =>
+      text.replace(
+        "  public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {\n",
+        `  public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {\n${call}`,
+      ),
+  });
+  assert.ok(
+    read.some((message) =>
+      message.includes("Admission.admitted creates an obligation; it is no read"),
+    ),
+    read.join("\n"),
+  );
+});

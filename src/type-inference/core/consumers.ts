@@ -556,11 +556,29 @@ export class Consumers {
           found = this.#typedReads.get(link);
           chain.push(link);
         } else {
-          // the default itself: its own kinds, else as the finishing read's ordered sources answer it (a named default's
-          // written type among them), as a typed default reads them (TABLE r4.144)
-          const own = this.#leafKind(at, path) ?? this.#finishingRead(at, null, path);
+          // the default itself: its own kinds as a typed default reads them; a default no literal gives (a named one, a
+          // call's result) by its read's finished answer, else by its domain (its written, contract or retained type,
+          // TABLE r4.144) only where one kind no narrower kind refines decides it: a domain is not the value (an
+          // `integer?` may hold null alone, which leaves the level open; a `number` an integer), so elsewhere the type
+          // stays open, `STOPPED`, and the call is marked (Codex r22 B1)
           const decision = typedDefault(path, false);
-          found = own === null ? null : decision.answer(decision.choose(own), own);
+          let own = this.#leafKind(at, path);
+          if (own === null && !this.#literalSyntax(at)) {
+            own = this.#finishedAnswer(at, null, path);
+            if (own === null) {
+              const domain = this.#finishingRead(at, null, path);
+              own =
+                domain.length === 1 && concrete(domain[0]!) && domain[0]!.tag !== "number"
+                  ? domain
+                  : STOPPED;
+            }
+          }
+          found =
+            own === null
+              ? null
+              : own === STOPPED
+                ? STOPPED
+                : decision.answer(decision.choose(own), own);
         }
       }
     }
@@ -570,6 +588,28 @@ export class Consumers {
 
   readonly #typedReads = new Map<string, readonly Item[] | null>();
 
+  /** Whether a value is a literal's own syntax: a scalar, collection or record literal. */
+  #literalSyntax(value: PlaceId): boolean {
+    const place = this.pass.program.places[value]?.kind;
+    return (
+      place?.kind === "value" &&
+      (LITERALS.has(place.node) ||
+        COLLECTION_LITERALS.has(place.node) ||
+        place.node === "objectLiteral")
+    );
+  }
+
+  /** After a stop, a read's own finished answer (the solver answers only what had finished); `null` where it had not. */
+  #finishedAnswer(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): readonly Item[] | null {
+    if (this.pass.program.work.stopped === null) return null;
+    const items = this.#run(this.pass.values.valueItems(value, node, rest));
+    return items.some(unsettledItem) ? null : items;
+  }
+
   /** `#finishingRead`'s sources after a leaf's own kind: the read's finished answer, then the domains. */
   #laterSources(
     value: PlaceId,
@@ -577,17 +617,14 @@ export class Consumers {
     rest: readonly string[],
     requirement: boolean,
   ): readonly Item[] {
-    const { contract, values } = this.pass;
+    const { contract } = this.pass;
     // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
     const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
       const items = this.#run(work());
       return items.some(unsettledItem) ? null : items;
     };
     // the value at the read: its own finished answer
-    const exact =
-      this.pass.program.work.stopped === null
-        ? null
-        : settled(() => values.valueItems(value, node, rest));
+    const exact = this.#finishedAnswer(value, node, rest);
     if (exact !== null) return exact;
     // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
     // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it

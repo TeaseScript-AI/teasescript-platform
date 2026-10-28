@@ -233,7 +233,8 @@ test("after a stop a typed default's own literal and the call's expected type an
       "let b = fromJson(hostValue, default: [null], files: false)\nsay b\nexit\n",
       "[null]",
       ["element"],
-      ["unknown"],
+      // (as unstopped: the parsed list may be empty)
+      ["empty", "unknown"],
     ],
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
@@ -1075,7 +1076,9 @@ test("after a stop a literal's composed questions read a child as its own read d
 /**
  * After a stop a typed call no store takes in keeps its boundary through a named default's written type, and is marked
  * where its default's type is undecided (an inferred variable, a call's result): a missing answer never declines it
- * silently (Astra r6 B2, TABLE r4.144).
+ * silently (Astra r6 B2, TABLE r4.144). A written type wider than the value is no type for it (an `integer?` may hold
+ * null alone, which leaves the level open; a `number` an integer; a union one member): no boundary the unstopped analysis
+ * lacks, the call marked (Codex r22 B1).
  */
 test("after a stop a typed call keeps its boundary through a named default, or is marked", () => {
   for (const source of [
@@ -1106,6 +1109,27 @@ test("after a stop a typed call keeps its boundary through a named default, or i
         ),
         source,
       );
+  }
+  for (const source of [
+    'let fallback: integer? = null\nsay load("key", default: fallback)\nexit\n',
+    "let fallback: number = 3\nsay fromJson(hostValue, default: fallback)\nexit\n",
+    "let fallback: integer | string = 3\nsay fromJson(hostValue, default: fallback)\nexit\n",
+  ]) {
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    const call = source.indexOf("say ") + 4;
+    for (const answers of stopped) {
+      assert.ok(
+        answers.checks.every(
+          (check) =>
+            !check.boundary || unstopped.checks.some((kept) => isDeepStrictEqual(kept, check)),
+        ),
+        source,
+      );
+      assert.ok(
+        answers.budget.deferred.some((mark) => mark.site.start === call),
+        source,
+      );
+    }
   }
 });
 

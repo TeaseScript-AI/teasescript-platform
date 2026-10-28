@@ -36,7 +36,7 @@ import { ExactPath, withoutEmpty } from "./exact-path.js";
 import type { Callable, FileRegion, FlowGraph, FlowNode, FunctionRegion } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
-import { makeItem, REASON, STOPPED, type Item, type ItemTag } from "./items.js";
+import { EMPTY, makeItem, REASON, STOPPED, type Item, type ItemTag } from "./items.js";
 import {
   CoreProgram,
   propertyStep,
@@ -915,6 +915,16 @@ class CoreAnswers implements Answers {
         }
       }
     }
+    // (an expected type is no proof of an element: a typed collection may be empty, as unstopped and as the consumers'
+    // typed read gives it, C6; the plan takes no kind from it)
+    const step = path.at(-1);
+    if (
+      found!.items !== STOPPED &&
+      step !== undefined &&
+      stepName(step) === "element" &&
+      !found!.items.some((item) => item.tag === "empty")
+    )
+      found = { ...found!, items: [...found!.items, EMPTY] };
     for (const link of chain) {
       const key = joinParts(link, path);
       keepText(program.work, key.length);
