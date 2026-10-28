@@ -137,8 +137,10 @@ export class PackageFolder {
   ): Promise<XmpKeywordsResult> {
     const file = join(this.root, path);
     const information = await stat(file);
-    // An editor may keep the modification time and size; the change time and inode still change.
-    const version = `${information.ino}:${information.size}:${information.mtimeMs}:${information.ctimeMs}`;
+    // An editor may keep the modification time and size; the change time and inode still change. The mode is part of
+    // the key too: a permission change can fall in the same change-time tick as the last write, and the file must then
+    // be read again, so that a file the server may no longer read is reported instead of served from the cache.
+    const version = `${information.ino}:${information.size}:${information.mtimeMs}:${information.ctimeMs}:${information.mode}`;
     const cached = this.#cache.get(path);
     if (cached?.version === version) return cached.result;
     const result = reader(await readFile(file));
