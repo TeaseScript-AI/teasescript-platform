@@ -8,7 +8,7 @@ import type {
   TimerDisplay,
   DurationUnit,
 } from "../ast.js";
-import { MISTAKEN_DURATION_UNIT_NAMES, startsCallForm } from "../language-facts.js";
+import { startsCallForm } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -150,16 +150,24 @@ function timerDuration(
     return { duration: written, unit: null };
   const end = written.end.kind === "durationLiteral" ? written.end.amount : written.end.operand;
   const range = `${parser.textOf(written.start.span, end.span)}`;
-  const writtenUnit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
-  // A word taken for a unit has its own error, and the range is offered with the unit it was read as.
-  const unit =
-    !written.end.calendar && MISTAKEN_DURATION_UNIT_NAMES.has(writtenUnit)
-      ? written.end.unit
-      : writtenUnit;
+  const unit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
+  // The range in parentheses, which only compiles where nothing else in the statement is wrong (see `Parser.offerFix`).
+  const message = "A unit after a range belongs to its end alone. Put the range in parentheses";
   parser.reportSpan(
     parserDiagnosticCode.unsupportedDurationUnit,
-    `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${command} (${range}) ${unit}'.`,
+    `${message}, with the unit after the closing parenthesis.`,
     written.span,
+  );
+  parser.offerFix(
+    parser.diagnostics.length - 1,
+    `${message}, as in '${command} (${range}) ${unit}'.`,
+    [
+      {
+        start: written.span.start.offset,
+        end: written.span.end.offset,
+        code: `(${range}) ${unit}`,
+      },
+    ],
   );
   return {
     duration: Object.freeze({ ...written, end, span: spanFrom(written.start.span, end.span) }),

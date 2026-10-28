@@ -180,7 +180,8 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
   }
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
   // A word taken for a unit names the unit meant and every unit. Every word at one place, and two words at every place
-  // a unit stands, with and without a space: each quoted form compiles where it is pasted.
+  // a unit stands, with and without a space. The amount with the unit is shown only where it compiles pasted in place
+  // of the amount and the word; where the statement has another error, as after a range, the fix is in words.
   const units =
     "The units of time are ms, s, min, h, d, and w, and after 'calendar' also mo and y.";
   const meant = new Map([
@@ -193,57 +194,56 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     ["hr", ["h", "hours"]],
     ["hrs", ["h", "hours"]],
   ] as const);
+  // Each place, and the other errors of its statement: none, or the range's and another one.
   const places = [
-    "wait #",
-    "timer #",
-    "let x = #",
-    'say "x", #',
-    'say "${#}"',
-    "let x = # + 1 s",
-    "timer(duration: #)",
-    "wait 1..#",
-  ];
+    ["wait #", []],
+    ["timer #", []],
+    ["let x = #", []],
+    ['say "x", #', []],
+    ['say "${#}"', []],
+    ["let x = # + 1 s", []],
+    ["timer(duration: #)", []],
+    [
+      "wait 1..#",
+      [
+        "A unit after a range belongs to its end alone. Put the range in parentheses, with the unit after the closing parenthesis.",
+      ],
+    ],
+    ["let x = [#, 1 s", ["Expected ']' after the list literal."]],
+  ] as const;
   const cases = [
-    ...[...meant.keys()].map((word) => ["wait #", "5", " ", word] as const),
-    // A range's ends are whole numbers, so its unit draws whole units.
+    ...[...meant.keys()].map((word) => [places[0], "5", " ", word] as const),
     ...places.flatMap((place) =>
       (["m", "hrs"] as const).flatMap((word) => [
         [place, "5", " ", word] as const,
-        [place, place.includes("..") ? "3" : "1.5", "", word] as const,
+        [place, "1.5", "", word] as const,
       ]),
     ),
   ];
-  for (const [place, amount, space, word] of cases) {
+  for (const [[place, others], amount, space, word] of cases) {
     const [unit, name] = meant.get(word)!;
     const source = place.replace("#", `${amount}${space}${word}`);
     const why = word === "m" ? ", because it could mean minutes or months" : "";
     const offered = `${amount} ${unit}`;
-    const errors = compileSource(`${source}\nexit`).diagnostics.map(({ code, message }) => [
-      code,
-      message,
-    ]);
+    const fix = others.length === 0 ? `write '${offered}'` : `use the unit ${unit}`;
     assert.deepEqual(
-      errors[0],
-      ["TSP033", `'${word}' is not a unit${why}. For ${name}, write '${offered}'. ${units}`],
+      compileSource(`${source}\nexit`).diagnostics.map(({ message }) => message),
+      [`'${word}' is not a unit${why}. For ${name}, ${fix}. ${units}`, ...others],
       source,
     );
-    const pasted = place.replace("#", offered);
-    // A range takes its unit in parentheses, which its own error offers with the unit the word was read as.
-    const range = place === "wait 1..#" ? `wait (1..${amount}) ${unit}` : null;
-    assert.deepEqual(
-      errors.slice(1),
-      range === null
-        ? []
-        : [
-            [
-              "TSP033",
-              `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${range}'.`,
-            ],
-          ],
-      source,
-    );
-    assert.notEqual(compileSource(`${range ?? pasted}\nexit`).plan, null, range ?? pasted);
+    if (others.length === 0) {
+      const pasted = place.replace("#", offered);
+      assert.notEqual(compileSource(`${pasted}\nexit`).plan, null, pasted);
+    }
   }
+  // The range in parentheses is shown where nothing else in the statement is wrong, and compiles there.
+  assert.deepEqual(
+    compileSource("wait 1..5 min\nexit").diagnostics.map(({ message }) => message),
+    [
+      "A unit after a range belongs to its end alone. Put the range in parentheses, as in 'wait (1..5) min'.",
+    ],
+  );
+  assert.notEqual(compileSource("wait (1..5) min\nexit").plan, null);
   // A word that is no unit and not taken for one, and a unit, keep their meaning.
   assert.deepEqual(
     compileSource("wait 5 foo\nexit").diagnostics.map(({ code }) => code),

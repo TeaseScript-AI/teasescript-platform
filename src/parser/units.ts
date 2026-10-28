@@ -190,7 +190,7 @@ export function parseDurationUnit(
     if (meant === undefined) return amount;
     // Read as the unit meant, so that its error is the only one.
     const result = literal({ calendar: false, unit: meant }, parser.advance());
-    reportMistakenUnit(parser, amount.raw, token, meant);
+    reportMistakenUnit(parser, amount, token, meant);
     return result;
   }
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
@@ -210,19 +210,28 @@ const EXACT_UNITS: ReadonlySet<string> = new Set(DURATION_UNITS);
 /** The units of time, for a message: the exact ones, then those only after `calendar`. */
 const UNITS_OF_TIME = `${DURATION_UNITS.slice(0, -1).join(", ")}, and ${DURATION_UNITS.at(-1)!}, and after 'calendar' also ${CALENDAR_DURATION_UNITS.filter((unit) => !EXACT_UNITS.has(unit)).join(" and ")}`;
 
-/** A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. */
+/**
+ * A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. It
+ * shows the amount with the unit only where that compiles in the statement (see `Parser.offerFix`).
+ */
 function reportMistakenUnit(
   parser: Parser,
-  amount: string,
+  amount: NumberLiteral,
   word: Token,
   meant: DurationUnit,
 ): void {
   const why = word.lexeme === "m" ? ", because it could mean minutes or months" : "";
+  const message = (fix: string) =>
+    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. The units of time are ${UNITS_OF_TIME}.`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
-    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, write '${amount} ${meant}'. The units of time are ${UNITS_OF_TIME}.`,
+    message(`use the unit ${meant}`),
     word,
   );
+  const fixed = `${amount.raw} ${meant}`;
+  parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
+    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed },
+  ]);
 }
 
 /**
