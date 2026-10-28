@@ -3382,6 +3382,8 @@ export class Consumers {
             (tag === "object" ? !indexStep : hasProperty(tag, property)),
         ) &&
         !own.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) &&
+        // (a member contract a stop left unsettled is no proof of the property)
+        !own.some(unsettledItem) &&
         !(
           selectsElement(property) &&
           quiet.some((tag) => tag === "list" || tag === "set" || tag === "object")
@@ -3448,7 +3450,9 @@ export class Consumers {
         );
         return;
       }
-      if (missing.length > 0) extra.push([missing[0]!, `has .${property} before the read`]);
+      // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's)
+      const open = missing.length > 0 ? missing[0] : value.find(unsettledItem);
+      if (open !== undefined) extra.push([open, `has .${property} before the read`]);
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
@@ -3599,8 +3603,10 @@ export class Consumers {
     if (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
-      // (an element read a stop left unsettled is no proof of an element)
-      !read.some(unsettledItem) &&
+      // (an element read a stop left unsettled is no proof of an element, a literal's own element is: Codex r24 N1)
+      (!read.some(unsettledItem) ||
+        (this.#literalSyntax(value) &&
+          this.admission.literalChildren(value, "element").length > 0)) &&
       !kinds.some((item) => item.tag === "unknown")
     )
       return;

@@ -11,9 +11,10 @@ import { Project, ts } from "ts-morph";
  *   that does, within `Consumers`) into an `Admission` method that is neither an inventory entry nor a read `READS`
  *   lists with why it creates none;
  * - an inventory entry whose `runs` names a derivation `Consumers.#freshStores` does not call;
- * - an `AdmissionHost` member that is not a host read `HOST_READS` lists with why it creates no obligation (a derivation
- *   returns what it leaves open to the consumers, which record it), so no callback records one for admission whatever
- *   its wiring (Codex r23 T1).
+ * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
+ *   no obligation (a derivation returns what it leaves open to the consumers, which record it), so no new callback
+ *   records one for admission whatever its wiring (Codex r23, r24 T1); a listed read's own implementation is trusted
+ *   by its listed reason, as `READS`' callers are.
  * A commented-out call is no call, and a new method is caught whatever its name.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
@@ -299,16 +300,17 @@ export function obligationInventoryDiagnostics(program, root, files) {
         `The fresh pass does not call ${runs}, which OBLIGATION_SITES lists for ${method}.`,
       );
 
-  // 4. every host member is a listed host read, and every listed one a member
+  // 4. every host member is a listed host read, and every listed one a member: the members of its type, inherited ones
+  // included (Codex r24 T1)
   const host = interfaceOf(admissionFile, "AdmissionHost");
   const members = new Set();
-  for (const member of host.members) {
-    const name = nameOf(member);
+  for (const member of checker.getTypeAtLocation(host).getProperties()) {
+    const name = member.getName();
     members.add(name);
-    if (name === null || !files.hostReads.has(name))
+    if (!files.hostReads.has(name))
       report(
-        member,
-        `AdmissionHost.${name ?? member.getText()} is no listed host read: list it with why it creates no obligation, or return what it decides to the consumers.`,
+        member.declarations?.[0] ?? host,
+        `AdmissionHost.${name} is no listed host read: list it with why it creates no obligation, or return what it decides to the consumers.`,
       );
   }
   for (const name of files.hostReads.keys())

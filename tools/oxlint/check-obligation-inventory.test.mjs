@@ -112,3 +112,19 @@ test("a host member that is no listed host read fails, whatever its consumer wir
     messages.join("\n"),
   );
 });
+
+test("an inherited host member that is no listed host read fails too", () => {
+  const messages = messagesWith({
+    [ADMISSION]: (text) =>
+      text.replace(
+        "export interface AdmissionHost {\n",
+        "interface OpenHost {\n  undecidedIngress?(site: SourceSite, label: string): void;\n}\n\nexport interface AdmissionHost extends OpenHost {\n",
+      ),
+  });
+  assert.ok(
+    messages.some((message) =>
+      message.includes("AdmissionHost.undecidedIngress is no listed host read"),
+    ),
+    messages.join("\n"),
+  );
+});

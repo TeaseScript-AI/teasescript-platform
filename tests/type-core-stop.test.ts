@@ -1161,6 +1161,47 @@ test("after a stop a selection of a typed call with a named list default owes it
 });
 
 /**
+ * A member read a stop left unsettled is no proof of the property either (C5, Codex r24 B1): a typed call's member its
+ * default lacks keeps its TSV043 or its mark, from a literal and from a named default, at a stop before admission settled
+ * and in the settled walk. A literal's own element is proof of one, settled or not (Codex r24 N1): `[count].first` owes no
+ * empty check at a stop, as unstopped.
+ */
+test("after a stop an unsettled member read owes its check; a literal's own element needs none", () => {
+  for (const source of [
+    "say fromJson(hostValue, default: {n: 1}).missing\nexit\n",
+    "let fallback = {n: 1}\nsay fromJson(hostValue, default: fallback).missing\nexit\n",
+  ]) {
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    const warning = unstopped.diagnostics.find((found) => found.code === "TSV043");
+    assert.ok(warning !== undefined && "site" in warning, source);
+    const { site } = warning;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const settled = walkEnds(source).map((allowance): Answers =>
+      withTestAllowance(allowance, () => analyseCore(request)),
+    );
+    for (const answers of [...stopped, ...settled])
+      assert.ok(
+        answers.diagnostics.some((found) => isDeepStrictEqual(found, warning)) ||
+          answers.budget.deferred.some(
+            (mark) => mark.code === "TSV043" && isDeepStrictEqual(mark.site, site),
+          ),
+        `${source} @${answers.budget.allowance}`,
+      );
+  }
+  const source = "let count = 2\nsay [count].first\nexit\n";
+  const { unstopped, stopped } = unsettledAnalyses(source);
+  assert.ok(!unstopped.checks.some((found) => found.kind === "empty-check"));
+  for (const answers of stopped) {
+    assert.ok(!answers.checks.some((found) => found.kind === "empty-check"), source);
+    assert.ok(
+      !answers.budget.deferred.some((mark) => mark.obligation.kind === "empty-check"),
+      source,
+    );
+  }
+});
+
+/**
  * A store marked with its type undecided stands for its records within its value on both sides alike (r4.111, TABLE
  * r4.122, Codex r14): a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
  * index read below the store is no extra check, at a stop in the setup and at the last before admission settled; a
