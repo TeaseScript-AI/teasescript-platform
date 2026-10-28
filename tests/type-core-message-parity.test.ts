@@ -1643,6 +1643,15 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       'let boxes = [{text: "hi", items: [1]}, null]\nlet box = boxes[1]\nsay box.items + 2\nexit\n',
       "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
     ],
+    // (Astra r3 on #1296: an operand that may be null, nested in arithmetic)
+    [
+      "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = n + 1\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
+    [
+      "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = -n\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
     // (Codex r13: such a read in an ask's operand)
     [
       'let d = dict{found: "Q"}\nlet v: duration = askInteger(d["absent"])\nsay v\nexit\n',

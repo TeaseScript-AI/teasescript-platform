@@ -184,6 +184,11 @@ const SITES: readonly Site[] = [
   { name: "literal divisor", before: "", line: "say 1 / [@][0]" },
   { name: "property divisor", before: "", line: "say 1 / ({n: @}).n" },
   { name: "interpolation divisor", before: "", line: 'say 1 / toInteger("${@}", default: 1)' },
+  // (an operand nested in arithmetic, a negation, a multiplication, an object's contents, an interpolation: Astra r3)
+  { name: "minus", before: "", line: "say -@", operand: true },
+  { name: "nested product", before: "", line: "say 2 * (3 * @)", operand: true },
+  { name: "object contents", before: "", line: "say ({v: @ + 1}).v", operand: true },
+  { name: "interpolated sum", before: "", line: 'say "${@ + 1}"', operand: true },
   // (an operand of a `say`, an ask and a button, which the presence walk enumerates: Codex r13, the lead)
   { name: "say operand", before: "", line: 'let shown = say("${@ + 1}", instant)' },
   { name: "ask prompt", before: "", line: 'let asked = askInteger("${@ + 1}")' },
@@ -205,6 +210,10 @@ const NUMBER_SITES = [
   "say operand",
   "ask prompt",
   "button label",
+  "minus",
+  "nested product",
+  "object contents",
+  "interpolated sum",
 ];
 const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   // (read by an index, which may be absent: a warning's own read, which its program already performs, wrapped in
@@ -269,6 +278,16 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "[ns[5]].length",
       'toInteger("${d["absent"]}${1}", default: 1)',
       "({n: n}).n",
+      // (Astra r3 on #1296: an operand that may be null nested in arithmetic, a negation, a multiplication, an object's
+      // contents, an interpolation; and one that is there)
+      "maybeN + 1",
+      "-maybeN",
+      "2 * (maybeN * 3)",
+      "({v: maybeN + 1}).v",
+      '"${maybeN}".length',
+      "2 * (n * 3)",
+      "({v: n + 1}).v",
+      '"${n}".length',
       // (Astra r2 on #1296: a property of a receiver that may be null, and of one that is there)
       "maybe.n",
       "boxes[1].n",
@@ -370,6 +389,7 @@ export function pasteCases(sample = false): PasteCase[] {
             "let held = dict{a: {n: 2}, b: null}.values.random",
             "let outer = {inner: boxes[1]}",
             "let fine = {n: 2}",
+            "let maybeN = [2, null].random",
             site.before,
           ]
             .filter((line) => line !== "")
@@ -414,11 +434,16 @@ export function pastedForms(
   const text = messageSource([source]);
   const forms: Pasted[] = [];
   let diagnosed = false;
-  for (const diagnostic of analyseCore(request).diagnostics) {
+  const { diagnostics } = analyseCore(request);
+  // (a warning's fallback is pasted into a program that otherwise compiles: beside an error it fixes nothing of that
+  // error, whose own fix is pasted on its own)
+  const erring = diagnostics.some((diagnostic) => diagnostic.class === "compile-error");
+  for (const diagnostic of diagnostics) {
     if (diagnostic.site.start < start || diagnostic.site.end > end) continue;
     diagnosed = true;
     const message = coreMessage(diagnostic, text);
     if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
+      if (erring) continue;
       // (a member's subject is its receiver, written at the start of the warned access)
       const fallback = FALLBACK.exec(message)?.[1];
       const { rule } = diagnostic;

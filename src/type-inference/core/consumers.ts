@@ -1469,8 +1469,8 @@ export class Consumers {
    * syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex r12, r13), one part at a time on
    * its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so not where any of them reads an
    * element by its index or a dict's value by its key, calls a function or a method (whose own reads are not
-   * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent, or of a
-   * receiver that may be null; and every subject itself, which the form reads, proved non-null (Astra r2 on #1296);
+   * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent; and every
+   * value it evaluates, at every depth, a subject, a receiver or an operand, proved non-null (Astra r2, r3 on #1296);
    * unproved where a site has no expression.
    */
   #present(site: SourceSite, rule: DiagnosticRule): Presence {
@@ -1492,11 +1492,7 @@ export class Consumers {
               : expression;
       work.push(subject);
     }
-    return work.some(
-      (subject) => this.#mayBeNull(subject, site) || this.#readsAbsent(subject, site),
-    )
-      ? "unproved"
-      : true;
+    return work.some((subject) => this.#readsAbsent(subject, site)) ? "unproved" : true;
   }
 
   /**
@@ -1541,9 +1537,11 @@ export class Consumers {
       }
       program.work.charge("checks");
       // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves
-      // presence; any other kind, a new one too, is unproved: TABLE r4.162, the lead after Codex r13)
+      // presence; any other kind, a new one too, is unproved: TABLE r4.162, the lead after Codex r13; and every value the
+      // walk evaluates, at every depth, proved non-null, the lead after Astra r2 and r3)
       if (
         !PRESENT_KINDS.has(expression.kind) ||
+        this.#mayBeNull(expression, site) ||
         (expression.kind === "propertyAccessExpression" && this.#mayBeAbsent(expression, site))
       ) {
         known.set(expression, true);
@@ -1560,8 +1558,8 @@ export class Consumers {
   readonly #absentReads = new Map<Expression, boolean>();
 
   /**
-   * Whether a property's read may find nothing: of a receiver that may be null, a property an object may lack, an
-   * element a selection may not have.
+   * Whether a property's read may find nothing: a property an object may lack, an element a selection may not have (its
+   * receiver's null the walk asks of every value it evaluates).
    */
   #mayBeAbsent(
     access: Extract<Expression, { kind: "propertyAccessExpression" }>,
@@ -1584,7 +1582,6 @@ export class Consumers {
       (item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0,
     );
     return (
-      this.#mayBeNull(object, site) ||
       missing ||
       (selectsElement(access.property.name) &&
         this.#valueItems(owner, node, ["element"]).some((item) => item.tag === "empty"))

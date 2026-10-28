@@ -18,6 +18,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
   NAMED_EXCEPTIONS,
+  stopIdentity,
   stopProblems,
   type Globals,
   type StopRun,
@@ -181,8 +182,8 @@ test("a stop in the answers' setup after a finished analysis is a question's", (
   const stopped = withTestAllowance(unstopped.budget.total - 1, () => analyseCore(request));
   assert.equal(stopped.budget.stoppedIn, "questions");
   assert.deepEqual(
-    stopped.diagnostics.filter((d) => d.code !== "TSV076"),
-    unstopped.diagnostics,
+    stopped.diagnostics.filter((d) => d.code !== "TSV076").map(stopIdentity),
+    unstopped.diagnostics.map(stopIdentity),
   );
 });
 
@@ -976,9 +977,7 @@ const kept = (answers: Answers, source: string) => {
   return answers.diagnostics
     .filter((d) => d.class === "compile-error")
     .map((d) => ({
-      ...Object.fromEntries(
-        Object.entries(d).filter(([key]) => key !== "expects" && key !== "present"),
-      ),
+      ...stopIdentity(d),
       message: coreMessage(d, text).split(/(?<=[.?])\s+(?=[A-Z'"])/)[0],
     }));
 };
@@ -1344,7 +1343,9 @@ test("after a stop an unsettled member read owes its check; a literal's own elem
     );
     for (const answers of [...stopped, ...settled])
       assert.ok(
-        answers.diagnostics.some((found) => isDeepStrictEqual(found, warning)) ||
+        answers.diagnostics.some((found) =>
+          isDeepStrictEqual(stopIdentity(found), stopIdentity(warning)),
+        ) ||
           answers.budget.deferred.some(
             (mark) => mark.code === "TSV043" && isDeepStrictEqual(mark.site, site),
           ),
