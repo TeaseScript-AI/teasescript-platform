@@ -3342,6 +3342,27 @@ test("a property only copies of whole objects bring errs where the copy meets th
   assert.deepEqual(differing, []);
 });
 
+/** A record as its outcome, then each diagnostic's class, kind, site and related site, and each check, sorted (A2). */
+function a2Record(source: string, reversed: boolean): string[] {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null, source);
+  const run = (): CompactRecord =>
+    withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+  const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+  const text = (site: { readonly offset: number; readonly end: number }): string =>
+    `'${source.slice(site.offset, site.end)}'`;
+  return [
+    record.outcome,
+    ...[
+      ...record.diagnostics.map(
+        ({ kind, class: level, site, related }) =>
+          `${level} ${kind} ${text(site)}${related === undefined ? "" : ` related ${text(related)}`}`,
+      ),
+      ...record.checks.map((check) => `check ${check.kind} ${check.target} ${text(check.site)}`),
+    ].sort(),
+  ];
+}
+
 /**
  * A2's witnesses (TABLE r4.131, r4.154), their exact records in both orders of the copy and the object and in both
  * analysis orders: per form, a place copied with its setup and an object holding another type at one property, stored
@@ -3434,30 +3455,10 @@ test("A2's witnesses: whole copies err where they meet the place or the list, re
       "q.p.n",
     ],
   ];
-  // a record as its outcome, then each diagnostic's class, kind, site and related site, and each check, sorted
-  const exact = (source: string, reversed: boolean): string[] => {
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null, source);
-    const run = (): CompactRecord =>
-      withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
-    const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
-    const text = (site: { readonly offset: number; readonly end: number }): string =>
-      `'${source.slice(site.offset, site.end)}'`;
-    return [
-      record.outcome,
-      ...[
-        ...record.diagnostics.map(
-          ({ kind, class: level, site, related }) =>
-            `${level} ${kind} ${text(site)}${related === undefined ? "" : ` related ${text(related)}`}`,
-        ),
-        ...record.checks.map((check) => `check ${check.kind} ${check.target} ${text(check.site)}`),
-      ].sort(),
-    ];
-  };
   const differing: string[] = [];
   const expect = (label: string, source: string, expected: readonly string[]): void => {
     for (const reversed of [false, true]) {
-      const actual = exact(source, reversed);
+      const actual = a2Record(source, reversed);
       if (JSON.stringify(actual) !== JSON.stringify(expected))
         differing.push(`${label}${reversed ? ", reversed" : ""}: ${actual.join(", ")}`);
     }
@@ -3529,6 +3530,133 @@ test("A2's witnesses: whole copies err where they meet the place or the list, re
   assert.deepEqual(differing, []);
 });
 
+/**
+ * A2's value origins (Astra r1 N1 on #1293): a property's value in one of two objects whose property holds two kinds, as
+ * a literal, a written or an inferred binding, a written binding in a nested object, a binding written as a union or as
+ * `object?` (the property itself, or one below it), in either object; the objects as a list's elements, stores into one
+ * place, the same through projections, and a ring of whole copies, in both orders, unread and read. A written binding's
+ * copy brings its written type as a literal brings its kind: the second errs where it meets the place or the list, read
+ * or not, and a union's copy only where it comes second (first, the place takes both kinds). An `object?` holds any
+ * object, its properties unchecked (A1): below it, nothing meets, and what a read of such a property gives is the read's
+ * own record, not A2's.
+ */
+test("A2's value origins: a written binding's copy errs where it meets the place or the list as a literal's does, read or not, in both orders", () => {
+  const values = { int: ["integer", "1"], str: ["string", '"text"'] } as const;
+  // per origin: the setup it needs, the object with its value of a kind, the plain object of a kind, the path compared
+  const origins: readonly (readonly [
+    string,
+    (kind: "int" | "str") => readonly [string, string],
+    (kind: "int" | "str") => string,
+    string,
+  ])[] = [
+    [
+      "a literal",
+      (kind) => ["", `{n: ${values[kind][1]}}`],
+      (kind) => `{n: ${values[kind][1]}}`,
+      "n",
+    ],
+    [
+      "a written binding",
+      (kind) => [`let w: ${values[kind][0]} = ${values[kind][1]}\n`, "{n: w}"],
+      (kind) => `{n: ${values[kind][1]}}`,
+      "n",
+    ],
+    [
+      "an inferred binding",
+      (kind) => [`let w = ${values[kind][1]}\n`, "{n: w}"],
+      (kind) => `{n: ${values[kind][1]}}`,
+      "n",
+    ],
+    [
+      "a written binding in a nested object",
+      (kind) => [`let w: ${values[kind][0]} = ${values[kind][1]}\n`, "{p: {n: w}}"],
+      (kind) => `{p: {n: ${values[kind][1]}}}`,
+      "p.n",
+    ],
+    [
+      "a union binding",
+      (kind) => [`let w: (integer | string) = ${values[kind][1]}\n`, "{n: w}"],
+      (kind) => `{n: ${values[kind][1]}}`,
+      "n",
+    ],
+    [
+      "an object? binding beside a scalar",
+      (kind) => [`let w: object? = {k: ${values[kind][1]}}\n`, "{n: w}"],
+      (kind) => `{n: ${values[kind][1]}}`,
+      "n",
+    ],
+    [
+      "an object? binding below it",
+      (kind) => [`let w: object? = {k: ${values[kind][1]}}\n`, "{n: w}"],
+      (kind) => `{n: {k: ${values[kind][1]}}}`,
+      "n.k",
+    ],
+  ];
+  // per shape: the program after the objects `a` and `b`, the second's site, and the place read
+  const shapes: readonly (readonly [
+    string,
+    (first: string, second: string) => string,
+    (second: string) => string,
+    string,
+  ])[] = [
+    ["a list", (first, second) => `let xs = [${first}, ${second}]`, (second) => second, "xs[0]"],
+    ["a place", (first, second) => `let c = ${first}\nc = ${second}`, (second) => second, "c"],
+    [
+      "a list through projections",
+      (first, second) =>
+        `let x = {inner: ${first}}\nlet y = {inner: ${second}}\nlet xs = [x.inner, y.inner]`,
+      () => "y.inner",
+      "xs[0]",
+    ],
+    [
+      "a place through projections",
+      (first, second) =>
+        `let x = {inner: ${first}}\nlet y = {inner: ${second}}\nlet c = x.inner\nc = y.inner`,
+      () => "y.inner",
+      "c",
+    ],
+    [
+      "a ring of whole copies",
+      (first, second) => `let c = ${first}\nlet d = c\nc = d\nd = ${second}`,
+      (second) => second,
+      "c",
+    ],
+  ];
+  const differing: string[] = [];
+  for (const [origin, value, plain, path] of origins)
+    for (const side of ["int", "str"] as const) {
+      const [setup, own] = value(side);
+      const objects = {
+        a: side === "int" ? own : plain("int"),
+        b: side === "str" ? own : plain("str"),
+      };
+      const sideOf = side === "int" ? "a" : "b";
+      for (const [shape, program, siteOf, place] of shapes)
+        for (const [first, second] of [
+          ["a", "b"],
+          ["b", "a"],
+        ] as const) {
+          const source = `${setup}let a = ${objects.a}\nlet b = ${objects.b}\n${program(first, second)}\n`;
+          const label = `${origin} in ${sideOf}, ${shape}, ${first} first`;
+          const unread =
+            origin.endsWith("below it") || (origin === "a union binding" && first === sideOf);
+          const expected = unread
+            ? ["valid"]
+            : ["compile-error", `compile-error written-target '${siteOf(second)}'`];
+          for (const reversed of [false, true]) {
+            const actual = a2Record(`${source}exit`, reversed);
+            if (JSON.stringify(actual) !== JSON.stringify(expected))
+              differing.push(`${label}${reversed ? ", reversed" : ""}: ${actual.join(", ")}`);
+            if (origin.endsWith("below it")) continue;
+            const read = a2Record(`${source}say ${place}.${path}\nexit`, reversed);
+            if (JSON.stringify(read) !== JSON.stringify(expected))
+              differing.push(`${label}, read${reversed ? ", reversed" : ""}: ${read.join(", ")}`);
+          }
+        }
+    }
+  assert.deepEqual(differing, []);
+});
+
 test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2, TABLE r4.131)", () => {
   // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
   // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes (TABLE
@@ -3539,7 +3667,8 @@ test("the copied-property check grows with the program, not with its copies time
   // per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound (r4.154),
   // linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`, `a.f_i = b_i`, the object then
   // copied beside another type (one error, at its own property), and r5's: those cycles beside k self-grafts
-  // `a.g_i = a` (none)
+  // `a.g_i = a` (none). The written-type axis (Astra r1 N1): the elements, the stores, the places and the list with
+  // each field a copy of a written binding (a ring of such copies costs what `main`'s ring costs, #1078)
   const fields = (k: number, value: string): string =>
     Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
   const records = (k: number): string =>
@@ -3548,6 +3677,12 @@ test("the copied-property check grows with the program, not with its copies time
     Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
   const copies = (k: number, copy: string): string =>
     Array.from({ length: k }, () => copy).join(", ");
+  // the records with each field a copy of a written binding, and the first record but one field of the other's
+  const typed = (k: number): string =>
+    `${Array.from({ length: k }, (_, i) => `let w${i}: integer = ${i}\nlet s${i}: string = "x"`).join("\n")}\n` +
+    `let good = {${Array.from({ length: k }, (_, i) => `f${i}: w${i}`).join(", ")}}\n` +
+    `let bad = {${Array.from({ length: k }, (_, i) => `f${i}: s${i}`).join(", ")}}\n` +
+    `let other = {${Array.from({ length: k }, (_, i) => (i === 0 ? "f0: s0" : `f${i}: w${i}`)).join(", ")}}\n`;
   // a ring of k whole copies fed the first record, each relay's second store after it closes, then the other record at
   // its first member; and a ring whose steps each pass a chain of `length` copies (r3's axes, #1293)
   const ring = (k: number, second: (i: number) => string): string =>
@@ -3643,6 +3778,31 @@ test("the copied-property check grows with the program, not with its copies time
     ["a fed ring through chains of two copies", (k) => chained(k, 2)],
     ["a fed ring through chains of three copies", (k) => chained(k, 3)],
     [
+      "elements of written fields",
+      (k) => `${typed(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
+    ],
+    [
+      "stores of written fields",
+      (k) =>
+        `${typed(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
+        `${reads(k, "c")}\nexit`,
+    ],
+    [
+      "places of written fields",
+      (k) =>
+        `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
+    ],
+    [
+      "places of written fields, the other first",
+      (k) =>
+        `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
+    ],
+    ["a list of written fields", (k) => `${typed(k)}let xs = [${copies(k, "good")}, other]\nexit`],
+    [
+      "a list of written fields, the other first",
+      (k) => `${typed(k)}let xs = [other, ${copies(k, "good")}]\nexit`,
+    ],
+    [
       "property cycles beside self-grafts",
       (k) =>
         `let a = {n: 1, ${fields(k, "null")}, ${fields(k, "null").replaceAll("f", "g")}}\n` +
@@ -3651,7 +3811,9 @@ test("the copied-property check grows with the program, not with its copies time
     ],
   ];
   const errors = (name: string, k: number): number =>
-    name === "independent property cycles" || name === "a list"
+    name === "independent property cycles" ||
+    name === "a list" ||
+    name === "a list of written fields"
       ? 1
       : name === "property cycles beside self-grafts" || name.endsWith("of one type")
         ? 0

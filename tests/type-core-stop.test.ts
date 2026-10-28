@@ -856,8 +856,9 @@ test("a stop before admission settled marks the stores into inferred places and 
  * TABLE r4.131), and a copy whose conflict is reached only through a cycle of copies that adds steps (r4.154), its
  * error reported where it is read and naming the copy. Each rule only so far: the mark narrowed off the record, or the
  * error's store moved elsewhere, and the oracle reports the record. A2's checks run before the stop, so its records at
- * a literal of copies, a store, a relay inside a cycle of whole copies and a fed ring stand at an early and the latest
- * unsettled stop as the unstopped analysis publishes them, or as the marks' content.
+ * a literal of copies, a store, a relay inside a cycle of whole copies and a fed ring, and at a literal and a store of
+ * copies of written bindings (Astra r1 N1), stand at an early and the latest unsettled stop as the unstopped analysis
+ * publishes them, or as the marks' content.
  */
 test("a store a stop before admission settled marks stands for its records within its value and the errors it brought", () => {
   const inner =
@@ -909,6 +910,9 @@ test("a store a stop before admission settled marks stands for its records withi
       'let c = b\nc = a\nsay "AFTER"\nb = c\na = b\nexit\n',
     'let good = {p0: 1, p1: 1}\nlet bad = {p0: "x", p1: "x"}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\na0 = a2\n' +
       "a2 = bad\nexit\n",
+    'let w: integer = 1\nlet a = {n: w}\nlet b = {n: "x"}\nlet xs = [a, b]\nsay xs[0].n\nlet n: integer = hostValue\nexit\n',
+    'let s: string = "x"\nlet a = {n: 1}\nlet b = {n: s}\nlet copy = a\ncopy = b\nsay copy.n\n' +
+      "let n: integer = hostValue\nexit\n",
   ])
     for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
       const stopped = stopRun(source, allowance);

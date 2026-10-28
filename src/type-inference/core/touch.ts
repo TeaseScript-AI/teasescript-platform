@@ -1436,7 +1436,7 @@ export class Touches {
       // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
       // other, whose landed types may decide where the two are merged; all of them where a ring stands in it; for
       // `copies` nothing new, its meetings found where it was made: a store's own value, or its group's,
-      // `Admission.#finishHeld`)
+      // `Admission.#groupHeld`)
       const owes = (outer: Touch, inner: Touch): Found =>
         mode === "copies"
           ? NONE

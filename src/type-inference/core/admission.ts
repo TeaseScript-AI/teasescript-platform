@@ -225,6 +225,20 @@ interface OwnStructure {
   readonly reads: readonly { readonly at: readonly string[]; readonly source: Key }[];
 }
 
+/** A live store's own structure and what A2's held view takes beside it (`#heldPoints`, `#heldReads`). */
+interface HeldOwn extends OwnStructure {
+  readonly held: { readonly points: OwnStructure["points"]; readonly reads: OwnStructure["reads"] };
+}
+
+/**
+ * What A2's held view takes beside a store's own structure (`#ownOf`): its copies of written bindings, whose contents
+ * are their types', as points, and a value its place's copies list stands for, where it stands, as without the list.
+ */
+interface HeldExtra {
+  readonly points: (readonly string[])[];
+  readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
+}
+
 /** Entries by path (`#byPath`): each under every prefix of its path (the path's own text included), and at its path. */
 interface ByPath<T> {
   readonly under: ReadonlyMap<string, readonly T[]>;
@@ -1095,7 +1109,7 @@ export class Admission {
   /** The copies a live store makes, by place, path, source and strip (Astra's B2). */
   readonly #liveCopies = new Set<string>();
   /** Each place's own contributions from its live stores (Astra's B2). */
-  readonly #liveOwns = new Map<PlaceId, OwnStructure | null>();
+  readonly #liveOwns = new Map<PlaceId, HeldOwn | null>();
   /** Per place, what its live stores definitely hold (`#heldOf`, A2). */
   readonly #helds = new Map<PlaceId, Touch | null>();
   /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
@@ -1103,7 +1117,7 @@ export class Admission {
   /** The keys a member of a live group owes where the group's contributions meet (`#finishHeld`, read by `groups`). */
   readonly #groupMeetings: Key[] = [];
   /** Each place's live stores, each with its own points and reads (`#liveOwn`), for a live group's members. */
-  readonly #liveStores = new Map<PlaceId, readonly OwnStructure[]>();
+  readonly #liveStores = new Map<PlaceId, readonly HeldOwn[]>();
   /** The places with definitions, every one of them dead in this pass (`#liveOwn`). */
   readonly #deadOnly = new Set<PlaceId>();
   readonly #touchLandings = new Map<PlaceId, Touch | null>();
@@ -2467,7 +2481,8 @@ export class Admission {
 
   /**
    * One store's value's own contributions standing at `base` in its place (`#ownStructure`, `#touchElements`), put in
-   * `out`; `copied` hears of each copy the place's copies list (`copies`), which stands for its source's contents.
+   * `out`; `copied` hears of each copy the place's copies list (`copies`), which stands for its source's contents;
+   * `out.held`, where given, takes what A2's held view takes beside them (`HeldExtra`).
    */
   #ownOf(
     d: Definition,
@@ -2478,6 +2493,7 @@ export class Admission {
       readonly points: (readonly string[])[];
       readonly below: (readonly string[])[];
       readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
+      readonly held?: HeldExtra;
     },
     copied?: (at: readonly string[], from: PlaceId, strip: readonly string[]) => void,
     skip?: ReadonlySet<PlaceId>,
@@ -2490,7 +2506,10 @@ export class Admission {
       for (const stop of list) {
         work.charge("indexSteps");
         if (skip?.has(stop.value) === true) continue;
-        if (stop.from === null) continue;
+        if (stop.from === null) {
+          out.held?.points.push(keptSteps(this.#work, base, stop.path));
+          continue;
+        }
         const at = keptSteps(this.#work, base, stop.path);
         if (copies.has(keptParts(this.#work, at, stop.from, stop.strip))) {
           copying.add(keptParts(this.#work, stop.path, stop.value));
@@ -2501,19 +2520,21 @@ export class Admission {
       for (const stop of list) {
         work.charge("indexSteps");
         if (skip?.has(stop.value) === true) continue;
-        if (copying.has(keptParts(this.#work, stop.path, stop.value))) continue;
+        // (a value a copy in the list stands for: A2's held view still takes it, `HeldExtra`)
+        const into = copying.has(keptParts(this.#work, stop.path, stop.value)) ? out.held : out;
+        if (into === undefined) continue;
         const at = keptSteps(this.#work, base, stop.path);
         const source = stop.deep ? null : this.#sourceOf(stop.value);
-        const kinds = this.#quietKinds(stop.value);
+        const kinds = into !== out && source !== null ? null : this.#quietKinds(stop.value);
         if (source !== null)
-          out.reads.push({ at, source: keptKeyBelow(this.#work, source, stop.strip) });
+          into.reads.push({ at, source: keptKeyBelow(this.#work, source, stop.strip) });
         else if (
           kinds !== null &&
           kinds.every((tag) => SCALAR.has(tag) || tag === "null") &&
           stop.strip.length === 0
         )
-          out.points.push(at);
-        else out.below.push(at);
+          into.points.push(at);
+        else if (into === out) out.below.push(at);
       }
     for (const list of stops.literals.values())
       for (const stop of list) {
@@ -4798,7 +4819,7 @@ export class Admission {
   }
 
   /** A place's own contributions from its live stores only (`#ownStructure`'s walk), once (Astra's B2). */
-  #liveOwn(place: PlaceId): OwnStructure | null {
+  #liveOwn(place: PlaceId): HeldOwn | null {
     const known = this.#liveOwns.get(place);
     if (known !== undefined) return known;
     const { definitions, lists } = this.pass;
@@ -4809,8 +4830,9 @@ export class Admission {
     const points: (readonly string[])[] = [];
     const below: (readonly string[])[] = [];
     const reads: { readonly at: readonly string[]; readonly source: Key }[] = [];
+    const held: HeldExtra = { points: [], reads: [] };
     // (each live store's own slice of them, A2's stores of a live group's member, `#finishHeld`)
-    const stores: OwnStructure[] = [];
+    const stores: HeldOwn[] = [];
     const root = keyOf(place, []);
     let live = false;
     let dead = false;
@@ -4822,7 +4844,13 @@ export class Admission {
           continue;
         }
         live = true;
-        const [fromPoints, fromBelow, fromReads] = [points.length, below.length, reads.length];
+        const [fromPoints, fromBelow, fromReads, fromHeldPoints, fromHeldReads] = [
+          points.length,
+          below.length,
+          reads.length,
+          held.points.length,
+          held.reads.length,
+        ];
         if (d.kind === "const") {
           points.push(d.path);
         }
@@ -4836,7 +4864,7 @@ export class Admission {
             d.value,
             base,
             copies,
-            { points, below, reads },
+            { points, below, reads, held },
             undefined,
             this.#deadCells(d.value),
           );
@@ -4845,29 +4873,56 @@ export class Admission {
           points: keptArray(this.#work, points.slice(fromPoints)),
           below: keptArray(this.#work, below.slice(fromBelow)),
           reads: keptArray(this.#work, reads.slice(fromReads)),
+          held: {
+            points: keptArray(this.#work, held.points.slice(fromHeldPoints)),
+            reads: keptArray(this.#work, held.reads.slice(fromHeldReads)),
+          },
         });
       }
     this.#liveStores.set(place, stores);
     const found =
-      points.length === 0 && below.length === 0 && reads.length === 0
+      points.length === 0 &&
+      below.length === 0 &&
+      reads.length === 0 &&
+      held.points.length === 0 &&
+      held.reads.length === 0
         ? null
-        : { points, below, reads };
+        : { points, below, reads, held };
     if (dead && !live) this.#deadOnly.add(place);
     this.#liveOwns.set(place, found);
     return found;
   }
 
   /**
-   * What a place's live stores definitely hold (A2, `#heldMeetings`): its own points and its reads' sources' held tries
-   * where they stand, by reference; none of its landings, its copies of written types (A4's) or its values holding
-   * anything, which decide nothing there. `null` where it holds nothing definite. Built with its reads' sources first
-   * (`#buildHeld`).
+   * What a place's live stores definitely hold (A2, `#heldMeetings`): its own points (`#heldPoints`) and its reads'
+   * sources' held tries where they stand, by reference (`#heldReads`); none of its landings, its copies inheriting
+   * written types (A4's) or its values holding anything, which decide nothing there. `null` where it holds nothing
+   * definite. Built with its reads' sources first (`#buildHeld`).
    */
   #heldOf(place: PlaceId): Touch | null {
     const known = this.#helds.get(place);
     if (known !== undefined) return known;
     this.#buildHeld(place);
     return this.#helds.get(place)!;
+  }
+
+  /**
+   * A store's own points in a held trie (A2): what it holds itself, its copies of written bindings among them, whose
+   * contents there are their types', a contribution like any other (`HeldExtra`, Astra r1 N1).
+   */
+  #heldPoints(own: HeldOwn | null): readonly (readonly string[])[] {
+    if (own === null) return [];
+    if (own.held.points.length === 0) return own.points;
+    return keptArray(this.#work, [...own.points, ...own.held.points]);
+  }
+
+  /** A store's reads in a held trie (A2): each where it stands, whether its place's copies list stands for it. */
+  #heldReads(
+    own: HeldOwn | null,
+  ): readonly { readonly at: readonly string[]; readonly source: Key }[] {
+    if (own === null) return [];
+    if (own.held.reads.length === 0) return own.reads;
+    return keptArray(this.#work, [...own.reads, ...own.held.reads]);
   }
 
   /** A read's contribution to a held trie where it stands: its source's held trie at its path. */
@@ -4889,7 +4944,7 @@ export class Admission {
       let list = sources.get(place);
       if (list === undefined) {
         const found: PlaceId[] = [];
-        for (const { source } of this.#liveOwn(place)?.reads ?? []) {
+        for (const { source } of this.#heldReads(this.#liveOwn(place))) {
           work.charge("indexSteps");
           if (!this.#helds.has(keyPlace(source))) found.push(keyPlace(source));
         }
@@ -4920,11 +4975,11 @@ export class Admission {
     const copies: number[][] = members.map(() => []);
     for (const [at, member] of members.entries()) {
       const found = this.#liveOwn(member);
-      for (const path of found?.points ?? []) {
+      for (const path of this.#heldPoints(found)) {
         work.charge("indexSteps");
         own[at]!.push(touches.leaf(path, [this.#touchRef(member, path, false)]));
       }
-      for (const { at: where, source } of found?.reads ?? []) {
+      for (const { at: where, source } of this.#heldReads(found)) {
         work.charge("indexSteps");
         const from = index.get(keyPlace(source));
         if (from === undefined) {
@@ -4999,11 +5054,11 @@ export class Admission {
       (this.#liveStores.get(member) ?? []).map((store) => {
         let copyOf: PlaceId | null = null;
         const parts: Touch[] = [];
-        for (const path of store.points) {
+        for (const path of this.#heldPoints(store)) {
           work.charge("indexSteps");
           parts.push(touches.leaf(path, [this.#touchRef(member, path, false)]));
         }
-        for (const { at: where, source } of store.reads) {
+        for (const { at: where, source } of this.#heldReads(store)) {
           work.charge("indexSteps");
           const from = index.get(keyPlace(source));
           const whole = where.length === 0 && keptPath(this.#work, source).length === 0;
@@ -5059,10 +5114,10 @@ export class Admission {
   /**
    * A2 (TABLE r4.131): the paths where what the stores into one place (`base` empty, each store at its own path) or a
    * literal's elements (each at `base`, its landing) definitely hold meet with two kinds or more (`copies`), relative to
-   * `base`, sorted by text. Each store's or element's trie is its own points and its reads' held tries (`#heldOf`),
-   * and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only copies of
-   * whole objects bring is owed as any other: the copy is checked where it meets the place. A4's copies of written
-   * types and the values holding anything stand below and decide nothing here.
+   * `base`, sorted by text. Each store's or element's trie is its own points (`#heldPoints`) and its reads' held tries
+   * (`#heldOf`), and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only
+   * copies of whole objects bring is owed as any other: the copy is checked where it meets the place. A4's copies
+   * inheriting written types and the values holding anything stand below and decide nothing here.
    */
   #heldMeetings(
     list: readonly { readonly d: Definition; readonly at: readonly string[] }[],
@@ -5080,14 +5135,15 @@ export class Admission {
     const distinct = new Map<number, Touch>();
     for (const [index, { d, at }] of list.entries()) {
       if (d.value === undefined) continue;
-      const own: OwnStructure & {
+      const own: HeldOwn & {
         readonly points: (readonly string[])[];
         readonly below: (readonly string[])[];
         readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
-      } = { points: [], below: [], reads: [] };
+        readonly held: HeldExtra;
+      } = { points: [], below: [], reads: [], held: { points: [], reads: [] } };
       this.#ownOf(d, d.value, at, NO_COPIES, own);
       const parts: Touch[] = [];
-      for (const { at: where, source } of own.reads) {
+      for (const { at: where, source } of this.#heldReads(own)) {
         const held = this.#heldRead(source, rest(where));
         if (held !== null) parts.push(held);
       }
@@ -5096,7 +5152,7 @@ export class Admission {
         const ref = { owner: `e${d.uid}`, place: -1 - index, path, lands: false, value: d.value! };
         return { ...ref, text: refText(this.#work, ref) };
       };
-      for (const point of own.points)
+      for (const point of this.#heldPoints(own))
         parts.push(touches.leaf(rest(point), [mine(keptSlice(this.#work, point, at.length))]));
       work.charge("indexSteps", parts.length + sortCost(parts.length));
       parts.sort((a, b) => b.size - a.size || a.id - b.id);
