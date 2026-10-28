@@ -486,7 +486,7 @@ test("a local date and time moves only by calendar units, keeping its clock time
   assert.equal(
     start(`${DYNAMIC}${dinner}let gap = dynamic(dinner) - dynamic(lunch)\nexit`).result.snapshot
       .failure?.message,
-    "A date and time has no time zone, so one cannot be subtracted from another. For the days between them, convert both with the toDate function first. For the elapsed time, convert both with the toAbsoluteDateTime function.",
+    "A date and time has no time zone, so one cannot be subtracted from another. For the days between them, convert both with the toDate function first. For the elapsed time, convert both with their toAbsoluteDateTime method first.",
   );
 });
 
