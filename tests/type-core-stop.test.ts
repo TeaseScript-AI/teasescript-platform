@@ -1051,8 +1051,9 @@ test("a marked store's records within its value are compared alike on both sides
  * Before admission settled, a store into a written type is checked by admission's own C1, the derivation the analysis
  * runs unstopped, reading what the stop retained (TABLE r4.125, r4.126, Astra r4's B1): two wrong elements give one
  * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
- * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred. At every
- * stop before admission settled the errors, their sites and sentences equal the unstopped ones.
+ * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred; a written
+ * parameter's every call (Codex r16). At every stop before admission settled the errors, their sites and sentences equal
+ * the unstopped ones.
  */
 test("a stop before admission settled checks a written store by admission's own C1, error for error", () => {
   for (const source of [
@@ -1065,6 +1066,7 @@ test("a stop before admission settled checks a written store by admission's own 
     'let xs: integer[] set = set[]\nxs.add(["wrong", true])\nexit\n',
     'let xs: (integer | string)[] set = set[]\nxs.add([1, "a"])\nexit\n',
     'let ys = [1, "a"]\nexit\n',
+    'function f(xs: integer[]) { say "x" }\nf(["wrong"])\nf(["bad"])\nexit\n',
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);

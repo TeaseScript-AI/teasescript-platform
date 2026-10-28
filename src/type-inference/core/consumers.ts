@@ -994,16 +994,17 @@ export class Consumers {
   }
 
   /**
-   * The places and paths admission decides by a written type that admission's own stores reach (`Admission.stores`):
+   * The places and paths admission decides by a written type that a store, add, argument or return reaches (every one,
+   * a multi-site argument into a written parameter among them: it decides nothing, but C1 checks it, ADR 0021 1.5):
    * every path of each such place's written type, which is as large as the source that writes it. The fresh pass's C1
    * decides these alone (`groups` would group every key and walk every store's landings again, unbounded after a
    * stop: TABLE r4.55, r4.126).
    */
   #writtenGroups(): { readonly root: PlaceId; readonly path: readonly string[] }[] {
-    const { program } = this.pass;
+    const { program, definitions } = this.pass;
     const out: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     const seen = new Set<PlaceId>();
-    for (const d of this.admission.stores()) {
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
       program.work.charge("checks");
       if (seen.has(d.place)) continue;
       seen.add(d.place);
