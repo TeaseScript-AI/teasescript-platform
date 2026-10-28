@@ -299,6 +299,36 @@ test("a union spans its parentheses when its first or last member is a group", (
   }
 });
 
+test("a type test, a type case, and a parameter span a grouped type's closing parenthesis", () => {
+  const source = [
+    "let t = x is not (integer | string)",
+    "switch x {",
+    "  case is (integer) {",
+    "  }",
+    "}",
+    "function f(y: (integer)) {",
+    "}",
+  ].join("\n");
+  const result = parse(source);
+  assert.deepEqual(result.diagnostics, []);
+  const [letStatement, switchStatement, declaration] = result.program.statements;
+  assert.ok(
+    letStatement?.kind === "letStatement" &&
+      switchStatement?.kind === "switchStatement" &&
+      declaration?.kind === "functionDeclaration",
+  );
+  const text = ({ start, end }: { start: { offset: number }; end: { offset: number } }) =>
+    source.slice(start.offset, end.offset);
+  assert.deepEqual(
+    [
+      text(letStatement.initializer.span),
+      text(switchStatement.cases[0]!.typeTest!.span),
+      text(declaration.parameters[0]!.span),
+    ],
+    ["x is not (integer | string)", "is (integer)", "y: (integer)"],
+  );
+});
+
 test("reports a missing or unknown type part at its location", () => {
   for (const [source, code, message] of [
     [

@@ -330,7 +330,8 @@ function* parseCaseTypeTestTask(parser: Parser): ParseTask<SwitchTypeTest | null
     kind: "switchTypeTest",
     type,
     negated,
-    span: spanFrom(keyword.span, type.span),
+    // To the type's last token, also a group's `)`.
+    span: spanFrom(keyword.span, parser.previous().span),
   });
 }
 
