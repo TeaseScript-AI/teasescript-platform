@@ -26,6 +26,7 @@ import {
   OWN_SELECTION,
   REFERENCE,
   termAt,
+  typedDefault,
   typeTags,
   unknownItem,
   writtenOf,
@@ -328,6 +329,22 @@ const STAGES = 4;
 /** The rank of a stop's own warning and marks among a site's diagnostics: after every consumer's (`Consumers.rules`). */
 export const STOP_RULE = 5 + STAGES;
 
+/** A typed parse or load (F18), with its default where it has one; `null` for any other value. */
+export function typedCall(
+  program: CorePass["program"],
+  value: PlaceId,
+): { readonly fallback: PlaceId | undefined } | null {
+  const c = program.opOf.get(value);
+  if (c?.kind === "load") return { fallback: c.fallback ?? undefined };
+  if (
+    c?.kind === "operation" &&
+    c.contract.family === "conversion" &&
+    conversionCategory(c.contract.name)?.kind === "parses"
+  )
+    return { fallback: defaultOf(c) ?? undefined };
+  return null;
+}
+
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
   /**
@@ -494,6 +511,49 @@ export class Consumers {
       : [...items, ...ingress];
   }
 
+  /**
+   * After a stop, a typed parse's or load's expected type at a path (F18): its written destination's (`landsIn`), else its
+   * default's own kinds as a typed default reads it (`typedDefault`: a `null` there leaves its level open), through a
+   * chain of typed defaults, as the route's stopped answers read it (`CoreAnswers.#stoppedShape`); `null` for any other
+   * value and where none gives a type. Each link of a chain and path once.
+   */
+  #typedRead(value: PlaceId, path: readonly string[]): readonly Item[] | null {
+    const { program, contract } = this.pass;
+    if (typedCall(program, value) === null) return null;
+    const memo = keptParts(program.work, value, path);
+    const known = this.#typedReads.get(memo);
+    if (known !== undefined) return known;
+    const chain = [memo];
+    let found: readonly Item[] | null | undefined;
+    for (let at = value, call = typedCall(program, at); found === undefined;) {
+      program.work.charge("checks");
+      const written = contract.landsIn(at, []);
+      if (written !== null) {
+        const term = termAt(written, path);
+        const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
+        found = tags.length === 0 ? null : tags.map((tag) => makeItem(tag, null, { cert: "def" }));
+      } else if (call?.fallback === undefined) found = null;
+      else {
+        at = call.fallback;
+        call = typedCall(program, at);
+        const link = keptParts(program.work, at, path);
+        if (call !== null) {
+          found = this.#typedReads.get(link);
+          chain.push(link);
+        } else {
+          // the default itself: its own kinds, as a typed default reads them
+          const own = this.#leafKind(at, path);
+          const decision = typedDefault(path, false);
+          found = own === null ? null : decision.answer(decision.choose(own), own);
+        }
+      }
+    }
+    for (const link of chain) this.#typedReads.set(link, found);
+    return found;
+  }
+
+  readonly #typedReads = new Map<string, readonly Item[] | null>();
+
   /** `#finishingRead`'s sources after a leaf's own kind: the read's finished answer, then the domains. */
   #laterSources(
     value: PlaceId,
@@ -513,6 +573,9 @@ export class Consumers {
         ? null
         : settled(() => values.valueItems(value, node, rest));
     if (exact !== null) return exact;
+    // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it
+    const typed = this.#typedRead(value, rest);
+    if (typed !== null) return typed;
     // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
     const held = settled(() => contract.contractOfValueAt(value, rest));
     if (held !== null)
@@ -957,10 +1020,12 @@ export class Consumers {
    * records within its value (r4.111).
    */
   #freshStores(): void {
-    const { program } = this.pass;
-    for (const d of this.admission.stores()) {
+    const { program, definitions } = this.pass;
+    // (every store and transfer, an argument to a parameter several calls reach and one beside a default among them,
+    // which `Admission.stores` leaves out of its decisions but whose obligations it owes: r4.138)
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
       program.work.charge("checks");
-      if (d.value === undefined) continue;
+      if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
       const written = writtenOf(program.place(d.place).kind);
       const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
       if (written !== null && termAt(written, path) !== null) continue;
@@ -976,7 +1041,11 @@ export class Consumers {
     );
     this.#rule = 1;
     this.#admittedStores(true);
+    // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
     this.admission.publish(true);
+    this.#rule = 2;
+    this.admission.ingressStores((site) => this.#inMarkedValue(site));
+    this.#rule = 1;
     this.published = true;
   }
 
@@ -1058,6 +1127,25 @@ export class Consumers {
   }
 
   readonly #marked = new Set<number>();
+
+  /** Whether a site lies inside the value of a store or transfer the fresh pass marked (`#storeMark`). */
+  #inMarkedValue(site: SourceSite): boolean {
+    const { program, definitions } = this.pass;
+    if (this.#markedSpans === null) {
+      this.#markedSpans = [];
+      for (const d of [...definitions.storeDefs, ...definitions.transferDefs])
+        if (this.#marked.has(d.uid) && d.value !== undefined) {
+          const at = program.places[d.value]?.site ?? null;
+          if (at !== null) this.#markedSpans.push(at);
+        }
+    }
+    program.work.charge("checks", this.#markedSpans.length);
+    return this.#markedSpans.some(
+      (span) => span.file === site.file && span.start <= site.start && site.end <= span.end,
+    );
+  }
+
+  #markedSpans: SourceSite[] | null = null;
 
   /**
    * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission

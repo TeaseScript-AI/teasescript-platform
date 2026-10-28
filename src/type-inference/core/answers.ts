@@ -13,11 +13,10 @@ import {
   type BudgetLimit,
   type WorkCounter,
 } from "./budget.js";
-import { Consumers, STOP_RULE } from "./consumers.js";
+import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import {
   Contract,
-  defaultOf,
   typedDefault,
   typeTags,
   termAt,
@@ -25,7 +24,6 @@ import {
   type ContractFacts,
   type GatherSite,
 } from "./contract.js";
-import { conversionCategory } from "./method-categories.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -722,22 +720,6 @@ const OWN_KINDS: ReadonlyMap<string, "atom" | "list" | "set" | "dict" | "object"
   ["dictLiteral", "dict"],
   ["objectLiteral", "object"],
 ]);
-
-/** A typed parse's or load's value (F18): its default, if it has one; `null` for any other value. */
-function typedCall(
-  program: CoreProgram,
-  value: PlaceId,
-): { readonly fallback: PlaceId | undefined } | null {
-  const c = program.opOf.get(value);
-  if (c?.kind === "load") return { fallback: c.fallback ?? undefined };
-  if (
-    c?.kind === "operation" &&
-    c.contract.family === "conversion" &&
-    conversionCategory(c.contract.name)?.kind === "parses"
-  )
-    return { fallback: defaultOf(c) ?? undefined };
-  return null;
-}
 
 /** What a value's own syntax gives at a path after a stop (`CoreAnswers.#stoppedShape`): items and property names. */
 interface StoppedShape {

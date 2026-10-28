@@ -6490,7 +6490,7 @@ export class Admission {
   #f18Admission(
     c: CorePass["program"]["constraints"][number],
   ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
-    if (!("result" in c)) return null;
+    if (!("result" in c) || !typedIngress(c)) return null;
     // (a typed ingress no store brings, an own read or unreached, is checked where it runs: §3.3, r4.57)
     const found = this.#landingIndex().byIngress.get(c.result);
     return found === undefined || found.stores.size === 0 ? this.#f18Kinds(c) : null;
@@ -6503,14 +6503,14 @@ export class Admission {
     const known = this.#f18.get(c.result);
     if (known !== undefined) return known;
     const { program, contract, values } = this.pass;
-    const parses =
-      c.kind === "operation" &&
-      c.contract.family === "conversion" &&
-      conversionCategory(c.contract.name)?.kind === "parses";
+    const parses = c.kind === "operation" && typedIngress(c);
     let found: { readonly label: string; readonly tags: readonly ItemTag[] } | null = null;
     const node = c.kind === "load" || parses ? program.exprAt(c.site) : null;
     if (node !== null && program.live(node)) {
-      const items = withoutEmpty(this.#run(values.valueItems(c.result, node, [])));
+      // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax, F18, r4.138)
+      const items = withoutEmpty(
+        this.host.read?.(c.result, node, []) ?? this.#run(values.valueItems(c.result, node, [])),
+      );
       const tags: ItemTag[] = [
         ...new Set(items.filter((item) => concrete(item)).map((item) => item.tag)),
       ];
@@ -6529,9 +6529,14 @@ export class Admission {
     return found;
   }
 
-  /** F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. */
-  public ingressStores(): void {
+  /**
+   * F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
+   * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
+   * index `publish` made there, of the stores into written places alone, answers for the rest (TABLE r4.138).
+   */
+  public ingressStores(skip?: (site: SourceSite) => boolean): void {
     for (const c of this.pass.program.constraints) {
+      if (skip !== undefined && "result" in c && skip(c.site)) continue;
       const found = this.#f18Admission(c);
       if (found === null) continue;
       this.readChecks.push(
@@ -6786,6 +6791,16 @@ function boundaryCheck(
     site: { file: site.file, start: site.start, end: site.end },
     boundary: true,
   };
+}
+
+/** Whether a constraint is a typed ingress (F18): a load, or a parse of text to a type. */
+function typedIngress(c: CorePass["program"]["constraints"][number]): boolean {
+  return (
+    c.kind === "load" ||
+    (c.kind === "operation" &&
+      c.contract.family === "conversion" &&
+      conversionCategory(c.contract.name)?.kind === "parses")
+  );
 }
 
 /** A required kind as an obligation names it. */
