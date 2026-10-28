@@ -764,6 +764,9 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     ["compact load", (x) => `let result = load ${x}, default: 0`],
     ["popup", (x) => `showPopup ${x}`],
     ["wait", (x) => `wait ${x}`],
+    // Inside a block: a statement of a function, and the head of a media cue, which is no statement on its own.
+    ["function", (x) => `function g {\n  return ${x}\n}`],
+    ["cue", (x) => `playAudio "a.mp3" {\n  beforeEnd ${x} {\n    say "cue"\n  }\n}`],
   ];
   const before =
     "function f(value) {\n  return value\n}\nlet a = f(null)\nlet b = f(null)\nlet c = f(null)\nlet d = f(null)\nlet ready = true\n";
@@ -808,6 +811,8 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     "argument",
     "list",
     "wait",
+    "function",
+    "cue",
   ])
     assert.ok(quoted.has(`${place}: a otherwise b + c`), place);
   for (const shown of [

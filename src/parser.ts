@@ -1512,8 +1512,12 @@ export class Parser {
       this.#fixOffers.push({ index, error: this.diagnostics[index]!, quoted, pastes });
   }
 
-  /** Settles the fixes offered for the statement that starts at token `start`, whose errors begin at `diagnosticCount`. */
-  #settleFixOffers(start: number, diagnosticCount: number): void {
+  /**
+   * Settles the fixes offered for the statement that starts at token `start`, whose errors begin at `diagnosticCount`.
+   * A statement inside a block, such as a media cue, may not parse on its own, so a fix that fails there although the
+   * statement has no other error is tried again in the statement around it, up to one of the file (`outermost`).
+   */
+  #settleFixOffers(start: number, diagnosticCount: number, outermost: boolean): void {
     const offers = this.#fixOffers;
     let first = offers.length;
     while (first > 0 && offers[first - 1]!.index >= diagnosticCount) first -= 1;
@@ -1522,6 +1526,7 @@ export class Parser {
     const from = this.tokens[start]!.span.start.offset;
     const to = this.lastEnd();
     const alone = this.diagnostics.length === diagnosticCount + 1;
+    const retried: typeof offers = [];
     for (const offer of offers.splice(first)) {
       if (
         !alone ||
@@ -1535,9 +1540,11 @@ export class Parser {
       const cost = pasted.reduce((sum, text) => sum + text.length, 0);
       if (cost > this.shared.proofBudget) continue;
       this.shared.proofBudget -= cost;
-      if (pasted.some((text) => parseSource(text, false).diagnostics.length > 0)) continue;
-      this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
+      if (pasted.every((text) => parseSource(text, false).diagnostics.length === 0))
+        this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
+      else if (!outermost) retried.push(offer);
     }
+    for (const offer of retried) offers.push(offer);
   }
 
   *#parseRange(): ParseTask<Expression | null> {
@@ -2168,7 +2175,7 @@ export class Parser {
     // Recovery has already stopped at the next statement.
     if (this.recoveredAtStatementBoundary) this.recoveredAtStatementBoundary = false;
     else this.finishStatement(inBlock);
-    this.#settleFixOffers(start, diagnosticCount);
+    this.#settleFixOffers(start, diagnosticCount, !inBlock);
     let end = this.current;
     // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
     // holds the line breaks after it, where an author completes it, as a recovered one does.
