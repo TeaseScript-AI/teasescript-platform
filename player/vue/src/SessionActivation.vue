@@ -80,17 +80,18 @@ defineExpose({ focus });
 </template>
 
 <style scoped>
-/* Clear of the top bar, as the page of a Tease that cannot start; a page taller than the space, such as one with the
-   card on a phone held sideways, scrolls. */
+/* Below the top bar, as the page of a Tease that cannot start, and centred in the window as the bottom padding keeps
+   it; a page taller than the space, such as one with the card on a phone held sideways, scrolls there. */
 .session-activation {
   position: absolute;
   z-index: 30;
-  inset: 0;
+  inset: var(--player-header-size) 0 0;
   display: grid;
   place-content: safe center;
   gap: 8px;
   justify-items: center;
-  padding: var(--player-header-size) var(--player-edge-space);
+  padding: var(--player-edge-space) var(--player-edge-space)
+    calc(var(--player-header-size) + var(--player-edge-space));
   overflow-y: auto;
   pointer-events: none;
 }
