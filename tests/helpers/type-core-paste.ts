@@ -142,6 +142,37 @@ const SITES: readonly Site[] = [
     before: "function id(p) {\n  return p\n}",
     line: "let w: string = id(@)\nsay w",
   },
+  // (a divisor, also through a literal's contents and an interpolation's text: Codex r10)
+  { name: "divisor", before: "", line: "say 1 / @", operand: true },
+  { name: "literal divisor", before: "", line: "say 1 / [@][0]" },
+  { name: "property divisor", before: "", line: "say 1 / ({n: @}).n" },
+  { name: "interpolation divisor", before: "", line: 'say 1 / toInteger("${@}", default: 1)' },
+];
+
+/**
+ * Values that may be null, whose warning's fix offers a fallback (ADR 0021 rule 1.9), at the sites that take their
+ * other type: where they divide, also through a literal or an interpolation, and at a call, which reads it later.
+ */
+const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
+  [
+    { name: "null element", setup: "let xs = [4, null]", expression: "xs[1]" },
+    ["integer declaration", "sum", "product", "comparison", "divisor", "integer argument", "count"],
+  ],
+  [
+    { name: "null element's length", setup: 'let xs = ["ab", null]', expression: "xs[1].length" },
+    [
+      "say",
+      "integer declaration",
+      "sum",
+      "divisor",
+      "literal divisor",
+      "property divisor",
+      "interpolation divisor",
+      "integer argument",
+      "untyped argument",
+      "count",
+    ],
+  ],
 ];
 
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */
@@ -191,8 +222,16 @@ export interface PasteCase {
 /** The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once). */
 export function pasteCases(sample = false): PasteCase[] {
   const cases: PasteCase[] = [];
-  OFFERS.forEach((offer, index) => {
-    const sites = sample ? [SITES[index % SITES.length]!] : SITES;
+  const offers = [
+    ...OFFERS.map(
+      (offer, index) => [offer, sample ? [SITES[index % SITES.length]!] : SITES] as const,
+    ),
+    ...NULLABLE.map(([offer, names], index) => {
+      const sites = SITES.filter((site) => names.includes(site.name));
+      return [offer, sample ? [sites[index % sites.length]!] : sites] as const;
+    }),
+  ];
+  for (const [offer, sites] of offers) {
     for (const site of sites) {
       const head = [offer.setup, site.before].filter((line) => line !== "").join("\n") + "\n";
       const [left, right] = around(site.line);
@@ -206,7 +245,7 @@ export function pasteCases(sample = false): PasteCase[] {
         end: start + offer.expression.length,
       });
     }
-  });
+  }
   // (a store's value at each place of each written type: a declaration, an assignment, a property, an element, an
   // argument)
   PLACES.forEach(([type, start, values], index) => {
@@ -240,10 +279,13 @@ export interface Pasted {
 /** A code form in a fix sentence, by the words that offer it; a statement's `on a line of its own`. */
 const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?/g;
 
+/** A warning's fallback (ADR 0021 rule 1.9), which stands in place of its subject. */
+const FALLBACK = /give a fallback, as in '([^']+)'/;
+
 /**
  * The code forms the core's errors in `source` offer at or inside `[start, end)`, each pasted at its position: in place
  * of the diagnosed expression, or as a line of its own before the case's line, the list it changes in place of the
- * expression; with the diagnostics, for a case whose expression gets none.
+ * expression; a warning's fallback in place of its subject; whether the expression gets any diagnostic.
  */
 export function pastedForms(
   source: string,
@@ -256,14 +298,27 @@ export function pastedForms(
   const forms: Pasted[] = [];
   let diagnosed = false;
   for (const diagnostic of analyseCore(request).diagnostics) {
-    if (
-      diagnostic.class !== "compile-error" ||
-      diagnostic.site.start < start ||
-      diagnostic.site.end > end
-    )
-      continue;
+    if (diagnostic.site.start < start || diagnostic.site.end > end) continue;
     diagnosed = true;
     const message = coreMessage(diagnostic, text);
+    if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
+      // (a member's subject is its receiver, written at the start of the warned access)
+      const fallback = FALLBACK.exec(message)?.[1];
+      const { rule } = diagnostic;
+      const subject =
+        rule.rule === "member"
+          ? rule.receiver
+          : source.slice(diagnostic.site.start, diagnostic.site.end);
+      if (fallback !== undefined)
+        forms.push({
+          code: fallback,
+          source:
+            source.slice(0, diagnostic.site.start) +
+            fallback +
+            source.slice(diagnostic.site.start + subject.length),
+        });
+      continue;
+    }
     const fixes = message.slice(message.indexOf(". ") + 2);
     for (const [, code, statement] of fixes.matchAll(CODE)) {
       // (#1213's decided sentence for a value shown as text, 'put it in a text with '${...}'', which the rulings keep)

@@ -199,8 +199,11 @@ export interface SiteExpectation {
   readonly binds: "whole" | "operand" | "receiver";
   /** A collection's elements' kinds there (`null`, any; none: not known, so no collection is proved to fit). */
   readonly elements?: readonly ItemTag[] | null;
-  /** The value divides, as a divisor or through an operation or a member that gives one: a zero there stops the run. */
-  readonly divides?: true;
+  /**
+   * Whether the value divides, as a divisor or through an operation, a member or a literal that gives one, where a zero
+   * stops the run: `false` where a fact proves it does not, none where no fact proves either (TABLE r4.162).
+   */
+  readonly divides?: boolean;
 }
 
 /** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */

@@ -1426,14 +1426,24 @@ export class Consumers {
     program.work.charge("checks");
     const place = program.placeBySite.get(key);
     const consumers = place === undefined ? [] : (program.consumersOf.get(place) ?? []);
-    const found: SiteExpectation =
-      consumers.length > 1
-        ? UNPROVED
-        : consumers.length === 1
-          ? yield* compileChild(this.#consumerTakesTask(consumers[0]!))
-          : program.effectNode(site)?.statement?.kind === "sayStatement"
-            ? { takes: SAID, binds: "whole", elements: null }
-            : UNPROVED;
+    let found: SiteExpectation;
+    if (consumers.length === 1) found = yield* compileChild(this.#consumerTakesTask(consumers[0]!));
+    else if (consumers.length === 0)
+      found =
+        program.effectNode(site)?.statement?.kind === "sayStatement"
+          ? { takes: SAID, binds: "whole", elements: null, divides: false }
+          : UNPROVED;
+    else {
+      // (several consumers: no type proved; it divides where one of them does, and not where every one proves not)
+      const all: SiteExpectation[] = [];
+      for (const consumer of consumers)
+        all.push(yield* compileChild(this.#consumerTakesTask(consumer)));
+      found = all.some((one) => one.divides === true)
+        ? { ...UNPROVED, divides: true }
+        : all.every((one) => one.divides === false)
+          ? { ...UNPROVED, divides: false }
+          : UNPROVED;
+    }
     this.#expectations.set(key, found);
     return found;
   }
@@ -1489,7 +1499,16 @@ export class Consumers {
    * its reads take (Codex r7, TABLE r4.160); beside values of other types, or below the place's root, nothing proved.
    */
   *#placeTakesTask(root: PlaceId, path: readonly string[]): CompileTask<SiteExpectation> {
-    if (this.pass.program.cellOwner.has(root)) return UNPROVED;
+    const { program } = this.pass;
+    // (a literal's own element or property: no type proved, and it divides where its literal does)
+    const cell = program.cellOwner.get(root);
+    if (cell !== undefined) {
+      const site = program.place(cell.owner).site;
+      const outer = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
+      return outer.divides === undefined ? UNPROVED : { ...UNPROVED, divides: outer.divides };
+    }
+    // (a place's value is read by later statements, where a zero it holds is the script's own, TABLE r4.159)
+    const placed = (found: SiteExpectation): SiteExpectation => ({ ...found, divides: false });
     const admitted = (at: readonly string[]): ItemTag[] | null => {
       const tags = this.admission.admitted(root, at).filter((tag) => tag !== "empty");
       return tags.length === 0 || tags.includes("unknown") ? null : tags;
@@ -1499,22 +1518,24 @@ export class Consumers {
       const others = this.admission
         .admitted(root, path)
         .some((tag) => tag !== "empty" && tag !== "unknown");
-      return path.length > 0 || others ? UNPROVED : yield* compileChild(this.#readsTakeTask(root));
+      return placed(
+        path.length > 0 || others ? UNPROVED : yield* compileChild(this.#readsTakeTask(root)),
+      );
     }
-    return {
+    return placed({
       takes,
       binds: "whole",
       elements: takes.some((tag) => tag === "list" || tag === "set" || tag === "dict")
         ? admitted(joinSteps(path, ["element"]))
         : null,
-    };
+    });
   }
 
   *#consumerTakesTask(consumer: Consumption): CompileTask<SiteExpectation> {
     const { program } = this.pass;
-    // (a value whose consumer computes its result from it divides where that result does)
-    const dividing = (outer: SiteExpectation): { divides?: true } =>
-      outer.divides === true ? { divides: true } : {};
+    // (a value whose consumer computes its result from it divides where that result does, unproved where that is)
+    const dividing = (outer: SiteExpectation): { divides?: boolean } =>
+      outer.divides === undefined ? {} : { divides: outer.divides };
     switch (consumer.kind) {
       case "store": {
         const target = program.targetRoot(consumer.into, true);
@@ -1526,8 +1547,9 @@ export class Consumers {
           typeof consumer.parameter === "number"
             ? fn.parameters[consumer.parameter]
             : program.parameterPlace(consumer.fn, consumer.parameter);
+        // (a function the value is passed to reads it in later statements, TABLE r4.159)
         return parameter === undefined
-          ? UNPROVED
+          ? { ...UNPROVED, divides: false }
           : yield* compileChild(this.#placeTakesTask(parameter, []));
       }
       case "return":
@@ -1537,7 +1559,10 @@ export class Consumers {
       case "operand": {
         const c = consumer.operation;
         const { family } = c.contract;
-        const outer = yield* compileChild(this.#expectedTask(c.site));
+        // (its result's own site: an interpolation's is its text's, not the interpolated value's, Codex r10)
+        const outer = yield* compileChild(
+          this.#expectedTask(program.place(c.result).site ?? c.site),
+        );
         if (family === "interpolation")
           return { takes: SHOWN_KINDS, binds: "whole", ...dividing(outer) };
         if (family === "logic") return { takes: ["boolean"], binds: "operand", ...dividing(outer) };
@@ -1575,8 +1600,9 @@ export class Consumers {
             .map((row) => row.result);
         // (a divisor, or an operand whose zero can give a zero result where that result divides)
         const divides =
-          (DIVISIONS.some((found) => found === operator) && consumer.index === 1) ||
-          outer.divides === true;
+          DIVISIONS.some((found) => found === operator) && consumer.index === 1
+            ? true
+            : outer.divides;
         return {
           takes: domain.filter((kind) => {
             if (outer.takes === null) return true;
@@ -1592,7 +1618,7 @@ export class Consumers {
             : outer.elements === undefined
               ? {}
               : { elements: outer.elements }),
-          ...(divides ? { divides } : {}),
+          ...(divides === undefined ? {} : { divides }),
         };
       }
       case "method": {
@@ -1611,7 +1637,7 @@ export class Consumers {
       case "access": {
         const step = consumer.step.step;
         // (a loop's iterable: what its variable then holds the loop's body reads, which no fact here follows)
-        if (step === "iteration") return { takes: [], binds: "receiver" };
+        if (step === "iteration") return { takes: [], binds: "receiver", divides: false };
         const outer = yield* compileChild(this.#expectedTask(consumer.step.site));
         // (a member's result: a length a whole number, any other read's only where its site takes any)
         const property = typeof step === "object" ? step.property : null;
@@ -1636,7 +1662,8 @@ export class Consumers {
       case "part": {
         // (a side of `otherwise`, a default, a named argument: its type must also fit the value it stands beside (C10),
         // which no fact here proves, Codex r9; it divides where the result does)
-        const outer = yield* compileChild(this.#expectedTask(consumer.site));
+        const site = program.place(consumer.result).site;
+        const outer = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
         return { takes: [], binds: "operand", ...dividing(outer) };
       }
       case "use": {
@@ -1649,6 +1676,7 @@ export class Consumers {
                   ? ["integer"]
                   : ["string"],
             binds: "whole",
+            divides: false,
           };
         // (an index takes a list's whole number or a dict's text, by its receiver)
         const owner = this.#indexOwner(consumer.span);
@@ -1658,9 +1686,11 @@ export class Consumers {
             : this.#kindsOf(owner, program.exprAt(consumer.span)).map((item) => item.tag);
         const only = (tag: ItemTag): boolean =>
           kinds.length > 0 && kinds.every((found) => found === tag);
+        // (it picks the script's own element, whose value is the script's, TABLE r4.160)
         return {
           takes: only("list") ? ["integer"] : only("dict") ? ["string"] : [],
           binds: "whole",
+          divides: false,
         };
       }
       case "read":
@@ -1697,12 +1727,8 @@ export class Consumers {
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
     };
     if (this.#finishing && leftOutWarning(diagnostic)) return false;
-    // (a null value's fallback stands where the operation or the member takes the value, TABLE r4.151)
-    const expects =
-      item.tag === "null" &&
-      (rule.rule === "operator" || (rule.rule === "member" && rule.use !== "store"))
-        ? this.#expected(site)
-        : undefined;
+    // (a null value's fallback stands where its rule takes the value: whether it divides there, TABLE r4.162)
+    const expects = item.tag === "null" ? this.#expected(site) : undefined;
     const reported = expects === undefined ? diagnostic : { ...diagnostic, expects };
     (this.#finishing ? this.deferred : this.diagnostics).push(reported);
     this.rules.set(reported, this.#rule);

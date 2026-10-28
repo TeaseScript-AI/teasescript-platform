@@ -444,11 +444,12 @@ function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["re
 /**
  * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on. It holds
  * where (1) each operation takes its subject: there when the script runs, every kind of it known, and one the
- * operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what consumes the value there: any
- * value where nothing restricts it), a structured value only there or as a collection of scalars against its
- * elements' kinds, and a value the fix writes itself only where the value does not divide; and (3) it binds there: as
- * the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code. Its code, so
- * grouped, where it holds; `null` where it does not, and the fix gives its advice in words.
+ * operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what
+ * consumes the value there: any value where nothing restricts it), a structured value only there or as a collection
+ * of scalars against its elements' kinds, and a value the fix writes itself only where the value is proved not to
+ * divide; and (3) it binds there: as the site's whole value, or in parentheses where an operand or a receiver binds
+ * tighter than its code. A site fact no fact proves gives words, never a form (TABLE r4.162). Its code, so grouped,
+ * where it holds; `null` where it does not, and the fix gives its advice in words.
  */
 function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   const proved = (kinds: readonly ItemTag[]): boolean =>
@@ -467,8 +468,8 @@ function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   )
     return null;
   // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
-  // the value divides, Astra on #1273)
-  if (form.writes === true && site.divides === true) return null;
+  // the value divides, Astra on #1273; offered only where a fact proves it does not, TABLE r4.162)
+  if (form.writes === true && site.divides !== false) return null;
   if (site.takes !== null) {
     if (!fit(form.gives, site.takes) || form.gives.includes("object")) return null;
     const collection = form.gives.some((kind) => STRUCTURED.has(kind));
@@ -1358,7 +1359,7 @@ function checkFix(
   if (fix !== null) return `${check}, or give a fallback, as in '${fix}'.`;
   return site.divides === true
     ? `${check}, or give a fallback after 'otherwise' that does not lead to a division by zero.`
-    : `${check}.`;
+    : `${check}, or give a fallback after 'otherwise'.`;
 }
 
 /** The literals an example may write beside a named value as the source writes them. */
@@ -1428,7 +1429,11 @@ function warningFix(
         ? null
         : {
             value: fallback,
-            site: { takes: null, binds, ...(expects?.divides === true ? { divides: true } : {}) },
+            site: {
+              takes: null,
+              binds,
+              ...(expects?.divides === undefined ? {} : { divides: expects.divides }),
+            },
           },
     );
   }

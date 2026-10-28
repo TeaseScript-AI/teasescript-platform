@@ -66,7 +66,7 @@ export type ValueConstraint = Extract<
  * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
  * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
  * demand on the value a fix does not read (a save, a speaker's store). A side of `otherwise`, a `get`'s or a `load`'s
- * parts and an operation's named argument are part of the result at `site` (`part`), with a type of their own to fit.
+ * parts and an operation's named argument are part of its `result` (`part`), with a type of their own to fit.
  * A variable's or a parameter's place is consumed by each read of it, a function's result by each call (`read`, the
  * value read there; TABLE r4.160).
  */
@@ -82,7 +82,7 @@ export type Consumption =
   | { readonly kind: "argument"; readonly fn: number; readonly parameter: number | string }
   | { readonly kind: "return"; readonly fn: number }
   | { readonly kind: "read"; readonly occurrence: PlaceId }
-  | { readonly kind: "part"; readonly site: SourceSite }
+  | { readonly kind: "part"; readonly result: PlaceId }
   | {
       readonly kind: "use";
       readonly what: "index" | "count" | "condition" | "key";
@@ -405,7 +405,7 @@ export class CoreProgram {
           this.#consumed(argument, { kind: "operand", operation: constraint, index }),
         );
         for (const named of constraint.named)
-          this.#consumed(named.value, { kind: "part", site: constraint.site });
+          this.#consumed(named.value, { kind: "part", result: constraint.result });
         break;
       case "call": {
         const result = this.#functions.get(constraint.fn)?.result;
@@ -429,7 +429,7 @@ export class CoreProgram {
       case "get":
       case "fallback":
       case "load": {
-        const part: Consumption = { kind: "part", site: constraint.site };
+        const part: Consumption = { kind: "part", result: constraint.result };
         if (constraint.kind === "get") {
           this.#consumed(constraint.receiver, part);
           if (constraint.key !== null) this.#consumed(constraint.key, part);

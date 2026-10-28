@@ -1608,6 +1608,10 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       // (Codex r8, r9: through a side of 'otherwise', a default)
       'let xs = ["ab", null]\nsay 1 / (xs[1].length otherwise 1)\nexit\n',
       'let xs = ["ab", null]\nsay 1 / load("missing", default: xs[1].length)\nexit\n',
+      // (Codex r10: through a literal's contents, an interpolation's text)
+      'let xs = ["ab", null]\nsay 1 / [xs[1].length][0]\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / ({n: xs[1].length}).n\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / toInteger("${xs[1].length}", default: 1)\nexit\n',
       'function f(s: string, xs: string?[]) {\n  say 1 / toInteger(s, default: xs[1].length)\n}\nf("bad", ["ab", null])\nexit\n',
     ].map(
       (source) =>
