@@ -2037,19 +2037,25 @@ export class Contract {
       else this.#lands.set(memoKey, found);
       return found;
     };
-    for (const d of definitions.byValue.get(value) ?? []) {
-      program.work.charge("checks");
-      const written = d.kind === "whole" ? writtenOf(program.place(d.place).kind) : null;
-      const term = written === null ? null : termAt(written, joinSteps(d.path, path));
-      if (term !== null) return keep(term);
-      const owner = program.cellOwner.get(d.place);
-      if (owner?.kind === "cell") {
-        const found = this.landsIn(owner.owner, joinSteps(["element"], path), depth + 1);
-        if (found !== null) return keep(found);
+    try {
+      for (const d of definitions.byValue.get(value) ?? []) {
+        program.work.charge("checks");
+        const written = d.kind === "whole" ? writtenOf(program.place(d.place).kind) : null;
+        const term = written === null ? null : termAt(written, joinSteps(d.path, path));
+        if (term !== null) return keep(term);
+        const owner = program.cellOwner.get(d.place);
+        if (owner?.kind === "cell") {
+          const found = this.landsIn(owner.owner, joinSteps(["element"], path), depth + 1);
+          if (found !== null) return keep(found);
+        }
       }
+      const operation = definitions.fallbackOf.get(value);
+      return keep(operation === undefined ? null : this.landsIn(operation, path, depth + 1));
+    } catch (error) {
+      // (a stop inside the lookup leaves no provisional answer behind for the finishing path to read)
+      this.#lands.delete(memoKey);
+      throw error;
     }
-    const operation = definitions.fallbackOf.get(value);
-    return keep(operation === undefined ? null : this.landsIn(operation, path, depth + 1));
   }
 
   // ----------------------------------------------------------------------------- the one identity function (§8 r4.15)
