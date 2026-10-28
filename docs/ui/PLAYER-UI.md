@@ -481,7 +481,14 @@ again, after a reload or with the browser closed in between, shows **Continue** 
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
 a kept session whose events the engine's `interpreterEventProblem` refuses, such as a message without its markup or an
-answer without its form, is not continued, and Start shows instead. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
+answer without its form, is not continued, and Start shows instead. Nor is a kept session whose plan or state is of
+another revision than this Player's, as after a Player update ([format evolution](../RUNTIME.md#format-evolution)):
+the start page then shows "This session cannot continue" and "The Player has been updated and can no longer resume
+your session. Choose Start to begin this Tease again." before Start, the debug room's with "Choose Start debug session
+to begin this Tease again.", in the card of a Tease that cannot start, whose **Technical details** give the runtime's
+error code and path when it refused the state, its message, and the saved and supported revisions, such as
+"Unsupported instruction-plan revision. Saved revision: 103. Supported revision: 104." (owner decision, 2026-10-28). A
+changed script, an ended session, or one that cannot be read shows Start alone. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
 moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
 is not kept, and the session kept before is discarded, in the debug room without its saved data and photos, so a
 reload never goes on from an earlier point as if it were the current one; while the session runs or waits, a warning

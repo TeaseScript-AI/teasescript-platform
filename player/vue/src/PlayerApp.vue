@@ -645,6 +645,7 @@ async function toggleFullscreen() {
             v-else-if="onStartPage"
             ref="startPage"
             :activation="player.activation.value"
+            :outdated="player.outdatedSession.value"
             :title="title"
             :author="author"
             :debug-room="player.rooms.current.value === 'debug'"

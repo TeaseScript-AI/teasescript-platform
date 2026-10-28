@@ -184,7 +184,7 @@ export function restoreCheckpoint(value: unknown): RuntimeCheckpoint {
     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
   }
   if (envelope.version !== CHECKPOINT_VERSION) {
-    throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
+    throw checkpointError("TSK001", "Unsupported checkpoint revision.", "$.version");
   }
 
   const plan = capturePlan(envelope.plan, "$.plan");
@@ -277,7 +277,7 @@ function restoreParsedCheckpoint(value: unknown): RuntimeCheckpoint {
     throw checkpointError("TSK001", "Unsupported checkpoint format.", "$.format");
   }
   if (envelope.version !== CHECKPOINT_VERSION) {
-    throw checkpointError("TSK001", "Unsupported checkpoint version.", "$.version");
+    throw checkpointError("TSK001", "Unsupported checkpoint revision.", "$.version");
   }
   const planValidation = validateCapturedInstructionPlan(envelope.plan);
   if (!planValidation.valid) {

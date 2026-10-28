@@ -1179,14 +1179,14 @@ async function packageScenario(cdp, origin) {
   await navigate(cdp, `${origin}/player/?package=unreadable-file`);
   await waitFor(
     cdp,
-    `document.querySelector('[data-script-failure-summary]')?.textContent === "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."`,
+    `document.querySelector('[data-problem-summary]')?.textContent === "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."`,
     8_000,
     "The Player did not say that a file of the package cannot be read",
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('[data-script-failure-technical-toggle]')?.getAttribute('aria-expanded') === 'false' && !document.querySelector('[data-script-failure-technical]')`,
+      `document.querySelector('[data-problem-technical-toggle]')?.getAttribute('aria-expanded') === 'false' && !document.querySelector('[data-problem-technical]')`,
     ),
     true,
     "The Player did not start with the technical details collapsed",
@@ -1201,11 +1201,11 @@ async function packageScenario(cdp, origin) {
   );
 
   await navigate(cdp, `${origin}/player/?package=broken`);
-  await waitFor(cdp, `!!document.querySelector('[data-script-failure-technical-toggle]')`);
-  await physicalClick(cdp, "[data-script-failure-technical-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-problem-technical-toggle]')`);
+  await physicalClick(cdp, "[data-problem-technical-toggle]");
   await waitFor(
     cdp,
-    `document.querySelector('[data-script-failure-technical]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
+    `document.querySelector('[data-problem-technical]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
     8_000,
     "The Player did not show the broken package's diagnostic",
   );
@@ -1360,6 +1360,62 @@ async function keptSessionScenario(cdp, origin, profile) {
     `${messages}.some((text) => text.includes('This is visit 2.'))`,
     8_000,
     "A session that ended is not kept: the next one starts anew",
+  );
+
+  // After a Player update the kept plan is of an older revision: Start, which takes focus, comes with why the session
+  // cannot continue, and the revisions under Technical details, collapsed at first. The ended first visit, whose state
+  // holds the same labels, stays kept until the second is kept at its choice.
+  const olderPlan = `return new Promise((resolve, reject) => {
+    const request = indexedDB.open('teasescript-kept-sessions');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const scope = 'development-package:kept-session';
+      const transaction = request.result.transaction(['sessions', 'plans'], 'readwrite');
+      let supported = null;
+      const session = transaction.objectStore('sessions').get(scope);
+      session.onsuccess = () => {
+        if (JSON.parse(session.result?.snapshotJson ?? 'null')?.foregroundAction == null) return;
+        const plans = transaction.objectStore('plans');
+        const plan = plans.get(scope);
+        plan.onsuccess = () => {
+          const kept = JSON.parse(plan.result.planJson);
+          supported = kept.version;
+          plans.put({ ...plan.result, planJson: JSON.stringify({ ...kept, version: kept.version - 1 }) });
+        };
+      };
+      transaction.oncomplete = () => {
+        request.result.close();
+        resolve(supported);
+      };
+      transaction.onerror = () => reject(transaction.error);
+    };
+  })`;
+  const keptBy = Date.now() + 8_000;
+  let supported;
+  while ((supported = await evaluate(cdp, olderPlan)) === null) {
+    if (Date.now() > keptBy) throw new Error("The second visit was not kept");
+    await delay(50);
+  }
+  await cdp.call("Page.reload");
+  const outdated = "[data-outdated-session]";
+  await waitFor(
+    cdp,
+    `document.querySelector('${start}')?.textContent.trim() === 'Start' && !!document.querySelector('${outdated}')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `[document.querySelector('[data-start-title]')?.textContent, ...[...document.querySelectorAll('${outdated} h2, ${outdated} [data-problem-summary]')].map((element) => element.textContent), document.activeElement === document.querySelector('${start}'), document.querySelector('${outdated} [data-problem-technical-toggle]')?.getAttribute('aria-expanded')].join(' / ')`,
+    ),
+    "Kept session fixture / This session cannot continue / The Player has been updated and can no longer resume your session. Choose Start to begin this Tease again. / true / false",
+    "The start page says why the kept session cannot continue, and Start takes focus",
+  );
+  await physicalClick(cdp, `${outdated} [data-problem-technical-toggle]`);
+  await waitFor(
+    cdp,
+    `document.querySelector('${outdated} [data-problem-technical]')?.textContent.trim() === 'Unsupported instruction-plan revision. Saved revision: ${supported - 1}. Supported revision: ${supported}.'`,
+    5_000,
+    "Technical details do not name the kept plan's revisions",
   );
 
   // A chosen picture the script shows after its saved reference was deleted comes back with the session, although a

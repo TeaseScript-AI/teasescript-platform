@@ -450,7 +450,7 @@ export const DIAGNOSTIC_CODES = {
   TSC010: entry(
     ["plan validation"],
     "error",
-    "Unsupported instruction plan format or version",
+    "Unsupported instruction plan format or revision",
     DOCS.compiler,
   ),
   TSC011: {
@@ -672,7 +672,7 @@ export const DIAGNOSTIC_CODES = {
   TSK001: entry(
     ["checkpoint"],
     "error",
-    "Unsupported checkpoint format or version",
+    "Unsupported checkpoint format or revision",
     DOCS.checkpoint,
   ),
   TSK002: entry(["checkpoint"], "error", "Malformed checkpoint", DOCS.checkpoint),

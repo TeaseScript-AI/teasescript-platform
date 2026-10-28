@@ -2,13 +2,16 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
+import ProblemCard, { type Problem } from "./ProblemCard.vue";
 
 // The start page (PLAYER-UI "Session start and user activation"): the script's title and author from its header above
 // the explicit Start, or Continue for the session the script keeps, whose click is the user activation audible playback
-// relies on. The debug room's (DEBUGGER.md "Debug room") names its session and, once it has something to delete, offers
-// to start it anew.
+// relies on; before Start, why the kept session cannot continue after a Player update. The debug room's (DEBUGGER.md
+// "Debug room") names its session and, once it has something to delete, offers to start it anew.
 const props = defineProps<{
   activation: "start" | "continue" | null;
+  /** Why Start shows instead of Continue: the kept session's format, which this Player no longer reads. */
+  outdated: Problem | null;
   title: string;
   author: string;
   debugRoom: boolean;
@@ -50,6 +53,14 @@ defineExpose({ focus });
       <p v-if="author" class="text-lg text-muted-foreground" data-start-author>by {{ author }}</p>
     </div>
     <template v-if="activation">
+      <ProblemCard
+        v-if="outdated"
+        class="mb-4"
+        title="This session cannot continue"
+        :summary="`The Player has been updated and can no longer resume your session. Choose ${label} to begin this Tease again.`"
+        :problems="[outdated]"
+        data-outdated-session
+      />
       <PlayerActionButton data-session-start @click="$emit('activate')">{{ label }}</PlayerActionButton>
       <template v-if="debugRoom && startAnew">
         <p class="mt-4 text-center text-sm text-balance text-muted-foreground">
@@ -69,15 +80,19 @@ defineExpose({ focus });
 </template>
 
 <style scoped>
+/* Below the top bar, as the page of a Tease that cannot start, and centred in the window as the bottom padding keeps
+   it; a page taller than the space, such as one with the card on a phone held sideways, scrolls there. */
 .session-activation {
   position: absolute;
   z-index: 30;
-  inset: 0;
+  inset: var(--player-header-size) 0 0;
   display: grid;
-  place-content: center;
+  place-content: safe center;
   gap: 8px;
   justify-items: center;
-  padding: var(--player-edge-space);
+  padding: var(--player-edge-space) var(--player-edge-space)
+    calc(var(--player-header-size) + var(--player-edge-space));
+  overflow-y: auto;
   pointer-events: none;
 }
 .session-activation > * { pointer-events: auto; }

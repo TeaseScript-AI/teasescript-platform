@@ -23,10 +23,12 @@ import {
   sessionTransferFile,
   type SessionTransfer,
 } from "../player/session-transfer.js";
-import type {
-  InstructionPlan,
-  RuntimeScriptStorageEntrySnapshot,
-  SerializableRuntimeValue,
+import {
+  INSTRUCTION_PLAN_VERSION,
+  RUNTIME_SNAPSHOT_VERSION,
+  type InstructionPlan,
+  type RuntimeScriptStorageEntrySnapshot,
+  type SerializableRuntimeValue,
 } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 import { loadPlayerModule } from "./helpers/player-modules.js";
@@ -41,6 +43,9 @@ interface SessionImportReview {
 interface TransferHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly outdatedSession: Readonly<
+    Ref<{ readonly code?: string; readonly path?: string; readonly message: string } | null>
+  >;
   readonly sessionExportUnavailable: Readonly<Ref<string | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
   exportSession(): Promise<SessionExport>;
@@ -387,4 +392,110 @@ test("a session whose state this browser cannot write is refused with the reason
   context.mock.restoreAll();
   const stored = (await keptState())!;
   assert.equal(stored.events.length, host.session.value!.events.length);
+});
+
+test("Start says why a kept session cannot continue only when a Player update changed the revision of its plan or state", async (context) => {
+  stubBrowser(context);
+  const plan = compilePlayerProject('showButton "Next"\nexit').plan!;
+  const at = browser();
+  const first = await page(context, at, plan);
+  assert.deepEqual([first.activation.value, first.outdatedSession.value], ["start", null]);
+  await first.activate();
+  await until(async () => (await at.kept.session(SCOPE)) !== null, "the session was not kept");
+  const kept = keptSession((await at.kept.session(SCOPE))!)!;
+  /** What a reload of `shown` in `into` offers once its kept session `from` is changed as `change` does. */
+  const reload = async (
+    change: (plan: Record<string, unknown>, snapshot: Record<string, unknown>) => void,
+    {
+      into = at,
+      from = kept,
+      shown = plan,
+      store = into.kept,
+    }: {
+      into?: ReturnType<typeof browser>;
+      from?: typeof kept;
+      shown?: InstructionPlan;
+      store?: KeptSessionStore;
+    } = {},
+  ) => {
+    const [planJson, snapshotJson] = [JSON.parse(from.planJson), JSON.parse(from.snapshotJson)];
+    change(planJson, snapshotJson);
+    await into.kept.discard(SCOPE);
+    await into.kept.publish(SCOPE, {
+      ...from,
+      planJson: JSON.stringify(planJson),
+      snapshotJson: JSON.stringify(snapshotJson),
+      eventsFrom: 0,
+    });
+    const host = await page(context, { ...into, kept: store }, shown);
+    return [host.activation.value, host.outdatedSession.value];
+  };
+  const revisions = (supported: number) =>
+    `Saved revision: ${supported - 1}. Supported revision: ${supported}.`;
+  const older = (format: Record<string, unknown>) =>
+    (format["version"] = Number(format["version"]) - 1);
+
+  assert.deepEqual(await reload(() => {}), ["continue", null]);
+  // The plan is the Player's, so its revision has no runtime error; the state's is the runtime's, also for a state whose
+  // fields changed with its revision.
+  assert.deepEqual(await reload(older), [
+    "start",
+    { message: `Unsupported instruction-plan revision. ${revisions(INSTRUCTION_PLAN_VERSION)}` },
+  ]);
+  assert.deepEqual(await reload((_, snapshot) => older(snapshot)), [
+    "start",
+    {
+      code: "TSK001",
+      path: "$.snapshot",
+      message: `Unsupported runtime-snapshot revision. ${revisions(RUNTIME_SNAPSHOT_VERSION)}`,
+    },
+  ]);
+  assert.deepEqual(
+    await reload((_, snapshot) => {
+      older(snapshot);
+      snapshot["retired"] = null;
+    }),
+    [
+      "start",
+      {
+        code: "TSK002",
+        path: "$.snapshot",
+        message: `Runtime snapshot contains unsupported fields or omits required fields. ${revisions(RUNTIME_SNAPSHOT_VERSION)}`,
+      },
+    ],
+  );
+
+  // Another script, a malformed state of this revision, and storage that cannot be read are not a Player update.
+  const changed = compilePlayerProject('showButton "Later"\nexit').plan!;
+  assert.deepEqual(await reload(() => {}, { shown: changed }), ["start", null]);
+  assert.deepEqual(await reload((_, snapshot) => (snapshot["frames"] = null)), ["start", null]);
+  const unreadable: KeptSessionStore = {
+    ...at.kept,
+    session: async () => {
+      throw new DOMException("Aborted.", "AbortError");
+    },
+  };
+  assert.deepEqual(await reload(older, { store: unreadable }), ["start", null]);
+
+  // Nor is a session that ended, by `exit` or by an error, also when its plan or state is of an older revision.
+  for (const source of [
+    "exit",
+    'let zero = load("zero", default: 0)\nsay "${1 / zero}", instant\nexit',
+  ]) {
+    const ending = compilePlayerProject(source).plan!;
+    const into = browser();
+    await (await page(context, into, ending)).activate();
+    await until(async () => (await into.kept.session(SCOPE)) !== null, "the end was not kept");
+    const from = keptSession((await into.kept.session(SCOPE))!)!;
+    for (const change of [
+      () => {},
+      older,
+      (_: unknown, snapshot: Record<string, unknown>) => older(snapshot),
+    ])
+      assert.deepEqual(
+        await reload(change, { into, from, shown: ending }),
+        ["start", null],
+        source,
+      );
+  }
 });

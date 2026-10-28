@@ -2054,9 +2054,9 @@ no `instructionTrace`. For a source location, `plan.instructions[index].span` ho
 
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify or persist after every instruction. A production runner may execute many instructions in memory until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.
 
-A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
+A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format revisions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
-A checkpoint that restore rejects throws `CheckpointError` with `TSK001` for an unsupported format or version, `TSK002`
+A checkpoint that restore rejects throws `CheckpointError` with `TSK001` for an unsupported format or revision, `TSK002`
 for a malformed checkpoint, or `TSK003` for text that is not JSON. A state whose checkpoint text would be longer than a
 text can be fails with `TSK004` when it is saved or exported ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)).
 

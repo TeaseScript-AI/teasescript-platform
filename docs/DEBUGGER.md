@@ -123,7 +123,9 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
   session and what it saved. Your normal session stays as it is.", with **Cancel** and **Overwrite**. Without a
   running normal session, Debug on opens the debug room's start page. The address then gets `room=debug`, so a reload
   stays in the debug room. **Debug off** in the debug room only makes the script read `debugMode` as `false`.
-- **Its start page** names its session: **Continue debug session** or **Start debug session**. Once the debug room
+- **Its start page** names its session: **Continue debug session** or **Start debug session**, which a Player update
+  that changed the session's format explains as the normal room's does
+  ([`PLAYER-UI.md`](ui/PLAYER-UI.md#session-start-and-user-activation)). Once the debug room
   has something to delete, a session or saved values, it also offers **Reload session**, a new debug session from the
   debug room's saved data as they are, and **Reset session**, one with its saved data and photos deleted, under "Reload
   deletes the debug session and keeps what it saved. Reset deletes both."

@@ -34,6 +34,7 @@ import { loadPlayerModule } from "./helpers/player-modules.js";
 interface RoomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly outdatedSession: Readonly<Ref<{ readonly message: string } | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
   readonly rooms: {
     readonly current: Readonly<Ref<"normal" | "debug">>;
@@ -350,6 +351,37 @@ test("a page opened in the debug room starts with Debug on, which the script rea
   context.after(() => normalScope.stop());
   assert.equal(normalDebug.menu.value, false);
   assert.equal(normal.rooms.current.value, "normal");
+});
+
+test("the debug room's start page also says why its session cannot continue after a Player update", async (context) => {
+  stubBrowser(context);
+  const rooms = memoryKeptRoomStore();
+  const open = async () => {
+    const host = mountHost(context, {
+      own: savedData([]),
+      kept: memoryKeptSessionStore(),
+      rooms,
+      room: "debug",
+    });
+    await prepare(context, host, SCRIPT);
+    return host;
+  };
+  await (await open()).activate();
+  await settle(context);
+  const kept = keptSession((await rooms.session("test"))!)!;
+  const plan = JSON.parse(kept.planJson);
+  await rooms.discardSession("test");
+  await rooms.publish("test", {
+    ...kept,
+    planJson: JSON.stringify({ ...plan, version: plan.version - 1 }),
+    eventsFrom: 0,
+  });
+  const reopened = await open();
+  assert.equal(reopened.activation.value, "start");
+  assert.match(
+    reopened.outdatedSession.value?.message ?? "",
+    /^Unsupported instruction-plan revision\./,
+  );
 });
 
 test("Reload session keeps the debug room's saved data; Reset session deletes them and its photos", async (context) => {
