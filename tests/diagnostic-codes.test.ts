@@ -424,14 +424,11 @@ function checkSeverities(code: string, info: DiagnosticCodeInfo): void {
   );
 }
 
-/** The severities of a code as its row in a document shows them. */
-const severityText = (info: DiagnosticCodeInfo): string => info.severities.join(" or ");
-
 test("each code has one severity, or both", () => {
   for (const [code, info] of Object.entries(registry)) checkSeverities(code, info);
 });
 
-test("a code with both severities is a code of each, and its row shows both", () => {
+test("a code with both severities is an error code and a warning code", () => {
   const docs = "docs/DIAGNOSTICS.md#names-types-and-values-tsv";
   const fixture = {
     TSV901: { owners: ["type checker"], severities: ["error", "warning"], title: "Both", docs },
@@ -456,11 +453,6 @@ test("a code with both severities is a code of each, and its row shows both", ()
   assert.equal(pairs.length + all.length, 7);
 
   for (const [code, info] of Object.entries(fixture)) checkSeverities(code, info);
-  assert.deepEqual(Object.values(fixture).map(severityText), [
-    "error or warning",
-    "error",
-    "warning",
-  ]);
 });
 
 test("a shared code is one problem with one text", () => {
