@@ -3,8 +3,11 @@ import { Project, ts } from "ts-morph";
 
 /**
  * Stage 3b's narrowing modules repeat work only through `narrowing-iteration.ts`, which charges every step to the work
- * ledger (TABLE §13.3), or through a function that charges a unit as its first statement, so an uncharged walk cannot
- * be written in them. This check reads them with their types and rejects:
+ * ledger (TABLE §13.3), or through a function that charges a unit as its first statement. This check guards the
+ * ordinary forms of anything else: it is not a proof over every TypeScript execution form (an inline recursive function
+ * expression called on the spot, recursion through an interface method, an aliased constructor, a call through a
+ * function-typed parameter, a getter behind an interface, a class field initializer and a zero-amount charge pass it;
+ * none occurs in the modules). It reads them with their types and rejects:
  * - every loop but `for…of` over that module's `each(…)` or `steps(…)`; spreads, rest elements and parameters, the
  *   spread of an object with an index signature, `yield*` of anything but a call, a callable reached by a computed
  *   member, and an object converted to text (a template, `+`, `String(…)`, `Number(…)`);
