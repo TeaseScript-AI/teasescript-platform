@@ -4173,7 +4173,8 @@ for item in items {
 ## 25. Persistent storage and keys
 
 **Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05; required default, load types, and wrong
-stored values: Owner decision, 2026-10-07; an object default per field: owner decision, 2026-10-20)
+stored values: Owner decision, 2026-10-07; an object default per field: owner decision, 2026-10-20; another Tease's data
+with `teaseId:` and `writableBy:`: owner decisions, 2026-10-25 and 2026-10-26, not yet implemented)
 
 Save or overwrite a value:
 
@@ -4267,6 +4268,32 @@ a later `load` in the session sees the saved value at once. When the host persis
 until the host acknowledges the write, and only a successful write changes what later `load` calls see. A failed write
 keeps the previous value, or leaves the key absent, reports developer warning `TSW014`, and the script continues. A
 timer or media block due while a write waits runs after the write settles, at its own due time.
+
+`teaseId:` makes `load` and `save` work on the saved data of another Tease of the same player, named by its tease id
+([Data across players and Teases](#data-across-players-and-teases)). Without `teaseId:`, they work on the running
+Tease's own data. Both forms of `load` take it:
+
+```text
+let chapter = load "chapterState", teaseId: "019a…", default: {}
+let sameChapter = load("chapterState", teaseId: "019a…", default: {})
+let points = load "punishmentPoints", teaseId: "019a…", default: 0
+save points + 5 as "punishmentPoints", teaseId: "019a…"
+```
+
+`load` with `teaseId:` reads every key of another Tease of the same player; no sharing is needed. For a Tease or key
+that does not exist, it returns its `default:`, as `load` does for an absent key. Another Tease may write a key only
+when the key's own Tease allows it with `writableBy:`, a list of tease ids or `"everyone"`:
+
+```text
+save points as "punishmentPoints", writableBy: ["019b…", "019c…"]   // only these Teases may write it
+save points as "punishmentPoints", writableBy: "everyone"           // every Tease of this player may write it
+save points as "punishmentPoints"                                   // read-only for other Teases
+```
+
+The most recent `save` of the key decides: saving it again without `writableBy:` makes it read-only again. A `save`
+with `teaseId:` to a key that is not writable for the running Tease, also a key that does not exist or a key of a Tease
+the player has never played, does not write: as for a failed write, the stored value stays as it was, developer warning
+`TSW014` is reported, and the script continues.
 
 Rules:
 
@@ -5843,59 +5870,32 @@ Meanings:
 
 The request is atomic and the server validates the complete schema and all active locks again before confirming acceptance. The final result payload, including how server-generated IDs of newly added toys are returned, remains open.
 
-### Script-global and cross-script data
+### Data across players and Teases
+**Status:** Accepted (owner decisions, 2026-10-25 and 2026-10-26); not yet implemented.
 
-A script may publish typed data shared by all executions of that same script:
+#### Ids and run history
 
-```text
-publishToPlayers(
-    key: "monopoly",
-    value: { score: player.monopolyScore }
-)
-```
+A Tease is named by its tease id, a UUIDv7 that the Writer's Den makes when the Tease is created; on publication, the
+server checks that no one else owns it. A user id is a UUIDv7 made when the account is created; scripts never see it. A
+player's id in a Tease, its player id, is a UUIDv7 per player and Tease. It cannot be linked to the player's user id,
+or to the same player in another Tease.
 
-Read matching entries with `loadFromPlayers(...)`:
-
-```text
-let previous = loadFromPlayers(
-    key: "monopoly",
-    order: "newest",
-    limit: 1,
-    excludeCurrentPlayer: true
-)[0]
-```
-
-Each returned entry contains at least:
+`getTeaseMetadata()` describes the running Tease, and `getTeaseMetadata(id)` another Tease of the same player, named by
+its tease id:
 
 ```text
-participantId
-displayName
-value
-publishedAt
+let me = getTeaseMetadata()
+say "This Tease has id ${me.teaseId}."
+let history = getTeaseMetadata("019a…")
+if history.sessionCount > 0 {
+    let lastSession = history.sessions.last
+}
 ```
 
-`participantId` is an opaque server-generated identifier scoped to the script and is not the account ID or username. `displayName` comes from the player's global account preference and may be empty. Receiving scripts may display `participantId` when no display name is available.
-
-A script may read saved data from another script for the same player through an immutable tease id:
-
-```text
-let previousChapter = loadFromTease(
-    tease: "immutable-tease-id",
-    key: "chapterState",
-    default: {}
-)
-```
-
-This access is read-only. Script metadata is available separately:
-
-```text
-let metadata = getTeaseMetadata("immutable-tease-id")
-
-metadata.firstSessionAt
-metadata.lastSessionAt
-metadata.sessionCount
-metadata.sessions
-```
+The result has `teaseId`, the Tease's id; `playerId`, the current player's id in the running Tease, or `null` for
+another Tease, so a player's ids in different Teases stay unlinkable; and the session history `firstSessionAt`,
+`lastSessionAt`, `sessionCount`, and `sessions`. `teaseId` and `playerId` are fields, not protected names, so
+`let playerId = opponent.playerId` and `let teaseId = "019a…"` stay ordinary declarations.
 
 `sessions` is a list with one object per session started with Start, oldest first. Continuing a session is not a new
 session. Each object has three fields: `startedAt` is the absolute moment of Start; `finishedAt` is the absolute moment
@@ -5903,13 +5903,168 @@ of `exit`, or `null` when the session has not ended with `exit`; and `playedTime
 ran in that session, without the time the Playroom was closed, as timers measure it ([§27](#27-timers)). For an
 unfinished session, `playedTime` counts up to its latest saved checkpoint. `firstSessionAt` and `lastSessionAt` are the
 `startedAt` of the first and the last session, and `sessionCount` equals `sessions.length`.
+`getTeaseMetadata(id).sessionCount == 0` shows that the player has never played that Tease.
+
+`load` and `save` with `teaseId:` read and write the saved data of another Tease of the same player, and `save` with
+`writableBy:` lets other Teases write a key ([§25](#25-persistent-storage-and-keys)).
+
+#### Entries shared between players
+
+The players of a Tease share typed data through entries: each player has one entry per key. The Tease itself also has
+its own entry, the shared world, under the running Tease's own id, `getTeaseMetadata().teaseId`, as `playerId:`. An
+entry has these fields:
+
+- `playerId`: the player's id in this Tease;
+- `playerAlias`: the nickname the player chose, which may be empty;
+- `value`: what was published;
+- `publishedAt`: when it was last published;
+- `tags`: the tags it was published with, for filtering;
+- `entryNumber`: the order of first publication for the key: `1` for the first player, `57` for the 57th ("you were
+  the 57th").
+
+A receiving script may show `playerId` when `playerAlias` is empty.
+
+`publishToPlayers` sets or changes an entry and returns the entry as stored, including its `entryNumber`. Here
+`opponent` is an entry that the script read earlier:
+
+```text
+let me = getTeaseMetadata()
+let mine = publishToPlayers(key: "pushups", value: { score: 23 }, tags: ["cage", "level: 4"])
+publishToPlayers(key: "pushups", value: { score: 23 }, expiresIn: 7 days)
+publishToPlayers(key: "pushups", playerId: opponent.playerId, value: { score: 23, result: "lost" })
+let total = publishToPlayers(key: "pushupsTotal", playerId: me.teaseId, update: current + 23, default: 0)
+```
+
+- `key:` names the entry.
+- `value:` replaces the whole value. When two players write it at the same moment, the last write wins.
+- `update:` with `default:` computes the new value from the stored one, as described below. A call gives either
+  `value:` or `update:`.
+- `playerId:` names whose entry it is: another player's, or the running Tease's own id for the Tease's own entry.
+  Without it, the entry is the current player's own.
+- `expiresIn:`, which is optional, is a duration after which the entry disappears.
+- `tags:` gives the entry's tags for filtering: tag names, or names with a number such as `"level: 4"`, by the rules of
+  [Tags](#tags). A Tease decides which tags an entry carries, such as the player's toys or kinks.
+- `publishToPlayers` cannot write outside its own Tease: a `playerId:` from another Tease, or a tease id other than the
+  running Tease's, is an error.
+
+`update:` is a formula, and `current` in it is the stored value. `current` has this meaning only inside `update:`, as
+`speaker` has one inside a message's text. `default:` is the value of `current` when there is no entry yet; it is
+required, as for `load`. Here `score` is a number of the script:
+
+```text
+let me = getTeaseMetadata()
+publishToPlayers(key: "pushupsTotal", playerId: me.teaseId, update: current + 23, default: 0)
+publishToPlayers(key: "debt", playerId: opponent.playerId, update: current * 2, default: 0)
+publishToPlayers(key: "best", update: max(current, score), default: 0)
+publishToPlayers(key: "stats", update: { games: current.games + 1, best: max(current.best, score) }, default: { games: 0, best: 0 })
+```
+
+- No update is lost when players change the value at the same moment. The host compares the stored value with the one
+  the formula started from; if someone changed it in between, the formula runs again on the newest value (optimistic
+  concurrency).
+- Because the formula can run more than once, it must not do anything else: no `say`, no ask, and no call of a function
+  that changes something. The compiler enforces this.
+- Values from the script, such as `score`, are computed once, before the update.
+- The result must fit the entry's type, checked as for any other stored value.
+
+`loadFromPlayers` reads entries. Its result is a list, `[]` when nothing matches:
+
+```text
+let me = getTeaseMetadata()
+let top = loadFromPlayers(key: "pushups", sortBy: "score", descending: true, limit: 10)
+let recent = loadFromPlayers(key: "pushups", order: "newest", limit: 5, excludeCurrentPlayer: true)
+let rivals = loadFromPlayers(key: "pushups", where: "level" >= 3, all: ["cage"], none: ["no-pain"])
+let total = loadFromPlayers(key: "pushupsTotal", playerId: me.teaseId)
+```
+
+- `order:` is `"newest"`, the default, `"first"`, stable by `entryNumber`, or `"random"`.
+- `sortBy:` instead sorts on a field of the value, with `descending:`; `descending: false` sorts ascending. Giving both
+  `order:` and `sortBy:` is an error.
+- `limit:` caps the number of entries, and `excludeCurrentPlayer: true` leaves out the current player's own entry.
+- `where:`, `all:`, `any:`, and `none:` filter on the entries' tags exactly as in `findImages`
+  ([Tagged selection](#tagged-selection)). `loadFromPlayers`, `countPlayers`, and `claimFromPlayers` use the one tag
+  query of `findImages`, `findScripts`, and `goto tagged`, so a later extension of it applies to all of them.
+- With `playerId:`, the result is that one entry, or `null` when there is none: `total` above is the Tease's own entry,
+  or `null` while it does not exist yet.
+- The Tease's own entry never appears among the players unless it is asked for with the Tease's own id as `playerId:`.
+  It is also not counted or claimed.
+
+`countPlayers` counts entries without fetching them. It takes the same filters as `loadFromPlayers` and returns `0` when
+nothing matches:
+
+```text
+let finished = countPlayers(key: "pushups", excludeCurrentPlayer: true, where: "level" >= 3)
+```
+
+`claimFromPlayers` takes an opponent once:
+
+```text
+let opponent = claimFromPlayers(key: "pushups", order: "first", any: ["rope", "cuffs"])
+if opponent != null {
+    say "Your opponent did ${opponent.value.score} push-ups."
+}
+```
+
+- One atomic step chooses an entry and marks it as used, so two players claiming at the same moment never get the same
+  entry.
+- Use is permanent, also when the claimant stops halfway. When the claimed player publishes again, their entry is
+  available again.
+- `loadFromPlayers` still shows a claimed entry; only claiming skips it.
+- The current player's own entry is left out by default.
+- It takes the same `order:`, `sortBy:`, and filters as `loadFromPlayers`, without `limit:`, and returns one entry or
+  `null`.
+
+`removeFromPlayers` withdraws the current player's own entry and returns `true` if there was one:
+
+```text
+let removed = removeFromPlayers(key: "pushups")
+```
+
+A push-up contest in which player B claims player A and writes A's result back:
+
+```text
+// player A: publish, and later look for the result
+let mine = publishToPlayers(key: "pushups", value: { score: 23, result: null })
+let entry = loadFromPlayers(key: "pushups", playerId: mine.playerId)
+while entry != null and entry.value.result == null {
+    say "Waiting for your opponent…"
+    wait 1 min
+    entry = loadFromPlayers(key: "pushups", playerId: mine.playerId)
+}
+```
+
+```text
+// player B: claim A only when the game starts, then write A's result
+let opponent = claimFromPlayers(key: "pushups", order: "first")
+if opponent != null {
+    let theirs: integer = opponent.value.score
+    let done: integer = askInteger "How many push-ups did you do?"
+    let result = "won"
+    if done > theirs {
+        result = "lost"
+    }
+    publishToPlayers(key: "pushups", playerId: opponent.playerId, value: { score: theirs, result: result })
+}
+```
+
+#### Connection, local mode, and access boundaries
+
+The functions of this section, and `load` and `save` with `teaseId:`, are blocking host calls. When the host cannot
+reach the server, there is no error and no crash: the Playroom shows "This Tease needs a connection to continue" and
+waits, and when the connection is back, the script continues where it was. An error in the script itself, such as an
+invalid value, is an ordinary runtime error; a `save` with `teaseId:` to a key that is not writable is a failed write
+([§25](#25-persistent-storage-and-keys)).
+
+In local mode, without a server, the same functions work against what the host keeps in the browser. Other players are
+then absent, so lists of their entries are empty.
 
 Access boundaries:
 
-- current player and current script: ordinary `load`;
-- current player and another script: `loadFromTease`;
-- other players and the same script: `loadFromPlayers`;
-- another player and another script: not allowed.
+- current player and running Tease: ordinary `load` and `save`;
+- current player and another Tease: `load` and `save` with `teaseId:`, and `getTeaseMetadata(id)`;
+- other players and running Tease: `publishToPlayers`, `loadFromPlayers`, `countPlayers`, `claimFromPlayers`, and
+  `removeFromPlayers`;
+- another player and another Tease: not allowed.
 
 ### Runtime, script, and account persistence
 
@@ -6181,7 +6336,9 @@ The same keyword may have more than one grammar form when the next token makes t
 
 Modifier and block words such as `async`, `visible`, `mystery`, `hidden`, `times`, and the media cue words `at`,
 `beforeEnd`, and `finish` are contextual: they have their special meaning only in the positions documented in
-[§22](#22-stage-image-audio-and-video) and [§27](#27-timers) and otherwise remain ordinary identifiers.
+[§22](#22-stage-image-audio-and-video) and [§27](#27-timers) and otherwise remain ordinary identifiers. So is
+`current`, the stored value only inside `update:` of `publishToPlayers`
+([Data across players and Teases](#data-across-players-and-teases)).
 
 ### Protected type names
 
@@ -6306,7 +6463,9 @@ playerProfile
 askProfileChange
 publishToPlayers
 loadFromPlayers
-loadFromTease
+countPlayers
+claimFromPlayers
+removeFromPlayers
 getTeaseMetadata
 getPlayerHistory
 ```
@@ -6634,8 +6793,10 @@ Resolved in this revision:
 - `playerProfile` is the typed player profile reference, which a script changes only through `askProfileChange(...)`;
 - profile-change operations include `save`, `add`, `remove`, `removeAll`, `increase`, and `decrease`, while saving `[]` empties a list;
 - toys have server-generated IDs, may share visible names, can be disabled without script-driven deletion, and have common photos plus initial detailed schemas for butt plugs, dildos, chastity devices, and ball gags;
-- script-global data uses `publishToPlayers` and `loadFromPlayers`;
-- cross-script same-player saved data uses read-only `loadFromTease` plus `getTeaseMetadata`;
+- data shared between the players of a Tease uses `publishToPlayers`, `loadFromPlayers`, `countPlayers`,
+  `claimFromPlayers`, and `removeFromPlayers`, with `current` contextual only inside `update:`;
+- a player's saved data in another Tease is read with `load` and `teaseId:`, and written with `save` and `teaseId:`
+  where that Tease allows it with `writableBy:`; `getTeaseMetadata` gives that Tease's run history;
 - account history uses `getPlayerHistory`; orgasm outcomes are `"orgasm"`, `"ruined"`, or `"denied"`;
 - session checkpoints include sequence-controlled changed state, execution position, deterministic RNG state, and active recoverable runtime state;
 - user identifiers are ASCII, case-sensitive, and follow `[A-Za-z_][A-Za-z0-9_]*`;
