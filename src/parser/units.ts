@@ -280,9 +280,10 @@ function writtenNames(type: TypeAnnotation): ReadonlySet<string> {
 
 /**
  * The one rule for what a month or a year without `calendar` in `value` gets at `place`. As the whole value, also in
- * parentheses or after a sign, it gets days or weeks where only an exact duration fits, and the calendar unit where
- * any duration does. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
- * `(1 month / 1 calendar month) * 1 s`, and wherever no place proves a fix, the error names both choices in words.
+ * parentheses, it gets days or weeks where only an exact duration fits (in words after a sign), and the calendar unit
+ * where any duration does (also after a sign, and in words for a written amount that is not whole). Inside `+`, `-`,
+ * `*`, `/`, or `otherwise`, where it may be part of a ratio such as `(1 month / 1 calendar month) * 1 s`, and wherever
+ * no place proves a fix, the error names both choices in words.
  */
 function adviseDuration(
   parser: Parser,

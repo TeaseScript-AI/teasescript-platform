@@ -5215,9 +5215,9 @@ one unit: `5 s ms` and `1 h 30 min` are errors, and parts are added with `+`, as
 
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
 `calendar` are compile errors. Where only an exact duration fits (a wait, timer, timeout, say pacing, media or cue
-position, media repeat budget, or a variable, global, or parameter written as `duration` or `duration?`), the error
+position, media repeat budget, or a variable, global, or parameter default written as `duration` or `duration?`), the error
 suggests a length in days or weeks, in words when a sign is before the value. Where any duration fits (a variable,
-global, or parameter with no written type or one that holds `calendarDuration`, the text of a `say`, or an
+global, or parameter default with no written type or one that holds `calendarDuration`, the text of a `say`, or an
 interpolation), it suggests `calendar`, or a length in days or weeks in words when the amount is not a whole number of
 months. Inside a calculation, for both values of a global with no written type that has `, default:`, and everywhere
 else, it names both choices in words. `m` is not a duration
