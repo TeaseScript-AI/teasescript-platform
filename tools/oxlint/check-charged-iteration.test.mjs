@@ -117,13 +117,17 @@ while (items.length > 0) items.length = 0;
 do use(1); while (items.length > 0);
 for (const item of items) use(item);
 function shadow(): void {
-  const each = (_work: WorkLedger, _counter: string, list: number[]) => list;
+  work.charge("eventSteps");
+  const each = (_work: WorkLedger, _counter: string, list: number[]) => {
+    work.charge("eventSteps");
+    return list;
+  };
   for (const item of each(work, "indexSteps", items)) use(item);
 }
 shadow();
 use(_each);
 `;
-  assert.deepEqual(rejected(sourceText), [8, 9, 10, 11, 12, 15]);
+  assert.deepEqual(rejected(sourceText), [8, 9, 10, 11, 12, 19]);
 });
 
 test("rejects walks through recursion, aliases, computed members, unlisted callables and copies", () => {
@@ -157,14 +161,17 @@ use([walk, new Box(), copy, all, set, keys, array]);
 `;
   assert.deepEqual(
     rejected(sourceText),
-    [9, 12, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 21, 22, 23, 24, 25, 25, 26, 26],
+    [9, 12, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 21, 22, 23, 23, 24, 25, 25, 26, 26],
   );
 });
 
-test("rejects each function of a recursion that does not charge on entry", () => {
+test("rejects a function body that does not charge a positive unit on entry, but an arrow the iterator calls", () => {
   const sourceText = `
+import { some } from "./iteration.js";
 import type { WorkLedger } from "./budget.js";
 declare const work: WorkLedger;
+declare const items: number[];
+declare const other: { charge(counter: string): void };
 function even(n: number): boolean {
   work.charge("eventSteps");
   return n === 0 || odd(n - 1);
@@ -173,13 +180,60 @@ function odd(n: number): boolean {
   return n !== 0 && even(n - 1);
 }
 const search = (n: number): number => (n === 0 ? 0 : search(n - 1));
+function remembered(n: number): number {
+  if (n > 0) return n;
+  work.charge("eventSteps");
+  return 0;
+}
+function nothing(): void {
+  work.charge("eventSteps", 0);
+}
+function counted(n: number): void {
+  work.charge("eventSteps", n + 1);
+}
+function twice(): void {
+  work.charge("eventSteps", 2);
+}
+function spelled(): void {
+  other.charge("eventSteps");
+}
+class Walk {
+  constructor() {}
+  get size(): number {
+    return items.length;
+  }
+  set size(_: number) {}
+  step(): number {
+    return 1;
+  }
+}
+const descend = (function down(i: number): number {
+  return i < items.length ? down(i + 1) : i;
+})(0);
+const table = {
+  run(): number {
+    return 1;
+  },
+};
+some(work, "eventSteps", items, (item) => item > 0);
+some(work, "eventSteps", items, function (item) {
+  return item > 0;
+});
+function shadow(): boolean {
+  work.charge("eventSteps");
+  const some = (_work: WorkLedger, _counter: string, list: number[], test: (item: number) => boolean) => {
+    work.charge("eventSteps");
+    return list.length > 0 && test(0);
+  };
+  return some(work, "eventSteps", items, (item) => item > 0);
+}
 const charged = (n: number): number => {
   work.charge("eventSteps");
   return n === 0 ? 0 : charged(n - 1);
 };
-export const all = [even(2), search(1), charged(1)];
+export const all = [charged(1), search(1), remembered(1), nothing(), counted(1), twice(), spelled(), new Walk(), descend, table, shadow()];
 `;
-  assert.deepEqual(rejected(sourceText), [8, 11]);
+  assert.deepEqual(rejected(sourceText), [11, 14, 15, 20, 23, 29, 33, 34, 37, 38, 42, 46, 51, 60]);
 });
 
 test("rejects functions used as values unless charged on entry, and objects converted to text", () => {

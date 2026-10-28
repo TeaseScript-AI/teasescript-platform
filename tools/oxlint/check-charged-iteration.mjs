@@ -3,16 +3,16 @@ import { Project, ts } from "ts-morph";
 
 /**
  * Stage 3b's narrowing modules repeat work only through `narrowing-iteration.ts`, which charges every step to the work
- * ledger (TABLE §13.3), or through a function that charges a unit as its first statement. This check guards the
- * ordinary forms of anything else: it is not a proof over every TypeScript execution form (an inline recursive function
- * expression called on the spot, recursion through an interface method, an aliased constructor, a call through a
- * function-typed parameter, a getter behind an interface, a class field initializer and a zero-amount charge pass it;
- * none occurs in the modules). It reads them with their types and rejects:
+ * ledger (TABLE §13.3), and every function body in them charges a unit on entry. This check guards the ordinary forms
+ * of anything else: it is not a proof over every TypeScript execution form (an aliased constructor and a class field
+ * initializer pass it; neither occurs in the modules). It reads them with their types and rejects:
  * - every loop but `for…of` over that module's `each(…)` or `steps(…)`; spreads, rest elements and parameters, the
  *   spread of an object with an index signature, `yield*` of anything but a call, a callable reached by a computed
  *   member, and an object converted to text (a template, `+`, `String(…)`, `Number(…)`);
- * - a function of these modules on a recursion (a cycle of functions naming each other) or used as a value (passed,
- *   stored, returned) whose first statement does not charge a unit;
+ * - a function body (a declaration, a method, a constructor, an accessor, a function expression, an arrow) whose first
+ *   statement does not charge a positive unit (`charge(counter)`, or an amount written as a positive number), but an
+ *   arrow handed straight to the iterator, which charges each step it calls it for: so a recursion, a function used as
+ *   a value and a call through an interface or a parameter charge each time they run;
  * - any callable declared elsewhere (a library method, a core helper, a getter) that `OUTSIDE` does not list with why a
  *   call to it walks nothing uncharged; the walking collection constructors only with no argument or a table written
  *   out in full.
@@ -253,53 +253,44 @@ export function chargedIterationDiagnostics(program, root, rules) {
     );
   };
 
-  // The functions of the modules and the functions each names, for the recursion check; and the ones used as values.
-  const functions = new Map();
-  const values = new Set();
-  /** The function a body belongs to: a declaration, a method, or a function a variable or field holds. */
-  const functionOf = (node) => {
-    if (
-      ts.isFunctionDeclaration(node) ||
-      ts.isMethodDeclaration(node) ||
-      ts.isConstructorDeclaration(node) ||
-      ts.isGetAccessorDeclaration(node) ||
-      ts.isSetAccessorDeclaration(node)
-    )
-      return node.body === undefined ? undefined : node;
-    if (
-      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
-      (ts.isVariableDeclaration(node.parent) ||
-        ts.isPropertyDeclaration(node.parent) ||
-        ts.isPropertyAssignment(node.parent)) &&
-      node.parent.initializer === node
-    )
-      return node;
-    return undefined;
+  /** Whether a function is an arrow handed straight to the iterator, which charges each step it calls it for. */
+  const iterated = (fn) => {
+    if (!ts.isArrowFunction(fn) || !ts.isCallExpression(fn.parent)) return false;
+    const callee = fn.parent.expression;
+    const target = declarationOf(ts.isPropertyAccessExpression(callee) ? callee.name : callee);
+    return (
+      fn.parent.arguments.includes(fn) &&
+      target !== undefined &&
+      fileOf(target.declaration) === rules.iteration
+    );
   };
-  const targetFunction = (declaration) => {
+  /** Whether a statement charges a positive unit: `charge(counter)`, or `charge(counter, n)` with `n` a positive number. */
+  const charges = (statement) => {
     if (
-      ts.isVariableDeclaration(declaration) ||
-      ts.isPropertyDeclaration(declaration) ||
-      ts.isPropertyAssignment(declaration)
+      statement === undefined ||
+      !ts.isExpressionStatement(statement) ||
+      !ts.isCallExpression(statement.expression) ||
+      !ts.isPropertyAccessExpression(statement.expression.expression) ||
+      !names(statement.expression.expression.name, rules.charge)
     )
-      return declaration.initializer === undefined
-        ? undefined
-        : functionOf(declaration.initializer);
-    if (ts.isClassLike(declaration))
-      return declaration.members.find(
-        (member) => ts.isConstructorDeclaration(member) && member.body,
-      );
-    return functionOf(declaration);
+      return false;
+    const amount = statement.expression.arguments[1];
+    return amount === undefined || (ts.isNumericLiteral(amount) && Number(amount.text) > 0);
   };
 
   for (const file of rules.files) {
     const sourceFile = program.getSourceFile(resolve(root, file));
     if (sourceFile === undefined) throw new Error(`${file} is not in the program.`);
-    const visit = (node, within) => {
-      const own = functionOf(node);
-      if (own !== undefined) {
-        within = own;
-        if (!functions.has(own)) functions.set(own, new Set());
+    const visit = (node) => {
+      // a body repeats as often as it is entered: a recursion, a function used as a value, a call through anything
+      if (ts.isFunctionLike(node) && node.body !== undefined && !iterated(node)) {
+        const first = ts.isBlock(node.body) ? node.body.statements[0] : undefined;
+        if (!charges(first))
+          report(
+            node.name ?? node,
+            "A function body goes uncharged: charge a positive unit as its first statement, or hand it as an " +
+              "arrow straight to `narrowing-iteration.ts`.",
+          );
       }
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
       if (
@@ -354,14 +345,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
         const target = declarationOf(node);
         if (target !== undefined && callable(target, node)) {
           const where = fileOf(target.declaration);
-          if (charged.has(where)) {
-            const callee = targetFunction(target.declaration);
-            if (callee !== undefined) {
-              if (within !== undefined) functions.get(within).add(callee);
-              // (an accessor runs where it is read)
-              if (!called(node) && !ts.isAccessor(callee)) values.add(callee);
-            }
-          } else if (where !== rules.iteration) {
+          if (!charged.has(where) && where !== rules.iteration) {
             const name = nameOf(target);
             if (!rules.outside.has(name))
               report(
@@ -383,28 +367,11 @@ export function chargedIterationDiagnostics(program, root, rules) {
           }
         }
       }
-      ts.forEachChild(node, (child) => visit(child, within));
+      ts.forEachChild(node, visit);
     };
-    visit(sourceFile, undefined);
+    visit(sourceFile);
   }
 
-  // A recursion repeats as often as its input asks, and a function used as a value as often as what holds it calls it:
-  // each charges a unit as its first statement.
-  for (const fn of new Set([...cyclesOf(functions).flat(), ...values])) {
-    const first = ts.isBlock(fn.body) ? fn.body.statements[0] : undefined;
-    if (
-      first === undefined ||
-      !ts.isExpressionStatement(first) ||
-      !ts.isCallExpression(first.expression) ||
-      !ts.isPropertyAccessExpression(first.expression.expression) ||
-      !names(first.expression.expression.name, rules.charge)
-    )
-      report(
-        fn.name ?? fn.parent.name ?? fn,
-        "A recursion, or a function used as a value, repeats uncharged: charge a unit as its first statement, or " +
-          "walk with `steps`.",
-      );
-  }
   return diagnostics.sort(
     (a, b) => a.fileName.localeCompare(b.fileName) || a.line - b.line || a.column - b.column,
   );
@@ -430,38 +397,4 @@ function declares(node) {
 
 function symbolText(node) {
   return ts.isIdentifier(node) ? node.text : node.getText();
-}
-
-/** The functions on a cycle of `edges`, one array per strongly connected component (Tarjan). */
-function cyclesOf(edges) {
-  const index = new Map();
-  const low = new Map();
-  const stack = [];
-  const onStack = new Set();
-  const cycles = [];
-  let counter = 0;
-  const connect = (fn) => {
-    index.set(fn, counter);
-    low.set(fn, counter);
-    counter += 1;
-    stack.push(fn);
-    onStack.add(fn);
-    for (const next of edges.get(fn) ?? []) {
-      if (!index.has(next)) {
-        connect(next);
-        low.set(fn, Math.min(low.get(fn), low.get(next)));
-      } else if (onStack.has(next)) low.set(fn, Math.min(low.get(fn), index.get(next)));
-    }
-    if (low.get(fn) !== index.get(fn)) return;
-    const component = [];
-    let member;
-    do {
-      member = stack.pop();
-      onStack.delete(member);
-      component.push(member);
-    } while (member !== fn);
-    if (component.length > 1 || edges.get(fn)?.has(fn)) cycles.push(component);
-  };
-  for (const fn of edges.keys()) if (!index.has(fn)) connect(fn);
-  return cycles;
 }

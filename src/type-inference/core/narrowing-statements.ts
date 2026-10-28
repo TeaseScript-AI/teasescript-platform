@@ -77,12 +77,14 @@ export function countIn(
   low: number,
   high: number,
 ): number {
+  work.charge("eventSteps");
   if (low >= high || sorted.length === 0) return 0;
   return lowerBound(work, sorted, high) - lowerBound(work, sorted, low);
 }
 
 /** The index of the first of the sorted numbers at least `target`: a binary search, each comparison charged. */
 export function lowerBound(work: WorkLedger, sorted: readonly number[], target: number): number {
+  work.charge("eventSteps");
   let low = 0;
   let high = sorted.length;
   for (const _ of steps(work, "eventSteps", () => low < high)) {
@@ -109,6 +111,7 @@ export class StatementTree {
   readonly callTexts = new Map<number, number[]>();
 
   public constructor(readonly program: CoreProgram) {
+    program.work.charge("indexSteps");
     const work = program.work;
     const flow = program.flow;
     const uses = new Map<string, GuardUse>();
@@ -130,6 +133,7 @@ export class StatementTree {
       statements: readonly Statement[],
       file = owner?.file ?? -1,
     ): TreeBlock => {
+      work.charge("indexSteps");
       const made: TreeBlock = {
         id: this.blocks.length,
         owner,
@@ -165,7 +169,10 @@ export class StatementTree {
         readonly start: { readonly offset: number };
         readonly end: { readonly offset: number };
       },
-    ) => uses.get(joinParts(file, span.start.offset, span.end.offset));
+    ) => {
+      work.charge("indexSteps");
+      return uses.get(joinParts(file, span.start.offset, span.end.offset));
+    };
     for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
       const { into, file, statements } = pending.pop()!;
       for (const statement of each(work, "indexSteps", statements)) {
@@ -310,12 +317,16 @@ export class StatementTree {
 
   /** Where every route through a statement's own expressions has evaluated them (the statement's node, a header's). */
   #evaluated(made: TreeStatement): FlowNode | null {
+    this.program.work.charge("indexSteps");
     const program = this.program;
     const statement = made.statement;
     const site = (span: {
       readonly start: { readonly offset: number };
       readonly end: { readonly offset: number };
-    }) => program.exprAt({ file: made.file, start: span.start.offset, end: span.end.offset });
+    }) => {
+      program.work.charge("indexSteps");
+      return program.exprAt({ file: made.file, start: span.start.offset, end: span.end.offset });
+    };
     switch (statement.kind) {
       case "ifStatement":
       case "whileStatement":
@@ -343,26 +354,31 @@ export class StatementTree {
 
   /** The innermost statement of `file` holding `offset`, or `null`. */
   public statementAt(file: number, offset: number): TreeStatement | null {
+    this.program.work.charge("eventSteps");
     return this.#byFile.get(file)?.innermost(offset) ?? null;
   }
 
   /** The alternative a node enters, if it is one's entry. */
   public armAt(node: FlowNode): TreeBlock | undefined {
+    this.program.work.charge("eventSteps");
     return this.#arms.get(node);
   }
 
   /** A callable's body (a file, a function or a block) by its region. */
   public root(region: number): TreeBlock | undefined {
+    this.program.work.charge("eventSteps");
     return this.#roots.get(region);
   }
 
   /** The nearest live call site's call-in outside block code that dominates a node, or `null`. */
   public nearestCall(node: FlowNode): FlowNode | null {
+    this.program.work.charge("eventSteps");
     return this.program.reached(node) ? this.#calls.innermost(this.program.position(node)) : null;
   }
 
   /** The `switch` statement whose subject has this span. */
   public switchAt(file: number, start: number, end: number): SwitchStatement | undefined {
+    this.program.work.charge("indexSteps");
     return this.#switches.get(joinParts(file, start, end));
   }
 }
