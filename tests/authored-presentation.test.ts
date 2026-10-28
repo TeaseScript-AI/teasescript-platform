@@ -166,7 +166,7 @@ test("a presentation option without a value is reported instead of dropped", () 
 
 test("invalid computed colours use inherited or theme defaults without failing the story", () => {
   const plan = compileValidPlan(`
-let invalid = "not a colour"
+let invalid = load("colour", default: "not a colour")
 speaker vera { displayName: "Vera"
   color: "red"
   bubble: { background: "blue" }
@@ -396,7 +396,7 @@ test("an authored colour that shows what is behind it is no colour at all", () =
 
 test("prose without a background leaves the panel to the Player", () => {
   const plan = compileValidPlan(`
-let faded = "rgb(255 0 0 / .5)"
+let faded = load("faded", default: "rgb(255 0 0 / .5)")
 speaker vera {
   displayName: "Vera"
   color: "blue"

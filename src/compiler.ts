@@ -1,5 +1,6 @@
 import type { Block, FileTarget, InteractionExpression, Program, Statement } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
+import { knownPresentationDiagnostics } from "./authored-presentation.js";
 import { dayWaitWarnings } from "./day-waits.js";
 import type { DiagnosticCodeSeverity } from "./diagnostic-codes.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -434,12 +435,19 @@ function checkProject(
       },
       backend,
     ).checked;
-    types.diagnostics.forEach((diagnostics, index) =>
+    types.diagnostics.forEach((diagnostics, index) => {
+      const program = files[index]!.result.program;
+      // A presentation value the compiler knows is checked as its literal is (V30 §37). The type check reports the
+      // problems of literals too, so each problem is kept once.
+      const reported = new Set(diagnostics.map(diagnosticKey));
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
-        ...dayWaitWarnings(files[index]!.result.program, files[index]!.source),
-      ]),
-    );
+        ...knownPresentationDiagnostics(program, types.known).filter(
+          (diagnostic) => !reported.has(diagnosticKey(diagnostic)),
+        ),
+        ...dayWaitWarnings(program, files[index]!.source),
+      ]);
+    });
     return files.some((file) => hasErrors(file.result.diagnostics))
       ? null
       : {

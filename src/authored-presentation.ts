@@ -1,7 +1,7 @@
 import { isMessagePresentationOption } from "./message-presentation.js";
-import type { Expression } from "./ast.js";
+import type { Expression, ObjectLiteral, Program, Statement } from "./ast.js";
 import { normalizeColor } from "./color.js";
-import { staticVisibleText } from "./static-evaluation.js";
+import { knownVisibleText, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { parseMessageMarkup } from "./message-markup.js";
 
@@ -13,15 +13,19 @@ export const SPEAKER_PRESENTATION_PROPERTIES: ReadonlySet<string> = new Set([
   "prose",
 ]);
 
+/** The text a check reads from an expression whose value it knows, else `undefined`. */
+type Shown = (expression: Expression) => string | undefined;
+
 export function presentationPropertyDiagnostics(
   name: string,
   expression: Expression,
+  shown: Shown = staticVisibleText,
 ): readonly Diagnostic[] {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   if ((name === "bubble" || name === "prose") && expression.kind === "objectLiteral") {
     return expression.properties.flatMap((property) =>
       isMessagePresentationOption(name, property.name.name)
-        ? presentationPropertyDiagnostics(property.name.name, property.value)
+        ? presentationPropertyDiagnostics(property.name.name, property.value, shown)
         : [
             createDiagnostic(
               DiagnosticSeverity.Error,
@@ -32,7 +36,7 @@ export function presentationPropertyDiagnostics(
           ],
     );
   }
-  const text = staticVisibleText(expression);
+  const text = shown(expression);
   if (text === undefined || expression.kind === "nullLiteral") return [];
   let message: string | null = null;
   if ((name === "color" || name === "background") && normalizeColor(text) === null)
@@ -46,8 +50,11 @@ export function presentationPropertyDiagnostics(
     : [createDiagnostic(DiagnosticSeverity.Error, "TSC008", message, expression.span)];
 }
 
-export function messageColorDiagnostics(expression: Expression): readonly Diagnostic[] {
-  const text = staticVisibleText(expression);
+export function messageColorDiagnostics(
+  expression: Expression,
+  shown: Shown = staticVisibleText,
+): readonly Diagnostic[] {
+  const text = shown(expression);
   if (text === undefined) return [];
   const content = parseMessageMarkup(text);
   for (const block of content.blocks) {
@@ -75,4 +82,59 @@ export function messageColorDiagnostics(expression: Expression): readonly Diagno
       ];
   }
   return [];
+}
+
+/**
+ * The problems above at every authored place of `program` whose value `known` gives, such as a colour held in a variable
+ * or joined from texts (V30 §37): a speaker's presentation properties, the options of a message's or a question's mode,
+ * and the text of a `say`, in source order.
+ */
+export function knownPresentationDiagnostics(
+  program: Program,
+  known: (expression: Expression) => KnownValue | undefined,
+): readonly Diagnostic[] {
+  // A known `null` leaves the option at its default, as a written one does.
+  const shown = (expression: Expression) => {
+    const value = known(expression);
+    return value === null ? undefined : knownVisibleText(value);
+  };
+  const found: Diagnostic[] = [];
+  const options = (presentation: ObjectLiteral | null | undefined) => {
+    for (const property of presentation?.properties ?? [])
+      found.push(...presentationPropertyDiagnostics(property.name.name, property.value, shown));
+  };
+  // Every node of the program, found with a list rather than by recursion, as source may nest deeply.
+  const work: unknown[] = [program];
+  while (work.length > 0) {
+    const node = work.pop();
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) work.push(item);
+      continue;
+    }
+    // Source spans hold no expressions.
+    for (const [key, child] of Object.entries(node))
+      if (key !== "span" && !key.endsWith("Span")) work.push(child);
+    // EVIDENCE: invariant: the parser builds every statement and expression as an object with its `kind`.
+    const command = node as Statement | Expression;
+    switch (command.kind) {
+      case "speakerDeclaration":
+        for (const property of command.properties)
+          if (SPEAKER_PRESENTATION_PROPERTIES.has(property.name.name))
+            found.push(
+              ...presentationPropertyDiagnostics(property.name.name, property.value, shown),
+            );
+        break;
+      case "sayStatement":
+      case "sayExpression":
+        options(command.presentation);
+        found.push(...messageColorDiagnostics(command.value, shown));
+        break;
+      case "interactionExpression":
+      case "callExpression":
+        options(command.presentation);
+        break;
+    }
+  }
+  return found.sort((left, right) => left.span.start.offset - right.span.start.offset);
 }
