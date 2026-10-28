@@ -296,7 +296,8 @@ test("a package lists every .tease file it can read, and compiling it reports th
     "The text of 'latin1.tease' uses a character encoding the Player cannot read. Save the file as UTF-8 in your text editor.";
   assert.deepEqual(listed.unreadable, [{ path: "latin1.tease", reason: latin1 }]);
   // The scanner does not judge package paths; compiling the project does. A file it could not read is a warning where
-  // nothing names it, also when the rest compiles (#595).
+  // nothing names it, also when the rest compiles, and says that it never runs where no code that can run uses it
+  // (#595).
   assert.deepEqual(
     compileWorkspaceProject(listed.sources, { unreadableFiles: listed.unreadable }).diagnostics.map(
       ({ path, code }) => [path, code],
@@ -310,6 +311,8 @@ test("a package lists every .tease file it can read, and compiling it reports th
     files: [{ path: "main.tease", source: main }],
     unreadableFiles: listed.unreadable,
   });
+  const unused = (path: string, reason: string) =>
+    `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${reason}`;
   const clean = compilePlayerProject(project("exit"));
   assert.notEqual(clean.plan, null);
   assert.deepEqual(clean.diagnostics, [
@@ -318,8 +321,8 @@ test("a package lists every .tease file it can read, and compiling it reports th
       line: 1,
       column: 1,
       severity: "warning",
-      code: "TSC011",
-      message: latin1,
+      code: "TSV065",
+      message: unused("latin1.tease", latin1),
     },
   ]);
   // Where a path or glob written out names it, the file is an error there, and the script cannot start.
@@ -371,6 +374,7 @@ test("a package lists every .tease file it can read, and compiling it reports th
         ],
         unreadableFiles: locked.unreadable,
       });
+    // Where the script has an error, which code can run is not known.
     const warnings = [
       ["latin1.tease", "warning", "TSC011", latin1],
       ["locked.tease", "warning", "TSC011", locked.unreadable[2].reason],
@@ -395,7 +399,16 @@ test("a package lists every .tease file it can read, and compiling it reports th
         code,
         message,
       ]),
-      [["rooms/locked.tease", "warning", "TSC011", folder], ...warnings],
+      [
+        [
+          "rooms/locked.tease",
+          "warning",
+          "TSV065",
+          `No code that can run uses a file in the folder 'rooms/locked.tease'. Remove the folder, or use the files of 'rooms/locked.tease' once the Player can read the folder. ${folder}`,
+        ],
+        ["latin1.tease", "warning", "TSV065", unused("latin1.tease", latin1)],
+        ["locked.tease", "warning", "TSV065", unused("locked.tease", locked.unreadable[2].reason)],
+      ],
     );
   }
 });

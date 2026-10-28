@@ -19,7 +19,7 @@ import type { SourceSpan } from "../source.js";
 import { staticNumber } from "../static-evaluation.js";
 import { mayMatchTags, tagQueryKey } from "../tag-query.js";
 import { semanticCode } from "./diagnostics.js";
-import { literalText, unwrapParentheses } from "./expressions.js";
+import { interpolatedTexts, literalText } from "./expressions.js";
 
 // The targets of transfers and script references (V30 §29): labels, file paths, globs, and tagged picks.
 
@@ -141,21 +141,8 @@ export function validateScriptReference(
   const path = literalText(pathArgument) ?? null;
   if (path === null) {
     // A text with `${...}` names the files its texts allow; any other path, any file.
-    const written = unwrapParentheses(pathArgument);
-    validator.project.refer(
-      written.kind === "stringLiteral"
-        ? validator.project.filesLike(
-            written.parts.reduce<string[]>(
-              (texts, part) => {
-                if (part.kind === "stringText") texts[texts.length - 1] += part.value;
-                else texts.push("");
-                return texts;
-              },
-              [""],
-            ),
-          )
-        : null,
-    );
+    const texts = interpolatedTexts(pathArgument);
+    validator.project.refer(texts === undefined ? null : validator.project.filesLike(texts));
     return;
   }
   validator.project.refer([path]);

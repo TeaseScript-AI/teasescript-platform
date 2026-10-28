@@ -12,7 +12,7 @@ import { solveBackward, solveForward } from "./plan/dataflow.js";
 import type { ExpressionPlan, InstructionPlan, LiteralExpressionPlan } from "./plan/model.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import { runsOnItsOwn } from "./project-globals.js";
-import { declarationsOnlyMessage } from "./project-paths.js";
+import { declarationsOnlyMessage, type UnreadablePackageFile } from "./project-paths.js";
 import { runsNothing } from "./runtime/scopes/activation-validation.js";
 import type { FileCallTarget } from "./semantic.js";
 import { CORE_RUNTIME_BUILTINS } from "./language-facts.js";
@@ -83,6 +83,8 @@ const ONWARD_EDGES: ReadonlySet<string> = new Set<FlowEdge["kind"]>([
 interface ComputedWays {
   readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
   readonly hubs: readonly (readonly number[])[];
+  /** The hub into the files that any script reference may name, when a target leads there. */
+  readonly references: number | undefined;
 }
 
 /** Which instructions of a plan can run, and how that reads back as the source's statements. */
@@ -513,7 +515,7 @@ export class Reachability {
       const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
       targets.set(index, { node, edge: "computed" });
     });
-    return { targets, hubs };
+    return { targets, hubs, references: hubOf.get(null) };
   }
 
   /**
@@ -713,16 +715,19 @@ export class Reachability {
    * `main.tease`, and the ways that can run lead on from there, by a target written out or a glob into each file it
    * names, and by any other target into each file that `targets` gives it (see {@link #computedWays}). The warning
    * stands on the file's first statement that runs where it stands; a file of declarations only runs nothing, so it gets
-   * none.
+   * none. A file the host could not load is not in the plan, so when `unreadable` asks, `referencesRun` tells whether a
+   * target that leads into the files any script reference may name can run, which may start such a file too.
    */
   public unstartedFileWarnings(
     targets: () => {
       readonly picks: ReadonlyMap<number, readonly number[]>;
       readonly referenced: readonly number[] | null;
     },
-  ): Diagnostic[][] {
+    unreadable: boolean,
+  ): { readonly files: Diagnostic[][]; readonly referencesRun: boolean } {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
-    if (this.plan.files.length < 2) return diagnostics;
+    if (this.plan.files.length < 2 && !unreadable)
+      return { files: diagnostics, referencesRun: false };
     const count = this.plan.instructions.length;
     const { picks, referenced } = targets();
     const ways = this.#computedWays(picks, referenced);
@@ -753,12 +758,15 @@ export class Reachability {
         createDiagnostic(
           DiagnosticSeverity.Warning,
           "TSV065",
-          `The code of '${file.path}' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call'.`,
+          `${unstartedFileSentence(file.path)} Remove the file, or start the file with a 'goto' or 'call'.`,
           first.span,
         ),
       );
     });
-    return diagnostics;
+    return {
+      files: diagnostics,
+      referencesRun: ways.references !== undefined && states[ways.references] !== null,
+    };
   }
 
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
@@ -1020,6 +1028,21 @@ function laterCallMessage(
   return path !== null
     ? `This call runs later, ${block.when}, so the compiler cannot tell whether '${path}' is already running then. If it is, the call fails. If that can happen, ${block.stop} while '${path}' runs, or put what '${path}' does in a function and write the function's name with '()' instead.`
     : `This call runs later, ${block.when}, so the compiler cannot tell whether the file it starts is already running then. If it is, the call fails. If that can happen, ${block.stop} while such a file runs.`;
+}
+
+/** Why the code of a file never runs (TSV065, #595), whether or not the host could load the file. */
+function unstartedFileSentence(path: string): string {
+  return `The code of '${path}' never runs, because no 'goto' or 'call' that can run starts the file.`;
+}
+
+/**
+ * Why a file or folder that the host could not load is code that never runs (TSV065, #595): no code that can run uses
+ * it. The host's reason follows, which says why it cannot be read and what to do.
+ */
+export function unusedUnreadableMessage(entry: UnreadablePackageFile): string {
+  return entry.folder === true
+    ? `No code that can run uses a file in the folder '${entry.path}'. Remove the folder, or use the files of '${entry.path}' once the Player can read the folder. ${entry.reason}`
+    : `${unstartedFileSentence(entry.path)} Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${entry.reason}`;
 }
 
 /**

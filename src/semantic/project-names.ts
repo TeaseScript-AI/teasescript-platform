@@ -12,7 +12,7 @@ import {
   sessionDeclarations,
   setsDefaultSpeaker,
 } from "../project-globals.js";
-import type { UnreadablePackageFile } from "../project-paths.js";
+import { textsMayName, textsMayReach, type UnreadablePackageFile } from "../project-paths.js";
 import type { ProjectProgram, SemanticValidationOptions } from "../semantic.js";
 import type { SourceSpan } from "../source.js";
 import { PLAYER } from "../speaker-terms.js";
@@ -40,10 +40,16 @@ export class ProjectNames {
 
   /**
    * The files that the script references the project makes may name: those of its `script(...)` calls and
-   * `findScripts(...)` lists; `null` once one may name any file, as a `script(...)` of a path computed otherwise than in
-   * a text with `${...}`.
+   * `findScripts(...)` lists, also the files and folders the host could not load that such a call may name or reach
+   * into; `null` once one may name any file, as a `script(...)` of a path computed otherwise than in a text with `${...}`.
    */
   referencedScripts: Set<string> | null = new Set();
+
+  /**
+   * The files and folders the host could not load that a media or image file known only when the script runs may name
+   * or reach into: those a text with `${...}` may give; `null` once one may be any file.
+   */
+  computedMedia: Set<string> | null = new Set();
 
   /** The lists of files already in `referencedScripts`, each added once. */
   readonly #referred = new WeakSet<readonly string[]>();
@@ -63,39 +69,37 @@ export class ProjectNames {
   }
 
   /**
-   * The files that a text with `${...}` may name: those whose path starts with its first text, ends with its last, and
-   * holds the ones between in order, whatever the values give between them. Each pattern is matched once.
+   * The files that a text with `${...}` may name (see `textsMayName`), with the files and folders the host could not
+   * load that it may name or reach into. Each pattern is matched once.
    */
   public filesLike(texts: readonly string[]): readonly string[] {
     const key = JSON.stringify(texts);
     const known = this.#patterns.get(key);
     if (known !== undefined) return known;
-    if (texts.length === 1) {
-      const files = this.labels.has(texts[0]!) ? [texts[0]!] : [];
-      this.#patterns.set(key, files);
-      return files;
-    }
-    const first = texts[0]!;
-    const last = texts.at(-1)!;
-    const files = [...this.labels.keys()].filter((path) => {
-      if (
-        path.length < first.length + last.length ||
-        !path.startsWith(first) ||
-        !path.endsWith(last)
-      )
-        return false;
-      let at = first.length;
-      const end = path.length - last.length;
-      for (let index = 1; index < texts.length - 1; index += 1) {
-        const text = texts[index]!;
-        const found = path.indexOf(text, at);
-        if (found < 0 || found + text.length > end) return false;
-        at = found + text.length;
-      }
-      return true;
-    });
+    const files = [
+      ...(texts.length === 1
+        ? this.labels.has(texts[0]!)
+          ? [texts[0]!]
+          : []
+        : [...this.labels.keys()].filter((path) => textsMayName(texts, path))),
+      ...this.unreadable.flatMap((entry) => (textsMayReach(texts, entry) ? [entry.path] : [])),
+    ];
     this.#patterns.set(key, files);
     return files;
+  }
+
+  /**
+   * Adds the files and folders the host could not load that a media file known only when the script runs may be or lie
+   * in, by the texts around its `${...}`, or any with `null` (see `computedMedia`).
+   */
+  public referMedia(texts: readonly string[] | null): void {
+    if (this.computedMedia === null) return;
+    if (texts === null) {
+      this.computedMedia = null;
+      return;
+    }
+    for (const entry of this.unreadable)
+      if (textsMayReach(texts, entry)) this.computedMedia.add(entry.path);
   }
 
   readonly diagnostics: Diagnostic[][];

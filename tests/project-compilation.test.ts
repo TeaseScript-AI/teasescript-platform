@@ -384,7 +384,8 @@ test("a package file the host could not load is an error where a path written ou
   const unreadableFiles = [broken, locked, bell, attic];
   const compile = (main: string) =>
     compileProject([{ path: "main.tease", source: main }], { unreadableFiles });
-  // Where nothing names them, each is a warning at itself, with the host's reason, and the script compiles.
+  // Where nothing names them, each is a warning at itself with the host's reason, and the script compiles. A file or
+  // folder that no code which can run uses never runs (#595).
   const clean = compile("exit");
   assert.notEqual(clean.plan, null);
   assert.deepEqual(
@@ -395,7 +396,24 @@ test("a package file the host could not load is an error where a path written ou
       code,
       message,
     ]),
-    unreadableFiles.map(({ path, reason }) => [path, 0, "warning", "TSC011", reason]),
+    [
+      [
+        broken.path,
+        0,
+        "warning",
+        "TSV065",
+        `The code of 'scenes/broken.tease' never runs, because no 'goto' or 'call' that can run starts the file. Remove the file, or start the file with a 'goto' or 'call' once the Player can read the file. ${broken.reason}`,
+      ],
+      [locked.path, 0, "warning", "TSC011", locked.reason],
+      [bell.path, 0, "warning", "TSC011", bell.reason],
+      [
+        attic.path,
+        0,
+        "warning",
+        "TSV065",
+        `No code that can run uses a file in the folder 'attic'. Remove the folder, or use the files of 'attic' once the Player can read the folder. ${attic.reason}`,
+      ],
+    ],
   );
   // A path or glob written out that names one is an error there instead, also where it never runs.
   for (const [main, file] of [
@@ -434,7 +452,7 @@ test("a package file the host could not load is an error where a path written ou
     compile('playAudio async "sounds/bell.mp3"\nshowImage "images/*.jpg"\nexit').diagnostics.map(
       ({ path, code }) => `${path} ${code}`,
     ),
-    unreadableFiles.map(({ path }) => `${path} TSC011`),
+    clean.diagnostics.map(({ path, code }) => `${path} ${code}`),
   );
   // Every session starts at main.tease, so a main.tease the host could not load is an error, also in a folder it could
   // not read.
@@ -448,4 +466,101 @@ test("a package file the host could not load is an error where a path written ou
       ),
       [["main.tease", "error", "TSC011", main.reason]],
     );
+});
+
+test("a file or folder the host could not load keeps its warning only where code that can run may use it", () => {
+  // A path written out that names one is an error (see above), so only a target or a media file known when the script
+  // runs may use one: by a script reference that a computed target which can run uses, or as a media file, whichever
+  // code it stands in.
+  const unreadableFiles = [
+    { path: "rooms/b.tease", reason: "The text of 'rooms/b.tease' cannot be read." },
+    { path: "rooms/old", folder: true, reason: "The folder 'rooms/old' cannot be opened." },
+    { path: "rooms/b.jpg", reason: "'rooms/b.jpg' cannot be opened." },
+  ];
+  const readable = {
+    "halls/a.tease": 'say "A"\nend',
+    "halls/t.tease": '---\ntags: "hall"\n---\nsay "T"\nend',
+    "rooms/r.tease": 'say "R"\nend',
+  };
+  // Each form with what it may use: `start` by a computed target, `media` as a media file.
+  const forms: readonly (readonly [string, { start?: string[]; media?: string[] }])[] = [
+    ['say "none"', {}],
+    ['call script("rooms/${choice}.tease")', { start: ["rooms/b.tease", "rooms/old"] }],
+    ['call script("rooms/old/${choice}.tease")', { start: ["rooms/old"] }],
+    ['call script("halls/${choice}.tease")', {}],
+    // A reference that no computed target uses starts nothing.
+    ['let next = script("rooms/${choice}.tease")', {}],
+    ["call script(choice)", { start: ["rooms/b.tease", "rooms/old"] }],
+    [
+      'let next = load "next", default: script("halls/a.tease")\ncall (next)',
+      { start: ["rooms/b.tease", "rooms/old"] },
+    ],
+    ['let next = script("halls/a.tease")\ncall (next)', {}],
+    ['let pool = findScripts(from: "halls/*.tease")\ncall (pool[0])', {}],
+    ['call tagged "hall"', {}],
+    ['showImage "rooms/old/${choice}.jpg"', { media: ["rooms/old"] }],
+    ['showImage "photos/${choice}.jpg"', {}],
+    ["showImage (choice)", { media: ["rooms/old"] }],
+    ['showImage tagged "photo"', {}],
+  ];
+  const reported = (result: ReturnType<typeof compileProject>) =>
+    result.diagnostics.flatMap(({ path, code }) =>
+      unreadableFiles.some((file) => file.path === path) ? [`${path} ${code}`] : [],
+    );
+  const compile = (main: string, side: string | null) =>
+    compileProject(
+      Object.entries({
+        "main.tease": main,
+        ...readable,
+        ...(side === null ? {} : { "side.tease": side }),
+      }).map(([path, source]) => ({ path, source })),
+      { unreadableFiles },
+    );
+  for (const [form, uses] of forms) {
+    const code = `let choice = askText "Which?"\n${form}`;
+    // In main.tease, which runs, and in a file that nothing starts.
+    for (const [main, side, runs] of [
+      [`${code}\nexit`, null, true],
+      ["exit", `${code}\nend`, false],
+    ] as const) {
+      const result = compile(main, side);
+      assert.notEqual(result.plan, null, form);
+      const used = new Set([...(runs ? (uses.start ?? []) : []), ...(uses.media ?? [])]);
+      assert.deepEqual(
+        reported(result),
+        unreadableFiles.map(
+          ({ path }) => `${path} ${path.endsWith(".jpg") || used.has(path) ? "TSC011" : "TSV065"}`,
+        ),
+        `${form} ${runs ? "in main.tease" : "in a file nothing starts"}`,
+      );
+    }
+  }
+  // A host value may give a reference to any file.
+  assert.deepEqual(
+    reported(
+      compileProject(
+        [
+          { path: "main.tease", source: 'let next = script("halls/a.tease")\ncall (next)\nexit' },
+          { path: "halls/a.tease", source: readable["halls/a.tease"] },
+        ],
+        { unreadableFiles, globals: ["host"] },
+      ),
+    ),
+    unreadableFiles.map(({ path }) => `${path} TSC011`),
+  );
+  // A computed target in a project of main.tease alone may start them too.
+  assert.deepEqual(
+    reported(
+      compileProject(
+        [
+          {
+            path: "main.tease",
+            source: 'let choice = askText "Which?"\ncall script("rooms/${choice}.tease")\nexit',
+          },
+        ],
+        { unreadableFiles },
+      ),
+    ),
+    unreadableFiles.map(({ path }) => `${path} TSC011`),
+  );
 });

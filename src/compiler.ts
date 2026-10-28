@@ -39,6 +39,7 @@ import { PlanControlFlow } from "./plan/control-flow.js";
 import {
   knownReferenceFile,
   Reachability,
+  unusedUnreadableMessage,
   type ConstantTest,
   type FileCall,
 } from "./reachability.js";
@@ -206,6 +207,11 @@ function compileProjectFiles(
     },
     backend,
   );
+  const named = new Set(files.flatMap((file) => [...(file.unreadableNamed ?? [])]));
+  // A missing `main.tease` reports the one it lies in, as an error of the inventory.
+  if (files[0]?.result.path !== MAIN_FILE_PATH)
+    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file)) named.add(file.path);
+  let unused: ReadonlySet<UnreadablePackageFile> = new Set();
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     const trace: LoweringTrace = { origins: new Map(), statements: new Map() };
     plan = lowerProject(
@@ -221,19 +227,32 @@ function compileProjectFiles(
     // session will (V30 §30, §37).
     // A host global or host function may give a script reference to any file (V30 §30).
     const hostValues = (options.globals?.length ?? 0) > 0 || (options.builtins?.length ?? 0) > 0;
-    if (plan !== null) plan = checkFlow(files, plan, trace, checked, hostValues);
+    if (plan !== null)
+      ({ plan, unused } = checkFlow(
+        files,
+        plan,
+        trace,
+        checked,
+        hostValues,
+        unreadable.filter((file) => !named.has(file.path)),
+      ));
   }
-  const named = new Set(files.flatMap((file) => [...(file.unreadableNamed ?? [])]));
-  // A missing `main.tease` reports the one it lies in, as an error of the inventory.
-  if (files[0]?.result.path !== MAIN_FILE_PATH)
-    for (const file of unreadable) if (liesIn(MAIN_FILE_PATH, file)) named.add(file.path);
   const packageDiagnostics = [
     ...catalog.diagnostics,
     // A path or glob that names one reports it there instead.
     ...unreadable.flatMap((file) =>
       named.has(file.path)
         ? []
-        : [packageFileDiagnostic(file.path, DiagnosticSeverity.Warning, "TSC011", file.reason)],
+        : [
+            unused.has(file)
+              ? packageFileDiagnostic(
+                  file.path,
+                  DiagnosticSeverity.Warning,
+                  "TSV065",
+                  unusedUnreadableMessage(file),
+                )
+              : packageFileDiagnostic(file.path, DiagnosticSeverity.Warning, "TSC011", file.reason),
+          ],
     ),
   ];
   const results = files.map((file) => file.result);
@@ -317,7 +336,7 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
 }
 
 /** A diagnostic of a package file as a whole, at its start. */
-function packageFileDiagnostic<C extends "TSC009" | "TSC011">(
+function packageFileDiagnostic<C extends "TSC009" | "TSC011" | "TSV065">(
   path: string,
   severity: DiagnosticCodeSeverity<C>,
   code: C,
@@ -490,7 +509,9 @@ function addSemanticDiagnostics(
 /**
  * The checks that follow the plan, with which ways the type check found possible: which code can run, with the
  * initialization of variables at labels and the endings of files and of the session, then the flow of speaker
- * properties. Returns the plan when they find no error, else `null` with their diagnostics in the files.
+ * properties. Returns the plan when they find no error, else `null` with their diagnostics in the files, and which files
+ * and folders of `unreadable`, those the host could not load that no path or glob written out names, no code that can
+ * run uses (see `unusedUnreadable`).
  */
 function checkFlow(
   files: CompiledProjectFile[],
@@ -498,7 +519,8 @@ function checkFlow(
   trace: LoweringTrace,
   checked: CheckedProject,
   hostValues: boolean,
-): InstructionPlan | null {
+  unreadable: readonly UnreadablePackageFile[],
+): { readonly plan: InstructionPlan | null; readonly unused: ReadonlySet<UnreadablePackageFile> } {
   try {
     const ways = new DeadWays(new PlanControlFlow(plan), trace.origins, checked.ways);
     const reachability = new Reachability(
@@ -544,7 +566,17 @@ function checkFlow(
         ),
       );
     }
-    const unstarted = reachability.unstartedFileWarnings(targets);
+    const unstarted = reachability.unstartedFileWarnings(targets, unreadable.length > 0);
+    const unused = unusedUnreadable(
+      unreadable,
+      // The files that a computed target which can run may start, `null` for any.
+      unstarted.referencesRun
+        ? targets().referenced === null
+          ? null
+          : checked.names[0]!.referencedScripts
+        : new Set(),
+      checked.names[0]!.computedMedia,
+    );
     const warnings = reachability.warnings(
       files.map((file) =>
         file.result.diagnostics.flatMap((diagnostic): ConstantTest[] =>
@@ -553,7 +585,7 @@ function checkFlow(
             : [],
         ),
       ),
-      (file) => unstarted[file]!.length === 0,
+      (file) => unstarted.files[file]!.length === 0,
     );
     // In source order, a warning before an error at the same place, as the loop that never ends comes before the
     // missing exit that it causes.
@@ -561,7 +593,7 @@ function checkFlow(
       addSemanticDiagnostics(
         file,
         [
-          ...unstarted[index]!,
+          ...unstarted.files[index]!,
           ...warnings[index]!,
           ...transfers[index]!.filter(
             (diagnostic) => diagnostic.severity === DiagnosticSeverity.Warning,
@@ -570,11 +602,11 @@ function checkFlow(
         ].sort((left, right) => left.span.start.offset - right.span.start.offset),
       ),
     );
-    if (errors.some((diagnostics) => diagnostics.length > 0)) return null;
+    if (errors.some((diagnostics) => diagnostics.length > 0)) return { plan: null, unused };
     const flow = speakerFlowDiagnostics(plan, trace.origins, ways, checked.speakerFlow);
-    if (!flow.some((diagnostics) => diagnostics.length > 0)) return plan;
+    if (!flow.some((diagnostics) => diagnostics.length > 0)) return { plan, unused };
     flow.forEach((diagnostics, index) => addSemanticDiagnostics(files[index]!, diagnostics));
-    return null;
+    return { plan: null, unused };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     const main = files[0]!;
@@ -585,8 +617,31 @@ function checkFlow(
       main.result.header,
       main.parsed?.diagnostics,
     );
-    return null;
+    return { plan: null, unused: new Set() };
   }
+}
+
+/**
+ * Of the files and folders the host could not load that no path or glob written out names, those that no code which can
+ * run uses, so that they never run (TSV065, #595): a `.tease` file that no computed target which can run may start, as
+ * `started` tells, `null` for any file, and a folder that no such target, nor a media or image file known only when the
+ * script runs (`media`, `null` for any), may reach into. A media file that nothing names keeps its own warning, as no
+ * check reports an image that nothing shows, and so does the folder that `main.tease` lies in.
+ */
+function unusedUnreadable(
+  unreadable: readonly UnreadablePackageFile[],
+  started: ReadonlySet<string> | null,
+  media: ReadonlySet<string> | null,
+): ReadonlySet<UnreadablePackageFile> {
+  return new Set(
+    unreadable.filter((file) =>
+      file.folder === true
+        ? !liesIn(MAIN_FILE_PATH, file) &&
+          started?.has(file.path) === false &&
+          media?.has(file.path) === false
+        : packagePathProblem(file.path) === null && started?.has(file.path) === false,
+    ),
+  );
 }
 
 /**
