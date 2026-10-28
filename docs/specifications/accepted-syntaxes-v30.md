@@ -1442,9 +1442,11 @@ integer[]?           // a list of integers, or null
 `[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set may hold any value a list
 may hold, so `integer[] set` is a set of lists of integers ([§16](#16-lists)).
 
-A union never holds a whole list, set, or dict beside another type: write the union inside the collection instead. An
-optional collection, such as `integer[]?`, is a collection or `null`, and stays allowed. The rule holds in every place
-a type is written: variables, parameters, results, list and set elements, and dict values, also inside another type:
+A union never holds a whole list, set, or dict beside another type: write the union inside the collection instead. For
+example, the error for `integer | string set` suggests `(integer | string) set`, and the error for
+`integer | string dict` suggests `(integer | string) dict`. An optional collection, such as `integer[]?`, is a
+collection or `null`, and stays allowed. The rule holds in every place a type is written: variables, parameters,
+results, list and set elements, and dict values, also inside another type:
 
 ```text
 let a: (integer | string)[] = [1, "two"]       // valid: a union inside a list
