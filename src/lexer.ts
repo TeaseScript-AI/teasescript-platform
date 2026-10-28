@@ -14,6 +14,8 @@ import {
   type CommandFacts,
   FOREIGN_FORM_CODE,
   FOREIGN_FORMS,
+  isIdentifierPart,
+  isIdentifierStart,
   KEYWORD_TOKENS,
 } from "./language-facts.js";
 import { createToken, TokenKind, type Token } from "./token.js";
@@ -1122,16 +1124,4 @@ function isHorizontalWhitespace(character: string): boolean {
 
 function isDigit(character: string): boolean {
   return character >= "0" && character <= "9";
-}
-
-function isIdentifierStart(character: string): boolean {
-  return (
-    (character >= "A" && character <= "Z") ||
-    (character >= "a" && character <= "z") ||
-    character === "_"
-  );
-}
-
-function isIdentifierPart(character: string): boolean {
-  return isIdentifierStart(character) || isDigit(character);
 }

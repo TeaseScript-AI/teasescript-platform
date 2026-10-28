@@ -832,12 +832,6 @@ exit`,
 });
 
 test("&&, ||, !, and ?? each give one error that names the word, and parsing goes on with the word", () => {
-  const symbol = (word: string, written: string, example: string) => [
-    "error",
-    "TSP037",
-    `TeaseScript writes '${word}' instead of '${written}': ${example}`,
-    written,
-  ];
   const spaced = (word: string, written: string, example: string) => [
     "error",
     "TSP037",
@@ -849,10 +843,10 @@ test("&&, ||, !, and ?? each give one error that names the word, and parsing goe
   const not = [
     "error",
     "TSP037",
-    `TeaseScript writes 'not' and a space instead of '!': if not a { say "not a" }`,
+    `TeaseScript writes 'not' with a space on each side instead of '!': if not a { say "not a" }`,
     "!",
   ];
-  const otherwise = symbol("otherwise", "??", 'let name = nickname otherwise "pet"');
+  const otherwise = spaced("otherwise", "??", 'let name = nickname otherwise "pet"');
   for (const [source, expected] of [
     ['let a = true\nlet b = false\nif a && b { say "x" }\nexit', [and]],
     ['let a = true\nif a || false { say "x" }\nexit', [or]],

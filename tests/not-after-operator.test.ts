@@ -116,7 +116,7 @@ test("after 'not' right after a comparison operator, the statement and the scrip
   assert.deepEqual(diagnostics(source('if x == !a {\n    say "yes", instant\n}')), [
     [
       "TSP037",
-      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "TeaseScript writes 'not' with a space on each side instead of '!': if not a { say \"not a\" }",
       "!",
     ],
     ["TSP012", EQUAL_NOT, "!"],
@@ -146,7 +146,7 @@ test("a comparison too long to quote, an operand with an error of its own, or an
     [
       [
         "TSP037",
-        "TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise \"pet\"",
+        "TeaseScript writes 'otherwise' with a space on each side instead of '??': let name = nickname otherwise \"pet\"",
         "??",
       ],
       [
@@ -217,7 +217,7 @@ test("'not' right after 'otherwise' is one error, and the code it names runs as 
   assert.deepEqual(diagnostics(source("let c = a otherwise !b")), [
     [
       "TSP037",
-      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "TeaseScript writes 'not' with a space on each side instead of '!': if not a { say \"not a\" }",
       "!",
     ],
     ["TSP012", OTHERWISE_NOT, "!"],
@@ -228,7 +228,7 @@ test("'not' right after 'otherwise' is one error, and the code it names runs as 
   assert.deepEqual(diagnostics(source("let c = a ?? not b")), [
     [
       "TSP037",
-      "TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise \"pet\"",
+      "TeaseScript writes 'otherwise' with a space on each side instead of '??': let name = nickname otherwise \"pet\"",
       "??",
     ],
   ]);
@@ -270,7 +270,7 @@ test("'not' right after arithmetic or a range operator is one error that names n
       [
         [
           "TSP037",
-          "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+          "TeaseScript writes 'not' with a space on each side instead of '!': if not a { say \"not a\" }",
           "!",
         ],
         ["TSP012", message, "!"],
@@ -314,7 +314,7 @@ test("'not' right after a sign is one error, as after arithmetic", () => {
   assert.deepEqual(diagnostics(source("let c = -!b")), [
     [
       "TSP037",
-      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "TeaseScript writes 'not' with a space on each side instead of '!': if not a { say \"not a\" }",
       "!",
     ],
     ["TSP012", message("-"), "!"],
