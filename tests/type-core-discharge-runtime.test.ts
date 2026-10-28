@@ -472,9 +472,14 @@ test("the default of fileFromBase64, decryptText and decryptFile is checked wher
 });
 
 test("a get's and a conversion's selected default is checked against the result's family, in three layers, in both orders (C10, S3 §4)", () => {
+  // (the conversion's text is loaded, so its run gives the default: known text that cannot convert is an error, #1105)
   for (const [source, fits, bad] of [
     ['let v = [1].get(5, default: hostValue)\nsay "AFTER"\nexit\n', 5, "text"],
-    ['let n = toInteger("x", default: hostValue)\nsay "AFTER"\nexit\n', 5, "text"],
+    [
+      'let n = toInteger(load("t", default: "x"), default: hostValue)\nsay "AFTER"\nexit\n',
+      5,
+      "text",
+    ],
   ] as const) {
     const site = at(source, "hostValue");
     const known = decision(source);

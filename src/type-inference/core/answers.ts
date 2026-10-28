@@ -1,3 +1,5 @@
+import type { Expression } from "../../ast.js";
+import type { KnownValue } from "../../static-evaluation.js";
 import { NULL_TYPE, UNKNOWN_TYPE, isScalarKind, type StaticType } from "../../static-types.js";
 import { VALUE_KINDS, type PlainKind, type ValueKind } from "../../value-kinds.js";
 import type { OperandView } from "../adapters/relation.js";
@@ -240,6 +242,11 @@ export interface Answers {
    */
   valueAt(node: FlowNode, path: readonly string[]): ValueAnswer;
   view(node: FlowNode): CoreView;
+  /**
+   * Gives `view` its known values: the one constant service the consumer owns (S3 §1, TABLE r4.81 (3)), so the known
+   * value a view reads and the consumer's own are one; until then a view knows none.
+   */
+  shareKnown(known: (expression: Expression) => KnownValue | undefined): void;
 }
 
 /** The analysis of a project by the coarse core: its answers, published after its last pass. */
@@ -578,6 +585,8 @@ class StoppedAnswers implements Answers {
   public view(): CoreView {
     throw new BudgetExhausted(this.#limit);
   }
+
+  public shareKnown(): void {}
 }
 
 class CoreAnswers implements Answers {
@@ -596,6 +605,7 @@ class CoreAnswers implements Answers {
   readonly #consumers: Consumers;
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
+  #known: ((expression: Expression) => KnownValue | undefined) | null = null;
 
   public constructor(
     pass: CorePass,
@@ -847,8 +857,12 @@ class CoreAnswers implements Answers {
       alternatives: alternatives.length > 0 ? alternatives : null,
       dynamic: unknown === undefined ? null : dynamicWhy(unknown.reasons),
       // the constant service's value is the consumer's (S3 §2, group V)
-      known: undefined,
+      known: node.expression === undefined ? undefined : this.#known?.(node.expression),
       certain: items.length > 0 && items.every((item) => item.cert === "def"),
     };
+  }
+
+  public shareKnown(known: (expression: Expression) => KnownValue | undefined): void {
+    this.#known = known;
   }
 }
