@@ -28,6 +28,8 @@ import {
   DefinitionIndex,
   DefinitionLists,
   keyOf,
+  keyPath,
+  keyPlace,
   type Definition,
   type Key,
 } from "./definitions.js";
@@ -206,6 +208,8 @@ export interface BudgetAnswer {
   readonly settled: boolean;
   /** Each consumer read's demand: the work it was the first to compute, against its demand allowance (S3 §5). */
   readonly demands: readonly ReadWork[];
+  /** Each admission decision's demand, likewise (S3 §5, revision 14). */
+  readonly decisions: readonly DecisionWork[];
   /** The finished demands with their work. */
   readonly finished: readonly DemandWork[];
   /** Facts of the indexes for the identity and mark controls (not work). */
@@ -218,6 +222,19 @@ export interface ReadWork {
   readonly node: number;
   readonly units: number;
   readonly allowance: number;
+  /** Whether the allowance bounded it: a consumer's own read; admission's, for a store's check, has the program's. */
+  readonly bounded: boolean;
+  /** Whether it stopped at its allowance (S3 §5). */
+  readonly stopped: boolean;
+}
+
+/** One admission decision for one key as a demand (S3 §5): its work, against its allowance, and whether it stopped. */
+export interface DecisionWork {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+  readonly units: number;
+  readonly allowance: number;
+  readonly stopped: boolean;
 }
 
 /** A value's answer at a path below it (`Answers.valueAt`). */
@@ -856,6 +873,7 @@ class CoreAnswers implements Answers {
       stoppedIn,
       settled: exhausted === null || consumers.settled,
       demands: consumers.reads,
+      decisions: consumers.decisions,
       finished: pass.solver.demandWork(),
       facts: { ...pass.contract.facts },
     };
@@ -1120,9 +1138,15 @@ class CoreAnswers implements Answers {
     const key: Key = keyOf(id, path);
     const written = writtenOf(program.place(id).kind);
     const term = written === null ? null : termAt(written, path);
-    const kinds = this.#run(contract.contractOf(key));
+    // (a key whose decision stopped: `unknown` with the reason `budget` for every read, S3 §5)
+    const stopped = (at: readonly string[]): boolean =>
+      this.#consumers.admission.decisionStopped(id, at);
+    const kinds = stopped(path) ? STOPPED : this.#run(contract.contractOf(key));
+    const below = joinSteps(path, ["element"]);
     const elements = kinds.some((item) => COLLECTION_TAGS.has(item.tag))
-      ? this.#run(contract.contractOf(keyOf(id, joinSteps(path, ["element"]))))
+      ? stopped(below)
+        ? STOPPED
+        : this.#run(contract.contractOf(keyOf(id, below)))
       : [];
     let defined: PlaceAnswer["definitions"] | null = null;
     return {
@@ -1149,10 +1173,32 @@ class CoreAnswers implements Answers {
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
     // (each kind once: `(null | string)?` admits `null` and `string`)
     if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
-    // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
-    if (this.#stopped && !this.#consumers.settled) return { by: "undecided" };
+    // (after a stop before admission settled, only what is written and what a cheap decider decides, TABLE r4.89 (2))
+    if (this.#stopped && !this.#consumers.settled) {
+      const decided = this.#consumers.cheapDecided(id, path);
+      return decided === null
+        ? { by: "undecided" }
+        : {
+            by: "decided",
+            kinds: decided.kinds,
+            decider: decided.decider.site,
+            inherited: decided.inherited,
+          };
+    }
     const { admission } = this.#consumers;
     const kinds = admission.admitted(id, path);
+    // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
+    // store's syntax decides answers, as the finishing read's source 4, TABLE r4.122)
+    if (kinds.length === 0 && this.#stopped) {
+      const decided = this.#consumers.cheapDecided(id, path);
+      if (decided !== null)
+        return {
+          by: "decided",
+          kinds: decided.kinds,
+          decider: decided.decider.site,
+          inherited: decided.inherited,
+        };
+    }
     // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
     return kinds.length === 0
       ? { by: "undecided" }
@@ -1210,6 +1256,10 @@ class CoreAnswers implements Answers {
       const names = new Set<string>();
       if ("value" in start)
         for (const name of this.#stoppedShape(start.value, start.path).names) names.add(name);
+      else if ("key" in start)
+        for (const name of this.#consumers.cheapDecided(keyPlace(start.key), keyPath(start.key))
+          ?.names ?? [])
+          names.add(name);
       return names;
     }
     return propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start);

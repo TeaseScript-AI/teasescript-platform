@@ -44,6 +44,7 @@ import {
   ingressLeaves,
   MIXED_LEAF,
   REASON,
+  STOPPED,
   writerKey,
   type IngressNode,
   type Item,
@@ -928,6 +929,22 @@ function compatible(items: readonly Item[], term: TypeTerm | null): boolean {
 }
 
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
+/**
+ * Where a finishing pass knows a place's kinds at a path without solving (TABLE r4.120, r4.122): the written type where
+ * it reaches the path, or the stores' syntax (`Consumers.cheapDecided`); else `null`.
+ */
+export type Fixed = (path: readonly string[]) => readonly ItemTag[] | null;
+
+/** A written type's kinds at each path it reaches (`Fixed`). */
+export function writtenKinds(written: TypeTerm | null): Fixed | null {
+  return written === null
+    ? null
+    : (path) => {
+        const term = termAt(written, path);
+        return term === null ? null : typeTags(term);
+      };
+}
+
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
   /**
@@ -936,6 +953,19 @@ export interface AdmissionHost {
    * boundaries read as every consumer does (one derivation, TABLE r4.126).
    */
   read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
+}
+
+/** What of the stopped decisions' paths a read's key reaches: its depth below its place, the paths it is still a
+ * prefix of, and whether it is at or below one (`Admission.readsStoppedDecision`). */
+interface StoppedReach {
+  readonly depth: number;
+  readonly live: readonly (readonly string[])[];
+  readonly stopped: boolean;
+}
+
+/** Whether `path` begins with `prefix`. */
+function startsWith(path: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
 }
 
 export class Admission {
@@ -948,6 +978,10 @@ export class Admission {
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
   readonly readChecks: Obligation[] = [];
   readonly #rejectedKeys = new Set<Key>();
+  /** The paths whose decision stopped at its demand allowance (S3 §5), by place: undecided, each read `budget`. */
+  readonly #stoppedPaths = new Map<PlaceId, (readonly string[])[]>();
+  /** Per value read, what of the stopped paths its key reaches (`readsStoppedDecision`), made from its owner's. */
+  readonly #stoppedReach = new Map<PlaceId, StoppedReach | null>();
   /** The previous pass's rejected stores by the place and path each was rejected at (A6). */
   readonly #retaken = new Map<Key, Definition[]>();
   readonly #a4Keys = new Set<Key>();
@@ -1696,6 +1730,8 @@ export class Admission {
   public valueAt(d: Definition, at: readonly string[]): Item[] {
     this.pass.program.work.charge("checks");
     if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
+    // (a value reading a key whose decision stopped: `unknown` with the reason `budget`, S3 §5)
+    if (this.readsStoppedDecision(d.value!, at)) return [...STOPPED];
     return this.#items(d.value!, d.node, at);
   }
 
@@ -1707,30 +1743,23 @@ export class Admission {
 
   /**
    * A place's path in the contract's vocabulary: an element step below a dict is its `entry`, the collection above it as
-   * the contract holds it or, where the place's written type `written` reaches it (the finishing path before admission
-   * settled, TABLE r4.122), as the written type has it, final at every stop and asking no solver.
+   * the contract holds it or, where `fixed` knows it (the finishing path before admission settled: the written type or
+   * the stores' syntax, TABLE r4.122), as that has it, final at every stop and asking no solver.
    */
-  public pathLabel(
-    place: PlaceId,
-    path: readonly string[],
-    written: TypeTerm | null = null,
-  ): string {
+  public pathLabel(place: PlaceId, path: readonly string[], fixed: Fixed | null = null): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
-    // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
-    let term = written;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
+        const prefix = path.slice(0, index);
         const tags =
-          term !== null
-            ? typeTags(term)
-            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
-                (item) => item.tag,
-              );
+          fixed?.(prefix) ??
+          withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
+            (item) => item.tag,
+          );
         label = stepText(label, elementStep(tags));
       }
-      if (term !== null) term = termAt(term, [step]);
     });
     return label;
   }
@@ -2705,6 +2734,100 @@ export class Admission {
   }
 
   /**
+   * A decision that stopped at its demand allowance (S3 §5): what it had made of its key is taken back, so the key is
+   * undecided and every read of it, or of a key below it, answers `unknown` with the reason `budget`.
+   */
+  public stopDecision(root: PlaceId, path: readonly string[]): void {
+    const key = keptKey(this.#work, root, path);
+    this.decided.delete(key);
+    this.#nullable.delete(key);
+    this.#permitsNull.delete(key);
+    this.#inheritsWritten.delete(key);
+    this.#unrestricted.delete(key);
+    this.#deciderSites.delete(key);
+    const paths = this.#stoppedPaths.get(root);
+    if (paths === undefined) this.#stoppedPaths.set(root, [path]);
+    else paths.push(path);
+    // (what was found of the reads before it reached no stopped key here)
+    this.#stoppedReach.clear();
+  }
+
+  /** Whether the decision of `place` at `path` or at a key above it stopped (`stopDecision`). */
+  public decisionStopped(place: PlaceId, path: readonly string[]): boolean {
+    const stopped = this.#stoppedPaths.get(place);
+    if (stopped === undefined) return false;
+    this.#work.charge("checks");
+    return stopped.some((at) => startsWith(path, at));
+  }
+
+  /**
+   * Whether a value, at `rest` below it, reads a key whose decision stopped or a key below one: its key's reach made
+   * once per value from its owner's by its step (a chain of k projections k steps, not k walks to its root).
+   */
+  public readsStoppedDecision(value: PlaceId, rest: readonly string[]): boolean {
+    if (this.#stoppedPaths.size === 0) return false;
+    const reach = this.#reachOf(value);
+    if (reach === null) return false;
+    // (the read's own steps below its value continue the paths it is still a prefix of)
+    return (
+      reach.stopped ||
+      reach.live.some(
+        (stop) =>
+          stop.length - reach.depth <= rest.length &&
+          stop.every((step, index) => index < reach.depth || rest[index - reach.depth] === step),
+      )
+    );
+  }
+
+  #reachOf(value: PlaceId): StoppedReach | null {
+    const { program } = this.pass;
+    const chain: PlaceId[] = [];
+    let at = value;
+    for (
+      let projection = program.projOf.get(at);
+      !this.#stoppedReach.has(at) && projection !== undefined;
+    ) {
+      chain.push(at);
+      at = projection.owner;
+      projection = program.projOf.get(at);
+    }
+    let reach = this.#stoppedReach.get(at);
+    if (reach === undefined) {
+      program.work.charge("checks");
+      const binding = program.occurrenceOf.get(at);
+      if (binding === undefined) reach = null;
+      else {
+        const { root, path } = program.targetRoot(binding);
+        const paths = this.#stoppedPaths.get(root) ?? [];
+        reach = {
+          depth: path.length,
+          live: paths.filter((stop) => stop.length > path.length && startsWith(stop, path)),
+          stopped: paths.some((stop) => startsWith(path, stop)),
+        };
+      }
+      this.#stoppedReach.set(at, reach);
+    }
+    for (const next of chain.reverse()) {
+      program.work.charge("checks");
+      const projection = program.projOf.get(next)!;
+      if (reach === null || projection.step === "iteration") reach = null;
+      else {
+        const step = stepName(projection.step);
+        const from: StoppedReach = reach;
+        const depth: number = from.depth + 1;
+        const live: (readonly string[])[] = from.live.filter((stop) => stop[from.depth] === step);
+        reach = {
+          depth,
+          live: live.filter((stop) => stop.length > depth),
+          stopped: from.stopped || live.some((stop) => stop.length === depth),
+        };
+      }
+      this.#stoppedReach.set(next, reach);
+    }
+    return reach ?? null;
+  }
+
+  /**
    * The decision of one place at one path (§5), or `null` where nothing is checked: no store reaches it, it lies below
    * a reference (F19a), a settled family needs no scan (A3), or nothing decides. The decision is recorded for the
    * boundary checks' `against` (C9). `lazily`: a path of a copy `groups` leaves to be decided where an answer asks for
@@ -2815,7 +2938,7 @@ export class Admission {
       label: this.pathLabel(
         root,
         path,
-        byWritten ? writtenOf(this.pass.program.place(root).kind) : null,
+        byWritten ? writtenKinds(writtenOf(this.pass.program.place(root).kind)) : null,
       ),
       tags,
       written: byWritten,
@@ -3215,6 +3338,8 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
+    // (a decision that stopped decides nothing at its key or below it)
+    if (this.decisionStopped(place, path)) return [];
     if (this.#undecidedCopy(place, path)) return this.#retainedSource(place, path)?.tags ?? [];
     this.#lazily(place, path);
     const key = keyOf(place, path);
@@ -7322,10 +7447,15 @@ export class Admission {
    * argument's own kinds at the boundary's path (a record carrying the ingress its record, a typed ingress its expected
    * kinds, F18, with their `null`), none for external data alone (`unknown`: the runtime's validation of it).
    */
-  #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
+  #againstOf(d: Definition, path: readonly string[], fixed: Fixed | null = null): ItemTag[] {
     if (!this.#besideDefault(d)) {
-      const tags = this.admitted(d.place, path);
-      // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
+      // (the type `fixed` knows there, as `admitted` gives a written one; else the admitted type)
+      const known = fixed?.(path) ?? null;
+      const tags =
+        known === null
+          ? this.admitted(d.place, path)
+          : [...new Set(known.filter((tag) => tag !== "unknown"))];
+      // (after a stop, where neither retained anything at the destination, the stored value's read below it as the
       // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
       // TABLE r4.126)
       const destination = this.#destPath(d);
@@ -7362,24 +7492,25 @@ export class Admission {
    * least evaluation key; owed where a consumer met one of its ingresses' items, where a typed ingress lands where a
    * type is admitted (a parameter default too, r4.28; an argument or a return that carries a typed `load` or
    * `fromJson`, Sol M3 r8), or where one of its ingress stops stands where a type is admitted (the owner's F1).
-   * `written`: only the stores whose destination has a written type (a stop before admission settled).
+   * `fixedOf`, a stop before admission settled: only the stores whose destination's type it knows for them (the written
+   * type, else the stores' syntax: TABLE r4.110 (3), r4.122), against that type.
    */
-  public publish(written = false): void {
+  public publish(fixedOf: ((d: Definition) => Fixed | null) | null = null): void {
     const { definitions, lists, program } = this.pass;
-    const writtenAt = (d: Definition): boolean => {
-      const type = writtenOf(program.place(d.place).kind);
-      return type !== null && termAt(type, this.#destPath(d)) !== null;
-    };
-    // (`written`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
+    const written = fixedOf !== null;
+    const writtenAt = (d: Definition): boolean =>
+      (fixedOf?.(d)?.(this.#destPath(d)) ?? null) !== null;
+    // (`fixedOf`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
     const index = this.#landingIndex(written ? writtenAt : undefined);
     const stores = new Set(definitions.storeDefs);
     const elements = elementsBelow;
     for (const [d, stops] of index.byStore) {
       program.work.charge("checks");
       if (stops.length === 0) continue;
-      // (`written`: a stop before admission settled reads no decision, so only a written destination's boundary forms;
+      // (`fixedOf`: a stop before admission settled reads no decision, so only a boundary against a type it knows forms;
       // any other ingress store is marked, TABLE r4.110 (3))
       if (written && !writtenAt(d)) continue;
+      const fixed = fixedOf?.(d) ?? null;
       const destination = this.#destPath(d);
       // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
       // one)
@@ -7400,11 +7531,12 @@ export class Admission {
       const owed =
         this.#pending.has(d.uid) ||
         (typed
-          ? this.#againstOf(d, destination).length > 0
+          ? this.#againstOf(d, destination, fixed).length > 0
           : lists.live(d) &&
             stops.some(
               (stop) =>
-                this.#againstOf(d, joinSteps(destination, elements(d, stop.path))).length > 0,
+                this.#againstOf(d, joinSteps(destination, elements(d, stop.path)), fixed).length >
+                0,
             ));
       if (!owed) continue;
       const record = elements(d, stops[0]!.recordPath);
@@ -7417,12 +7549,8 @@ export class Admission {
         common = length;
       }
       const path = joinSteps(destination, record.slice(0, common));
-      const tags = this.#againstOf(d, path);
-      const label = this.pathLabel(
-        d.place,
-        path,
-        written ? writtenOf(program.place(d.place).kind) : null,
-      );
+      const tags = this.#againstOf(d, path, fixed);
+      const label = this.pathLabel(d.place, path, fixed);
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const key = keptKey(this.#work, d.place, path);
       const message = `validate external data entering ${label} against ${against.join("|")}`;

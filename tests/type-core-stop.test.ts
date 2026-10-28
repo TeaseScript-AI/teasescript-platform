@@ -9,9 +9,10 @@ import type { SerializableRuntimeValue } from "../src/runtime/values/serializabl
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -785,24 +786,28 @@ test("no stop in a settled walk gives a fallback the family of its key's contrac
 
 /**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
- * stop before that unit leaves the type the default is checked against undecided. The stop never loses the obligation
- * silently (TABLE r4.100): it marks it "not checked (budget)" at the default with its code; deciding the element at the
- * stop, to check it, is the per-demand fallback's step.
+ * stop before that unit leaves the element's contract unfinished; the stores' syntax decides it (`[2, 3]`: integers,
+ * TABLE r4.100), so the default keeps its check. A copied element type that admits `null` (`integer?[]`) is a domain that
+ * leaves the default's family undecided (TABLE r4.105): the stop marks it "not checked (budget)" at the default.
  */
-test("a stop after admission settled marks an inferred list's default it leaves undecided", () => {
+test("a stop after admission settled checks an inferred list's default by its stores' syntax", () => {
+  settledPhases([
+    [
+      'let items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
+      [host(2, 3)],
+      [host("bad", 3)],
+    ],
+    [
+      "let anchor = 4\nlet value = anchor otherwise hostValue\nlet items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay value\nexit\n",
+      [host(2, 3)],
+      [host("bad", 3)],
+    ],
+  ]);
+});
+
+test("a stop after admission settled marks a default whose element domain admits null", () => {
   settledPhases(
     [
-      [
-        'let items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
-        [host(2, 3)],
-        [host("bad", 3)],
-      ],
-      [
-        "let anchor = 4\nlet value = anchor otherwise hostValue\nlet items = [2, 3]\nsay items.get(hostOther, default: hostValue)\nsay value\nexit\n",
-        [host(2, 3)],
-        [host("bad", 3)],
-      ],
-      // a copied domain that admits `null` leaves the family undecided (TABLE r4.105): marked, not imposed
       [
         'let items: integer?[] = [2,null]\nlet a = {xs: items}\nlet b = a\nsay b.xs.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
         [host(2, 3)],
@@ -815,37 +820,46 @@ test("a stop after admission settled marks an inferred list's default it leaves 
 
 /**
  * Before admission settled nothing it decided is read (TABLE r4.110 (3); A6: a later pass may admit a store this one
- * rejected): a store into an inferred place is marked at its site, its type undecided, and one into a written type
- * keeps its check and its boundary; at a stop in the setup and at the last before admission settled, the oracle finds
- * nothing else, the inferred store's check moved to the runtime with its mark.
+ * rejected), and what every store's syntax decides is (r4.122): a store into an inferred place whose stores the syntax
+ * does not all tell (a copy of an inferred place among them) is marked at its site, its type undecided; a host value stored beside a
+ * literal owes its check against the literal's type; one into a written type keeps its check and its boundary. At a stop
+ * in the setup and at the last before admission settled, the oracle finds nothing else.
  */
-test("a stop before admission settled marks the stores into inferred places and keeps the written ones", () => {
-  const source = 'let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n';
-  const unstopped = stopRun(source);
-  const store = source.indexOf("hostValue");
-  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
-    const stopped = stopRun(source, allowance);
-    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
-    assert.ok(
-      stopped.answers.budget.deferred.some(
-        (d) =>
-          d.code === "TSV041" &&
-          d.site.start === store &&
-          d.obligation.against.length === 1 &&
-          d.obligation.against[0] === "unknown",
-      ),
-      `@${allowance}`,
-    );
-    assert.deepEqual(
-      stopProblems({
-        unstopped,
-        stopped,
-        fitting: [host(2, 3)],
-        violating: [host(1.5, 3), host(2, 1.5)],
-      }),
-      [],
-      `@${allowance}`,
-    );
+test("a stop before admission settled marks the stores into inferred places syntax leaves undecided", () => {
+  for (const [source, marked] of [
+    [
+      'let base = 1\nlet count = base\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n',
+      true,
+    ],
+    ['let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n', false],
+  ] as const) {
+    const unstopped = stopRun(source);
+    const store = source.indexOf("hostValue");
+    for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+      const stopped = stopRun(source, allowance);
+      assert.equal(stopped.answers.budget.settled, false, `${source} @${allowance}`);
+      assert.equal(
+        stopped.answers.budget.deferred.some(
+          (d) =>
+            d.code === "TSV041" &&
+            d.site.start === store &&
+            d.obligation.against.length === 1 &&
+            d.obligation.against[0] === "unknown",
+        ),
+        marked,
+        `${source} @${allowance}`,
+      );
+      assert.deepEqual(
+        stopProblems({
+          unstopped,
+          stopped,
+          fitting: [host(2, 3)],
+          violating: [host(1.5, 3), host(2, 1.5)],
+        }),
+        [],
+        `${source} @${allowance}`,
+      );
+    }
   }
 });
 
@@ -1591,4 +1605,222 @@ test("the named exception for #1216 stands at its counted stops", () => {
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, exception.settled);
+});
+
+/**
+ * The per-demand fallback (S3 §5, TABLE B1, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
+ * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
+ * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
+ * read of `y` stops with its key's contract and the reason `budget`, so its check runs when the script runs, while
+ * `count`'s error stays an error.
+ */
+const chain = (reads: number, count: boolean): string =>
+  [
+    "let x = 1.5",
+    ...Array.from({ length: 30 }, (_, i) => `let y${i + 1} = ${i === 0 ? "x" : `y${i}`}`),
+    ...Array.from({ length: reads }, () => "repeat y30 {}"),
+    "y30 = 2",
+    ...(count ? ["let count = 1", "count = 0.5", "repeat count {}"] : []),
+    'say "AFTER"',
+    "exit",
+  ].join("\n") + "\n";
+
+/** Three quarters of the longest demand a source's analysis bounds, unbounded: below the chain's, above a short read's. */
+function demandAllowance(source: string): number {
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const bounded = analyseCore(request).budget.demands.filter((read) => read.bounded);
+  return Math.floor(0.75 * Math.max(...bounded.map((read) => read.units)));
+}
+
+test("a demand past its allowance moves its read's check to the runtime, an independent proof staying an error (S3 §5)", () => {
+  const source = chain(1, true);
+  const read = source.indexOf("y30 {}");
+  const count = source.indexOf("count {}");
+  const diagnostics = withTestDemandAllowance(demandAllowance(source), () =>
+    inBothOrders(() =>
+      compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).diagnostics.map(
+        (d) => `${d.severity} ${d.code} @${d.span.start.offset}`,
+      ),
+    ),
+  );
+  assert.deepEqual(diagnostics, [`warning TSV011 @${read}`, `error TSV011 @${count}`]);
+  // without the independent error: the moved check runs and stops the fraction before the next effect
+  const runnable = chain(1, false);
+  const plan = withTestDemandAllowance(demandAllowance(runnable), () =>
+    inBothOrders(() => compileSourceWithBackend(runnable, OPTIONS, CORE_BACKEND).plan),
+  );
+  assert.ok(plan !== null);
+  const failed = ran(plan, 0);
+  assert.deepEqual(failed.said, []);
+  assert.match(failed.failure ?? "", new RegExp(`^TSR043@${runnable.indexOf("y30 {}")}:`, "u"));
+});
+
+test("a stopped demand's proof is not reused by a later demand of its key, in either order (S3 §5)", () => {
+  // two reads of `y30`: the one asked first stops; the other, an independent demand, keeps its allowance and proves
+  const source = chain(2, false);
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const first = source.indexOf("repeat y30") + "repeat ".length;
+  const second = source.indexOf("repeat y30", first) + "repeat ".length;
+  const allowance = demandAllowance(source);
+  for (const reversed of [false, true]) {
+    const analyse = (): Answers => withTestDemandAllowance(allowance, () => analyseCore(request));
+    const answers: Answers = reversed
+      ? withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), analyse),
+        )
+      : analyse();
+    const at = (start: number): string[] =>
+      answers.diagnostics
+        .filter((d) => d.site.start === start)
+        .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
+    const [stopped, proved] = reversed ? [second, first] : [first, second];
+    assert.deepEqual(at(stopped), ["warning-runtime-check budget"], `reversed: ${reversed}`);
+    assert.deepEqual(at(proved), ["compile-error -"], `reversed: ${reversed}`);
+  }
+});
+
+test("after an early stop a store into a place a literal or a copy of a written type decides keeps its check", () => {
+  // the stop in the setup, before admission decides anything: the cheap deciders of TABLE r4.89 (2)
+  const stats = (n: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "object",
+    properties: [
+      { name: "stats", value: { kind: "object", properties: [{ name: "n", value: n }] } },
+    ],
+  });
+  for (const [source, fitting, violating] of [
+    ['let b = 1\nb = hostValue\nsay "AFTER"\nexit\n', 2, "wrong"],
+    ['let a: integer = 0\nlet b = a\nb = hostValue\nsay "AFTER"\nexit\n', 2, "wrong"],
+    ['let b = {stats: {n: 1}}\nb = hostValue\nsay "AFTER"\nexit\n', stats(2), stats("wrong")],
+    // a literal holding a host value is checked at its store as the host value is (Codex c-r3 B1c)
+    ['let b = {n: 1}\nb = {n: hostValue}\nsay "AFTER"\nexit\n', 2, "wrong"],
+    ['let b = [1]\nb = [hostValue]\nsay "AFTER"\nexit\n', 2, "wrong"],
+  ] as const) {
+    const { plan } = compiled(source, 1);
+    assert.ok(plan !== null, source);
+    assert.deepEqual(ran(plan, fitting), { said: ["AFTER"], failure: null }, source);
+    assert.match(ran(plan, violating).failure ?? "", /^TSR058@/u, source);
+  }
+  // every store decides together, as admission would: a `null` decides nothing but admits `null`, a fraction widens an
+  // integer (Codex c-r1 B1: a first literal's own type alone failed each of these fitting values)
+  const object = (n: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "object",
+    properties: [{ name: "n", value: n }],
+  });
+  const list = (item: SerializableRuntimeValue): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [item],
+  });
+  for (const [stores, fitting] of [
+    ["let b = null", 2],
+    ["let b = 1\nb = 1.5", 1.5],
+    ["let b = 1\nb = null", null],
+    ["let b = {n: null}", object(2)],
+    ["let b = {n: 1}\nb.n = null", object(null)],
+    ["let b = [null]", list(2)],
+    ["let b = [{n: null}]", list(object(2))],
+  ] as const) {
+    const source = `${stores}\nb = hostValue\nsay "AFTER"\nexit\n`;
+    const { plan } = compiled(source, 1);
+    assert.ok(plan !== null, source);
+    assert.deepEqual(ran(plan, fitting), { said: ["AFTER"], failure: null }, source);
+  }
+});
+
+test("after an early stop an add, an addAll and a dict's values decide a place's elements as admission does", () => {
+  // through the analysis: the candidate route does not take these forms yet (Codex c-r2 B1: an `addAll` gave its list,
+  // not its elements; a dict literal gave no values, so a later store alone decided them)
+  for (const [stores, kinds] of [
+    ["let b = [1]\nb.add(1.5)", ["number"]],
+    ["let b = [1]\nb.addAll([1.5])", ["number"]],
+    ["let b = [1]\nb.addAll([null])", ["integer", "null"]],
+    ['let b = dict{a: 1.5}\nb["a"] = 1', ["number"]],
+    ['let b = dict{a: null}\nb["a"] = 1', ["integer", "null"]],
+  ] as const) {
+    const source = `${stores}\nb = hostValue\nsay "AFTER"\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+    assert.ok(request !== null);
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === "b",
+    )!;
+    const elements = (answers: Answers): string[] => {
+      const admitted = answers.place(place.id, ["element"]).admitted;
+      return admitted.by === "undecided" ? [] : [...admitted.kinds].sort();
+    };
+    assert.deepEqual(elements(analyseCore(request)), kinds, stores);
+    assert.deepEqual(
+      withTestAllowance(1, () => inBothOrders(() => elements(analyseCore(request)))),
+      kinds,
+      stores,
+    );
+  }
+});
+
+test("an admission decision past its allowance stops: its key undecided, its reads checked when the script runs (S3 §5)", () => {
+  // `b`'s decision scans its 41 stores, while each read is short, `count`'s decision too
+  const source = (count: boolean): string =>
+    [
+      "let b = 1",
+      ...Array.from({ length: 40 }, (_, i) => `b = ${i + 2}`),
+      "b = hostValue",
+      "let n: integer = b",
+      ...(count ? ["let count = 1", "count = 0.5", "repeat count {}"] : []),
+      'say "AFTER"',
+      "exit",
+    ].join("\n") + "\n";
+  for (const reversed of [false, true]) {
+    const inOrder = <T>(make: () => T): T =>
+      reversed
+        ? withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), make),
+          )
+        : make();
+    for (const count of [true, false]) {
+      const text = source(count);
+      const request = coreRequest([{ path: "main.tease", source: text }], OPTIONS.globals);
+      assert.ok(request !== null);
+      const b = new CoreProgram(request).places.find(
+        ({ kind }) => kind.kind === "binding" && kind.name === "b",
+      )!.id;
+      // three quarters of `b`'s decision in the unbounded analysis in this order: far above `count`'s
+      const { decisions } = inOrder(() => analyseCore(request)).budget;
+      const own = decisions.filter((d) => d.place === b && d.path.length === 0);
+      assert.equal(own.length, 1);
+      const allowance = Math.floor(0.75 * own[0]!.units);
+      const where = `reversed: ${reversed}, count: ${count}`;
+      const answers: Answers = withTestDemandAllowance(allowance, () =>
+        inOrder(() => analyseCore(request)),
+      );
+      assert.deepEqual(
+        answers.budget.decisions.filter((d) => d.stopped).map((d) => [d.place, d.path]),
+        [[b, []]],
+        where,
+      );
+      // (a read as long as the decision may stop too: its own key's contract with `budget`)
+      assert.deepEqual(answers.place(b).admitted, { by: "undecided" }, where);
+      const at = (start: number): string[] =>
+        answers.diagnostics
+          .filter((d) => d.site.start === start)
+          .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
+      const read = text.indexOf(count ? "b\nlet count" : "b\nsay");
+      // (its check owed either way: `budget` where the decision had stopped before the read, else the host value's
+      // own `unknown`, as where `n`'s check reads `b` before `b` is decided in the reversed order)
+      assert.deepEqual(
+        at(read),
+        [`warning-runtime-check ${reversed ? "unknown" : "budget"}`],
+        where,
+      );
+      if (count) assert.deepEqual(at(text.indexOf("count {}")), ["compile-error -"], where);
+      else {
+        // the read's moved check stops a fraction before the next effect
+        const plan = withTestDemandAllowance(allowance, () =>
+          inOrder(() => compileSourceWithBackend(text, OPTIONS, CORE_BACKEND).plan),
+        );
+        assert.ok(plan !== null, where);
+        assert.deepEqual(ran(plan, 5), { said: ["AFTER"], failure: null }, where);
+        assert.match(ran(plan, 1.5).failure ?? "", new RegExp(`^TSR\\d+@${read}:`, "u"), where);
+      }
+    }
+  }
 });

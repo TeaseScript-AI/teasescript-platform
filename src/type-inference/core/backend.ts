@@ -448,7 +448,12 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       const place = answers.at(nodeOf(answers, index, statement))?.place;
       if (place === null || place === undefined) continue;
       for (let path: string[] = [...place.path]; ; path = [...path, "element"]) {
-        const tags = answers.place(place.id, path).contract.kinds.map((item) => item.tag);
+        // (as the facts read it, `admittedType`: the admitted kinds where decided, else the contract's)
+        const answer = answers.place(place.id, path);
+        const tags =
+          answer.admitted.by === "undecided"
+            ? answer.contract.kinds.map((item) => item.tag)
+            : answer.admitted.kinds;
         if (!tags.includes("list")) break;
         if (path.length + 1 >= SLICE_DEPTH)
           return {

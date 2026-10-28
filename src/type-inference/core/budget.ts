@@ -230,6 +230,17 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
  * analysis catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when
  * the script runs (`nesting`).
  */
+/**
+ * A demand that crossed its allowance (S3 §5, TABLE B1): the solver gives it up between two steps of its computations,
+ * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
+ */
+export class DemandExhausted extends Error {
+  public constructor() {
+    super("A demand exceeded its allowance.");
+    this.name = "DemandExhausted";
+  }
+}
+
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
     super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
@@ -337,6 +348,26 @@ export function checkReadDepth(depth: number): void {
 
 /** The allowance a test imposes on every analysis started inside `withTestAllowance`, or `null`. */
 let testAllowance: number | null = null;
+let testDemandAllowance: number | null = null;
+
+/**
+ * A demand's allowance (S3 §5, TABLE B1): 256 × the nodes of the reading site's callable, or a test's
+ * (`withTestDemandAllowance`).
+ */
+export function demandAllowanceFor(callableNodes: number): number {
+  return testDemandAllowance ?? WORK_PER_NODE * callableNodes;
+}
+
+/** Test-only: runs `callback` with `allowance` as every demand's allowance (`demandAllowanceFor`). */
+export function withTestDemandAllowance<T>(allowance: number, callback: () => T): T {
+  if (testDemandAllowance !== null) throw new Error("A test demand allowance is already active.");
+  testDemandAllowance = allowance;
+  try {
+    return callback();
+  } finally {
+    testDemandAllowance = null;
+  }
+}
 
 /** The ledger of an analysis of a program with `syntaxNodes` parsed nodes: its allowance, or a test's. */
 export function ledgerFor(syntaxNodes: number): WorkLedger {

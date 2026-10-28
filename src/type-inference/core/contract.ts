@@ -4190,14 +4190,21 @@ export class Contract {
   /**
    * Every contribution, once per pass before the first query: each live stored read of a key with a tested key below
    * it into its source's holder (stores, adds, arguments, returns, literal cells, alias bindings); each literal's reads
-   * as references from the literal's holder under their path, and its guarded reads' paths.
+   * as references from the literal's holder under their path, and its guarded reads' paths. A literal another literal
+   * holds is among that literal's: its reads stand in the outer literal's index at their paths below it, so its own
+   * would repeat them, and its identity would walk its whole depth again at every level (TABLE r4.100 (2)).
    */
   #collectMarks(): void {
     if (this.#collected) return;
     this.#collected = true;
     const { program, definitions, lists, guards } = this.pass;
     const stores = new Set([...definitions.storeDefs, ...definitions.transferDefs]);
-    for (const [, cells] of definitions.cellDefs) for (const d of cells) stores.add(d);
+    const held = new Set<PlaceId>();
+    for (const [, cells] of definitions.cellDefs)
+      for (const d of cells) {
+        stores.add(d);
+        if (d.value !== undefined) held.add(d.value);
+      }
     for (const d of stores) {
       program.work.charge("invSteps");
       if (d.value === undefined || !lists.live(d)) continue;
@@ -4211,6 +4218,7 @@ export class Contract {
     }
     for (const value of program.hasOf.keys()) {
       program.work.charge("invSteps");
+      if (held.has(value)) continue;
       const holder = this.identityOf(value).holder;
       if (holder === null) continue;
       for (const [path, list] of this.literalIndex(value).reads)
