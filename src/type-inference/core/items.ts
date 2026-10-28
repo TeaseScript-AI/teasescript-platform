@@ -245,6 +245,30 @@ export function ingressLeaves(node: IngressNode): Writer[] {
   return [...leaves.values()].sort(compareWriters);
 }
 
+/**
+ * Whether every one of `leaves` lies below `node`, with no cell on the way (a fixpoint's cell grows as its member runs
+ * again): each node visited once, charged.
+ */
+export function holdsLeaves(
+  node: IngressNode | undefined,
+  leaves: readonly IngressNode[],
+  scope: ItemScope,
+): boolean {
+  const found = new Set<IngressNode>();
+  const seen = new Set<IngressNode>();
+  const pending = node === undefined ? [] : [node];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    scope.work.charge("mergeItems");
+    seen.add(current);
+    if ("ingress" in current) found.add(current);
+    else if ("parts" in current) pending.push(...current.parts);
+    else return false;
+  }
+  return leaves.every((leaf) => found.has(leaf));
+}
+
 /** What the item operations of one analysis share: its ledger and its ingress graph. */
 export interface ItemScope {
   readonly work: WorkLedger;

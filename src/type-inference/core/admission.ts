@@ -5850,13 +5850,19 @@ export class Admission {
   /**
    * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
    * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
-   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); any other value its
+   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data,
+   * there or as the default, the contract's class of its global and guards (`classOf`, #1196: its answer is the
+   * global's external data at every path, so k reads of one global share one discovery, #1207); any other value its
    * source identity. Values of one class have the same kinds at every path.
    */
   #conflictClass(value: PlaceId): string {
-    const { program, contract } = this.pass;
+    const { program, contract, definitions } = this.pass;
+    const source = (of: PlaceId): string =>
+      (program.occurrenceOf.has(of) && definitions.ingress.has(of)
+        ? contract.classOf(of, false)
+        : null) ?? contract.identityOf(of).id;
     const c = program.opOf.get(value);
-    if (c === undefined) return contract.identityOf(value).id;
+    if (c === undefined) return source(value);
     let fallback: PlaceId | undefined;
     if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;
     else if (
@@ -5873,12 +5879,7 @@ export class Admission {
       this.#termIds.set(expected, term);
     }
     const by = c.kind === "load" ? "load" : c.contract.name;
-    return joinParts(
-      "f18",
-      by,
-      term,
-      fallback === undefined ? "" : contract.identityOf(fallback).id,
-    );
+    return joinParts("f18", by, term, fallback === undefined ? "" : source(fallback));
   }
 
   // ------------------------------------------------------------------------------------------- the landing index
