@@ -4826,7 +4826,8 @@ export class Contract {
    * select by the key, each left out whose contribution at every path an earlier one's holds. A contract answer is merged
    * before it is read (each kind once, its earliest writer, kinds in the order they first come), so of the objects whose
    * selected properties store one value (`#storedClass`) one counts, the earliest: its span ends before the others'
-   * start, so every writer of its answer comes first. So do the objects with unknown keys and those with neither key.
+   * start, so each writer of its answer from inside its option comes first, and the rest (a missing property's) are the
+   * class's own, alike in each. So do the objects with unknown keys and those with neither key.
    * So k questions below a choice of k objects storing one value read one object each, not k.
    */
   #selectionObjects(
@@ -4878,7 +4879,8 @@ export class Contract {
 
   /**
    * #1233: what a cell stores, as a class: two cells of one class answer every contract-side question below them alike
-   * but for their writers, which lie inside the extent kept with the class. The rule: a cell stores the sequence of its
+   * but for the writers inside them, which lie inside the extent kept with the class; the others (a missing property's,
+   * which keeps its source's) are the class's own, alike in both. The rule: a cell stores the sequence of its
    * live definitions' values; a read stores its read class (`readClass`: its source resolved through unchanged whole
    * copies, its own steps, the guards that hold it at and below its path) and whether its identity is guarded; an inline
    * literal stores its structure (an object its properties in order, each its cell's class; a list, set or dict its
