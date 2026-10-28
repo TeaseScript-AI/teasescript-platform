@@ -5214,12 +5214,13 @@ before a unit must be a number: a known other value is a compile error and any o
 one unit: `5 s ms` and `1 h 30 min` are errors, and parts are added with `+`, as in `1 h + 30 min`.
 
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
-`calendar` are compile errors. Where only an exact duration fits (a wait, timer, timeout, say pacing, media position,
-media repeat budget, or a variable, global, or parameter written as `duration` or `duration?`), the error suggests a
-length in days or weeks, unless a sign is before the value. Where any duration fits (a variable, global, or parameter
-with no written type or one that holds `calendarDuration`, the text of a `say`, or an interpolation), it suggests
-`calendar`, unless the written amount is not a whole number of months. Elsewhere, also for a global without a written
-type that has `, default:`, and inside a calculation, it names both choices in words. `m` is not a duration
+`calendar` are compile errors. Where only an exact duration fits (a wait, timer, timeout, say pacing, media or cue
+position, media repeat budget, or a variable, global, or parameter written as `duration` or `duration?`), the error
+suggests a length in days or weeks, in words when a sign is before the value. Where any duration fits (a variable,
+global, or parameter with no written type or one that holds `calendarDuration`, the text of a `say`, or an
+interpolation), it suggests `calendar`, or a length in days or weeks in words when the amount is not a whole number of
+months. Inside a calculation, for both values of a global with no written type that has `, default:`, and everywhere
+else, it names both choices in words. `m` is not a duration
 unit, because it would be ambiguous between minutes and months. `calendar` is a
 unit word only where a unit can stand; elsewhere it is an ordinary name. A calendar week is 7 calendar days and a
 calendar year 12 calendar months. Adding months or years to a day that the target month lacks gives that month's last

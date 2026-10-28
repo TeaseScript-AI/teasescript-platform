@@ -136,7 +136,7 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
   // So does a short 'mo' or 'y', at the unit, also where a list or a call goes on after it. Inside a calculation or a
   // list, which type fits is not known, so the error names both choices in words.
   const inWords = (unit: string) =>
-    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`;
+    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`;
   for (const [source, message, column, unit] of [
     ["let a = n mo", "A month has no fixed length. Write 'n calendar mo'.", 10, "mo"],
     ["let a = getDate() + xs[0] y", inWords("year"), 26, "y"],
@@ -576,7 +576,7 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
   // Inside arithmetic it may be part of a ratio, so which fix compiles depends on the other operand: the fix is in words.
   const inWords = (unit: string): [string, string] => [
     "TSP033",
-    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`,
+    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`,
   ];
   for (const [source, expected] of [
     ["wait 1 h + (n months)", [inWords("month")]],
@@ -660,26 +660,27 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
       const written = `${amount} ${unit}`;
       const source = place.replace("#", form);
       const name = unit.startsWith("y") ? "year" : "month";
-      // A calendar amount must be whole, and a negative length is wrong whatever its unit, so neither fix compiles.
-      const fix =
+      // A calendar amount must be whole, and a negative length is wrong whatever its unit, so no code form compiles:
+      // the words name the choice that remains.
+      const unproved =
         (advice === "calendar" && form === "1.5 month") ||
-        (advice !== "calendar" && advice !== "words" && form.startsWith("-"))
-          ? "words"
-          : advice;
+        (advice !== "calendar" && advice !== "words" && form.startsWith("-"));
       const offered =
-        fix === "calendar"
-          ? `${amount} calendar ${unit}`
-          : fix === "words"
-            ? null
+        unproved || advice === "words"
+          ? null
+          : advice === "calendar"
+            ? `${amount} calendar ${unit}`
             : name === "year"
               ? "365 days"
               : "30 days";
       const expected =
-        fix === "calendar"
-          ? `A ${name} has no fixed length. Write '${offered}'.`
-          : fix === "words"
-            ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
-            : `${fix} needs an exact length, and a ${name} has none. Write the length in days or weeks, as in '${offered}'.`;
+        advice === "words"
+          ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`
+          : advice === "calendar"
+            ? unproved
+              ? `A ${name} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
+              : `A ${name} has no fixed length. Write '${offered}'.`
+            : `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks${unproved ? "" : `, as in '${offered}'`}.`;
       assert.deepEqual(diagnostics(`${header}${source}\nexit`), [["TSP033", expected]], source);
       if (offered !== null) {
         const pasted = `${header}${source.replace(written, offered)}\nexit`;

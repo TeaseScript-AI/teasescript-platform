@@ -204,7 +204,7 @@ function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | u
 
 /** The advice for a month or a year without `calendar` that names both choices, wherever neither is known to fit. */
 function calendarUnitWords(unit: string): string {
-  return `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`;
+  return `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`;
 }
 
 /**
@@ -296,8 +296,8 @@ function adviseDuration(
     const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
       const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
-      // Either fix fails, so the words stay, for a written calendar amount that is not whole, as in `1.5 month`, and
-      // for a length after a sign where only an exact duration fits, as in `wait -(1 month)`.
+      // No code form is proved for a written calendar amount that is not whole, as in `1.5 month`, nor for a length after
+      // a sign where only an exact duration fits, as in `wait -(1 month)`: the words name the choice that remains.
       const proved =
         place === "calendar"
           ? node.kind !== "durationLiteral" || typeof durationLiteralValue(node) !== "string"
@@ -305,11 +305,11 @@ function adviseDuration(
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        !proved
-          ? calendarUnitWords(unit)
-          : place === "calendar"
+        place === "calendar"
+          ? proved
             ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
-            : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+            : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
+          : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks${proved ? `, as in '${example}'` : ""}.`,
         error!.diagnostic.span,
       );
       // A command that takes the value as an argument knows its place, and its advice comes after.
