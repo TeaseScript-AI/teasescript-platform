@@ -222,7 +222,8 @@ function parseFunctionParameter(parser: Parser): FunctionParameter | null {
       parser.synchronizeParameter();
       return null;
     }
-    end = typeAnnotation.span;
+    // To the type's last token, also a group's `)`.
+    end = parser.previous().span;
   }
   let defaultValue: Expression | null = null;
   if (parser.match(TokenKind.Equal)) {

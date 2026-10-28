@@ -664,6 +664,23 @@ test("otherwise beside any other operator needs parentheses, and one error names
   );
 });
 
+test("both readings of a type test with a grouped type keep its ')', and each compiles", () => {
+  const header = `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\n`;
+  for (const test of ["is (integer)", "is (integer | string)", "is not (integer | string)"]) {
+    const [message] = diagnostics(`${header}say a otherwise b ${test}\nexit`).map(
+      (diagnostic) => diagnostic[2],
+    );
+    const readings = [...(message ?? "").matchAll(/'([^']*)' uses /gu)].map((match) => match[1]);
+    assert.deepEqual(readings, [`(a otherwise b) ${test}`, `a otherwise (b ${test})`], test);
+    for (const reading of readings)
+      assert.deepEqual(
+        diagnostics(`${header}say ${reading}\nexit`).filter(([severity]) => severity === "error"),
+        [],
+        reading,
+      );
+  }
+});
+
 test("otherwise needs no parentheses in a chain, in an interpolation, and before a sign or a unit", () => {
   assert.deepEqual(
     sayTexts(

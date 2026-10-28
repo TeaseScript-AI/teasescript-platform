@@ -1179,6 +1179,8 @@ export class Parser {
       ),
     );
     if (type === null) return value;
+    // The test ends at the type's last token: a group without a postfix spans only its inner type, without the `)`.
+    const last = this.previous();
     // A type test ends its operand too (see `#parseMultiplicative`).
     this.#skipNewlinesBeforeOperator();
     return Object.freeze({
@@ -1186,7 +1188,7 @@ export class Parser {
       value,
       type,
       negated,
-      span: spanFrom(value.span, type.span),
+      span: spanFrom(value.span, last.span),
     });
   }
 
