@@ -46,10 +46,13 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
     } else if (exact !== undefined) {
       parser.advance();
       result = withUnit({ calendar: false, unit: exact }, token);
+      reportUnitWithoutSpace(parser, expression, start, parser.current - 1);
     } else if (token.lexeme === "calendar") {
       const unit = calendarUnit(parser, parser.advance());
-      if (unit !== undefined) result = withUnit({ calendar: true, unit }, parser.advance());
-      else parser.unitlessCalendars.add(expression);
+      if (unit !== undefined) {
+        result = withUnit({ calendar: true, unit }, parser.advance());
+        reportUnitWithoutSpace(parser, expression, start, parser.current - 2);
+      } else parser.unitlessCalendars.add(expression);
     } else if (withoutCalendar !== undefined) {
       reportCalendarUnitWithoutCalendar(parser, parser.sourceText(start, parser.current), token);
       result = withUnit({ calendar: true, unit: withoutCalendar }, parser.advance());
@@ -95,17 +98,32 @@ function reportSecondUnit(parser: Parser, result: Expression): Expression {
 }
 
 /**
+ * A unit needs a space before it, as in `90 s`, `count s`, or `(a + b) min` (V30 §3): `90s`, `2min`, and `90deg` are
+ * errors that suggest the spaced form. `operand` begins at token `start` and the unit at token `first`, and the unit
+ * ends at the token just read.
+ */
+function reportUnitWithoutSpace(
+  parser: Parser,
+  operand: Expression,
+  start: number,
+  first: number,
+): void {
+  const unit = parser.tokens[first]!;
+  if (unit.span.start.offset === operand.span.end.offset)
+    parser.reportToken(
+      parserDiagnosticCode.unsupportedDurationUnit,
+      `A unit needs a space before it. Write '${parser.sourceText(start, first)} ${parser.sourceText(first, parser.current)}'.`,
+      unit,
+    );
+}
+
+/**
  * The angle unit that comes next after `operand`, which begins at `start`: the number before it as an angle, such as
- * `90 deg` or `(a + b) rad` (V30 §13). A space must come before the unit, unlike in `90deg`.
+ * `90 deg` or `(a + b) rad` (V30 §13).
  */
 function angleExpression(parser: Parser, operand: Expression, start: number): AngleExpression {
   const token = parser.advance();
-  if (token.span.start.offset === operand.span.end.offset)
-    parser.reportToken(
-      parserDiagnosticCode.unsupportedDurationUnit,
-      `A unit needs a space before it. Write '${parser.sourceText(start, parser.current - 1)} ${token.lexeme}'.`,
-      token,
-    );
+  reportUnitWithoutSpace(parser, operand, start, parser.current - 1);
   return Object.freeze({
     kind: "angleExpression",
     operand,
@@ -142,10 +160,17 @@ export function parseDurationUnit(
     });
   if (token.lexeme === "calendar") {
     const unit = calendarUnit(parser, parser.advance());
-    return unit === undefined ? amount : literal({ calendar: true, unit }, parser.advance());
+    if (unit === undefined) return amount;
+    const result = literal({ calendar: true, unit }, parser.advance());
+    reportUnitWithoutSpace(parser, amount, start, parser.current - 2);
+    return result;
   }
   const exact = elapsedDurationUnit(token.lexeme);
-  if (exact !== undefined) return literal({ calendar: false, unit: exact }, parser.advance());
+  if (exact !== undefined) {
+    const result = literal({ calendar: false, unit: exact }, parser.advance());
+    reportUnitWithoutSpace(parser, amount, start, parser.current - 1);
+    return result;
+  }
   const calendar = calendarDurationUnit(token.lexeme);
   if (calendar === undefined) return amount;
   reportCalendarUnitWithoutCalendar(parser, amount.raw, token);

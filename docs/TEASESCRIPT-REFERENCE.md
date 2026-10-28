@@ -714,8 +714,7 @@ button.remove()
 
 - **Takes:** a number, name, call or `(expression)`, a space, then the unit. Every time needs a unit: `wait 1 s`.
 - **Gives:** an exact `duration` (a day is 24 hours); dividing two gives a `number`.
-- **Fails:** `m` (use `min`); `1 h 30 min` (write `1 h + 30 min`); a bare number. V30 requires the space before the
-  unit; the compiler does not enforce it yet.
+- **Fails:** `m` (use `min`); `1 h 30 min` (write `1 h + 30 min`); a bare number; `90s` without a space.
 - **Status:** Implemented · [durations](specifications/accepted-syntaxes-v30.md#durations)
 
 ```tease
