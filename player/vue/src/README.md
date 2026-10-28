@@ -51,12 +51,14 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   on overwrites its session. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
   `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media-device.ts`: it reconciles the session's media
   projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
-  clock observation, which runs every 100 ms while media loads or plays. With the camera capability, Start
-  first opens the session camera (`player/session-camera.ts`) before the session is created; without it, the session
-  starts within the click. Because some browsers (Safari) allow playback per element only from a user activation, which
-  the session may outlive while a camera permission prompt is open, the host reuses released elements and, within a
-  Start or Continue click that waits for the camera, plays silence on every spare one, ensuring at least two; elements
-  allocated beyond the pool fall back to the refused-playback retry. For the same reason, as Safari grants a page's
+  clock observation, which runs every 100 ms while media loads or plays. Start and Continue first open the
+  session camera (`player/session-camera.ts`) when the Player has the camera capability, and a Start with script
+  storage, which `main.ts` always gives, then reads the script's saved values again
+  ([`DATA-AND-API.md`](../../../docs/DATA-AND-API.md#script-storage-in-the-browser)). The session is created after these
+  waits, so in the shipped Player only a Continue without the camera starts it within the click. Because some browsers
+  (Safari) allow playback per element only from a user activation, which the session may outlive while it waits, the
+  host reuses released elements and, within a Start or Continue click that waits, plays silence on every spare one,
+  ensuring at least two; elements allocated beyond the pool fall back to the refused-playback retry. For the same reason, as Safari grants a page's
   first screen wake lock only right after a click, `useScreenWakeLock.ts` asks for it within that click, before the
   camera opens, and holds it while the session plays. In a Player that can capture or read stored
   photos, a save first stores the captured photos its value references (`player/captured-media-persistence.ts`);
