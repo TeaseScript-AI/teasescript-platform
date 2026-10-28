@@ -979,6 +979,10 @@ export class Admission {
   readonly #members = new Map<Definition, Definition[]>();
   /** An alias's source path and the node it is read at (`#aliasKey`). */
   readonly #aliases = new Map<Definition, Alias>();
+  /** Per written type and path into it, the name of its spelling in the alias keys (`#writtenDomainKey`). */
+  readonly #writtenNames = new Map<TypeTerm, Map<string, string>>();
+  /** The name of each written spelling the alias keys hold, by the spelling: equal spellings one name. */
+  readonly #spellings = new Map<string, string>();
   /** Per read (its source and node), its chain's end (`#chainEnd`), `null` where it is its own. */
   readonly #chains = new Map<string, ChainEnd | null>();
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
@@ -4718,15 +4722,32 @@ export class Admission {
 
   /**
    * The written type an alias's read copies at its path (A4: a copy of a written binding is decided by it), as the class
-   * key holds it: the type, or the unwritten place whose own decision it copies with the path into it (`#inheritedAt`),
-   * `null` where the copied binding has none; the member's own, never its chain's end's (TABLE r4.72, Astra r5 B1).
+   * key holds it: the name of the type's spelling, or the unwritten place whose own decision it copies with the path
+   * into it (`#inheritedAt`), `null` where the copied binding has none; the member's own, never its chain's end's
+   * (TABLE r4.72, Astra r5 B1).
    */
   #writtenDomainKey(alias: Alias): string {
     const written = this.#writtenSource(alias.value, []);
     if (written === null) return "null";
-    return written.from === null
-      ? JSON.stringify(permittedAt(written.term!, written.strip))
-      : `inherits ${written.from} ${keptText(this.#work, written.strip)}`;
+    if (written.from !== null)
+      return `inherits ${written.from} ${keptText(this.#work, written.strip)}`;
+    // (by its spelling's interned name, spelled once per written type and path: k copies of one long written type keep
+    // k short names, never k spellings, #1255)
+    let byPath = this.#writtenNames.get(written.term!);
+    if (byPath === undefined) this.#writtenNames.set(written.term!, (byPath = new Map()));
+    const path = keptText(this.#work, written.strip);
+    let name = byPath.get(path);
+    if (name === undefined) {
+      const spelling = JSON.stringify(permittedAt(written.term!, written.strip));
+      name = this.#spellings.get(spelling);
+      if (name === undefined) {
+        keepText(this.#work, spelling.length);
+        name = `w${this.#spellings.size}`;
+        this.#spellings.set(spelling, name);
+      }
+      byPath.set(path, name);
+    }
+    return name;
   }
 
   /** The written type an alias's read copies at `rest` below its path (`#writtenDomainKey`), `null` where none. */
