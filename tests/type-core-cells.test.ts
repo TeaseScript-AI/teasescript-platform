@@ -254,9 +254,9 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
     ],
   ];
   // a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
-  // result, a field or element of one, or a parameter copied in a callee only a dead call calls, warns as on `main`: the
-  // live form's record, X1's word on the use (reviews r3's and r4's B3 shapes, standing, with an operation, a length
-  // and a merge); a written destination keeps the flag as it keeps the guard mark
+  // result or a field or element of one warns as on `main`: the live form's record, X1's word on the use (reviews r3's
+  // and r4's B3 shapes, standing, with an operation, a length and a merge); a written destination keeps the flag as it
+  // keeps the guard mark
   const written = `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction fs(x: number[]): number[] {\n  return x\n}`;
   const transfers: readonly (readonly [string, string, string])[] = [
     [
@@ -273,11 +273,6 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "an element",
       "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
       "if n is integer { let v = [f(n)]\nrepeat v.first {} }",
-    ],
-    [
-      "a parameter copied in its callee",
-      "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
-      "if n is integer { f(n) }",
     ],
     [
       "a nested call's result",
@@ -332,6 +327,15 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       "if n is integer { let v: number = 0\nv = f(n)\nrepeat v {} }",
     ],
   ];
+  // a parameter copied in a callee only one call calls: a live call's narrowed argument is the parameter's value, the
+  // tested kind (S10 part 2b), which a dead call, binding nothing (F21), never gives: the dead form warns as on `main`
+  const narrowedArguments: readonly (readonly [string, string, string])[] = [
+    [
+      "a parameter copied in its callee",
+      "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
+      "if n is integer { f(n) }",
+    ],
+  ];
   // such a copy, written or not, as a dead call's argument for a written parameter stays unchecked, as every dead
   // argument was on `main`
   const copiedArguments: readonly (readonly [string, string])[] = [
@@ -359,6 +363,19 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       for (const [where, shape] of shapes) {
         const found = analysed(shape(before, body), reversed);
         if (unordered(found) !== expected)
+          differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
+      }
+    }
+    for (const [what, before, body] of narrowedArguments) {
+      const live = analysed(`${before}\n${body}\nexit\n`, reversed);
+      if (JSON.stringify(live) !== JSON.stringify(["valid"]))
+        differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      for (const [where, shape] of shapes) {
+        const found = analysed(shape(before, body), reversed);
+        if (
+          found[0] !== "warning-runtime-check" ||
+          found.some((line) => line.includes("compile-error"))
+        )
           differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
       }
     }
@@ -465,17 +482,31 @@ test("a warning names the earliest admitted store of its offending kind, after a
  */
 const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   // §3.2: the mark travels with the value through a conversion, a length, a dict's keys and a declared result
+  // (where its test's narrowing holds, a stored value is the tested kind, S10 part 2b: an intrinsic error; a call that
+  // stores the value between them drops it, and the mark travels)
   [
     "§3.2 guarded conversion",
-    "let xs = null\nif xs != null { let wrong: string = xs.toSet() }",
+    "let xs = null\nfunction refill { xs = [1] }\nif xs != null { refill()\n let wrong: string = xs.toSet() }",
     "warning-runtime-check",
-    "branch branch branch",
+    "call call call",
   ],
   [
     "§3.2 guarded length",
-    "let xs = [1]\nif xs != null { let wrong: string = xs.length }",
+    "let xs = [1]\nfunction refill { xs = [2] }\nif xs != null { refill()\n let wrong: string = xs.length }",
     "warning-runtime-check",
-    "branch",
+    "call",
+  ],
+  [
+    "N2 narrowed conversion",
+    "let xs = null\nif xs != null { let wrong: string = xs.toSet() }",
+    "compile-error",
+    "-",
+  ],
+  [
+    "N2 narrowed length",
+    "let xs = [1]\nif xs != null { let wrong: string = xs.length }",
+    "compile-error",
+    "-",
   ],
   [
     "§3.2 guarded dict keys",
@@ -485,9 +516,15 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
   ],
   [
     "§3.2 guarded declared result",
-    "let xs = [1]\nif xs != null { let wrong: string = xs.count() }",
+    "let xs = [1]\nfunction refill { xs = [2] }\nif xs != null { refill()\n let wrong: string = xs.count() }",
     "warning-runtime-check",
-    "branch",
+    "call",
+  ],
+  [
+    "N2 narrowed declared result",
+    "let xs = [1]\nif xs != null { let wrong: string = xs.count() }",
+    "compile-error",
+    "-",
   ],
   ["§3.2 unguarded length", "let xs = [1]\nlet wrong: string = xs.length", "compile-error", "-"],
   // W34: copies of a source without an exact definition at the copy keep the guard's mark (review r3)
@@ -1457,24 +1494,26 @@ test("a choice's written list element reads below the list's element step, as it
  * checks' targets aside.
  */
 test("a held choice object's button value is marked by a test of its selected key, as the keyed read is", () => {
+  // (each read at a count, which no stored value holds: the keyed read in a stored value takes its narrowing since S10
+  // part 2b, which the choice's value, no read of the tested path, does not)
   const cases: readonly (readonly [string, string, string, string, string])[] = [
     [
       "a test of its value",
-      'let o = {text: "unused", value: 2.0}\nif o.value is integer { let r: integer = READ }\nexit',
+      'let o = {text: "unused", value: 2.0}\nif o.value is integer { repeat READ {} }\nexit',
       "askChoice o",
       "o.value",
       "warning-runtime-check",
     ],
     [
       "a test of its text, without a value",
-      "let o = {text: 2.0}\nif o.text is integer { let r: integer = READ }\nexit",
+      "let o = {text: 2.0}\nif o.text is integer { repeat READ {} }\nexit",
       "askChoice o",
       "o.text",
       "warning-runtime-check",
     ],
     [
       "a copy of a copy in the tested branch",
-      'let o = {text: "unused", value: 2.0}\nif o.value is integer {\nlet p = o\nlet q = p\nlet r: integer = READ\n}\nexit',
+      'let o = {text: "unused", value: 2.0}\nif o.value is integer {\nlet p = o\nlet q = p\nrepeat READ {}\n}\nexit',
       "askChoice q",
       "q.value",
       "warning-runtime-check",
@@ -1488,21 +1527,21 @@ test("a held choice object's button value is marked by a test of its selected ke
     ],
     [
       "a list's element",
-      'let opts = [{text: "unused", value: 2.0}]\nif opts[0].value is integer { let r: integer = READ }\nexit',
+      'let opts = [{text: "unused", value: 2.0}]\nif opts[0].value is integer { repeat READ {} }\nexit',
       "askChoice opts",
       "opts[0].value",
       "warning-runtime-check",
     ],
     [
       "a parameter",
-      'function pick(o) {\nif o.value is integer { let r: integer = READ }\n}\npick({text: "unused", value: 2.0})\nexit',
+      'function pick(o) {\nif o.value is integer { repeat READ {} }\n}\npick({text: "unused", value: 2.0})\nexit',
       "askChoice o",
       "o.value",
       "warning-runtime-check",
     ],
     [
       "a test of the other key",
-      "let o = {text: 2.0, value: 2.5}\nif o.text is integer { let r: integer = READ }\nexit",
+      "let o = {text: 2.0, value: 2.5}\nif o.text is integer { repeat READ {} }\nexit",
       "askChoice o",
       "o.value",
       "compile-error",

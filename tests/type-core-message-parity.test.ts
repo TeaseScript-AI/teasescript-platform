@@ -486,6 +486,8 @@ interface Intended {
   readonly matches: (pair: Pair) => boolean;
   readonly replacement: (pair: Pair) => RegExp;
   readonly count: number;
+  /** The new checker's diagnostic is another one, which has no fix to keep. */
+  readonly fixless?: true;
 }
 
 /** The type each rule 3.5 pair's test names: the type its use takes, which the value's written union holds. */
@@ -521,6 +523,16 @@ const UNION_RULE_FIXES: ReadonlyMap<string, string> = new Map([
 
 const INTENDED: readonly Intended[] = [
   {
+    rule:
+      "§13 N2 (#1073, S10 part 2b): the null check the current checker asks for is written and holds at a read in a " +
+      "stored value, so the new checker asks for none; its warning there is the external value's own property, which " +
+      "only the run decides",
+    matches: ({ record }) => record === "cp9-cells/witness/astra-stored-length",
+    replacement: () => /^'[^']+' may not have property '[^']+' here\./,
+    count: 1,
+    fixless: true,
+  },
+  {
     rule: "S8c's (#1173): a number where a whole number is required, the count's and the written integer's sentences",
     matches: ({ diagnostic }) =>
       diagnostic.kind !== "written-type" &&
@@ -537,7 +549,8 @@ const INTENDED: readonly Intended[] = [
           : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("unknown")
             ? typeTest(named.subject, "integer")
             : exact("Use a whole number here."),
-    count: 177,
+    // (four fewer since S10 part 2b: those records' stored values take `is integer`'s narrowing, a whole number)
+    count: 173,
   },
   {
     rule:
@@ -599,8 +612,8 @@ test("the new checker keeps every fix the current checker gives, in the new form
   const unexplained: string[] = [];
   let lost = 0;
   for (const pair of differing) {
-    if (fixes(pair.message).length === 0) lost += 1;
     const intended = intendedOf(pair);
+    if (fixes(pair.message).length === 0 && intended?.fixless !== true) lost += 1;
     // (an intended difference with the exact fix it names)
     if (intended === undefined || !intended.replacement(pair).test(pair.message))
       unexplained.push(`${pair.record}\n  current: ${pair.current}\n  new:     ${pair.message}\n`);

@@ -82,13 +82,16 @@ const one = (name: string, source: string): Program => ({
  * #1210's programs: projections of host reads (a property, an element, a nested property) in one literal, in records, in
  * lists or bare, two deep and read below, beside another field, another global, a direct read and known data, guarded,
  * changed between, chosen, selected and added; a named source and a named projection the controls.
- * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name.
+ * Each `^` marks a host read whose leaf the receiving place's contract at `place` and the receiving read `read` name;
+ * `answered`: the read names only the first so many (the others take their test's narrowing, its kind no longer
+ * external data, S10 part 2b).
  */
 const PROJECTED_INGRESS_PROGRAMS: readonly {
   readonly name: string;
   readonly lines: readonly string[];
   readonly place: readonly [string, readonly string[]];
   readonly read: string;
+  readonly answered?: number;
 }[] = [
   {
     name: "records of one property read (the issue's witness)",
@@ -176,6 +179,18 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     name: "guarded property reads beside one outside the test",
     lines: [
       "let outside = {n: ^hostValue.n}",
+      "if hostValue.n > 0 {",
+      "  let box = [outside, {n: ^hostValue.n}, {n: ^hostValue.n}]",
+      "  let out: integer = box[0].n",
+      "}",
+    ],
+    place: ["box", ["element", "n"]],
+    read: "box[0].n",
+  },
+  {
+    name: "narrowed property reads beside one outside the test",
+    lines: [
+      "let outside = {n: ^hostValue.n}",
       "if hostValue.n is integer {",
       "  let box = [outside, {n: ^hostValue.n}, {n: ^hostValue.n}]",
       "  let out: integer = box[0].n",
@@ -183,6 +198,7 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     ],
     place: ["box", ["element", "n"]],
     read: "box[0].n",
+    answered: 1,
   },
   {
     name: "property reads with a tested property below",
@@ -467,9 +483,9 @@ test("a projection of a host read names its ingress's leaf and publishes the sam
       .sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
       .join(",");
   const wrong: string[] = [];
-  for (const { name, lines, place, read } of PROJECTED_INGRESS_PROGRAMS) {
+  for (const { name, lines, place, read, answered } of PROJECTED_INGRESS_PROGRAMS) {
     const { source, spans } = unmarked(lines);
-    const expected = `${spans.join(",")} / ${spans.join(",")}`;
+    const expected = `${spans.join(",")} / ${spans.slice(0, answered ?? spans.length).join(",")}`;
     const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
     assert.ok(request !== null, `${name}: its source parses and resolves`);
     const id = new CoreProgram(request).places.find(
