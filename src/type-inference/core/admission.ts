@@ -4533,6 +4533,8 @@ export class Admission {
     if (node === null && !task.members.every((member) => this.#deadOnly.has(member)))
       node = touches.leaf([], [], [this.#touchRef(task.place, [], false)]);
     touches.share(node);
+    // (a live group of two or more members of a whole-copy ring shares this trie: `Touches.ring`)
+    if (task.members.length > 1) touches.ring(node);
     const out = { node, found };
     for (const member of task.members) this.#touchPlaces.set(member, out);
   }

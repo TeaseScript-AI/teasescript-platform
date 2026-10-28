@@ -62,6 +62,11 @@ export interface Touch {
    * it differs from the other, as the other's landed types may decide the place merging them (§2.4 (d)).
    */
   readonly met: Found;
+  /**
+   * Whether a whole-copy ring's shared trie, or a projection of one, stands in it (`Touches.ring`): a containment there
+   * owes as the accepted design has it, as each member decides by its own first store (#1270, Astra's review B1).
+   */
+  readonly ring: boolean;
 }
 
 /** A node's deltas down to a shared base, nearest the node first (`Touches.#hop`). */
@@ -279,6 +284,9 @@ export class Touches {
     elements: new WeakMap(),
   };
   readonly #owes = new Map<string, Found>();
+  readonly #metOwes = new Map<number, Found>();
+  /** The tries of whole-copy rings, each the trie of every member of its live group, and their projections. */
+  readonly #rings = new Set<number>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
     elements: new Map(),
@@ -431,9 +439,26 @@ export class Touches {
     this.#entries(branch.right, out);
   }
 
-  #node(fields: Omit<Touch, "id">): Touch {
+  #node(fields: Omit<Touch, "id" | "ring">): Touch {
     this.#charge();
-    return { id: this.#ids++, ...fields };
+    // (a ring stands in a node where it stands in one of its parts, or in a path node's one child)
+    const ring =
+      fields.parts !== null
+        ? this.#isRing(fields.parts[0]) || this.#isRing(fields.parts[1])
+        : fields.branches !== null && this.#isRing(fields.branches.node);
+    return { id: this.#ids++, ...fields, ring };
+  }
+
+  /**
+   * Marks a whole-copy ring's trie (a live group of two or more members): its members share it, each deciding by its own
+   * first store, so two elements copying different members may offend each other where their nodes are one node.
+   */
+  public ring(node: Touch | null): void {
+    if (node !== null) this.#rings.add(node.id);
+  }
+
+  #isRing(node: Touch): boolean {
+    return node.ring || this.#rings.has(node.id);
   }
 
   /** The payload of one opaque contributor, one per ref. */
@@ -718,6 +743,7 @@ export class Touches {
     if (above !== null)
       found = at === null ? this.#payloadLeaf(above) : this.#withOpaque(at, above);
     if (found !== null && this.#shared.has(node.id)) this.#shared.add(found.id);
+    if (found !== null && this.#isRing(node)) this.#rings.add(found.id);
     this.#subs.set(key, found);
     return found;
   }
@@ -1231,9 +1257,27 @@ export class Touches {
   }
 
   /**
-   * What a node containing another owes where a merge ends at it (§2.2 step 3, §2.4 (d)): its meetings found in making
-   * it, as the contained node's landed types may decide the place merging them; for `elements` only where its contents
-   * hold two kinds or more, as an element standing in the other's stead may offend there. Only where the two differ:
+   * For `elements`, what a node holding a ring owes where it contains the other (or is merged with itself): its meetings
+   * found in making it where its contents hold two kinds or more, as an element standing in the other's stead may offend
+   * there (§2.2). Once per node.
+   */
+  #metOwed(node: Touch): Found {
+    const known = this.#metOwes.get(node.id);
+    if (known !== undefined) return known;
+    const paths: (readonly string[])[] = [];
+    this.paths(node.met, [], paths);
+    let out: Found = NONE;
+    for (const path of paths)
+      if (this.kindsAt(node, path).size > 1) out = this.#unite(out, this.#at(path));
+    this.#metOwes.set(node.id, out);
+    return out;
+  }
+
+  /**
+   * What a node containing another owes where a merge ends at it, no ring standing in it (§2.2 step 3, §2.4 (d)): its
+   * meetings found in making it, as the contained node's landed types may decide the place merging them; for `elements`
+   * only where its contents hold two kinds or more, as an element standing in the other's stead may offend there. Only
+   * where the two differ:
    * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
    * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
    * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
@@ -1309,6 +1353,14 @@ export class Touches {
   }
 
   /**
+   * What a node merged with itself owes: nothing it did not meet in its making, but for `elements` a node holding a ring
+   * owes its meetings with two kinds or more, as elements copying different members of the ring stand on it (§2.2).
+   */
+  #selfOwes(node: Touch, mode: TouchMode): Found {
+    return mode === "elements" && this.#isRing(node) ? this.#metOwed(node) : NONE;
+  }
+
+  /**
    * The two nodes merged at one place's path, with the paths below it where they meet as the mode owes: memoized by
    * the two nodes; where one is a node merged with a small delta, through its base first (the base's merge with the
    * other is then shared by every place merging them), as far as the deltas cost no more than listing the smaller.
@@ -1320,8 +1372,7 @@ export class Touches {
   ): { node: Touch | null; found: Found } {
     if (a === null) return { node: b, found: NONE };
     if (b === null) return { node: a, found: NONE };
-    // (a node merged with itself meets nothing it did not meet in its making)
-    if (a === b) return { node: a, found: NONE };
+    if (a === b) return { node: a, found: this.#selfOwes(a, mode) };
     const key = (x: Touch, y: Touch): string =>
       keptParts(this.host.work, mode, Math.min(x.id, y.id), Math.max(x.id, y.id));
     const known = this.#memo.get(key(a, b));
@@ -1354,9 +1405,15 @@ export class Touches {
     };
     for (;;) {
       // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
-      // other, whose landed types may decide where the two are merged)
+      // other, whose landed types may decide where the two are merged; all of them where a ring stands in it)
       const owes = (outer: Touch, inner: Touch): Found =>
-        outer === inner ? NONE : this.#containedOwes(outer, inner, mode);
+        outer === inner
+          ? this.#selfOwes(outer, mode)
+          : !this.#isRing(outer)
+            ? this.#containedOwes(outer, inner, mode)
+            : mode === "elements"
+              ? this.#metOwed(outer)
+              : outer.met;
       if (this.#contains(x, y)) core = { node: x, found: owes(x, y) };
       else if (this.#contains(y, x)) core = { node: y, found: owes(y, x) };
       else core = this.#memo.get(key(x, y)) ?? null;
