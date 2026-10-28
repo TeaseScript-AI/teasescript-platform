@@ -457,9 +457,14 @@ export function takesRegex(parameter: TextParameter | undefined): boolean {
   return parameter?.kind === "regex" || parameter?.kind === "textOrRegex";
 }
 
+/** The TeaseScript member for a common one text does not have, such as `length` for `size`, or `undefined`. */
+export function textMemberSuggestion(name: string): string | undefined {
+  return TEXT_MEMBER_SUGGESTIONS.get(name);
+}
+
 /** The failure message for an unknown text member, suggesting the TeaseScript name for a common one. */
 export function unknownTextMemberMessage(name: string, use: "method" | "property"): string {
-  const suggestion = TEXT_MEMBER_SUGGESTIONS.get(name);
+  const suggestion = textMemberSuggestion(name);
   return `Text has no ${use} '${name}'.${suggestion === undefined ? "" : ` Use ${suggestion}.`}`;
 }
 

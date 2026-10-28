@@ -61,6 +61,35 @@ export type ValueConstraint = Extract<
   { readonly kind: "operation" | "get" | "fallback" | "call" | "load" }
 >;
 
+/**
+ * What consumes a value place (TABLE r4.151), as its constraint or use is registered: a store into `into`; an operand
+ * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
+ * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
+ * demand on the value a fix does not read (a save, a speaker's store). A side of `otherwise`, a `get`'s or a `load`'s
+ * parts and an operation's named argument are part of its `result` (`part`), with a type of their own to fit.
+ * A variable's or a parameter's place is consumed by each read of it, a function's result by each call (`read`, the
+ * value read there; TABLE r4.160).
+ */
+export type Consumption =
+  | { readonly kind: "store"; readonly into: PlaceId }
+  | {
+      readonly kind: "operand";
+      readonly operation: Extract<Constraint, { readonly kind: "operation" }>;
+      readonly index: number;
+    }
+  | { readonly kind: "method"; readonly name: string; readonly site: SourceSite }
+  | { readonly kind: "access"; readonly step: Constraint & { readonly kind: "project" } }
+  | { readonly kind: "argument"; readonly fn: number; readonly parameter: number | string }
+  | { readonly kind: "return"; readonly fn: number }
+  | { readonly kind: "read"; readonly occurrence: PlaceId }
+  | { readonly kind: "part"; readonly result: PlaceId }
+  | {
+      readonly kind: "use";
+      readonly what: "index" | "count" | "condition" | "key";
+      readonly span: SourceSite;
+    }
+  | { readonly kind: "other" };
+
 export type HasConstraint = Extract<Constraint, { readonly kind: "has" }>;
 
 /**
@@ -182,6 +211,8 @@ export class CoreProgram {
   /** A function call's result place, by its node. */
   readonly callOutOf = new Map<PlaceId, FlowNode | null>();
   readonly resultPlaces = new Set<PlaceId>();
+  /** What consumes each value place, one entry per consuming constraint or use (TABLE r4.151): the place a fix lands in. */
+  readonly consumersOf = new Map<PlaceId, Consumption[]>();
   readonly #functions = new Map<number, FunctionSignature>();
   readonly #functionRegions = new Map<number, FunctionRegion>();
   readonly #parameterPlaces = new Map<string, PlaceId>();
@@ -272,6 +303,7 @@ export class CoreProgram {
         default:
           break;
       }
+      this.#consumptions(constraint);
     }
     for (const place of this.places) {
       this.work.charge("indexSteps");
@@ -292,6 +324,24 @@ export class CoreProgram {
     for (const constraint of this.constraints)
       if (constraint.kind === "speakerRead" && !this.placeBySite.has(siteKey(constraint.site)))
         this.placeBySite.set(siteKey(constraint.site), constraint.occurrence);
+    // the flow graph's uses of an operand, by its place
+    const uses = [
+      ["index", this.flow.indexUses],
+      ["count", this.flow.countUses],
+      ["condition", this.flow.conditionUses],
+      ["key", this.flow.keyUses],
+    ] as const;
+    for (const [what, list] of uses)
+      for (const use of list) {
+        const span = { file: use.file, start: use.span.start.offset, end: use.span.end.offset };
+        const operand = {
+          file: use.file,
+          start: use.operand.span.start.offset,
+          end: use.operand.span.end.offset,
+        };
+        const place = this.placeBySite.get(siteKey(operand));
+        if (place !== undefined) this.#consumed(place, { kind: "use", what, span });
+      }
     this.#indexed = true;
   }
 
@@ -321,6 +371,82 @@ export class CoreProgram {
   public spenderOf(node: FlowNode): number {
     const callable = this.flow.callableOf(node.region);
     return callable === null ? 0 : callable.id + 1;
+  }
+
+  /** A consumption of `place` (`consumersOf`), charged as its registration is: one entry each. */
+  #consumed(place: PlaceId, consumption: Consumption): void {
+    this.work.charge("indexSteps");
+    const list = this.consumersOf.get(place);
+    if (list === undefined) this.consumersOf.set(place, [consumption]);
+    else list.push(consumption);
+  }
+
+  /** The value places a constraint consumes, each with what consumes it (`consumersOf`). */
+  #consumptions(constraint: Constraint): void {
+    const other: Consumption = { kind: "other" };
+    switch (constraint.kind) {
+      case "read":
+        this.#consumed(constraint.binding, { kind: "read", occurrence: constraint.occurrence });
+        break;
+      case "store":
+        this.#consumed(constraint.value, { kind: "store", into: constraint.into });
+        break;
+      case "project":
+        this.#consumed(constraint.owner, { kind: "access", step: constraint });
+        break;
+      case "operation":
+        if (constraint.receiver !== null)
+          this.#consumed(constraint.receiver, {
+            kind: "method",
+            name: constraint.contract.name,
+            site: constraint.site,
+          });
+        constraint.arguments.forEach((argument, index) =>
+          this.#consumed(argument, { kind: "operand", operation: constraint, index }),
+        );
+        for (const named of constraint.named)
+          this.#consumed(named.value, { kind: "part", result: constraint.result });
+        break;
+      case "call": {
+        const result = this.#functions.get(constraint.fn)?.result;
+        if (result !== undefined)
+          this.#consumed(result, { kind: "read", occurrence: constraint.result });
+        constraint.arguments.forEach((argument, index) =>
+          this.#consumed(argument, { kind: "argument", fn: constraint.fn, parameter: index }),
+        );
+        for (const named of constraint.named)
+          this.#consumed(named.value, {
+            kind: "argument",
+            fn: constraint.fn,
+            parameter: named.name,
+          });
+        break;
+      }
+      case "return":
+        if (constraint.value !== null)
+          this.#consumed(constraint.value, { kind: "return", fn: constraint.fn });
+        break;
+      case "get":
+      case "fallback":
+      case "load": {
+        const part: Consumption = { kind: "part", result: constraint.result };
+        if (constraint.kind === "get") {
+          this.#consumed(constraint.receiver, part);
+          if (constraint.key !== null) this.#consumed(constraint.key, part);
+          this.#consumed(constraint.fallback, part);
+        } else if (constraint.kind === "fallback") {
+          this.#consumed(constraint.left, part);
+          this.#consumed(constraint.right, part);
+        } else if (constraint.fallback !== null) this.#consumed(constraint.fallback, part);
+        break;
+      }
+      case "save":
+      case "speakerStore":
+        this.#consumed(constraint.value, other);
+        break;
+      default:
+        break;
+    }
   }
 
   public place(id: PlaceId): Place {

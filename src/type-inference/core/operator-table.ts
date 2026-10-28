@@ -41,7 +41,11 @@ export interface OperatorRow {
 
 const CALCULATIONS = ["+", "-", "*", "/", "%", "neg"] as const;
 
-const COMPARISONS = ["<", "<=", ">", ">="] as const;
+/** The comparisons: each gives true or false, whatever it compares. */
+export const COMPARISONS = ["<", "<=", ">", ">="] as const;
+
+/** The operators whose second operand divides: a zero there gives no result (TSR036). */
+export const DIVISIONS = ["/", "%"] as const;
 
 const DURATIONS = [
   "duration duration duration",

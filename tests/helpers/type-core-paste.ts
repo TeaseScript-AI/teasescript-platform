@@ -1,0 +1,524 @@
+import { compileProject } from "../../src/compiler.js";
+import { createFreshRuntimeSession } from "../../src/index.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
+import { coreRequest } from "./type-core-analysis.js";
+
+/*
+ * The paste family of TABLE r4.151 (#1241): every code form a fix offers, pasted at its own position in the source it
+ * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
+ * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
+ * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
+ * loop's iterable, a range's bound, a side of `otherwise`, a default, a variable or a parameter without a type, as its
+ * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs.
+ * The parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
+ */
+
+/** An erroneous expression a fix offers code for, with the lines before it that make it so. */
+export interface Offer {
+  readonly name: string;
+  readonly setup: string;
+  readonly expression: string;
+}
+
+/**
+ * A site an expression stands at: the lines around it, `@` where it stands, and the lines before it; an operand or a
+ * receiver takes an operation in parentheses, so it stays the site's own expression.
+ */
+export interface Site {
+  readonly name: string;
+  readonly before: string;
+  readonly line: string;
+  readonly operand?: true;
+}
+
+/** The element and value kinds a list's or a dict's offers vary, as literals of each. */
+const ELEMENTS: readonly (readonly [string, string])[] = [
+  ["text", '"a"'],
+  ["integer", "1"],
+  ["number", "1.5"],
+  ["boolean", "true"],
+  ["duration", "1 s"],
+  ["object", "{n: 1}"],
+  ["list", "[1]"],
+  ["set", "set[1]"],
+];
+
+/** An object that may be null, as a variable, a list's element, a dict's value or a property holds it; one that is there. */
+const RECEIVERS: readonly (readonly [string, string, string])[] = [
+  [
+    "object or null",
+    'let boxes = [{n: 2, text: "hello", items: [1]}, null]\nlet maybe = boxes[1]',
+    "maybe",
+  ],
+  ["null element", 'let boxes = [{n: 2, text: "hello", items: [1]}, null]', "boxes[1]"],
+  [
+    "null dict value",
+    'let maybe = dict{a: {n: 2, text: "hello", items: [1]}, b: null}.values.random',
+    "maybe",
+  ],
+  [
+    "null property",
+    'let boxes = [{n: 2, text: "hello", items: [1]}, null]\nlet outer = {inner: boxes[1]}',
+    "outer.inner",
+  ],
+  ["object", 'let fine = {n: 2, text: "hello", items: [1]}', "fine"],
+];
+
+/** The offers: each fix's code form, on receivers and lists of each element kind. */
+const OFFERS: readonly Offer[] = [
+  { name: "text size", setup: 'let t = "hello"', expression: "t.size" },
+  { name: "nested text size", setup: 'let box = {label: "hello"}', expression: "box.label.size" },
+  { name: "element text size", setup: 'let items = ["hello"]', expression: "items[0].size" },
+  { name: "text toUpperCase", setup: 'let t = "hello"', expression: "t.toUpperCase()" },
+  { name: "text length call", setup: 'let t = "hello"', expression: "t.length()" },
+  { name: "text trim", setup: 'let t = " hello "', expression: "t.trim" },
+  { name: "dict value trim", setup: 'let d = dict{a: " hello "}', expression: 'd["a"].trim' },
+  { name: "angle degrees", setup: "let a = 90 deg", expression: "a.degrees" },
+  { name: "dict missing key", setup: "let d = dict{k: 1}", expression: "d.missing" },
+  {
+    name: "missing key's trim",
+    setup: 'let d = dict{a: " hello "}',
+    expression: 'd["missing"].trim',
+  },
+  { name: "absent property's size", setup: 'let door = {a: "hello"}', expression: "door.b.size" },
+  // (a list a fix reads by a dict's key or a list's index, there or not: TABLE r4.162, Astra on #1296)
+  ...[
+    ["dict{found: [1]}", 'd["absent"]'],
+    ["dict{found: [1]}", 'd["found"]'],
+    ["[[1]]", "d[5]"],
+    ["[[1]]", "d[0]"],
+  ].flatMap(([value, list]): Offer[] => [
+    { name: `${list} + element`, setup: `let d = ${value}`, expression: `${list} + 2` },
+    { name: `element + ${list}`, setup: `let d = ${value}`, expression: `2 + ${list}` },
+  ]),
+  // (a receiver that may be null: an object-or-null variable, a list element, a dict value, a nested property, and one
+  // that is there; a member's and a list's form over it, Astra r2 on #1296)
+  ...RECEIVERS.flatMap(([kind, setup, receiver]): Offer[] => [
+    { name: `${kind}'s text size`, setup, expression: `${receiver}.text.size` },
+    { name: `${kind}'s items + element`, setup, expression: `${receiver}.items + 2` },
+  ]),
+  ...ELEMENTS.flatMap(([kind, value]): Offer[] => [
+    { name: `join of ${kind}`, setup: `let items = [${value}]`, expression: "items.join" },
+    {
+      name: `nested join of ${kind}`,
+      setup: `let box = {items: [${value}]}`,
+      expression: "box.items.join",
+    },
+    { name: `dict of ${kind}`, setup: `let d = dict{k: ${value}}`, expression: "d.k" },
+  ]),
+  ...ELEMENTS.flatMap(([kind, value]): Offer[] =>
+    [...ELEMENTS.slice(0, 3), ["object", '{n: "x"}'] as const].flatMap(
+      ([joined, element]): Offer[] => [
+        {
+          name: `list of ${kind} + ${joined}`,
+          setup: `let xs = [${value}]`,
+          expression: `xs + ${element}`,
+        },
+        {
+          name: `${joined} + list of ${kind}`,
+          setup: `let xs = [${value}]`,
+          expression: `${element} + xs`,
+        },
+      ],
+    ),
+  ),
+  { name: "list + range", setup: "let xs = [1]", expression: "xs + (1..3)" },
+  { name: "range + list", setup: "let xs = [1]", expression: "(1..3) + xs" },
+];
+
+/** The sites: where the expression's value lands. */
+const SITES: readonly Site[] = [
+  { name: "say", before: "", line: "say @" },
+  { name: "declaration", before: "", line: "let v = @\nsay v" },
+  ...["string", "integer", "number", "boolean", "string[]", "integer[]"].map((type): Site => ({
+    name: `${type} declaration`,
+    before: "",
+    line: `let v: ${type} = @`,
+  })),
+  { name: "text store", before: 'let v = "x"', line: "v = @" },
+  { name: "sum", before: "", line: "say @ + 1", operand: true },
+  { name: "product", before: "", line: "say 2 * @", operand: true },
+  { name: "comparison", before: "", line: "say @ > 2", operand: true },
+  { name: "text join", before: "", line: 'say "a" + @', operand: true },
+  { name: "negation", before: "", line: "say not @", operand: true },
+  { name: "logic", before: "", line: "say @ and true", operand: true },
+  { name: "text argument", before: "function show(p: string) {\n  say p\n}", line: "show(@)" },
+  {
+    name: "integer argument",
+    before: "function count(p: integer) {\n  say p\n}",
+    line: "count(@)",
+  },
+  { name: "condition", before: "", line: 'if @ {\n  say "yes"\n}' },
+  { name: "interpolation", before: "", line: 'say "${@}"' },
+  { name: "element", before: "", line: "let ws = [@]\nsay ws.length" },
+  { name: "receiver", before: "", line: "say @.length", operand: true },
+  { name: "count", before: "", line: 'repeat @ {\n  say "x"\n}' },
+  { name: "wait", before: "", line: "wait @" },
+  { name: "iteration", before: "", line: "for v in @ {\n  say v\n}" },
+  { name: "range bound", before: "", line: "for i in 1..@ {\n  say i\n}", operand: true },
+  { name: "object store", before: 'let o = {n: "x"}', line: "o = @" },
+  { name: "untyped variable's trim", before: "", line: "let v = @\nsay v.trim()" },
+  { name: "untyped argument", before: "function show(p) {\n  say p\n}", line: "show(@)" },
+  { name: "untyped trim argument", before: "function use(p) {\n  say p.trim()\n}", line: "use(@)" },
+  {
+    name: "untyped sum argument",
+    before: "function count(p) {\n  return p + 1\n}",
+    line: "say count(@)",
+  },
+  { name: "untyped compound", before: "", line: 'let v = @\nv += "x"\nsay v' },
+  {
+    name: "untyped compound argument",
+    before: 'function f(p) {\n  p += "x"\n  say p\n}',
+    line: "f(@)",
+  },
+  { name: "fallback", before: "let n: integer? = null", line: "say n otherwise @", operand: true },
+  { name: "default", before: 'let ys = ["x"]', line: "say ys.get(9, default: @)" },
+  {
+    name: "untyped returned argument",
+    before: "function id(p) {\n  return p\n}",
+    line: "let w: string = id(@)\nsay w",
+  },
+  // (a divisor, also through a literal's contents and an interpolation's text: Codex r10)
+  { name: "divisor", before: "", line: "say 1 / @", operand: true },
+  { name: "literal divisor", before: "", line: "say 1 / [@][0]" },
+  { name: "property divisor", before: "", line: "say 1 / ({n: @}).n" },
+  { name: "interpolation divisor", before: "", line: 'say 1 / toInteger("${@}", default: 1)' },
+  // (an operand nested in arithmetic, a negation, a multiplication, an object's contents, an interpolation: Astra r3)
+  { name: "minus", before: "", line: "say -@", operand: true },
+  { name: "nested product", before: "", line: "say 2 * (3 * @)", operand: true },
+  { name: "object contents", before: "", line: "say ({v: @ + 1}).v", operand: true },
+  { name: "interpolated sum", before: "", line: 'say "${@ + 1}"', operand: true },
+  // (an operand of a `say`, an ask and a button, which the presence walk enumerates: Codex r13, the lead)
+  { name: "say operand", before: "", line: 'let shown = say("${@ + 1}", instant)' },
+  { name: "ask prompt", before: "", line: 'let asked = askInteger("${@ + 1}")' },
+  { name: "button label", before: "", line: 'let pressed = showButton "${@ + 1}"' },
+];
+
+/**
+ * Values that may be null, whose warning's fix offers a fallback (ADR 0021 rule 1.9), at the sites that take their
+ * other type: where they divide, also through a literal or an interpolation, and at a call, which reads it later.
+ */
+const NUMBER_SITES = [
+  "integer declaration",
+  "sum",
+  "product",
+  "comparison",
+  "divisor",
+  "integer argument",
+  "count",
+  "say operand",
+  "ask prompt",
+  "button label",
+  "minus",
+  "nested product",
+  "object contents",
+  "interpolated sum",
+];
+const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
+  // (read by an index, which may be absent: a warning's own read, which its program already performs, wrapped in
+  // place, TABLE r4.168; or a variable's)
+  [{ name: "null element", setup: "let xs = [4, null]", expression: "xs[1]" }, NUMBER_SITES],
+  [{ name: "null value", setup: "let x = [4, null].random", expression: "x" }, NUMBER_SITES],
+  ...[
+    { name: "null element's length", setup: 'let xs = ["ab", null]', expression: "xs[1].length" },
+    { name: "null value's length", setup: 'let x = ["ab", null].random', expression: "x.length" },
+    {
+      name: "null property's length",
+      setup: 'let holder = {t: ["ab", null].random}',
+      expression: "holder.t.length",
+    },
+    {
+      name: "null dict value's length",
+      setup: 'let x = dict{a: "ab", b: null}.values.random',
+      expression: "x.length",
+    },
+    // (a subject whose own text holds an ellipsis, which is no placeholder, Codex r15)
+    {
+      name: "null ellipsis key's length",
+      setup: 'let d = dict{"...": "alpha", b: null}',
+      expression: 'd["..."].length',
+    },
+  ].map(
+    (offer) =>
+      [
+        offer,
+        [
+          "say",
+          "integer declaration",
+          "sum",
+          "divisor",
+          "literal divisor",
+          "property divisor",
+          "interpolation divisor",
+          "integer argument",
+          "untyped argument",
+          "count",
+        ],
+      ] as const,
+  ),
+];
+
+/** A store's place of one written type, its start value, and values of other kinds stored into it. */
+const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
+  [
+    "duration",
+    "1 s",
+    [
+      "3",
+      "n + 1",
+      "-3",
+      "1.5",
+      'd["found"]',
+      'd["absent"]',
+      "ns[0]",
+      "ns[5]",
+      // (Codex r12: such reads inside a literal and an interpolation; a literal's own property, which is there)
+      '({n: d["absent"]}).n',
+      "[ns[5]].length",
+      'toInteger("${d["absent"]}${1}", default: 1)',
+      "({n: n}).n",
+      // (Astra r3 on #1296: an operand that may be null nested in arithmetic, a negation, a multiplication, an object's
+      // contents, an interpolation; and one that is there)
+      "maybeN + 1",
+      "-maybeN",
+      "2 * (maybeN * 3)",
+      "({v: maybeN + 1}).v",
+      '"${maybeN}".length',
+      "2 * (n * 3)",
+      "({v: n + 1}).v",
+      '"${n}".length',
+      // (Astra r2 on #1296: a property of a receiver that may be null, and of one that is there)
+      "maybe.n",
+      "boxes[1].n",
+      "held.n",
+      "outer.inner.n",
+      "fine.n",
+      // (Codex r13: an ask's, a `say`'s and a button's operand, read by a key or there)
+      'askInteger("${d["absent"]}")',
+      'askInteger("How many?")',
+      '[say("${d["absent"]}", instant)].length',
+      '[say("Strokes: 0", instant)].length',
+      '[(showButton "${d["absent"]}")].length',
+      '[(showButton "Continue")].length',
+    ],
+  ],
+  ["angle", "1 deg", ["90", "n", 'd["absent"]', "ns[5]"]],
+  ["date", 'toDate("2026-01-01")', ['"2026-10-28"', '"bad"', '"2026-02-30"', "s"]],
+  ["time", 'toTime("10:00")', ['"10:30"', '"25:00"']],
+  ["string", '"x"', ["5", "n", "true", "n + 1", 'd["absent"]', "ns[5]"]],
+];
+
+/** The places a value is stored into: a declaration, an assignment, a property, an element, an argument. */
+const STORES: readonly ((type: string, start: string) => Site)[] = [
+  (type) => ({ name: `${type} declaration`, before: "", line: `let p: ${type} = @` }),
+  (type, start) => ({
+    name: `${type} assignment`,
+    before: `let p: ${type} = ${start}`,
+    line: "p = @",
+  }),
+  (_, start) => ({ name: "property", before: `let box = {p: ${start}}`, line: "box.p = @" }),
+  (type, start) => ({
+    name: `${type} element`,
+    before: `let ps: ${type}[] = [${start}]`,
+    line: "ps.add(@)",
+  }),
+  (type) => ({
+    name: `${type} argument`,
+    before: `function use(p: ${type}) {\n  say p\n}`,
+    line: "use(@)",
+  }),
+];
+
+/** A site's line before and after its `@`. */
+function around(line: string): readonly [string, string] {
+  const at = line.indexOf("@");
+  return [line.slice(0, at), line.slice(at + 1)];
+}
+
+/** A case: an offer at a site, its source, and the span its expression stands at. */
+export interface PasteCase {
+  readonly name: string;
+  readonly source: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/** The family's cases: every offer at every site, or with `sample`, every offer once, the sites in turn (each once). */
+export function pasteCases(sample = false): PasteCase[] {
+  const cases: PasteCase[] = [];
+  const offers = [
+    ...OFFERS.map(
+      (offer, index) => [offer, sample ? [SITES[index % SITES.length]!] : SITES] as const,
+    ),
+    ...NULLABLE.map(([offer, names], index) => {
+      const sites = SITES.filter((site) => names.includes(site.name));
+      return [offer, sample ? [sites[index % sites.length]!] : sites] as const;
+    }),
+  ];
+  for (const [offer, sites] of offers) {
+    for (const site of sites) {
+      const head = [offer.setup, site.before].filter((line) => line !== "").join("\n") + "\n";
+      const [left, right] = around(site.line);
+      const grouped = site.operand === true && offer.expression.includes(" + ");
+      const start = head.length + left.length + (grouped ? 1 : 0);
+      const expression = grouped ? `(${offer.expression})` : offer.expression;
+      cases.push({
+        name: `${offer.name} at ${site.name}`,
+        source: `${head}${left}${expression}${right}\nexit\n`,
+        start,
+        end: start + offer.expression.length,
+      });
+    }
+  }
+  // (a store's value at each place of each written type: a declaration, an assignment, a property, an element, an
+  // argument)
+  PLACES.forEach(([type, start, values], index) => {
+    const stores = sample ? [STORES[index % STORES.length]!] : STORES;
+    for (const store of stores)
+      for (const value of sample ? values.slice(0, 1) : values) {
+        const site = store(type, start);
+        const head =
+          [
+            "let n = 2",
+            'let s = "2026-10-28"',
+            "let d = dict{found: 2}",
+            "let ns = [2]",
+            "let boxes = [{n: 2}, null]",
+            "let maybe = boxes[1]",
+            "let held = dict{a: {n: 2}, b: null}.values.random",
+            "let outer = {inner: boxes[1]}",
+            "let fine = {n: 2}",
+            "let maybeN = [2, null].random",
+            site.before,
+          ]
+            .filter((line) => line !== "")
+            .join("\n") + "\n";
+        const [left, right] = around(site.line);
+        const begin = head.length + left.length;
+        cases.push({
+          name: `${value} into ${site.name}`,
+          source: `${head}${left}${value}${right}\nexit\n`,
+          start: begin,
+          end: begin + value.length,
+        });
+      }
+  });
+  return cases;
+}
+
+/** A pasted form: the code a fix offered, and the source with it pasted at its position. */
+export interface Pasted {
+  readonly code: string;
+  readonly source: string;
+}
+
+/** A code form in a fix sentence, by the words that offer it; a statement's `on a line of its own`. */
+const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?/g;
+
+/** A warning's fallback (ADR 0021 rule 1.9), which stands in place of its subject. */
+const FALLBACK = /give a fallback, as in '([^']+)'/;
+
+/**
+ * The code forms the core's errors in `source` offer at or inside `[start, end)`, each pasted at its position: in place
+ * of the diagnosed expression, or as a line of its own before the case's line, the list it changes in place of the
+ * expression; a warning's fallback in place of its subject; whether the expression gets any diagnostic.
+ */
+export function pastedForms(
+  source: string,
+  start: number,
+  end: number,
+): { readonly diagnosed: boolean; readonly forms: readonly Pasted[] } {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  if (request === null) return { diagnosed: false, forms: [] };
+  const text = messageSource([source]);
+  const forms: Pasted[] = [];
+  let diagnosed = false;
+  const { diagnostics } = analyseCore(request);
+  // (a warning's fallback is pasted into a program that otherwise compiles: beside an error it fixes nothing of that
+  // error, whose own fix is pasted on its own)
+  const erring = diagnostics.some((diagnostic) => diagnostic.class === "compile-error");
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.site.start < start || diagnostic.site.end > end) continue;
+    diagnosed = true;
+    const message = coreMessage(diagnostic, text);
+    if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
+      if (erring) continue;
+      // (a member's subject is its receiver, written at the start of the warned access)
+      const fallback = FALLBACK.exec(message)?.[1];
+      const { rule } = diagnostic;
+      const subject =
+        rule.rule === "member"
+          ? rule.receiver
+          : source.slice(diagnostic.site.start, diagnostic.site.end);
+      // (#1213's placeholder fallback `...`, which is no code to paste and is left for #1273: the fallback value itself,
+      // not an ellipsis inside its subject, Codex r15)
+      if (fallback !== undefined && !/ otherwise \.\.\.\)?$/.test(fallback))
+        forms.push({
+          code: fallback,
+          source:
+            source.slice(0, diagnostic.site.start) +
+            fallback +
+            source.slice(diagnostic.site.start + subject.length),
+        });
+      continue;
+    }
+    const fixes = message.slice(message.indexOf(". ") + 2);
+    for (const [, code, statement] of fixes.matchAll(CODE)) {
+      // (#1213's decided sentence for a value shown as text, 'put it in a text with '${...}'', which the rulings keep)
+      if (code === "${...}") continue;
+      if (statement === undefined) {
+        forms.push({
+          code: code!,
+          source: source.slice(0, diagnostic.site.start) + code + source.slice(diagnostic.site.end),
+        });
+        continue;
+      }
+      // (an add on a line of its own, before the case's line; the list itself where the join stood)
+      const list = /to '([^']+)' itself/.exec(fixes)?.[1] ?? "";
+      const lineStart = source.lastIndexOf("\n", start) + 1;
+      forms.push({
+        code: code!,
+        source:
+          source.slice(0, lineStart) +
+          `${code}\n` +
+          source.slice(lineStart, start) +
+          list +
+          source.slice(end),
+      });
+    }
+  }
+  return { diagnosed, forms };
+}
+
+/**
+ * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
+ * where it compiles and runs.
+ */
+export function pasteFailure(source: string): string | null {
+  const compiled = compileProject([{ path: "main.tease", source }]);
+  const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  if (errors.length > 0)
+    return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");
+  const request = coreRequest([{ path: "main.tease", source }]);
+  const text = messageSource([source]);
+  const core =
+    request === null
+      ? []
+      : analyseCore(request).diagnostics.filter(
+          (diagnostic) => diagnostic.class === "compile-error",
+        );
+  if (core.length > 0)
+    return core
+      .map((diagnostic) => `core ${diagnostic.code}: ${coreMessage(diagnostic, text)}`)
+      .join(" | ");
+  if (compiled.plan === null) return "no plan";
+  const failure = createFreshRuntimeSession(compiled.plan, {
+    baseDelayMs: 0,
+    delayPerWordMs: 0,
+    delayPerCharacterMs: 0,
+  })
+    .run()
+    .events.find((event) => event.kind === "runtimeFailure");
+  return failure === undefined ? null : JSON.stringify(failure);
+}

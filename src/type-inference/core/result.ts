@@ -142,6 +142,8 @@ export type DiagnosticRule =
       readonly domain: readonly ItemTag[];
       readonly operands: readonly SourceSite[];
       readonly pair: readonly ItemTag[];
+      /** An error's list operand of `+`: its elements' type's kinds, which a fix's list must hold (TABLE r4.151). */
+      readonly elements?: readonly ItemTag[];
     }
   /** C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead. */
   | { readonly rule: "shown"; readonly element: boolean; readonly property: string | null }
@@ -155,6 +157,8 @@ export type DiagnosticRule =
       readonly receiver: string;
       readonly member: string;
       readonly use: "read" | "call" | "store";
+      /** A list's `join` read: its elements' type's kinds, which decide whether a fix's call is valid (TABLE r4.151). */
+      readonly elements?: readonly ItemTag[];
     }
   /**
    * C5c, ADR 1.4: a property no source of `receiver` has: a read's at the read; a store's at the object that lacks it,
@@ -180,6 +184,32 @@ export type DiagnosticRule =
       /** The variable whose start value the literal is, which a fix declares; `null` for any other literal. */
       readonly root: StoreRoot | null;
     };
+
+/**
+ * What the place a diagnosed value lands in takes (TABLE r4.151), read from the constraint that consumes it
+ * (`CoreProgram.consumersOf`): its kinds (`null`, any value: a place nothing restricts, or one nothing reads; none, where
+ * no kind is proved), and how a value binds there (`whole`, as an operand of an operator, or as a member's receiver). A
+ * value nothing consumes (a bare `say`) takes the shown kinds; a value an operator or a member consumes, only kinds whose
+ * result the operator's or member's own site takes in turn. Every fact is stated, `unproved` where no fact proves it,
+ * which gives words (TABLE r4.162).
+ */
+export interface SiteExpectation {
+  readonly takes: readonly ItemTag[] | null;
+  readonly binds: "whole" | "operand" | "receiver";
+  /** A collection's elements' kinds there (`null`, any). */
+  readonly elements: readonly ItemTag[] | null | "unproved";
+  /**
+   * Whether the value divides, as a divisor or through an operation, a member or a literal that gives one, where a zero
+   * stops the run.
+   */
+  readonly divides: boolean | "unproved";
+}
+
+/**
+ * Whether every value a diagnosed expression reads is there when the script runs (TABLE r4.162, Astra on #1296): an
+ * element read by its index or a dict's value by its key may be absent, which no fact proves.
+ */
+export type Presence = true | "unproved";
 
 /** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */
 export interface StoreRoot {
@@ -261,6 +291,10 @@ export type CoreDiagnostic =
       readonly site: SourceSite;
       readonly rule: DiagnosticRule;
       readonly kinds: readonly ItemTag[];
+      /** A member's or an operation's error: what the place its value lands in takes, which a fix's code must fit. */
+      readonly expects?: SiteExpectation;
+      /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
+      readonly present?: Presence;
     }
   | WrittenTypeError
   | {
@@ -277,6 +311,10 @@ export type CoreDiagnostic =
        * a fallback stands in for (rule 1.9). None where every known kind offends, which takes the error's fix.
        */
       readonly fits: readonly ItemTag[];
+      /** A null value's operation or member: what the place its value lands in takes, which a fallback must fit. */
+      readonly expects?: SiteExpectation;
+      /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
+      readonly present?: Presence;
     };
 
 export interface CoreResult {

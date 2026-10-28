@@ -15,6 +15,16 @@ import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime
 /** A plan's globals for one run. */
 export type Globals = Readonly<Record<string, SerializableRuntimeValue>>;
 
+/**
+ * A diagnostic as a stop must keep it, its identity: without the facts its fix's code forms read (`expects`,
+ * `present`), which a stop never proves, so a fix there may be words (TABLE r4.162). The stop tests compare these.
+ */
+export function stopIdentity(diagnostic: CoreDiagnostic): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(diagnostic).filter(([key]) => key !== "expects" && key !== "present"),
+  );
+}
+
 /** A compile's diagnostics and plan. */
 type Compiled = Pick<CompilationResult, "diagnostics" | "plan">;
 

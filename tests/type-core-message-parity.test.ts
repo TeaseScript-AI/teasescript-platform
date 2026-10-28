@@ -12,7 +12,8 @@ import {
 } from "../src/type-inference/core/messages.js";
 import type { CoreDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
+import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
@@ -58,6 +59,10 @@ const form = (...parts: readonly (string | RegExp)[]): RegExp =>
 
 const code = (pattern: string): RegExp => new RegExp(pattern);
 
+/** One of several forms: a fix's code where its predicate holds at the site, else its words (TABLE r4.151). */
+const oneOf = (...forms: readonly RegExp[]): RegExp =>
+  new RegExp(forms.map((found) => `(?:${found.source})`).join("|"));
+
 /**
  * Whether a subject is a stable path as written (TABLE §13 N1), the only subject a fix's example names (Astra r1, r2):
  * a variable, then properties other than `random`, fixed indexes or keys, or indexes held in plain variables; a literal
@@ -74,16 +79,23 @@ const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
 
+/** A fallback in words (TABLE r4.162): after 'otherwise', also one that does not divide by zero. */
+const FALLBACK_WORDS = " after 'otherwise'(?: that does not lead to a division by zero)?\\.";
+
 const PORTS: readonly Port[] = [
   // ADR 0021 rules 1.9 and 3.5: the check, of a variable, or of the subject kept in a variable first, its `let` shown
   // where its own text may stand in code (the owner's review)
+  // (a fallback's code where its predicate holds, else in words: where the value may divide, or reads what may be
+  // absent, TABLE r4.162)
   {
     from: /^Check it first: if (\S+) != null \{ \.\.\. \}, or give a fallback: \1 otherwise (.+)$/,
     to: ([, name, value]) =>
       form(
-        `Check '${name}' first, as in 'if ${name} != null { ... }', or give a fallback, as in '`,
-        code(grouped(`${name} otherwise ${value}`)),
-        "'.",
+        `Check '${name}' first, as in 'if ${name} != null { ... }', or give a fallback`,
+        oneOf(
+          form(", as in '", code(grouped(`${name} otherwise ${value}`)), "'."),
+          code(FALLBACK_WORDS),
+        ),
       ),
   },
   {
@@ -96,9 +108,15 @@ const PORTS: readonly Port[] = [
       ownText(subject)
         ? form(
             `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
-              "{ ... }', or give a fallback, as in '",
-            code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
-            "'.",
+              "{ ... }', or give a fallback",
+            oneOf(
+              form(
+                ", as in '",
+                code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
+                "'.",
+              ),
+              code(FALLBACK_WORDS),
+            ),
           )
         : exact(
             `Keep '${subject}' in a new variable and check the variable first, as in 'if value != null { ... }'.`,
@@ -339,11 +357,170 @@ const PORTS: readonly Port[] = [
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
+  // #1241 under TABLE r4.151: each code form where its predicate holds at the diagnosed site (`codeAt`, which the paste
+  // test below proves), the same fix in words where it does not; so a kept fix is one of the two, with the actual
+  // operand and the receiver as the source writes it (the current checker writes '5 s' into an element and a result)
+  {
+    from: /^Give the number a unit, such as '.+ (s|deg)'\.$/,
+    to: ([, unit], { subject }) =>
+      oneOf(
+        form("Give the number a unit, such as '", code(grouped(subject)), ` ${unit}'.`),
+        exact("Give the number a unit."),
+      ),
+  },
+  {
+    from: /^Convert the text with (\w+)\(\.\.\.\)\.$/,
+    to: ([, conversion = ""], { subject }) =>
+      oneOf(
+        exact(`Convert the text with '${conversion}(${subject})'.`),
+        exact(`Convert the text with the ${conversion} function.`),
+      ),
+  },
+  {
+    from: /^Use '(toDeg|toRad)\(.+\)' for its size in (degrees|radians)\.$/,
+    to: ([, conversion, unit], { subject }) =>
+      oneOf(
+        exact(`Use '${conversion}(${subject})' for its size in ${unit}.`),
+        exact(`Use the ${conversion} function for its size in ${unit}.`),
+      ),
+  },
+  { from: /^Use a dict to look up by name\.$/, to: ([text]) => exact(text) },
+  // (an object's property is in words: no fact proves the object has it, Codex r1)
+  {
+    from: /^Read a fixed property as '.+\.(\w+)'\.$/,
+    to: ([, key], { subject }) =>
+      exact(
+        `If ${stablePath(subject) ? `'${subject}'` : "the object"} has a property '${key}', use a dot instead of ` +
+          "brackets.",
+      ),
+  },
+  // (an add's key is the script's to choose, and a store's value is not proved a dict value: both in words)
+  {
+    from: /^Store a value by its key, as in dict\[(.+)\] = value\.$/,
+    to: ([, key]) =>
+      exact(
+        key === "key"
+          ? "Assign the value to a key of the dict instead."
+          : "To store a value by its key, write the key in brackets.",
+      ),
+  },
+  // (a key's value is there only where the dict has the key, which no fact proves: in words, Codex r6)
+  {
+    from: /^To read a value by its key, write '.+(\[.+\])'\.$/,
+    to: (_, { subject }) =>
+      exact(
+        `To read a value by its key, write the key in brackets, where '${subject}' has that key.`,
+      ),
+  },
+  {
+    from: /^Use (length, keys, or values|contains, remove, clear, or get)\.$/,
+    to: ([, names]) =>
+      exact(
+        `Use one of the dict's ${names!.startsWith("length") ? "properties" : "methods"} instead: ` +
+          `${names!.replace(/(\w+)/g, "'$1'").replace("'or' ", "or ")}.`,
+      ),
+  },
+  {
+    from: /^Use (\w+(?:, \w+)*), or (\w+)\.$/,
+    to: ([, names, last]) => {
+      const quoted = [...names!.split(", "), last!].map((name) => `'${name}'`);
+      return exact(`Use ${quoted.slice(0, -1).join(", ")}, or ${quoted.at(-1)!}.`);
+    },
+  },
+  {
+    from: /^Use (\w+)(\(\.\.\.\)|\(\))?\.$/,
+    to: ([, member, call], { subject }) =>
+      call === "(...)"
+        ? exact(`Use the ${member} method.`)
+        : oneOf(
+            exact(`Use '${subject}.${member}${call ?? ""}'.`),
+            exact(`Use the ${member} ${call === undefined ? "property" : "method"}.`),
+          ),
+  },
+  // (a join's words also say what its elements must be, Astra r2, Codex r4)
+  {
+    from: /^Write \.?(\w+)(\(\.\.\.\)|\(\))? (with|without) parentheses\.$/,
+    to: ([, member, call], { subject }) =>
+      call === "(...)"
+        ? exact(`Call the ${member} method with its arguments in parentheses.`)
+        : call === undefined
+          ? oneOf(
+              exact(`Write '${subject}.${member}' without parentheses.`),
+              exact(`Read the ${member} property without parentheses.`),
+            )
+          : oneOf(
+              exact(`Write '${subject}.${member}()' with parentheses.`),
+              exact(`Call the ${member} method with parentheses.`),
+              exact(
+                `Call the ${member} method with parentheses, on elements that can be shown as text.`,
+              ),
+              exact(
+                `The ${member} method joins only elements that can be shown as text, so select an element or a ` +
+                  "property first.",
+              ),
+            ),
+  },
+  // #1241: '+' of a list and a value that is not one: a new list at the diagnosed site, the operation or the operand
+  // it names (`subject`), and an add only on a line of its own (it gives no list, Astra r1 B2), each in words where
+  // its predicate does not hold
+  {
+    from: /^To add one element, use '.+', or write '.+' for a new list\.$/,
+    to: (_, { subject, operands: [list = "", value = ""] }) =>
+      form(
+        code(
+          `(?:Write '${grouped(subject === value ? `[${value}]` : `${list} + [${value}]`)}' for a new list|` +
+            "To add one element, put the element in brackets for a new list)",
+        ),
+        code(
+          `, or (?:add the element to '${escaped(list)}' itself with '${escaped(`${list}.add(${value})`)}'|` +
+            "call the add method) on a line of its own\\.",
+        ),
+      ),
+  },
+  {
+    from: /^Write '\[.+\] \+ .+' for a new list\.$/,
+    to: (_, { subject, operands: [value = "", list = ""] }) =>
+      oneOf(
+        form(
+          "Write '",
+          code(grouped(subject === value ? `[${value}]` : `[${value}] + ${list}`)),
+          "' for a new list.",
+        ),
+        exact("Put the element in brackets for a new list."),
+      ),
+  },
+  // (the range as a list, the current checker's code for it beside the list operand, at the operand or the operation
+  // the diagnostic sits on)
+  {
+    from: /^To add the numbers of a range, write '(.+)'\.$/,
+    to: ([, both = ""], { subject, operands: [first = "", second = ""] }) => {
+      const listFirst = both.startsWith(`${first} + `);
+      const range = listFirst ? second : first;
+      const numbers = listFirst
+        ? both.slice(first.length + 3)
+        : both.slice(0, both.length - second.length - 3);
+      return oneOf(
+        form(
+          "Write '",
+          code(grouped(subject === range ? numbers : both)),
+          "' to add the numbers of the range.",
+        ),
+        exact("To add the numbers of a range, convert the range with the toList method first."),
+      );
+    },
+  },
+  {
+    from: /^Join sets with union\(\), or copy a set into a list with toList\(\) first\.$/,
+    to: () =>
+      exact(
+        "Join sets with the union method, or copy a set into a list with the toList method first.",
+      ),
+  },
 ];
 
 /** The review's test for a sentence that names a fix (`message-review-2026-10-27/compare.mjs`): every one is ported. */
 const FIX =
-  /^(Round|Use|Put|Compare|Check|Declare|Write|Add|Select|Its |Remove|Call|Store|Give|Copy|Index|To |Convert|Move|Pass|Show|Turn|Test|Assign|Make|Keep|Start|Set|Load|Save|Wrap|Split|Read|Divide|Combine|Subtract|Did you mean)|\bas in\b|\bsuch as\b|\bdeclare it\b/;
+  /^(Round|Use|Put|Compare|Check|Declare|Write|Add|Select|Its |Remove|Call|Store|Give|Copy|Index|To |Convert|Move|Pass|Show|Turn|Test|Assign|Make|Keep|Start|Set|Load|Save|Wrap|Split|Read|Divide|Combine|Subtract|Join|Did you mean)|\bas in\b|\bsuch as\b|\bdeclare it\b/;
 
 const sentences = (text: string): string[] => text.split(/(?<=[.?])\s+(?=[A-Z'"])/);
 
@@ -417,9 +594,15 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
   return (subject ? 2 : 0) + (kinds ? 1 : 0) - (unnamedNull ? 1 : 0);
 }
 
-function pairs(): Pair[] {
+/** The pairs of the records' diagnostics: the expectation set's, or others of the same shape. */
+function pairs(
+  records: readonly {
+    readonly name: string;
+    readonly files: readonly SourceFile[];
+  }[] = readFixture(),
+): Pair[] {
   const found: Pair[] = [];
-  for (const record of readFixture()) {
+  for (const record of records) {
     const files = [...record.files].sort((a, b) => compareProjectPaths(a.path, b.path));
     const request = coreRequest(files);
     if (request === null) continue;
@@ -665,6 +848,125 @@ test("the comparison rejects a fix changed in a kept or an intended pair (negati
 });
 
 /**
+ * #1241: member, conversion and list errors the expectation set does not hold, from the classified pairs (Sol's
+ * #1241 comment) and one sibling per repair the current checker gives: a number given a unit at a declaration, a
+ * property, an operation's value, an element and an argument, an angle; text converted; a number shown as text in a
+ * property; the members of an angle, an object, a dict and text, a list's method read as a property; `+` of a list
+ * and an element, a range or a set.
+ */
+const CLASSIFIED: readonly string[] = [
+  "let pause: duration = 3\nwait pause\nexit\n",
+  "let box = {pause: 1 s}\nbox.pause = 3\nwait box.pause\nexit\n",
+  "let n = 2\nlet p: duration = n + 1\nexit\n",
+  "let xs: duration[] = [1 s]\nxs.add(3)\nexit\n",
+  "function f(p: duration) { wait p }\nf(3)\nexit\n",
+  "let p: angle = 90\nexit\n",
+  'let day: date = "2026-10-28"\nexit\n',
+  'let record = {label: "old"}\nrecord.label = 5\nexit\n',
+  "let a = 90 deg\nsay a.degrees\nexit\n",
+  'let door = {name: "hall"}\nsay door["name"]\nexit\n',
+  "let toys = dict{collar: 1}\ntoys.add(2)\nexit\n",
+  "let toys = dict{collar: 1}\nsay toys.collar\nexit\n",
+  "let d = dict{a: 1}\nd.x = 2\nexit\n",
+  "let d = dict{a: 1}\nsay d.keys()\nexit\n",
+  'let t = "hello"\nsay t.size\nexit\n',
+  'let t = "hello"\nsay t.toUpperCase()\nexit\n',
+  'let t = "hello"\nsay t.length()\nexit\n',
+  'let t = "hello"\nsay t.trim\nexit\n',
+  'let t = "hello"\nsay t.substring\nexit\n',
+  'let items = ["a", "b"]\nsay items.join\nexit\n',
+  'let names = ["Ann"]\nsay names + "Bo"\nexit\n',
+  "let xs = [1]\nsay 2 + xs\nexit\n",
+  "let xs = [1]\nsay xs + (1..3)\nexit\n",
+  "let xs = [1]\nlet s = set[2]\nsay xs + s\nexit\n",
+  // (Codex r3: a text the conversion does not read; operands and ranges with arithmetic, at an operand or a list that
+  // is no stable path)
+  'let value: date = "bad"\nexit\n',
+  "let xs = [{n: 1}]\nsay (xs + {n: 2}).length\nexit\n",
+  "let xs: integer?[] = [1]\nsay (xs + null).length\nexit\n",
+  "let xs = [1]\nlet n = 1\nsay (xs + (n..(n + 2))).length\nexit\n",
+  "let xs = [1]\nlet n = 1\nsay (((n + 1)..4) + xs).length\nexit\n",
+  "let lists = [[1]]\nsay (1..3) + lists.random\nexit\n",
+];
+
+test("each member, conversion and list fix of the current checker is kept on the classified pairs (#1241)", () => {
+  const found = pairs(
+    CLASSIFIED.map((source) => ({ name: source, files: [{ path: "main.tease", source }] })),
+  );
+  assert.deepEqual(
+    found
+      .filter((pair) => pair.forms.length === 0 || !kept(pair))
+      .map((pair) => `${pair.record}\n  current: ${pair.current}\n  new:     ${pair.message}`),
+    [],
+  );
+  // (each source pairs a diagnostic with a fix)
+  assert.equal(new Set(found.map((pair) => pair.record)).size, CLASSIFIED.length);
+  // TABLE r4.151 (Codex r1, r4, r5, Astra r2): a code form where its predicate holds at the site, the same fix in words
+  // where it does not: what the site takes (a typed declaration, an operand), the elements' type, a store's target,
+  // an object's property no fact proves; a property stored on a type without it gets no read's repair
+  const messages = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    return analyseCore(request).diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+  };
+  assert.deepEqual(messages("let xs = [1]\nxs.join = 2\nexit\n"), [
+    "A list has no property 'join', so 'xs.join' cannot be used.",
+  ]);
+  assert.deepEqual(messages("let a = 90 deg\na.degrees = 2\nexit\n"), [
+    "An angle has no property 'degrees', so 'a.degrees' cannot be used.",
+  ]);
+  const T = 'let t = "hello"\n';
+  for (const [source, fix] of [
+    [`${T}let size: string = t.size\nsay size\nexit\n`, "Use the length property."],
+    [`${T}let n: integer = t.size\nsay n\nexit\n`, "Use 't.length'."],
+    [`${T}if t.size > 2 {\n  say "long"\n}\nexit\n`, "Use 't.length'."],
+    [
+      'let items = ["a"]\nlet value: integer = items.join\nexit\n',
+      "Call the join method with parentheses.",
+    ],
+    // (Codex r6: no fact proves the dict has the key, so a key's read is in words at any site)
+    [
+      "let d = dict{k: 1}\nlet v: integer = d.k\nexit\n",
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      "let a = 90 deg\nlet n: string = a.degrees\nexit\n",
+      "Use the toDeg function for its size in degrees.",
+    ],
+    [
+      "let xs = [1]\nlet s: string = xs + 2\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      "let xs = [1]\nsay xs + 2\nexit\n",
+      "Write 'xs + [2]' for a new list, or add the element to 'xs' itself with 'xs.add(2)' on a line of its own.",
+    ],
+    // (a value no constraint consumes: what `say` shows, but nothing proved where a command the core does not model
+    // takes it)
+    [`${T}wait t.size\nexit\n`, "Use the length property."],
+    [
+      'let xs = [1]\nsay xs + "x"\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let a = {n: 1}\nsay a["missing"]\nexit\n',
+      "If 'a' has a property 'missing', use a dot instead of brackets.",
+    ],
+    [
+      'let d = dict{a: 1}\nd.b = "x"\nexit\n',
+      "To store a value by its key, write the key in brackets.",
+    ],
+  ] as const) {
+    const found = messages(source);
+    assert.ok(
+      found.some((message) => message.endsWith(` ${fix}`)),
+      `${source}: ${found.join(" | ")}`,
+    );
+  }
+});
+
+/**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
  * and structured values, each fix's family once, and for an example of a property shown the lines the repaired source
  * says. A declaration's `= ...` keeps the source's own start value.
@@ -714,20 +1016,20 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
   ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
-  // a stable path through a fixed index, a key, an index variable (TABLE §13 N1, Astra r2)
-  ["let xs = [1]\nlet caption: string = ⟦xs[0]⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
-  [
-    'let d = dict{"a": 2}\nlet caption: string = ⟦d["a"]⟧\nsay caption\nexit\n',
-    /write '([^']*)'/,
-    ["2"],
-  ],
+  // a stable path through an index variable (TABLE §13 N1, Astra r2), in a fix the predicate does not test
   [
     'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ⟦ts[i].year⟧\nexit\n',
     /as in '([^']*)'/,
     ["2026"],
   ],
-  // the null check's fallback, of a kept value and of a composed one
-  ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/],
+  // the null check's fallback, of a kept value and of a composed one; a warning's read by an index, which its program
+  // already performs there, wrapped in place (TABLE r4.168)
+  ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/, ["8"]],
+  [
+    "let xs = [4, null]\nlet v: integer = ⟦xs[1]⟧\nsay v\nexit\n",
+    /fallback, as in '([^']*)'/,
+    ["0"],
+  ],
   [
     'let x: integer? = null\nlet y: integer? = null\nif askBoolean "x" { x = 1 }\nrepeat (⟦x otherwise y⟧) {}\nexit\n',
     /fallback, as in '([^']*)'/,
@@ -742,7 +1044,180 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     '⟦let result: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
     /as '([^']*)'/,
   ],
+  // #1241 (TABLE r4.151): each code form a fix offers, pasted whole at the site its diagnostic sits on, where its
+  // predicate holds: a number given a unit, also an operation's value; text converted; a member the type has, on a
+  // receiver written plainly, nested, as an element and as a dict value, also as a range's bound; a join's elements
+  // ones it shows; a new list where the site takes one (an untyped or a written list, an operand, a receiver)
+  ["let pause: duration = ⟦3⟧\nsay pause\nexit\n", /such as '([^']*)'/],
+  ["let n = 2\nlet p: duration = ⟦n + 1⟧\nsay p\nexit\n", /such as '([^']*)'/],
+  ['let day: date = ⟦"2026-10-28"⟧\nsay day.year\nexit\n', /with '([^']*)'\./, ["2026"]],
+  ['let at: time = ⟦"10:30"⟧\nsay at.hour\nexit\n', /with '([^']*)'\./, ["10"]],
+  ['let dt: datetime = ⟦"2026-10-28T10:00:00"⟧\nsay dt.year\nexit\n', /with '([^']*)'\./, ["2026"]],
+  [
+    'let ad: absoluteDateTime = ⟦"2026-10-28T10:00:00Z"⟧\nsay ad.toDateTime().year\nexit\n',
+    /with '([^']*)'\./,
+  ],
+  ["let a = 90 deg\nsay ⟦a.degrees⟧\nexit\n", /Use '([^']*)' for its size/, ["90"]],
+  [
+    "let a = 90 deg\nlet n: number = ⟦a.degrees⟧\nsay n\nexit\n",
+    /Use '([^']*)' for its size/,
+    ["90"],
+  ],
+  ['let t = "hello"\nsay ⟦t.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let t = "hello"\nlet n: integer = ⟦t.size⟧\nsay n\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let t = "hello"\nif ⟦t.size⟧ > 2 {\n  say "long"\n}\nexit\n', /Use '([^']*)'/, ["long"]],
+  ['let box = {label: "hello"}\nsay ⟦box.label.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  [
+    'let t = "hello"\nfor i in 1..⟦t.size⟧ {\n  say i\n}\nexit\n',
+    /Use '([^']*)'/,
+    ["1", "2", "3", "4"],
+  ],
+  ['let t = "hello"\nsay ⟦t.toUpperCase()⟧\nexit\n', /Use '([^']*)'/, ["HELLO"]],
+  ['let t = "hello"\nsay ⟦t.length()⟧\nexit\n', /Write '([^']*)'/, ["5"]],
+  ['let t = " hello "\nsay ⟦t.trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
+  ['let items = ["a", "b"]\nsay ⟦items.join⟧\nexit\n', /Write '([^']*)'/],
+  ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
+  ["let items: integer[] = []\nsay ⟦items.join⟧\nexit\n", /Write '([^']*)'/],
+  [
+    'let names = ["Ann"]\nlet more = ⟦names + "Bo"⟧\nsay more.length\nexit\n',
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  [
+    "let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n",
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  [
+    "let xs = [1]\nlet ys = ⟦2 + xs⟧\nsay ys.length\nexit\n",
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  [
+    'let names = ["Ann"]\nsay (⟦names + "Bo"⟧).length\nexit\n',
+    /Write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /Write '([^']*)' to add the numbers/, ["3"]],
+  // an argument of a parameter without a type, as its body takes it, also through its result (Codex r7, TABLE r4.160)
+  [
+    'let t = "hello"\nfunction show(p) {\n  say p\n}\nshow(⟦t.size⟧)\nexit\n',
+    /Use '([^']*)'/,
+    ["5"],
+  ],
+  [
+    'let t = "hello"\nfunction count(p) {\n  return p + 1\n}\nsay count(⟦t.size⟧)\nexit\n',
+    /Use '([^']*)'/,
+    ["6"],
+  ],
+  // a fallback the fix writes (ADR 0021 rule 1.9) where the value does not divide, and a receiver's in parentheses
+  // (Astra on #1273)
+  [
+    "function half(x: integer?) {\n  say ⟦x⟧ / 2\n}\nhalf(4)\nhalf(null)\nexit\n",
+    /fallback, as in '([^']*)'/,
+    ["2", "0"],
+  ],
+  [
+    'function size(t: string?) {\n  say ⟦t⟧.length\n}\nsize("ab")\nsize(null)\nexit\n',
+    /fallback, as in '([^']*)'/,
+    ["2", "0"],
+  ],
 ];
+
+/**
+ * #1241 (Astra r1 B2): an `add` a list fix offers on a line of its own, which gives no list: pasted as a line before the
+ * join's line, the list itself where the join stood, `⟦…⟧` around the join; the run says the lines given.
+ */
+const ADDS: readonly (readonly [string, readonly string[]])[] = [
+  ['let names = ["Ann"]\nsay (⟦names + "Bo"⟧).length\nexit\n', ["2"]],
+  ["let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n", ["2"]],
+];
+
+test("a list fix's add, on a line of its own, compiles and runs where the fix offers it (#1241)", () => {
+  for (const [marked, says] of ADDS) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    const found = analyseCore(request)
+      .diagnostics.map((diagnostic) =>
+        /add the element to '([^']*)' itself with '([^']*)' on a line of its own/.exec(
+          coreMessage(diagnostic, text),
+        ),
+      )
+      .find((match) => match !== null);
+    assert.ok(found !== undefined && found !== null, `an add: ${source}`);
+    const [, list, statement] = found;
+    const line = marked.split("\n").find((candidate) => candidate.includes("⟦"))!;
+    const fixed = marked.replace(line, `${statement!}\n${line.replace(/⟦[^⟧]*⟧/, list!)}`);
+    const compiled = compileProject([{ path: "main.tease", source: fixed }]);
+    assert.deepEqual(
+      compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      [],
+      fixed,
+    );
+    assert.ok(compiled.plan !== null, fixed);
+    const events = createFreshRuntimeSession(compiled.plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      says,
+      fixed,
+    );
+  }
+});
+
+/**
+ * TABLE r4.151 (#1241): the paste family's sample (`type-core-paste.ts`): every offer once, the sites in turn, every
+ * code form its fix offers pasted at its own position compiles and runs. The whole family, every offer at every site,
+ * is the step's evidence outside CI.
+ */
+test("every code form a fix offers compiles and runs where pasted, on the paste family's sample (TABLE r4.151)", () => {
+  const failures: string[] = [];
+  let pasted = 0;
+  for (const { name, source, start, end } of pasteCases(true)) {
+    const { diagnosed, forms } = pastedForms(source, start, end);
+    if (!diagnosed) failures.push(`${name}: no error at the expression`);
+    for (const form of forms) {
+      pasted += 1;
+      const failure = pasteFailure(form.source);
+      if (failure !== null) failures.push(`${name}: '${form.code}': ${failure}`);
+    }
+  }
+  assert.deepEqual(failures, []);
+  assert.ok(pasted > 0, `${pasted} forms pasted`);
+});
+
+test("what a site takes is read through a long chain of untyped copies or calls, and a wide literal (#1241, Codex r8, r13)", () => {
+  const lines = (count: number, line: (index: number) => string): string =>
+    Array.from({ length: count }, (_, index) => line(index)).join("\n");
+  const call = (index: number): string => (index === 1023 ? "p" : `f${index + 1}(p)`);
+  for (const source of [
+    `let t = "x"\nlet v0 = t.size\n${lines(2048, (i) => `let v${i + 1} = v${i}`)}\nsay v2048.trim()\nexit\n`,
+    `let t = "x"\n${lines(1024, (i) => `function f${i}(p) {\n  return ${call(i)}\n}`)}\nlet v: string = f0(t.size)\nsay v\nexit\n`,
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const text = messageSource([source]);
+    assert.ok(
+      analyseCore(request).diagnostics.some((diagnostic) =>
+        coreMessage(diagnostic, text).endsWith(" Use the length property."),
+      ),
+    );
+  }
+  // (Codex r13: a literal wide enough that one native call per element would exhaust the stack, where its presence is
+  // walked)
+  const wide = `let d: duration = [${"1, ".repeat(131071)}2].length\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source: wide }]);
+  assert.ok(request !== null);
+  assert.deepEqual(
+    analyseCore(request).diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV041"],
+  );
+});
 
 test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
   for (const [marked, pick, says] of REPAIRS) {
@@ -1020,6 +1495,220 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random - ds[0]\nexit\n',
       "Subtract their dates with 'toDate(...)', or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
     ],
+    // #1241 (TABLE r4.146): where no complete code form stands at the site, the function or the step in words: a unit,
+    // a conversion of text not on one line; members of a receiver that is no stable path; a method's arguments; an
+    // add's key; a list joined of a receiver that is no stable path
+    [
+      "let n = 1\nlet p: duration = n /* c */ + 1\nexit\n",
+      "Put the expression in parentheses with a unit after them.",
+    ],
+    ['let day: date = ("2026-" +\n"10-28")\nexit\n', "Convert the text with the toDate function."],
+    // (Codex r3: a text the conversion does not read, or another value, which may be one)
+    ['let day: date = "bad"\nexit\n', "Convert the text with the toDate function."],
+    ['let day: date = "2026-02-30"\nexit\n', "Convert the text with the toDate function."],
+    ['let at: time = "25:00"\nexit\n', "Convert the text with the toTime function."],
+    [
+      'let text = "bad"\nlet day: date = text\nexit\n',
+      "Convert the text with the toDate function.",
+    ],
+    [
+      "let angles = [90 deg]\nsay angles.random.degrees\nexit\n",
+      "Use the toDeg function for its size in degrees.",
+    ],
+    ['let ts = ["a"]\nsay ts.random.trim\nexit\n', "Call the trim method with parentheses."],
+    [
+      'let ts = ["a"]\nsay ts.random.length()\nexit\n',
+      "Read the length property without parentheses.",
+    ],
+    ['let ts = ["a"]\nsay ts.random.size\nexit\n', "Use the length property."],
+    [
+      'let t = "hello"\nsay t.substring\nexit\n',
+      "Call the substring method with its arguments in parentheses.",
+    ],
+    ['let t = "hello"\nsay t.includes("l")\nexit\n', "Use the contains method."],
+    [
+      'let os = [{n: 1}]\nsay os.random["n"]\nexit\n',
+      "If the object has a property 'n', use a dot instead of brackets.",
+    ],
+    [
+      "let ds = [dict{a: 1}]\nsay ds.random.collar\nexit\n",
+      "To read a value by its key, write the key in brackets, where 'ds.random' has that key.",
+    ],
+    // (Codex r6: a key the dict may not have, also a value of objects; a loop's iterable, whose variable the body reads;
+    // a list of objects, whose element's properties the fix cannot prove)
+    [
+      "let d = dict{k: 1}\nsay d.missing\nexit\n",
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      'let d = dict{k: {n: 1}}\nlet v = {n: "x"}\nv = d.k\nexit\n',
+      "To read a value by its key, write the key in brackets, where 'd' has that key.",
+    ],
+    [
+      "let xs = [1]\nfor v in xs + 2 {\n  say v\n}\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let xs = [{n: 1}]\nsay xs + {n: "x"}\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      "let ds = [dict{a: 1}]\nds.random.b = 2\nexit\n",
+      "To store a value by its key, write the key in brackets.",
+    ],
+    [
+      "let toys = dict{collar: 1}\ntoys.add(2)\nexit\n",
+      "Assign the value to a key of the dict instead.",
+    ],
+    [
+      'let ls = [["A"]]\nsay ls.random + "B"\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    ["let ls = [[1]]\nsay 2 + ls.random\nexit\n", "Put the element in brackets for a new list."],
+    // (Astra r2, Codex r4: a join of elements whose type it cannot show, also of a list cleared or filled later, of
+    // lists, of a dict's objects, nested; of elements whose type is not known; a warning's receiver, which may be of
+    // another type or null, so its fix is in words)
+    ...[
+      "let items = [{n: 1}]\nsay items.join\nexit\n",
+      "let items = [{n: 1}]\nitems.clear()\nsay items.join\nexit\n",
+      "let items = []\nitems.add({n: 1})\nsay items.join\nexit\n",
+      "let items = [[1]]\nsay items.join\nexit\n",
+      "let ds = dict{a: {n: 1}}\nsay ds.values.join\nexit\n",
+      "let box = {items: [{n: 1}]}\nsay box.items.join\nexit\n",
+    ].map(
+      (source) =>
+        [
+          source,
+          "The join method joins only elements that can be shown as text, so select an element or a property first.",
+        ] as const,
+    ),
+    [
+      "let items = [hostValue]\nsay items.join\nexit\n",
+      "Call the join method with parentheses, on elements that can be shown as text.",
+    ],
+    [
+      'function show(x: string | integer) {\n  say x.trim\n}\nshow("a")\nshow(1)\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    ['function show(x) {\n  say x.size\n}\nshow("a")\nshow(1)\nexit\n', "Use the length property."],
+    [
+      'function show(x: string?) {\n  say x.trim\n}\nshow("a")\nshow(null)\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    // (Codex r7, TABLE r4.160: an argument of a parameter without a type that its body or its result's use does not
+    // take, a variable's value its reads do not take; a receiver read through a dict's key, which may be absent)
+    [
+      'let t = "hello"\nfunction use(p) {\n  say p.trim()\n}\nuse(t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    [
+      'let t = "hello"\nfunction id(p) {\n  return p\n}\nlet q: string[] = id(t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
+    // (Astra on #1296, TABLE r4.162, r4.168: an error's value read by an index or a dict's key, which may be absent,
+    // the list or the operand a list or a conversion fix reads, either way; an element as a receiver)
+    [
+      'let d = dict{found: [1]}\nsay d["absent"] + 2\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      "let ls = [[1]]\nsay ls[0] + 2\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let d = dict{found: 2}\nlet v: duration = d["absent"]\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    ["let ns = [2]\nlet v: duration = ns[0]\nsay v\nexit\n", "Give the number a unit."],
+    // (Codex r12: such a read inside a literal or an interpolation, also before another part)
+    [
+      'let d = dict{found: 2}\nlet v: duration = ({n: d["absent"]}).n\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    [
+      'let d = dict{found: 2}\nlet v: duration = toInteger("${d["absent"]}${1}", default: 1)\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    // (Astra r2 on #1296: a property of a receiver that may be null, as a variable or a property holds it)
+    [
+      "let boxes = [{n: 2}, null]\nlet box = boxes[1]\nlet converted: duration = box.n\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
+    [
+      'let boxes = [{text: "hi", items: [1]}, null]\nlet outer = {inner: boxes[1]}\nsay outer.inner.text.size\nexit\n',
+      "Use the length property.",
+    ],
+    [
+      'let boxes = [{text: "hi", items: [1]}, null]\nlet box = boxes[1]\nsay box.items + 2\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    // (Astra r3 on #1296: an operand that may be null, nested in arithmetic)
+    [
+      "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = n + 1\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
+    [
+      "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = -n\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
+    // (Codex r13: such a read in an ask's operand)
+    [
+      'let d = dict{found: "Q"}\nlet v: duration = askInteger(d["absent"])\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    ['let items = ["hello"]\nsay items[0].size\nexit\n', "Use the length property."],
+    ['let lists = [["a"]]\nsay lists[0].join\nexit\n', "Call the join method with parentheses."],
+    [
+      "let xs = [1]\nlet caption: string = xs[0]\nsay caption\nexit\n",
+      "To show it as text, put it in a text with '${...}'.",
+    ],
+    [
+      'let d = dict{"a": 2}\nlet caption: string = d["a"]\nsay caption\nexit\n',
+      "To show it as text, put it in a text with '${...}'.",
+    ],
+    // (Codex r9: a default's or a fallback's type must also fit the value it stands beside, C10)
+    [
+      'let t = "hello"\nlet ys = ["x"]\nsay ys.get(9, default: t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    ['let t = "hello"\nsay t.size otherwise "x"\nexit\n', "Use the length property."],
+    // (Codex r8: a compound assignment's operands, which have no flow point here)
+    ['let t = "hello"\nlet v = t.size\nv += "x"\nsay v\nexit\n', "Use the length property."],
+    [
+      'let t = "hello"\nfunction f(p) {\n  p += "x"\n  say p\n}\nf(t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    [
+      'let d = dict{a: " hello "}\nsay d["missing"].trim\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    [
+      'let d = dict{a: " hello "}\nsay d["a"].trim\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    // (Astra on #1273: a fallback the fix would write where the value divides, as a divisor, through a calculation or a
+    // member, where a written zero stops the run)
+    ...[
+      "let xs = [4, null]\nsay 1 / xs[1]\nexit\n",
+      "let xs = [4, null]\nsay 7 % xs[1]\nexit\n",
+      "let xs = [4, null]\nsay 1 / (xs[1] * 2)\nexit\n",
+      'let xs = ["ab", null]\nsay 4 / xs[1].length\nexit\n',
+      // (Codex r8, r9: through a side of 'otherwise', a default)
+      'let xs = ["ab", null]\nsay 1 / (xs[1].length otherwise 1)\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / load("missing", default: xs[1].length)\nexit\n',
+      // (Codex r10: through a literal's contents, an interpolation's text)
+      'let xs = ["ab", null]\nsay 1 / [xs[1].length][0]\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / ({n: xs[1].length}).n\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / toInteger("${xs[1].length}", default: 1)\nexit\n',
+      'function f(s: string, xs: string?[]) {\n  say 1 / toInteger(s, default: xs[1].length)\n}\nf("bad", ["ab", null])\nexit\n',
+    ].map(
+      (source) =>
+        [
+          source,
+          "or give a fallback after 'otherwise' that does not lead to a division by zero.",
+        ] as const,
+    ),
   ];
   for (const [source, fix] of cases) {
     const request = coreRequest([{ path: "main.tease", source }]);
