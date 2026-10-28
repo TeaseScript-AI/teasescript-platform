@@ -1578,6 +1578,12 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Use the length property.",
     ],
     ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
+    // (Codex r9: a default's or a fallback's type must also fit the value it stands beside, C10)
+    [
+      'let t = "hello"\nlet ys = ["x"]\nsay ys.get(9, default: t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    ['let t = "hello"\nsay t.size otherwise "x"\nexit\n', "Use the length property."],
     // (Codex r8: a compound assignment's operands, which have no flow point here)
     ['let t = "hello"\nlet v = t.size\nv += "x"\nsay v\nexit\n', "Use the length property."],
     [
@@ -1599,8 +1605,10 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "let xs = [4, null]\nsay 7 % xs[1]\nexit\n",
       "let xs = [4, null]\nsay 1 / (xs[1] * 2)\nexit\n",
       'let xs = ["ab", null]\nsay 4 / xs[1].length\nexit\n',
-      // (Codex r8: through a side of 'otherwise')
+      // (Codex r8, r9: through a side of 'otherwise', a default)
       'let xs = ["ab", null]\nsay 1 / (xs[1].length otherwise 1)\nexit\n',
+      'let xs = ["ab", null]\nsay 1 / load("missing", default: xs[1].length)\nexit\n',
+      'function f(s: string, xs: string?[]) {\n  say 1 / toInteger(s, default: xs[1].length)\n}\nf("bad", ["ab", null])\nexit\n',
     ].map(
       (source) =>
         [

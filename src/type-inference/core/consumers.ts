@@ -1407,7 +1407,8 @@ export class Consumers {
    * own result depends on the value (an operator's, a member's), the kinds it takes whose result its own site takes in
    * turn, up the expression to a consumer that does not; a comparison, a logic operator, an interpolation give one type
    * whatever they take. Any other consumer takes nothing a fix can prove. A divisor's value divides, and so does any
-   * value an operation, a member or a fallback computes its result from where that result divides (TABLE r4.159).
+   * value an operation, a member, a fallback or a default computes its result from where that result divides (TABLE
+   * r4.159).
    */
   #expected(site: SourceSite): SiteExpectation {
     // (one task per site or place, on the driver's own stack: a long chain of them is no native call depth, Codex r8)
@@ -1632,16 +1633,11 @@ export class Consumers {
           ...dividing(outer),
         };
       }
-      case "fallback": {
-        // (a side of `otherwise` is its result where it is taken: what the result's site takes, in parentheses beside
-        // the operator)
+      case "part": {
+        // (a side of `otherwise`, a default, a named argument: its type must also fit the value it stands beside (C10),
+        // which no fact here proves, Codex r9; it divides where the result does)
         const outer = yield* compileChild(this.#expectedTask(consumer.site));
-        return {
-          takes: outer.takes,
-          binds: "operand",
-          ...(outer.elements === undefined ? {} : { elements: outer.elements }),
-          ...dividing(outer),
-        };
+        return { takes: [], binds: "operand", ...dividing(outer) };
       }
       case "use": {
         if (consumer.what !== "index")

@@ -65,9 +65,10 @@ export type ValueConstraint = Extract<
  * What consumes a value place (TABLE r4.151), as its constraint or use is registered: a store into `into`; an operand
  * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
  * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
- * demand on the value a fix does not read (a `get`'s receiver and key, a save). A side of `otherwise` and a `get`'s
- * default are the result at `site` (`fallback`). A variable's or a parameter's place is consumed by each read of it, a
- * function's result by each call (`read`, the value read there; TABLE r4.160).
+ * demand on the value a fix does not read (a save, a speaker's store). A side of `otherwise`, a `get`'s or a `load`'s
+ * parts and an operation's named argument are part of the result at `site` (`part`), with a type of their own to fit.
+ * A variable's or a parameter's place is consumed by each read of it, a function's result by each call (`read`, the
+ * value read there; TABLE r4.160).
  */
 export type Consumption =
   | { readonly kind: "store"; readonly into: PlaceId }
@@ -81,7 +82,7 @@ export type Consumption =
   | { readonly kind: "argument"; readonly fn: number; readonly parameter: number | string }
   | { readonly kind: "return"; readonly fn: number }
   | { readonly kind: "read"; readonly occurrence: PlaceId }
-  | { readonly kind: "fallback"; readonly site: SourceSite }
+  | { readonly kind: "part"; readonly site: SourceSite }
   | {
       readonly kind: "use";
       readonly what: "index" | "count" | "condition" | "key";
@@ -403,7 +404,8 @@ export class CoreProgram {
         constraint.arguments.forEach((argument, index) =>
           this.#consumed(argument, { kind: "operand", operation: constraint, index }),
         );
-        for (const named of constraint.named) this.#consumed(named.value, other);
+        for (const named of constraint.named)
+          this.#consumed(named.value, { kind: "part", site: constraint.site });
         break;
       case "call": {
         const result = this.#functions.get(constraint.fn)?.result;
@@ -425,14 +427,19 @@ export class CoreProgram {
           this.#consumed(constraint.value, { kind: "return", fn: constraint.fn });
         break;
       case "get":
-        this.#consumed(constraint.receiver, other);
-        if (constraint.key !== null) this.#consumed(constraint.key, other);
-        this.#consumed(constraint.fallback, { kind: "fallback", site: constraint.site });
-        break;
       case "fallback":
-        this.#consumed(constraint.left, { kind: "fallback", site: constraint.site });
-        this.#consumed(constraint.right, { kind: "fallback", site: constraint.site });
+      case "load": {
+        const part: Consumption = { kind: "part", site: constraint.site };
+        if (constraint.kind === "get") {
+          this.#consumed(constraint.receiver, part);
+          if (constraint.key !== null) this.#consumed(constraint.key, part);
+          this.#consumed(constraint.fallback, part);
+        } else if (constraint.kind === "fallback") {
+          this.#consumed(constraint.left, part);
+          this.#consumed(constraint.right, part);
+        } else if (constraint.fallback !== null) this.#consumed(constraint.fallback, part);
         break;
+      }
       case "save":
       case "speakerStore":
         this.#consumed(constraint.value, other);

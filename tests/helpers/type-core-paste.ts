@@ -9,8 +9,8 @@ import { coreRequest } from "./type-core-analysis.js";
  * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
- * loop's iterable, a range's bound, a side of `otherwise`, a variable or a parameter without a type, as its reads
- * take it, also in a compound assignment).
+ * loop's iterable, a range's bound, a side of `otherwise`, a default, a variable or a parameter without a type, as its
+ * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs.
  * The parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
  */
 
@@ -136,6 +136,7 @@ const SITES: readonly Site[] = [
     line: "f(@)",
   },
   { name: "fallback", before: "let n: integer? = null", line: "say n otherwise @", operand: true },
+  { name: "default", before: 'let ys = ["x"]', line: "say ys.get(9, default: @)" },
   {
     name: "untyped returned argument",
     before: "function id(p) {\n  return p\n}",
@@ -291,12 +292,27 @@ export function pastedForms(
   return { diagnosed, forms };
 }
 
-/** Why a pasted source fails: its compile errors, or its run's failure; `null` where it compiles and runs. */
+/**
+ * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
+ * where it compiles and runs.
+ */
 export function pasteFailure(source: string): string | null {
   const compiled = compileProject([{ path: "main.tease", source }]);
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0)
     return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");
+  const request = coreRequest([{ path: "main.tease", source }]);
+  const text = messageSource([source]);
+  const core =
+    request === null
+      ? []
+      : analyseCore(request).diagnostics.filter(
+          (diagnostic) => diagnostic.class === "compile-error",
+        );
+  if (core.length > 0)
+    return core
+      .map((diagnostic) => `core ${diagnostic.code}: ${coreMessage(diagnostic, text)}`)
+      .join(" | ");
   if (compiled.plan === null) return "no plan";
   const failure = createFreshRuntimeSession(compiled.plan, {
     baseDelayMs: 0,
