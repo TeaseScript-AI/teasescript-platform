@@ -548,18 +548,53 @@ const admitsNumber = (item: Item): boolean => item.tag === "number" && item.extO
 /**
  * An evaluation key (S6-CARRIERS §2): from the stored value down to a stop, each carrier's operand position (its own
  * contribution after all of them, `OWN`) and each literal cell's source position. Keys compare lexicographically, a
- * shorter key before the keys it prefixes.
+ * shorter key before the keys it prefixes. A walk keeps each key once, as a node of its tree of keys one position below
+ * the key it extends (`longerKey`), so k nested operations keep k nodes, never k keys up to k long (#1230); the
+ * lexicographic order is the tree's preorder, each key's longer ones by position (`rankKeys`).
  */
-type EvaluationKey = readonly number[];
+interface EvaluationKey {
+  readonly position: number;
+  /** The keys one position longer, by that position. */
+  longer: Map<number, EvaluationKey> | null;
+  /** Its place in evaluation order among its walk's keys, once the walk is done. */
+  rank: number;
+}
+
+/** A walk's empty key. */
+const rootKey = (): EvaluationKey => ({ position: -1, longer: null, rank: 0 });
+
+/** The key one `position` longer than `key`: one node per key and walk. */
+function longerKey(key: EvaluationKey, position: number): EvaluationKey {
+  key.longer ??= new Map();
+  let found = key.longer.get(position);
+  if (found === undefined) key.longer.set(position, (found = { position, longer: null, rank: 0 }));
+  return found;
+}
+
+/** Ranks a walk's keys from `root` in evaluation order: the preorder of their tree, each key's longer ones by position. */
+function rankKeys(work: WorkLedger, root: EvaluationKey): void {
+  let rank = 0;
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    node.rank = rank++;
+    if (node.longer === null) continue;
+    // (a walk makes a key's longer ones from the last position back, so they are mostly in order already)
+    const longer = [...node.longer.values()];
+    if (longer.some((each, index) => index > 0 && each.position > longer[index - 1]!.position)) {
+      work.charge("checks", sortCost(longer.length));
+      longer.sort((a, b) => b.position - a.position);
+    }
+    for (const each of longer) pending.push(each);
+  }
+}
 
 /** A carrier's own contribution's position: after every operand it carries (A4: a selected copy precedes it). */
 const OWN = Number.MAX_SAFE_INTEGER;
 
-/** The order of two evaluation keys: negative where `a` is evaluated first. */
+/** The order of two evaluation keys of one walk: negative where `a` is evaluated first. */
 function compareKeys(a: EvaluationKey, b: EvaluationKey): number {
-  for (let index = 0; index < a.length && index < b.length; index += 1)
-    if (a[index] !== b[index]) return a[index]! - b[index]!;
-  return a.length - b.length;
+  return a.rank - b.rank;
 }
 
 /** The roles of a typed ingress's default (F18). */
@@ -733,10 +768,10 @@ interface Stop {
   /** Whether each literal it was read out of has it alone at the step (`[typed][0]`, never `[typed, 2][0]`). */
   readonly single: boolean;
   /**
-   * The operations it was reached through, the outermost first (`get` with its default, a copy of the elements, a
-   * list's `+`, ...): its contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
+   * The operations it was reached through (`get` with its default, a copy of the elements, a list's `+`, ...): its
+   * contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
    */
-  readonly via: readonly Via[];
+  readonly via: ViaChain | null;
 }
 
 /**
@@ -751,6 +786,28 @@ interface Via {
   readonly operand: PlaceId;
   /** The operand's role for the carrier (`carriers.ts`), part of a via's signature. */
   readonly role: CarrierRole;
+}
+
+/**
+ * A chain of operations (`Stop.via`): its innermost one and the chain outside it, `null` for none. Each operand's chain
+ * is one link onto its operation's, so k nested operations keep k links, never k chains up to k long (#1230).
+ */
+interface ViaChain {
+  readonly level: Via;
+  readonly outer: ViaChain | null;
+}
+
+/** Whether some operation of a chain passes `test`. */
+function someLevel(via: ViaChain | null, test: (level: Via) => boolean): boolean {
+  for (let at = via; at !== null; at = at.outer) if (test(at.level)) return true;
+  return false;
+}
+
+/** A chain's operations, the outermost first. */
+function levelsOf(via: ViaChain | null): Via[] {
+  const levels: Via[] = [];
+  for (let at = via; at !== null; at = at.outer) levels.push(at.level);
+  return levels.reverse();
 }
 
 /** A stored value's contributions by path (`#stopsOf`): written copies, other whole values, and literals. */
@@ -1022,8 +1079,9 @@ export class Admission {
   readonly #someOwn = new Map<number, Map<IngressNode, boolean>>();
   readonly #wholeItems = new Map<number, Map<IngressNode, boolean>>();
   readonly #firstStops = new Map<number, Map<IngressNode, IngressStop | null>>();
-  /** Per chain of a walk's operations, its signature (`#viaSignature`). */
-  readonly #viaSignatures = new WeakMap<readonly Via[], string>();
+  /** Per chain of a walk's operations, its signature (`#viaSignature`), and per signature's parts, its name. */
+  readonly #viaSignatures = new WeakMap<ViaChain, string>();
+  readonly #viaNames = new Map<string, string>();
   /** Per store, its landing stops by ingress (`#storeIngresses`). */
   readonly #byIngress = new Map<number, StoreIngresses>();
   /** Per list of a walk's stops, the decider's snapshots of it, all and the unselected ones (`#snapshots`). */
@@ -5787,6 +5845,7 @@ export class Admission {
     const { program, definitions, contract } = this.pass;
     const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
     const sources = new Set<string>();
+    const root = rootKey();
     // a literal's cells at a step, in evaluation order
     const cells = (literal: PlaceId, step: string | null): (readonly [Definition, string])[] => {
       const next: (readonly [Definition, string])[] = [];
@@ -5817,16 +5876,15 @@ export class Admission {
       readonly string[],
       readonly string[],
       boolean,
-      readonly Via[],
+      ViaChain | null,
       boolean,
       boolean,
       EvaluationKey,
-    ])[] = [[value, node, [], [], false, [], false, true, []]];
+    ])[] = [[value, node, [], [], false, null, false, true, root]];
     // a cell's position: its value's place in the literal's own source, never its index in a list one step filtered
-    // (each evaluation key and chain of operations a task or stop keeps is charged as kept, TABLE r4.78 (5): k nested
-    // operations keep k keys and chains up to k long)
+    // (each evaluation key and chain of operations a task or stop keeps is one node onto the one it extends: #1230)
     const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey =>
-      keptSteps(this.#work, key, [program.places[d.value!]?.site?.start ?? 0]);
+      longerKey(key, program.places[d.value!]?.site?.start ?? 0);
     while (pending.length > 0) {
       const [current, at, path, strip, deep, via, after, single, key] = pending.pop()!;
       program.work.charge("indexSteps");
@@ -5879,24 +5937,12 @@ export class Admission {
       if (!after && !literal && term === null && this.#sourceOf(current) === null) {
         const carried = this.#carriersOf(current, strip);
         if (carried.length > 0) {
-          pending.push([
-            current,
-            at,
-            path,
-            strip,
-            deep,
-            via,
-            true,
-            single,
-            keptSteps(this.#work, key, [OWN]),
-          ]);
+          pending.push([current, at, path, strip, deep, via, true, single, longerKey(key, OWN)]);
           for (let index = carried.length - 1; index >= 0; index -= 1) {
             const [operand, rest, role, position] = carried[index]!;
-            const through = program.projOf.has(current)
+            const through: ViaChain | null = program.projOf.has(current)
               ? via
-              : keptSteps(this.#work, via, [
-                  { value: current, node: at, path, strip, operand, role },
-                ]);
+              : { level: { value: current, node: at, path, strip, operand, role }, outer: via };
             pending.push([
               operand,
               at,
@@ -5906,7 +5952,7 @@ export class Admission {
               through,
               false,
               single,
-              keptSteps(this.#work, key, [position]),
+              longerKey(key, position),
             ]);
           }
           continue;
@@ -5971,6 +6017,7 @@ export class Admission {
       }
     }
     // each path's stops in evaluation order: the walk reaches a later row of one operand before an earlier cell
+    rankKeys(program.work, root);
     for (const map of [stops.written, stops.values, stops.literals])
       for (const list of map.values()) {
         program.work.charge("checks", sortCost(list.length));
@@ -6019,7 +6066,7 @@ export class Admission {
             : yield* this.#inheritedInto(stop.from, rest, into);
         // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
         // is no copy of the place, while a selected copy keeps its whole written type, A4)
-        if (term !== null && (stop.via.length === 0 || this.#selects(stop)))
+        if (term !== null && (stop.via === null || this.#selects(stop)))
           copy = { key: stop.key, term, stop };
       }
     }
@@ -6056,7 +6103,7 @@ export class Admission {
       positions[best]! += 1;
       // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
       // data it leaves the path open, and the call decides nothing there beside it, F18, TABLE r4.66 (3))
-      if (next.via.some((level) => TYPED_ROLES.has(level.role))) continue;
+      if (someLevel(next.via, (level) => TYPED_ROLES.has(level.role))) continue;
       const rest = at.slice(lists[best]!.length);
       const items = withoutEmpty(
         this.#run(values.valueItems(next.value, next.node, joinSteps(next.strip, rest))),
@@ -6130,24 +6177,34 @@ export class Admission {
   /**
    * A chain of operations by what selects through it (S6-CARRIERS §4.5's via signature): each level's carrier value
    * and role, its operand aside, so a choice's options read alike while a fallback's two operands, or a `get`'s receiver
-   * and default, stay apart. Once per chain.
+   * and default, stay apart. Once per chain, as a short name of its outer chain's name and its innermost level, so equal
+   * chains have equal names and no name grows with its chain (#1230).
    */
-  #viaSignature(via: readonly Via[]): string {
-    let known = this.#viaSignatures.get(via);
-    if (known === undefined) {
-      this.pass.program.work.charge("checks", via.length);
-      known = via.map((level) => `${level.value}:${level.role}`).join(">");
-      this.#viaSignatures.set(via, known);
+  #viaSignature(via: ViaChain | null): string {
+    const unnamed: ViaChain[] = [];
+    let at = via;
+    for (; at !== null && !this.#viaSignatures.has(at); at = at.outer) unnamed.push(at);
+    let name = at === null ? "" : this.#viaSignatures.get(at)!;
+    for (let index = unnamed.length - 1; index >= 0; index -= 1) {
+      const { level } = unnamed[index]!;
+      this.pass.program.work.charge("checks");
+      const parts = `${name}>${level.value}:${level.role}`;
+      let known = this.#viaNames.get(parts);
+      if (known === undefined) {
+        keepText(this.#work, parts.length);
+        this.#viaNames.set(parts, (known = `${this.#viaNames.size}`));
+      }
+      this.#viaSignatures.set(unnamed[index]!, (name = known));
     }
-    return known;
+    return name;
   }
 
   /**
    * Whether a decider reached through operations decides at `at`: each of them, outermost to innermost, holds its kinds
    * definitely in its own value there.
    */
-  #through(via: readonly Via[], at: readonly string[], definite: readonly ItemTag[]): boolean {
-    for (const level of via) {
+  #through(via: ViaChain | null, at: readonly string[], definite: readonly ItemTag[]): boolean {
+    for (const level of levelsOf(via)) {
       const carried = withoutEmpty(
         this.#run(
           this.pass.values.valueItems(
@@ -6179,9 +6236,9 @@ export class Admission {
    * its receiver's element where its default is dead and its default where that is the only value, `otherwise` its
    * operand where that is never null and its fallback where the operand is only null; no other carrier surely.
    */
-  #chosen(via: readonly Via[], surely = false): boolean {
+  #chosen(via: ViaChain | null, surely = false): boolean {
     const { program, values } = this.pass;
-    return via.every((level) => {
+    return levelsOf(via).every((level) => {
       const c = program.opOf.get(level.value);
       const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
       // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
@@ -6298,7 +6355,7 @@ export class Admission {
     for (const map of [stops.written, stops.values, stops.literals])
       for (const stop of map.get(key) ?? []) {
         program.work.charge("checks");
-        if (stop.via.length === 0 || this.#selects(stop)) selected.push(stop);
+        if (stop.via === null || this.#selects(stop)) selected.push(stop);
       }
     program.work.charge("checks", sortCost(selected.length));
     selected.sort((a, b) => compareKeys(a.key, b.key));
@@ -6328,7 +6385,7 @@ export class Admission {
         const out: Siting[] = [];
         for (const stop of selected) {
           program.work.charge("checks");
-          if (stop.via.some((level) => OWN_ROLES.has(level.role))) continue;
+          if (someLevel(stop.via, (level) => OWN_ROLES.has(level.role))) continue;
           if (this.#namedBelowCombining(stop) || this.#namedMember(stop))
             out.push(
               definitions.ingress.has(baseOf(stop.value))
@@ -6363,7 +6420,7 @@ export class Admission {
           if (
             !definitions.ingress.has(base) &&
             this.#sourceOf(stop.value) !== null &&
-            !stop.via.some((level) => inline.has(level.value) || OWN_ROLES.has(level.role))
+            !someLevel(stop.via, (level) => inline.has(level.value) || OWN_ROLES.has(level.role))
           )
             out.push(stop);
         }
@@ -6384,7 +6441,7 @@ export class Admission {
   #contributionSite(stop: Stop, d: Definition): SourceSite {
     const { program } = this.pass;
     // (only the innermost row takes the stop's value as its operand: a walk descends, each value one row's operand)
-    const level = stop.via.at(-1);
+    const level = stop.via?.level;
     if (level !== undefined && RECEIVER_ROLES.has(level.role) && level.operand === stop.value)
       return program.places[level.value]?.site ?? d.site;
     return program.places[stop.value]?.site ?? d.site;
@@ -6399,7 +6456,10 @@ export class Admission {
     if (definitions.ingress.has(stop.value) || this.#sourceOf(stop.value) === null) return false;
     const member =
       program.projOf.has(stop.value) ||
-      stop.via.some((level) => RECEIVER_ROLES.has(level.role) && level.operand === stop.value);
+      someLevel(
+        stop.via,
+        (level) => RECEIVER_ROLES.has(level.role) && level.operand === stop.value,
+      );
     return (
       member && this.#run(values.valueItems(stop.value, stop.node, stop.strip)).some(isExternal)
     );
@@ -6414,7 +6474,8 @@ export class Admission {
     return (
       !definitions.ingress.has(stop.value) &&
       this.#sourceOf(stop.value) !== null &&
-      stop.via.some(
+      someLevel(
+        stop.via,
         (level) =>
           COMBINING_ROLES.has(level.role) &&
           level.operand !== stop.value &&
@@ -6443,7 +6504,7 @@ export class Admission {
       if (withoutEmpty(this.#run(contract.contractOf(key))).some(concrete)) continue;
       if (this.#run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
         // (an operation's own read: the destination's check at the store's value, TABLE r4.63 (3))
-        return stop.via.some((level) => OWN_ROLES.has(level.role))
+        return someLevel(stop.via, (level) => OWN_ROLES.has(level.role))
           ? d.site
           : this.#contributionSite(stop, d);
     }
@@ -6495,7 +6556,8 @@ export class Admission {
           for (const stop of list) {
             program.work.charge("checks");
             if (
-              !stop.via.some(
+              !someLevel(
+                stop.via,
                 (level) => OWN_ROLES.has(level.role) && (typed || !TYPED_ROLES.has(level.role)),
               )
             )
@@ -6786,17 +6848,19 @@ export class Admission {
     const reached = new Set<PlaceId>();
     const rows = new Map<string, { readonly own: boolean; readonly call: PlaceId | null }>();
     const rowOf = (
-      via: readonly Via[],
+      via: ViaChain | null,
     ): { readonly own: boolean; readonly call: PlaceId | null } => {
-      const keyAt = (index: number): string => `${via[index]!.value}:${via[index]!.operand}`;
-      let start = via.length;
-      while (start > 0 && !rows.has(keyAt(start - 1))) {
+      const rowKey = (level: Via): string => `${level.value}:${level.operand}`;
+      // (the rows no stop before went through, from the innermost out)
+      const fresh: Via[] = [];
+      let at = via;
+      for (; at !== null && !rows.has(rowKey(at.level)); at = at.outer) {
         program.work.charge("indexSteps");
-        start -= 1;
+        fresh.push(at.level);
       }
-      let row = start > 0 ? rows.get(keyAt(start - 1))! : { own: false, call: null };
-      for (let index = start; index < via.length; index += 1) {
-        const level = via[index]!;
+      let row = at !== null ? rows.get(rowKey(at.level))! : { own: false, call: null };
+      for (let index = fresh.length - 1; index >= 0; index -= 1) {
+        const level = fresh[index]!;
         if (OWN_ROLES.has(level.role)) reached.add(level.operand);
         row = {
           own: row.own || OWN_ROLES.has(level.role),
@@ -6806,7 +6870,7 @@ export class Admission {
               : null
             : row.call,
         };
-        rows.set(keyAt(index), row);
+        rows.set(rowKey(level), row);
       }
       return row;
     };
