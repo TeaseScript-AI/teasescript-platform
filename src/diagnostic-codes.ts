@@ -127,7 +127,8 @@ export const DIAGNOSTIC_CODES = {
       parts: [
         "a symbol of another language that is no token, as `;`, with the text of `FOREIGN_FORMS`",
         "the same rule with the same text for a symbol that is a token, such as `&&`, a word that starts a " +
-          "statement, such as `def`, and a loop head in parentheses, each where the source fails without it",
+          "statement, such as `def`, an `f` that touches text, a loop head in parentheses, and a `:` that ends " +
+          "the line before a block, each where the source fails without it",
         "the same rule with the same text for a name that no declaration takes, such as `None` or `print(...)`",
       ],
     },

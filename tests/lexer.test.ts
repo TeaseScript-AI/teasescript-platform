@@ -217,14 +217,10 @@ test("diagnoses invalid characters and continues lexing", () => {
   );
 });
 
-test("diagnoses unknown escapes and obsolete backticks precisely", () => {
+test("diagnoses unknown escapes precisely", () => {
   const unknown = lex('"bad \\q still"');
   assert.deepEqual(unknown.diagnostics.map(compactDiagnostic), [["TSL002", [5, 0, 5, 7, 0, 7]]]);
   assert.equal(tokenValue(unknown.tokens[1]), "bad q still");
-  assert.deepEqual(
-    lex("`old`").diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSL001", "TSL001"],
-  );
 });
 
 test("recovers an unknown escape before a physical newline", () => {

@@ -738,6 +738,7 @@ export class Parser {
   }
 
   *#parseBlockStatements(): ParseTask<Block | null> {
+    if (this.atColonBlock()) return yield* parseChild(this.#parseIndentedBlock());
     if (!this.match(TokenKind.LeftBrace)) {
       this.reportInsertion(parserDiagnosticCode.expectedBlock, "Expected '{' to start the block.");
       return null;
@@ -757,6 +758,54 @@ export class Parser {
       kind: "block",
       statements: Object.freeze(statements),
       span: spanFrom(leftBrace.span, this.previous().span),
+    });
+  }
+
+  /** Whether a `:` that ends its line comes next, where Python starts an indented block (`#parseIndentedBlock`). */
+  public atColonBlock(): boolean {
+    const next = this.peek(1).kind;
+    return (
+      this.check(TokenKind.Colon) && (next === TokenKind.Newline || next === TokenKind.EndOfFile)
+    );
+  }
+
+  /**
+   * Python's block after a `:` that ends its line, as in `if done:`: the lines indented deeper than the line of the `:`.
+   * The `:` is reported (`FOREIGN_FORMS`) and the lines are read as a block, so that they and an `else` after them
+   * report nothing more.
+   */
+  *#parseIndentedBlock(): ParseTask<Block> {
+    const colon = this.advance();
+    this.reportToken(parserDiagnosticCode.foreignForm, FOREIGN_FORMS.get(":")!.message, colon);
+    let lineStart = this.current - 1;
+    while (lineStart > 0 && this.tokens[lineStart - 1]!.kind !== TokenKind.Newline) lineStart -= 1;
+    const indent = this.tokens[lineStart]!.span.start.column;
+    const statements: Statement[] = [];
+    for (;;) {
+      const next = this.check(TokenKind.Newline)
+        ? this.tokens[this.shared.newlineRuns.ends[this.current]!]!
+        : this.peek();
+      if (
+        next.kind === TokenKind.EndOfFile ||
+        next.kind === TokenKind.RightBrace ||
+        next.span.start.column <= indent
+      ) {
+        // The line break before the next line stays for the statement that holds the block.
+        if (this.tokens[this.current - 1]!.kind === TokenKind.Newline)
+          this.current = this.shared.newlineRuns.starts[this.current - 1]!;
+        break;
+      }
+      this.skipNewlines();
+      const startIndex = this.current;
+      const diagnosticCount = this.diagnostics.length;
+      const statement = yield* parseChild(this.parseStatement());
+      if (statement !== null) statements.push(statement);
+      this.endStatement(startIndex, diagnosticCount, true);
+    }
+    return Object.freeze({
+      kind: "block",
+      statements: Object.freeze(statements),
+      span: spanFrom(colon.span, this.previous().span),
     });
   }
 
@@ -1742,6 +1791,21 @@ export class Parser {
         }),
         this.current - 1,
       );
+    }
+    // Python's `f"Hi {name}"`, an `f` that touches the quote, which is read as the text.
+    if (
+      token.kind === TokenKind.Identifier &&
+      token.lexeme === "f" &&
+      this.peek(1).kind === TokenKind.StringStart &&
+      this.peek(1).span.start.offset === token.span.end.offset
+    ) {
+      this.reportToken(
+        parserDiagnosticCode.foreignForm,
+        FOREIGN_FORMS.get('f"Hi {name}"')!.message,
+        token,
+      );
+      this.advance();
+      return yield* parseChild(this.#parsePrimary());
     }
     if (
       this.match(TokenKind.Identifier) ||
