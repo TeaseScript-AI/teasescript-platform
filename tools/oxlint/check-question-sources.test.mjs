@@ -11,18 +11,22 @@ const CONSUMERS = "src/type-inference/core/consumers.ts";
 const COMPOSED = "for (const item of this.#items(child.value, child.node, rest)) items.push(item);";
 
 /**
- * The check's messages for answers.ts and consumers.ts, each changed in memory by its `edit` (a scratch copy). The files
- * as they are pass the check in `npm run lint` (`run.mjs`); these are its negative pair (TABLE r4.165).
+ * The check's messages for answers.ts and consumers.ts, each changed in memory by its `edit` (a scratch copy), or
+ * replaced by its text in `replaced`, and the files `added`. The files as they are pass the check in `npm run lint`
+ * (`run.mjs`); these are its negative checks (TABLE r4.165).
  */
-function messagesWith(edits) {
+function messagesWith(edits, replaced = {}, added = {}) {
   return questionSourceDiagnostics(
-    [ANSWERS, CONSUMERS].map((file) => {
-      const text = readFileSync(resolve(repositoryRoot, file), "utf8");
-      const changed = edits[file]?.(text) ?? text;
-      if (edits[file] !== undefined)
-        assert.notEqual(changed, text, `the scratch copy of ${file} changes`);
-      return { file, text: changed };
-    }),
+    [
+      ...[ANSWERS, CONSUMERS].map((file) => {
+        const text = replaced[file] ?? readFileSync(resolve(repositoryRoot, file), "utf8");
+        const changed = edits[file]?.(text) ?? text;
+        if (edits[file] !== undefined)
+          assert.notEqual(changed, text, `the scratch copy of ${file} changes`);
+        return { file, text: changed };
+      }),
+      ...Object.entries(added).map(([file, text]) => ({ file, text })),
+    ],
     FINISHING_READERS,
   ).map((diagnostic) => `${diagnostic.fileName}: ${diagnostic.message}`);
 }
@@ -61,6 +65,107 @@ test("a new wrapper of the finishing read fails by the name it references, howev
   });
   assert.ok(
     messages.some((message) => message.startsWith(`${CONSUMERS}: #finishingRead is named only in`)),
+    messages.join("\n"),
+  );
+});
+
+/*
+ * The split layout (#1071): the consumers' methods moved to functions in `consumers/`, each taking the instance first,
+ * a public method keeping its forwarder. Its clean control reports nothing; each negative, planted in a file of its own,
+ * is reported there.
+ */
+const PART = "src/type-inference/core/consumers/finishing.ts";
+const SPLIT_CLASS = [
+  'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+  "export class Consumers {",
+  "  constructor() {",
+  "    void ((value: number) => finishingRead(this, value));",
+  "  }",
+  "  public valueItems(value: number): number {",
+  "    return finishingRead(this, value);",
+  "  }",
+  "  public finishedItems(value: number): number {",
+  "    return finishedItems(this, value);",
+  "  }",
+  "}",
+].join("\n");
+const SPLIT_PART = [
+  'import type { Consumers } from "../consumers.js";',
+  "export function finishingRead(walk: Consumers, value: number): number {",
+  "  return value > 0 ? finishingRead(walk, value - 1) : 0;",
+  "}",
+  "export function typedRead(walk: Consumers): number {",
+  "  return finishingRead(walk, 0);",
+  "}",
+  "export function finishedItems(walk: Consumers, value: number): number {",
+  "  return finishingRead(walk, value);",
+  "}",
+].join("\n");
+const part = (name) => `src/type-inference/core/consumers/${name}.ts`;
+const IMPORT = 'import type { Consumers } from "../consumers.js";\n';
+/** Negatives of the split layout, each in its own file: [its file, its text]. */
+const SPLIT_NEGATIVES = [
+  // a function the class owns that is no listed reader
+  [
+    part("settled"),
+    `${IMPORT}import { finishingRead } from "./finishing.js";\nexport function settledItems(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n`,
+  ],
+  // the finishing read imported under another name
+  [
+    part("aliased"),
+    `${IMPORT}import { finishingRead as read } from "./finishing.js";\nexport const aliased = read;\n`,
+  ],
+  // a function of the finishing read's name another class owns
+  [
+    part("decoy"),
+    'import type { CoreAnswers } from "../answers.js";\nexport function finishingRead(answers: CoreAnswers): number {\n  void answers;\n  return 0;\n}\n',
+  ],
+  // a second declaration of a listed reader's site
+  [
+    part("forgery"),
+    `${IMPORT}import { finishingRead } from "./finishing.js";\nexport function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 1);\n}\n`,
+  ],
+  // a function the class owns, a method of its moved to it, re-exported
+  [part("reexport"), 'export { finishingRead } from "./finishing.js";\n'],
+];
+
+test("the split layout's members are its functions: clean, and each negative reported in its own file", () => {
+  const clean = messagesWith({}, { [CONSUMERS]: SPLIT_CLASS }, { [PART]: SPLIT_PART });
+  assert.deepEqual(clean, []);
+  const messages = messagesWith(
+    {},
+    { [CONSUMERS]: SPLIT_CLASS },
+    { [PART]: SPLIT_PART, ...Object.fromEntries(SPLIT_NEGATIVES) },
+  );
+  for (const [file] of SPLIT_NEGATIVES)
+    assert.ok(
+      messages.some((message) => message.startsWith(`${file}: `)),
+      `${file}:\n${messages.join("\n")}`,
+    );
+  assert.ok(
+    messages.some((message) => message.includes("Consumers.typedRead has 2 declarations")),
+    messages.join("\n"),
+  );
+});
+
+test("a forwarder that is not exact names its function as a reference (the split layout)", () => {
+  const messages = messagesWith(
+    {
+      [CONSUMERS]: (text) =>
+        text.replace(
+          "return finishedItems(this, value);",
+          "return finishedItems(this, value + 1);",
+        ),
+    },
+    { [CONSUMERS]: SPLIT_CLASS },
+    { [PART]: SPLIT_PART },
+  );
+  assert.ok(
+    messages.some((message) => message.startsWith(`${CONSUMERS}: finishedItems is named only in`)),
+    messages.join("\n"),
+  );
+  assert.ok(
+    messages.some((message) => message.includes("Consumers.finishedItems has 2 declarations")),
     messages.join("\n"),
   );
 });
