@@ -827,8 +827,8 @@ class CoreAnswers implements Answers {
     ))
       owned.push(diagnostic.obligation);
     const others: { readonly item: Obligation; readonly rule: number }[] = [];
-    // (the boundaries are the walk's last step, finished after a stop where admission settled; a fresh finishing pass
-    // leaves the ingresses to their consumers' own checks)
+    // (the boundaries are the walk's last step, finished after any stop: where admission had not settled, those into
+    // written types, every other ingress store marked)
     if (consumers.published)
       for (const list of consumers.admission.boundaries.values())
         for (const item of list) others.push({ item, rule: 0 });

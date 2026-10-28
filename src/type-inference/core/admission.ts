@@ -1586,10 +1586,29 @@ export class Admission {
 
   // ------------------------------------------------------------------------------------------- the decision
 
+  /**
+   * The stores admission walks: the stores, adds, returns, parameter defaults and single-site arguments into each key (a
+   * multi-site argument decides nothing, F21), found once.
+   */
+  public stores(): readonly Definition[] {
+    if (this.#stores === null) {
+      const { definitions, lists } = this.pass;
+      this.#stores = [...definitions.storeDefs, ...definitions.transferDefs].filter(
+        (d) =>
+          (d.kind === "whole" || d.kind === "add") &&
+          (d.how !== "argument" || lists.singleSite(d.fn)) &&
+          !this.#besideDefault(d),
+      );
+    }
+    return this.#stores;
+  }
+
+  #stores: readonly Definition[] | null = null;
+
   /** Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements. */
   public groups(): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
     if (this.#groups !== null) return this.#groups;
-    const { program, definitions, lists } = this.pass;
+    const { program, definitions } = this.pass;
     const work = program.work;
     const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
     for (const c of program.constraints)
@@ -1599,14 +1618,7 @@ export class Admission {
           tracked.add(keptKey(this.#work, target.root, target.path));
       }
     for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(this.#work, binding, []));
-    // the stores, adds, returns, parameter defaults and single-site arguments into each key (a multi-site argument
-    // decides nothing, F21)
-    const reaching = [...definitions.storeDefs, ...definitions.transferDefs].filter(
-      (d) =>
-        (d.kind === "whole" || d.kind === "add") &&
-        (d.how !== "argument" || lists.singleSite(d.fn)) &&
-        !this.#besideDefault(d),
-    );
+    const reaching = this.stores();
     const stores = new Map<Key, number>();
     for (const d of reaching)
       for (const key of [d.key, ...keptPrefixes(this.#work, d.key)]) {
@@ -6504,8 +6516,9 @@ export class Admission {
    * least evaluation key; owed where a consumer met one of its ingresses' items, where a typed ingress lands where a
    * type is admitted (a parameter default too, r4.28; an argument or a return that carries a typed `load` or
    * `fromJson`, Sol M3 r8), or where one of its ingress stops stands where a type is admitted (the owner's F1).
+   * `written`: only the stores whose destination has a written type (a stop before admission settled).
    */
-  public publish(): void {
+  public publish(written = false): void {
     const { definitions, lists, program } = this.pass;
     const index = this.#landingIndex();
     const stores = new Set(definitions.storeDefs);
@@ -6514,6 +6527,10 @@ export class Admission {
       program.work.charge("checks");
       if (stops.length === 0) continue;
       const destination = this.#destPath(d);
+      // (`written`: a stop before admission settled reads no decision, so only a written destination's boundary forms;
+      // any other ingress store is marked, TABLE r4.110 (3))
+      const writtenType = written ? writtenOf(program.place(d.place).kind) : null;
+      if (written && (writtenType === null || termAt(writtenType, destination) === null)) continue;
       // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
       // one)
       const typedIngress = stops.some((stop) => {

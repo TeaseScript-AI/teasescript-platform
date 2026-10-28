@@ -47,6 +47,7 @@ import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
+import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
@@ -537,25 +538,6 @@ export function coreCheckResult(
   };
 }
 
-let leftOut: ((diagnostic: CoreDiagnostic) => boolean) | null = null;
-
-/**
- * Test-only: runs `callback` with the warnings `omit` names left out of every discharge inside it: the plan content a
- * record brings, as the stop oracle measures it (`tests/helpers/type-core-stop-oracle.ts`, TABLE r4.108).
- */
-export function withoutRecords<T>(
-  omit: (diagnostic: CoreDiagnostic) => boolean,
-  callback: () => T,
-): T {
-  if (leftOut !== null) throw new Error("Records are already left out.");
-  leftOut = omit;
-  try {
-    return callback();
-  } finally {
-    leftOut = null;
-  }
-}
-
 /**
  * V30 §13: a conversion of a value the compiler knows and the conversion cannot convert is a compile error, also with a
  * `default:` (#1105). The value is the argument's known value through its view, never the call's, which the default
@@ -626,7 +608,7 @@ function runtimeChecks(
   // the warnings' checks, and those a stop moved to the runtime
   for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
     if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
-    if (leftOut?.(diagnostic) === true) continue;
+    if (leftOutWarning(diagnostic)) continue;
     const expression = index.expressionAt(diagnostic.site);
     switch (diagnostic.kind) {
       case "written-target": {
@@ -669,7 +651,7 @@ function runtimeChecks(
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
   for (const check of answers.checks)
-    if (check.boundary) owed.push({ obligation: check, kinds: null });
+    if (check.boundary && !leftOutCheck(check)) owed.push({ obligation: check, kinds: null });
   // the types a typed load and a `fromJson` read their value as (F18)
   const typed = new Set<Expression>();
   for (const load of index.loads) {

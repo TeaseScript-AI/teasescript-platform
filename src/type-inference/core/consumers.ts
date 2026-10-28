@@ -253,6 +253,39 @@ type Offending = readonly [Item, string];
 
 let consumerOrder: (<T>(list: readonly T[]) => T[]) | null = null;
 
+/** The records a test leaves out (`withoutRecords`): warnings, and checks no warning owns. */
+export interface Omission {
+  readonly diagnostic: (diagnostic: CoreDiagnostic) => boolean;
+  readonly check: (check: Obligation) => boolean;
+}
+
+let leftOut: Omission | null = null;
+
+/**
+ * Test-only: runs `callback` with what `omit` names left out: the marks a stop makes, with what their consumer forms only
+ * with them, and the warnings and checks every discharge inside it plans (`consumer.ts`). The stop oracle's measure of a
+ * record's content (`tests/helpers/type-core-stop-oracle.ts`, TABLE r4.108, r4.110).
+ */
+export function withoutRecords<T>(omit: Omission, callback: () => T): T {
+  if (leftOut !== null) throw new Error("Records are already left out.");
+  leftOut = omit;
+  try {
+    return callback();
+  } finally {
+    leftOut = null;
+  }
+}
+
+/** Whether `withoutRecords` leaves a warning out of the discharge. */
+export function leftOutWarning(diagnostic: CoreDiagnostic): boolean {
+  return leftOut?.diagnostic(diagnostic) === true;
+}
+
+/** Whether `withoutRecords` leaves a check no warning owns out of the discharge. */
+export function leftOutCheck(check: Obligation): boolean {
+  return leftOut?.check(check) === true;
+}
+
 /** Test-only: runs `callback` with every analysis inside it visiting its consumers in `order` (ADR 0021 1.6). */
 export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], callback: () => T): T {
   if (consumerOrder !== null) throw new Error("A consumer order is already active.");
@@ -735,8 +768,8 @@ export class Consumers {
    * The finishing path (D4 a′, TABLE r4.54, r4.55): the units a stop left, or with `all` every one (admission did not
    * settle, so nothing before the stop stands), and the units nested past the nesting limit, each with no further
    * proving: every value they read is `unknown` with the reason `budget` (`STOPPED`), so each consumer owes its check,
-   * its warning one of `deferred`. With `all`, also C1's checks against written types, which admission's walk would
-   * have made. Without `all`, admission settled: what it decided and what the walk found before the stop stand
+   * its warning one of `deferred`. With `all`, also the stores' obligations admission's walk would have made, no
+   * decision read (`#freshStores`). Without `all`, admission settled: what it decided and what the walk found before the stop stand
    * (TABLE r4.90), and a publication the stop cut or never reached finishes against those decisions, the solver
    * answering only what it had finished. Bounded by the units, each a constant number of steps besides its own syntax.
    */
@@ -744,9 +777,9 @@ export class Consumers {
     this.#finishing = true;
     this.#stoppedAt = all ? null : (this.#stoppedAt ?? { stage: STAGES, unit: 0 });
     this.#walk();
-    // (C1 against written types ranks as admission's stores do)
+    // (the stores' obligations rank as admission's do)
     this.#rule = all ? 1 : 4 + STAGES;
-    if (all) this.#writtenStores();
+    if (all) this.#freshStores();
     else if (!this.published) {
       // (from its start: what the cut publication had made is made again)
       this.admission.boundaries.clear();
@@ -782,51 +815,66 @@ export class Consumers {
   }
 
   /**
-   * C1 against written types in the finishing path, admission's walk not settled: each store, argument, return and
-   * add into a place whose written type holds at its path owes its check (A1, the type the runtime checks it against).
+   * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), over admission's
+   * own store list (`Admission.stores`) and reading no decision (A6: a later pass may admit a store this one rejected,
+   * so its decisions may be narrower than the settled ones). A store into a written type at its path keeps its C1
+   * against it (A1, the type the runtime checks it against): a literal's own kind fits or errs, any other value is
+   * checked when the script runs; an ingress store there its boundary (`Admission.publish`). Every other store is marked
+   * at its site, its type undecided (r4.100).
    */
-  #writtenStores(): void {
-    const { program, definitions } = this.pass;
-    for (const list of definitions.byKey.values())
-      for (const d of list) {
-        program.work.charge("checks");
-        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
-        const written = writtenOf(program.place(d.place).kind);
-        const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
-        const term = written === null ? null : termAt(written, path);
-        if (term === null) continue;
-        const tags = typeTags(term).filter((tag) => tag !== "unknown");
-        if (tags.length === 0) continue;
-        const rule: DiagnosticRule = {
+  #freshStores(): void {
+    const { program } = this.pass;
+    for (const d of this.admission.stores()) {
+      program.work.charge("checks");
+      if (d.value === undefined) continue;
+      const written = writtenOf(program.place(d.place).kind);
+      const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
+      const term = written === null ? null : termAt(written, path);
+      const label = targetName(program.place(d.place).label, path);
+      if (term === null) {
+        this.#storeWarning(d.site, label, STOPPED[0]!, ["unknown"], {
           rule: "store",
           into: this.#placeText(d.place, path),
-          type: tags,
-          written: true,
+          type: ["unknown"],
+          written: false,
           decider: null,
           brought: null,
-        };
-        // a literal's own kind fits or errs (C1, A6); any other value is checked when the script runs
-        // (only what the store's syntax tells: the whole value's type alone would not check the parts it holds)
-        const items = withoutEmpty(this.#literalKind(d.value) ?? STOPPED);
-        const fitting = (item: Item): boolean =>
-          concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
-        if (items.every(fitting)) continue;
-        if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
-          this.#error(
-            "written-target",
-            d.site,
-            rule,
-            items.map((item) => item.tag),
-          );
-        else
-          this.#storeWarning(
-            d.site,
-            targetName(program.place(d.place).label, path),
-            items.find((item) => !fitting(item)) ?? STOPPED[0]!,
-            tags,
-            rule,
-          );
+        });
+        continue;
       }
+      const tags = typeTags(term).filter((tag) => tag !== "unknown");
+      if (tags.length === 0) continue;
+      const rule: DiagnosticRule = {
+        rule: "store",
+        into: this.#placeText(d.place, path),
+        type: tags,
+        written: true,
+        decider: null,
+        brought: null,
+      };
+      // (only what the store's syntax tells: the whole value's type alone would not check the parts it holds)
+      const items = withoutEmpty(this.#literalKind(d.value) ?? STOPPED);
+      const fitting = (item: Item): boolean =>
+        concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
+      if (items.every(fitting)) continue;
+      if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
+        this.#error(
+          "written-target",
+          d.site,
+          rule,
+          items.map((item) => item.tag),
+        );
+      else
+        this.#storeWarning(
+          d.site,
+          label,
+          items.find((item) => !fitting(item)) ?? STOPPED[0]!,
+          tags,
+          rule,
+        );
+    }
+    this.admission.publish(true);
+    this.published = true;
   }
 
   // ----------------------------------------------------------------------------------------- diagnostics
@@ -858,7 +906,8 @@ export class Consumers {
   /**
    * A warning of `rule` explained by `item`; `fits`, the value's items that the rule takes (its fixes' types);
    * `receiver`, a member's receiver as its context sentence names it, `read` the value whose read the word is (a
-   * member's receiver; else the value at `site`).
+   * member's receiver; else the value at `site`). Whether it was made: a mark a test leaves out (`withoutRecords`) is
+   * not.
    */
   #warning(
     kind: DiagnosticKind,
@@ -869,7 +918,7 @@ export class Consumers {
     fits: readonly Item[],
     receiver: ContextDetail["receiver"] = null,
     read?: PlaceId,
-  ): void {
+  ): boolean {
     const diagnostic: Extract<CoreDiagnostic, { obligation: unknown }> = {
       class: "warning-runtime-check",
       kind,
@@ -881,8 +930,10 @@ export class Consumers {
       obligation,
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
     };
+    if (this.#finishing && leftOutWarning(diagnostic)) return false;
     (this.#finishing ? this.deferred : this.diagnostics).push(diagnostic);
     this.rules.set(diagnostic, this.#rule);
+    return true;
   }
 
   /**
@@ -1087,8 +1138,8 @@ export class Consumers {
     against: readonly ItemTag[],
     rule: DiagnosticRule,
     fits: readonly Item[],
-  ): void {
-    this.#warning(
+  ): boolean {
+    return this.#warning(
       "written-target",
       site,
       item,
@@ -2362,24 +2413,27 @@ export class Consumers {
       // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing; its
       // host data meets its boundary as unstopped (r4.109 (1))
       const own = withoutEmpty(this.#valueItems(value, node, rest));
-      if (direct.some(unsettledItem) && !own.every((item) => item.tag === "null")) {
+      if (
+        direct.some(unsettledItem) &&
+        !own.every((item) => item.tag === "null") &&
+        // (what the mark carries forms only with it: its content, TABLE r4.110 (a))
         this.#storeWarning(site, label, STOPPED[0]!, ["unknown"], {
           rule: "fallback",
           fallback: c.kind === "fallback",
           type: ["unknown"],
-        });
-        if (into === null || !typeTags(into).includes("unknown"))
-          this.admission.boundariesAt(
-            own.filter((item) => isOpaque(item) || isExternal(item)),
-            this.#obligation(
-              "copy-type",
-              site,
-              label,
-              ["unknown"],
-              `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label}`,
-            ),
-          );
-      }
+        }) &&
+        (into === null || !typeTags(into).includes("unknown"))
+      )
+        this.admission.boundariesAt(
+          own.filter((item) => isOpaque(item) || isExternal(item)),
+          this.#obligation(
+            "copy-type",
+            site,
+            label,
+            ["unknown"],
+            `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label}`,
+          ),
+        );
       return false;
     }
     const directFamilies = new Set(directTags.map(family));
@@ -2724,7 +2778,7 @@ export class Consumers {
       against: readonly RequiredKind[],
       index: number | null,
       pair: readonly ItemTag[] = [],
-    ): void =>
+    ): boolean =>
       this.#warning(
         "operator",
         site,
@@ -3170,7 +3224,7 @@ export class Consumers {
           ? `check that ${label} is a whole number at ${what}`
           : `check the operand ${label} at ${what} when it runs`;
     const required = against.map((tag) => requiredKind(tag));
-    const owe = (item: Item, obliged: ObligationKind): void =>
+    const owe = (item: Item, obliged: ObligationKind): boolean =>
       this.#warning(
         kind,
         at,
@@ -3242,7 +3296,7 @@ export class Consumers {
       return;
     }
     // S4, §4: the null owes its null-check, every other offending kind its integer check
-    const owe = (item: Item, obliged: ObligationKind, on: string): void =>
+    const owe = (item: Item, obliged: ObligationKind, on: string): boolean =>
       this.#warning(
         "integer-use",
         at,

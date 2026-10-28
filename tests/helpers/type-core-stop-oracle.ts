@@ -3,6 +3,7 @@ import type { InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { Answers } from "../../src/type-inference/core/answers.js";
+import type { Omission } from "../../src/type-inference/core/consumers.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 
@@ -21,8 +22,11 @@ type Compiled = Pick<CompilationResult, "diagnostics" | "plan">;
 export interface StopRun {
   readonly result: Compiled;
   readonly answers: Answers;
-  /** The compile again, the warnings whose `recordOf` `records` has left out of its discharge (`withoutRecords`). */
-  readonly without: (records: ReadonlySet<string>) => Compiled;
+  /** The compile and its analysis again under `withoutRecords(omit)`; `key` names the omission (for a cache). */
+  readonly without: (
+    omit: Omission,
+    key: string,
+  ) => { readonly result: Compiled; readonly answers: Answers };
 }
 
 export interface StopCase {
@@ -105,9 +109,33 @@ function recordOf(code: string, site: Span): string {
   return `${code} ${site.start}:${site.end}`;
 }
 
-/** A diagnostic of the core as a record (`StopRun.without`). */
-export function recordOfDiagnostic(diagnostic: CoreDiagnostic): string {
-  return recordOf(diagnostic.code, diagnostic.site);
+/**
+ * What to leave out of a compile (`StopRun.without`): the warnings and marks with the records `records` names (each
+ * `code start:end`), and the boundary checks at the sites `boundaries` names (each `start:end`), with its key.
+ */
+function omission(
+  records: ReadonlySet<string>,
+  boundaries: ReadonlySet<string> = new Set(),
+): readonly [Omission, string] {
+  return [
+    {
+      diagnostic: (d: CoreDiagnostic) => records.has(recordOf(d.code, d.site)),
+      check: (check: Obligation) =>
+        check.boundary && boundaries.has(`${check.site.start}:${check.site.end}`),
+    },
+    `${[...records].sort().join("|")}#${[...boundaries].sort().join("|")}`,
+  ];
+}
+
+/** The items of `list` beyond those of `other`, each as often as `list` has it more (a multiset difference). */
+function beyond(list: readonly string[], other: readonly string[]): string[] {
+  const left = new Map<string, number>();
+  for (const item of other) left.set(item, (left.get(item) ?? 0) + 1);
+  return list.filter((item) => {
+    const count = left.get(item) ?? 0;
+    if (count > 0) left.set(item, count - 1);
+    return count === 0;
+  });
 }
 
 /** A diagnostic's offsets. */
@@ -166,17 +194,50 @@ export function stopProblems(c: StopCase): string[] {
   const [before, after] = [shown(unstopped), shown(stopped)];
   if (JSON.stringify(before) !== JSON.stringify(after))
     problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
-  // the checks, in their published order
+  // the checks, in their published order: an unstopped one a mark's record owns, or the boundary of a store a stop
+  // before admission settled marks (r4.110 (3)); a stopped one a mark's record owns, or one that forms only with the
+  // marks, their content (r4.110 (a): the stopped analysis without them lacks it)
   const marked = new Set<Obligation>(
     [...unstopped.answers.diagnostics, ...stopped.answers.diagnostics, ...marks].flatMap((d) =>
       "obligation" in d && excused.has(recordOf(d.code, d.site)) ? [d.obligation] : [],
     ),
   );
-  const checks = (each: StopRun): string[] =>
-    each.answers.checks.filter((check) => !marked.has(check)).map((check) => JSON.stringify(check));
-  const [owed, kept] = [checks(unstopped), checks(stopped)];
-  if (JSON.stringify(owed) !== JSON.stringify(kept))
-    problems.push(`checks ${kept.join(" | ")} against ${owed.join(" | ")}`);
+  const storeSites = new Set(
+    marks
+      .filter(
+        (mark) =>
+          mark.rule.rule === "store" &&
+          mark.obligation.against.length === 1 &&
+          mark.obligation.against[0] === "unknown",
+      )
+      .map((mark) => `${mark.site.start}:${mark.site.end}`),
+  );
+  const owed = unstopped.answers.checks
+    .filter(
+      (check) =>
+        !marked.has(check) &&
+        !(check.boundary && storeSites.has(`${check.site.start}:${check.site.end}`)),
+    )
+    .map((check) => JSON.stringify(check));
+  let kept = stopped.answers.checks
+    .filter((check) => !marked.has(check))
+    .map((check) => JSON.stringify(check));
+  if (beyond(kept, owed).length > 0 && marks.length > 0) {
+    const without = stopped.without(...omission(excused)).answers.checks;
+    kept = beyond(
+      kept,
+      beyond(
+        kept,
+        without.map((check) => JSON.stringify(check)),
+      ),
+    );
+  }
+  if (JSON.stringify(owed) !== JSON.stringify(kept)) {
+    const [lost, extra] = [beyond(owed, kept), beyond(kept, owed)];
+    for (const check of lost) problems.push(`lost check ${check}`);
+    for (const check of extra) problems.push(`extra check ${check}`);
+    if (lost.length + extra.length === 0) problems.push(`checks order ${kept.join(" | ")}`);
+  }
   if (want !== null && got === null) problems.push("no plan");
   if (want === null || got === null) return problems;
   // the plans, whole: each difference inside a changing mark's content
@@ -197,7 +258,10 @@ export function stopProblems(c: StopCase): string[] {
   const content: PlanDifference[] = [];
   if (differences.length > 0 && changing.size > 0) {
     const own = (each: StopRun): PlanDifference[] =>
-      planDifferences(each.without(new Set()).plan, each.without(changing).plan);
+      planDifferences(
+        each.without(...omission(new Set())).result.plan,
+        each.without(...omission(changing, storeSites)).result.plan,
+      );
     content.push(...own(unstopped), ...own(stopped));
   }
   const inContent = (path: string): boolean =>
@@ -218,4 +282,60 @@ export function stopProblems(c: StopCase): string[] {
       problems.push(`violating ${JSON.stringify(b)} against ${JSON.stringify(a)}`);
   });
   return problems;
+}
+
+/**
+ * A difference the oracle knows and does not excuse (TABLE r4.110): the source it is found in, its exact problems, its
+ * mechanism, the issue that owns it, and the stop points of the every-unit sweep it is found at over its four modes. The
+ * sweep fails where the count moves; the exception goes when its issue lands.
+ */
+export interface NamedException {
+  readonly source: string;
+  /** The exact problems it shows, one at each of its stop points. */
+  readonly problems: readonly string[];
+  readonly mechanism: string;
+  readonly issue: string;
+  readonly count: number;
+  /** Where CI counts it (`type-core-stop.test.ts`): its stop points in the settled phases, the analysis's own order. */
+  readonly settled?: number;
+}
+
+export const NAMED_EXCEPTIONS: readonly NamedException[] = [
+  {
+    source:
+      'let seed = {ticks: 2, title: "ok"}\nlet state = seed\nstate = hostValue\nrepeat state.ticks {}\nsay state.title\nexit\n',
+    problems: [
+      'extra check {"kind":"copy-type","target":"state.ticks","against":["unknown"],"on":"validate external data state.ticks","site":{"file":0,"start":77,"end":88},"boundary":true}',
+    ],
+    mechanism:
+      "a settled walk stop reads `state.ticks` by its key's finished contract, whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress store brought: a redundant runtime check",
+    issue: "#1216",
+    count: 504,
+    settled: 126,
+  },
+  {
+    source:
+      'let value = fromJson(hostValue, default: {list: [{n: fromJson("3", default: 0), open: null}]})\nsay value.list.get(0, default: {n: 0, open: null}).n\nsay "DONE"\nexit\n',
+    problems: [
+      "plan /instructions/8/typeCheck/type/properties/0/type/element",
+      "plan /instructions/8/typeCheck/type/properties/0/type/element/properties",
+    ],
+    mechanism:
+      "a settled walk stop leaves `value.list.element` or its fields undecided (admission decides them lazily, never after a stop), so the store's check opens there; part 3's syntax decision (source 4) decides them from the default literal",
+    issue: "#1165",
+    count: 802,
+  },
+];
+
+/** A stop's problems in `source` that are no named exception, and the named exceptions it shows. */
+export function namedExceptions(
+  source: string,
+  problems: readonly string[],
+): { readonly rest: readonly string[]; readonly named: readonly NamedException[] } {
+  const known = NAMED_EXCEPTIONS.filter((exception) => exception.source === source);
+  const named = known.filter((exception) => exception.problems.some((p) => problems.includes(p)));
+  return {
+    rest: problems.filter((problem) => !named.some((n) => n.problems.includes(problem))),
+    named,
+  };
 }

@@ -9,14 +9,13 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
-import { withoutRecords } from "../src/type-inference/core/consumer.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
-  recordOfDiagnostic,
+  NAMED_EXCEPTIONS,
   stopProblems,
   type Globals,
   type StopRun,
@@ -340,13 +339,8 @@ function settledPhases(
       const analyse = (allowance: number): Answers =>
         withTestAllowance(allowance, () => inMode(() => analyseCore(request)));
       const compile = () => inMode(() => compileSourceWithBackend(source, options, CORE_BACKEND));
-      const without = (records: ReadonlySet<string>) =>
-        withoutRecords((d) => records.has(recordOfDiagnostic(d)), compile);
-      const unstopped: StopRun = {
-        result: compile(),
-        answers: inMode(() => analyseCore(request)),
-        without,
-      };
+      const both = () => ({ result: compile(), answers: inMode(() => analyseCore(request)) });
+      const unstopped: StopRun = { ...both(), without: (omit) => withoutRecords(omit, both) };
       // this mode's settled phases: the stops below its total, down to the first that is not settled
       const stops = phaseEnds(unstopped.answers.budget.total, (allowance) => {
         const { stoppedIn, settled } = analyse(allowance).budget;
@@ -373,7 +367,7 @@ function settledPhases(
               stopped: {
                 result: withTestAllowance(allowance, compile),
                 answers,
-                without: (records) => withTestAllowance(allowance, () => without(records)),
+                without: (omit) => withTestAllowance(allowance, () => withoutRecords(omit, both)),
               },
               fitting,
               violating,
@@ -435,13 +429,11 @@ function stopRun(source: string, allowance?: number): StopRun {
   assert.ok(request !== null);
   const allowed = <T>(make: () => T): T =>
     allowance === undefined ? make() : withTestAllowance(allowance, make);
-  const compile = () => compileSourceWithBackend(source, options, CORE_BACKEND);
-  return {
-    result: allowed(compile),
-    answers: allowed(() => analyseCore(request)),
-    without: (records) =>
-      allowed(() => withoutRecords((d) => records.has(recordOfDiagnostic(d)), compile)),
-  };
+  const both = () => ({
+    result: compileSourceWithBackend(source, options, CORE_BACKEND),
+    answers: analyseCore(request),
+  });
+  return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
 }
 
 /** The lowest and highest allowance of a source's settled walk stops. */
@@ -733,4 +725,79 @@ test("a stop after admission settled marks an inferred list's default it leaves 
     ],
     { code: "TSV041", after: "default:", text: "hostValue" },
   );
+});
+
+/**
+ * Before admission settled nothing it decided is read (TABLE r4.110 (3); A6: a later pass may admit a store this one
+ * rejected): a store into an inferred place is marked at its site, its type undecided, and one into a written type
+ * keeps its check and its boundary; at a stop in the setup and at the last before admission settled, the oracle finds
+ * nothing else, the inferred store's check moved to the runtime with its mark.
+ */
+test("a stop before admission settled marks the stores into inferred places and keeps the written ones", () => {
+  const source = 'let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const unstopped = stopRun(source);
+  const settled = phaseEnds(unstopped.answers.budget.total, (allowance) => {
+    const { stoppedIn, settled: done } = withTestAllowance(allowance, () =>
+      analyseCore(request),
+    ).budget;
+    return done ? stoppedIn : null;
+  });
+  const first = Math.min(...[...settled.values()].map(([low]) => low));
+  const store = source.indexOf("hostValue");
+  for (const allowance of [ALLOWANCE, first - 1]) {
+    const stopped = stopRun(source, allowance);
+    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (d) =>
+          d.code === "TSV041" &&
+          d.site.start === store &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown",
+      ),
+      `@${allowance}`,
+    );
+    assert.deepEqual(
+      stopProblems({
+        unstopped,
+        stopped,
+        fitting: [host(2, 3)],
+        violating: [host(1.5, 3), host(2, 1.5)],
+      }),
+      [],
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
+ * The oracle's named exception for #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of
+ * `state.ticks`, read by its key's contract that lost the ingress origin; counted at every stop of the settled phases in
+ * the analysis's own order, the test fails where the count moves (the exception goes when #1216 lands).
+ */
+test("the named exception for #1216 stands at its counted stops", () => {
+  const exception = NAMED_EXCEPTIONS.find((each) => each.issue === "#1216");
+  assert.ok(exception?.settled !== undefined);
+  const request = coreRequest(
+    [{ path: "main.tease", source: exception.source }],
+    ["hostValue", "hostOther"],
+  );
+  assert.ok(request !== null);
+  const analyse = (allowance: number): Answers =>
+    withTestAllowance(allowance, () => analyseCore(request));
+  const check = exception.problems[0]!.slice("extra check ".length);
+  const has = (answers: Answers): boolean =>
+    answers.checks.some((each) => JSON.stringify(each) === check);
+  const unstopped = analyseCore(request);
+  assert.equal(has(unstopped), false);
+  let count = 0;
+  for (const [low, high] of phaseEnds(unstopped.budget.total, (allowance) => {
+    const { stoppedIn, settled } = analyse(allowance).budget;
+    return settled ? stoppedIn : null;
+  }).values())
+    for (let allowance = low; allowance <= high; allowance += 1)
+      if (has(analyse(allowance))) count += 1;
+  assert.equal(count, exception.settled);
 });
