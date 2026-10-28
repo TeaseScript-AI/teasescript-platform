@@ -1418,13 +1418,6 @@ export class Consumers {
     kinds: readonly ItemTag[],
   ): void {
     // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
-    // (a finishing walk after a stop reads only what is settled: no fact a fix's form needs is proved, TABLE r4.162)
-    const expects =
-      (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
-        ? this.#finishing
-          ? UNPROVED
-          : this.#expected(site)
-        : undefined;
     const diagnostic: CoreDiagnostic = {
       class: "compile-error",
       kind,
@@ -1432,11 +1425,42 @@ export class Consumers {
       site: this.#site(site),
       rule,
       kinds: [...new Set(kinds)],
-      ...(expects === undefined ? {} : { expects }),
-      present: this.#finishing ? "unproved" : this.#present(site, rule),
     };
     this.diagnostics.push(diagnostic);
     this.rules.set(diagnostic, this.#rule);
+  }
+
+  /**
+   * A published diagnostic with the facts its fix's code forms read (TABLE r4.151, r4.162): what the place its value
+   * lands in takes (`expects`: a member's read or call and an operation's error, a null value's warning) and whether the
+   * values it names are there (`present`). Asked once the analysis ran to its end, its work counted apart from the
+   * allowance (`WorkLedger.apart`), so the walk's charges and its stops are the analysis's own; after a stop no fact is
+   * asked, which reads as unproved and gives words.
+   */
+  public withFacts(diagnostic: CoreDiagnostic): CoreDiagnostic {
+    if (diagnostic.class === "compile-error" && diagnostic.kind !== "written-type") {
+      const { rule, site } = diagnostic;
+      const expects =
+        (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
+          ? this.#expected(site)
+          : undefined;
+      return {
+        ...diagnostic,
+        ...(expects === undefined ? {} : { expects }),
+        present: this.#present(site, rule),
+      };
+    }
+    if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
+      const { rule, site } = diagnostic;
+      // (a null value's fallback stands where its rule takes the value: whether it divides there)
+      const expects = diagnostic.kinds.includes("null") ? this.#expected(site) : undefined;
+      return {
+        ...diagnostic,
+        ...(expects === undefined ? {} : { expects }),
+        present: this.#present(site, rule),
+      };
+    }
+    return diagnostic;
   }
 
   /**
@@ -1894,16 +1918,8 @@ export class Consumers {
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
     };
     if (this.#finishing && leftOutWarning(diagnostic)) return false;
-    // (a null value's fallback stands where its rule takes the value: whether it divides there, TABLE r4.162)
-    const expects =
-      item.tag !== "null" ? undefined : this.#finishing ? UNPROVED : this.#expected(site);
-    const reported = {
-      ...diagnostic,
-      ...(expects === undefined ? {} : { expects }),
-      present: this.#finishing ? ("unproved" as const) : this.#present(site, rule),
-    };
-    (this.#finishing ? this.deferred : this.diagnostics).push(reported);
-    this.rules.set(reported, this.#rule);
+    (this.#finishing ? this.deferred : this.diagnostics).push(diagnostic);
+    this.rules.set(diagnostic, this.#rule);
     return true;
   }
 

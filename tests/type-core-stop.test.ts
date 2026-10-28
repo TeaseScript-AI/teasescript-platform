@@ -967,6 +967,23 @@ test("a stop before admission settled checks a written store's literal parts at 
 });
 
 /**
+ * An error as a stop keeps it: the diagnostic and its message's first sentence, without the facts its fix's code forms
+ * read (`expects`, `present`). A stop proves nothing of a fix's code, so the fix after that sentence may be words
+ * (TABLE r4.162).
+ */
+const kept = (answers: Answers, source: string) => {
+  const text = messageSource([source]);
+  return answers.diagnostics
+    .filter((d) => d.class === "compile-error")
+    .map((d) => ({
+      ...Object.fromEntries(
+        Object.entries(d).filter(([key]) => key !== "expects" && key !== "present"),
+      ),
+      message: coreMessage(d, text).split(/(?<=[.?])\s+(?=[A-Z'"])/)[0],
+    }));
+};
+
+/**
  * Before admission settled, a written store's literal parts take their collections from the written type and their
  * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
  * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument
@@ -983,11 +1000,7 @@ test("a stop before admission settled keeps a written store's errors whole, thei
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);
-    const text = messageSource([source]);
-    const errors = (answers: Answers) =>
-      answers.diagnostics
-        .filter((d) => d.class === "compile-error")
-        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const errors = (answers: Answers) => kept(answers, source);
     const unstopped = errors(analyseCore(request));
     assert.equal(unstopped.length, 1, source);
     for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
@@ -1039,11 +1052,7 @@ test("a stop before admission settled reads a dict literal's values as its synta
   }
   {
     const source = 'let v = dict{a: 1}.get(hostOther, default: "wrong")\nsay v\nexit\n';
-    const text = messageSource([source]);
-    const errors = (answers: Answers) =>
-      answers.diagnostics
-        .filter((d) => d.class === "compile-error")
-        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const errors = (answers: Answers) => kept(answers, source);
     const { unstopped, stopped } = unsettledAnalyses(source);
     assert.equal(errors(unstopped).length, 1);
     for (const answers of stopped) assert.deepEqual(errors(answers), errors(unstopped));
@@ -1416,11 +1425,7 @@ test("a stop before admission settled checks a written store by admission's own 
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);
-    const text = messageSource([source]);
-    const errors = (answers: Answers) =>
-      answers.diagnostics
-        .filter((d) => d.class === "compile-error")
-        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const errors = (answers: Answers) => kept(answers, source);
     const unstopped = analyseCore(request);
     const want = errors(unstopped);
     assert.ok(want.length > 0, source);

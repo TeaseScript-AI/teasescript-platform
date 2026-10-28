@@ -831,6 +831,12 @@ class CoreAnswers implements Answers {
       if (returns.length > 1) deferredResults.push(fn.result);
     }
     this.deferred = { parameters: deferredParameters, results: deferredResults };
+    // (the facts the fixes' code forms read, once the analysis ran to its end, counted apart from the allowance, so the
+    // walk's charges and stops stay the analysis's own; after a stop none, which reads as unproved: TABLE r4.162)
+    if (!this.#stopped)
+      this.diagnostics = program.work.apart(() =>
+        this.diagnostics.map((diagnostic) => consumers.withFacts(diagnostic)),
+      );
     this.budget = {
       total: program.work.total,
       allowance: program.work.allowance,
