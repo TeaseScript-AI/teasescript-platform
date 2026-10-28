@@ -210,6 +210,8 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
       ],
     ],
     ["let x = [#, 1 s", ["Expected ']' after the list literal."]],
+    // The head of a media cue, which is no statement on its own, where the fix still compiles.
+    ['playAudio "a.mp3" {\n  beforeEnd # {\n    say "cue"\n  }\n}', []],
   ] as const;
   const cases = [
     ...[...meant.keys()].map((word) => [places[0], "5", " ", word] as const),
