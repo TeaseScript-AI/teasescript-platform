@@ -289,6 +289,7 @@ export class Touches {
   readonly #asking: Readonly<Record<TouchMode, WeakMap<Touch | Branch, boolean>>> = {
     meet: new WeakMap(),
     elements: new WeakMap(),
+    copies: new WeakMap(),
   };
   readonly #owes = new Map<string, Found>();
   readonly #metOwes = new Map<number, Found>();
