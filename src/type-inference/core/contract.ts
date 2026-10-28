@@ -683,6 +683,8 @@ export class Contract {
     decidedPaths: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
+  /** The prefixes under discovery (`#prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
+  readonly #discovering = new Map<Key, PrefixFrame>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
   readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly #projectedLayers = new Map<string, SubLayer | null>();
@@ -2829,8 +2831,14 @@ export class Contract {
         this.#copyOnly(place) &&
         writtenOf(program.place(place).kind) === null
       ) {
-        const stores = yield* this.#needPrefix(keyOf(place, []));
+        // (a prefix under discovery whose own stores already hold more than copies has no single entry, whatever the rest
+        // bring: so answered, never discovered again from its start, so a chain of k calls of one helper discovers its
+        // parameter once, not once per link, #1257)
+        const prefix = keyOf(place, []);
+        const stores =
+          this.#discovering.get(prefix)?.other === true ? null : yield* this.#needPrefix(prefix);
         const entry =
+          stores !== null &&
           stores.list.length === 1 &&
           !stores.other &&
           stores.subs === null &&
@@ -3237,7 +3245,12 @@ export class Contract {
       defs.add(f.d);
     };
     const open = new Set<Key>([prefix]);
-    const stack: PrefixFrame[] = [frame(prefix)];
+    const stack: PrefixFrame[] = [];
+    const push = (f: PrefixFrame): void => {
+      stack.push(f);
+      if (!this.#discovering.has(f.pk)) this.#discovering.set(f.pk, f);
+    };
+    push(frame(prefix));
     while (stack.length > 0) {
       const f = stack.at(-1)!;
       if (f.inner !== undefined && f.proj !== null) {
@@ -3370,7 +3383,7 @@ export class Contract {
             continue;
           }
           open.add(root);
-          stack.push(frame(root));
+          push(frame(root));
           continue;
         }
         if (open.has(copied) || !this.#copyOnly(keyPlace(copied))) {
@@ -3385,11 +3398,12 @@ export class Contract {
           continue;
         }
         open.add(copied);
-        stack.push(frame(copied));
+        push(frame(copied));
         continue;
       }
       stack.pop();
       open.delete(f.pk);
+      if (this.#discovering.get(f.pk) === f) this.#discovering.delete(f.pk);
       const stores: PrefixStores = {
         list: f.out,
         subs: f.inherit,
