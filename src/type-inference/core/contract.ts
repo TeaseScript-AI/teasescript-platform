@@ -598,6 +598,31 @@ export interface LiteralIndex {
 
 const NESTING = 256;
 
+/** The contributions of one kind a value-side gather reads inline; past it, a balanced tree of demands (`gathered`). */
+export const WIDE = 8;
+
+/** An object of a literal at a path (a selection's alternative, `#selectedAt`). */
+type LiteralObject = NonNullable<ReturnType<LiteralIndex["objects"]["get"]>>["list"][number];
+
+/**
+ * A wide gather of the value side (`Contract.gathered`): a literal's exact entries, its copies past an element step or
+ * its computed values' groups at a path (`deeper`: a path the read goes below), or a selection's objects there.
+ */
+export type GatherSite =
+  | {
+      readonly kind: "exact" | "copies" | "others";
+      readonly literal: PlaceId;
+      readonly path: string;
+      readonly deeper: boolean;
+    }
+  | {
+      readonly kind: "selected";
+      readonly literal: PlaceId;
+      readonly path: string;
+      readonly byValue: boolean;
+      readonly below: boolean;
+    };
+
 /** The kinds that may have a member an unknown receiver is asked for (A7 r4.10). */
 export const MEMBER_KINDS: readonly ValueKind[] = [
   "string",
@@ -4383,7 +4408,7 @@ export class Contract {
     exact: boolean,
     below = false,
   ): Work<readonly Item[]> {
-    const { program, definitions, values } = this.pass;
+    const { program, definitions } = this.pass;
     const index = this.literalIndex(literal);
     // an element cell, or a literal read as one (`below`): every path below lies below an element step
     const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
@@ -4448,36 +4473,25 @@ export class Contract {
       } else {
         const copies = length < rest.length && elementAbove ? (index.reads.get(path) ?? []) : null;
         if (copies !== null && copies.length > 0) overCopy = true;
-        if (copies !== null)
-          for (const entry of copies)
-            out.push(
-              ...this.#annotated(entry, after(), yield* this.#belowRead(entry.value, after())),
-            );
-        else
-          for (const entry of index.exact.get(path) ?? [])
-            out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
-        const others = index.others.get(path) ?? [];
-        const groups = this.#othersAt(others, true);
-        for (const group of length < rest.length
-          ? (this.#othersBelowOf.get(groups) ?? groups)
-          : groups) {
-          if (group === null) {
-            for (const item of yield* this.#loadsBelow(groups, after(), true, node)) out.push(item);
-            continue;
-          }
-          const from = out.length;
-          for (const entry of group.read)
-            out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
-          if (group.rest.length > 0 && out.slice(from).some((item) => differsIn(item, group.mixed)))
-            for (const entry of group.rest)
-              out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, after())));
+        // (each kind of contribution read one by one, or past `WIDE` of them as a tree of demands, `gathered`)
+        const deeper = length < rest.length;
+        for (const kind of [copies !== null ? "copies" : "exact", "others"] as const) {
+          const site: GatherSite = { kind, literal, path, deeper };
+          const count = this.#gatherCount(site);
+          if (count <= WIDE)
+            for (let at = 0; at < count; at += 1)
+              out.push(...(yield* this.#gatherAt(site, node, after(), at)));
+          else
+            for (const item of yield* this.gathered(site, node, after(), 0, count)) out.push(item);
         }
+        const others = index.others.get(path) ?? [];
         sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
       const step = rest[length];
       if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
         const selected = yield* this.#selectedAt(
+          literal,
           index,
           path,
           step === SELECTED_VALUE,
@@ -4571,7 +4585,125 @@ export class Contract {
    * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses
    * among, whichever key it reads: each is a contribution of the read (§3.4: the element step over the options).
    */
+  /**
+   * A wide gather of the value side's (S10 part 2b): a site's contributions [lo, hi) (a literal's exact entries, its
+   * copies past an element step or its computed values' groups at `path`, or a selection's objects), read at `rest` and
+   * merged by kind (`mergeItems`, as every caller's merge takes them anyway, in their order), as a balanced tree of
+   * demands: where the contributions' answers change one by one (a component of N5's stores reading them), a change
+   * re-runs only the nodes above it, never the whole gather.
+   */
+  public *gathered(
+    site: GatherSite,
+    node: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    const { program } = this.pass;
+    const at = program.places[site.literal]?.site ?? null;
+    const flags = `${site.kind === "selected" ? `${site.byValue ? "v" : ""}${site.below ? "b" : ""}` : site.deeper ? "d" : ""}`;
+    return yield {
+      key: joinParts(
+        "lp",
+        site.kind,
+        site.literal,
+        lo,
+        hi,
+        node?.id ?? "-",
+        flags,
+        site.path,
+        rest,
+      ),
+      kind: "value",
+      file: at?.file ?? -1,
+      offset: at?.start ?? -1,
+      make: () => this.#gatheredMade(site, node, rest, lo, hi),
+    };
+  }
+
+  /** The demand of `gathered`. */
+  *#gatheredMade(
+    site: GatherSite,
+    node: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    this.pass.program.work.charge("invSteps");
+    const out: Item[] = [];
+    if (hi - lo <= WIDE)
+      for (let at = lo; at < hi; at += 1)
+        out.push(...(yield* this.#gatherAt(site, node, rest, at)));
+    else {
+      const middle = (lo + hi) >> 1;
+      out.push(...(yield* this.gathered(site, node, rest, lo, middle)));
+      out.push(...(yield* this.gathered(site, node, rest, middle, hi)));
+    }
+    return mergeItems(out, this.pass.program.scope);
+  }
+
+  /** How many contributions a gather site reads. */
+  #gatherCount(site: GatherSite): number {
+    const index = this.literalIndex(site.literal);
+    if (site.kind === "exact") return (index.exact.get(site.path) ?? []).length;
+    if (site.kind === "copies") return (index.reads.get(site.path) ?? []).length;
+    if (site.kind === "selected") return (index.objects.get(site.path)?.list ?? []).length;
+    return this.#gatherGroups(site).length;
+  }
+
+  /** A gather site's computed values' groups at its path (`#othersAt`), past a step those below it. */
+  #gatherGroups(site: GatherSite): readonly (OtherGroup | null)[] {
+    const groups = this.#othersAt(this.literalIndex(site.literal).others.get(site.path), true);
+    return site.kind === "others" && site.deeper
+      ? (this.#othersBelowOf.get(groups) ?? groups)
+      : groups;
+  }
+
+  /** One contribution of a gather site, read at `rest`. */
+  *#gatherAt(
+    site: GatherSite,
+    node: FlowNode | null,
+    rest: readonly string[],
+    at: number,
+  ): Work<readonly Item[]> {
+    const { values } = this.pass;
+    const index = this.literalIndex(site.literal);
+    if (site.kind === "exact") {
+      const entry = index.exact.get(site.path)![at]!;
+      return yield* values.valueItems(entry.value, entry.g?.node ?? node, rest);
+    }
+    if (site.kind === "copies") {
+      const entry = index.reads.get(site.path)![at]!;
+      return this.#annotated(entry, rest, yield* this.#belowRead(entry.value, rest));
+    }
+    if (site.kind === "selected")
+      return yield* this.#selectedObject(
+        index.objects.get(site.path)!.list[at]!,
+        site.byValue,
+        rest,
+        node,
+        true,
+        site.below,
+      );
+    const group = this.#gatherGroups(site)[at]!;
+    if (group === null)
+      return yield* this.#loadsBelow(
+        this.#othersAt(index.others.get(site.path), true),
+        rest,
+        true,
+        node,
+      );
+    const out: Item[] = [];
+    for (const entry of group.read)
+      out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, rest)));
+    if (group.rest.length > 0 && out.some((item) => differsIn(item, group.mixed)))
+      for (const entry of group.rest)
+        out.push(...(yield* values.valueItems(entry.value, entry.g?.node ?? node, rest)));
+    return out;
+  }
+
   *#selectedAt(
+    literal: PlaceId,
     index: LiteralIndex,
     path: string,
     byValue: boolean,
@@ -4588,30 +4720,50 @@ export class Contract {
       for (const [tag, token] of terms) out.push(makeItem(tag, token));
     if (byValue && index.references.has(path))
       out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-    for (const object of objects) {
-      this.pass.program.work.charge("invSteps");
-      this.facts.selectionVisits += 1;
-      const { selected } = object;
-      if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
-        continue;
-      if (object.term.properties === null)
-        out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
-      else if (selected === null)
-        out.push(
-          exact
-            ? makeItem("unknown", object.token, { reasons: REASON.missing, context: "missing" })
-            : unknownItem(REASON.missing, object.token),
-        );
-      else if (selected.type.kind === "ref")
-        // (one by one: a selected property's items grow with its literal, past one call's arguments)
-        for (const item of yield* this.indexItems(selected.type.place, after, node, exact, below))
+    // (on the value side past `WIDE` objects as a tree of demands, `gathered`)
+    if (exact && objects.length > WIDE)
+      for (const item of yield* this.gathered(
+        { kind: "selected", literal, path, byValue, below },
+        node,
+        after,
+        0,
+        objects.length,
+      ))
+        out.push(item);
+    else
+      for (const object of objects)
+        for (const item of yield* this.#selectedObject(object, byValue, after, node, exact, below))
           out.push(item);
-      else {
-        const at = termAt(selected.type, after);
-        if (at !== null) for (const tag of typeTags(at)) out.push(makeItem(tag, object.token));
-      }
-    }
     return { items: out, sources };
+  }
+
+  /** One object's contribution to a selection (`#selectedAt`): its selected key's items at `after`, or none. */
+  *#selectedObject(
+    object: LiteralObject,
+    byValue: boolean,
+    after: readonly string[],
+    node: FlowNode | null,
+    exact: boolean,
+    below: boolean,
+  ): Work<readonly Item[]> {
+    this.pass.program.work.charge("invSteps");
+    this.facts.selectionVisits += 1;
+    const { selected } = object;
+    if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
+      return [];
+    if (object.term.properties === null)
+      return [exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque)];
+    if (selected === null)
+      return [
+        exact
+          ? makeItem("unknown", object.token, { reasons: REASON.missing, context: "missing" })
+          : unknownItem(REASON.missing, object.token),
+      ];
+    // (one by one: a selected property's items grow with its literal, past one call's arguments)
+    if (selected.type.kind === "ref")
+      return yield* this.indexItems(selected.type.place, after, node, exact, below);
+    const at = termAt(selected.type, after);
+    return at === null ? [] : typeTags(at).map((tag) => makeItem(tag, object.token));
   }
 
   /**
@@ -4649,9 +4801,11 @@ export function writtenOf(kind: PlaceKind): TypeTerm | null {
  * written empty (no button), or `undefined` without a label.
  */
 export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | undefined)[] {
+  const known = LABELS.get(c);
+  if (known !== undefined) return known;
   const evidence = "evidence" in c ? c.evidence : undefined;
   if (evidence?.kind !== "choice") return [];
-  return evidence.options.map((option) =>
+  const labels = evidence.options.map((option) =>
     option.label === null
       ? undefined
       : (option.content.kind === "list" || option.content.kind === "set") &&
@@ -4659,6 +4813,23 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
         ? null
         : option.label.kind,
   );
+  LABELS.set(c, labels);
+  return labels;
+}
+
+/** Each choice's labels (`choiceLabels`), made once: a wide choice's every part reads them. */
+const LABELS = new WeakMap<ValueConstraint, readonly (ValueKind | null | undefined)[]>();
+
+/**
+ * The part of a choice's answer `choiceItems` reads (a wide choice's, S10 part 2b): its option groups of [`lo`, `hi`);
+ * or one written list's or set's elements of [`lo`, `hi`) (`elements`); `wide`, a wide such list's elements read as
+ * their own tree of demands (`Values.choiceElements`) at the answer's `rest`.
+ */
+export interface ChoicePart {
+  readonly lo?: number;
+  readonly hi?: number;
+  readonly elements?: { readonly index: number; readonly lo: number; readonly hi: number };
+  readonly wide?: (index: number, count: number, rest: readonly string[]) => Work<readonly Item[]>;
 }
 
 /**
@@ -4671,7 +4842,7 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
  * a record is made (`stored`), that key is read by its key instead, as the literal's records no longer say what it
  * holds: the `value` as its key gives it, and every record's `text` where some record lacks the `value` (F11's
  * `missing`), possible where some has one. Only the `options` are read (`Contract.choiceOptions`: one of each class),
- * in order.
+ * in order, those of the `part` asked (a wide choice's, `Values.choiceRange`, `Values.choiceElements`).
  */
 export function* choiceItems(
   c: Extract<ValueConstraint, { readonly kind: "operation" }>,
@@ -4679,10 +4850,11 @@ export function* choiceItems(
   read: (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]>,
   stored: StoredChoiceKeys,
   options: readonly ChoiceGroup[],
+  part: ChoicePart = {},
 ): Work<Item[]> {
   // r4.93: the answer is a scalar button (V30 §19, TSV029): an outer choice's selection of it is the button itself
   if (rest[0] === SELECTED_VALUE || rest[0] === SELECTED_TEXT)
-    return yield* choiceItems(c, rest.slice(1), read, stored, options);
+    return yield* choiceItems(c, rest.slice(1), read, stored, options, part);
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
@@ -4747,6 +4919,8 @@ export function* choiceItems(
       )
         for (const step of [SELECTED_VALUE, SELECTED_TEXT])
           out.push(...(yield* read(argument, joinSteps(["element", step], rest))));
+      else if (part.wide !== undefined && content.elements.length > WIDE)
+        out.push(...(yield* part.wide(index, content.elements.length, rest)));
       else
         for (const element of content.elements) yield* button(element.place, element.object, true);
       return;
@@ -4762,7 +4936,15 @@ export function* choiceItems(
       if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
       else if (rest.length === 0 || item.tag === "unknown") out.push(item);
   };
-  for (const { read: chosen, rest: others, mixed } of options) {
+  // (a wide written list's elements of [lo, hi), `Values.choiceElements`)
+  if (part.elements !== undefined) {
+    const content = evidence[part.elements.index]?.content;
+    if (content?.kind === "list" || content?.kind === "set")
+      for (const element of content.elements.slice(part.elements.lo, part.elements.hi))
+        yield* button(element.place, element.object, true);
+    return out;
+  }
+  for (const { read: chosen, rest: others, mixed } of options.slice(part.lo, part.hi)) {
     const from = out.length;
     for (const index of chosen) yield* option(index);
     // (a mixed class's options differ where their answer holds a leaf or an operand's identity: each is read)

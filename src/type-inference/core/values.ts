@@ -15,7 +15,9 @@ import {
   REFERENCE,
   typedDefault,
   unknownItem,
+  WIDE,
   withOwnSelection,
+  type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
@@ -802,6 +804,128 @@ export class Values {
    * F18 (r4.5): the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,
    * the runtime checks the value against the default's type.
    */
+  /**
+   * A wide choice's options [lo, hi) (V30 §19, S10 part 2b), read at `rest` and merged by kind, as its operation's merge
+   * takes them anyway: a balanced tree of demands, so where the options' answers change one by one (a component of N5's
+   * stores reading them), a change re-runs only the nodes above it (`Contract.gathered` for a literal's).
+   */
+  public *choiceRange(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    return yield {
+      key: joinParts("cr", c.result, lo, hi, at?.id ?? "-", rest),
+      kind: "value",
+      file: c.site.file,
+      offset: c.site.start,
+      make: () => this.#choiceRangeMade(c, at, rest, lo, hi),
+    };
+  }
+
+  /** The demand of `choiceRange`. */
+  *#choiceRangeMade(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    const { contract, program } = this.pass;
+    program.work.charge("invSteps");
+    if (hi - lo <= WIDE) {
+      const options = contract.choiceOptions(c, true);
+      return mergeItems(
+        yield* choiceItems(c, rest, this.#choiceRead(at), contract.choiceKeysStored(), options, {
+          ...this.#choiceWide(c, at),
+          lo,
+          hi,
+        }),
+        program.scope,
+      );
+    }
+    const middle = (lo + hi) >> 1;
+    return mergeItems(
+      [
+        ...(yield* this.choiceRange(c, at, rest, lo, middle)),
+        ...(yield* this.choiceRange(c, at, rest, middle, hi)),
+      ],
+      program.scope,
+    );
+  }
+
+  /** A choice's part whose wide written lists read their elements as trees of demands (`choiceElements`). */
+  #choiceWide(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+  ): ChoicePart {
+    return { wide: (index, count, rest) => this.choiceElements(c, at, rest, index, 0, count) };
+  }
+
+  /**
+   * A choice's written list or set option's elements [lo, hi) (V30 §19, S10 part 2b), as `choiceRange` reads its
+   * options: a balanced tree of demands, each node its range's items merged by kind.
+   */
+  public *choiceElements(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    index: number,
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    return yield {
+      key: joinParts("ce", c.result, index, lo, hi, at?.id ?? "-", rest),
+      kind: "value",
+      file: c.site.file,
+      offset: c.site.start,
+      make: () => this.#choiceElementsMade(c, at, rest, index, lo, hi),
+    };
+  }
+
+  /** The demand of `choiceElements`. */
+  *#choiceElementsMade(
+    c: Extract<ValueConstraint, { readonly kind: "operation" }>,
+    at: FlowNode | null,
+    rest: readonly string[],
+    index: number,
+    lo: number,
+    hi: number,
+  ): Work<readonly Item[]> {
+    const { contract, program } = this.pass;
+    program.work.charge("invSteps");
+    if (hi - lo <= WIDE)
+      return mergeItems(
+        yield* choiceItems(
+          c,
+          rest,
+          this.#choiceRead(at),
+          contract.choiceKeysStored(),
+          contract.choiceOptions(c, true),
+          { elements: { index, lo, hi } },
+        ),
+        program.scope,
+      );
+    const middle = (lo + hi) >> 1;
+    return mergeItems(
+      [
+        ...(yield* this.choiceElements(c, at, rest, index, lo, middle)),
+        ...(yield* this.choiceElements(c, at, rest, index, middle, hi)),
+      ],
+      program.scope,
+    );
+  }
+
+  /** How a choice's options are read at its node `at` (`choiceItems`). */
+  #choiceRead(
+    at: FlowNode | null,
+  ): (value: PlaceId, path: readonly string[], element?: true) => Work<readonly Item[]> {
+    return (value, path, element) =>
+      element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path);
+  }
+
   public *defaultKinds(
     fallback: PlaceId,
     at: FlowNode | null,
@@ -994,15 +1118,20 @@ export class Values {
     const clock = family === "clock" ? clockResult(name) : undefined;
     if (clock !== undefined) return rest.length === 0 ? [makeItem(clock)] : [];
     // V30 §19: askChoice's answer, per option its label, or each of its buttons' values
-    if (interaction?.kind === "options")
+    if (interaction?.kind === "options") {
+      const options = contract.choiceOptions(c, true);
+      // (a wide choice's options as a tree of demands, `choiceRange`)
+      if (options.length > WIDE)
+        return [...(yield* this.choiceRange(c, at, rest, 0, options.length))];
       return yield* choiceItems(
         c,
         rest,
-        (value, path, element) =>
-          element === true ? this.#belowElement(value, at, path) : this.valueItems(value, at, path),
+        this.#choiceRead(at),
         contract.choiceKeysStored(),
-        contract.choiceOptions(c, true),
+        options,
+        this.#choiceWide(c, at),
       );
+    }
     const member = family === "member" ? memberResult(name) : undefined;
     if (member !== undefined) return member.map((kind) => makeItem(kind));
     // F19a: a handle's members are the runtime's

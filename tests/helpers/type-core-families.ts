@@ -1553,6 +1553,66 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
+  // (W29-wide-ring read through one wide gather: a literal of its k values, of computed ones, of records holding them, or
+  // a choice of k options: a changed value re-runs the gather's nodes above it, never the whole gather)
+  ...(
+    [
+      [
+        "literal",
+        (k: number) =>
+          `let xs = [${rows(k, (i) => `a${i}`).replaceAll("\n", ", ")}]\ntotal = xs[i] otherwise 0`,
+      ],
+      [
+        "computed",
+        (k: number) =>
+          `let xs = [${rows(k, (i) => `a${i} otherwise null`).replaceAll("\n", ", ")}]\ntotal = xs[i] otherwise 0`,
+      ],
+      [
+        "sums",
+        (k: number) =>
+          `let xs = [${rows(k, (i) => `a${i} + 0`).replaceAll("\n", ", ")}]\ntotal = xs[i] otherwise 0`,
+      ],
+      [
+        "records",
+        (k: number) =>
+          `let xs = [${rows(k, (i) => `{n: a${i}}`).replaceAll("\n", ", ")}]\ntotal = xs[i].n otherwise 0`,
+      ],
+      [
+        "choice",
+        (k: number) =>
+          `total = (askChoice ${rows(k, (i) => `{text: "${i}", value: a${i}}`).replaceAll("\n", ", ")}) otherwise 0`,
+      ],
+      [
+        "choice-list",
+        (k: number) =>
+          `total = (askChoice [${rows(k, (i) => `{text: "${i}", value: a${i}}`).replaceAll("\n", ", ")}]) otherwise 0`,
+      ],
+      [
+        "choice-values",
+        (k: number) =>
+          `total = (askChoice [${rows(k, (i) => `a${i}`).replaceAll("\n", ", ")}]) otherwise 0`,
+      ],
+    ] as const
+  ).map(([variant, read]): WorkFamily => ({
+    name: `W29-wide-ring-${variant}`,
+    measures: `N5: W29-wide-ring read through a wide ${variant} gather: a changed value re-runs the nodes above it`,
+    program: (k) =>
+      main(
+        lines(
+          "let i = 0",
+          rows(k, (i) => `let a${i}: integer? = 1\nif flagHost { a${i} = null }`),
+          "let total: integer? = 0",
+          `if total != null and ${rows(k, (i) => `a${i} != null`).replaceAll("\n", " and ")} {`,
+          "while flagHost {",
+          read(k),
+          rows(k - 1, (i) => `a${i} = a${i + 1}`),
+          `a${k - 1} = total otherwise null`,
+          "}",
+          "}",
+          "exit",
+        ),
+      ),
+  })),
   {
     name: "W29-guarded-choice",
     measures:
