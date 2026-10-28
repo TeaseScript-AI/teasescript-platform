@@ -89,6 +89,7 @@ import {
   joinSteps,
   keepText,
   keptArray,
+  keptParts,
   keptSlice,
   keptSteps,
   pathText,
@@ -1026,7 +1027,7 @@ export class Consumers {
     }
     // (a union's members reach one path more than once: each path once)
     const unique = new Map<string, { readonly root: PlaceId; readonly path: readonly string[] }>();
-    for (const group of out) unique.set(joinParts(group.root, group.path), group);
+    for (const group of out) unique.set(keptParts(program.work, group.root, group.path), group);
     return [...unique.values()];
   }
 
