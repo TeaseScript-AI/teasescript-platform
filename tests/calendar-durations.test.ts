@@ -133,22 +133,15 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     ],
   ] as const)
     assert.deepEqual(diagnostics(`${named}${source}\nexit`), [["TSP033", message]], source);
-  // So does a short 'mo' or 'y', at the unit, also where a list or a call goes on after it.
+  // So does a short 'mo' or 'y', at the unit, also where a list or a call goes on after it. Inside a calculation or a
+  // list, which type fits is not known, so the error names both choices in words.
+  const inWords = (unit: string) =>
+    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`;
   for (const [source, message, column, unit] of [
     ["let a = n mo", "A month has no fixed length. Write 'n calendar mo'.", 10, "mo"],
-    [
-      "let a = getDate() + xs[0] y",
-      "A year has no fixed length. Write 'xs[0] calendar y'.",
-      26,
-      "y",
-    ],
+    ["let a = getDate() + xs[0] y", inWords("year"), 26, "y"],
     ['let a = "${p.delay y}"', "A year has no fixed length. Write 'p.delay calendar y'.", 19, "y"],
-    [
-      "let a = [f() mo, 1 calendar day]",
-      "A month has no fixed length. Write 'f() calendar mo'.",
-      13,
-      "mo",
-    ],
+    ["let a = [f() mo, 1 calendar day]", inWords("month"), 13, "mo"],
     [
       'let b = showButton "Go", timeout: (n + 1) y',
       "A showButton timeout needs an exact length, and a year has none. Write the length in days or weeks, as in '365 days'.",
@@ -536,7 +529,9 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
 });
 
 test("where only an exact duration fits, a month or a year without 'calendar' asks for days or weeks", () => {
-  const header = "let n = 2\nlet c = 1 calendar month\nfunction f(d) {\n  return 1 s\n}\n";
+  const header =
+    "let n = 2\nlet c = 1 calendar month\nfunction f(d) {\n  return 1 s\n}\n" +
+    "function rest(length: duration) {\n  wait length\n}\nlet t = timer async 10 s {\n}\n";
   const form = 'askForm "Q", fields: { ok: false }, onTimeout: "submit", timeout:';
   for (const [source, subject, written] of [
     ["wait #", "A wait", "1 month"],
@@ -555,6 +550,10 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
       "A cue position",
       "1 month",
     ],
+    // A written type that holds only durations.
+    ["let delay: duration = #\nwait delay", "'delay'", "1 month"],
+    ["global delay: duration? = #", "'delay'", "n years"],
+    ["function pause(length: duration = #) {\n  wait length\n}", "'length'", "1 month"],
   ] as const) {
     const [unit, example] = /y/u.test(written) ? ["year", "365 days"] : ["month", "30 days"];
     assert.deepEqual(
@@ -577,7 +576,7 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
   // Inside arithmetic it may be part of a ratio, so which fix compiles depends on the other operand: the fix is in words.
   const inWords = (unit: string): [string, string] => [
     "TSP033",
-    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`,
+    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`,
   ];
   for (const [source, expected] of [
     ["wait 1 h + (n months)", [inWords("month")]],
@@ -590,13 +589,104 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
     ["wait (1 month / (2 * 1 calendar month)) * 1 s", [inWords("month")]],
     ["wait (1 month / c) * 1 s", [inWords("month")]],
     ['showButton "Go", timeout: f(1) otherwise 1 y', [inWords("year")]],
+    // An argument may be for a 'duration' parameter, and an assigned value for a timer's or a media handle's
+    // duration, which the parser cannot tell.
+    ["rest(1 month)", [inWords("month")]],
+    ["wait f(1 month)", [inWords("month")]],
+    ["t.remaining = 1 month", [inWords("month")]],
+    ["c = 2 years", [inWords("year")]],
   ] as const)
     assert.deepEqual(diagnostics(`${header}${source}\nexit`), expected, source);
-  // A month that the value only passes on keeps the calendar fix, which compiles there.
-  assert.deepEqual(diagnostics(`${header}wait f(1 month)\nexit`), [
-    ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
-  ]);
-  assert.notEqual(compileSource(`${header}wait f(1 calendar month)\nexit`).plan, null);
+  // A written type that also holds calendar durations keeps the calendar fix, which compiles there.
+  for (const type of ["calendarDuration", "duration | calendarDuration"]) {
+    assert.deepEqual(diagnostics(`let d: ${type} = 1 month\nexit`), [
+      ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
+    ]);
+    assert.notEqual(compileSource(`let d: ${type} = 1 calendar month\nexit`).plan, null, type);
+  }
+});
+
+test("a month or a year without 'calendar' gets a fix only where its place proves that the fix compiles", () => {
+  const header =
+    // A global, which a global's start value may read too.
+    "global n = 2\nlet elapsed = 10 s\nlet c = 1 calendar month\nfunction rest(length: duration) {\n  wait length\n}\n" +
+    "function f2(value) {\n  return value\n}\nlet t = timer async 10 s {\n}\n";
+  // Each form, with its amount and unit, and its place inside the value: after a sign, and with a written amount that
+  // is not a whole number of months, or is one.
+  const forms = [
+    ["1 month", "1", "month"],
+    ["n months", "n", "months"],
+    ["(2 years)", "2", "years"],
+    ["-1 month", "1", "month"],
+    ["1.5 month", "1.5", "month"],
+    ["0.5 year", "0.5", "year"],
+  ] as const;
+  const places: readonly (readonly [string, "calendar" | "words" | string])[] = [
+    // Places that take any duration: the calendar unit compiles there.
+    ["let d = #", "calendar"],
+    ["global g = #", "calendar"],
+    ["let d: calendarDuration = #", "calendar"],
+    ["let d: duration | calendarDuration = #", "calendar"],
+    ['function f(d = #) {\n  say "${d}"\n}', "calendar"],
+    ["say #", "calendar"],
+    ['say "${#}"', "calendar"],
+    ["let d: calendarDuration | duration[] = #", "calendar"],
+    ["global g: calendarDuration = 1 calendar month, default: #", "calendar"],
+    // Places that take only an exact duration: a length in days or weeks compiles there.
+    ["wait #", "A wait"],
+    ["let d: duration = #", "'d'"],
+    ["global g: duration? = #", "'g'"],
+    ["function f(d: duration = #) {\n  wait d\n}", "'d'"],
+    ['say "x", #', "Say pacing"],
+    ["timer(duration: #)", "A timer"],
+    ["global g: duration = #, default: 1 s", "'g'"],
+    // Places whose type is not known here, and calculations: both choices in words.
+    ["rest(#)", "words"],
+    ["f2(#)", "words"],
+    ["t.remaining = #", "words"],
+    ["c = #", "words"],
+    ['let x = toDate("2026-01-01") + #', "words"],
+    ["let b = elapsed > #", "words"],
+    ["let xs = [#]", "words"],
+    ["let s: string = #", "words"],
+    ["wait # + 1 h", "words"],
+    ["let d: duration | duration[] = #", "words"],
+    // Without a written type, a global's value and its start value fix each other's type.
+    ["global g = #, default: 1 s", "words"],
+    ["global g = 1 s, default: #", "words"],
+  ];
+  for (const [place, advice] of places)
+    for (const [form, amount, unit] of forms) {
+      const written = `${amount} ${unit}`;
+      const source = place.replace("#", form);
+      const name = unit.startsWith("y") ? "year" : "month";
+      // A calendar amount must be whole, and a negative length is wrong whatever its unit, so no code form compiles:
+      // the words name the choice that remains.
+      const unproved =
+        (advice === "calendar" && form === "1.5 month") ||
+        (advice !== "calendar" && advice !== "words" && form.startsWith("-"));
+      const offered =
+        unproved || advice === "words"
+          ? null
+          : advice === "calendar"
+            ? `${amount} calendar ${unit}`
+            : name === "year"
+              ? "365 days"
+              : "30 days";
+      const expected =
+        advice === "words"
+          ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`
+          : advice === "calendar"
+            ? unproved
+              ? `A ${name} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
+              : `A ${name} has no fixed length. Write '${offered}'.`
+            : `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks${unproved ? "" : `, as in '${offered}'`}.`;
+      assert.deepEqual(diagnostics(`${header}${source}\nexit`), [["TSP033", expected]], source);
+      if (offered !== null) {
+        const pasted = `${header}${source.replace(written, offered)}\nexit`;
+        assert.notEqual(compileSource(pasted).plan, null, pasted);
+      }
+    }
 });
 
 test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {

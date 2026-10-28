@@ -15,7 +15,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, delimiterClosers, isPropertyName, spanFrom } from "./tokens.js";
-import { requireExactDuration } from "./units.js";
+import { allowCalendarDuration, requireExactDuration } from "./units.js";
 
 // Speakers and `say`: speaker declarations and properties, and a message's parts, mode, and pacing.
 
@@ -197,6 +197,7 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
   const valueStart = parser.peek().kind;
   let mark = parser.mark();
   const value = yield* parseChild(parser.parseOr());
+  if (value !== null) allowCalendarDuration(parser, value);
   if (value === null) {
     // A failed string has its error already: its own, or the lexer's for a missing closing quote.
     if (valueStart !== TokenKind.StringStart)
@@ -303,6 +304,7 @@ function* parseBoundedSayText(
   parser.skipNewlines();
   const value = yield* parseChild(parser.parseRequiredExpressionTask());
   if (value === null) return null;
+  allowCalendarDuration(parser, value);
   parser.skipNewlines();
   let pacing: SayParts["pacing"] = null;
   let instantSpan: SourceSpan | null = null;

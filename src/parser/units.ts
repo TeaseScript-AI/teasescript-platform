@@ -5,10 +5,16 @@ import type {
   DurationUnit,
   UnitExpression,
   NumberLiteral,
+  TypeAnnotation,
 } from "../ast.js";
 import { angleUnit } from "../angle.js";
 import { createDiagnostic, DiagnosticSeverity } from "../diagnostics.js";
-import { calendarDurationUnit, elapsedDurationUnit, UNIT_OPERANDS } from "../duration.js";
+import {
+  calendarDurationUnit,
+  durationLiteralValue,
+  elapsedDurationUnit,
+  UNIT_OPERANDS,
+} from "../duration.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -196,9 +202,14 @@ function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | u
   return unit;
 }
 
+/** The advice for a month or a year without `calendar` that names both choices, wherever neither is known to fit. */
+function calendarUnitWords(unit: string): string {
+  return `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`;
+}
+
 /**
- * A month or a year after `amount` without `calendar`, which gives `duration`; days and weeks are exact units. The fix
- * names the calendar unit, unless `duration` is where only an exact duration fits (see `requireExactDuration`).
+ * A month or a year after `amount` without `calendar`. Which fix compiles depends on where the value goes, so the error
+ * names both choices in words until its place proves one (see `adviseDuration`).
  */
 function reportCalendarUnitWithoutCalendar(
   parser: Parser,
@@ -208,44 +219,105 @@ function reportCalendarUnitWithoutCalendar(
 ): void {
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
-    `A ${calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"} has no fixed length. Write '${amount} calendar ${unit.lexeme}'.`,
+    calendarUnitWords(calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"),
     unit,
   );
-  parser.calendarUnitErrors.set(duration, parser.diagnostics.at(-1)!);
+  parser.calendarUnitErrors.set(duration, {
+    diagnostic: parser.diagnostics.at(-1)!,
+    calendar: `${amount} calendar ${unit.lexeme}`,
+  });
 }
-
-/** The operators whose operands make up an exact duration's length, as in `1 h + 30 min`. */
-const LENGTH_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
 
 /**
  * `value` is where only an exact duration fits, such as a wait's length, which `subject` names, so a month or a year
- * without `calendar` in it does not get the calendar fix (ADR 0026 §5). As the whole value, also in parentheses or after
- * a sign, it gets days or weeks. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
- * `(1 month / 1 calendar month) * 1 s`, the fix names both choices in words.
+ * without `calendar` in it gets days or weeks (ADR 0026 §5).
  */
 export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
-  const pending: { readonly node: Expression; readonly inside: boolean }[] = [
-    { node: value, inside: false },
-  ];
+  adviseDuration(parser, value, { exact: subject });
+}
+
+/** `value` is where any value fits, such as the text of a `say`, so a month or a year without `calendar` gets it. */
+export function allowCalendarDuration(parser: Parser, value: Expression): void {
+  adviseDuration(parser, value, "calendar");
+}
+
+/**
+ * `value` is that of a declaration with the written type `type`, or none: one that takes a calendar duration gets the
+ * calendar fix, and one that holds exact durations and nothing else but `null` gets days or weeks. Any other type, such
+ * as a list, keeps both choices in words.
+ */
+export function adviseDeclaredDuration(
+  parser: Parser,
+  value: Expression,
+  type: TypeAnnotation | null,
+  subject: string,
+): void {
+  const names = type === null ? null : writtenNames(type);
+  if (names === null || names.has("calendarDuration")) adviseDuration(parser, value, "calendar");
+  else if (
+    names.has("duration") &&
+    [...names].every((name) => name === "duration" || name === "null")
+  )
+    adviseDuration(parser, value, { exact: subject });
+}
+
+/**
+ * The type names a written type is made of at its top, through `?` and unions, with a list, set, or dict, which holds
+ * no duration as a whole, as `collection`.
+ */
+function writtenNames(type: TypeAnnotation): ReadonlySet<string> {
+  const names = new Set<string>();
+  const pending = [type];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    const { node, inside } = next;
+    if (next.kind === "optionalType") {
+      names.add("null");
+      pending.push(next.value);
+    } else if (next.kind === "unionType") for (const member of next.members) pending.push(member);
+    else names.add(next.kind === "namedType" ? next.name : "collection");
+  }
+  return names;
+}
+
+/**
+ * The one rule for what a month or a year without `calendar` in `value` gets at `place`. As the whole value, also in
+ * parentheses, it gets days or weeks where only an exact duration fits (in words after a sign), and the calendar unit
+ * where any duration does (also after a sign, and in words for a written amount that is not whole). Inside `+`, `-`,
+ * `*`, `/`, or `otherwise`, where it may be part of a ratio such as `(1 month / 1 calendar month) * 1 s`, and wherever
+ * no place proves a fix, the error names both choices in words.
+ */
+function adviseDuration(
+  parser: Parser,
+  value: Expression,
+  place: { readonly exact: string } | "calendar",
+): void {
+  const pending = [{ node: value, signed: false }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { node, signed } = next;
     const error = parser.calendarUnitErrors.get(node);
-    const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error);
+    const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
       const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
+      // No code form is proved for a written calendar amount that is not whole, as in `1.5 month`, nor for a length after
+      // a sign where only an exact duration fits, as in `wait -(1 month)`: the words name the choice that remains.
+      const proved =
+        place === "calendar"
+          ? node.kind !== "durationLiteral" || typeof durationLiteralValue(node) !== "string"
+          : !signed;
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        inside
-          ? `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
-          : `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
-        error!.span,
+        place === "calendar"
+          ? proved
+            ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
+            : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
+          : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks${proved ? `, as in '${example}'` : ""}.`,
+        error!.diagnostic.span,
       );
+      // A command that takes the value as an argument knows its place, and its advice comes after.
+      parser.calendarUnitErrors.set(node, { ...error!, diagnostic: parser.diagnostics[index]! });
     } else if (node.kind === "parenthesizedExpression")
-      pending.push({ node: node.expression, inside });
+      pending.push({ node: node.expression, signed });
     else if (node.kind === "unaryExpression" && node.operator !== "not")
-      pending.push({ node: node.operand, inside });
-    else if (node.kind === "binaryExpression" && LENGTH_OPERATORS.has(node.operator))
-      pending.push({ node: node.left, inside: true }, { node: node.right, inside: true });
+      pending.push({ node: node.operand, signed: true });
   }
 }

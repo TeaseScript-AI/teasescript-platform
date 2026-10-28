@@ -13,6 +13,7 @@ import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
 import { parseTypeAnnotation } from "./types.js";
+import { adviseDeclaredDuration } from "./units.js";
 
 // Declarations: `let`, `global`, and functions with their parameters and `return`.
 
@@ -49,6 +50,7 @@ export function parseLetStatement(parser: Parser): LetStatement | null {
     parser.synchronizeStatement();
     return null;
   }
+  adviseDeclaredDuration(parser, initializer, typeAnnotation, `'${name.name}'`);
   return Object.freeze({
     kind: "letStatement",
     name,
@@ -101,7 +103,12 @@ export function* parseGlobalStatement(
     return null;
   }
   const defaultOffset = parser.offsetAfterComma();
-  if (defaultOffset === null || !parser.atNamedDefault(defaultOffset))
+  const paired = defaultOffset !== null && parser.atNamedDefault(defaultOffset);
+  // Without a written type, the value and the start value after `, default:` fix each other's type, so neither proves a
+  // fix for a month or a year.
+  if (!paired || typeAnnotation !== null)
+    adviseDeclaredDuration(parser, value, typeAnnotation, `'${name.name}'`);
+  if (!paired)
     return Object.freeze({
       kind: "globalStatement",
       name,
@@ -110,12 +117,14 @@ export function* parseGlobalStatement(
       assignment: null,
       span: spanFrom(keyword.span, value.span),
     });
-  for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) parser.advance();
+  for (let skipped = 0; skipped < defaultOffset! + 2; skipped += 1) parser.advance();
   const start = yield* parseChild(parser.parseColonValueTask(true));
   if (start === null) {
     parser.synchronizeStatement();
     return null;
   }
+  if (typeAnnotation !== null)
+    adviseDeclaredDuration(parser, start, typeAnnotation, `'${name.name}'`);
   const span = spanFrom(keyword.span, start.span);
   return Object.freeze({
     kind: "globalStatement",
@@ -235,6 +244,7 @@ function parseFunctionParameter(parser: Parser): FunctionParameter | null {
       parser.synchronizeParameter();
       return null;
     }
+    adviseDeclaredDuration(parser, defaultValue, typeAnnotation, `'${name.name}'`);
     end = defaultValue.span;
   }
   return Object.freeze({

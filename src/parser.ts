@@ -324,7 +324,10 @@ export class Parser {
   /** The values before a `calendar` without a unit, so that after a `say` mode or skip word, `calendar` is the text. */
   public readonly unitlessCalendars = new WeakSet<Expression>();
   /** The error of each month or year without `calendar`, which a place that takes only an exact duration rewords. */
-  public readonly calendarUnitErrors = new WeakMap<Expression, Diagnostic>();
+  public readonly calendarUnitErrors = new WeakMap<
+    Expression,
+    { readonly diagnostic: Diagnostic; readonly calendar: string }
+  >();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   public readonly shared: SharedParse;
 
