@@ -24,7 +24,8 @@ and text. The codes that more than one owner reports are listed in
 ## Messages
 
 A compiler diagnostic or runtime failure says what went wrong and why, naming the real operand or value, and what to do
-about it, in whole sentences without semicolons, and quotes source in single quotes, as in `'total / count'` (owner
+about it, as code only when that code compiles where the message says to put it and otherwise in words (owner decision,
+2026-10-28), in whole sentences without semicolons, and quotes source in single quotes, as in `'total / count'` (owner
 decision, 2026-10-09). It names its subject, such as the file, value, or place, instead of "it" or "this" (owner
 decision, 2026-10-27). A sentence that authors read uses no implementation terms, such as "compiler", "follow", or
 "store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27).

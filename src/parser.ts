@@ -239,7 +239,7 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
 ]);
 /** TSP041, which `Parser.offerFix` follows with both readings where it proves them. */
 const UNCLEAR_OTHERWISE =
-  "It is unclear what 'otherwise' belongs to. Put parentheses around that part.";
+  "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.";
 /** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, or a text. */
 const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|true|false|null|"[^"\n]*")$/;
 /** Tokens that start a value but cannot go on from a name before them, as an operator or a call can. */

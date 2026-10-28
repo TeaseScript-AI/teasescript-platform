@@ -170,7 +170,7 @@ test("a comparison too long to quote, an operand with an error of its own, or an
       ],
       [
         "TSP041",
-        "It is unclear what 'otherwise' belongs to. Put parentheses around that part.",
+        "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.",
         "otherwise",
       ],
     ],

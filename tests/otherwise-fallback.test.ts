@@ -693,7 +693,7 @@ test("otherwise beside any other operator needs parentheses, and one error names
         [
           "error",
           "TSP041",
-          `It is unclear what 'otherwise' belongs to. Put parentheses around that part. '${nearest}' ${nearestMeaning}. '${all}' ${allMeaning}.`,
+          `It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first. '${nearest}' ${nearestMeaning}. '${all}' ${allMeaning}.`,
           "otherwise",
         ],
       ],
@@ -715,7 +715,7 @@ test("otherwise beside any other operator needs parentheses, and one error names
       'let a: string? = null\nlet b: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\n' +
         'say a otherwise "x" == "y" and b otherwise "x" == "y"\nsay a otherwise b + "!" otherwise "x"\nexit',
     ).map((diagnostic) => diagnostic[2]),
-    Array(4).fill("It is unclear what 'otherwise' belongs to. Put parentheses around that part."),
+    Array(4).fill("It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first."),
   );
 });
 
@@ -781,7 +781,7 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
       }
     assert.fail(`'${reading}' is no reading of '${expression}'`);
   };
-  const UNCLEAR = "It is unclear what 'otherwise' belongs to. Put parentheses around that part.";
+  const UNCLEAR = "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.";
   const quoted = new Set<string>();
   for (const expression of expressions)
     for (const [place, wrap] of places)
