@@ -17,4 +17,8 @@ const tests = run({
 tests.on("test:summary", (summary) => {
   if (!summary.success) process.exitCode = 1;
 });
-await pipeline(tests, spec(), process.stdout);
+// A signal to the whole process group, as from Ctrl+C, also ends the filter that reads stdout, so the cancelled results
+// may find no reader.
+await pipeline(tests, spec(), process.stdout).catch((error) => {
+  if (!controller.signal.aborted || error.code !== "EPIPE") throw error;
+});

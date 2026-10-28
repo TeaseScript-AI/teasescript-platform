@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
@@ -215,3 +217,45 @@ test("the full suite runs every file once, each in its own process, with the cos
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test(
+  "Ctrl+C stops the full suite without an error",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const started = resolve(directory, "started");
+    mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+    writeFileSync(
+      resolve(directory, "dist/tests/running.test.js"),
+      `require("node:test")("running", () => {
+         require("node:fs").writeFileSync(${JSON.stringify(started)}, "");
+         return new Promise(() => setInterval(() => {}, 1000));
+       });`,
+    );
+    // In a process group of its own, which receives the signal as a terminal's group does.
+    const filter = spawn(process.execPath, [filterPath], {
+      cwd: directory,
+      env: environment,
+      detached: true,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const closed = once(filter, "close");
+    const group = filter.pid;
+    assert.ok(group !== undefined);
+    try {
+      for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
+      assert.ok(existsSync(started), stderr);
+      process.kill(-group, "SIGINT");
+      // The close waits for the runner too, which writes to the same error output.
+      assert.deepEqual(await closed, [null, "SIGINT"]);
+      assert.doesNotMatch(stderr, /Error/);
+    } finally {
+      if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
