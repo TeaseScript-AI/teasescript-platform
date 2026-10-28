@@ -1061,8 +1061,10 @@ export class Consumers {
 
   /**
    * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
-   * settled): each store of the outermost literal holding it marked (`#storeMark`), standing for its records within
-   * its value, the mixed elements' among them (TABLE r4.126).
+   * settled): each definition of the outermost literal holding it marked (`#storeMark`: a store, an add, an argument
+   * whether one call or several reaches its parameter, a return), standing for its records within its value, the mixed
+   * elements' among them (TABLE r4.126); a literal no definition holds (a consumer's own, `say [count, "bad"]`, or a
+   * receiver's) marked itself, standing for its records within it (r4.138).
    */
   #markHolder(cell: PlaceId): void {
     const { program, definitions } = this.pass;
@@ -1074,7 +1076,7 @@ export class Consumers {
           if (d.value !== undefined) this.#heldIn.set(d.value, at);
         }
       this.#storesOf = new Map();
-      for (const d of this.admission.stores()) {
+      for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
         program.work.charge("checks");
         if (d.value === undefined) continue;
         const list = this.#storesOf.get(d.value);
@@ -1090,9 +1092,38 @@ export class Consumers {
       up = holder === undefined ? undefined : program.cellOwner.get(holder)?.owner;
     }
     if (literal === undefined) return;
-    for (const d of this.#storesOf?.get(literal) ?? [])
+    const holders = this.#storesOf?.get(literal) ?? [];
+    for (const d of holders)
       this.#storeMark(d, d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path);
+    if (holders.length === 0) this.#literalMark(literal);
   }
+
+  /** A literal no definition holds, marked at its own site, its type undecided (r4.100, r4.138), once. */
+  #literalMark(literal: PlaceId): void {
+    const { program } = this.pass;
+    const site = program.places[literal]?.site ?? null;
+    if (site === null || this.#markedLiterals.has(literal)) return;
+    this.#markedLiterals.add(literal);
+    this.#storeWarning(
+      site,
+      program.place(literal).label,
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: this.#placeText(literal, []),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: null,
+        steps: [],
+      },
+      [],
+    );
+  }
+
+  readonly #markedLiterals = new Set<PlaceId>();
 
   #heldIn: Map<PlaceId, PlaceId> | null = null;
   #storesOf: Map<PlaceId, Definition[]> | null = null;
