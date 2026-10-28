@@ -414,6 +414,45 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     C copy-type grid.element.rows.element.score [boolean] 64:104`,
   ],
   [
+    "a whole-copy ring whose members decide two properties differently, two of them in a list (Astra's review B1 of #1311)",
+    "let ti:integer=7\n" +
+      'let ts:string="s"\n' +
+      "let a0={f:1.5,g:ti}\n" +
+      "let a1={f:1.5,g:true}\n" +
+      "let a2={f:ts,g:true}\n" +
+      "a2=a0\n" +
+      "a0=a1\n" +
+      "a1=a2\n" +
+      "let pair=[a1,a0]\n",
+    `outcome compile-error
+    D written-target error 101:103 -
+    D written-target error 101:103 -
+    D written-target error 107:109 -
+    D written-target warning 113:115 unknown
+    D written-target error 129:131 -
+    D written-target error 129:131 -
+    C copy-type a1.f [number] 113:115`,
+  ],
+  [
+    "the same ring through a written union",
+    "let ti:integer=7\n" +
+      "let tu:integer | string=7\n" +
+      "let a0={f:tu,g:1.5}\n" +
+      "let a1={f:true,g:tu}\n" +
+      "let a2={f:ti,g:tu}\n" +
+      "a0=a1\n" +
+      "a1=a2\n" +
+      "a2=a0\n" +
+      "let pair=[a1,a0]\n",
+    `outcome compile-error
+    D written-target error 106:108 -
+    D written-target error 112:114 -
+    D written-target warning 118:120 unknown
+    D written-target error 134:136 -
+    D written-target error 134:136 -
+    C copy-type a2.g [integer|string] 118:120`,
+  ],
+  [
     "a load default's contributor beside a shared record in two lists, the first fitting (Astra's PR review B1)",
     "let t:integer=7\n" +
       "let peer={x:t}\n" +

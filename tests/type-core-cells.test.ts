@@ -4905,6 +4905,9 @@ test("the carrier design's witnesses give their exact records, in both orders (S
  * - a merge place deciding by its first copy, beside its second copy in a literal that decides by that copy: the
  *   literal's check, as the meeting is hot only where the literal decides (§2.4 (d));
  * - a live nested union, whose outer list now errs where its elements disagree (TABLE r4.128 (1));
+ * - a whole-copy ring whose members decide two properties differently, two of them in a list, with a plain or a written
+ *   union decider: the list's rejection in the first pass leaves the ring's last copy a possibility, a warning and its
+ *   check (Astra's review B1 of #1311: the ring's shared trie still owes its meetings to the list);
  * - two literals each holding its own `load` or `fromJson` default at the same position beside one shared record, in
  *   lists, sets, dicts and a nested position, in either order of the literals: each literal's contributor is its own
  *   below that position, so the second literal's string and integer still disagree whatever the first holds (Astra's

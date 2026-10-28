@@ -58,10 +58,14 @@ export interface Touch {
   /** The shared nodes down its bases (each contained in it), by id. */
   readonly anchors: IdSet | null;
   /**
-   * The meetings found in making it (`meet`), below it: a merge that finds it containing the other node owes them, as
-   * the other's landed types may decide the place merging them (§2.4 (d)).
+   * The meetings found in making it (`meet`), below it: a merge that finds it containing the other node owes them where
+   * it differs from the other, as the other's landed types may decide the place merging them (§2.4 (d)).
    */
   readonly met: Found;
+  /** Whether a ring node stands in it at any depth (`Touches.#rings` defines the mark). */
+  readonly ring: boolean;
+  /** Whether it is a ring node: a ring's trie stands at its own level (`Touches.#rings`). */
+  readonly ringHere: boolean;
 }
 
 /** A node's deltas down to a shared base, nearest the node first (`Touches.#hop`). */
@@ -200,6 +204,61 @@ function afterParts<T>(
   }
 }
 
+/** An entry of a persistent treap: a children map's (`Branch`) or a found trie's (`FoundBranch`). */
+interface Entry<N> {
+  readonly key: string;
+  readonly node: N;
+  readonly left: Entry<N> | null;
+  readonly right: Entry<N> | null;
+  readonly count: number;
+}
+
+/**
+ * The entries of `a` whose key `b` lacks or holds another node at, passing whole every subtree the two share: a map
+ * made from another by a few insertions shares all of it but those insertions' paths (a key's priority fixes its place),
+ * so this walks only those. `null` past `limit` steps, each charged.
+ */
+function differing<N>(
+  a: Entry<N> | null,
+  b: Entry<N> | null,
+  limit: number,
+  charge: () => void,
+): [string, N][] | null {
+  const out: [string, N][] = [];
+  // (each treap's subtrees and entries still to pass, in key order, the next one last; an open one stands for its own
+  // entry, its children pushed beside it)
+  type Pending = { readonly entry: Entry<N>; readonly open: boolean };
+  const left: Pending[] = a === null ? [] : [{ entry: a, open: false }];
+  const right: Pending[] = b === null ? [] : [{ entry: b, open: false }];
+  const open = (stack: Pending[]): void => {
+    const { entry } = stack.pop()!;
+    if (entry.right !== null) stack.push({ entry: entry.right, open: false });
+    stack.push({ entry, open: true });
+    if (entry.left !== null) stack.push({ entry: entry.left, open: false });
+  };
+  for (let steps = 1; left.length > 0; steps += 1) {
+    if (steps > limit) return null;
+    charge();
+    const x = left[left.length - 1]!;
+    const y = right[right.length - 1];
+    if (y !== undefined && !x.open && !y.open && x.entry === y.entry) {
+      left.pop();
+      right.pop();
+    } else if (!x.open && (y === undefined || y.open || x.entry.count >= y.entry.count)) open(left);
+    else if (y !== undefined && !y.open) open(right);
+    else if (y === undefined || x.entry.key < y.entry.key) {
+      out.push([x.entry.key, x.entry.node]);
+      left.pop();
+    } else if (y.entry.key < x.entry.key) right.pop();
+    else {
+      if (x.entry.node !== y.entry.node) out.push([x.entry.key, x.entry.node]);
+      left.pop();
+      right.pop();
+    }
+  }
+  return out;
+}
+
 const countOf = (branch: Branch | null): number => branch?.count ?? 0;
 
 function made(
@@ -223,7 +282,20 @@ export class Touches {
     meet: new WeakMap(),
     elements: new WeakMap(),
   };
+  readonly #owes = new Map<string, Found>();
   readonly #metOwes = new Map<number, Found>();
+  /**
+   * The ring mark (#1270; Astra's reviews B1 and B2), defined here once. A whole-copy ring's members share one trie, each
+   * deciding by its own first store, so two elements copying different members may offend each other where their nodes
+   * are one node; a containment over such a node owes as the accepted design has it. A node is a *ring node* where a
+   * ring's trie stands at its own level: the trie itself (`ring`, a live group of two or more members), a node one of
+   * whose parts is a ring node (a copy's landed top, a merge), or a projection whose walk steps through a ring node
+   * (`sub`). A projection that steps only through nodes holding a ring at another path (a ring-free sibling of a ring) is
+   * no ring node. A node *holds* a ring where a ring node stands in it at any depth (`Touch.ring`). Both flags are set
+   * when a node is made: a ring marked later is seen only on its own node and on the projections taken of it after.
+   * This set holds the ring tries and the ring projections, both marked after they were made.
+   */
+  readonly #rings = new Set<number>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
     elements: new Map(),
@@ -376,9 +448,32 @@ export class Touches {
     this.#entries(branch.right, out);
   }
 
-  #node(fields: Omit<Touch, "id">): Touch {
+  #node(fields: Omit<Touch, "id" | "ring" | "ringHere">): Touch {
     this.#charge();
-    return { id: this.#ids++, ...fields };
+    // (a node is a ring node where one of its parts is, and holds a ring where a part or a path node's one child does)
+    const { parts, branches } = fields;
+    const ringHere = parts !== null && (this.#isRingHere(parts[0]) || this.#isRingHere(parts[1]));
+    const ring =
+      parts !== null
+        ? this.#isRing(parts[0]) || this.#isRing(parts[1])
+        : branches !== null && this.#isRing(branches.node);
+    return { id: this.#ids++, ...fields, ring, ringHere };
+  }
+
+  /**
+   * Marks a whole-copy ring's trie (a live group of two or more members): its members share it, each deciding by its own
+   * first store, so two elements copying different members may offend each other where their nodes are one node.
+   */
+  public ring(node: Touch | null): void {
+    if (node !== null) this.#rings.add(node.id);
+  }
+
+  #isRing(node: Touch): boolean {
+    return node.ring || this.#rings.has(node.id);
+  }
+
+  #isRingHere(node: Touch): boolean {
+    return node.ringHere || this.#rings.has(node.id);
   }
 
   /** The payload of one opaque contributor, one per ref. */
@@ -653,16 +748,20 @@ export class Touches {
     // (the node there, and the contributors of the opaque nodes above it, who hold anything there too)
     let at: Touch | null = node;
     let above: Payload | null = null;
+    // (whether the walk steps through a ring node: the projection is then one, `#rings`)
+    let through = false;
     for (let index = 0; index < path.length && at !== null; index += 1) {
       this.#charge(this.#depth(at.branches));
       if (at.opaque !== null)
         above = this.unitePayloads(above, this.#shiftPayload(at.opaque, path.slice(index)));
+      through ||= this.#isRingHere(at);
       at = this.#get(at.branches, path[index]!) ?? null;
     }
     let found: Touch | null = at;
     if (above !== null)
       found = at === null ? this.#payloadLeaf(above) : this.#withOpaque(at, above);
     if (found !== null && this.#shared.has(node.id)) this.#shared.add(found.id);
+    if (found !== null && through) this.#rings.add(found.id);
     this.#subs.set(key, found);
     return found;
   }
@@ -1090,7 +1189,10 @@ export class Touches {
     this.#foundEntries(branch.right, out);
   }
 
-  /** The paths of both, each once: the smaller's branches put in the larger's, once per pair. */
+  /**
+   * The paths of both, each once: the smaller's branches put in the larger's, once per pair; only those the larger does
+   * not hold as they are, where the two share subtrees (a node's meetings are mostly its parts', #1270).
+   */
   #unite(a: Found, b: Found): Found {
     if (a === b || b === NONE) return a;
     if (a === NONE) return b;
@@ -1099,8 +1201,10 @@ export class Touches {
     if (known !== undefined) return known;
     const [big, small] = foundCount(a.branches) >= foundCount(b.branches) ? [a, b] : [b, a];
     let branches = big.branches;
-    const entries: [string, Found][] = [];
-    this.#foundEntries(small.branches, entries);
+    let entries = differing(small.branches, big.branches, 8 + foundCount(small.branches), () =>
+      this.#charge(),
+    );
+    if (entries === null) this.#foundEntries(small.branches, (entries = []));
     for (const [step, inner] of entries) {
       this.#charge(1 + Math.ceil(Math.log2(1 + foundCount(branches))));
       const other = this.#foundGet(branches, step);
@@ -1171,9 +1275,9 @@ export class Touches {
   }
 
   /**
-   * For `elements`, what a node containing the other (or the same node twice) owes: its meetings found in making it
-   * where its contents hold two kinds or more, as an element standing in the other's stead may offend there (§2.2).
-   * Once per node.
+   * For `elements`, what a node holding a ring owes where it contains the other (or is merged with itself): its meetings
+   * found in making it where its contents hold two kinds or more, as an element standing in the other's stead may offend
+   * there (§2.2). Once per node.
    */
   #metOwed(node: Touch): Found {
     const known = this.#metOwes.get(node.id);
@@ -1187,10 +1291,91 @@ export class Touches {
     return out;
   }
 
+  /**
+   * What a node containing another owes where a merge ends at it, no ring standing in it (§2.2 step 3, §2.4 (d)): its
+   * meetings found in making it, as the contained node's landed types may decide the place merging them; for `elements`
+   * only where its contents hold two kinds or more, as an element standing in the other's stead may offend there. Only
+   * where the two differ:
+   * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
+   * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
+   * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
+   * share, found from the smaller of the meetings there and the two children maps' difference. Once per pair.
+   */
+  #containedOwes(outer: Touch, inner: Touch, mode: TouchMode): Found {
+    const key = keptParts(this.host.work, mode, outer.id, inner.id);
+    const known = this.#owes.get(key);
+    if (known !== undefined) return known;
+    let out: Found = NONE;
+    // (every meeting below a path: for `meet` the found trie itself, taken whole; for `elements` each path's kinds read)
+    const oweAll = (met: Found, path: readonly string[]): void => {
+      if (mode === "meet") {
+        let at = met;
+        for (let index = path.length - 1; index >= 0; index -= 1)
+          at = this.#under(path[index]!, at);
+        out = this.#unite(out, at);
+        return;
+      }
+      const paths: (readonly string[])[] = [];
+      this.paths(met, path, paths);
+      for (const each of paths)
+        if (this.kindsAt(outer, each).size > 1) out = this.#unite(out, this.#at(each));
+    };
+    const stack: {
+      readonly x: Touch | undefined;
+      readonly y: Touch | undefined;
+      readonly met: Found;
+      readonly path: readonly string[];
+    }[] = [{ x: outer, y: inner, met: outer.met, path: [] }];
+    while (stack.length > 0) {
+      const { x, y, met, path } = stack.pop()!;
+      this.#charge();
+      if (met === NONE || x === y) continue;
+      if (x === undefined || y === undefined || x.opaque !== y.opaque) {
+        // (the contained node stands nowhere here, or a payload of the container's own stands here, which meets
+        // everything below: every meeting below is owed)
+        oweAll(met, path);
+        continue;
+      }
+      if (met.here && (mode === "meet" || this.kindsAt(outer, path).size > 1))
+        out = this.#unite(out, this.#at(path));
+      const differs = differing(x.branches, y.branches, 8 + 2 * foundCount(met.branches), () =>
+        this.#charge(),
+      );
+      const steps: string[] = [];
+      if (differs !== null) for (const [step] of differs) steps.push(step);
+      else {
+        const entries: [string, Found][] = [];
+        this.#foundEntries(met.branches, entries);
+        for (const [step] of entries) steps.push(step);
+      }
+      for (const step of steps) {
+        this.#charge(this.#depth(x.branches));
+        const below = this.#foundGet(met.branches, step);
+        if (below === undefined) continue;
+        stack.push({
+          x: this.#get(x.branches, step),
+          y: this.#get(y.branches, step),
+          met: below,
+          path: keptSteps(this.host.work, path, [step]),
+        });
+      }
+    }
+    this.#owes.set(key, out);
+    return out;
+  }
+
   #at(rest: readonly string[]): Found {
     let out = HERE;
     for (let index = rest.length - 1; index >= 0; index -= 1) out = this.#under(rest[index]!, out);
     return out;
+  }
+
+  /**
+   * What a node merged with itself owes: nothing it did not meet in its making, but for `elements` a node holding a ring
+   * owes its meetings with two kinds or more, as elements copying different members of the ring stand on it (§2.2).
+   */
+  #selfOwes(node: Touch, mode: TouchMode): Found {
+    return mode === "elements" && this.#isRing(node) ? this.#metOwed(node) : NONE;
   }
 
   /**
@@ -1205,7 +1390,7 @@ export class Touches {
   ): { node: Touch | null; found: Found } {
     if (a === null) return { node: b, found: NONE };
     if (b === null) return { node: a, found: NONE };
-    if (a === b) return { node: a, found: mode === "elements" ? this.#metOwed(a) : NONE };
+    if (a === b) return { node: a, found: this.#selfOwes(a, mode) };
     const key = (x: Touch, y: Touch): string =>
       keptParts(this.host.work, mode, Math.min(x.id, y.id), Math.max(x.id, y.id));
     const known = this.#memo.get(key(a, b));
@@ -1237,10 +1422,16 @@ export class Touches {
       spent += hop.cost;
     };
     for (;;) {
-      // (a node containing the other is their union; for `meet` it owes the meetings found in making it, which the
-      // contained node's landed types may decide where the two are merged)
+      // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
+      // other, whose landed types may decide where the two are merged; all of them where a ring stands in it)
       const owes = (outer: Touch, inner: Touch): Found =>
-        mode === "elements" ? this.#metOwed(outer) : outer !== inner ? outer.met : NONE;
+        outer === inner
+          ? this.#selfOwes(outer, mode)
+          : !this.#isRing(outer)
+            ? this.#containedOwes(outer, inner, mode)
+            : mode === "elements"
+              ? this.#metOwed(outer)
+              : outer.met;
       if (this.#contains(x, y)) core = { node: x, found: owes(x, y) };
       else if (this.#contains(y, x)) core = { node: y, found: owes(y, x) };
       else core = this.#memo.get(key(x, y)) ?? null;
