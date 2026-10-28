@@ -21,6 +21,7 @@ import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
+import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { validateRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-validation.js";
 
 type Plan = ReturnType<typeof compileValidPlan>;
@@ -243,17 +244,23 @@ test("inside an object literal, prefill: belongs to the nearest ask unless paren
 
 test("an invalid dynamic prefill fails before the field opens", () => {
   const notText =
-    "The prefill of askText must be text. Write the value as text with interpolation: 'prefill: \"${...}\"'.";
+    "The prefill of askText must be text. Give a text as the prefill, or ask without 'prefill:'.";
   const notNumber =
     "The prefill of askNumber must be a finite number. Ask without 'prefill:' when there is no number to offer.";
   const notWhole =
     "The prefill of askInteger must be a whole number. Round the prefill with the floor, round or ceil function, or " +
     "ask without 'prefill:'.";
-  const cases = [
+  const cases: [string, SerializableRuntimeValue, string][] = [
     ["let answer = askText prefill: value\nexit", 5, notText],
+    // A value that interpolation cannot show either.
+    [
+      "let answer = askText prefill: value\nexit",
+      { kind: "object", properties: [{ name: "name", value: "Ada" }] },
+      notText,
+    ],
     ["let answer = askNumber prefill: value\nexit", "10", notNumber],
     ["let answer = askInteger prefill: value\nexit", 2.5, notWhole],
-  ] as const;
+  ];
   for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });
     const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { value } }));

@@ -71,7 +71,7 @@ test("each typed place rejects a value of another type that the compiler cannot 
     ],
     [
       'let tags = set["a"]\ntags.add(pick(1))',
-      "An element of 'tags' holds text (string), so it cannot take 1. To show the value as text, put it in a text with '${...}'.",
+      "An element of 'tags' holds text (string), so it cannot take 1. To use the value as text, put the value into a text with interpolation.",
       "pick(1)",
     ],
     [
