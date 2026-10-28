@@ -2521,10 +2521,12 @@ export class Consumers {
     }
     const read = this.#run(values.valueItems(value, node, ["element"]));
     const kinds = this.#kindsOf(value, node);
+    // the exact value holds one, in a collection by its kinds or by its contract's (a written type over host data)
     if (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
-      !kinds.some((item) => item.tag === "unknown")
+      (!kinds.some((item) => item.tag === "unknown") ||
+        !this.#run(contract.contractOfValue(value)).some((item) => item.tag === "unknown"))
     )
       return;
     // the obligation answers for every collection and every unknown that may be one

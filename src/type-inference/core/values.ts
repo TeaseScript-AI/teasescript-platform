@@ -7,6 +7,7 @@ import {
   defaultOf,
   emptyAt,
   heldReference,
+  hostAt,
   ingressNull,
   ONLY_NULL,
   OPAQUE_MEMBER,
@@ -23,6 +24,7 @@ import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
   keptKey,
   keyOf,
+  keyPath,
   keyPlace,
   type Definition,
   type ForLoopFacts,
@@ -143,7 +145,7 @@ export class Values {
     };
     if (program.isHost(keyPlace(key))) {
       route("contract");
-      return { items: [unknownItem(REASON.external)], def: null, guardable: false };
+      return { items: hostAt(keyPath(key)), def: null, guardable: false };
     }
     if (yield* contract.refReceiver(key)) {
       route("contract");
@@ -395,7 +397,10 @@ export class Values {
     return (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
-      !(yield* this.valueItems(facts.value, facts.node, [])).some((item) => item.tag === "unknown")
+      (!(yield* this.valueItems(facts.value, facts.node, [])).some(
+        (item) => item.tag === "unknown",
+      ) ||
+        !(yield* contract.contractOfValue(facts.value)).some((item) => item.tag === "unknown"))
     );
   }
 
@@ -594,7 +599,7 @@ export class Values {
         return contract.entered(value, yield* this.#operationItems(operation, node, rest));
       if (program.hasOf.has(value) || program.cellOwner.has(value))
         return yield* this.#literalItems(value, rest, node);
-      if (program.isHost(value)) return [unknownItem(REASON.external)];
+      if (program.isHost(value)) return hostAt(rest);
       return yield* this.keyItems(keyOf(value, rest), node);
     } finally {
       this.pass.solver.leaveRead();
@@ -796,7 +801,7 @@ export class Values {
       ];
     } else if (c.kind === "load" && c.key === null) {
       // F19: a computed key is host data
-      if (rest.length > 0) out = external();
+      if (rest.length > 0) out = hostAt(rest);
       else {
         const nullDefault =
           c.fallback !== null && (yield* this.onlyNull(c.fallback, at)).length > 0;

@@ -798,7 +798,7 @@ export class Contract {
     const place = keyPlace(key);
     const found = program.places[place];
     if (found === undefined) return [unknownItem(REASON.external)];
-    if (program.isHost(place)) return [unknownItem(REASON.external)];
+    if (program.isHost(place)) return hostAt(keyPath(key));
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
     // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
     const items = yield* this.#keyThrough(key, 0);
@@ -1779,7 +1779,7 @@ export class Contract {
       if (c.key === null) {
         const nullDefault =
           rest.length === 0 && c.fallback !== null && (yield* this.onlyNull(c.fallback)).length > 0;
-        return [unknownItem(REASON.external), ...(nullDefault ? [ingressNull()] : [])];
+        return [...hostAt(rest), ...(nullDefault ? [ingressNull()] : [])];
       }
       const expected = yield* this.expectedOf(c, rest);
       if (expected !== null) return expected;
@@ -5084,6 +5084,14 @@ export function conversionKind(result: string): ItemTag {
 /** A stored or parsed collection may hold none. */
 export function emptyAt(rest: readonly string[]): Item[] {
   return rest.at(-1) === "element" ? [EMPTY] : [];
+}
+
+/**
+ * Host data at a path (C9; F19: a computed key's load too): unknown, and a collection there may hold none, whatever a
+ * written type or a test later says of its elements (V30 §16).
+ */
+export function hostAt(rest: readonly string[]): Item[] {
+  return [unknownItem(REASON.external), ...emptyAt(rest)];
 }
 
 /** The lookup cut by the nesting limit: an unknown destination (V30 §18). */
