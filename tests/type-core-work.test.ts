@@ -293,8 +293,10 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
  * Valid scripts whose work grew with a product of two of their dimensions, each with the counter that grew: a written
  * type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written result of
  * k repeated members read k times, each read merging every written member (#1256); a chain of k calls of one untyped
- * helper, each link discovering the helper's parameter again (#1257); and a stored sum of k terms, admission's stop
- * index keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's (#1230).
+ * helper, each link discovering the helper's parameter again (#1257); a stored sum of k terms, admission's stop index
+ * keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's (#1230); and a
+ * ring of k copies through a k-element list, the list's index built again for each element and its read re-run whole
+ * for each changed element (#1229).
  */
 const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
   {
@@ -362,14 +364,37 @@ const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
       },
     ],
   },
+  {
+    name: "list-ring",
+    measures: "#1229: the list's index built once, a changed element re-running the reads above it",
+    counter: "sccDeps",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          'let flag = askBoolean "flag"',
+          "let i = 0",
+          many(k, (i) => `let a${i} = 1`),
+          "while flag {",
+          `let xs = [${many(k, (i) => `a${i}`, ", ")}]`,
+          many(k - 1, (i) => `a${i} = a${i + 1}`),
+          `a${k - 1} = xs[i]`,
+          "if flag { a0 = 2.5 }",
+          "}",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
  * Each family's total and its counter in either order under the standard gates; only the named counter, since the
  * helper's parameter's k definitions are sorted and lifted (the TABLE's `n log n` structures), which measure 2.37 here,
- * as they do with a written parameter.
+ * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
+ * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("written types repeated across copies and reads, chains of one helper and stored sums take linear work (#1230, #1255–#1257)", () => {
+test("each product a repair removed grows with the program in either order (#1229, #1230, #1255–#1257)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
