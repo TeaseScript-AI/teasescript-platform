@@ -388,9 +388,10 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * each element read again at each (#1207); k such loads beside a wide object, each property's decision reading every
  * load before the object (Astra's review B2); k/4 loads, parses and reads of host data beside an object of k
  * properties, the list's touch trie walking the object again for each (#1307); k `load(…) otherwise {…}` beside a wide
- * object, directly or each in an object, each member read again at each property (#1304); and k named bindings of
- * loads, of host reads or of alike objects beside one, each binding read again at each (#1313). A read of host data
- * compiles with its runtime check.
+ * object, directly or each in an object, each member read again at each property (#1304); k named bindings of
+ * loads, of host reads or of alike objects beside one, each binding read again at each (#1313); and a run of k joined
+ * lists ending in a list of another type, the class of each join naming the joins below it in full (#1357). A read of
+ * host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -756,6 +757,22 @@ const PRODUCTS: readonly (WorkFamily & {
       },
     ],
   },
+  {
+    name: "join-run-ending-in-another-type",
+    measures: "#1357: each join's class naming its operands' by their short names",
+    counter: "literalUnits",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let xs: (integer | string)[] = [0]",
+          `let s = xs + ${many(k, (i) => `[${i + 1}]`, " + ")} + ["x"]`,
+          "say s.length",
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
@@ -764,7 +781,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1291, #1304, #1307, #1313)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1291, #1304, #1307, #1313, #1357)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
