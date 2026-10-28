@@ -484,7 +484,7 @@ a kept session whose events the engine's `interpreterEventProblem` refuses, such
 answer without its form, is not continued, and Start shows instead. Nor is a kept session whose plan or state is of
 another revision than this Player's, as after a Player update ([format evolution](../RUNTIME.md#format-evolution)):
 the start page then shows "This session cannot continue" and "The Player has been updated and can no longer resume
-your session. Choose Start to begin this Tease again." before Start, the debug room's with "Choose Start debug session
+this session. Choose Start to begin this Tease again." before Start, the debug room's with "Choose Start debug session
 to begin this Tease again.", in the card of a Tease that cannot start, whose **Technical details** give the runtime's
 error code and path when it refused the state, its message, and the saved and supported revisions, such as
 "Unsupported instruction-plan revision. Saved revision: 103. Supported revision: 104." (owner decision, 2026-10-28). A
