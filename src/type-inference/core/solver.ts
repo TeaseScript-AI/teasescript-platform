@@ -246,7 +246,7 @@ export class Solver {
    * `DemandExhausted`, what it was the first to finish memoised, the rest, provisional answers included, forgotten.
    */
   public demand<T>(work: Work<T>, allowance: number): T {
-    this.#limit = this.#work.total + allowance;
+    this.#limit = this.#work.own + allowance;
     try {
       return this.run(work);
     } finally {
@@ -351,7 +351,7 @@ export class Solver {
     frames.push(base);
     for (;;) {
       // (between two steps every computation stands whole: a demand past its allowance stops here)
-      if (this.#limit !== null && this.#work.total > this.#limit) throw new DemandExhausted();
+      if (this.#limit !== null && this.#work.own > this.#limit) throw new DemandExhausted();
       const solving = this.#solving.at(-1);
       if (solving !== undefined && solving.depth === frames.length) {
         this.#step(solving);

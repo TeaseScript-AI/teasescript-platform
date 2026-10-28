@@ -261,6 +261,9 @@ export class WorkLedger {
   /** Work counted as finishing work, the analysis not stopped (`finishing`'s callback). */
   #apart = false;
   #finishing = 0;
+  /** Units charged while building an index the program shares (`shared`), outermost builds only. */
+  #shared = 0;
+  #sharing = false;
   readonly #spent: number[] = [0];
   #spender = 0;
 
@@ -298,6 +301,28 @@ export class WorkLedger {
   /** The work after the stop: the finishing path's. */
   public get finishing(): number {
     return this.#finishing;
+  }
+
+  /**
+   * Runs `callback`, the first build of an index every later read of the program shares (the narrowing index): its
+   * units count to the analysis as any, but to no demand's allowance, as the read that happened to ask first did not
+   * make them its own work (S3 §5).
+   */
+  public shared<T>(callback: () => T): T {
+    if (this.#sharing) return callback();
+    const before = this.#total;
+    this.#sharing = true;
+    try {
+      return callback();
+    } finally {
+      this.#sharing = false;
+      this.#shared += this.#total - before;
+    }
+  }
+
+  /** The analysis's units outside `shared` builds: what a demand's allowance measures (S3 §5). */
+  public get own(): number {
+    return this.#total - this.#shared;
   }
 
   /**

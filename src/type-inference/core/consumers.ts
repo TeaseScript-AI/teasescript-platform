@@ -1157,7 +1157,7 @@ export class Consumers {
    */
   #solve<T>(work: Work<T>, allowance: number | null = null): T {
     const ledger = this.pass.program.work;
-    const before = ledger.total;
+    const before = ledger.own;
     let stopped = false;
     try {
       // (admission's own question inside a decision: what is left of the decision's allowance)
@@ -1168,10 +1168,10 @@ export class Consumers {
       stopped = error instanceof DemandExhausted;
       throw error;
     } finally {
-      if (this.#reading !== null && ledger.total > before)
+      if (this.#reading !== null && ledger.own > before)
         this.reads.push({
           node: this.#reading.id,
-          units: ledger.total - before,
+          units: ledger.own - before,
           allowance: this.#demandAllowance(this.#reading),
           bounded: allowance !== null,
           stopped,
@@ -1188,7 +1188,7 @@ export class Consumers {
    */
   #decide(root: PlaceId, path: readonly string[]): Decision | null {
     const ledger = this.pass.program.work;
-    const before = ledger.total;
+    const before = ledger.own;
     const allowance = demandAllowanceFor(this.pass.program.flow.nodes.length);
     // (its work is the decision's, not a consumer read's)
     this.#reading = null;
@@ -1203,7 +1203,7 @@ export class Consumers {
       return null;
     } finally {
       this.#deciding = null;
-      this.decisions.push({ place: root, path, units: ledger.total - before, allowance, stopped });
+      this.decisions.push({ place: root, path, units: ledger.own - before, allowance, stopped });
     }
   }
 

@@ -240,7 +240,8 @@ export class Values {
     const { program, definitions } = this.pass;
     const work = program.work;
     let storedSpans = STORED_SPANS.get(program);
-    if (storedSpans === undefined) {
+    // (the program's, shared by every later read: no demand's own work, S3 §5)
+    storedSpans ??= work.shared(() => {
       const byFile = new Map<number, { start: number; end: number; item: null }[]>();
       for (const list of [definitions.storeDefs, definitions.transferDefs])
         for (const d of list) {
@@ -254,8 +255,9 @@ export class Values {
         }
       const made = new Map<number, Laminar<null>>();
       for (const [file, spans] of byFile) made.set(file, new Laminar(work, spans));
-      STORED_SPANS.set(program, (storedSpans = made));
-    }
+      STORED_SPANS.set(program, made);
+      return made;
+    });
     const spans = storedSpans.get(read.file);
     if (spans === undefined || read.span === null) return false;
     // (the innermost span holding its start, and those holding that one, until one holds its end)
