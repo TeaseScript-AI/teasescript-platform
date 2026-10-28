@@ -994,27 +994,28 @@ export class Consumers {
   }
 
   /**
-   * The places and paths admission decides by a written type that a store, add, argument or return reaches (every one,
-   * a multi-site argument into a written parameter among them: it decides nothing, but C1 checks it, ADR 0021 1.5):
-   * every path of each such place's written type, which is as large as the source that writes it. The fresh pass's C1
-   * decides these alone (`groups` would group every key and walk every store's landings again, unbounded after a
-   * stop: TABLE r4.55, r4.126).
+   * The places and paths admission decides by a written type: the roots `Admission.groups` starts from (every key with a
+   * definition or a candidate: a store, add, argument or return, a multi-site or dead call's argument among them, which
+   * decides nothing but C1 checks, ADR 0021 1.5), the written ones, each at every path of its written type, which is as
+   * large as the source that writes it. The fresh pass's C1 decides these alone (`groups` would group every key and walk
+   * every store's landings again, unbounded after a stop: TABLE r4.55, r4.126).
    */
   #writtenGroups(): { readonly root: PlaceId; readonly path: readonly string[] }[] {
     const { program, definitions } = this.pass;
     const out: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
     const seen = new Set<PlaceId>();
-    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+    for (const key of [...definitions.byKey.keys(), ...definitions.candidates.keys()]) {
       program.work.charge("checks");
-      if (seen.has(d.place)) continue;
-      seen.add(d.place);
-      const written = writtenOf(program.place(d.place).kind);
+      const place = keyPlace(key);
+      if (seen.has(place)) continue;
+      seen.add(place);
+      const written = writtenOf(program.place(place).kind);
       if (written === null) continue;
       const pending: [TypeTerm, readonly string[]][] = [[written, []]];
       for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
         program.work.charge("checks");
         const [term, path] = next;
-        out.push({ root: d.place, path });
+        out.push({ root: place, path });
         if (term.kind === "union") for (const member of term.members) pending.push([member, path]);
         else if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
           pending.push([term.element, keptSteps(program.work, path, ["element"])]);
