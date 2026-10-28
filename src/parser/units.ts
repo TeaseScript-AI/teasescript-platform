@@ -19,7 +19,7 @@ import {
 import {
   CALENDAR_DURATION_UNITS,
   DURATION_UNITS,
-  MISTAKEN_DURATION_UNIT_NAMES,
+  mistakenDurationUnit,
 } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
@@ -72,6 +72,13 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
       const amount = parser.sourceText(start, parser.current);
       result = withUnit({ calendar: true, unit: withoutCalendar }, parser.advance());
       reportCalendarUnitWithoutCalendar(parser, amount, token, result);
+    } else {
+      const meant = mistakenDurationUnit(token.lexeme);
+      // Read as the unit meant, so that its error is the only one.
+      if (meant !== undefined) {
+        result = withUnit({ calendar: false, unit: meant }, parser.advance());
+        reportMistakenUnit(parser, expression, start, token, meant);
+      }
     }
   }
   return reportSecondUnit(parser, result);
@@ -238,11 +245,11 @@ export function parseDurationUnit(
   }
   const calendar = calendarDurationUnit(token.lexeme);
   if (calendar === undefined) {
-    const meant = MISTAKEN_DURATION_UNIT_NAMES.get(token.lexeme);
+    const meant = mistakenDurationUnit(token.lexeme);
     if (meant === undefined) return amount;
     // Read as the unit meant, so that its error is the only one.
     const result = literal({ calendar: false, unit: meant }, parser.advance());
-    reportMistakenUnit(parser, amount, token, meant);
+    reportMistakenUnit(parser, amount, start, token, meant);
     return result;
   }
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
@@ -251,11 +258,13 @@ export function parseDurationUnit(
 }
 
 /** The unit names a mistaken unit is written in, by the unit meant. */
-const MEANT_UNITS: Readonly<Record<string, string>> = {
+const MEANT_UNITS: Readonly<Record<DurationUnit, string>> = {
   ms: "milliseconds",
   s: "seconds",
   min: "minutes",
   h: "hours",
+  d: "days",
+  w: "weeks",
 };
 
 /** A list of units for a message, as in "d, w, mo, and y". */
@@ -265,24 +274,26 @@ const unitList = (units: readonly string[]) =>
 const UNITS_OF_TIME = `The units of time are ${unitList(DURATION_UNITS)}. After 'calendar', the units are ${unitList(CALENDAR_DURATION_UNITS)}.`;
 
 /**
- * A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. It
- * shows the amount with the unit only where that compiles in the statement (see `Parser.offerFix`).
+ * A word after `amount`, which begins at token `start`, that is no unit, as in `5 m`, `n sec`, or `5 S`
+ * (`mistakenDurationUnit`), whose error names the unit meant and every unit. It shows the amount with the unit only
+ * where that compiles in the statement (see `Parser.offerFix`).
  */
 function reportMistakenUnit(
   parser: Parser,
-  amount: NumberLiteral,
+  amount: Expression,
+  start: number,
   word: Token,
   meant: DurationUnit,
 ): void {
-  const why = word.lexeme === "m" ? ", because it could mean minutes or months" : "";
+  const why = word.lexeme.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
   const message = (fix: string) =>
-    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. ${UNITS_OF_TIME}`;
+    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]}, ${fix}. ${UNITS_OF_TIME}`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     message(`use the unit ${meant}`),
     word,
   );
-  const fixed = `${amount.raw} ${meant}`;
+  const fixed = `${parser.sourceText(start, parser.current - 1)} ${meant}`;
   parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
     { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
   ]);

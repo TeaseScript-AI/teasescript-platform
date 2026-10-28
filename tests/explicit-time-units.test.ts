@@ -179,11 +179,14 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     assert.deepEqual(rest, [], source);
   }
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
-  // A word taken for a unit names the unit meant and every unit. Every word at one place, and two words at every place
-  // a unit stands, with and without a space. The amount with the unit is shown only where it compiles pasted in place
-  // of the amount and the word; where the statement has another error, as after a range, the fix is in words.
+  // A word taken for a unit names the unit meant and every unit, also a unit or such a word with capitals. Every word at
+  // one place, and four words at every place a unit stands, after a number with and without a space and after a name.
+  // Every amount that a unit follows, at two places. The amount with the unit is shown only where it compiles pasted in
+  // place of the amount and the word; where the statement has another error, as after a range, the fix is in words.
   const units =
     "The units of time are ms, s, min, h, d, and w. After 'calendar', the units are d, w, mo, and y.";
+  const names =
+    "let n = 5\nlet p = { delay: 2 }\nlet xs = [2]\nfunction f(value) {\n  return value\n}\n";
   const meant = new Map([
     ["m", ["min", "minutes"]],
     ["msec", ["ms", "milliseconds"]],
@@ -193,6 +196,14 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     ["mins", ["min", "minutes"]],
     ["hr", ["h", "hours"]],
     ["hrs", ["h", "hours"]],
+    ["S", ["s", "seconds"]],
+    ["Min", ["min", "minutes"]],
+    ["MS", ["ms", "milliseconds"]],
+    ["HOURS", ["h", "hours"]],
+    ["D", ["d", "days"]],
+    ["W", ["w", "weeks"]],
+    ["Sec", ["s", "seconds"]],
+    ["M", ["min", "minutes"]],
   ] as const);
   // Each place, and the other errors of its statement: none, or the range's and another one.
   const places = [
@@ -216,28 +227,42 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
   const cases = [
     ...[...meant.keys()].map((word) => [places[0], "5", " ", word] as const),
     ...places.flatMap((place) =>
-      (["m", "hrs"] as const).flatMap((word) => [
+      (["m", "hrs", "S", "Min"] as const).flatMap((word) => [
         [place, "5", " ", word] as const,
         [place, "1.5", "", word] as const,
+        [place, "n", " ", word] as const,
       ]),
+    ),
+    ...[places[0], places[5]].flatMap((place) =>
+      ["(n)", "p.delay", "f(1)", "xs[0]", "(n + 1)"].map(
+        (amount) => [place, amount, " ", "mins"] as const,
+      ),
     ),
   ];
   for (const [[place, others], amount, space, word] of cases) {
     const [unit, name] = meant.get(word)!;
     const source = place.replace("#", `${amount}${space}${word}`);
-    const why = word === "m" ? ", because it could mean minutes or months" : "";
+    const why = word.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
     const offered = `${amount} ${unit}`;
     const fix = others.length === 0 ? `write '${offered}'` : `use the unit ${unit}`;
     assert.deepEqual(
-      compileSource(`${source}\nexit`).diagnostics.map(({ message }) => message),
+      compileSource(`${names}${source}\nexit`).diagnostics.map(({ message }) => message),
       [`'${word}' is not a unit${why}. For ${name}, ${fix}. ${units}`, ...others],
       source,
     );
     if (others.length === 0) {
       const pasted = place.replace("#", offered);
-      assert.notEqual(compileSource(`${pasted}\nexit`).plan, null, pasted);
+      assert.notEqual(compileSource(`${names}${pasted}\nexit`).plan, null, pasted);
     }
   }
+  // After a say mode or skip word, a name that is such a word is the text, as a name that is a unit is.
+  for (const word of ["hr", "S", "mins"])
+    assert.deepEqual(
+      compileSource(`let ${word} = "x"\nsay skippable ${word}\nsay bubble ${word}\nexit`)
+        .diagnostics,
+      [],
+      word,
+    );
   // The range in parentheses is shown where nothing else in the statement is wrong, and compiles there.
   assert.deepEqual(
     compileSource("wait 1..5 min\nexit").diagnostics.map(({ message }) => message),

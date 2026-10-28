@@ -171,7 +171,10 @@ interface FixPaste {
   readonly expression: boolean;
 }
 
-/** Whether `program` has a node from offset `start` up to `end`, which then holds all of that source. */
+/**
+ * Whether `program` has a node from offset `start` up to `end`, which then holds all of that source, also as the length
+ * of a wait or timer, which keeps its unit apart from the amount (see `timerDuration`).
+ */
 function spansNode(program: Program, start: number, end: number): boolean {
   // Every node, found with a list rather than by recursion, as source may nest deeply.
   const pending: unknown[] = [program];
@@ -182,8 +185,15 @@ function spansNode(program: Program, start: number, end: number): boolean {
       continue;
     }
     // EVIDENCE: invariant: the parser builds every node as an object with its `kind` and `span`.
-    const { kind, span } = node as { kind?: unknown; span?: SourceSpan };
-    if (typeof kind === "string" && span?.start.offset === start && span.end.offset === end)
+    const { kind, span, lengthSpan } = node as {
+      kind?: unknown;
+      span?: SourceSpan;
+      lengthSpan?: SourceSpan;
+    };
+    if (
+      typeof kind === "string" &&
+      [span, lengthSpan].some((part) => part?.start.offset === start && part.end.offset === end)
+    )
       return true;
     for (const [key, child] of Object.entries(node))
       if (key !== "span" && !key.endsWith("Span")) pending.push(child);
@@ -638,7 +648,7 @@ export class Parser {
     const value = yield* parseChild(speculative.parseOr());
     if (value === null) return false;
     // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
-    // text whose name is a unit word, also `calendar` or an angle unit.
+    // text whose name is a unit word, also `calendar`, an angle unit, or a word taken for a unit, as `hr`.
     if (unitAfterWord(value, this.peek(), speculative.unitlessCalendars)) return false;
 
     if (speculative.match(TokenKind.Comma)) {
