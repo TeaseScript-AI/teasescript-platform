@@ -233,8 +233,11 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftBrace,
   TokenKind.InterpolationStart,
 ]);
-/** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, a name, or a text. */
-const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|[A-Za-z_]\w*|"[^"\n]*")$/;
+/** TSP041, which `Parser.#nameOtherwiseReadings` follows with both readings where it can. */
+const UNCLEAR_OTHERWISE =
+  "It is unclear what 'otherwise' belongs to. Put parentheses around that part.";
+/** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, or a text. */
+const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|true|false|null|"[^"\n]*")$/;
 /** Tokens that start a value but cannot go on from a name before them, as an operator or a call can. */
 const OPERAND_STARTS: ReadonlySet<TokenKind> = new Set([
   TokenKind.Identifier,
@@ -965,6 +968,7 @@ export class Parser {
   }
 
   public *parseOr(): ParseTask<Expression | null> {
+    const diagnosticCount = this.diagnostics.length;
     let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null) {
       const operator =
@@ -982,6 +986,10 @@ export class Parser {
       this.#reportOtherwiseOperand(expression, left);
       this.#reportOtherwiseOperand(expression, right);
     }
+    // Nothing outside binds to the whole expression, so only now can an unclear `otherwise` in it name readings that
+    // need no more parentheses where they are pasted.
+    if (expression !== null && this.diagnostics.length === diagnosticCount + 1)
+      this.#nameOtherwiseReadings(expression, diagnosticCount);
     return expression;
   }
 
@@ -1178,7 +1186,7 @@ export class Parser {
 
   /**
    * Reports `not` right after `symbol`, quoting the code to write: `readings` of the source text of `left` and of the
-   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportUnclearOtherwise`), and
+   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#nameOtherwiseReadings`), and
    * one without errors of its own; the readings of `example` stand in for it.
    */
   #reportNotReadings(
@@ -1336,103 +1344,122 @@ export class Parser {
 
   /**
    * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850), and
-   * tells whether it did. The message names both readings: the fallback for the nearest value, and for the whole
-   * operand. A sign before the fallback, as in `otherwise -1`, can be read only one way.
+   * tells whether it did. A sign before the fallback, as in `otherwise -1`, can be read only one way.
    */
   #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): boolean {
-    const leftMixed = isArithmetic(left) || isSign(left);
-    const rightMixed = isArithmetic(right);
-    if (!leftMixed && !rightMixed) return false;
-    // The values next to `otherwise`: the last one of the left operand and the first one of the right operand.
-    let last = left;
-    while (isArithmetic(last) || isSign(last))
-      last = isSign(last) ? last.operand : last.kind === "binaryExpression" ? last.right : last.end;
-    let first = right;
-    while (isArithmetic(first))
-      first = first.kind === "binaryExpression" ? first.left : first.start;
-    this.#reportUnclearOtherwise(operator, spanFrom(left.span, right.span), () => {
-      // The source text of an operand ends with that of its last value and starts with that of its first one.
-      const text = (expression: Expression) => this.textOf(expression.span, expression.span);
-      const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
-      return [
-        {
-          code: `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`,
-          subject: value,
-          fallback,
-        },
-        {
-          code: `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`,
-          subject: whole,
-          fallback: rest,
-        },
-      ];
-    });
+    if (!isArithmetic(left) && !isSign(left) && !isArithmetic(right)) return false;
+    this.reportSpan(parserDiagnosticCode.mixedOtherwise, UNCLEAR_OTHERWISE, operator);
     return true;
   }
 
   /**
    * Reports an `otherwise` without parentheses as an operand of `whole`: a comparison, a type test, `not`, `and`, or `or`
-   * (owner decision on #1243). As for arithmetic, the message names both readings: the fallback for the value next to the
-   * operator, and for all of the operator's operand. In a chain, the last `otherwise` before the operator is next to it,
+   * (owner decision on #1243). In a chain, the error is at the `otherwise` next to the operator: the last one before it,
    * and the first one after it.
    */
   #reportOtherwiseOperand(whole: Expression, operand: Expression): void {
     if (!isOtherwise(operand)) return;
-    const before = operand.span.start.offset === whole.span.start.offset;
     let next = operand;
-    while (!before && isOtherwise(next.left)) next = next.left;
+    if (operand.span.start.offset !== whole.span.start.offset)
+      while (isOtherwise(next.left)) next = next.left;
     if (this.shared.faultyOtherwise.has(next)) return;
-    this.#reportUnclearOtherwise(next.operatorSpan, whole.span, () => {
-      // The source text of `whole` starts or ends with that of the operand, and so does that of a chain with the value
-      // at its far end.
-      const text = (expression: Expression) => this.textOf(expression.span, expression.span);
-      const [all, own] = [text(whole), text(operand)];
-      if (before) {
-        const [rest, fallback] = [all.slice(own.length), text(operand.right)];
-        const subject = text(operand.left);
-        return [
-          { code: `(${own})${rest}`, subject, fallback },
-          {
-            code: `${own.slice(0, own.length - fallback.length)}(${fallback}${rest})`,
-            subject,
-            fallback: `${fallback}${rest}`,
-          },
-        ];
-      }
-      const [rest, value] = [all.slice(0, all.length - own.length), text(next.left)];
-      const fallback = text(next.right);
-      return [
-        { code: `${rest}(${own})`, subject: value, fallback },
-        {
-          code: `(${rest}${value})${own.slice(value.length)}`,
-          subject: `${rest}${value}`,
-          fallback,
-        },
-      ];
-    });
+    this.reportSpan(parserDiagnosticCode.mixedOtherwise, UNCLEAR_OTHERWISE, next.operatorSpan);
   }
 
   /**
-   * Reports the `otherwise` at `operator`, which needs parentheses, naming both `readings` with the code as written. Only
-   * a short expression is quoted, which also keeps a long chain from being written out for each error in it.
+   * Names both readings of the `otherwise` with the error at `index`, when that is the only error in `expression`, which
+   * nothing outside binds to (see `parseOr`): the fallback for the values next to it, and for all of each side of it.
+   * Each reading is one of all of `expression`, so it needs no more parentheses where it is pasted. Only a short
+   * expression is quoted, which also keeps a long chain from being written out.
    */
-  #reportUnclearOtherwise(
-    operator: SourceSpan,
-    span: SourceSpan,
-    readings: () => readonly { code: string; subject: string; fallback: string }[],
-  ): void {
-    let message = "It is unclear what 'otherwise' belongs to. Put parentheses around that part";
-    if (span.end.offset - span.start.offset <= 240) {
-      const choices = readings();
-      if (choices.every(({ code }) => code.length <= 60 && !code.includes("\n")))
-        message += `: ${choices
-          .map(
-            ({ code, subject, fallback }) =>
-              `'${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null`,
-          )
-          .join("; ")}`;
+  #nameOtherwiseReadings(expression: Expression, index: number): void {
+    const error = this.diagnostics[index]!;
+    if (
+      error.code !== parserDiagnosticCode.mixedOtherwise ||
+      expression.span.end.offset - expression.span.start.offset > 240
+    )
+      return;
+    // The chain of `otherwise` with the error's operator, an operand of the operators that bind more loosely.
+    const at = error.span.start.offset;
+    let chain = expression;
+    for (;;) {
+      if (chain.kind === "binaryExpression") {
+        if (chain.operator === "otherwise") break;
+        chain = at < chain.right.span.start.offset ? chain.left : chain.right;
+      } else if (chain.kind === "unaryExpression" && chain.operator === "not")
+        chain = chain.operand;
+      else if (chain.kind === "typeTestExpression") chain = chain.value;
+      else return;
     }
-    this.reportSpan(parserDiagnosticCode.mixedOtherwise, `${message}.`, operator);
+    // Its values in order. Arithmetic in the middle of it, as in `a otherwise b + 1 otherwise c`, would need more than
+    // these readings.
+    const values: Expression[] = [];
+    let found = false;
+    let link: Expression = chain;
+    for (; isOtherwise(link); link = link.left) {
+      found ||= link.operatorSpan.start.offset === at;
+      values.push(link.right);
+    }
+    values.push(link);
+    values.reverse();
+    if (!found || values.slice(1, -1).some(isArithmetic)) return;
+    const first = values[0]!;
+    const last = values.at(-1)!;
+    const beforeLast = values.at(-2)!;
+    // The values next to the chain's ends: the last one of its first value and the first one of its last value.
+    let near = first;
+    while (isArithmetic(near) || isSign(near))
+      near = isSign(near) ? near.operand : near.kind === "binaryExpression" ? near.right : near.end;
+    let nearFallback = last;
+    while (isArithmetic(nearFallback))
+      nearFallback =
+        nearFallback.kind === "binaryExpression" ? nearFallback.left : nearFallback.start;
+    // The source text of a part from one value to another starts with that of the first value and ends with that of the
+    // last one.
+    const text = (from: Expression, to: Expression = from) => this.textOf(from.span, to.span);
+    const whole = text(expression);
+    const start = text(expression, near).length - text(near).length;
+    const end = whole.length - (text(nearFallback, expression).length - text(nearFallback).length);
+    const subject = text(expression, first);
+    const fallback = text(last, expression);
+    const grouped = (part: string, alone: boolean) => (alone ? part : `(${part})`);
+    const left = grouped(
+      subject,
+      expression.span.start.offset === first.span.start.offset &&
+        !isArithmetic(first) &&
+        !isSign(first),
+    );
+    const right = grouped(
+      fallback,
+      expression.span.end.offset === last.span.end.offset && !isArithmetic(last),
+    );
+    const middle = text(first, last).slice(text(first).length, -text(last).length);
+    const readings = [
+      {
+        code: `${whole.slice(0, start)}(${whole.slice(start, end)})${whole.slice(end)}`,
+        subject: text(near, beforeLast),
+        fallback: text(nearFallback),
+      },
+      {
+        code: `${left}${middle}${right}`,
+        subject:
+          values.length === 2
+            ? subject
+            : `${left}${text(first, beforeLast).slice(text(first).length)}`,
+        fallback,
+      },
+    ];
+    if (!readings.every(({ code }) => code.length <= 60 && !code.includes("\n"))) return;
+    const named = readings.map(
+      ({ code, subject, fallback }) =>
+        ` '${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null.`,
+    );
+    this.diagnostics[index] = createDiagnostic(
+      DiagnosticSeverity.Error,
+      parserDiagnosticCode.mixedOtherwise,
+      `${UNCLEAR_OTHERWISE}${named.join("")}`,
+      error.span,
+    );
   }
 
   *#parseRange(): ParseTask<Expression | null> {

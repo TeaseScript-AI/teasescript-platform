@@ -512,7 +512,7 @@ exit`;
   assert.deepEqual(sayTexts(source("null", "null")), ["pet 123"]);
 });
 
-test("otherwise beside any other operator needs parentheses, and one error names both readings", () => {
+test("otherwise beside any other operator needs parentheses, and one error names both readings, each of which compiles", () => {
   const cases: [string, string, string, string, string][] = [];
   for (const operator of ["+", "-", "*", "/", "%"])
     cases.push(
@@ -604,11 +604,47 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses false when 'true or c' is null",
     ],
     [
+      "true and c otherwise false",
+      "true and (c otherwise false)",
+      "(true and c) otherwise false",
+      "uses false when 'c' is null",
+      "uses false when 'true and c' is null",
+    ],
+    [
       '"${a otherwise 3 != 2}"',
       "(a otherwise 3) != 2",
       "a otherwise (3 != 2)",
       "uses 3 when 'a' is null",
       "uses '3 != 2' when 'a' is null",
+    ],
+    // Inside a larger expression, each reading is one of all of it, so that it needs no more parentheses.
+    [
+      "a otherwise 0 == 0 and true",
+      "(a otherwise 0) == 0 and true",
+      "a otherwise (0 == 0 and true)",
+      "uses 0 when 'a' is null",
+      "uses '0 == 0 and true' when 'a' is null",
+    ],
+    [
+      "true or a otherwise 0 > 2",
+      "true or (a otherwise 0) > 2",
+      "(true or a) otherwise (0 > 2)",
+      "uses 0 when 'a' is null",
+      "uses '0 > 2' when 'true or a' is null",
+    ],
+    [
+      "not a otherwise 0 == 0",
+      "not (a otherwise 0) == 0",
+      "(not a) otherwise (0 == 0)",
+      "uses 0 when 'a' is null",
+      "uses '0 == 0' when 'not a' is null",
+    ],
+    [
+      "a otherwise b + 3 == 5",
+      "(a otherwise b) + 3 == 5",
+      "a otherwise (b + 3 == 5)",
+      "uses 'b' when 'a' is null",
+      "uses 'b + 3 == 5' when 'a' is null",
     ],
     // Both sides, a chain, and the issue's own example: the error quotes what was written.
     [
@@ -633,6 +669,13 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses '3 > 1' when 'a otherwise b' is null",
     ],
     [
+      "1 == a otherwise b otherwise 3",
+      "1 == (a otherwise b otherwise 3)",
+      "(1 == a) otherwise b otherwise 3",
+      "uses 3 when 'a otherwise b' is null",
+      "uses 3 when '(1 == a) otherwise b' is null",
+    ],
+    [
       'path.lastIndexOf("/") otherwise -1 + 1',
       '(path.lastIndexOf("/") otherwise -1) + 1',
       'path.lastIndexOf("/") otherwise (-1 + 1)',
@@ -640,27 +683,38 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses '-1 + 1' when 'path.lastIndexOf(\"/\")' is null",
     ],
   );
-  for (const [written, nearest, all, nearestMeaning, allMeaning] of cases)
+  const source = (said: string) =>
+    `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${said}\nexit`;
+  for (const [written, nearest, all, nearestMeaning, allMeaning] of cases) {
     assert.deepEqual(
-      diagnostics(
-        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
-      ),
+      diagnostics(source(written)),
       [
         [
           "error",
           "TSP041",
-          `It is unclear what 'otherwise' belongs to. Put parentheses around that part: '${nearest}' ${nearestMeaning}; '${all}' ${allMeaning}.`,
+          `It is unclear what 'otherwise' belongs to. Put parentheses around that part. '${nearest}' ${nearestMeaning}. '${all}' ${allMeaning}.`,
           "otherwise",
         ],
       ],
       written,
     );
-  // A reading too long to quote gets only the explanation and instruction.
+    // Pasted where it was written, a reading may still be of the wrong type, but it needs no more parentheses.
+    for (const reading of [nearest, all]) {
+      const pasted = written.startsWith('"') ? `"\${${reading}}"` : reading;
+      assert.deepEqual(
+        diagnostics(source(pasted)).filter(([, code]) => code.startsWith("TSP")),
+        [],
+        pasted,
+      );
+    }
+  }
+  // A reading too long to quote, or of an expression with another error, gets only the explanation and instruction.
   assert.deepEqual(
     diagnostics(
-      'let a: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\nexit',
+      'let a: string? = null\nlet b: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\n' +
+        'say a otherwise "x" == "y" and b otherwise "x" == "y"\nsay a otherwise b + "!" otherwise "x"\nexit',
     ).map((diagnostic) => diagnostic[2]),
-    ["It is unclear what 'otherwise' belongs to. Put parentheses around that part."],
+    Array(4).fill("It is unclear what 'otherwise' belongs to. Put parentheses around that part."),
   );
 });
 

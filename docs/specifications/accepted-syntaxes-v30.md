@@ -2756,10 +2756,11 @@ let answer = nickname otherwise askText "Name?"
   ([§5](#expression-precedence-and-associativity)). The operators are `+`, `-`, `*`, `/`, `%`, a sign before the left
   operand, as in `-x otherwise 0`, a range `..` or `..=`, the comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, a type test
   `is`, `not`, `and`, and `or`. A chain of `otherwise` needs none, because every grouping gives the same first value
-  that is not `null`. The compile error names both readings, with the code as written:
+  that is not `null`. When the expression is short and has no other error, the compile error names both readings of
+  all of it, with the code as written:
 
   ```text
-  It is unclear what 'otherwise' belongs to. Put parentheses around that part: '(count otherwise 0) + 1' uses 0 when 'count' is null; 'count otherwise (0 + 1)' uses '0 + 1' when 'count' is null.
+  It is unclear what 'otherwise' belongs to. Put parentheses around that part. '(count otherwise 0) + 1' uses 0 when 'count' is null. 'count otherwise (0 + 1)' uses '0 + 1' when 'count' is null.
   ```
 
 - A sign before the fallback can be read only one way, as in `path.lastIndexOf("/") otherwise -1`. A unit belongs to
