@@ -89,9 +89,12 @@ const CONSTANT = [
 const CHARGING = [
   ...core("type-inference/core/budget.ts", ["keptArray", "keptParts"]),
   ...core("type-inference/core/contract.ts", ["Contract.refReceiver"]),
+  // (a store's value demand, N5's leaf: what it reads is the value side's charged work)
+  ...core("type-inference/core/exact-path.ts", ["ExactPath.defVal"]),
   ...core("type-inference/core/definitions.ts", [
     "DefinitionLists.definitionsOf",
     "DefinitionLists.eventList",
+    "DefinitionLists.readSignature",
     "DefinitionLists.singleSite",
   ]),
   ...core("type-inference/core/items.ts", ["mergeItems"]),

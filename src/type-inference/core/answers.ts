@@ -44,7 +44,7 @@ import {
   type WrittenTypeError,
 } from "./result.js";
 import { Solver, type DemandWork, type Work } from "./solver.js";
-import { Values } from "./values.js";
+import { narrowingKey, Values } from "./values.js";
 import { writtenTypeErrors } from "./written.js";
 
 /*
@@ -319,7 +319,7 @@ export function solveDemands(
 
 /**
  * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
- * `vdn|`, as the parts write them).
+ * `vdn|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -367,6 +367,24 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       const node = parts[1] === "-" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
       return values.onlyNull(Number(parts[0]), node);
     }
+    case "vg": {
+      const node = parts[1] === "" ? null : (program.flow.nodes[Number(parts[1])] ?? null);
+      return values.valueItems(Number(parts[0]), node, []);
+    }
+    case "gv": {
+      const g = pass.guards.narrowing.all.find((each) => narrowingKey(each) === key);
+      if (g === undefined) throw new Error(`No narrowing is written '${key}'.`);
+      return values.narrowingValue(g);
+    }
+    // (the location last: a text key in it may hold the separator)
+    case "n5":
+      return pass.guards
+        .narrowings(pass)
+        .events.treeDemand(parts.slice(2).join("|"), Number(parts[0]), Number(parts[1]), null);
+    case "n5-loop":
+      return pass.guards
+        .narrowings(pass)
+        .events.treeDemand(parts.slice(1).join("|"), 0, 0, program.flow.nodes[Number(parts[0])]!);
     default:
       throw new Error(`No demand is written '${key}'.`);
   }

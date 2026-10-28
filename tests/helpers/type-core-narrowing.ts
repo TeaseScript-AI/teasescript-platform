@@ -10,12 +10,7 @@ import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
 import { GuardIndex } from "../../src/type-inference/core/guards.js";
 import { HandlerIndex } from "../../src/type-inference/core/handlers.js";
 import type { ContextWord, ItemTag } from "../../src/type-inference/core/items.js";
-import {
-  narrowedItems,
-  pathKey,
-  stablePath,
-  type Narrowing,
-} from "../../src/type-inference/core/narrowing.js";
+import { pathKey, stablePath, type Narrowing } from "../../src/type-inference/core/narrowing.js";
 import { CoreProgram, type CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { Solver, withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { Values } from "../../src/type-inference/core/values.js";
@@ -58,16 +53,12 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
   return pass;
 }
 
-/** G's filtered kinds: its input read at the test as the exact path or the contract answers it, filtered. */
+/** G's filtered kinds: its items as `Values` reads them (its input at the test, filtered), without emptiness. */
 function filteredKinds(pass: CorePass, g: Narrowing): readonly ItemTag[] {
-  return pass.solver.run(
-    (function* () {
-      const input = yield* pass.values.keyItems(g.key, g.input);
-      return narrowedItems(g.form, input, pass.program.scope)
-        .filter((item) => item.tag !== "empty")
-        .map((item) => item.tag);
-    })(),
-  );
+  return pass.solver
+    .run(pass.values.narrowingValue(g))
+    .filter((item) => item.tag !== "empty")
+    .map((item) => item.tag);
 }
 
 /** N2 at a read: its nearest narrowing, and `null` where that holds there, else the failing condition's word. */

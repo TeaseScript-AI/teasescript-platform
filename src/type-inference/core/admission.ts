@@ -4711,6 +4711,8 @@ export class Admission {
       // (the member's own copied binding's written type at its read, A4's decider, whatever its chain resolves to:
       // `let b: integer[] = raw` is no `let a = raw`, TABLE r4.72)
       this.#writtenDomainKey(alias),
+      // (what its read's narrowing makes of its answer, S10 part 2b)
+      this.pass.values.narrowingMark(alias.value),
     ].join("|");
   }
 

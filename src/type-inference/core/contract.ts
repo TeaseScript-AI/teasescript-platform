@@ -2035,7 +2035,8 @@ export class Contract {
       projection = program.projOf.get(root);
     }
     const node = program.occNode.get(root) ?? null;
-    const read = `${guards.guardedRead(value) ? "g" : ""}${copied}`;
+    // (a read that takes its narrowing joins its G's environment, S10 part 2b)
+    const read = `${guards.guardedRead(value) ? "g" : ""}${this.pass.values.narrowingMark(value)}${copied}`;
     const snapshot =
       node === null
         ? keptParts(this.#work, read, "-")
@@ -2113,6 +2114,8 @@ export class Contract {
       steps.reverse().join(" "),
       guards.guardedRead(value) ? "g" : "",
       guards.guardedBelowRead(value).join(" "),
+      // (on the value side, what its narrowing makes of its answer, S10 part 2b)
+      exact ? this.pass.values.narrowingMark(value) : "",
     ] as const;
     // (an alias of an alias read with no steps and no guard reads what that one reads: one class for the chain)
     const source = alias === null ? undefined : this.#readClasses[exact ? 1 : 0]!.get(alias.source);
