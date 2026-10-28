@@ -357,7 +357,14 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
     { message: "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'." },
   ],
   foreignForm("#", "//", "// a comment"),
-  foreignForm("`", '"', 'say "Hi ${name}"'),
+  [
+    "`",
+    {
+      message:
+        "TeaseScript writes text between double quotes instead of backticks, and a backslash before each double " +
+        'quote in the text: say "She said \\"Hi ${name}\\""',
+    },
+  ],
   foreignForm('f"Hi {name}"', '"Hi ${name}"', 'say "Hi ${name}"'),
   foreignForm("for (...)", "for ... in", "for i in 0..3 { ... }"),
   [
@@ -370,7 +377,7 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   [
     "range",
     {
-      message: `TeaseScript writes '0..5' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
+      message: `TeaseScript writes '(0..5)' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
       name: "call",
     },
   ],

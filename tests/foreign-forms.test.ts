@@ -77,8 +77,15 @@ test("each form of another language is one error that names the TeaseScript form
       ],
     ],
     [
-      'let name = "Ann"\nsay `Hi ${name}`\nexit',
-      [["TSP037", writes('"', "`", 'say "Hi ${name}"'), "`"]],
+      'let name = "Ann"\nsay `She said "Hi ${name}"`\nexit',
+      [
+        [
+          "TSP037",
+          "TeaseScript writes text between double quotes instead of backticks, and a backslash before each double " +
+            'quote in the text: say "She said \\"Hi ${name}\\""',
+          "`",
+        ],
+      ],
     ],
     [
       'let name = "Ann"\nsay f"Hi {name}"\nexit',
@@ -89,14 +96,14 @@ test("each form of another language is one error that names the TeaseScript form
       [
         [
           "TSP037",
-          `TeaseScript writes '0..5' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
+          `TeaseScript writes '(0..5)' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
           "range",
         ],
       ],
     ],
-    // The indented lines are the block, also of an `else` and a function.
+    // The lines indented deeper than the head are the block, also of an `else` and a function.
     [
-      'let a = 1\nif a == 1:\n    say "one"\nelse:\n    say "other"\nsay "after"\nexit',
+      'let a = 1\nif (a == 1 or\n    a == 2):\n    say "one"\nelse:\n    say "other"\nsay "after"\nexit',
       [
         ["TSP037", COLON, ":"],
         ["TSP037", COLON, ":"],
@@ -125,6 +132,22 @@ test("each form of another language is one error that names the TeaseScript form
     ],
   ];
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
+});
+
+test("the TeaseScript form that such an error names compiles where it is pasted", () => {
+  const cases: [string, string][] = [
+    ['let a = 1\nif a ~= 2 { say "x" }\nexit', "~="],
+    ['let a = 1 # one\nsay "${a}"\nexit', "#"],
+    ['let name = "Ann"\nsay f"Hi {name}"\nexit', 'f"Hi {name}"'],
+    // Also before a method call.
+    ['let items = range(5).toList()\nsay "${items.length}"\nexit', "range(5)"],
+    ['console.error("x")\nexit', "console.error"],
+  ];
+  for (const [source, written] of cases) {
+    const [error] = compileSource(source).diagnostics;
+    const teaseScript = /^TeaseScript writes '(.+?)' instead of /u.exec(error!.message)![1]!;
+    assert.deepEqual(diagnostics(source.replace(written, teaseScript)), [], source);
+  }
 });
 
 test("a script that uses such a word as a name, or such a symbol in text, compiles as before", () => {
