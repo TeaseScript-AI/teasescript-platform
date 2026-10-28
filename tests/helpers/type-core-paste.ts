@@ -431,10 +431,10 @@ export function pastedForms(
 ): { readonly diagnosed: boolean; readonly forms: readonly Pasted[] } {
   const request = coreRequest([{ path: "main.tease", source }]);
   if (request === null) return { diagnosed: false, forms: [] };
-  const text = messageSource([source]);
   const forms: Pasted[] = [];
   let diagnosed = false;
   const { diagnostics } = analyseCore(request);
+  const text = messageSource([source], diagnostics);
   // (a warning's fallback is pasted into a program that otherwise compiles: beside an error it fixes nothing of that
   // error, whose own fix is pasted on its own)
   const erring = diagnostics.some((diagnostic) => diagnostic.class === "compile-error");
@@ -501,13 +501,9 @@ export function pasteFailure(source: string): string | null {
   if (errors.length > 0)
     return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");
   const request = coreRequest([{ path: "main.tease", source }]);
-  const text = messageSource([source]);
-  const core =
-    request === null
-      ? []
-      : analyseCore(request).diagnostics.filter(
-          (diagnostic) => diagnostic.class === "compile-error",
-        );
+  const all = request === null ? [] : analyseCore(request).diagnostics;
+  const text = messageSource([source], all);
+  const core = all.filter((diagnostic) => diagnostic.class === "compile-error");
   if (core.length > 0)
     return core
       .map((diagnostic) => `core ${diagnostic.code}: ${coreMessage(diagnostic, text)}`)

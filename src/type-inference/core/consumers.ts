@@ -199,6 +199,8 @@ const PRESENT_KINDS: ReadonlySet<Expression["kind"]> = new Set<Expression["kind"
 
 /** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
+/** The kinds `${...}` shows on its own, and `join()` shows of each element (V30 §16). */
+const SHOWN_ALONE: ReadonlySet<ItemTag> = new Set(SHOWN);
 
 /** The order an operand's domain lists the kinds of the operator table's rows in (F16), as the rows name them. */
 const DOMAIN_ORDER: readonly ValueKind[] = [
@@ -2386,6 +2388,8 @@ export class Consumers {
       provenance: provenanceOf(item, this.#detail(item, site, rule, receiver, read)),
       obligation,
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
+      // (the published answers give it, from the site's other diagnostics, `withBesides`)
+      besides: [],
     };
     if (this.#finishing && leftOutWarning(diagnostic)) return false;
     (this.#finishing ? this.deferred : this.diagnostics).push(diagnostic);
@@ -2655,34 +2659,19 @@ export class Consumers {
   }
 
   /**
-   * A store's root as a fix declares it (ADR 0021 rule 1.1): a variable by its `let` or `global`, a parameter with its
-   * default as written where it is a number or `true`/`false`, a function's result; `null` for any other place.
+   * A store's root as a fix declares it (ADR 0021 rule 1.1): a variable by its `let` or `global`, a parameter, a
+   * function's result; `null` for any other place.
    */
   #storeRoot(root: PlaceId): StoreRoot | null {
     const { program } = this.pass;
-    const kind = program.place(root).kind;
+    const { kind, site } = program.place(root);
     if (kind.kind === "binding")
       return kind.declared === "let" || kind.declared === "global"
-        ? { kind: kind.declared, name: kind.name, start: null }
+        ? { kind: kind.declared, name: kind.name, site }
         : null;
     if (kind.kind === "result")
-      return { kind: "result", name: program.functionOf(kind.fn).name, start: null };
-    if (kind.kind !== "parameter") return null;
-    const declared = program.functionRegion(kind.fn)?.declaration.parameters[kind.index];
-    let start: Expression | null = declared?.defaultValue ?? null;
-    while (start?.kind === "parenthesizedExpression") start = start.expression;
-    return {
-      kind: "parameter",
-      name: kind.name,
-      start:
-        start === null
-          ? null
-          : start.kind === "numberLiteral"
-            ? start.raw
-            : start.kind === "booleanLiteral"
-              ? String(start.value)
-              : "...",
-    };
+      return { kind: "result", name: program.functionOf(kind.fn).name, site: null };
+    return kind.kind === "parameter" ? { kind: "parameter", name: kind.name, site } : null;
   }
 
   /**
@@ -4121,13 +4110,20 @@ export class Consumers {
       const property = kinds.some((item) => item.tag === "object")
         ? this.#shownProperty(value)
         : null;
+      // (a set's elements and a dict's values, which a fix may join only where `${...}` shows each, #1268)
+      const joinable =
+        kinds.some((item) => item.tag === "set" || item.tag === "dict") &&
+        [
+          ...this.#run(this.pass.values.valueItems(value, node, ["element"])),
+          ...this.#run(this.pass.values.valueItems(value, node, ["entry"])),
+        ].every((item) => item.tag === "empty" || SHOWN_ALONE.has(item.tag));
       this.#consume(
         value,
         node,
         c.site,
         new Set([...SHOWN, "list"]),
         "${...}",
-        { rule: "shown", element: false, property },
+        { rule: "shown", element: false, property, joinable },
         [...SHOWN, "list"],
       );
       if (kinds.some((item) => item.tag === "list")) {
@@ -4137,7 +4133,7 @@ export class Consumers {
           c.site,
           new Set(SHOWN),
           "an element in ${...}",
-          { rule: "shown", element: true, property: null },
+          { rule: "shown", element: true, property: null, joinable: false },
           SHOWN,
           "operator",
           "operand",

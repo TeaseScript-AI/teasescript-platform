@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { BinaryExpression } from "../src/ast.js";
 import { compileProject } from "../src/compiler.js";
 import { createFreshRuntimeSession } from "../src/index.js";
+import { parse } from "../src/parser.js";
+import { someNode } from "../src/project-globals.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
@@ -28,12 +31,24 @@ type Compared = Exclude<CoreDiagnostic, { readonly kind: "budget" }>;
  * checker is removed (#1076), this compares with its messages captured before.
  */
 
-/** What the new checker's diagnostic names: its subject as the source writes it, a member, an operation's operands. */
+/**
+ * What the new checker's diagnostic names: its subject as the source writes it, a member, an operation's operands, the
+ * statement a check would hold, and the declaration a fix rewrites.
+ */
 interface Named {
   readonly subject: string;
   /** A member as its code writes it: `.length`, `.get(...)`; empty for any other rule. */
   readonly member: string;
   readonly operands: readonly string[];
+  /** The text of the use's statement a check may hold (`MessageSource.statement`), or `null`. */
+  readonly statement: string | null;
+  /** The text of the declaration of the place a store's or a literal's fix declares, or `null`. */
+  readonly declared: string | null;
+  /**
+   * Whether the fix's code is taken as proved where it stands (TABLE r4.162): so in a pair, and not in the words that an
+   * unproved fact gives (`INTENDED`, `unproved`).
+   */
+  readonly proved: boolean;
 }
 
 /** A fix sentence of the current checker, and the sentence the new checker writes for it (#1195 rule 1). */
@@ -82,6 +97,69 @@ const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text
 /** A fallback in words (TABLE r4.162): after 'otherwise', also one that does not divide by zero. */
 const FALLBACK_WORDS = " after 'otherwise'(?: that does not lead to a division by zero)?\\.";
 
+/** A fallback the current checker writes as `...`, in words (#1268: no code that does not compile). */
+const SAME_TYPE = "or give a fallback of the same type with 'otherwise'.";
+
+/** A written type in words, as a sentence names a value of it: `integer | string` as `a whole number (integer) or …`. */
+const typeWords = (type: string): string => {
+  const names = type.endsWith("?") ? [type.slice(0, -1), "null"] : type.split(" | ");
+  // (a whole number among numbers is one of them, V30 §2)
+  const words = names
+    .filter((name) => name !== "integer" || !names.includes("number"))
+    .map((name) => Object.entries(VALUE_KINDS).find(([kind]) => kind === name)![1].description);
+  return words.length < 3
+    ? words.join(" or ")
+    : `${words.slice(0, -1).join(", ")}, or ${words.at(-1)!}`;
+};
+
+/**
+ * The check of a subject (ADR 0021 rules 1.9 and 3.5): of a variable directly, of any other value kept in a new variable
+ * first, its `let` shown where its own text may stand in code; around the use's statement where it is code on one line
+ * and reads a kept value once, else the test in words (#1268, TABLE r4.146). Without the closing period.
+ */
+const checkForm = (subject: string, test: string, statement: string | null): string => {
+  const words = test === "!= null" ? "is not null" : `is ${typeWords(test.slice("is ".length))}`;
+  const held = statement !== null && ownText(statement) ? statement : null;
+  if (/^[A-Za-z_]\w*$/.test(subject))
+    return held === null
+      ? `Check that '${subject}' ${words} first`
+      : `Check '${subject}' first, as in 'if ${subject} ${test} { ${held} }'`;
+  // (the kept value's `let` only with the check that holds the statement: it moves the read)
+  const kept =
+    held !== null && ownText(subject) && held.split(subject).length === 2
+      ? held.replace(subject, "value")
+      : null;
+  return kept === null
+    ? `Keep '${subject}' in a new variable and check that it ${words} first`
+    : `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in ` +
+        `'if value ${test} { ${kept} }'`;
+};
+
+/**
+ * A fallback's alternative: its code where `codeAt` holds, else after 'otherwise' in words (where the value may divide or
+ * reads what may be absent); where unproved also of the same type in words (TABLE r4.162).
+ */
+const fallbackForm = (fallback: string, proved: boolean): RegExp =>
+  code(
+    proved
+      ? `or give a fallback(?:, as in '${fallback}'\\.|${FALLBACK_WORDS})`
+      : `(?:or give a fallback(?:, as in '${fallback}'\\.|${FALLBACK_WORDS})|${escaped(SAME_TYPE)})`,
+  );
+
+/**
+ * A declaration as the new checker writes it (#1268, TABLE r4.146), from the current checker's `let n: T = ...` or
+ * `n: T`: the source's own declaration with that type, its start value from its `=`, where it is code on one line;
+ * else the type in words. `subject`: the place as the sentence names it.
+ */
+const declarationForm = (fix: string, declared: string | null, subject: string): string => {
+  const [, head = "", type = ""] =
+    /^((?:let |global )?[A-Za-z_]\w*): (.+?)(?: = .*)?$/.exec(fix) ?? [];
+  if (declared === null || !ownText(declared))
+    return `declare ${subject === "the parameter" ? `the parameter '${head}'` : subject} with the type '${type}'`;
+  const start = declared.indexOf("=");
+  return `declare ${subject} as '${head}: ${type}${start === -1 ? "" : ` ${declared.slice(start)}`}'`;
+};
+
 const PORTS: readonly Port[] = [
   // ADR 0021 rules 1.9 and 3.5: the check, of a variable, or of the subject kept in a variable first, its `let` shown
   // where its own text may stand in code (the owner's review)
@@ -89,71 +167,61 @@ const PORTS: readonly Port[] = [
   // absent, TABLE r4.162)
   {
     from: /^Check it first: if (\S+) != null \{ \.\.\. \}, or give a fallback: \1 otherwise (.+)$/,
-    to: ([, name, value]) =>
-      form(
-        `Check '${name}' first, as in 'if ${name} != null { ... }', or give a fallback`,
-        oneOf(
-          form(", as in '", code(grouped(`${name} otherwise ${value}`)), "'."),
-          code(FALLBACK_WORDS),
-        ),
-      ),
-  },
-  {
-    from: /^Check it first: if (\S+) (!= null|is .+) \{ \.\.\. \}$/,
-    to: ([, name, test]) => exact(`Check '${name}' first, as in 'if ${name} ${test} { ... }'.`),
-  },
-  {
-    from: /^Keep it in a variable and check it first, as in: if value != null \{ \.\.\. \}, or give a fallback: value otherwise (.+)$/,
-    to: ([, value], { subject }) =>
-      ownText(subject)
-        ? form(
-            `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
-              "{ ... }', or give a fallback",
-            oneOf(
-              form(
-                ", as in '",
-                code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
-                "'.",
-              ),
-              code(FALLBACK_WORDS),
-            ),
-          )
-        : exact(
-            `Keep '${subject}' in a new variable and check the variable first, as in 'if value != null { ... }'.`,
+    to: ([, name, value], { statement, proved }) =>
+      value === "..."
+        ? exact(`${checkForm(name!, "!= null", statement)}, ${SAME_TYPE}`)
+        : form(
+            `${checkForm(name!, "!= null", statement)}, `,
+            fallbackForm(grouped(`${name} otherwise ${value}`), proved),
           ),
   },
   {
+    from: /^Check it first: if (\S+) (!= null|is .+) \{ \.\.\. \}$/,
+    to: ([, name, test], { statement }) => exact(`${checkForm(name!, test!, statement)}.`),
+  },
+  {
+    from: /^Keep it in a variable and check it first, as in: if value != null \{ \.\.\. \}, or give a fallback: value otherwise (.+)$/,
+    to: ([, value], { subject, statement, proved }) =>
+      ownText(subject) && value === "..."
+        ? exact(`${checkForm(subject, "!= null", statement)}, ${SAME_TYPE}`)
+        : ownText(subject)
+          ? form(
+              `${checkForm(subject, "!= null", statement)}, `,
+              fallbackForm(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`, proved),
+            )
+          : exact(`${checkForm(subject, "!= null", statement)}.`),
+  },
+  {
     from: /^Keep it in a variable and check it first, as in: if value (!= null|is .+) \{ \.\.\. \}$/,
-    to: ([, test], { subject }) =>
-      exact(
-        ownText(subject)
-          ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value ${test} ` +
-              "{ ... }'."
-          : `Keep '${subject}' in a new variable and check the variable first, as in 'if value ${test} { ... }'.`,
-      ),
+    to: ([, test], { subject, statement }) => exact(`${checkForm(subject, test!, statement)}.`),
   },
   // #1195's decided texts; a condition's advice always, its example only of a stable path (Astra r3)
   {
     from: /^Compare it instead, such as '(.+)'\.$/,
-    to: ([, fix], { subject }) =>
-      exact(stablePath(subject) ? `Compare it instead, as in '${fix}'.` : "Compare it instead."),
+    to: ([, fix], { subject, proved }) =>
+      exact(
+        proved && stablePath(subject)
+          ? `Compare it instead, as in '${fix}'.`
+          : "Compare it instead.",
+      ),
   },
   {
     from: /^Check its length instead, such as '(.+)'\.$/,
-    to: ([, fix], { subject }) =>
+    to: ([, fix], { subject, proved }) =>
       exact(
-        stablePath(subject)
+        proved && stablePath(subject)
           ? `Check its length instead, as in '${fix}'.`
           : "Check its length instead.",
       ),
   },
   {
     from: /^Show one of its properties instead\.$/,
-    to: (_, { subject }) =>
-      stablePath(subject)
+    // (the value in place wherever its own text may stand in code, #1268)
+    to: (_, { subject, proved }) =>
+      proved && ownText(subject)
         ? form(
             "Show one of its properties instead, as in '${",
-            subject,
+            code(grouped(subject)),
             code("\\.[A-Za-z_]\\w*"),
             "}'.",
           )
@@ -161,18 +229,16 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Show its elements with 'toList\(\)\.join\(\)' instead\.$/,
-    to: (_, { subject }) =>
-      exact(
-        stablePath(subject)
-          ? `Show all its elements with '\${${subject}.toList().join()}'.`
-          : "Show its elements with 'toList().join()' instead.",
-      ),
+    to: (_, { subject, proved }) =>
+      proved && ownText(subject)
+        ? form("Show all its elements with '${", code(grouped(subject)), ".toList().join()}'.")
+        : exact("Show its elements with the toList and join methods instead."),
   },
   // (the operand that is not text, as the source writes it, never the chain rebuilt: the owner's review)
   {
     from: /^Put the value in the text instead, as in "(.+)"\.$/,
-    to: (_, { operands }) =>
-      operands.some(ownText)
+    to: (_, { operands, proved }) =>
+      proved && operands.some(ownText)
         ? form(
             "Put the value in the text as '${",
             code(`(?:${operands.filter(ownText).map(escaped).join("|")})`),
@@ -183,27 +249,38 @@ const PORTS: readonly Port[] = [
   // the current checker's fixes, code in single quotes, the value named where it is a variable or a path
   {
     from: /^Select one value with '(.+)', or show every value with '(.+)'\.$/,
-    to: ([text], { subject }) =>
-      exact(
-        stablePath(subject)
-          ? text
-          : "Select one value with a key, or show every value with 'values.join()'.",
-      ),
+    // (no key the script does not name; every value in place, #1268)
+    to: (_, { subject, proved }) =>
+      proved && ownText(subject)
+        ? form(
+            "Select one value with a key, or show every value with '${",
+            code(grouped(subject)),
+            ".values.join()}'.",
+          )
+        : exact(
+            "Select one value with a key, or show every value with the values and join methods.",
+          ),
   },
   {
     from: /^To allow (both|null), declare (it|the parameter) as '(.+)'\.$/,
     // (a default's or fallback's place named, ADR 0021 rule 7.3)
-    to: ([, allow, it, fix]) =>
-      form(code(`[Tt]o allow ${allow}, declare (?:${it}|'[^']*') as '`), fix!, "'."),
+    to: ([, allow, it, fix], { declared }) => {
+      // (the place as the sentence names it: `it`, the parameter, or a fallback's place by its name)
+      const name = /[A-Za-z_]\w*(?=:)/.exec(fix!)?.[0] ?? "";
+      const subjects = [it!, `'${name}'`].map((subject) =>
+        escaped(declarationForm(fix!, declared, subject)),
+      );
+      return form(code(`[Tt]o allow ${allow}, (?:${subjects.join("|")})`), ".");
+    },
   },
   {
     from: /^To keep both, declare a union type, as in '(.+)'\.$/,
     // (TSV044: on the literal's variable, else the type alone, the owner's review)
-    to: ([, fix]) =>
+    to: ([, fix], { declared }) =>
       exact(
         fix!.startsWith("let values: ")
           ? `To allow both, declare it as '${fix!.slice("let values: ".length, -" = ...".length)}'.`
-          : `To allow both, declare it as '${fix}'.`,
+          : `To allow both, ${declarationForm(fix!, declared, "it")}.`,
       ),
   },
   {
@@ -215,11 +292,12 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^To show it as text, write "(.+)"\.$/,
-    to: (_, { subject }) =>
+    // (the value in place wherever its own text may stand in code, #1268)
+    to: (_, { subject, proved }) =>
       exact(
-        stablePath(subject)
-          ? `To show it as text, write '"\${${subject}}"'.`
-          : "To show it as text, put it in a text with '${...}'.",
+        proved && ownText(subject)
+          ? `To show '${subject}' as text, write '"\${${subject}}"'.`
+          : "To show the value as text, put it in a text.",
       ),
   },
   { from: /^Use a separate property for a value of another type\.$/, to: ([text]) => exact(text) },
@@ -227,58 +305,80 @@ const PORTS: readonly Port[] = [
   { from: /^Did you mean '(.+)'\?$/, to: ([text]) => exact(text) },
   {
     from: /^Write a number key as text, as in "(.+)"\.$/,
-    to: (_, { subject }) =>
+    to: (_, { subject, proved }) =>
       exact(
-        stablePath(subject)
+        proved && stablePath(subject)
           ? `Write a number key as text, as in '"\${${subject}}"'.`
           : "Write a number key as text.",
       ),
   },
   {
     from: /^Check '(.+)\.length' first\.$/,
-    to: (_, { subject }) =>
-      exact(
+    // (around the read's statement where it is code on one line, and reads a kept value once, #1268)
+    to: (_, { subject, statement }) => {
+      const held = statement !== null && ownText(statement) ? statement : null;
+      const kept =
+        held !== null && held.split(subject).length === 2 ? held.replace(subject, "value") : null;
+      return exact(
         stablePath(subject)
-          ? `Check '${subject}.length' first, as in 'if ${subject}.length > 0 { ... }'.`
-          : ownText(subject)
-            ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check its length, as in ` +
-              "'if value.length > 0 { ... }'."
+          ? held === null
+            ? `Check the length of '${subject}' first.`
+            : `Check '${subject}.length' first, as in 'if ${subject}.length > 0 { ${held} }'.`
+          : ownText(subject) && kept !== null
+            ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check its length, as ` +
+              `in 'if value.length > 0 { ${kept} }'.`
             : `Keep '${subject}' in a new variable and check its length first.`,
-      ),
+      );
+    },
   },
   { from: /^Give '(.+)' one type in every element\.$/, to: ([text]) => exact(text) },
   // members of a type without them
   {
     from: /^Convert it to text first with toString\(\.\.\.\)\.$/,
-    to: (_, { subject, member }) =>
+    // (a property read of a stable path whole; else the receiver's conversion in its place, #1268)
+    to: (_, { subject, member, proved }) =>
       exact(
-        stablePath(subject)
+        proved && stablePath(subject) && !member.endsWith("(...)")
           ? `Convert '${subject}' to text first, as in 'toString(${subject})${member}'.`
-          : `Convert '${subject}' to text first with 'toString(...)'.`,
+          : proved && ownText(subject)
+            ? `Convert '${subject}' to text first with 'toString(${subject})'.`
+            : "Convert the value to text first with the toString function.",
       ),
   },
   {
     from: /^Divide it by a unit, as in '.+ \/ 1 (\w+)'\.$/,
-    to: ([, unit], { subject }) =>
-      exact(
-        stablePath(subject)
-          ? `Divide '${subject}' by a unit, as in '${subject} / 1 ${unit}'.`
-          : `Divide '${subject}' by a unit, such as '1 ${unit}'.`,
-      ),
+    to: ([, unit], { subject, proved }) =>
+      proved && stablePath(subject)
+        ? // (in parentheses where it stands for the member, #1268)
+          form(
+            `Divide '${subject}' by a unit, as in '`,
+            code(grouped(`${subject} / 1 ${unit}`)),
+            "'.",
+          )
+        : exact(
+            proved
+              ? `Divide '${subject}' by a unit, such as '1 ${unit}'.`
+              : "Divide the duration by a unit of time instead.",
+          ),
   },
-  { from: /^Use 'contains\(\.\.\.\)' instead\.$/, to: ([text]) => exact(text) },
+  {
+    from: /^Use 'contains\(\.\.\.\)' instead\.$/,
+    to: () => exact("Use the contains method instead."),
+  },
   {
     from: /^Use length, first, last, or random\.$/,
-    to: () => exact("Use 'length', 'first', 'last', or 'random'."),
+    // (in words: each has its own type, which the read's use may not take, Codex r4)
+    to: () => exact("Use one of its properties instead: length, first, last, or random."),
   },
   {
     from: /^Assign a new text to the variable instead\.$/,
     to: (_, { subject }) => exact(`Assign a new text to '${subject}' instead.`),
   },
-  // a speaker's property: the receiver as the source writes it (S9b's speaker flow names the speaker, below)
+  // a speaker's property: the receiver as the source writes it (S9b's speaker flow names the speaker, below), without a
+  // value to write (#1268)
   {
-    from: /^Assign it before this line, as in '(.+)'\.$/,
-    to: ([, fix]) => exact(`Assign the property before this line, as in '${fix}'.`),
+    from: /^Assign it before this line, as in '(.+) = \.\.\.'\.$/,
+    to: ([, property]) => exact(`Assign '${property}' before this line.`),
   },
   {
     from: /^Copy the player profile before this line, as in '(.+)' at the start of the script, or assign '(.+)' first\.$/,
@@ -286,44 +386,42 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Use one of its properties instead, such as '(.+)'\.$/,
-    to: (_, { subject }) =>
-      exact(
-        `Use one of its properties instead, such as '${stablePath(subject) ? `${subject}.` : ""}title'.`,
-      ),
+    // (no property named: a speaker has those its script gives it, Codex r4)
+    to: () => exact("Use one of its properties instead."),
   },
   // date and time operators and fields: an example where the value it converts is a variable or a path, the other
   // operand one or a quantity, else the sentence alone
   {
     from: /^Convert it first, as in '(.+)', or use calendar units to keep the clock time\.$/,
-    to: (_, { operands: [left = "", right = ""] }) =>
-      stablePath(left) && (stablePath(right) || quantity(right))
+    to: (_, { operands: [left = "", right = ""], proved }) =>
+      proved && stablePath(left) && (stablePath(right) || quantity(right))
         ? form(
             `Convert it first, as in '(${left}.toAbsoluteDateTime() `,
             code("[-+]"),
             ` ${right}).toDateTime()', or use calendar units to keep the clock time.`,
           )
         : exact(
-            "Convert it with 'toAbsoluteDateTime()' first, or use calendar units to keep the clock time.",
+            "Convert it with the toAbsoluteDateTime method first, or use calendar units to keep the clock time.",
           ),
   },
   {
     from: /^Convert it first, as in '\(.+\)\.toAbsoluteDateTime\(\)'\.$/,
-    to: (_, { operands: [left = "", right = ""] }) =>
-      stablePath(left) && (stablePath(right) || quantity(right))
+    to: (_, { operands: [left = "", right = ""], proved }) =>
+      proved && stablePath(left) && (stablePath(right) || quantity(right))
         ? form(
             `Convert it first, as in '(${left}.toDateTime() `,
             code("[-+]"),
             ` ${right}).toAbsoluteDateTime()'.`,
           )
-        : exact("Convert it with 'toDateTime()' first."),
+        : exact("Convert it with the toDateTime method first."),
   },
   {
     from: /^Convert it first, as in '.+\.toDateTime\(\)\.(\w+)'\.$/,
-    to: ([, field], { subject }) =>
+    to: ([, field], { subject, proved }) =>
       exact(
-        stablePath(subject)
+        proved && stablePath(subject)
           ? `Convert '${subject}' first, as in '${subject}.toDateTime().${field}'.`
-          : `Convert '${subject}' with 'toDateTime()' first.`,
+          : `Convert '${subject}' with the toDateTime method first.`,
       ),
   },
   { from: /^Write '(.+)'\.$/, to: ([text]) => exact(text) },
@@ -333,23 +431,23 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Compare its date, as in 'toDate\((.+)\)'\.$/,
-    to: (_, { operands: [, right = ""] }) =>
+    to: (_, { operands: [, right = ""], proved }) =>
       exact(
-        stablePath(right)
+        proved && stablePath(right)
           ? `Compare its date, as in 'toDate(${right})'.`
-          : "Compare its date, with 'toDate(...)'.",
+          : "Compare its date with the toDate function.",
       ),
   },
   {
     from: /^Combine it with a date first, as in '(.+)'\.$/,
-    to: () => exact("Combine it with a date first, with 'toDateTime(...)'."),
+    to: () => exact("Combine it with a date first, with the toDateTime function."),
   },
   {
     from: /^Subtract their dates with '(.+)', or convert both with toAbsoluteDateTime\(\) for the elapsed time\.$/,
-    to: (_, { operands: [left = "", right = ""] }) =>
+    to: (_, { operands: [left = "", right = ""], proved }) =>
       exact(
-        `Subtract their dates with ${stablePath(left) && stablePath(right) ? `'toDate(${left}) - toDate(${right})'` : "'toDate(...)'"}, ` +
-          "or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
+        `Subtract their dates with ${proved && stablePath(left) && stablePath(right) ? `'toDate(${left}) - toDate(${right})'` : "the toDate function"}, ` +
+          "or convert both with the toAbsoluteDateTime method for the elapsed time.",
       ),
   },
   // ADR 0021 rule 2.2's rounding, as the count's sentence words it (S8c's, #1173)
@@ -534,15 +632,35 @@ function fixes(message: string): string[] {
 /** What a diagnostic names, in the source's own text. */
 function namedBy(diagnostic: Compared, source: MessageSource): Named {
   if (diagnostic.kind === "written-type")
-    return { subject: source.text(diagnostic.site), member: "", operands: [] };
+    return {
+      subject: source.text(diagnostic.site),
+      member: "",
+      operands: [],
+      statement: null,
+      declared: null,
+      proved: true,
+    };
   const { rule } = diagnostic;
+  const subject =
+    rule.rule === "member"
+      ? rule.receiver
+      : rule.rule === "selection"
+        ? rule.collection
+        : source.text(diagnostic.site);
+  // (the subject the use reads: its first text inside the use's own)
+  const read = source.text(diagnostic.site).indexOf(subject);
+  const statement =
+    read === -1
+      ? null
+      : source.statement(diagnostic.site, {
+          file: diagnostic.site.file,
+          start: diagnostic.site.start + read,
+          end: diagnostic.site.start + read + subject.length,
+        });
+  const root =
+    rule.rule === "store" || rule.rule === "fallback" || rule.rule === "mixed" ? rule.root : null;
   return {
-    subject:
-      rule.rule === "member"
-        ? rule.receiver
-        : rule.rule === "selection"
-          ? rule.collection
-          : source.text(diagnostic.site),
+    subject,
     member:
       rule.rule !== "member"
         ? ""
@@ -550,6 +668,9 @@ function namedBy(diagnostic: Compared, source: MessageSource): Named {
           ? `${rule.member.slice(0, -2)}(...)`
           : rule.member,
     operands: rule.rule === "operator" ? rule.operands.map((site) => source.text(site)) : [],
+    statement: statement === null ? null : source.text(statement),
+    declared: root === null || root.site === null ? null : source.text(root.site),
+    proved: true,
   };
 }
 
@@ -606,9 +727,13 @@ function pairs(
     const files = [...record.files].sort((a, b) => compareProjectPaths(a.path, b.path));
     const request = coreRequest(files);
     if (request === null) continue;
-    const source = messageSource(files.map((file) => file.source));
+    const answers = analyseCore(request);
+    const source = messageSource(
+      files.map((file) => file.source),
+      answers.diagnostics,
+    );
     const core = new Map<string, { diagnostic: Compared; message: string; named: Named }[]>();
-    for (const diagnostic of reportedDiagnostics(analyseCore(request))) {
+    for (const diagnostic of reportedDiagnostics(answers)) {
       if (diagnostic.kind === "budget") continue;
       const key = `${files[diagnostic.site.file]!.path}:${source.line(diagnostic.site)}:${diagnostic.code}`;
       const list = core.get(key) ?? [];
@@ -651,18 +776,29 @@ const allPairs = (): Pair[] => (made ??= pairs());
 
 const ROUND = "Round the number with the floor, round or ceil function first.";
 
-/**
- * The type test of a subject (ADR 0021 rule 3.5): of a variable directly, of any other value kept in one first, its
- * `let` shown where its own text may stand in code.
- */
-const typeTest = (subject: string, type: string): RegExp =>
-  exact(
-    /^[A-Za-z_]\w*$/.test(subject)
-      ? `Check '${subject}' first, as in 'if ${subject} is ${type} { ... }'.`
-      : ownText(subject)
-        ? `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value is ${type} { ... }'.`
-        : `Keep '${subject}' in a new variable and check the variable first, as in 'if value is ${type} { ... }'.`,
+/** The type test of a subject (ADR 0021 rule 3.5), as `checkForm` writes it: in code, or in words (TABLE r4.162). */
+const typeTest = ({ subject, statement }: Named, type: string): RegExp =>
+  code(
+    `(?:${escaped(`${checkForm(subject, `is ${type}`, statement)}.`)}|` +
+      `${escaped(`${checkForm(subject, `is ${type}`, null)}.`)})`,
   );
+
+/**
+ * Each fix of a pair as the new checker words it where its code is not proved (TABLE r4.162): its port's form with no
+ * statement a check holds, no declaration and no proof; `null` where no port takes it.
+ */
+const unproved = (pair: Pair): (RegExp | null)[] =>
+  pair.forms.map(({ fix }) => {
+    const port = PORTS.find((found) => found.from.test(fix));
+    return port === undefined
+      ? null
+      : port.to(port.from.exec(fix)!, {
+          ...pair.named,
+          statement: null,
+          declared: null,
+          proved: false,
+        });
+  });
 
 /**
  * Pairs whose fixes differ on purpose: the rule that makes them differ, which pairs, the exact fix the new checker gives
@@ -711,6 +847,23 @@ const UNION_RULE_FIXES: ReadonlyMap<string, string> = new Map([
 const INTENDED: readonly Intended[] = [
   {
     rule:
+      "TABLE r4.162: the new checker's code stands only where it is proved where it is pasted (no other diagnostic in " +
+      "the author's text it holds, a check that holds at its use), else its words: under-offers, a note (N)",
+    matches: (pair) => {
+      const words = unproved(pair);
+      return pair.forms.every(
+        ({ form }, index) =>
+          form?.test(pair.message) === true || words[index]?.test(pair.message) === true,
+      );
+    },
+    // (the fix in words where its code is not)
+    replacement: (pair) =>
+      unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
+      /(?!)/,
+    count: 16,
+  },
+  {
+    rule:
       "§13 N2 (#1073, S10 part 2b): the null check the current checker asks for is written and holds at a read in a " +
       "stored value, so the new checker asks for none; its warning there is the external value's own property, which " +
       "only the run decides",
@@ -734,7 +887,7 @@ const INTENDED: readonly Intended[] = [
         : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("number")
           ? exact(ROUND)
           : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("unknown")
-            ? typeTest(named.subject, "integer")
+            ? typeTest(named, "integer")
             : exact("Use a whole number here."),
     // (four fewer since S10 part 2b: those records' stored values take `is integer`'s narrowing, a whole number)
     count: 173,
@@ -748,7 +901,7 @@ const INTENDED: readonly Intended[] = [
       UNION_TESTS.has(record) &&
       diagnostic.class === "warning-runtime-check" &&
       diagnostic.fits.length > 0,
-    replacement: ({ record, named }) => typeTest(named.subject, UNION_TESTS.get(record)!),
+    replacement: ({ record, named }) => typeTest(named, UNION_TESTS.get(record)!),
     count: 11,
   },
   {
@@ -759,7 +912,7 @@ const INTENDED: readonly Intended[] = [
       UNKNOWN_TESTS.has(record) &&
       diagnostic.class === "warning-runtime-check" &&
       diagnostic.kinds.includes("unknown"),
-    replacement: ({ record, named }) => typeTest(named.subject, UNKNOWN_TESTS.get(record)!),
+    replacement: ({ record, named }) => typeTest(named, UNKNOWN_TESTS.get(record)!),
     count: 4,
   },
   {
@@ -780,9 +933,20 @@ const INTENDED: readonly Intended[] = [
     replacement: ({ named }) =>
       exact(
         stablePath(named.subject)
-          ? `Assign the property before this line, as in '${named.subject}${named.member} = ...'.`
+          ? `Assign '${named.subject}${named.member}' before this line.`
           : "Assign the property before this line.",
       ),
+    count: 5,
+  },
+  {
+    rule:
+      "#1268: beside another type of the value that the use does not take (a union), a fallback for null alone leaves " +
+      "the use invalid, so the new checker names none in code",
+    matches: ({ current, diagnostic }) =>
+      diagnostic.class === "warning-runtime-check" &&
+      diagnostic.besides.length > 0 &&
+      / otherwise (?!\.\.\.$)\S/.test(current),
+    replacement: () => exact(SAME_TYPE),
     count: 5,
   },
 ];
@@ -907,8 +1071,9 @@ test("each member, conversion and list fix of the current checker is kept on the
   const messages = (source: string): string[] => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    return analyseCore(request).diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    return diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
   };
   assert.deepEqual(messages("let xs = [1]\nxs.join = 2\nexit\n"), [
     "A list has no property 'join', so 'xs.join' cannot be used.",
@@ -969,7 +1134,7 @@ test("each member, conversion and list fix of the current checker is kept on the
 /**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
  * and structured values, each fix's family once, and for an example of a property shown the lines the repaired source
- * says. A declaration's `= ...` keeps the source's own start value.
+ * says. A declaration is whole, with its start value (#1268, TABLE r4.146).
  */
 const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   // date and time operators, composed operands grouped, also as a warning
@@ -993,12 +1158,18 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     /as in '([^']*)'/,
   ],
   ["let d = 1 s+2 s\nsay ⟦d.seconds⟧\nexit\n", /as in '([^']*)'/, ["3"]],
+  // (#1268: the value in place, read once, where its own text may stand in code: a receiver that is no stable path, a
+  // literal or an expression shown or stored as text)
+  ["let ns = [12, 13]\nsay ⟦ns.random⟧.length\nexit\n", /with '([^']*)'/],
+  ["let caption: string = ⟦1⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
+  ["let caption: string = ⟦true⟧\nsay caption\nexit\n", /write '([^']*)'/, ["true"]],
+  ["let n = 1\nlet caption: string = ⟦n + 1⟧\nsay caption\nexit\n", /write '([^']*)'/, ["2"]],
+  ['say "⟦${set[4, 7]}⟧"\nexit\n', /with '([^']*)'/, ["4, 7"]],
+  ['say "⟦${dict{a: 1}}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
+  ['let d = dict{a: 1}\nsay "⟦${d}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
+  ['function make { return {a: 1, b: 2} }\nsay "⟦${make()}⟧"\nexit\n', /as in '([^']*)'/, ["1"]],
+  ['let s = "a"\nif ⟦s⟧ { say "x" }\nexit\n', /as in '([^']*)'/, ["x"]],
   ["let n = 1\nsay ⟦n.length⟧\nexit\n", /as in '([^']*)'/],
-  [
-    // (the current checker's example property, of a speaker that has it)
-    'speaker sage { title: "Sage" }\nlet value = sage\nsay ⟦value.get(0, default: 3)⟧\nexit\n',
-    /such as '([^']*)'/,
-  ],
   // `${...}`: an object's first property it shows, a set
   // (the first plain property: a list's emptiness is known only when the script runs)
   ['let slave = {nested: {name: "A"}, age: 1}\nsay "⟦${slave}⟧"\nexit\n', /as in '([^']*)'/, ["1"]],
@@ -1034,15 +1205,29 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     'let x: integer? = null\nlet y: integer? = null\nif askBoolean "x" { x = 1 }\nrepeat (⟦x otherwise y⟧) {}\nexit\n',
     /fallback, as in '([^']*)'/,
   ],
-  // the declarations a union or null widens (ADR 0021 rules 1.1, 1.2, 1.7, 7.3)
-  ['⟦let mood⟧ = 1\nmood = "happy"\nexit\n', /as '([^']*)'/],
-  ['⟦let d⟧ = dict{a: 1}\nd["b"] = "x"\nexit\n', /as '([^']*)'/],
-  ['function use(⟦n: integer⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/],
-  ["let n = null\n⟦let whole: integer⟧ = n\nexit\n", /as '([^']*)'/],
-  ['let source = ["s"]\n⟦let copy⟧ = source.removeAt(0)\ncopy = 2\nexit\n', /as '([^']*)'/],
+  // the declarations a union or null widens (ADR 0021 rules 1.1, 1.2, 1.3, 1.7, 7.3), each start value as written: a
+  // literal (Astra on #1273), a call, a global's `default:`, a parameter's default, a list literal, a fallback
+  ['⟦let mood = 1⟧\nmood = "happy"\nsay mood\nexit\n', /as '([^']*)'/, ["happy"]],
   [
-    '⟦let result: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
+    'function make { return 1 }\n⟦let mood = make()⟧\nmood = "happy"\nsay mood\nexit\n',
     /as '([^']*)'/,
+    ["happy"],
+  ],
+  ['⟦global g = 1, default: 2⟧\ng = "x"\nsay g\nexit\n', /as '([^']*)'/, ["x"]],
+  ['⟦let d = dict{a: 1}⟧\nd["b"] = "x"\nsay d["b"]\nexit\n', /as '([^']*)'/, ["x"]],
+  ['⟦let a = [1, "x"]⟧\nsay a.length\nexit\n', /as '([^']*)'/, ["2"]],
+  ['function use(⟦n: integer⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
+  ['function use(⟦n: integer = [1][0]⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
+  ["let n = null\n⟦let whole: integer = n⟧\nexit\n", /as '([^']*)'/],
+  ['let source = ["s"]\n⟦let copy = source.removeAt(0)⟧\ncopy = 2\nexit\n', /as '([^']*)'/],
+  [
+    '⟦let result: integer = load("count", default: ["bad"].last)⟧\nsay result\nexit\n',
+    /as '([^']*)'/,
+  ],
+  [
+    'let y: integer? = null\n⟦let x: integer = y otherwise "a"⟧\nsay x\nexit\n',
+    /as '([^']*)'/,
+    ["a"],
   ],
   // #1241 (TABLE r4.151): each code form a fix offers, pasted whole at the site its diagnostic sits on, where its
   // predicate holds: a number given a unit, also an operation's value; text converted; a member the type has, on a
@@ -1138,9 +1323,10 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
     const source = marked.replace(/[⟦⟧]/g, "");
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    const found = analyseCore(request)
-      .diagnostics.map((diagnostic) =>
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const found = diagnostics
+      .map((diagnostic) =>
         /add the element to '([^']*)' itself with '([^']*)' on a line of its own/.exec(
           coreMessage(diagnostic, text),
         ),
@@ -1201,9 +1387,10 @@ test("what a site takes is read through a long chain of untyped copies or calls,
   ]) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const text = messageSource([source]);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
     assert.ok(
-      analyseCore(request).diagnostics.some((diagnostic) =>
+      diagnostics.some((diagnostic) =>
         coreMessage(diagnostic, text).endsWith(" Use the length property."),
       ),
     );
@@ -1225,13 +1412,13 @@ test("the code each fix suggests compiles where it stands and runs, saying what 
     const files = [{ path: "main.tease", source }];
     const request = coreRequest(files);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    const suggested = analyseCore(request)
-      .diagnostics.map((diagnostic) => pick.exec(coreMessage(diagnostic, text))?.[1])
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const suggested = diagnostics
+      .map((diagnostic) => pick.exec(coreMessage(diagnostic, text))?.[1])
       .find((found) => found !== undefined);
     assert.ok(suggested !== undefined, `a fix: ${source}`);
-    // (a declaration keeps its start value)
-    const fixed = marked.replace(/⟦[^⟧]*⟧/, suggested.replace(/ = \.\.\.$/, ""));
+    const fixed = marked.replace(/⟦[^⟧]*⟧/, suggested);
     const errors = compileProject([{ path: "main.tease", source: fixed }]).diagnostics.filter(
       (diagnostic) => diagnostic.severity === "error",
     );
@@ -1260,6 +1447,397 @@ test("the code each fix suggests compiles where it stands and runs, saying what 
         says,
         fixed,
       );
+  }
+});
+
+/**
+ * #1268: null checks' fallbacks, `⟦…⟧` around the value they stand in for, whether the fallback stands in parentheses
+ * there (an operand or a receiver: TSP041 asks for them next to every operator, #1243) and what the source then says: a
+ * plain value,
+ * an operand of each operator class (a comparison, arithmetic, a sign, `and`, `or`, `not`; `is` takes null, so the case
+ * under it is the arithmetic's operand), a condition, a count, an index, a key, an argument, text, an element of a list.
+ */
+const FALLBACKS: readonly (readonly [string, boolean, readonly string[]])[] = [
+  ["let xs = [7, null]\nlet n: integer = ⟦xs[1]⟧\nsay n\nexit\n", false, ["0"]],
+  ['let xs = [7, null]\nif ⟦xs[1]⟧ < 1 { say "low" }\nexit\n', true, ["low"]],
+  ["let xs = [7, null]\nsay ⟦xs[1]⟧ + 1\nexit\n", true, ["1"]],
+  ["let xs = [7, null]\nsay -⟦xs[1]⟧\nexit\n", true, ["0"]],
+  ['let xs = [7, null]\nif ⟦xs[1]⟧ + 1 is integer { say "whole" }\nexit\n', true, ["whole"]],
+  [
+    'let bs = [true, null]\nif ⟦bs[1]⟧ and true { say "yes" } else { say "no" }\nexit\n',
+    true,
+    ["no"],
+  ],
+  [
+    'let bs = [true, null]\nif false or ⟦bs[1]⟧ { say "yes" } else { say "no" }\nexit\n',
+    true,
+    ["no"],
+  ],
+  ['let bs = [true, null]\nif not ⟦bs[1]⟧ { say "yes" }\nexit\n', true, ["yes"]],
+  ['let bs = [true, null]\nif ⟦bs[1]⟧ { say "yes" } else { say "no" }\nexit\n', false, ["no"]],
+  ['let xs = [7, null]\nrepeat ⟦xs[1]⟧ { say "x" }\nsay "done"\nexit\n', false, ["done"]],
+  ["let xs = [7, null]\nsay [5][⟦xs[1]⟧]\nexit\n", false, ["5"]],
+  [
+    'let ks = ["a", null]\nlet d = dict{a: 1}\nsay d.get(⟦ks[1]⟧, default: 0)\nexit\n',
+    false,
+    ["0"],
+  ],
+  [
+    "function use(v: integer) {\n  say v\n}\nlet xs = [7, null]\nuse(⟦xs[1]⟧)\nexit\n",
+    false,
+    ["0"],
+  ],
+  ['let names = ["a", null]\nsay ⟦names[1]⟧.length\nexit\n', true, ["0"]],
+  ['let names = ["a", null]\nsay "a" + ⟦names[1]⟧\nexit\n', true, ["a"]],
+  ['let names = ["a", null]\nif ⟦names[1]⟧ < "b" { say "before" }\nexit\n', true, ["before"]],
+  ['let xs = [7, null]\nsay "${⟦xs[1]⟧ + 1}"\nexit\n', true, ["1"]],
+];
+
+test("a null check's fallback compiles where it is pasted, grouped as written, and runs (#1268)", () => {
+  for (const [marked, grouped, says] of FALLBACKS) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const analysed = analyseCore(request).diagnostics;
+    const text = messageSource([source], analysed);
+    const suggested = analysed
+      .map((diagnostic) => /fallback, as in '([^']*)'/.exec(coreMessage(diagnostic, text))?.[1])
+      .find((found) => found !== undefined);
+    assert.ok(suggested !== undefined, `a fallback: ${source}`);
+    assert.equal(suggested.startsWith("("), grouped, suggested);
+    const at = marked.indexOf("⟦");
+    const fixed = marked.replace(/⟦[^⟧]*⟧/, suggested);
+    // (its `otherwise` holds exactly the pasted code, inside the parentheses it brings: the grouping TSP041 asks for)
+    const inner = suggested.startsWith("(") ? 1 : 0;
+    assert.ok(
+      someNode(parse(fixed).program, (node) => {
+        if (node.kind !== "binaryExpression") return false;
+        // EVIDENCE: invariant: a parser-owned node whose kind is `binaryExpression` is a binary expression.
+        const binary = node as BinaryExpression;
+        return (
+          binary.operator === "otherwise" &&
+          binary.span.start.offset === at + inner &&
+          binary.span.end.offset === at + suggested.length - inner
+        );
+      }),
+      fixed,
+    );
+    const { diagnostics, plan } = compileProject([{ path: "main.tease", source: fixed }]);
+    assert.deepEqual(
+      diagnostics.filter((found) => found.severity === "error").map((found) => found.message),
+      [],
+      fixed,
+    );
+    // (the fallback leaves no possible null for the new checker either)
+    const repaired = coreRequest([{ path: "main.tease", source: fixed }]);
+    assert.ok(repaired !== null, fixed);
+    assert.deepEqual(
+      analyseCore(repaired).diagnostics.filter(
+        (found) =>
+          found.kind !== "budget" &&
+          (found.kind === "written-type" || found.kinds.includes("null")),
+      ),
+      [],
+      fixed,
+    );
+    assert.ok(plan !== null, fixed);
+    const events = createFreshRuntimeSession(plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      says,
+      fixed,
+    );
+  }
+  // none in code where none of the value's type can be written: a list, and a union beside the type the use takes
+  for (const source of [
+    "let rows = [[1], null]\nsay rows[1].length\nexit\n",
+    'let us: (integer | string | null)[] = [1, "a", null]\nsay us[2] + 1\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const fixes = diagnostics
+      .filter(
+        (found) =>
+          found.kind !== "written-type" && found.kind !== "budget" && found.kinds.includes("null"),
+      )
+      .map((found) => coreMessage(found, text));
+    assert.equal(fixes.length, 1, source);
+    assert.match(fixes[0]!, new RegExp(`, ${escaped(SAME_TYPE)}`), source);
+    assert.doesNotMatch(fixes[0]!, / otherwise /, source);
+  }
+  // no join of values `join()` does not show, and no receiver form for an element `${...}` selects from a list, whose
+  // text names the list (Codex r2): the steps in words
+  for (const [source, words] of [
+    ['say "${[set[1]]}"\nexit\n', "Show its elements with the toList and join methods instead."],
+    ['say "${set[{a: 1}]}"\nexit\n', "Show its elements with the toList and join methods instead."],
+    [
+      'say "${dict{a: {p: 1}}}"\nexit\n',
+      "Select one value with a key, or show every value with the values and join methods.",
+    ],
+    [
+      'let d = dict{a: [1]}\nsay "${d}"\nexit\n',
+      "Select one value with a key, or show every value with the values and join methods.",
+    ],
+    ['let xs = [{a: 1}]\nsay "${xs}"\nexit\n', "Show one of its properties instead."],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const found = diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+    assert.ok(
+      found.some((message) => message.endsWith(` ${words}`)),
+      `${source}: ${found.join(" | ")}`,
+    );
+    assert.ok(
+      found.every((message) => !/as in '|with '/.test(message)),
+      source,
+    );
+  }
+  // a property stored on a type without it: no read's repair, which is no place to store into (Codex r1)
+  for (const source of ["let d = 2 s\nd.seconds = 3\nexit\n", "let n = 12\nn.length = 3\nexit\n"]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const found = diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+    assert.equal(found.length, 1, source);
+    assert.doesNotMatch(found[0]!, /as in '|with '/, source);
+  }
+});
+
+/**
+ * #1268, TABLE r4.146: checks, `⟦…⟧` around the use's statement, which the check's example holds as the source writes
+ * it (a kept value's read as `value`, its `let` on a line before), and what the source then says: a null check of a
+ * variable and of a kept value, on a line of its own and in a block (Astra on #1273); around a condition, a count, an
+ * iterable, a store, an interpolation, a receiver; a type test, a length check, a timer's block.
+ */
+const CHECKS: readonly (readonly [string, readonly string[]])[] = [
+  ["let ns = [1, null]\nlet n = ns[1]\n⟦say n + 1⟧\nexit\n", []],
+  ["let ns = [1, null]\nlet n = ns[0]\nif true {\n  ⟦say n + 1⟧\n}\nexit\n", ["2"]],
+  ["let ns = [1, null]\nlet n = ns[0]\nif true { ⟦say n + 1⟧ }\nexit\n", ["2"]],
+  ["let ns = [1, null]\n⟦say ns[0] + 1⟧\nexit\n", ["2"]],
+  ["let ns = [1, null]\nif true { ⟦say ns[0] + 1⟧ }\nexit\n", ["2"]],
+  [
+    'let ns = [1, null]\nlet n = ns[0]\n⟦if n < 1 { say "low" } else { say "high" }⟧\nexit\n',
+    ["high"],
+  ],
+  ['let ns = [1, null]\nlet n = ns[0]\n⟦repeat n { say "x" }⟧\nexit\n', ["x"]],
+  ["let lists = [[4], null]\nlet xs = lists[0]\n⟦for x in xs { say x }⟧\nexit\n", ["4"]],
+  ["let ns = [1, null]\nlet n = ns[0]\nlet m = 0\n⟦m = n + 1⟧\nsay m\nexit\n", ["2"]],
+  ['let ns = [1, null]\nlet n = ns[0]\n⟦say "${n + 1}"⟧\nexit\n', ["2"]],
+  ['let names = ["ab", null]\n⟦say names[0].length⟧\nexit\n', ["2"]],
+  ['let us: (integer | string)[] = [1, "a"]\nlet u = us[0]\n⟦say u + 1⟧\nexit\n', ["2"]],
+  ['let us: (integer | string)[] = [1, "a"]\n⟦say us[0] + 1⟧\nexit\n', ["2"]],
+  ["let groups: integer[][] = [[], [21]]\n⟦say groups[1].last⟧\nexit\n", ["21"]],
+  ["let ns = [1, null]\nlet n = ns[0]\nlet t = timer async 1 s { ⟦say n + 1⟧ }\nexit\n", []],
+  // (beside text, the null check's alternative is the type test too, Codex r4)
+  [
+    'let us: (integer | string | null)[] = [1, "a", null]\nlet u = us[0]\n⟦say u + 1⟧\nexit\n',
+    ["2"],
+  ],
+  ['let us: (integer | string | null)[] = [1, "a", null]\n⟦say us[0] + 1⟧\nexit\n', ["2"]],
+  // (a call after the read, a method of the value itself, a kept call read first: nothing changes before the use)
+  ["let ns = [1, null]\nfunction f { return 2 }\n⟦say ns[0] + f()⟧\nexit\n", ["3"]],
+  ["let lists = [[1], null]\nlet xs = lists[0]\n⟦xs.add(2)⟧\nsay xs\nexit\n", ["[1, 2]"]],
+  ["let ns = [1, null]\nfunction f { return ns[0] }\n⟦say f() + 1⟧\nexit\n", ["2"]],
+];
+
+test("a check's example holds the use's statement, compiles in its place, and runs (#1268)", () => {
+  for (const [marked, says] of CHECKS) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    // (every check its messages offer: a type test beside a null check's, Codex r4)
+    const offers = new Set(
+      diagnostics.flatMap((diagnostic) => {
+        const message = coreMessage(diagnostic, text);
+        const check = / as in '(if [^']*)'/.exec(message)?.[1];
+        const kept = /as in '(let value = [^']*)', and check/.exec(message)?.[1];
+        return check === undefined ? [] : [kept === undefined ? check : `${kept}\n${check}`];
+      }),
+    );
+    assert.ok(offers.size > 0, `a check: ${source}`);
+    const statement = /⟦([^⟧]*)⟧/.exec(marked)![1]!;
+    for (const offer of offers) {
+      const [check, kept] = offer.includes("\n") ? offer.split("\n").reverse() : [offer];
+      // (it holds the statement it replaces: as written, a kept value's read as `value`)
+      const held = /^if .+? \{ (.*) \}$/.exec(check!)?.[1];
+      assert.equal(
+        kept === undefined ? held : held?.replace("value", kept.slice("let value = ".length)),
+        statement,
+        offer,
+      );
+      const fixed = marked.replace(/⟦[^⟧]*⟧/, offer);
+      const { diagnostics, plan } = compileProject([{ path: "main.tease", source: fixed }]);
+      assert.deepEqual(
+        diagnostics.filter((found) => found.severity === "error").map((found) => found.message),
+        [],
+        fixed,
+      );
+      assert.ok(plan !== null, fixed);
+      const events = createFreshRuntimeSession(plan, {
+        baseDelayMs: 0,
+        delayPerWordMs: 0,
+        delayPerCharacterMs: 0,
+      }).run().events;
+      assert.deepEqual(
+        events.filter((event) => event.kind === "runtimeFailure"),
+        [],
+        fixed,
+      );
+      assert.deepEqual(
+        events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+        says,
+        fixed,
+      );
+    }
+  }
+});
+
+/**
+ * #1268, TABLE r4.146 and r4.162: uses whose statement no check may hold as written, and declarations not on one line:
+ * the step in words, with no block and no placeholder; where the words still offer code, a fallback or a type, `⟦…⟧`
+ * marks where it goes.
+ */
+const WORDED: readonly (readonly [string, string])[] = [
+  // a declaration, whose name would end with the check's block; a statement over two lines; an `else if`'s condition;
+  // a `while`'s, tested again after each pass; a return; a comment
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nlet m = ⟦n⟧ + 1\nsay m\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nsay ⟦n⟧ +\n  1\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nif false { say 0 } else if ⟦n⟧ < 1 { say 1 }\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nwhile ⟦n⟧ < 3 { n = 3 }\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nfunction f(k) {\n  let n = ns[k]\n  return ⟦n⟧ + 1\n}\nsay f(0)\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nsay ⟦n⟧ /* one */ + 1\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  // something evaluated before the use that may change or draw, the kept read's own effect, or a use a run may skip
+  // (Codex r4, r5): a check before the statement would not hold there, and a kept value would be read too early
+  [
+    "let ns = [1, null]\nfunction change {\n  ns[0] = 9\n  return 1\n}\nsay change() + ⟦ns[0]⟧\nexit\n",
+    "Keep 'ns[0]' in a new variable and check that it is not null first, or give a fallback, as in " +
+      "'(ns[0] otherwise 0)'.",
+  ],
+  [
+    "let ns = [1, null]\nlet n = ns[0]\nfunction change {\n  n = 9\n  return 1\n}\nsay change() + ⟦n⟧\nexit\n",
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let xs = [7]\nfunction change {\n  xs.clear()\n  return 1\n}\nsay change() + xs.last\nexit\n",
+    "Check the length of 'xs' first.",
+  ],
+  [
+    'let ns = [1, null]\nlet n = ns[0]\nif askBoolean "go" or ⟦n⟧ > 0 { say 1 }\nexit\n',
+    "Check that 'n' is not null first, or give a fallback, as in '(n otherwise 0)'.",
+  ],
+  [
+    "let n = 1\nlet ns = [1, null]\nfunction read {\n  n = 9\n  return ns[0]\n}\nsay n + ⟦read()⟧\nexit\n",
+    "Keep 'read()' in a new variable and check that it is not null first, or give a fallback, as in " +
+      "'(read() otherwise 0)'.",
+  ],
+  [
+    'let ns = [1, 2, null, 3]\nsay "${[10, 20]} ${⟦ns.random⟧ + 1}"\nexit\n',
+    "Keep 'ns.random' in a new variable and check that it is not null first, or give a fallback, as in " +
+      "'(ns.random otherwise 0)'.",
+  ],
+  // a kept value the statement reads twice: a check of one read leaves the other
+  [
+    "let ns = [1, null]\nsay ⟦ns[0]⟧ + ns[0]\nexit\n",
+    "Keep 'ns[0]' in a new variable and check that it is not null first, or give a fallback, as in " +
+      "'(ns[0] otherwise 0)'.",
+  ],
+  // another problem where the code would stand (TABLE r4.162, Codex r5): a whole number joined with text, a duration or
+  // a number that may also be null, a mixed key or condition
+  [
+    'let ns = [1, null]\nlet n = ns[0]\nsay "x" + n\nexit\n',
+    "Check that 'n' is not null first, or give a fallback of the same type with 'otherwise'.",
+  ],
+  [
+    "let vs: duration?[] = [1 s, null]\nlet v = vs[0]\nsay v.seconds\nexit\n",
+    "Divide the duration by a unit of time instead.",
+  ],
+  ["let vs: integer?[] = [1, null]\nlet v = vs[0]\nif v { say 1 }\nexit\n", "Compare it instead."],
+  // a type test and a length check in a declaration
+  [
+    'let us: (integer | string)[] = [1, "a"]\nlet m = us[0] + 1\nexit\n',
+    "Keep 'us[0]' in a new variable and check that it is a whole number (integer) first.",
+  ],
+  [
+    "let groups: integer[][] = [[], [21]]\nlet x = groups[1].last\nexit\n",
+    "Check the length of 'groups[1]' first.",
+  ],
+  [
+    "let groups: integer[][] = [[], [21]]\nlet x = groups.random.last\nexit\n",
+    "Keep 'groups.random' in a new variable and check its length first.",
+  ],
+  // a start value over lines (Astra on #1273's sibling)
+  [
+    'let mood⟦⟧ = [\n  1\n][0]\nmood = "happy"\nexit\n',
+    "To allow both, declare it with the type 'integer | string'.",
+  ],
+  [
+    'function use(n⟦: integer⟧ = [\n  1\n][0]) { say n }\nuse("x")\nexit\n',
+    "To allow both, declare the parameter 'n' with the type 'integer | string'.",
+  ],
+];
+
+test("a use no check may hold as written gets the check in words, with no block or placeholder (#1268)", () => {
+  for (const [marked, words] of WORDED) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const found = diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+    assert.ok(
+      found.some((message) => message.includes(words)),
+      `${source}: ${found.join(" | ")}`,
+    );
+    assert.ok(
+      found.every((message) => !/'if [^']*\{|\{ \.\.\. \}| = \.\.\.'|'let value = /.test(message)),
+      source,
+    );
+    // (the code the words still offer, in its place, adds no error: a use it does not mend keeps its own)
+    const fallback = /fallback, as in '([^']*)'/.exec(words)?.[1];
+    const type = /with the type '([^']*)'/.exec(words)?.[1];
+    const offered = fallback ?? (type === undefined ? undefined : `: ${type}`);
+    assert.equal(marked.includes("⟦"), offered !== undefined, marked);
+    if (offered === undefined) continue;
+    const fixed = marked.replace(/⟦[^⟧]*⟧/, offered);
+    const errors = (code: string): string[] =>
+      compileProject([{ path: "main.tease", source: code }])
+        .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`);
+    const before = errors(source);
+    assert.deepEqual(
+      errors(fixed).filter((error) => !before.includes(error)),
+      [],
+      fixed,
+    );
   }
 });
 
@@ -1294,9 +1872,10 @@ test("a text join's example puts the operand that is not text in '${...}', and t
     const source = marked.replace(/[⟦⟧]/g, "");
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    const suggested = analyseCore(request)
-      .diagnostics.map(
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const suggested = diagnostics
+      .map(
         (diagnostic) =>
           /in the text as '(\$\{[^']*\})' instead/.exec(coreMessage(diagnostic, text))?.[1],
       )
@@ -1380,25 +1959,24 @@ test("a length check's fix checks the selection the read takes, under every seed
     assert.equal(stablePath(collection), stable, collection);
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    const message = analyseCore(request)
-      .diagnostics.map((diagnostic) => coreMessage(diagnostic, text))
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const message = diagnostics
+      .map((diagnostic) => coreMessage(diagnostic, text))
       .find((found) => found.startsWith(`'${collection}' may be empty here.`));
     assert.ok(message !== undefined, source);
-    // (the fix as its message writes it, applied around the read)
+    // (the fix as its message writes it, in place of the read's statement, its `let` on a line before; #1268)
     const read = source.split("\n").find((line) => line.includes(collection))!;
-    const checked = /Check '[^']*' first, as in 'if ([^']*) \{ \.\.\. \}'\./.exec(message);
+    const checked = /Check '[^']*' first, as in '(if [^']*)'\./.exec(message);
     const kept =
-      /Keep '[^']*' in a new variable, as in '(let value = [^']*)', and check its length, as in 'if ([^']*) \{ \.\.\. \}'\./.exec(
+      /Keep '[^']*' in a new variable, as in '(let value = [^']*)', and check its length, as in '(if [^']*)'\./.exec(
         message,
       );
     assert.equal(checked !== null, stable, message);
     assert.equal(kept !== null, !stable, message);
     const fixed = source.replace(
       read,
-      checked !== null
-        ? `if ${checked[1]!} { ${read} }`
-        : `${kept![1]!}\nif ${kept![2]!} { ${read.replace(collection, "value")} }`,
+      checked !== null ? checked[1]! : `${kept![1]!}\n${kept![2]!}`,
     );
     const runs = SEEDS.map((seed) => run(fixed, seed));
     assert.deepEqual(
@@ -1433,46 +2011,84 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Check its length instead.",
     ],
     ['function f { return 1 }\nif f() { say "x" }\nexit\n', "Compare it instead."],
-    // a member of a type without it, a speaker's member
+    // a member of a type without it, a speaker's member (#1268: words for the function, never a template)
     [
-      "let ns = [1, 2]\nsay ns.random.length\nexit\n",
-      "Convert 'ns.random' to text first with 'toString(...)'.",
+      "let ns = [1, 2]\nsay (ns /* any */ .random).length\nexit\n",
+      "Convert the value to text first with the toString function.",
     ],
     [
       'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nsay ts.random.year\nexit\n',
-      "Convert 'ts.random' with 'toDateTime()' first.",
+      "Convert 'ts.random' with the toDateTime method first.",
     ],
     [
       "let ss = [set[1]]\nsay ss.random.indexOf(1)\nexit\n",
-      "Copy 'ss.random' into a list with 'toList()' first.",
+      "Copy 'ss.random' into a list with the toList method first.",
     ],
     ["let rack = [player]\nsay rack.random.rank\nexit\n", "Assign the property before this line."],
     [
-      "let rack = [player]\nsay rack.random.get(0)\nexit\n",
-      "A speaker has no methods. Use one of its properties instead, such as 'title'.",
+      'speaker sage { title: "Sage" }\nlet value = sage\nsay value.get(0, default: 3)\nexit\n',
+      "A speaker has no methods. Use one of its properties instead.",
+    ],
+    // (members named in words, each of its own type, Codex r4)
+    [
+      'let xs = ["a"]\nsay xs.foo + 1\nexit\n',
+      "Use one of its properties instead: length, first, last, or random.",
+    ],
+    [
+      "let d = 1 calendar day\nsay d.seconds + 1\nexit\n",
+      "Use one of its properties instead: months, days, or exactOffset.",
+    ],
+    // (a conversion only where the receiver has no other type, Codex r4)
+    [
+      "let vs: (integer | duration)[] = [1, 1 s]\nlet v = vs[0]\nsay v.seconds\nexit\n",
+      "Divide the duration by a unit of time instead.",
+    ],
+    // (a conversion, a date and time form or a join whose result no use was checked for, where its use is not what a
+    // `say` shows, a `${...}` holds or a condition takes: words, TABLE r4.162, Codex r6)
+    [
+      "let n = 12\nif n.length { say 1 }\nexit\n",
+      "Convert the value to text first with the toString function.",
+    ],
+    [
+      'let n = 12\nsay n.replace("1", "a")\nexit\n',
+      "Convert the value to text first with the toString function.",
+    ],
+    [
+      "let d = 2 s\nrepeat d.seconds { say 1 }\nexit\n",
+      "Divide the duration by a unit of time instead.",
+    ],
+    ["let d = 2 s\nsay 4 / d.seconds\nexit\n", "Divide the duration by a unit of time instead."],
+    [
+      'let t = toDateTime("2026-10-23T12:00:00")\nif t + 1 s { say 1 }\nexit\n',
+      "Convert it with the toAbsoluteDateTime method first, or use calendar units to keep the clock time.",
+    ],
+    ['let n = 1\nif "x" + n { say 1 }\nexit\n', "Put the value in the text instead."],
+    // (no list copy for a method that changes it, whose change the copy would lose, Codex r4)
+    [
+      "let s = set[3, 1]\nsay s.sort() + 1\nexit\n",
+      "Copy 's' into a list with the toList method first.",
     ],
     // a null check of a value not on one line
     [
       "let xs = [7, null]\nsay (xs /* c */ [0]) + 1\nexit\n",
-      "Keep 'xs /* c */ [0]' in a new variable and check the variable first, as in 'if value != null { ... }'.",
+      "Keep 'xs /* c */ [0]' in a new variable and check that it is not null first.",
     ],
     // the text join where the operand that is not text spans lines or holds a comment (the owner's review)
     ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead."],
     ['let n = 1\nsay "Sum: " + (n /* two */ + 2)\nexit\n', "Put the value in the text instead."],
-    // a value written as a literal or another expression (Astra r1: never a name of another declaration)
+    // a value not on one line (Astra r1: never a name of another declaration; #1268: a literal or an expression on
+    // one line is shown in place, `REPAIRS`)
     [
-      'let value = set[99]\nsay "${set[4, 7]}"\nexit\n',
-      "Show its elements with 'toList().join()' instead.",
+      'let value = set[99]\nsay "${set[4, /* s */ 7]}"\nexit\n',
+      "Show its elements with the toList and join methods instead.",
     ],
     [
-      'say "${dict{a: 1}}"\nexit\n',
-      "Select one value with a key, or show every value with 'values.join()'.",
+      'say "${dict{a: /* d */ 1}}"\nexit\n',
+      "Select one value with a key, or show every value with the values and join methods.",
     ],
     ['let rec = {names: ["A"]}\nsay "${rec}"\nexit\n', "Show one of its properties instead."],
     ['let d = dict{"1": 5}\nsay d[1]\nexit\n', "Write a number key as text."],
-    ["let caption: string = 1\nexit\n", "To show it as text, put it in a text with '${...}'."],
-    // (a literal is classified by the parser: `true` is no name, Sol r5)
-    ["let caption: string = true\nexit\n", "To show it as text, put it in a text with '${...}'."],
+    ["let caption: string = (1 /* one */)\nexit\n", "To show the value as text, put it in a text."],
     // (a selection that is no stable path, its text not code on one line: kept first, without the example)
     [
       "let groups: integer[][] = [[], [21]]\nsay (groups /* any */ .random).last\nexit\n",
@@ -1481,19 +2097,20 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     ["say (1 s + 2 s).seconds\nexit\n", "Divide '1 s + 2 s' by a unit, such as '1 second'."],
     [
       'let t = toAbsoluteDateTime("2026-01-01T00:00:00Z")\nsay (t + 1 s) + 1 calendar day\nexit\n',
-      "Convert it with 'toDateTime()' first.",
+      "Convert it with the toDateTime method first.",
     ],
     [
       'say toDate("2026-10-23") < toDateTime("2026-10-23T12:00:00")\nexit\n',
-      "Compare its date, with 'toDate(...)'.",
+      "Compare its date with the toDate function.",
     ],
     [
       'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random + 1 s\nexit\n',
-      "Convert it with 'toAbsoluteDateTime()' first, or use calendar units to keep the clock time.",
+      "Convert it with the toAbsoluteDateTime method first, or use calendar units to keep the clock time.",
     ],
     [
       'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random - ds[0]\nexit\n',
-      "Subtract their dates with 'toDate(...)', or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
+      "Subtract their dates with the toDate function, or convert both with the toAbsoluteDateTime method for the " +
+        "elapsed time.",
     ],
     // #1241 (TABLE r4.146): where no complete code form stands at the site, the function or the step in words: a unit,
     // a conversion of text not on one line; members of a receiver that is no stable path; a method's arguments; an
@@ -1661,11 +2278,11 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     ['let lists = [["a"]]\nsay lists[0].join\nexit\n', "Call the join method with parentheses."],
     [
       "let xs = [1]\nlet caption: string = xs[0]\nsay caption\nexit\n",
-      "To show it as text, put it in a text with '${...}'.",
+      "To show the value as text, put it in a text.",
     ],
     [
       'let d = dict{"a": 2}\nlet caption: string = d["a"]\nsay caption\nexit\n',
-      "To show it as text, put it in a text with '${...}'.",
+      "To show the value as text, put it in a text.",
     ],
     // (Codex r9: a default's or a fallback's type must also fit the value it stands beside, C10)
     [
@@ -1713,10 +2330,9 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
   for (const [source, fix] of cases) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const text = messageSource([source]);
-    const messages = analyseCore(request).diagnostics.map((diagnostic) =>
-      coreMessage(diagnostic, text),
-    );
+    const { diagnostics } = analyseCore(request);
+    const text = messageSource([source], diagnostics);
+    const messages = diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
     assert.ok(
       messages.some((message) => message.includes(fix)),
       `${source}: ${messages.join(" | ")}`,

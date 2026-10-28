@@ -145,8 +145,17 @@ export type DiagnosticRule =
       /** An error's list operand of `+`: its elements' type's kinds, which a fix's list must hold (TABLE r4.151). */
       readonly elements?: readonly ItemTag[];
     }
-  /** C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead. */
-  | { readonly rule: "shown"; readonly element: boolean; readonly property: string | null }
+  /**
+   * C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead;
+   * `joinable`, whether every element of a set and every value of a dict it may be is one `${...}` shows on its own, as
+   * `join()` takes them (V30 §16), so that a fix may join them (#1268).
+   */
+  | {
+      readonly rule: "shown";
+      readonly element: boolean;
+      readonly property: string | null;
+      readonly joinable: boolean;
+    }
   /** C12: a dict key. */
   | { readonly rule: "key" }
   /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
@@ -211,12 +220,12 @@ export interface SiteExpectation {
  */
 export type Presence = true | "unproved";
 
-/** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */
+/** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and its declaration, which a fix rewrites. */
 export interface StoreRoot {
   readonly kind: "let" | "global" | "parameter" | "result";
   readonly name: string;
-  /** A parameter's default: a number or `true`/`false` as written, else `...`; `null` without one. */
-  readonly start: string | null;
+  /** The declaration as written: a variable's `let` or `global` statement, a parameter with its type and default. */
+  readonly site: SourceSite | null;
 }
 
 /** A step below a store's root: a property by its name, or the collection whose element or dict value comes next. */
@@ -315,6 +324,11 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
+      /**
+       * The value's other known kinds that the site's other diagnostics of the rule report, each a problem of its own:
+       * beside them a fix of this kind alone, such as a fallback for null, leaves the use invalid (#1268).
+       */
+      readonly besides: readonly ItemTag[];
     };
 
 export interface CoreResult {

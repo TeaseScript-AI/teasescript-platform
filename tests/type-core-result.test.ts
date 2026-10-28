@@ -166,6 +166,7 @@ function warning(
     provenance: provenanceOf(item, NO_DETAIL),
     obligation: { ...obligation, boundary: false },
     fits: [],
+    besides: [],
   };
 }
 

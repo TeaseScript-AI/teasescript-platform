@@ -719,6 +719,36 @@ function dynamicWhy(reasons: number): DynamicWhy {
 }
 
 /**
+ * Each warning with the value's other known kinds that its site's other diagnostics of the same rule report (`besides`):
+ * one consumer reports one diagnostic per offending kind of the value at its use (§4), so a warning's fix names no code
+ * that leaves the use invalid beside them (#1268). One pass over the diagnostics.
+ */
+function withBesides(diagnostics: readonly CoreDiagnostic[]): CoreDiagnostic[] {
+  const key = (site: SourceSite, rule: string): string =>
+    `${site.file}:${site.start}:${site.end}:${rule}`;
+  const reported = new Map<string, Set<ItemTag>>();
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.kind === "written-type" || diagnostic.kind === "budget") continue;
+    const at = key(diagnostic.site, diagnostic.rule.rule);
+    const found = reported.get(at) ?? new Set<ItemTag>();
+    for (const kind of diagnostic.kinds) found.add(kind);
+    reported.set(at, found);
+  }
+  return diagnostics.map((diagnostic) => {
+    if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget")
+      return diagnostic;
+    const besides = [...reported.get(key(diagnostic.site, diagnostic.rule.rule))!].filter(
+      (kind) =>
+        !diagnostic.kinds.includes(kind) &&
+        kind !== "null" &&
+        kind !== "unknown" &&
+        kind !== "empty",
+    );
+    return besides.length === 0 ? diagnostic : { ...diagnostic, besides };
+  });
+}
+
+/**
  * A published list in source order of its items' sites (file, start, end): at one site in the order the consumers run
  * (`rule`), and one consumer's by their own text, so the order is the same whichever order a consumer visits in and with
  * the sharing on or off (TABLE r4.86 (1)).
@@ -828,12 +858,14 @@ class CoreAnswers implements Answers {
       item,
       rule: consumers.rules.get(item) ?? 0,
     });
-    this.diagnostics = bySite([
-      ...[...written, ...consumers.diagnostics].map(ranked),
-      ...(exhausted === null ? [] : stopDiagnostics(program, exhausted, consumers.deferred)).map(
-        (item) => ({ item, rule: STOP_RULE }),
-      ),
-    ]);
+    this.diagnostics = withBesides(
+      bySite([
+        ...[...written, ...consumers.diagnostics].map(ranked),
+        ...(exhausted === null ? [] : stopDiagnostics(program, exhausted, consumers.deferred)).map(
+          (item) => ({ item, rule: STOP_RULE }),
+        ),
+      ]),
+    );
     this.outcome = outcomeOf(this.diagnostics);
     // each warning's obligation, one per warning (§4), then the boundary checks no warning owes: in source order of their
     // sites, at one site the warnings' obligations in the diagnostics' order (a stop's moved checks after the shown
