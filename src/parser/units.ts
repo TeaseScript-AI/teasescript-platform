@@ -206,9 +206,11 @@ const MEANT_UNITS: Readonly<Record<string, string>> = {
   h: "hours",
 };
 
-const EXACT_UNITS: ReadonlySet<string> = new Set(DURATION_UNITS);
-/** The units of time, for a message: the exact ones, then those only after `calendar`. */
-const UNITS_OF_TIME = `${DURATION_UNITS.slice(0, -1).join(", ")}, and ${DURATION_UNITS.at(-1)!}, and after 'calendar' also ${CALENDAR_DURATION_UNITS.filter((unit) => !EXACT_UNITS.has(unit)).join(" and ")}`;
+/** A list of units for a message, as in "d, w, mo, and y". */
+const unitList = (units: readonly string[]) =>
+  `${units.slice(0, -1).join(", ")}, and ${units.at(-1)!}`;
+/** The units of time, for a message: the exact ones, then those after `calendar`. */
+const UNITS_OF_TIME = `The units of time are ${unitList(DURATION_UNITS)}. After 'calendar', the units are ${unitList(CALENDAR_DURATION_UNITS)}.`;
 
 /**
  * A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. It
@@ -222,7 +224,7 @@ function reportMistakenUnit(
 ): void {
   const why = word.lexeme === "m" ? ", because it could mean minutes or months" : "";
   const message = (fix: string) =>
-    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. The units of time are ${UNITS_OF_TIME}.`;
+    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. ${UNITS_OF_TIME}`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     message(`use the unit ${meant}`),

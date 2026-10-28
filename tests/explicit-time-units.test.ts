@@ -183,7 +183,7 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
   // a unit stands, with and without a space. The amount with the unit is shown only where it compiles pasted in place
   // of the amount and the word; where the statement has another error, as after a range, the fix is in words.
   const units =
-    "The units of time are ms, s, min, h, d, and w, and after 'calendar' also mo and y.";
+    "The units of time are ms, s, min, h, d, and w. After 'calendar', the units are d, w, mo, and y.";
   const meant = new Map([
     ["m", ["min", "minutes"]],
     ["msec", ["ms", "milliseconds"]],
