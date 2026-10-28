@@ -4236,7 +4236,6 @@ arguments. Its `)` ends the `load`, also with a space before `(`, so the result 
 expression:
 
 ```text
-let value: string? = load("k", default: null)
 say load("k", default: null) == null
 say load("a", default: 0) + 1
 ```
