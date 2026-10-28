@@ -90,9 +90,12 @@ interface InheritedCopy {
   readonly path: readonly string[];
   readonly from: PlaceId;
   readonly strip: readonly string[];
-  /** The store making it and the literal cells it passes (A6: a rejected one is dead in the next pass, #1188). */
+  /**
+   * The store making it, and whether the literal cells it passes are all live (A6: a rejected one is dead in the next
+   * pass, #1188).
+   */
   readonly store?: Definition;
-  readonly cells?: readonly Definition[];
+  readonly cellsLive?: boolean;
 }
 
 /**
@@ -895,7 +898,7 @@ export class Admission {
       readonly path: readonly string[];
       readonly binding: PlaceId;
       readonly strip: readonly string[];
-      readonly cells: readonly Definition[];
+      readonly cellsLive: boolean;
     }[]
   >();
   /** The copies of places that may inherit a written type (`#inheriting`), where they land. */
@@ -1064,7 +1067,7 @@ export class Admission {
       ) {
         // (one landing path and key per copied path, its copies' shared one, charged before it is made)
         const landed = new Map<readonly string[], readonly string[]>();
-        for (const { path, binding, strip, cells } of this.#copySources(d.value)) {
+        for (const { path, binding, strip, cellsLive } of this.#copySources(d.value)) {
           const written = writtenOf(program.place(binding).kind);
           const term = written === null ? null : permittedAt(written, strip);
           if (term === null && (written !== null || !this.#inheriting.has(binding))) continue;
@@ -1088,7 +1091,7 @@ export class Admission {
               from: binding,
               strip,
               store: d,
-              cells,
+              cellsLive,
             });
         }
       }
@@ -1819,11 +1822,7 @@ export class Admission {
     // (whether a live store makes each copy, Astra's B2)
     for (const copy of this.#a4Inherits) {
       const id = keptParts(this.#work, copy.place, copy.path, copy.from, copy.strip);
-      if (
-        copy.store !== undefined &&
-        this.pass.lists.live(copy.store) &&
-        (copy.cells ?? []).every((cell) => this.pass.lists.live(cell))
-      )
+      if (copy.store !== undefined && this.pass.lists.live(copy.store) && copy.cellsLive !== false)
         this.#liveCopies.add(id);
     }
     // a cycle's landed paths, sources before it: a copy from outside it brings its own path and every path landed below
@@ -4894,8 +4893,13 @@ export class Admission {
     readonly path: readonly string[];
     readonly binding: PlaceId;
     readonly strip: readonly string[];
-    /** The literal cells the copy passes through (Astra's B2). */
-    readonly cells: readonly Definition[];
+    /**
+     * Whether the literal cells the copy passes through are all live (Astra's B2), kept as one answer, not the cells:
+     * a list of them per copy grew with the literal's depth, a source of every reference below it (16,384 references
+     * 4,096 deep held about 780 MiB after a stop before admission settled, the fresh pass's copies beside the stopped
+     * one's).
+     */
+    readonly cellsLive: boolean;
   }[] {
     const known = this.#copies.get(value);
     if (known !== undefined) return known;
@@ -4904,20 +4908,20 @@ export class Admission {
       path: readonly string[];
       binding: PlaceId;
       strip: readonly string[];
-      cells: readonly Definition[];
+      cellsLive: boolean;
     }[] = [];
-    const pending: [PlaceId, readonly string[], readonly string[], readonly Definition[]][] = [
-      [value, [], [], []],
+    const pending: [PlaceId, readonly string[], readonly string[], boolean][] = [
+      [value, [], [], true],
     ];
     while (pending.length > 0) {
-      const [current, path, strip, cells] = pending.pop()!;
+      const [current, path, strip, cellsLive] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        out.push({ path, binding, strip, cells });
+        out.push({ path, binding, strip, cellsLive });
         continue;
       }
-      const next: [PlaceId, readonly string[], readonly string[], readonly Definition[]][] = [];
+      const next: [PlaceId, readonly string[], readonly string[], boolean][] = [];
       // (its cells' tasks share one rest of the strip, charged as kept)
       let rest: readonly string[] | null = null;
       if (program.hasOf.has(current))
@@ -4931,13 +4935,13 @@ export class Admission {
               const child = strip.length === 0 ? keptSteps(this.#work, path, [name]) : path;
               for (const d of definitions.cellDefs.get(term.place) ?? []) {
                 rest ??= strip.length === 0 ? strip : keptSlice(this.#work, strip, 1);
-                next.push([d.value!, child, rest, [...cells, d]]);
+                next.push([d.value!, child, rest, cellsLive && this.pass.lists.live(d)]);
               }
             }
         }
       else
         for (const [carried, rest] of this.#carriersOf(current, strip))
-          next.push([carried, path, rest, cells]);
+          next.push([carried, path, rest, cellsLive]);
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
     }
     this.#copies.set(value, out);
