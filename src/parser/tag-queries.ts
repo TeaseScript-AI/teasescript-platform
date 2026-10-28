@@ -19,11 +19,11 @@ export function parseTaggedQuery(
   catalog: TagQueryExpression["catalog"],
 ): TagQueryExpression | null {
   const tagged = parser.advance();
-  const example = catalog === "images" ? 'showImage tagged "bedroom"' : 'goto tagged "punishment"';
+  const example = catalog === "images" ? '"bedroom"' : '"punishment"';
   if (parser.check(TokenKind.Newline) || parser.check(TokenKind.EndOfFile)) {
     parser.reportInsertion(
       parserDiagnosticCode.invalidTagQuery,
-      `Expected a tag after 'tagged', such as ${example}.`,
+      `Expected a tag after 'tagged', such as '${example}'.`,
     );
     return null;
   }

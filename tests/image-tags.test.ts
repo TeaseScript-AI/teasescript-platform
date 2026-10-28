@@ -331,7 +331,7 @@ test("a malformed tag query names the accepted form", () => {
       'showImage tagged "bedroom", none: ["a"], none: ["b"]',
       "The option 'none' appears more than once.",
     ],
-    ["showImage tagged", "Expected a tag after 'tagged', such as showImage tagged \"bedroom\"."],
+    ["showImage tagged", "Expected a tag after 'tagged', such as '\"bedroom\"'."],
     [
       'say findImages("bedroom")',
       "findImages takes named arguments: where:, all:, none:, and any:.",
