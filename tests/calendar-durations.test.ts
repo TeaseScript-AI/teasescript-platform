@@ -482,6 +482,12 @@ test("a local date and time moves only by calendar units, keeping its clock time
     `${DYNAMIC}${dinner}let x = dynamic(dinner) + dynamic(1 calendar month + 30 min)\nexit`,
   ])
     assert.equal(runtimeFailure(source), "TSR009", source);
+  // The runtime has the values but not their source, so it names the fix in words.
+  assert.equal(
+    start(`${DYNAMIC}${dinner}let gap = dynamic(dinner) - dynamic(lunch)\nexit`).result.snapshot
+      .failure?.message,
+    "A date and time has no time zone, so one cannot be subtracted from another. For the days between them, convert both with the toDate function first. For the elapsed time, convert both with the toAbsoluteDateTime function.",
+  );
 });
 
 test("an absolute date and time moves only by exact time, and elapsed-time consumers reject calendar durations", () => {

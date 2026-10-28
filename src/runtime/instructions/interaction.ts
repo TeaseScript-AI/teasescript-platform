@@ -651,7 +651,7 @@ function interactionPrefill(
   if (typeof value !== "string")
     throw fault(
       "TSR052",
-      "The prefill of askText must be text. Write the value as text with interpolation: 'prefill: \"${...}\"'.",
+      "The prefill of askText must be text. Put the value into a text with interpolation.",
       span,
     );
   return value;
