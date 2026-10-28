@@ -900,21 +900,53 @@ test("before admission settled every store into an inferred place is marked, aft
   const tail = '\nsay n\nrepeat 2 { say "AFTER" }\nexit\n';
   const at = (source: string, text: string, skip = 0): number => source.indexOf(text) + skip;
   for (const [source, values] of [
-    ['let n = 1\nn = "wrong"' + tail, ["= 1", 2, '"wrong"', 0]],
-    ['let n = [1]\nn = ["wrong"]' + tail, ["[1]", 0, '["wrong"]', 0]],
-    ['let n = {x: 1}\nn = {x: "wrong"}' + tail, ["{x: 1}", 0, '{x: "wrong"}', 0]],
+    [
+      'let n = 1\nn = "wrong"' + tail,
+      [
+        ["= 1", 2],
+        ['"wrong"', 0],
+      ],
+    ],
+    [
+      'let n = [1]\nn = ["wrong"]' + tail,
+      [
+        ["[1]", 0],
+        ['["wrong"]', 0],
+      ],
+    ],
+    [
+      'let n = {x: 1}\nn = {x: "wrong"}' + tail,
+      [
+        ["{x: 1}", 0],
+        ['{x: "wrong"}', 0],
+      ],
+    ],
     [
       'let n = {x: {y: 1}}\nn = {x: {y: "wrong"}}' + tail,
-      ["{x: {y: 1}}", 0, '{x: {y: "wrong"}}', 0],
+      [
+        ["{x: {y: 1}}", 0],
+        ['{x: {y: "wrong"}}', 0],
+      ],
     ],
-    ["let n = 1\nn = 2.5" + tail, ["= 1", 2, "2.5", 0]],
-    ['let n = 1\nn = "wrong"\nlet m = n' + tail, ["= 1", 2, '"wrong"', 0, "= n\n", 2]],
+    [
+      "let n = 1\nn = 2.5" + tail,
+      [
+        ["= 1", 2],
+        ["2.5", 0],
+      ],
+    ],
+    [
+      'let n = 1\nn = "wrong"\nlet m = n' + tail,
+      [
+        ["= 1", 2],
+        ['"wrong"', 0],
+        ["= n\n", 2],
+      ],
+    ],
   ] as const) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null);
-    const sites: number[] = [];
-    for (let index = 0; index < values.length; index += 2)
-      sites.push(at(source, values[index] as string, values[index + 1] as number));
+    const sites = values.map(([text, skip]) => at(source, text, skip));
     const wrong = source.indexOf('"wrong"');
     for (const reversed of [false, true]) {
       const analyse = (allowance?: number): Answers => {

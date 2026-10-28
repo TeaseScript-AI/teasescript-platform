@@ -1592,8 +1592,6 @@ export class Consumers {
     return steps;
   }
 
-
-
   /**
    * What a copy copies by its syntax: a written place's type and the path it is copied from; `external` for a host
    * value the script never stores into; `null` for anything else.
