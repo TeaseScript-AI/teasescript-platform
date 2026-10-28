@@ -9,7 +9,7 @@ import { coreRequest } from "./type-core-analysis.js";
  * was offered for, compiles and runs. Each case is an offer's erroneous expression (`OFFERS`, with the setup its
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
- * loop's iterable, a range's bound).
+ * loop's iterable, a range's bound, a variable or a parameter without a type, as its reads take it).
  * The parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
  */
 
@@ -54,6 +54,12 @@ const OFFERS: readonly Offer[] = [
   { name: "dict value trim", setup: 'let d = dict{a: " hello "}', expression: 'd["a"].trim' },
   { name: "angle degrees", setup: "let a = 90 deg", expression: "a.degrees" },
   { name: "dict missing key", setup: "let d = dict{k: 1}", expression: "d.missing" },
+  {
+    name: "missing key's trim",
+    setup: 'let d = dict{a: " hello "}',
+    expression: 'd["missing"].trim',
+  },
+  { name: "absent property's size", setup: 'let door = {a: "hello"}', expression: "door.b.size" },
   ...ELEMENTS.flatMap(([kind, value]): Offer[] => [
     { name: `join of ${kind}`, setup: `let items = [${value}]`, expression: "items.join" },
     {
@@ -114,6 +120,19 @@ const SITES: readonly Site[] = [
   { name: "iteration", before: "", line: "for v in @ {\n  say v\n}" },
   { name: "range bound", before: "", line: "for i in 1..@ {\n  say i\n}", operand: true },
   { name: "object store", before: 'let o = {n: "x"}', line: "o = @" },
+  { name: "untyped variable's trim", before: "", line: "let v = @\nsay v.trim()" },
+  { name: "untyped argument", before: "function show(p) {\n  say p\n}", line: "show(@)" },
+  { name: "untyped trim argument", before: "function use(p) {\n  say p.trim()\n}", line: "use(@)" },
+  {
+    name: "untyped sum argument",
+    before: "function count(p) {\n  return p + 1\n}",
+    line: "say count(@)",
+  },
+  {
+    name: "untyped returned argument",
+    before: "function id(p) {\n  return p\n}",
+    line: "let w: string = id(@)\nsay w",
+  },
 ];
 
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */

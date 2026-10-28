@@ -391,12 +391,14 @@ function operandRule(rule: DiagnosticRule): string {
 
 /**
  * What one operation of a code form takes of a subject: the subject's kinds, each of which it must take; `value`, a
- * value it holds (a list's element), whose structure must fit too.
+ * value it holds (a list's element), whose structure must fit too; `absent`, a subject that may not be there when the
+ * script runs (a value read through a dict's key).
  */
 interface Takes {
   readonly subject: readonly ItemTag[];
   readonly takes: readonly ItemTag[];
   readonly value?: true;
+  readonly absent?: true;
 }
 
 /** The kinds whose structure a kind alone does not say: an object's properties, a collection's elements. */
@@ -441,8 +443,8 @@ function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["re
 
 /**
  * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on. It holds
- * where (1) each operation takes its subject: every kind of it known, and one the operation takes, a value it holds
- * of a flat structure; (2) its value fits what the site takes (`site`, read from what consumes the value there: any
+ * where (1) each operation takes its subject: there when the script runs, every kind of it known, and one the
+ * operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what consumes the value there: any
  * value where nothing restricts it), a structured value only there or as a collection of scalars against its
  * elements' kinds, and a value the fix writes itself only where the value does not divide; and (3) it binds there: as
  * the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code. Its code, so
@@ -459,7 +461,8 @@ function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   if (
     !ownText(form.code) ||
     !form.takes.every(
-      ({ subject, takes, value }) => fit(subject, takes) && (value !== true || flat(subject)),
+      ({ subject, takes, value, absent }) =>
+        absent !== true && fit(subject, takes) && (value !== true || flat(subject)),
     )
   )
     return null;
@@ -690,7 +693,20 @@ function memberFix(
     takes: readonly ItemTag[],
     gives: readonly ItemTag[],
     also: readonly Takes[] = [],
-  ) => (named ? codeAt({ code, takes: [{ subject: holder, takes }, ...also], gives }, site) : null);
+  ) =>
+    named
+      ? codeAt(
+          {
+            code,
+            takes: [
+              { subject: holder, takes, ...(rule.keyed === true ? { absent: true } : {}) },
+              ...also,
+            ],
+            gives,
+          },
+          site,
+        )
+      : null;
   if (!rule.member.startsWith(".")) return kind === "object" ? objectIndexFix(rule, text) : "";
   const method = rule.member.endsWith("()");
   const name = method ? rule.member.slice(1, -2) : rule.member.slice(1);

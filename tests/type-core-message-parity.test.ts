@@ -1063,7 +1063,6 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let t = "hello"\nsay ⟦t.toUpperCase()⟧\nexit\n', /Use '([^']*)'/, ["HELLO"]],
   ['let t = "hello"\nsay ⟦t.length()⟧\nexit\n', /Write '([^']*)'/, ["5"]],
   ['let t = " hello "\nsay ⟦t.trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
-  ['let d = dict{a: " hello "}\nsay ⟦d["a"].trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
   ['let items = ["a", "b"]\nsay ⟦items.join⟧\nexit\n', /Write '([^']*)'/],
   ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
   ['let lists = [["a"]]\nsay ⟦lists[0].join⟧\nexit\n', /Write '([^']*)'/],
@@ -1089,6 +1088,17 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     ["2"],
   ],
   ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /Write '([^']*)' to add the numbers/, ["3"]],
+  // an argument of a parameter without a type, as its body takes it, also through its result (Codex r7, TABLE r4.160)
+  [
+    'let t = "hello"\nfunction show(p) {\n  say p\n}\nshow(⟦t.size⟧)\nexit\n',
+    /Use '([^']*)'/,
+    ["5"],
+  ],
+  [
+    'let t = "hello"\nfunction count(p) {\n  return p + 1\n}\nsay count(⟦t.size⟧)\nexit\n',
+    /Use '([^']*)'/,
+    ["6"],
+  ],
   // a fallback the fix writes (ADR 0021 rule 1.9) where the value does not divide, and a receiver's in parentheses
   // (Astra on #1273)
   ["let xs = [4, null]\nsay ⟦xs[1]⟧ / 2\nexit\n", /fallback, as in '([^']*)'/, ["0"]],
@@ -1536,6 +1546,25 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     ['function show(x) {\n  say x.size\n}\nshow("a")\nshow(1)\nexit\n', "Use the length property."],
     [
       'function show(x: string?) {\n  say x.trim\n}\nshow("a")\nshow(null)\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    // (Codex r7, TABLE r4.160: an argument of a parameter without a type that its body or its result's use does not
+    // take, a variable's value its reads do not take; a receiver read through a dict's key, which may be absent)
+    [
+      'let t = "hello"\nfunction use(p) {\n  say p.trim()\n}\nuse(t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    [
+      'let t = "hello"\nfunction id(p) {\n  return p\n}\nlet q: string[] = id(t.size)\nexit\n',
+      "Use the length property.",
+    ],
+    ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
+    [
+      'let d = dict{a: " hello "}\nsay d["missing"].trim\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    [
+      'let d = dict{a: " hello "}\nsay d["a"].trim\nexit\n',
       "Call the trim method with parentheses.",
     ],
     // (Astra on #1273: a fallback the fix would write where the value divides, as a divisor, through a calculation or a

@@ -159,6 +159,8 @@ export type DiagnosticRule =
       readonly use: "read" | "call" | "store";
       /** A list's `join` read: its elements' type's kinds, which decide whether a fix's call is valid (TABLE r4.151). */
       readonly elements?: readonly ItemTag[];
+      /** An error's receiver read through a dict's key, which may be absent, so no code on it is proved (TABLE r4.160). */
+      readonly keyed?: true;
     }
   /**
    * C5c, ADR 1.4: a property no source of `receiver` has: a read's at the read; a store's at the object that lacks it,

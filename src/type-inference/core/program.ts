@@ -65,7 +65,8 @@ export type ValueConstraint = Extract<
  * What consumes a value place (TABLE r4.151), as its constraint or use is registered: a store into `into`; an operand
  * (`index`) or the receiver of an operation; the receiver of a member or element access; an argument of a function, by
  * position or name; a function's returned value; a use of the flow graph (C2, C3, C12); or another constraint, whose
- * demand on the value a fix does not read (a `get`'s key, a fallback's side, a save).
+ * demand on the value a fix does not read (a `get`'s key, a fallback's side, a save). A variable's or a parameter's
+ * place is consumed by each read of it, a function's result by each call (`read`, the value read there; TABLE r4.160).
  */
 export type Consumption =
   | { readonly kind: "store"; readonly into: PlaceId }
@@ -78,6 +79,7 @@ export type Consumption =
   | { readonly kind: "access"; readonly step: Constraint & { readonly kind: "project" } }
   | { readonly kind: "argument"; readonly fn: number; readonly parameter: number | string }
   | { readonly kind: "return"; readonly fn: number }
+  | { readonly kind: "read"; readonly occurrence: PlaceId }
   | {
       readonly kind: "use";
       readonly what: "index" | "count" | "condition" | "key";
@@ -380,6 +382,9 @@ export class CoreProgram {
   #consumptions(constraint: Constraint): void {
     const other: Consumption = { kind: "other" };
     switch (constraint.kind) {
+      case "read":
+        this.#consumed(constraint.binding, { kind: "read", occurrence: constraint.occurrence });
+        break;
       case "store":
         this.#consumed(constraint.value, { kind: "store", into: constraint.into });
         break;
@@ -398,7 +403,10 @@ export class CoreProgram {
         );
         for (const named of constraint.named) this.#consumed(named.value, other);
         break;
-      case "call":
+      case "call": {
+        const result = this.#functions.get(constraint.fn)?.result;
+        if (result !== undefined)
+          this.#consumed(result, { kind: "read", occurrence: constraint.result });
         constraint.arguments.forEach((argument, index) =>
           this.#consumed(argument, { kind: "argument", fn: constraint.fn, parameter: index }),
         );
@@ -409,6 +417,7 @@ export class CoreProgram {
             parameter: named.name,
           });
         break;
+      }
       case "return":
         if (constraint.value !== null)
           this.#consumed(constraint.value, { kind: "return", fn: constraint.fn });

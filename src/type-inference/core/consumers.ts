@@ -1396,8 +1396,8 @@ export class Consumers {
 
   /**
    * TABLE r4.151: what the place the value at `site` lands in takes, read from what consumes it
-   * (`CoreProgram.consumersOf`): a store's, an argument's or a result's place, its admitted type and its elements' (any
-   * where it is unrestricted or where this value decides it); a use, the kind it requires; nothing, where `say` shows
+   * (`CoreProgram.consumersOf`): a store's, an argument's or a result's place, its admitted type and its elements' (where
+   * this value decides it, unwritten, what every read of it takes); a use, the kind it requires; nothing, where `say` shows
    * the value, what `say` shows (V30 §8: text, numbers and the other shown kinds, a list, set, dict or object in
    * notation), else nothing a fix can prove (a command the core does not model, such as `wait`). Where the consumer's
    * own result depends on the value (an operator's, a member's), the
@@ -1431,10 +1431,55 @@ export class Consumers {
   /** `#expected`'s answer per site. */
   readonly #expectations = new Map<string, SiteExpectation>();
 
+  /**
+   * What every read of an unwritten place takes, a function's result each call (`read` consumptions): a kind each read
+   * takes, by `fits`, and their elements'; any where nothing reads it. Once per place, charged per read.
+   */
+  #readsTake(place: PlaceId): SiteExpectation {
+    const known = this.#placeExpectations.get(place);
+    if (known !== undefined) return known;
+    // (a read that leads back to the place, as a recursive call's argument does, proves nothing)
+    this.#placeExpectations.set(place, { takes: [], binds: "whole" });
+    const { program } = this.pass;
+    const both = (a: readonly ItemTag[], b: readonly ItemTag[]): ItemTag[] => [
+      ...a.filter((tag) => b.some((other) => fits(tag, other, true))),
+      ...b.filter((tag) => !a.includes(tag) && a.some((other) => fits(tag, other, true))),
+    ];
+    let takes: readonly ItemTag[] | null = null;
+    let elements: readonly ItemTag[] | null | undefined = null;
+    for (const consumer of program.consumersOf.get(place) ?? []) {
+      if (consumer.kind !== "read") continue;
+      program.work.charge("checks");
+      const site = program.place(consumer.occurrence).site;
+      const read: SiteExpectation =
+        site === null ? { takes: [], binds: "whole" } : this.#expected(site);
+      if (read.takes !== null) takes = takes === null ? read.takes : both(takes, read.takes);
+      elements =
+        elements === undefined || read.elements === undefined
+          ? undefined
+          : read.elements === null
+            ? elements
+            : elements === null
+              ? read.elements
+              : both(elements, read.elements);
+    }
+    const found: SiteExpectation = {
+      takes,
+      binds: "whole",
+      ...(elements === undefined ? {} : { elements }),
+    };
+    this.#placeExpectations.set(place, found);
+    return found;
+  }
+
+  /** `#readsTake`'s answer per place. */
+  readonly #placeExpectations = new Map<PlaceId, SiteExpectation>();
+
   #consumerTakes(consumer: Consumption): SiteExpectation {
     const { program } = this.pass;
     const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
-    // (a place's admitted type, and its elements' where it holds a collection: any where unrestricted or undecided)
+    // (a place's admitted type, and its elements' where it holds a collection: any where unrestricted; where this
+    // value decides it, unwritten, what its reads take, Codex r7, TABLE r4.160)
     const placeTakes = (root: PlaceId, path: readonly string[]): SiteExpectation => {
       if (program.cellOwner.has(root)) return UNPROVED;
       const admitted = (at: readonly string[]): ItemTag[] | null => {
@@ -1442,6 +1487,13 @@ export class Consumers {
         return tags.length === 0 || tags.includes("unknown") ? null : tags;
       };
       const takes = admitted(path);
+      if (takes === null) {
+        // (decided beside values of other types, or below the place's root, it is not this value's alone)
+        const others = this.admission
+          .admitted(root, path)
+          .some((tag) => tag !== "empty" && tag !== "unknown");
+        return path.length > 0 || others ? UNPROVED : this.#readsTake(root);
+      }
       return {
         takes,
         binds: "whole",
@@ -1583,6 +1635,7 @@ export class Consumers {
           binds: "whole",
         };
       }
+      case "read":
       case "other":
         return UNPROVED;
     }
@@ -3737,6 +3790,25 @@ export class Consumers {
     );
   }
 
+  /**
+   * Whether the value at `place` is read through a dict's key, there or above it (`d["a"]`, `d["a"].label`): a value
+   * the dict may not have when the script runs, which no fact here rules out (TABLE r4.160).
+   */
+  #throughKey(place: PlaceId): boolean {
+    const { program } = this.pass;
+    for (
+      let projection = program.projOf.get(place);
+      projection !== undefined;
+      projection = program.projOf.get(projection.owner)
+    )
+      if (
+        projection.step === "index" &&
+        this.#kindsOf(projection.owner, projection.node).some((item) => item.tag === "dict")
+      )
+        return true;
+    return false;
+  }
+
   /** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
   #methodReceiver(site: SourceSite, node: FlowNode, receiver: PlaceId, name: string): void {
     // §3.3: a receiver that is never null and has the method (a reference's method is F19a's)
@@ -3820,7 +3892,9 @@ export class Consumers {
       this.#error(
         "member-read",
         site,
-        rule,
+        receiverPlace !== undefined && this.#throughKey(receiverPlace)
+          ? { ...rule, keyed: true }
+          : rule,
         (definite(nulls) ? nulls : lacking).map((item) => item.tag),
       );
       return;
