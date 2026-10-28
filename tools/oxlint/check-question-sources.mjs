@@ -74,8 +74,8 @@ export function questionSourceDiagnostics(sources, readers) {
   const diagnostics = [];
   // the members that name each guarded name, by class
   const named = new Set();
+  // (every file parsed: a name the source spells with escapes is the same name, Codex r29 B1)
   for (const { file, text } of sources) {
-    if (![...OWNERS.keys()].some((name) => text.includes(name.replace("#", "")))) continue;
     const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     const report = (node, message) => {
       const location = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
