@@ -476,8 +476,8 @@ export const DIAGNOSTIC_CODES = {
           "other file or folder the host could not load that no such path or glob names but code may use: a computed " +
           "`goto` or `call` that can run, when a script reference may name the file, or, for a folder, any media or " +
           "image file known only when the script runs, also in code that never runs. Such a `.tease` file or folder " +
-          "that no such code may use is `TSV065`, with the host's reason after the `TSV065` text. While the script " +
-          "has an error, which code can run is not known, so each keeps `TSC011`",
+          "that no such code may use is `TSV065`, with the host's reason after the `TSV065` text. When errors prevent " +
+          "reachability analysis, each keeps `TSC011`",
       ],
     },
   },
