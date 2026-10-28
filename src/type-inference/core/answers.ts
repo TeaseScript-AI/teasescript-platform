@@ -855,14 +855,16 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * A value's items at a node and a path. After a stop, the solver's finished answer where admission had settled, and
-   * where that is `budget`'s unknown, what the value's own syntax gives (`#stoppedShape`).
+   * A value's items at a node and a path. After a stop, the finishing read's sources in their order (TABLE r4.138): the
+   * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
+   * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
+   * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`).
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
     if (!this.#stopped || !answered.some(isStopped)) return answered;
     const own = this.#stoppedShape(value, path).items;
-    return own === STOPPED ? answered : own;
+    return own !== STOPPED ? own : this.#consumers.finishedItems(value, node, path);
   }
 
   /**

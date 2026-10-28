@@ -462,6 +462,18 @@ export class Consumers {
   }
 
   /**
+   * After a stop, a value's items at a node and a path as the finishing read answers them (`#finishingRead`), for the
+   * route's questions: one derivation with the consumers' (TABLE r4.138).
+   */
+  public finishedItems(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): readonly Item[] {
+    return this.#finishingRead(value, node, rest);
+  }
+
+  /**
    * A read in the finishing path (D4 a′, TABLE r4.90, r4.99; S3 §5 revision 14, r4.102), answered from the retained
    * state only, the first source that decides it winning: a leaf's own kind (`#leafKind`), which no proof decides (an
    * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
