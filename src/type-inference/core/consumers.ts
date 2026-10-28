@@ -2346,9 +2346,10 @@ export class Consumers {
   #directSites: Map<string, SourceSite> | null = null;
 
   /**
-   * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects is checked at its first
-   * direct read or store, the copy that brought the other type its related site (`copy`, else `site`); any other error
-   * stays at `site`. `eligible`: the error is that property's, its offending contribution through whole copies.
+   * A2, ADR 0021 rule 1.1: a property that reaches a place only through copies of whole objects, where they were not
+   * found to meet at the copy (a cycle of copies that adds or takes steps, TABLE r4.154), is checked at its first direct
+   * read or store, the copy that brought the other type its related site (`copy`, else `site`); any other error stays
+   * at `site`. `eligible`: the error is that property's, its offending contribution through whole copies.
    */
   #deferred(
     site: SourceSite,
@@ -2684,8 +2685,9 @@ export class Consumers {
 
   /**
    * ADR 0021 1.3, A8: a literal's element of another type than the earliest element's (`Admission.literalElements`): an
-   * error at the offending element, or where a copy brought it into a property, A2's at the property's first direct read
-   * or store.
+   * error at the offending element, also where a copy brought it into a property and the copies meet there (A2, TABLE
+   * r4.131); where they were not found to meet (a cycle of copies that adds or takes steps, r4.154), at the property's
+   * first direct read or store.
    */
   #mixed(
     site: SourceSite,
@@ -2698,7 +2700,9 @@ export class Consumers {
     const step = cell.kind === "cell" ? cell.step : "element";
     // the place the literal lands in, through which a later read reaches the property
     const store =
-      literal === undefined || found.path.length === 0 ? null : this.#landingOf(literal);
+      literal === undefined || found.path.length === 0 || found.atCopy
+        ? null
+        : this.#landingOf(literal);
     if (store !== null) {
       // (a key's steps: a dict value is an `element`, as `targetRoot` makes it)
       const below = found.path.map((at) => (at === "entry" ? "element" : at));
@@ -3047,7 +3051,10 @@ export class Consumers {
             ),
             root,
             path,
-            reach !== null && reach.brought && this.#copiesOnly(root, path),
+            reach !== null &&
+              reach.brought &&
+              !admission.atCopy(root, path) &&
+              this.#copiesOnly(root, path),
             () => reach?.copy ?? null,
           );
           this.#error(

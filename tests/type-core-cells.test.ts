@@ -3126,13 +3126,13 @@ test("a named collection in a literal or an add brings its elements' types to th
     ["inline lists", `let xs = [[1], ["bad"]]${after}`, "compile-error", [16]],
     ["an inline add", `let xs = [[1]]\nxs.add(["bad"])${after}`, "compile-error", [22]],
     ["inline records", `let xs = [{n: 1}, {n: "bad"}]${after}`, "compile-error", [22]],
-    // a named record's field where a read or the literal's own record decides it (A2, TABLE q12): reached only through
-    // copies, at its first direct read, the copy `b` its related site (ADR 0021 rule 1.1, r4.75 (4))
+    // a named record's field, reached only through copies, where the copy meets the literal, read or not (A2, ADR 0021
+    // rule 1.1, TABLE r4.131)
     [
       "records, a field read",
       `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}${after}`,
       "compile-error",
-      [57],
+      [47],
     ],
     [
       "a record beside a literal one",
@@ -3140,7 +3140,7 @@ test("a named collection in a literal or an add brings its elements' types to th
       "compile-error",
       [37],
     ],
-    // whole numbers with numbers; fields apart; a named record's fields admitted at their first read (A2)
+    // whole numbers with numbers; fields apart
     [
       "whole numbers and numbers",
       `let a = [1]\nlet b = [2.5]\nlet xs = [a, b]${after}`,
@@ -3156,14 +3156,14 @@ test("a named collection in a literal or an add brings its elements' types to th
     [
       "records, no field read",
       `let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]${after}`,
-      "valid",
-      [],
+      "compile-error",
+      [47],
     ],
     [
       "records holding lists, no field read",
       `let a = {items: [1]}\nlet b = {items: ["bad"]}\nlet xs = [a, b]${after}`,
-      "valid",
-      [],
+      "compile-error",
+      [59],
     ],
     // host data named in the literal: no error, C1's check against the decided lists (round 10 B1)
     [
@@ -3194,19 +3194,40 @@ test("a named collection in a literal or an add brings its elements' types to th
   assert.deepEqual(differing, []);
 });
 
-test("a property only copies of whole objects bring errs at its first direct read or store, the copy related; a store or a literal's own field keeps its error (ADR 0021 rule 1.1, r4.75 (4))", () => {
-  // per program its errors as site text, with the related site's text where there is one
+test("a property only copies of whole objects bring errs where the copy meets the place, read or not; a store or a literal's own field keeps its error (ADR 0021 rule 1.1, TABLE r4.131)", () => {
+  // per program its errors as site text
   const programs: readonly (readonly [string, string, readonly string[]])[] = [
     [
       "copies of variables",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = a\nc = b\nsay c.n\nexit',
-      ["c.n (b)"],
+      ["b"],
+    ],
+    // a conflict nobody reads is refused, as for inline objects, in either order of the copies
+    [
+      "copies of variables, unread",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = a\nc = b\nexit',
+      ["b"],
+    ],
+    [
+      "copies of variables, the other first",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = b\nc = a\nexit',
+      ["a"],
+    ],
+    [
+      "a list, a set and a dict of copies",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nlet ys = set[a, b]\nlet zs = dict{"a": a, "b": b}\nexit',
+      ["b", "b", "b"],
+    ],
+    [
+      "a literal of copies nothing stores",
+      'let a = {n: 1}\nlet b = {n: "bad"}\nsay [a, b].length\nexit',
+      ["b"],
     ],
     // a projection that copies a whole object is a copy too
     [
       "copies through projections",
       'let bundle = {left: {n: 1}, right: {n: "bad"}}\nlet c = bundle.left\nc = bundle.right\nsay c.n\nexit',
-      ["c.n (bundle.right)"],
+      ["bundle.right"],
     ],
     // a store through the property is the property's own, whatever names its value
     [
@@ -3214,58 +3235,58 @@ test("a property only copies of whole objects bring errs at its first direct rea
       'let a = {n: 1}\nlet c = a\nsay c.n\nlet wrong = "bad"\nc.n = wrong\nexit',
       ["wrong"],
     ],
-    // copies inside literals that wrap them, the copy named
+    // copies inside literals that wrap them, at the wrapper that brings the copy
     [
       "copies through literal wrappers",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet c = {box: {inner: a}}\nc = {box: {inner: b}}\nsay c.box.inner.n\nexit',
-      ["c.box.inner.n (b)"],
+      ["{box: {inner: b}}"],
     ],
     [
       "elements wrapping copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: b}]\nsay xs[0].inner.n\nexit',
-      ["xs[0].inner.n (b)"],
+      ["{inner: b}"],
     ],
     // a dict's values, an added list's elements, and a wrapper without the property, like the list's
     [
       "dict values wrapping copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = dict{a: {inner: a}, b: {inner: b}}\nsay xs["a"].inner.n\nexit',
-      ['xs["a"].inner.n (b)'],
+      ["{inner: b}"],
     ],
     [
       "an added list wrapping a copy",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}]\nxs.addAll([{inner: b}])\nsay xs[0].inner.n\nexit',
-      ["xs[0].inner.n (b)"],
+      ["[{inner: b}]"],
     ],
     [
       "a wrapper without the property beside the copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {}}, {inner: b}]\nsay xs[0].inner.n\nexit',
-      ["xs[0].inner.n (b)"],
+      ["{inner: b}"],
     ],
     [
       "a wrapper with the property beside the copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [{inner: a}, {inner: {n: 2}}, {inner: b}]\nsay xs[0].inner.n\nexit',
       ["{inner: b}"],
     ],
-    // copies in a literal that lands inside another literal or through an add: at the first direct read or store
+    // copies in a literal that lands inside another literal or through an add: at the copy in its own literal
     [
       "a list of copies inside an object",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = {items: [a, b]}\nxs.items[0].n = 2\nexit',
-      ["xs.items[0].n (b)"],
+      ["b"],
     ],
     [
       "a list of copies inside a list",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [[a, b]]\nsay xs[0][0].n\nexit',
-      ["xs[0][0].n (b)"],
+      ["b"],
     ],
     [
       "an added list of copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.addAll([a, b])\nsay xs[0].n\nexit',
-      ["xs[0].n (b)"],
+      ["b"],
     ],
     [
       "an added element that is a list of copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = []\nxs.add([a, b])\nsay xs[0][0].n\nexit',
-      ["xs[0][0].n (b)"],
+      ["b"],
     ],
     // a literal's own field is its own contribution, whatever it copies
     [
@@ -3273,11 +3294,34 @@ test("a property only copies of whole objects bring errs at its first direct rea
       'let a = {n: 1}\nlet c = {n: a.n}\nc = {n: "bad"}\nsay c.n\nexit',
       ['"bad"'],
     ],
-    // a literal of the destination gives the property itself, so the copy's error stays at the copy
     [
       "a literal's field beside the copies",
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, {n: 2}, b]\nsay xs[0].n\nexit',
       ["b"],
+    ],
+    // an object with a written property beside a plain one: the plain one where the copy meets the place, the written
+    // one by its written type (A4)
+    [
+      "a plain property beside a written one",
+      'let typed: integer = 1\nlet a = {n: typed, m: 1}\nlet b = {n: 2, m: "x"}\nlet c = a\nc = b\nlet xs = [a, b]\nexit',
+      ["b", "b"],
+    ],
+    // a place whose own type is unknown, a property of it receiving copies, each rejection found again (Codex r2 B3)
+    [
+      "copies into a property of host data",
+      'let c = hostValue\nlet a = {n: 1}\nlet b = {n: "x"}\nc.inner = a\nc.inner = b\nc.inner = b\nexit',
+      ["b", "b"],
+    ],
+    [
+      "copies into a place that starts empty",
+      'let a = {n: 1}\nlet b = {n: "x"}\nlet c = null\nc = a\nc = b\nexit',
+      ["b"],
+    ],
+    // whole numbers and numbers are one family, so nothing errs
+    [
+      "a whole number beside a number",
+      "let a = {n: 1}\nlet b = {n: 1.5}\nlet xs = [a, b]\nlet c = a\nc = b\nexit",
+      [],
     ],
   ];
   const differing: string[] = [];
@@ -3290,11 +3334,7 @@ test("a property only copies of whole objects bring errs at its first direct rea
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
       const errors = record.diagnostics
         .filter((diagnostic) => diagnostic.class === "compile-error")
-        .map(
-          ({ site, related }) =>
-            source.slice(site.offset, site.end) +
-            (related === undefined ? "" : ` (${source.slice(related.offset, related.end)})`),
-        );
+        .map(({ site }) => source.slice(site.offset, site.end));
       if (JSON.stringify(errors) !== JSON.stringify(expected))
         differing.push(`${name}${reversed ? " reversed" : ""}: ${errors.join(", ")}`);
     }
@@ -3302,9 +3342,167 @@ test("a property only copies of whole objects bring errs at its first direct rea
   assert.deepEqual(differing, []);
 });
 
-test("the copied-property check grows with the program, not with its copies times its fields (A2, ADR 0021 rule 1.1)", () => {
+/**
+ * A2's witnesses (TABLE r4.131, r4.154), their exact records in both orders of the copy and the object and in both
+ * analysis orders: per form, a place copied with its setup and an object holding another type at one property, stored
+ * into one place and as a list's elements, unread. Through whole copies (Codex r1's cycle of whole copies, a cycle fed
+ * from outside, a copy into a property, a projection, nested objects, a written property beside an inferred one, a
+ * property that may be null) the second errs where it meets the place or the list. Through a cycle of copies that adds or
+ * takes steps (Codex r2's and r3's projections and composed projections, r2's and r5's self-grafts) their meeting is
+ * beyond the bound (design §2.1.2): valid unread; read, the error is at the first read and names the second.
+ */
+test("A2's witnesses: whole copies err where they meet the place or the list, read or not; a cycle that adds or takes steps errs where it is read, in both orders", () => {
+  // per form: its setup, the place copied, the object of another type, and for a cycle beyond the bound the path read
+  const forms: readonly (readonly [string, string, string, string, string | null])[] = [
+    [
+      "a cycle of whole copies",
+      "let a = {n: 1}\nlet b = {m: 2}\na = b\nb = a",
+      "a",
+      '{m: "x"}',
+      null,
+    ],
+    [
+      "a cycle fed from outside",
+      "let src = {n: 1}\nlet a = src\nlet b = a\na = b",
+      "b",
+      '{n: "x"}',
+      null,
+    ],
+    [
+      "a copy into a property",
+      "let src = {n: 1}\nlet a = {p: null}\na.p = src",
+      "a",
+      '{p: {n: "x"}}',
+      null,
+    ],
+    ["a projection", "let bundle = {left: {n: 1}}\nlet a = bundle.left", "a", '{n: "x"}', null],
+    [
+      "nested objects",
+      "let inner = {n: 1}\nlet a = {box: {inner: inner}}",
+      "a",
+      '{box: {inner: {n: "x"}}}',
+      null,
+    ],
+    [
+      "a written property beside an inferred one",
+      "let typed: integer = 1\nlet a = {n: typed, m: 1}",
+      "a",
+      '{n: 2, m: "x"}',
+      null,
+    ],
+    [
+      "a property that may be null",
+      "let a = {inner: {n: 1}}\nlet b = {inner: null}\nb = a",
+      "b",
+      '{inner: {n: "x"}}',
+      null,
+    ],
+    ["a projection of itself", "let a = {inner: {n: 1}}\na = a.inner", "a", '{n: "x"}', "n"],
+    [
+      "a store into its own property",
+      "let a = {n: 1, inner: null}\na.inner = a",
+      "a",
+      '{inner: {n: "x"}}',
+      "inner.n",
+    ],
+    [
+      "composed projections",
+      "let a = {left: {right: {n: 1}}}\nlet b = a.left\na = b.right",
+      "a",
+      '{n: "x"}',
+      "n",
+    ],
+    [
+      "two places stored into each other's property",
+      "let a = {n: 1, inner: null}\nlet b = {m: 2, inner: null}\na.inner = b\nb.inner = a",
+      "a",
+      '{inner: {m: "x"}}',
+      "inner.m",
+    ],
+    [
+      "a store into its own property in a loop",
+      "let a = {n: 1, inner: null}\nrepeat 3 {\n  a.inner = a\n}",
+      "a",
+      '{inner: {n: "x"}}',
+      "inner.n",
+    ],
+    [
+      "a self-graft below a projection through wrappers",
+      "let a = {n: 1, inner: null}\nlet b = {p: a}\nlet d = {q: b}\na = d.q.p\na.inner = a",
+      "d",
+      '{q: {p: {n: "x"}}}',
+      "q.p.n",
+    ],
+  ];
+  // a record as its outcome, then each diagnostic's class, kind, site and related site, and each check, sorted
+  const exact = (source: string, reversed: boolean): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const run = (): CompactRecord =>
+      withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
+    const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
+    const text = (site: { readonly offset: number; readonly end: number }): string =>
+      `'${source.slice(site.offset, site.end)}'`;
+    return [
+      record.outcome,
+      ...[
+        ...record.diagnostics.map(
+          ({ kind, class: level, site, related }) =>
+            `${level} ${kind} ${text(site)}${related === undefined ? "" : ` related ${text(related)}`}`,
+        ),
+        ...record.checks.map((check) => `check ${check.kind} ${check.target} ${text(check.site)}`),
+      ].sort(),
+    ];
+  };
+  const differing: string[] = [];
+  const expect = (label: string, source: string, expected: readonly string[]): void => {
+    for (const reversed of [false, true]) {
+      const actual = exact(source, reversed);
+      if (JSON.stringify(actual) !== JSON.stringify(expected))
+        differing.push(`${label}${reversed ? ", reversed" : ""}: ${actual.join(", ")}`);
+    }
+  };
+  for (const [form, setup, place, other, read] of forms)
+    for (const copyFirst of [true, false]) {
+      const [first, second] = copyFirst ? [place, "bad"] : ["bad", place];
+      const label = `${form}, ${copyFirst ? "the copy" : "the object"} first`;
+      const stored = `${setup}\nlet bad = ${other}\nlet c = ${first}\nc = ${second}`;
+      const listed = `${setup}\nlet bad = ${other}\nlet xs = [${first}, ${second}]\nexit`;
+      if (read === null) {
+        const at = (code: string): string[] => [
+          "compile-error",
+          `compile-error ${code} '${second}'`,
+        ];
+        expect(`${label}, stored`, `${stored}\nexit`, at("written-target"));
+        expect(`${label}, listed`, listed, at("written-target"));
+        continue;
+      }
+      expect(`${label}, stored`, `${stored}\nexit`, ["valid"]);
+      expect(`${label}, listed`, listed, ["valid"]);
+      expect(`${label}, read`, `${stored}\nsay c.${read}\nexit`, [
+        "compile-error",
+        `compile-error written-target 'c.${read}' related '${second}'`,
+      ]);
+    }
+  // a written `object?` place holds any object, its properties unchecked, inline or copied (A1)
+  expect(
+    "a written object? place",
+    'let a = {n: 1}\nlet b = {n: "x"}\nlet c: object? = null\nc = a\nc = b\nc = {n: 1}\nc = {n: "x"}\nexit',
+    ["valid"],
+  );
+  assert.deepEqual(differing, []);
+});
+
+test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2, TABLE r4.131)", () => {
   // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
-  // copies as a list's elements, as stores into one variable, and wrapped in literals of both
+  // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes (TABLE
+  // r4.131), unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
+  // differs in one field (one error, or one per copy where it comes first), and k places each receiving a copy of each
+  // (one error per place, at its store).
+  // k places each receiving a copy of the first record and then its own object of one other-typed field (one error
+  // each). Beyond the bound (r4.154), linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`,
+  // `a.f_i = b_i`, the object then copied beside another type (one error, at its own property), and r5's: those
+  // cycles beside k self-grafts `a.g_i = a` (none)
   const fields = (k: number, value: string): string =>
     Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
   const records = (k: number): string =>
@@ -3338,28 +3536,102 @@ test("the copied-property check grows with the program, not with its copies time
         `${records(k)}let xs = [${copies(k, "{inner: good}")}]\nxs.add({inner: bad})\n` +
         `${reads(k, "xs[0].inner")}\nexit`,
     ],
+    [
+      "independent property cycles",
+      (k) =>
+        `let a = {n: 1, ${fields(k, "null")}}\n` +
+        `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}`).join("\n")}\n` +
+        'let bad = {n: "x"}\nlet c = a\nc = bad\nexit',
+    ],
+    [
+      "one object copied by k places, each then receiving its own other copy",
+      (k) =>
+        `${records(k)}${Array.from({ length: k }, (_, i) => `let o${i} = {f${i}: "x"}\nlet c${i} = good\nc${i} = o${i}`).join("\n")}\nexit`,
+    ],
+    [
+      "places",
+      (k) =>
+        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+        `${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
+    ],
+    [
+      "places, the other first",
+      (k) =>
+        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+        `${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
+    ],
+    [
+      "a list",
+      (k) =>
+        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+        `let xs = [${copies(k, "good")}, other]\nexit`,
+    ],
+    [
+      "a list, the other first",
+      (k) =>
+        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+        `let xs = [other, ${copies(k, "good")}]\nexit`,
+    ],
+    [
+      "property cycles beside self-grafts",
+      (k) =>
+        `let a = {n: 1, ${fields(k, "null")}, ${fields(k, "null").replaceAll("f", "g")}}\n` +
+        `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}\na.g${i} = a`).join("\n")}\n` +
+        "let c = a\nexit",
+    ],
   ];
-  for (const [name, program] of shapes) {
-    const work = (k: number): { total: number; nodes: number } => {
-      const request = coreRequest([{ path: "main.tease", source: program(k) }]);
-      assert.ok(request !== null, name);
-      const answers = analyseCore(request);
-      assert.equal(
-        answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
-        k,
-        name,
-      );
-      return { total: answers.budget.total, nodes: answers.budget.counts.get("syntaxNodes") ?? 0 };
-    };
-    const small = work(32);
-    const large = work(64);
-    // the work ratio per doubling of the source, against `type-core-work.test.ts`'s criterion (2 for linear work)
-    const doubling = (2 * (large.total / small.total)) / (large.nodes / small.nodes);
-    assert.ok(doubling <= 2.15, `${name}: ${doubling.toFixed(3)}`);
-  }
+  const errors = (name: string, k: number): number =>
+    name === "independent property cycles" || name === "a list"
+      ? 1
+      : name === "property cycles beside self-grafts"
+        ? 0
+        : k;
+  const steep: string[] = [];
+  for (const [name, program] of shapes)
+    for (const reversed of [false, true]) {
+      const work = (k: number): ReadonlyMap<string, number> & { total: number } => {
+        const request = coreRequest([{ path: "main.tease", source: program(k) }]);
+        assert.ok(request !== null, name);
+        const answers = reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder(
+                (list) => [...list].reverse(),
+                () => analyseCore(request),
+              ),
+            )
+          : analyseCore(request);
+        assert.equal(
+          answers.diagnostics.filter((diagnostic) => diagnostic.class === "compile-error").length,
+          errors(name, k),
+          name,
+        );
+        return Object.assign(new Map(answers.budget.counts), { total: answers.budget.total });
+      };
+      // (k stores into one object carry the parent stack's log factor, 2.36 at 64 → 128 before A2 too: those cycles'
+      // counters at 128 → 256)
+      const from = name.includes("property cycles") ? 128 : 64;
+      const small = work(from);
+      const large = work(2 * from);
+      // per doubling of the source, against `type-core-work.test.ts`'s criteria (2 for linear work): the total, and
+      // each counter of at least 200 units
+      const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const label = `${name}${reversed ? " reversed" : ""}`;
+      if (doubling(small.total, large.total) > 2.15)
+        steep.push(`${label}: ${doubling(small.total, large.total).toFixed(3)}`);
+      for (const [counter, after] of large)
+        if (
+          counter !== "syntaxNodes" &&
+          after >= 200 &&
+          doubling(small.get(counter) ?? 0, after) > 2.35
+        )
+          steep.push(`${label} ${counter}: ${doubling(small.get(counter) ?? 0, after).toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
 });
 
-test("a mixed literal's landing is walked once for all its conflicts, under however many wrappers (A2)", () => {
+test("a mixed literal's conflicts are found once, under however many wrappers (A2)", () => {
   // k wrappers around a list of k copies (or k lists of two copies): one conflicting copy against k, at one size, so the
   // deep literal's own checks cancel and the difference is the conflicts' own work
   const source = (k: number, siblings: boolean, many: boolean): string => {

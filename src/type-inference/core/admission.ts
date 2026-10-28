@@ -53,7 +53,7 @@ import { conversionCategory, dictList, measuresLength } from "./method-categorie
 import { propertyStep, stepName, type CoreProgram } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import { sharing } from "./sharing.js";
-import { refText, Touches, type Touch, type TouchRef } from "./touch.js";
+import { refText, Touches, type Found, type Touch, type TouchRef } from "./touch.js";
 import type { Work } from "./solver.js";
 import { getProof } from "./values.js";
 
@@ -73,6 +73,13 @@ import { getProof } from "./values.js";
 /** The plain scalar kinds: an inferred root whose every store is of one family of them asks nothing. */
 const SCALAR: ReadonlySet<ItemTag> = new Set(["integer", "number", "string", "boolean"]);
 const NUMERIC: ReadonlySet<ItemTag> = new Set(["integer", "number"]);
+/**
+ * Whether contents are known and scalar: some, each a scalar or `null`, so no copy meets them below their root (A2,
+ * `groups`); an unknown or anything else may hold properties or elements.
+ */
+function scalarOnly(items: readonly Item[]): boolean {
+  return items.length > 0 && items.every((item) => SCALAR.has(item.tag) || item.tag === "null");
+}
 
 /** The kinds that fit a destination of kind `ref` (C1, ADR 1.2): a whole number a number; an unknown anything. */
 export function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
@@ -224,6 +231,8 @@ interface ByPath<T> {
 }
 
 const NO_PATHS: ByPath<never> = { under: new Map(), at: new Map() };
+/** No copies listed (`#ownOf`): every copy of a written type stands below, as a value holding anything (A2). */
+const NO_COPIES: ReadonlySet<string> = new Set();
 
 /** Places of a copy forest by entry, with the greatest last entry below over each range (a max segment tree). */
 interface Storing {
@@ -246,6 +255,61 @@ function lastAtLeast(tree: readonly number[], size: number, last: number, least:
   node -= 1;
   while (node < size) node = tree[2 * node + 1]! >= least ? 2 * node + 1 : 2 * node;
   return node - size;
+}
+
+/**
+ * The strongly connected components of a graph over `nodes` and the nodes they reach (`next`: a node's successors),
+ * Tarjan's on an explicit stack, a component after every one it reaches; `step` hears of each node and edge.
+ */
+function keyComponents<T>(
+  nodes: readonly T[],
+  next: (node: T) => readonly T[],
+  step: () => void,
+): T[][] {
+  const order = new Map<T, number>();
+  const low = new Map<T, number>();
+  const onStack = new Set<T>();
+  const stack: T[] = [];
+  const out: T[][] = [];
+  for (const root of nodes) {
+    if (order.has(root)) continue;
+    const frames: { readonly node: T; edge: number }[] = [{ node: root, edge: 0 }];
+    order.set(root, order.size);
+    low.set(root, order.get(root)!);
+    stack.push(root);
+    onStack.add(root);
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1]!;
+      step();
+      const successors = next(frame.node);
+      if (frame.edge < successors.length) {
+        const to = successors[frame.edge++]!;
+        if (!order.has(to)) {
+          order.set(to, order.size);
+          low.set(to, order.get(to)!);
+          stack.push(to);
+          onStack.add(to);
+          frames.push({ node: to, edge: 0 });
+        } else if (onStack.has(to))
+          low.set(frame.node, Math.min(low.get(frame.node)!, order.get(to)!));
+        continue;
+      }
+      frames.pop();
+      const above = frames[frames.length - 1];
+      if (above !== undefined)
+        low.set(above.node, Math.min(low.get(above.node)!, low.get(frame.node)!));
+      if (low.get(frame.node) !== order.get(frame.node)) continue;
+      const component: T[] = [];
+      for (;;) {
+        const top = stack.pop()!;
+        onStack.delete(top);
+        component.push(top);
+        if (top === frame.node) break;
+      }
+      out.push(component);
+    }
+  }
+  return out;
 }
 
 /** Whether `path` starts with `prefix` (or is it). */
@@ -1031,6 +1095,12 @@ export class Admission {
   readonly #liveCopies = new Set<string>();
   /** Each place's own contributions from its live stores (Astra's B2). */
   readonly #liveOwns = new Map<PlaceId, OwnStructure | null>();
+  /** Per place, what its live stores definitely hold (`#heldOf`, A2). */
+  readonly #helds = new Map<PlaceId, Touch | null>();
+  /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
+  readonly #atCopies = new Set<Key>();
+  /** The keys where the parts of a live group's held trie meet, for each member (`#finishHeld`, read by `groups`). */
+  readonly #groupMeetings: Key[] = [];
   /** The places with definitions, every one of them dead in this pass (`#liveOwn`). */
   readonly #deadOnly = new Set<PlaceId>();
   readonly #touchLandings = new Map<PlaceId, Touch | null>();
@@ -1596,6 +1666,15 @@ export class Admission {
     );
   }
 
+  /**
+   * Whether what a place's stores definitely hold meets at a path (A2, TABLE r4.131): a store bringing the other type
+   * there errs where it meets the place, never at a later read (ADR 0021 rule 1.1).
+   */
+  public atCopy(root: PlaceId, path: readonly string[]): boolean {
+    this.groups();
+    return this.#atCopies.has(keptKey(this.#work, root, path));
+  }
+
   /** A store's value at the path below its destination, by §3 at its node. */
   public valueAt(d: Definition, at: readonly string[]): Item[] {
     this.pass.program.work.charge("checks");
@@ -1717,6 +1796,47 @@ export class Admission {
           tracked.add(keptKey(this.#work, d.place, joinSteps(base, path)));
         }
       }
+    // A2 (TABLE r4.131): a place receiving copies is checked where they meet it, read or not: the paths where what two
+    // of its stores definitely hold meets with two kinds or more (`#heldMeetings`), so the store that brings the other
+    // type errs there (a rejected one too, as A6 finds it again); not where all the place holds is known and scalar, as
+    // a scalar has no property to meet at
+    const byPlace = new Map<
+      PlaceId,
+      { readonly d: Definition; readonly at: readonly string[] }[]
+    >();
+    const named = new Set<PlaceId>();
+    for (const d of reaching) {
+      work.charge("indexSteps");
+      const at = keptSteps(
+        this.#work,
+        d.path,
+        d.kind === "add" && d.how !== "elements" ? ["element"] : [],
+      );
+      const list = byPlace.get(d.place);
+      if (list === undefined) byPlace.set(d.place, [{ d, at }]);
+      else list.push({ d, at });
+      if (this.#valueStructure(d.value!).sources.length > 0) named.add(d.place);
+    }
+    for (const [place, list] of byPlace)
+      if (
+        list.length > 1 &&
+        named.has(place) &&
+        !scalarOnly(
+          withoutEmpty(this.#run(this.pass.contract.contractOf(keptKey(this.#work, place, [])))),
+        )
+      )
+        for (const path of this.#heldMeetings(list, [])) {
+          const key = keptKey(this.#work, place, path);
+          tracked.add(key);
+          this.#atCopies.add(key);
+        }
+    // (and where a live group's members meet: each holds them all, so each member's stores are checked there; the
+    // groups the discovery above made, so every order of the consumers sees the same)
+    for (const key of this.#groupMeetings) {
+      work.charge("indexSteps");
+      tracked.add(key);
+      this.#atCopies.add(key);
+    }
     // C9: where each ingress store's external data stands below its destination, decided with the store whether a
     // consumer reads the place or not (the owner's F1): its landings' contribution paths (§3.2)
     for (const [d, stops] of this.#landingIndex().byStore)
@@ -4725,6 +4845,181 @@ export class Admission {
   }
 
   /**
+   * What a place's live stores definitely hold (A2, `#heldMeetings`): its own points and its reads' sources' held tries
+   * where they stand, by reference; none of its landings, its copies of written types (A4's) or its values holding
+   * anything, which decide nothing there. `null` where it holds nothing definite. Built with its reads' sources first
+   * (`#buildHeld`).
+   */
+  #heldOf(place: PlaceId): Touch | null {
+    const known = this.#helds.get(place);
+    if (known !== undefined) return known;
+    this.#buildHeld(place);
+    return this.#helds.get(place)!;
+  }
+
+  /** A read's contribution to a held trie where it stands: its source's held trie at its path. */
+  #heldRead(source: Key, at: readonly string[]): Touch | null {
+    const touches = this.#touchesOf();
+    const held = touches.sub(this.#heldOf(keyPlace(source)), keptPath(this.#work, source));
+    return held === null ? null : touches.graft(held, at);
+  }
+
+  /**
+   * Builds a place's held trie and every one its reads need first: the components of the places its live stores read
+   * (`keyComponents`, each place and read once), sources first (`#finishHeld`). A component is recorded only once
+   * complete, so a stop thrown through the build leaves no partial answer.
+   */
+  #buildHeld(root: PlaceId): void {
+    const work = this.pass.program.work;
+    const sources = new Map<PlaceId, readonly PlaceId[]>();
+    const next = (place: PlaceId): readonly PlaceId[] => {
+      let list = sources.get(place);
+      if (list === undefined) {
+        const found: PlaceId[] = [];
+        for (const { source } of this.#liveOwn(place)?.reads ?? []) {
+          work.charge("indexSteps");
+          if (!this.#helds.has(keyPlace(source))) found.push(keyPlace(source));
+        }
+        sources.set(place, (list = found));
+      }
+      return list;
+    };
+    for (const component of keyComponents([root], next, () => work.charge("indexSteps")))
+      this.#finishHeld(component);
+  }
+
+  /**
+   * The held tries of a component of the places live stores read (A2, TABLE r4.131 and r4.154: design §2.1.2 as
+   * accepted). Its members that hold each other through whole copies (a place read whole into a place) form live
+   * groups, the strongly connected components of those copies: each group one trie, its members' own points and what
+   * their reads bring from outside the group, sources first, and where those meet each member is checked
+   * (`#groupMeetings`). Every other read is by reference, its source's held trie at its path where it stands. A read within the component that adds or takes steps (`a.inner = a`, `a = b.right`)
+   * closes a cycle outside that class and brings nothing definite: what reaches a place only through it is found where
+   * it is read.
+   */
+  #finishHeld(members: readonly PlaceId[]): void {
+    const touches = this.#touchesOf();
+    const work = this.pass.program.work;
+    const index = new Map<PlaceId, number>();
+    for (const [at, member] of members.entries()) index.set(member, at);
+    // (each member's own points and reads from outside the component, and its whole copies within it by source)
+    const own: Touch[][] = members.map(() => []);
+    const copies: number[][] = members.map(() => []);
+    for (const [at, member] of members.entries()) {
+      const found = this.#liveOwn(member);
+      for (const path of found?.points ?? []) {
+        work.charge("indexSteps");
+        own[at]!.push(touches.leaf(path, [this.#touchRef(member, path, false)]));
+      }
+      for (const { at: where, source } of found?.reads ?? []) {
+        work.charge("indexSteps");
+        const from = index.get(keyPlace(source));
+        if (from === undefined) {
+          const held = this.#heldRead(source, where);
+          if (held !== null) own[at]!.push(held);
+        } else if (where.length === 0 && keptPath(this.#work, source).length === 0)
+          copies[at]!.push(from);
+      }
+    }
+    // (the live groups, sources first: a whole copy from an earlier group brings its trie by reference)
+    for (const group of keyComponents(
+      members.map((_, at) => at),
+      (at) => copies[at]!,
+      () => work.charge("indexSteps"),
+    )) {
+      const inside = new Set(group);
+      const parts: Touch[] = [];
+      for (const at of group) {
+        for (const part of own[at]!) parts.push(part);
+        for (const from of copies[at]!) {
+          const held = inside.has(from) ? null : this.#helds.get(members[from]!);
+          if (held !== null && held !== undefined) parts.push(held);
+        }
+      }
+      work.charge("indexSteps", parts.length + sortCost(parts.length));
+      parts.sort((a, b) => b.size - a.size || a.id - b.id);
+      // (where its parts meet, a group of several members holds them in each: its members' paths there, `groups`)
+      const met: (readonly string[])[] = [];
+      let held: Touch | null = null;
+      for (const part of parts) {
+        const merged = touches.merge(held, part, "copies");
+        held = merged.node;
+        if (group.length > 1) touches.paths(merged.found, [], met);
+      }
+      for (const path of met)
+        if (path.length > 0)
+          for (const at of group) this.#groupMeetings.push(keptKey(this.#work, members[at]!, path));
+      touches.share(held);
+      for (const at of group) this.#helds.set(members[at]!, held);
+    }
+  }
+
+  /**
+   * A2 (TABLE r4.131): the paths where what the stores into one place (`base` empty, each store at its own path) or a
+   * literal's elements (each at `base`, its landing) definitely hold meet with two kinds or more (`copies`), relative to
+   * `base`, sorted by text. Each store's or element's trie is its own points and its reads' held tries (`#heldOf`),
+   * and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only copies of
+   * whole objects bring is owed as any other: the copy is checked where it meets the place. A4's copies of written
+   * types and the values holding anything stand below and decide nothing here.
+   */
+  #heldMeetings(
+    list: readonly { readonly d: Definition; readonly at: readonly string[] }[],
+    base: readonly string[],
+  ): (readonly string[])[] {
+    const touches = this.#touchesOf();
+    const work = this.pass.program.work;
+    const owed = new Map<string, readonly string[]>();
+    const take = (found: Found): void => {
+      const paths: (readonly string[])[] = [];
+      touches.paths(found, [], paths);
+      for (const path of paths) if (path.length > 0) owed.set(keptText(this.#work, path), path);
+    };
+    const rest = (path: readonly string[]): string[] => keptSlice(this.#work, path, base.length);
+    const distinct = new Map<number, Touch>();
+    for (const [index, { d, at }] of list.entries()) {
+      if (d.value === undefined) continue;
+      const own: OwnStructure & {
+        readonly points: (readonly string[])[];
+        readonly below: (readonly string[])[];
+        readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
+      } = { points: [], below: [], reads: [] };
+      this.#ownOf(d, d.value, at, NO_COPIES, own);
+      const parts: Touch[] = [];
+      for (const { at: where, source } of own.reads) {
+        const held = this.#heldRead(source, rest(where));
+        if (held !== null) parts.push(held);
+      }
+      // (its own points, their contents asked of its value below `at`)
+      const mine = (path: readonly string[]): TouchRef => {
+        const ref = { owner: `e${d.uid}`, place: -1 - index, path, lands: false, value: d.value! };
+        return { ...ref, text: refText(this.#work, ref) };
+      };
+      for (const point of own.points)
+        parts.push(touches.leaf(rest(point), [mine(keptSlice(this.#work, point, at.length))]));
+      work.charge("indexSteps", parts.length + sortCost(parts.length));
+      parts.sort((a, b) => b.size - a.size || a.id - b.id);
+      let node: Touch | null = null;
+      for (const part of parts) {
+        const merged = touches.merge(node, part, "copies");
+        node = merged.node;
+        take(merged.found);
+      }
+      if (node !== null) distinct.set(node.id, node);
+    }
+    const order = [...distinct.values()].sort((a, b) => b.size - a.size || a.id - b.id);
+    work.charge("indexSteps", order.length + sortCost(order.length));
+    let merged: Touch | null = null;
+    for (const node of order) {
+      const next = touches.merge(merged, node, "copies");
+      merged = next.node;
+      take(next.found);
+    }
+    const texts = [...owed.keys()].sort();
+    work.charge("indexSteps", texts.length + sortCost(texts.length));
+    return texts.map((text) => owed.get(text)!);
+  }
+
+  /**
    * The landed paths below a collection literal's landing where one of its elements may offend another
    * (`literalElements`, F2): each element's touch trie relative to the landing (its copies' and reads' sources', its own
    * points and other values), merged largest first; a path is owed where two stand there and their contents hold two
@@ -5905,6 +6200,7 @@ export class Admission {
         readonly decided: readonly ItemTag[];
         readonly earliest: readonly ItemTag[];
         readonly kinds: readonly ItemTag[];
+        readonly atCopy: boolean;
       },
     ) => void,
     undecided?: (cell: PlaceId) => void,
@@ -5918,6 +6214,8 @@ export class Admission {
     // class or a typed ingress's type and default, `#conflictGroups`), the paths below them where their contracts hold
     // more than one kind: only there can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
+    // (per key, the paths where what the elements definitely hold meets, A2's)
+    const atCopies = new Map<string, ReadonlySet<string>>();
     cells: for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
@@ -5927,6 +6225,7 @@ export class Admission {
         continue;
       }
       let shared: readonly (readonly string[])[] | null = null;
+      let atCopy: ReadonlySet<string> = new Set();
       if (list.some(named)) {
         const ids = list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id));
         const distinct = [...new Set(ids)].sort();
@@ -5964,16 +6263,33 @@ export class Admission {
           }
           // (beside them the landed paths where two elements' tries meet, their kinds from the literal's merged trie,
           // no element asked: Astra's review B1, #1188)
-          if (landing !== null) {
-            const texts = new Set<string>();
-            for (const path of listed) texts.add(keptText(this.#work, path));
-            for (const met of this.#touchElements(landing, representatives))
-              if (!texts.has(keptText(this.#work, met.path))) kept.push(met.path);
+          const texts = new Set<string>();
+          for (const path of listed) texts.add(keptText(this.#work, path));
+          const keep = (path: readonly string[]): void => {
+            const text = keptText(this.#work, path);
+            if (texts.has(text)) return;
+            texts.add(text);
+            kept.push(path);
+          };
+          if (landing !== null)
+            for (const met of this.#touchElements(landing, representatives)) keep(met.path);
+          // (and where what they definitely hold meets: a property only copies of whole objects bring, checked where
+          // the copy meets the literal, A2, TABLE r4.131)
+          const base = landing === null ? [] : keptPath(this.#work, landing);
+          const met = new Set<string>();
+          for (const path of this.#heldMeetings(
+            representatives.map((d) => ({ d, at: base })),
+            base,
+          )) {
+            met.add(keptText(this.#work, path));
+            keep(path);
           }
           keepText(this.#work, key.length);
           conflicts.set(key, (paths = kept));
+          atCopies.set(key, met);
         }
         shared = paths;
+        atCopy = atCopies.get(key)!;
       }
       const first = new Map<
         string,
@@ -6011,6 +6327,7 @@ export class Admission {
           decided: first.get(at)!.tags,
           earliest: first.get(at)!.own,
           kinds: [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))],
+          atCopy: atCopy.has(at),
         });
         this.reject(d, cell, path);
       };

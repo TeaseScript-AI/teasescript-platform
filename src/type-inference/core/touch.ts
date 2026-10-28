@@ -144,9 +144,17 @@ interface FoundBranch {
   readonly count: number;
 }
 
-export type TouchMode = "meet" | "elements";
+/**
+ * What a merge owes: `meet` (a place's landed types against its contents), `elements` (a literal's elements standing
+ * together with two kinds), or `copies` (A2: as `elements`, over what the stores into one place or a literal's elements
+ * definitely hold, `Admission.#heldOf`; a contributor holding anything decides nothing there).
+ */
+export type TouchMode = "meet" | "elements" | "copies";
 
-/** What a mode's test needs at a node: the terms landed and contents held there (`meet`), or who stands (`elements`). */
+/**
+ * What a mode's test needs at a node: the terms landed and contents held there (`meet`), or who stands (`elements`,
+ * `copies`).
+ */
 interface Summary {
   readonly terms: Map<string, TypeTerm | null>;
   readonly contents: Map<string, readonly Item[]>;
@@ -299,6 +307,7 @@ export class Touches {
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
     elements: new Map(),
+    copies: new Map(),
   };
   readonly #subs = new Map<string, Touch | null>();
   readonly #items = new Map<number, Map<string, Item>>();
@@ -1063,7 +1072,7 @@ export class Touches {
     };
     for (const node of nodes) this.#combine(summary, this.#summary(node, mode), mode);
     for (const ref of extra) this.#add(summary, ref, mode);
-    if (mode === "elements") {
+    if (mode !== "meet") {
       // (two stand there, and their contents there hold two kinds or more: `literalElements` keeps the path; the test
       // is the merge's, once per pair of nodes, never once per literal)
       if (!(
@@ -1423,15 +1432,19 @@ export class Touches {
     };
     for (;;) {
       // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
-      // other, whose landed types may decide where the two are merged; all of them where a ring stands in it)
+      // other, whose landed types may decide where the two are merged; all of them where a ring stands in it; for
+      // `copies` nothing new, its meetings found where it was made: a store's own value, or its group's,
+      // `Admission.#finishHeld`)
       const owes = (outer: Touch, inner: Touch): Found =>
-        outer === inner
-          ? this.#selfOwes(outer, mode)
-          : !this.#isRing(outer)
-            ? this.#containedOwes(outer, inner, mode)
-            : mode === "elements"
-              ? this.#metOwed(outer)
-              : outer.met;
+        mode === "copies"
+          ? NONE
+          : outer === inner
+            ? this.#selfOwes(outer, mode)
+            : !this.#isRing(outer)
+              ? this.#containedOwes(outer, inner, mode)
+              : mode === "elements"
+                ? this.#metOwed(outer)
+                : outer.met;
       if (this.#contains(x, y)) core = { node: x, found: owes(x, y) };
       else if (this.#contains(y, x)) core = { node: y, found: owes(y, x) };
       else core = this.#memo.get(key(x, y)) ?? null;
@@ -1484,12 +1497,14 @@ export class Touches {
     let found: Found = NONE;
     let here = false;
     // (an opaque node's contributors hold anything below it: they meet every node standing below the other)
-    // (for `elements`, two opaque nodes owe every path landed below them, which the literal walks once: no expansion)
+    // (for `elements`, two opaque nodes owe every path landed below them, which the literal walks once: no expansion;
+    // for `copies`, what holds anything decides nothing)
     const both = mode === "elements" && a.opaque !== null && b.opaque !== null;
-    if (a.opaque !== null && !both) found = this.#unite(found, this.#expand(a.opaque, b, mode));
-    if (b.opaque !== null && !both) found = this.#unite(found, this.#expand(b.opaque, a, mode));
+    const expands = mode !== "copies" && !both;
+    if (a.opaque !== null && expands) found = this.#unite(found, this.#expand(a.opaque, b, mode));
+    if (b.opaque !== null && expands) found = this.#unite(found, this.#expand(b.opaque, a, mode));
     if (both) here = true;
-    else if (a.here && b.here && (mode === "elements" || a.landed || b.landed))
+    else if (a.here && b.here && (mode !== "meet" || a.landed || b.landed))
       here = this.#owed([a, b], [], mode);
     // (the smaller node's branches, each looked up in the larger's: the common ones merged, the others taken whole)
     let branches = big.branches;
