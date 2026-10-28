@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
@@ -512,7 +513,7 @@ exit`;
   assert.deepEqual(sayTexts(source("null", "null")), ["pet 123"]);
 });
 
-test("otherwise beside any other operator needs parentheses, and one error names both readings", () => {
+test("otherwise beside any other operator needs parentheses, and one error names both readings, each of which compiles", () => {
   const cases: [string, string, string, string, string][] = [];
   for (const operator of ["+", "-", "*", "/", "%"])
     cases.push(
@@ -604,11 +605,47 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses false when 'true or c' is null",
     ],
     [
+      "true and c otherwise false",
+      "true and (c otherwise false)",
+      "(true and c) otherwise false",
+      "uses false when 'c' is null",
+      "uses false when 'true and c' is null",
+    ],
+    [
       '"${a otherwise 3 != 2}"',
       "(a otherwise 3) != 2",
       "a otherwise (3 != 2)",
       "uses 3 when 'a' is null",
       "uses '3 != 2' when 'a' is null",
+    ],
+    // Inside a larger expression, each reading is one of all of it, so that it needs no more parentheses.
+    [
+      "a otherwise 0 == 0 and true",
+      "(a otherwise 0) == 0 and true",
+      "a otherwise (0 == 0 and true)",
+      "uses 0 when 'a' is null",
+      "uses '0 == 0 and true' when 'a' is null",
+    ],
+    [
+      "true or a otherwise 0 > 2",
+      "true or (a otherwise 0) > 2",
+      "(true or a) otherwise (0 > 2)",
+      "uses 0 when 'a' is null",
+      "uses '0 > 2' when 'true or a' is null",
+    ],
+    [
+      "not a otherwise 0 == 0",
+      "not (a otherwise 0) == 0",
+      "(not a) otherwise (0 == 0)",
+      "uses 0 when 'a' is null",
+      "uses '0 == 0' when 'not a' is null",
+    ],
+    [
+      "a otherwise b + 3 == 5",
+      "(a otherwise b) + 3 == 5",
+      "a otherwise (b + 3 == 5)",
+      "uses 'b' when 'a' is null",
+      "uses 'b + 3 == 5' when 'a' is null",
     ],
     // Both sides, a chain, and the issue's own example: the error quotes what was written.
     [
@@ -633,6 +670,13 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses '3 > 1' when 'a otherwise b' is null",
     ],
     [
+      "1 == a otherwise b otherwise 3",
+      "1 == (a otherwise b otherwise 3)",
+      "(1 == a) otherwise b otherwise 3",
+      "uses 3 when 'a otherwise b' is null",
+      "uses 3 when '(1 == a) otherwise b' is null",
+    ],
+    [
       'path.lastIndexOf("/") otherwise -1 + 1',
       '(path.lastIndexOf("/") otherwise -1) + 1',
       'path.lastIndexOf("/") otherwise (-1 + 1)',
@@ -640,28 +684,152 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "uses '-1 + 1' when 'path.lastIndexOf(\"/\")' is null",
     ],
   );
-  for (const [written, nearest, all, nearestMeaning, allMeaning] of cases)
+  const source = (said: string) =>
+    `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${said}\nexit`;
+  for (const [written, nearest, all, nearestMeaning, allMeaning] of cases) {
     assert.deepEqual(
-      diagnostics(
-        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
-      ),
+      diagnostics(source(written)),
       [
         [
           "error",
           "TSP041",
-          `It is unclear what 'otherwise' belongs to. Put parentheses around that part: '${nearest}' ${nearestMeaning}; '${all}' ${allMeaning}.`,
+          `It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first. '${nearest}' ${nearestMeaning}. '${all}' ${allMeaning}.`,
           "otherwise",
         ],
       ],
       written,
     );
-  // A reading too long to quote gets only the explanation and instruction.
+    // Pasted where it was written, a reading may still be of the wrong type, but it needs no more parentheses.
+    for (const reading of [nearest, all]) {
+      const pasted = written.startsWith('"') ? `"\${${reading}}"` : reading;
+      assert.deepEqual(
+        diagnostics(source(pasted)).filter(([, code]) => code.startsWith("TSP")),
+        [],
+        pasted,
+      );
+    }
+  }
+  // A reading too long to quote, or of an expression with another error, gets only the explanation and instruction.
   assert.deepEqual(
     diagnostics(
-      'let a: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\nexit',
+      'let a: string? = null\nlet b: string? = null\nsay a otherwise "a fallback long enough to need a generic text" + "!"\n' +
+        'say a otherwise "x" == "y" and b otherwise "x" == "y"\nsay a otherwise b + "!" otherwise "x"\nexit',
     ).map((diagnostic) => diagnostic[2]),
-    ["It is unclear what 'otherwise' belongs to. Put parentheses around that part."],
+    Array(4).fill(
+      "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.",
+    ),
   );
+});
+
+test("every reading TSP041 quotes parses without an error where it is pasted, wherever the expression stands", () => {
+  // Expressions with an unclear `otherwise` beside every operator, in chains and groups, across lines, and beside other
+  // errors, each in every place an expression stands, also where a leading '(' would change a command's form.
+  const expressions = new Set([
+    "a otherwise b + c",
+    "a otherwise b == c and ready",
+    "ready or a otherwise b > c",
+    "not a otherwise b == c",
+    "a otherwise b otherwise c > d",
+    "1 == a otherwise b otherwise c",
+    "a + b otherwise c otherwise d",
+    "a otherwise -b otherwise c > d",
+    "-a otherwise b",
+    "--a otherwise b",
+    "a otherwise b is integer",
+    "ready and a otherwise b is integer",
+    "a is integer or b otherwise c == d",
+    "a otherwise (b otherwise c + d)",
+    "a otherwise f(b otherwise c + d)",
+    "(a otherwise b + c) + d",
+    "f(a otherwise b + c) otherwise d",
+    "a otherwise b + c otherwise d",
+    "a otherwise b > c and d otherwise 0 > 2",
+    "a otherwise b == not c",
+    "a otherwise\n b + c",
+    "not\n a otherwise b == c",
+    'a otherwise "\\q" + "x"',
+  ]);
+  for (const left of ["+", "*", ".."])
+    for (const right of ["-", "/", "..="]) expressions.add(`a ${left} b otherwise c ${right} d`);
+  for (const operator of ["==", "<=", "and", "or"])
+    expressions.add(`a otherwise b ${operator} c`).add(`a ${operator} b otherwise c`);
+  const places: readonly (readonly [string, (expression: string) => string])[] = [
+    ["let", (x) => `let result = ${x}`],
+    ["if", (x) => `if ${x} {\n  say "yes"\n}`],
+    ["say", (x) => `say ${x}`],
+    ["pacing", (x) => `say "hi", ${x}`],
+    ["bounded say", (x) => `say (${x}, instant)`],
+    ["say value", (x) => `let result = say ${x}, instant`],
+    ["say value alone", (x) => `let result = say ${x}`],
+    ["lexer error after", (x) => `let result = ${x}@`],
+    ["interpolation", (x) => `say "answer: \${${x}}"`],
+    ["argument", (x) => `say f(${x})`],
+    ["list", (x) => `let result = [${x}]`],
+    ["compact load", (x) => `let result = load ${x}, default: 0`],
+    ["popup", (x) => `showPopup ${x}`],
+    ["wait", (x) => `wait ${x}`],
+    // Inside a block: a statement of a function, and the head of a media cue, which is no statement on its own.
+    ["function", (x) => `function g {\n  return ${x}\n}`],
+    ["cue", (x) => `playAudio "a.mp3" {\n  beforeEnd ${x} {\n    say "cue"\n  }\n}`],
+  ];
+  const before =
+    "function f(value) {\n  return value\n}\nlet a = f(null)\nlet b = f(null)\nlet c = f(null)\nlet d = f(null)\nlet ready = true\n";
+  // The part of `expression` that a reading is of: its text, also over lines, without the parentheses a reading adds.
+  const bare = (text: string) => text.replace(/\n\s*/gu, " ").replace(/[()]/gu, "");
+  const paste = (expression: string, reading: string) => {
+    for (let length = bare(reading).length; length <= expression.length; length += 1)
+      for (let start = 0; start + length <= expression.length; start += 1) {
+        const part = expression.slice(start, start + length);
+        if (bare(part) === bare(reading))
+          return `${expression.slice(0, start)}${reading}${expression.slice(start + length)}`;
+      }
+    assert.fail(`'${reading}' is no reading of '${expression}'`);
+  };
+  const UNCLEAR =
+    "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.";
+  const quoted = new Set<string>();
+  for (const expression of expressions)
+    for (const [place, wrap] of places)
+      for (const { code, message } of parse(`${before}${wrap(expression)}\nexit\n`).diagnostics) {
+        if (code !== "TSP041") continue;
+        const readings = message
+          .slice(UNCLEAR.length)
+          .matchAll(/ '(.+?)' uses .*? when '.+?' is null\./gu);
+        for (const [, reading] of readings) {
+          const pasted = `${before}${wrap(paste(expression, reading!))}\nexit\n`;
+          assert.deepEqual(
+            parse(pasted).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+            [],
+            `${place}: ${pasted}`,
+          );
+          quoted.add(`${place}: ${expression}`);
+        }
+      }
+  // Readings are shown where they hold, and words where a '(' would change the command or the value has another error.
+  for (const place of [
+    "let",
+    "if",
+    "say",
+    "pacing",
+    "bounded say",
+    "interpolation",
+    "argument",
+    "list",
+    "wait",
+    "function",
+    "cue",
+  ])
+    assert.ok(quoted.has(`${place}: a otherwise b + c`), place);
+  for (const shown of [
+    "say value: a otherwise b + c",
+    "say value alone: a otherwise b + c",
+    "lexer error after: a otherwise b + c",
+    "compact load: a otherwise b + c",
+    "popup: a otherwise b + c",
+    'let: a otherwise "\\q" + "x"',
+    "let: a .. b otherwise c ..= d",
+  ])
+    assert.ok(!quoted.has(shown), shown);
 });
 
 test("both readings of a type test with a grouped type keep its ')', and each compiles", () => {

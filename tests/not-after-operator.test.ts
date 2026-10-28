@@ -156,7 +156,8 @@ test("a comparison too long to quote, an operand with an error of its own, or an
       ],
     ],
   );
-  // Quoted, `x otherwise false != a` would need parentheses too, which their own error names.
+  // Quoted, `x otherwise false != a` would need parentheses too, which their own error names, and the readings of
+  // `otherwise` would hold the `not`.
   assert.deepEqual(
     diagnostics(
       "let x: boolean? = null\nlet a = false\nsay x otherwise false == not a, instant\nexit\n",
@@ -169,7 +170,7 @@ test("a comparison too long to quote, an operand with an error of its own, or an
       ],
       [
         "TSP041",
-        "It is unclear what 'otherwise' belongs to. Put parentheses around that part: '(x otherwise false) == not a' uses false when 'x' is null; 'x otherwise (false == not a)' uses 'false == not a' when 'x' is null.",
+        "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.",
         "otherwise",
       ],
     ],

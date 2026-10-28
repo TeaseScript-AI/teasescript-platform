@@ -160,6 +160,37 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES
 const LINE_STATEMENTS: ReadonlySet<string> = new Set(
   Object.keys(COMMANDS).filter((name) => commandFacts(name)?.statement === "line"),
 );
+/**
+ * Code that a message offers in place of the source from `start` up to `end`, and with `expression` one that must be one
+ * expression there, which keeps a reading from changing how the code around it groups (see `Parser.offerFix`).
+ */
+interface FixPaste {
+  readonly start: number;
+  readonly end: number;
+  readonly code: string;
+  readonly expression: boolean;
+}
+
+/** Whether `program` has a node from offset `start` up to `end`, which then holds all of that source. */
+function spansNode(program: Program, start: number, end: number): boolean {
+  // Every node, found with a list rather than by recursion, as source may nest deeply.
+  const pending: unknown[] = [program];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: invariant: the parser builds every node as an object with its `kind` and `span`.
+    const { kind, span } = node as { kind?: unknown; span?: SourceSpan };
+    if (typeof kind === "string" && span?.start.offset === start && span.end.offset === end)
+      return true;
+    for (const [key, child] of Object.entries(node))
+      if (key !== "span" && !key.endsWith("Span")) pending.push(child);
+  }
+  return false;
+}
+
 /** What the parsers over one token list share. */
 interface SharedParse {
   /**
@@ -195,6 +226,10 @@ interface SharedParse {
    * without this set, but `parse` leaves them out (see `Parser.reportMissing`).
    */
   readonly followUps: WeakSet<Diagnostic>;
+  /** The source, where offered fixes are proved (see `Parser.offerFix`), or `null` in the parses that prove them. */
+  source: string | null;
+  /** How many characters the parses that prove those fixes may still read. */
+  proofBudget: number;
 }
 /** A point in a parse, from which `Parser.reportMissing` tells what a failed part reported. */
 export interface ParseMark {
@@ -233,8 +268,11 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftBrace,
   TokenKind.InterpolationStart,
 ]);
-/** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, a name, or a text. */
-const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|[A-Za-z_]\w*|"[^"\n]*")$/;
+/** TSP041, which `Parser.offerFix` follows with both readings where it proves them. */
+const UNCLEAR_OTHERWISE =
+  "It is unclear what 'otherwise' belongs to. Put parentheses around what to work out first.";
+/** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, or a text. */
+const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|true|false|null|"[^"\n]*")$/;
 /** Tokens that start a value but cannot go on from a name before them, as an operator or a call can. */
 const OPERAND_STARTS: ReadonlySet<TokenKind> = new Set([
   TokenKind.Identifier,
@@ -255,16 +293,37 @@ const CLOSING_TOKENS: ReadonlySet<TokenKind> = new Set([
 
 /** Parses the accepted core-language milestone. */
 export function parse(source: string): ParseResult {
+  return parseSource(source, true);
+}
+
+/**
+ * The share of the source's length that the parses proving offered fixes may read, besides a fixed allowance, which
+ * keeps that proof in proportion to the source (see `Parser.offerFix`).
+ */
+const FIX_PROOF_BUDGET = { perCharacter: 4, fixed: 4096 };
+
+/** `parse`, which with `offers` also proves the fixes that its messages offer as code (see `Parser.offerFix`). */
+function parseSource(source: string, offers: boolean): ParseResult {
   // A `/` where the grammar expects a value starts a regex literal (V30 §8). The lexer tells most such places from the
   // token before; where a parse with errors expected a value at a `/` that the lexer took for division, the source is
   // lexed and parsed again with a regex there, until no new one appears. A parse without errors is never changed.
   const regexStarts = new Set<number>();
+  // One allowance for the parses that prove offered fixes, over every pass below.
+  let budget = FIX_PROOF_BUDGET.perCharacter * source.length + FIX_PROOF_BUDGET.fixed;
   for (;;) {
-    const header = readScriptHeader(lex(source, regexStarts));
+    const lexed = lex(source, regexStarts);
+    const header = readScriptHeader(lexed);
     const parser = new Parser(header.programTokens);
+    // A lexer error may lie outside the statement that a proof reads, so with one no fix is proved.
+    if (offers && lexed.diagnostics.length === 0) {
+      parser.shared.source = source;
+      parser.shared.proofBudget = budget;
+    }
     const program = parser.parseProgram();
+    if (parser.shared.source !== null) budget = parser.shared.proofBudget;
     const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
-    if (added.length > 0 && parser.diagnostics.length > 0) {
+    // A parse that proves a fix does not lex again: its fix is then not proved.
+    if (offers && added.length > 0 && parser.diagnostics.length > 0) {
       for (const offset of added) regexStarts.add(offset);
       continue;
     }
@@ -286,6 +345,13 @@ export function parse(source: string): ParseResult {
 /** The public members serve `parse` and the modules in `parser/`, and are internal to the parser. */
 export class Parser {
   public readonly diagnostics: Diagnostic[] = [];
+  /** The fixes offered for errors of the statement being read, which wait for it to end (see `offerFix`). */
+  readonly #fixOffers: {
+    readonly index: number;
+    readonly error: Diagnostic;
+    readonly quoted: string;
+    readonly pastes: readonly FixPaste[];
+  }[] = [];
   /**
    * The statement and command ranges. A speculative parser keeps its own, so only those of the parse that counts are
    * listed, also those of a `say` value it reuses.
@@ -341,6 +407,8 @@ export class Parser {
       faultyOtherwise: new WeakSet(),
       newlineRuns: newlineRuns(tokens),
       followUps: new WeakSet(),
+      source: null,
+      proofBudget: 0,
     },
   ) {
     this.shared = shared;
@@ -965,6 +1033,7 @@ export class Parser {
   }
 
   public *parseOr(): ParseTask<Expression | null> {
+    const diagnosticCount = this.diagnostics.length;
     let expression = yield* parseChild(this.#parseAnd());
     while (expression !== null) {
       const operator =
@@ -982,6 +1051,9 @@ export class Parser {
       this.#reportOtherwiseOperand(expression, left);
       this.#reportOtherwiseOperand(expression, right);
     }
+    // Nothing outside binds to the whole expression, so only now are the readings of an unclear `otherwise` in it whole.
+    if (expression !== null && this.diagnostics.length === diagnosticCount + 1)
+      this.#offerOtherwiseReadings(expression, diagnosticCount);
     return expression;
   }
 
@@ -1178,7 +1250,7 @@ export class Parser {
 
   /**
    * Reports `not` right after `symbol`, quoting the code to write: `readings` of the source text of `left` and of the
-   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportUnclearOtherwise`), and
+   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#offerOtherwiseReadings`), and
    * one without errors of its own; the readings of `example` stand in for it.
    */
   #reportNotReadings(
@@ -1336,103 +1408,179 @@ export class Parser {
 
   /**
    * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850), and
-   * tells whether it did. The message names both readings: the fallback for the nearest value, and for the whole
-   * operand. A sign before the fallback, as in `otherwise -1`, can be read only one way.
+   * tells whether it did. A sign before the fallback, as in `otherwise -1`, can be read only one way.
    */
   #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): boolean {
-    const leftMixed = isArithmetic(left) || isSign(left);
-    const rightMixed = isArithmetic(right);
-    if (!leftMixed && !rightMixed) return false;
-    // The values next to `otherwise`: the last one of the left operand and the first one of the right operand.
-    let last = left;
-    while (isArithmetic(last) || isSign(last))
-      last = isSign(last) ? last.operand : last.kind === "binaryExpression" ? last.right : last.end;
-    let first = right;
-    while (isArithmetic(first))
-      first = first.kind === "binaryExpression" ? first.left : first.start;
-    this.#reportUnclearOtherwise(operator, spanFrom(left.span, right.span), () => {
-      // The source text of an operand ends with that of its last value and starts with that of its first one.
-      const text = (expression: Expression) => this.textOf(expression.span, expression.span);
-      const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
-      return [
-        {
-          code: `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`,
-          subject: value,
-          fallback,
-        },
-        {
-          code: `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`,
-          subject: whole,
-          fallback: rest,
-        },
-      ];
-    });
+    if (!isArithmetic(left) && !isSign(left) && !isArithmetic(right)) return false;
+    this.reportSpan(parserDiagnosticCode.mixedOtherwise, UNCLEAR_OTHERWISE, operator);
     return true;
   }
 
   /**
    * Reports an `otherwise` without parentheses as an operand of `whole`: a comparison, a type test, `not`, `and`, or `or`
-   * (owner decision on #1243). As for arithmetic, the message names both readings: the fallback for the value next to the
-   * operator, and for all of the operator's operand. In a chain, the last `otherwise` before the operator is next to it,
+   * (owner decision on #1243). In a chain, the error is at the `otherwise` next to the operator: the last one before it,
    * and the first one after it.
    */
   #reportOtherwiseOperand(whole: Expression, operand: Expression): void {
     if (!isOtherwise(operand)) return;
-    const before = operand.span.start.offset === whole.span.start.offset;
     let next = operand;
-    while (!before && isOtherwise(next.left)) next = next.left;
+    if (operand.span.start.offset !== whole.span.start.offset)
+      while (isOtherwise(next.left)) next = next.left;
     if (this.shared.faultyOtherwise.has(next)) return;
-    this.#reportUnclearOtherwise(next.operatorSpan, whole.span, () => {
-      // The source text of `whole` starts or ends with that of the operand, and so does that of a chain with the value
-      // at its far end.
-      const text = (expression: Expression) => this.textOf(expression.span, expression.span);
-      const [all, own] = [text(whole), text(operand)];
-      if (before) {
-        const [rest, fallback] = [all.slice(own.length), text(operand.right)];
-        const subject = text(operand.left);
-        return [
-          { code: `(${own})${rest}`, subject, fallback },
-          {
-            code: `${own.slice(0, own.length - fallback.length)}(${fallback}${rest})`,
-            subject,
-            fallback: `${fallback}${rest}`,
-          },
-        ];
-      }
-      const [rest, value] = [all.slice(0, all.length - own.length), text(next.left)];
-      const fallback = text(next.right);
-      return [
-        { code: `${rest}(${own})`, subject: value, fallback },
-        {
-          code: `(${rest}${value})${own.slice(value.length)}`,
-          subject: `${rest}${value}`,
-          fallback,
-        },
-      ];
-    });
+    this.reportSpan(parserDiagnosticCode.mixedOtherwise, UNCLEAR_OTHERWISE, next.operatorSpan);
   }
 
   /**
-   * Reports the `otherwise` at `operator`, which needs parentheses, naming both `readings` with the code as written. Only
-   * a short expression is quoted, which also keeps a long chain from being written out for each error in it.
+   * Offers both readings of the `otherwise` with the error at `index`, when that is the only error in `expression`,
+   * which nothing outside binds to (see `parseOr`): the fallback for the values next to it, and for all of each side of
+   * it. `offerFix` names them once it has proved them. Only a short expression is quoted, which also keeps
+   * a long chain from being written out.
    */
-  #reportUnclearOtherwise(
-    operator: SourceSpan,
-    span: SourceSpan,
-    readings: () => readonly { code: string; subject: string; fallback: string }[],
-  ): void {
-    let message = "It is unclear what 'otherwise' belongs to. Put parentheses around that part";
-    if (span.end.offset - span.start.offset <= 240) {
-      const choices = readings();
-      if (choices.every(({ code }) => code.length <= 60 && !code.includes("\n")))
-        message += `: ${choices
-          .map(
-            ({ code, subject, fallback }) =>
-              `'${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null`,
-          )
-          .join("; ")}`;
+  #offerOtherwiseReadings(expression: Expression, index: number): void {
+    const error = this.diagnostics[index]!;
+    if (
+      this.shared.source === null ||
+      error.code !== parserDiagnosticCode.mixedOtherwise ||
+      expression.span.end.offset - expression.span.start.offset > 240
+    )
+      return;
+    // The chain of `otherwise` with the error's operator, an operand of the operators that bind more loosely.
+    const at = error.span.start.offset;
+    let chain = expression;
+    for (;;) {
+      if (chain.kind === "binaryExpression") {
+        if (chain.operator === "otherwise") break;
+        chain = at < chain.right.span.start.offset ? chain.left : chain.right;
+      } else if (chain.kind === "unaryExpression" && chain.operator === "not")
+        chain = chain.operand;
+      else if (chain.kind === "typeTestExpression") chain = chain.value;
+      else return;
     }
-    this.reportSpan(parserDiagnosticCode.mixedOtherwise, `${message}.`, operator);
+    // Its values in order.
+    const values: Expression[] = [];
+    let found = false;
+    let link: Expression = chain;
+    for (; isOtherwise(link); link = link.left) {
+      found ||= link.operatorSpan.start.offset === at;
+      values.push(link.right);
+    }
+    values.push(link);
+    values.reverse();
+    if (!found) return;
+    const first = values[0]!;
+    const last = values.at(-1)!;
+    const beforeLast = values.at(-2)!;
+    // The values next to the chain's ends: the last one of its first value and the first one of its last value.
+    let near = first;
+    while (isArithmetic(near) || isSign(near))
+      near = isSign(near) ? near.operand : near.kind === "binaryExpression" ? near.right : near.end;
+    let nearFallback = last;
+    while (isArithmetic(nearFallback))
+      nearFallback =
+        nearFallback.kind === "binaryExpression" ? nearFallback.left : nearFallback.start;
+    // The source text of a part from one value to another starts with that of the first value and ends with that of the
+    // last one.
+    const text = (from: Expression, to: Expression = from) => this.textOf(from.span, to.span);
+    const whole = text(expression);
+    const start = text(expression, near).length - text(near).length;
+    const end = whole.length - (text(nearFallback, expression).length - text(nearFallback).length);
+    const subject = text(expression, first);
+    const fallback = text(last, expression);
+    const grouped = (part: string, alone: boolean) => (alone ? part : `(${part})`);
+    const left = grouped(
+      subject,
+      expression.span.start.offset === first.span.start.offset &&
+        !isArithmetic(first) &&
+        !isSign(first),
+    );
+    const right = grouped(
+      fallback,
+      expression.span.end.offset === last.span.end.offset && !isArithmetic(last),
+    );
+    const middle = text(first, last).slice(text(first).length, -text(last).length);
+    const readings = [
+      {
+        code: `${whole.slice(0, start)}(${whole.slice(start, end)})${whole.slice(end)}`,
+        subject: text(near, beforeLast),
+        fallback: text(nearFallback),
+      },
+      {
+        code: `${left}${middle}${right}`,
+        subject:
+          values.length === 2
+            ? subject
+            : `${left}${text(first, beforeLast).slice(text(first).length)}`,
+        fallback,
+      },
+    ];
+    if (!readings.every(({ code }) => code.length <= 60 && !code.includes("\n"))) return;
+    const named = readings.map(
+      ({ code, subject, fallback }) =>
+        ` '${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null.`,
+    );
+    this.offerFix(
+      index,
+      `${UNCLEAR_OTHERWISE}${named.join("")}`,
+      readings.map(({ code }) => ({
+        start: expression.span.start.offset,
+        end: expression.span.end.offset,
+        code,
+        expression: true,
+      })),
+    );
+  }
+
+  /**
+   * Offers code for the error at `index`, whose message says the fix in words: `quoted`, a message that shows the code,
+   * replaces it when the statement ends, but only if the file lexes without an error, the statement has no other error,
+   * and with each of `pastes` in place the statement parses without any error, also as one expression where a paste
+   * asks for it (#1268). The parses together read at most `SharedParse.proofBudget` characters.
+   */
+  public offerFix(index: number, quoted: string, pastes: readonly FixPaste[]): void {
+    if (this.shared.source !== null)
+      this.#fixOffers.push({ index, error: this.diagnostics[index]!, quoted, pastes });
+  }
+
+  /**
+   * Settles the fixes offered for the statement that starts at token `start`, whose errors begin at `diagnosticCount`.
+   * A statement inside a block, such as a media cue, may not parse on its own, so a fix that fails there although the
+   * statement has no other error is tried again in the statement around it, up to one of the file (`outermost`).
+   */
+  #settleFixOffers(start: number, diagnosticCount: number, outermost: boolean): void {
+    const offers = this.#fixOffers;
+    let first = offers.length;
+    while (first > 0 && offers[first - 1]!.index >= diagnosticCount) first -= 1;
+    if (first === offers.length) return;
+    const source = this.shared.source!;
+    const from = this.tokens[start]!.span.start.offset;
+    const to = this.lastEnd();
+    const alone = this.diagnostics.length === diagnosticCount + 1;
+    const retried: typeof offers = [];
+    for (const offer of offers.splice(first)) {
+      if (
+        !alone ||
+        this.diagnostics[offer.index] !== offer.error ||
+        offer.pastes.some(({ start, end }) => start < from || end > to)
+      )
+        continue;
+      const pasted = offer.pastes.map(
+        ({ start, end, code }) => `${source.slice(from, start)}${code}${source.slice(end, to)}`,
+      );
+      const cost = pasted.reduce((sum, text) => sum + text.length, 0);
+      if (cost > this.shared.proofBudget) continue;
+      this.shared.proofBudget -= cost;
+      const proved = offer.pastes.every(({ start, code, expression }, index) => {
+        const result = parseSource(pasted[index]!, false);
+        return (
+          result.diagnostics.length === 0 &&
+          (!expression || spansNode(result.program, start - from, start - from + code.length))
+        );
+      });
+      if (proved)
+        this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
+      else if (!outermost) retried.push(offer);
+    }
+    for (const offer of retried) offers.push(offer);
   }
 
   *#parseRange(): ParseTask<Expression | null> {
@@ -2063,6 +2211,7 @@ export class Parser {
     // Recovery has already stopped at the next statement.
     if (this.recoveredAtStatementBoundary) this.recoveredAtStatementBoundary = false;
     else this.finishStatement(inBlock);
+    this.#settleFixOffers(start, diagnosticCount, !inBlock);
     let end = this.current;
     // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
     // holds the line breaks after it, where an author completes it, as a recovered one does.
