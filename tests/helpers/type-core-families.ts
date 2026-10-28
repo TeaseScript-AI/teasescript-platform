@@ -2500,7 +2500,8 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
  * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
  * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
- * it, added to a list); each at size k, linear.
+ * it, added to a list), and k method results or conversions of one class beside an object in one literal (#1078); each
+ * at size k, linear.
  */
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
@@ -3193,6 +3194,25 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  ...(
+    [
+      ["method-results", (i: number) => `[a${i}].count(a${i})`],
+      ["conversions", (i: number) => `toInteger(a${i}.f0, default: 0)`],
+    ] as const
+  ).map(([variant, element]): WorkFamily => ({
+    name: `A8-${variant}-beside-object`,
+    measures: `A8 (#1078): k ${variant.replace("-", " ")} of one class beside an object of k properties in one literal, read at each property`,
+    program: (k) =>
+      main(
+        lines(
+          `let root = {${fields(k, () => "1")}}`,
+          rows(k, (i) => `let a${i} = root`),
+          `let out = [${Array.from({ length: k }, (_, i) => element(i)).join(", ")}, root]`,
+          rows(k, (i) => `repeat out[0].f${i} {}`),
+          "exit",
+        ),
+      ),
+  })),
   ...INHERITED_FIELD_FAMILIES,
 ];
 

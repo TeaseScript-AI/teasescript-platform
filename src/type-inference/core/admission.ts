@@ -940,8 +940,9 @@ export class Admission {
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
   #demands: Map<Key, (readonly string[])[]> | null = null;
   readonly #representative = new Map<Definition, Definition>();
-  /** The expected types of typed ingresses by identity, for `#conflictClass`. */
+  /** The expected types of typed ingresses by identity, and the contract-side classes, for `#conflictClass`. */
   readonly #termIds = new Map<TypeTerm, string>();
+  readonly #classIds = new Map<string, number>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
   readonly #structures = new Map<string, Structure>();
   readonly #depths = new Map<Key, number>();
@@ -5896,9 +5897,9 @@ export class Admission {
     // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
     const named = (d: Definition): boolean =>
       d.value !== undefined && this.#valueStructure(d.value).sources.length > 0;
-    // per landing and the distinct classes of a literal's elements' contracts (flow-insensitive: a source identity, or
-    // a typed ingress's type and default), the paths below them where their contracts hold more than one kind: only there
-    // can one element offend another (F2)
+    // per landing and the distinct groups of a literal's elements' contracts (flow-insensitive: by source identity,
+    // class or a typed ingress's type and default, `#conflictGroups`), the paths below them where their contracts hold
+    // more than one kind: only there can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
     cells: for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
@@ -5915,9 +5916,7 @@ export class Admission {
         // (elements of one source identity hold one value: none offends another)
         if (distinct.length === 1) continue;
         const landing = this.#landing(owner.owner);
-        const classes = list.map((d) =>
-          d.value === undefined ? "" : this.#conflictClass(d.value),
-        );
+        const classes = this.#conflictGroups(list);
         const kinds = [...new Set(classes)].sort();
         const key = joinParts(landing ?? "", kinds.join(","));
         let paths = conflicts.get(key);
@@ -6143,26 +6142,71 @@ export class Admission {
   }
 
   /**
+   * A literal's elements grouped for the conflict paths of `literalElements` (§8): elements of one source identity, or
+   * of one class (`#conflictClass`), have the same kinds at every path, so the elements either joins are one group,
+   * asked once; each group named by its least identity or class, so literals of alike groups share one discovery. (An
+   * identity may join what a class keeps apart, k bindings of alike objects, #1313, and a class what identities keep
+   * apart, k method results of one class, #1078.)
+   */
+  #conflictGroups(list: readonly Definition[]): string[] {
+    const { program, contract } = this.pass;
+    const tags = list.map((d) =>
+      d.value === undefined
+        ? [""]
+        : [joinParts("identity", contract.identityOf(d.value).id), this.#conflictClass(d.value)],
+    );
+    // (a union-find over the elements, joined by each tag they share)
+    const parent = list.map((_, index) => index);
+    const find = (at: number): number => {
+      while (parent[at] !== at) at = parent[at] = parent[parent[at]!]!;
+      return at;
+    };
+    const byTag = new Map<string, number>();
+    for (const [index, own] of tags.entries())
+      for (const tag of own) {
+        program.work.charge("checks");
+        const other = byTag.get(tag);
+        if (other === undefined) byTag.set(tag, index);
+        else parent[find(index)] = find(other);
+      }
+    const least = new Map<number, string>();
+    for (const [index, own] of tags.entries()) {
+      const root = find(index);
+      for (const tag of own) {
+        const known = least.get(root);
+        if (known === undefined || tag < known) least.set(root, tag);
+      }
+    }
+    return list.map((_, index) => least.get(find(index))!);
+  }
+
+  /**
    * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
    * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
-   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data
-   * as the default the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
+   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15), and a default reading
+   * host data counts by the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
    * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
    * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads
-   * of one default, #1313, each share one discovery); any other value its source identity. Values of one class have the
-   * same kinds at every path.
+   * of one default, #1313, each share one discovery); any other value its contract-side class (`Contract.classOf`, so k
+   * method results or conversions beside an object are not each asked at each of its properties, #1078), or without
+   * one its source identity. Values of one class have the same kinds at every path.
    */
   #conflictClass(value: PlaceId): string {
     const { program, contract, definitions } = this.pass;
+    // (a class and an identity tagged apart, as an identity may read like any short id, a carrier's `c<n>` among
+    // them; a short id per class, as a class's text may hold the "," that joins a literal's classes into its key)
+    const tagged = (cls: string | null, of: PlaceId): string => {
+      if (cls === null) return joinParts("identity", contract.identityOf(of).id);
+      let id = this.#classIds.get(cls);
+      if (id === undefined) this.#classIds.set(cls, (id = this.#classIds.size));
+      return joinParts("class", id);
+    };
+    const own = (of: PlaceId): string => tagged(contract.classOf(of, false), of);
     const c = program.opOf.get(value);
     if (c === undefined || c.kind === "fallback") {
-      const own = contract.boundClass(value, false);
-      return (own.mixed === MIXED_LEAF ? own.cls : null) ?? contract.identityOf(value).id;
+      const bound = contract.boundClass(value, false);
+      return bound.mixed === MIXED_LEAF ? tagged(bound.cls, value) : own(value);
     }
-    const source = (of: PlaceId): string =>
-      (program.occurrenceOf.has(of) && definitions.ingress.has(of)
-        ? contract.classOf(of, false)
-        : null) ?? contract.identityOf(of).id;
     let fallback: PlaceId | undefined;
     if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;
     else if (
@@ -6171,7 +6215,7 @@ export class Admission {
       conversionCategory(c.contract.name)?.kind === "parses"
     )
       fallback = defaultOf(c);
-    else return contract.identityOf(value).id;
+    else return own(value);
     const expected = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
     let term = "";
     if (expected !== null) {
@@ -6179,7 +6223,20 @@ export class Admission {
       this.#termIds.set(expected, term);
     }
     const by = c.kind === "load" ? "load" : c.contract.name;
-    return joinParts("f18", by, term, fallback === undefined ? "" : source(fallback));
+    const host =
+      fallback !== undefined &&
+      program.occurrenceOf.has(fallback) &&
+      definitions.ingress.has(fallback);
+    return joinParts(
+      "f18",
+      by,
+      term,
+      fallback === undefined
+        ? ""
+        : host
+          ? own(fallback)
+          : joinParts("identity", contract.identityOf(fallback).id),
+    );
   }
 
   // ------------------------------------------------------------------------------------------- the landing index
