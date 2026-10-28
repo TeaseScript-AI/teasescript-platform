@@ -691,7 +691,12 @@ test("is checks a type, and a provably constant test is a warning", () => {
       ["error", "TSP021", valueTest, '"happy"'],
       ["error", "TSP021", valueTest, '"happy"'],
       ["error", "TSP021", valueTest, '("happy")'],
-      ["error", "TSP037", "TeaseScript writes 'or' instead of '||': if a or b { ... }", "||"],
+      [
+        "error",
+        "TSP037",
+        "TeaseScript writes 'or' instead of '||': if a or b { say \"one or both\" }",
+        "||",
+      ],
     ],
   );
   assert.deepEqual(

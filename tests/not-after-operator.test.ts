@@ -114,7 +114,11 @@ test("after 'not' right after a comparison operator, the statement and the scrip
   }
   // `!` has its own error and is then read as `not`; two `not`s cancel out; a chain has its own error already.
   assert.deepEqual(diagnostics(source('if x == !a {\n    say "yes", instant\n}')), [
-    ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+    [
+      "TSP037",
+      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "!",
+    ],
     ["TSP012", EQUAL_NOT, "!"],
   ]);
   assert.deepEqual(diagnostics(source('if x == not not a {\n    say "yes", instant\n}')), [
@@ -211,7 +215,11 @@ test("'not' right after 'otherwise' is one error, and the code it names runs as 
     ],
   ]);
   assert.deepEqual(diagnostics(source("let c = a otherwise !b")), [
-    ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+    [
+      "TSP037",
+      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "!",
+    ],
     ["TSP012", OTHERWISE_NOT, "!"],
   ]);
   assert.deepEqual(diagnostics(source("let c = a otherwise not not b")), [
@@ -260,7 +268,11 @@ test("'not' right after arithmetic or a range operator is one error that names n
     assert.deepEqual(
       diagnostics(source(form("!b"))),
       [
-        ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+        [
+          "TSP037",
+          "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+          "!",
+        ],
         ["TSP012", message, "!"],
       ],
       operator,
@@ -300,7 +312,11 @@ test("'not' right after a sign is one error, as after arithmetic", () => {
   for (const [form, sign] of forms)
     assert.deepEqual(diagnostics(source(form)), [["TSP012", message(sign), "not"]], form);
   assert.deepEqual(diagnostics(source("let c = -!b")), [
-    ["TSP037", "TeaseScript writes 'not' instead of '!': if not a { ... }", "!"],
+    [
+      "TSP037",
+      "TeaseScript writes 'not' and a space instead of '!': if not a { say \"not a\" }",
+      "!",
+    ],
     ["TSP012", message("-"), "!"],
   ]);
   assert.deepEqual(diagnostics(source("let c = -not")), [

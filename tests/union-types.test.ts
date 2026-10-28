@@ -403,7 +403,7 @@ test("an empty default, list, or result joins a union as a value of the member i
 
 test("'|' outside a type points to 'or'", () => {
   assert.deepEqual(diagnostics("let both = true || false"), [
-    ["TSP037", "TeaseScript writes 'or' instead of '||': if a or b { ... }", "||"],
+    ["TSP037", "TeaseScript writes 'or' instead of '||': if a or b { say \"one or both\" }", "||"],
   ]);
   assert.deepEqual(diagnostics("let both = true | false"), [
     [

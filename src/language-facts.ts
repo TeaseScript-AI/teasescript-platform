@@ -342,13 +342,17 @@ function foreignForm(
  * comment as a comment, and text in backticks as text.
  */
 export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
-  foreignForm("&&", "and", "if a and b { ... }"),
-  foreignForm("&", "and", "if a and b { ... }"),
-  foreignForm("||", "or", "if a or b { ... }"),
-  foreignForm("!", "not", "if not a { ... }"),
+  foreignForm("&&", "and", 'if a and b { say "both" }'),
+  foreignForm("&", "and", 'if a and b { say "both" }'),
+  foreignForm("||", "or", 'if a or b { say "one or both" }'),
+  // A space after `not`, which `!` does not need, as in `!a`.
+  [
+    "!",
+    { message: `TeaseScript writes 'not' and a space instead of '!': if not a { say "not a" }` },
+  ],
   foreignForm("??", "otherwise", 'let name = nickname otherwise "pet"'),
-  foreignForm("===", "==", "if a == b { ... }"),
-  foreignForm("!==", "!=", "if a != b { ... }"),
+  foreignForm("===", "==", 'if a == b { say "same" }'),
+  foreignForm("!==", "!=", 'if a != b { say "different" }'),
   foreignForm("~=", "!=", 'if a != b { say "different" }'),
   foreignForm("++", "+= 1", "count += 1"),
   foreignForm("--", "-= 1", "count -= 1"),
@@ -366,7 +370,12 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
     },
   ],
   foreignForm('f"Hi {name}"', '"Hi ${name}"', 'say "Hi ${name}"'),
-  foreignForm("for (...)", "for ... in", "for i in 0..3 { ... }"),
+  [
+    "for (...)",
+    {
+      message: `TeaseScript writes 'for i in 0..3' instead of 'for (let i = 0; i < 3; i++)': for i in 0..3 { say "\${i}" }`,
+    },
+  ],
   [
     ":",
     {
@@ -382,13 +391,15 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
     },
   ],
   ...["def", "fn", "func", "fun"].map((word) =>
-    foreignForm(word, "function", "function countTo(n) { ... }", { statement: "function" }),
+    foreignForm(word, "function", 'function countTo(n) { say "${n}" }', { statement: "function" }),
   ),
   ...["var", "local"].map((word) =>
     foreignForm(word, "let", "let count = 1", { statement: "let" }),
   ),
   ...["elif", "elsif", "elseif"].map((word) =>
-    foreignForm(word, "else if", "if a { ... } else if b { ... }", { statement: "else if" }),
+    foreignForm(word, "else if", 'if a { say "a" } else if b { say "b" }', {
+      statement: "else if",
+    }),
   ),
   foreignForm("print", "say", 'say "Hello"', { statement: "say", name: true }),
   ...["console.log", "console.error", "console.warn"].map((written) =>

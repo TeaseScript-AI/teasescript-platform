@@ -24,7 +24,7 @@ test("each form of another language is one error that names the TeaseScript form
   const cases: [string, [string, string, string][]][] = [
     ...["def", "fn", "func", "fun"].map((word): [string, [string, string, string][]] => [
       `${word} countTo(n: integer) {\n  say "\${n}"\n}\ncountTo(3)\nexit`,
-      [["TSP037", writes("function", word, "function countTo(n) { ... }"), word]],
+      [["TSP037", writes("function", word, 'function countTo(n) { say "${n}" }'), word]],
     ]),
     ...["var", "local"].map((word): [string, [string, string, string][]] => [
       `${word} count = 1\nsay "\${count}"\nexit`,
@@ -33,11 +33,11 @@ test("each form of another language is one error that names the TeaseScript form
     // On the line of the `}`, and on the next line before a condition, also one in parentheses.
     ...["elif", "elsif", "elseif"].map((word): [string, [string, string, string][]] => [
       `let a = 1\nif a == 1 { say "one" } ${word} a == 2 { say "two" }\nexit`,
-      [["TSP037", writes("else if", word, "if a { ... } else if b { ... }"), word]],
+      [["TSP037", writes("else if", word, 'if a { say "a" } else if b { say "b" }'), word]],
     ]),
     ...["a == 2", "not done", "(done)"].map((condition): [string, [string, string, string][]] => [
       `let a = 1\nlet done = false\nif a == 1 {\n  say "one"\n}\nelif ${condition} {\n  say "two"\n}\nexit`,
-      [["TSP037", writes("else if", "elif", "if a { ... } else if b { ... }"), "elif"]],
+      [["TSP037", writes("else if", "elif", 'if a { say "a" } else if b { say "b" }'), "elif"]],
     ]),
     ['print "Hello"\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
     ['print("Hello")\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
@@ -58,11 +58,11 @@ test("each form of another language is one error that names the TeaseScript form
     ],
     [
       'let a = 1\nif a === 1 { say "x" }\nexit',
-      [["TSP037", writes("==", "===", "if a == b { ... }"), "==="]],
+      [["TSP037", writes("==", "===", 'if a == b { say "same" }'), "==="]],
     ],
     [
       'let a = 1\nif a !== 1 { say "x" }\nexit',
-      [["TSP037", writes("!=", "!==", "if a != b { ... }"), "!=="]],
+      [["TSP037", writes("!=", "!==", 'if a != b { say "different" }'), "!=="]],
     ],
     [
       'let a = 1\nif a ~= 1 { say "x" }\nexit',
@@ -115,7 +115,7 @@ test("each form of another language is one error that names the TeaseScript form
     ['let a = 1;\nsay "${a}"\nexit', [["TSP037", SEMICOLON, ";"]]],
     [
       'if true & false { say "x" }\nexit',
-      [["TSP037", writes("and", "&", "if a and b { ... }"), "&"]],
+      [["TSP037", writes("and", "&", 'if a and b { say "both" }'), "&"]],
     ],
     // The block after the head still parses, also on the next line.
     [
@@ -125,7 +125,7 @@ test("each form of another language is one error that names the TeaseScript form
         ["TSP037", SEMICOLON, ";"],
         [
           "TSP037",
-          writes("for ... in", "for (...)", "for i in 0..3 { ... }"),
+          writes("for i in 0..3", "for (let i = 0; i < 3; i++)", 'for i in 0..3 { say "${i}" }'),
           "for (let i = 0; i < 3; i++)",
         ],
       ],
@@ -134,19 +134,46 @@ test("each form of another language is one error that names the TeaseScript form
   for (const [source, expected] of cases) assert.deepEqual(diagnostics(source), expected, source);
 });
 
-test("the TeaseScript form that such an error names compiles where it is pasted", () => {
-  const cases: [string, string][] = [
-    ['let a = 1\nif a ~= 2 { say "x" }\nexit', "~="],
-    ['let a = 1 # one\nsay "${a}"\nexit', "#"],
-    ['let name = "Ann"\nsay f"Hi {name}"\nexit', 'f"Hi {name}"'],
+test("the form and the example that such an error names compile where they are pasted", () => {
+  // The names an example uses, statements that write the form, and the form as written. A message in words names no
+  // form to paste, but its example compiles too.
+  const ab = "let a = true\nlet b = false\n";
+  const cases: [string, string, string][] = [
+    [ab, 'if a && b { say "x" }', "&&"],
+    [ab, 'if a & b { say "x" }', "&"],
+    [ab, 'if a || b { say "x" }', "||"],
+    ["let a = true\n", 'if !a { say "x" }', "!"],
+    ["let nickname: string? = null\n", 'let name = nickname ?? "pet"\nsay name', "??"],
+    ["let a = 1\nlet b = 2\n", 'if a === b { say "x" }', "==="],
+    ["let a = 1\nlet b = 2\n", 'if a !== b { say "x" }', "!=="],
+    ["let a = 1\nlet b = 2\n", 'if a ~= b { say "x" }', "~="],
+    ["let count = 0\n", "count++", "++"],
+    ["let count = 0\n", "count--", "--"],
+    ["let a = 1\n", 'say "${a}" # one', "#"],
+    ['let name = "Ann"\n', "say `Hi ${name}`", "`"],
+    ['let name = "Ann"\n', 'say f"Hi {name}"', 'f"Hi {name}"'],
+    // The `for (...)` error comes after those of the `;` in its head.
+    ["", 'for (let i = 0; i < 3; i++) {\n  say "x"\n}', "for (let i = 0; i < 3; i++)"],
+    ["let done = true\n", 'if done:\n    say "x"', ":"],
     // Also before a method call.
-    ['let items = range(5).toList()\nsay "${items.length}"\nexit', "range(5)"],
-    ['console.error("x")\nexit', "console.error"],
+    ["", 'let items = range(5).toList()\nsay "${items.length}"', "range(5)"],
+    ["", 'def countTo(n: integer) {\n  say "${n}"\n}\ncountTo(3)', "def"],
+    ["", 'var count = 1\nsay "${count}"', "var"],
+    [ab, 'if a { say "x" } elif b { say "y" }', "elif"],
+    ["", 'print("Hello")', "print"],
+    ["", 'console.error("Hello")', "console.error"],
+    ["", "let answer: string? = None", "None"],
+    ["", 'if True { say "x" }', "True"],
   ];
-  for (const [source, written] of cases) {
-    const [error] = compileSource(source).diagnostics;
-    const teaseScript = /^TeaseScript writes '(.+?)' instead of /u.exec(error!.message)![1]!;
-    assert.deepEqual(diagnostics(source.replace(written, teaseScript)), [], source);
+  for (const [names, statements, written] of cases) {
+    const source = `${names}${statements}\nexit`;
+    const { code, message } = compileSource(source).diagnostics.at(-1)!;
+    assert.equal(code, "TSP037", source);
+    const form = /^TeaseScript writes '([^']+)' instead of /u.exec(message)?.[1];
+    if (form !== undefined)
+      assert.deepEqual(diagnostics(source.replace(written, form)), [], source);
+    const example = message.slice(message.lastIndexOf(": ") + 2);
+    assert.deepEqual(diagnostics(`${names}${example}\nexit`), [], message);
   }
 });
 

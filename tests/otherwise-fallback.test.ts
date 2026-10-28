@@ -838,9 +838,14 @@ test("&&, ||, !, and ?? each give one error that names the word, and parsing goe
     `TeaseScript writes '${word}' instead of '${written}': ${example}`,
     written,
   ];
-  const and = symbol("and", "&&", "if a and b { ... }");
-  const or = symbol("or", "||", "if a or b { ... }");
-  const not = symbol("not", "!", "if not a { ... }");
+  const and = symbol("and", "&&", 'if a and b { say "both" }');
+  const or = symbol("or", "||", 'if a or b { say "one or both" }');
+  const not = [
+    "error",
+    "TSP037",
+    `TeaseScript writes 'not' and a space instead of '!': if not a { say "not a" }`,
+    "!",
+  ];
   const otherwise = symbol("otherwise", "??", 'let name = nickname otherwise "pet"');
   for (const [source, expected] of [
     ['let a = true\nlet b = false\nif a && b { say "x" }\nexit', [and]],
