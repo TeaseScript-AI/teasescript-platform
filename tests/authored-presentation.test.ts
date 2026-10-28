@@ -127,6 +127,7 @@ test("rejects invalid constant colours and presentation options at compile time"
     ['speaker vera { color: "not-a-color" }', "TSC008", '"not-a-color"'],
     ['speaker vera { prose: { background: "not-a-color" } }', "TSC008", '"not-a-color"'],
     ['say "[color=not-a-color]x[/color]"', "TSC008", '"[color=not-a-color]x[/color]"'],
+    ['let text = "[color=not-a-color]x[/color]"\nsay text', "TSC008", "text"],
     [
       'let line = say "x"\nline.text = "[color=not-a-color]x[/color]"',
       "TSC008",
