@@ -5694,9 +5694,12 @@ export class Admission {
             ...this.#sharedPaths(landing, representatives),
             ...representatives.slice(1).flatMap((d) => this.#pathsBelow(d.value!, [])),
           ]);
+          // (each object literal asked at its own properties' paths only: a wide object beside k small ones takes their
+          // sizes, not their product, #1199)
+          const holding = this.#holdersByProperty(representatives);
           for (const path of listed) {
             const kinds = new Set<ItemTag>();
-            for (const d of representatives) {
+            for (const d of holding(path)) {
               program.work.charge("checks");
               for (const item of withoutEmpty(
                 this.#run(contract.contractOfValueAt(d.value!, path)),
@@ -5792,6 +5795,56 @@ export class Admission {
         for (const path of known ?? []) offended(d, path);
       }
     }
+  }
+
+  /**
+   * The elements whose contracts may hold a kind at a path below them (`literalElements`), in their order: an object
+   * literal's only at its own properties (F11: without the path's first property it holds `missing` there), any other
+   * element's at every path, as a selection's step (V30 §19) and the element itself. The objects' properties are
+   * listed at the first path asked, where each element's contract would be read anyway.
+   */
+  #holdersByProperty(
+    elements: readonly Definition[],
+  ): (path: readonly string[]) => readonly Definition[] {
+    const { program, contract } = this.pass;
+    const always: number[] = [];
+    let byProperty: Map<string, number[]> | null = null;
+    const list = (): Map<string, number[]> => {
+      const out = new Map<string, number[]>();
+      for (const [at, d] of elements.entries()) {
+        const index = program.hasOf.has(d.value!) ? contract.literalIndex(d.value!) : null;
+        const objects = index?.objects.get("");
+        // (a literal of an object alone: its root's one kind)
+        if (objects === undefined || index!.terms.get("")?.size !== 1) {
+          always.push(at);
+          continue;
+        }
+        for (const object of objects.list)
+          for (const name of object.names) {
+            program.work.charge("checks");
+            const holders = out.get(name);
+            if (holders === undefined) out.set(name, [at]);
+            else if (holders.at(-1) !== at) holders.push(at);
+          }
+      }
+      return out;
+    };
+    return (path) => {
+      const step = path[0];
+      if (step === undefined || step === SELECTED_VALUE || step === SELECTED_TEXT) return elements;
+      const own = (byProperty ??= list()).get(step) ?? [];
+      // (the two lists merged in the elements' order)
+      const out: Definition[] = [];
+      for (let a = 0, b = 0; a < always.length || b < own.length;)
+        out.push(
+          elements[
+            b >= own.length || (a < always.length && always[a]! < own[b]!)
+              ? always[a++]!
+              : own[b++]!
+          ]!,
+        );
+      return out;
+    };
   }
 
   /**

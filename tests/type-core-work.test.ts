@@ -298,9 +298,10 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
  * index keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's
  * (#1230); a ring of k copies through a k-element list, the list's index built again for each element and its read
  * re-run whole for each changed element (#1229); k properties read below a choice of k objects holding one value, or k
- * unchanged aliases or wrappers of it, each read walking every object (#1233); and k/4 loads, parses and reads of host
- * data beside an object of k properties, the list's touch trie walking the object again for each (#1307). A read of
- * host data compiles with its runtime check.
+ * unchanged aliases or wrappers of it, each read walking every object (#1233); a list of a wide object and k small
+ * ones, each small one's contract asked at every property of the wide one (#1199); and k/4 loads, parses and reads of
+ * host data beside an object of k properties, the list's touch trie walking the object again for each (#1307). A read
+ * of host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -455,6 +456,21 @@ const PRODUCTS: readonly (WorkFamily & {
     ],
   },
   {
+    name: "wide-object-beside-small-ones",
+    measures: "#1199: each object of a list asked at its own properties only",
+    counter: "mergeItems",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "let t: integer = 1",
+          `let a = [{${many(k, (i) => `f${i}: t`, ", ")}}, ${many(k, (i) => `{f${i}: 2}`, ", ")}]`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
     name: "host-data-beside-a-wide-object",
     measures: "#1307: the touch trie walks only the nodes a merge asks, never the object again",
     counter: "indexSteps",
@@ -486,7 +502,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256). The touch family's total is left
  * ungated: the value side still reads each host-data element at each property (2.95 here), which #1297 removes.
  */
-test("each product a repair removed grows with the program in either order (#1229, #1230, #1233, #1255–#1257, #1307)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1229, #1230, #1233, #1255–#1257, #1307)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
