@@ -838,8 +838,14 @@ test("&&, ||, !, and ?? each give one error that names the word, and parsing goe
     `TeaseScript writes '${word}' instead of '${written}': ${example}`,
     written,
   ];
-  const and = symbol("and", "&&", 'if a and b { say "both" }');
-  const or = symbol("or", "||", 'if a or b { say "one or both" }');
+  const spaced = (word: string, written: string, example: string) => [
+    "error",
+    "TSP037",
+    `TeaseScript writes '${word}' with a space on each side instead of '${written}': ${example}`,
+    written,
+  ];
+  const and = spaced("and", "&&", 'if a and b { say "both" }');
+  const or = spaced("or", "||", 'if a or b { say "one or both" }');
   const not = [
     "error",
     "TSP037",

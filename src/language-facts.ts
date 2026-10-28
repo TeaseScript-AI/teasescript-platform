@@ -342,9 +342,19 @@ function foreignForm(
  * comment as a comment, and text in backticks as text.
  */
 export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
-  foreignForm("&&", "and", 'if a and b { say "both" }'),
-  foreignForm("&", "and", 'if a and b { say "both" }'),
-  foreignForm("||", "or", 'if a or b { say "one or both" }'),
+  // A space on each side of a word, which a symbol does not need, as in `a&&b`.
+  ...["&&", "&"].map((symbol): readonly [string, ForeignForm] => [
+    symbol,
+    {
+      message: `TeaseScript writes 'and' with a space on each side instead of '${symbol}': if a and b { say "both" }`,
+    },
+  ]),
+  [
+    "||",
+    {
+      message: `TeaseScript writes 'or' with a space on each side instead of '||': if a or b { say "one or both" }`,
+    },
+  ],
   // A space after `not`, which `!` does not need, as in `!a`.
   [
     "!",
@@ -373,7 +383,7 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   [
     "for (...)",
     {
-      message: `TeaseScript writes 'for i in 0..3' instead of 'for (let i = 0; i < 3; i++)': for i in 0..3 { say "\${i}" }`,
+      message: `TeaseScript writes a loop with 'in' instead of 'for (...)': for i in 0..3 { say "\${i}" }`,
     },
   ],
   [

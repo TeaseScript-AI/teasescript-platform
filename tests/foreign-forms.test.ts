@@ -115,7 +115,13 @@ test("each form of another language is one error that names the TeaseScript form
     ['let a = 1;\nsay "${a}"\nexit', [["TSP037", SEMICOLON, ";"]]],
     [
       'if true & false { say "x" }\nexit',
-      [["TSP037", writes("and", "&", 'if a and b { say "both" }'), "&"]],
+      [
+        [
+          "TSP037",
+          `TeaseScript writes 'and' with a space on each side instead of '&': if a and b { say "both" }`,
+          "&",
+        ],
+      ],
     ],
     // The block after the head still parses, also on the next line.
     [
@@ -125,7 +131,7 @@ test("each form of another language is one error that names the TeaseScript form
         ["TSP037", SEMICOLON, ";"],
         [
           "TSP037",
-          writes("for i in 0..3", "for (let i = 0; i < 3; i++)", 'for i in 0..3 { say "${i}" }'),
+          `TeaseScript writes a loop with 'in' instead of 'for (...)': for i in 0..3 { say "\${i}" }`,
           "for (let i = 0; i < 3; i++)",
         ],
       ],
@@ -139,9 +145,10 @@ test("the form and the example that such an error names compile where they are p
   // form to paste, but its example compiles too.
   const ab = "let a = true\nlet b = false\n";
   const cases: [string, string, string][] = [
-    [ab, 'if a && b { say "x" }', "&&"],
-    [ab, 'if a & b { say "x" }', "&"],
-    [ab, 'if a || b { say "x" }', "||"],
+    // Written without spaces, where a word needs them.
+    [ab, 'if a&&b { say "x" }', "&&"],
+    [ab, 'if a&b { say "x" }', "&"],
+    [ab, 'if a||b { say "x" }', "||"],
     ["let a = true\n", 'if !a { say "x" }', "!"],
     ["let nickname: string? = null\n", 'let name = nickname ?? "pet"\nsay name', "??"],
     ["let a = 1\nlet b = 2\n", 'if a === b { say "x" }', "==="],
@@ -153,7 +160,7 @@ test("the form and the example that such an error names compile where they are p
     ['let name = "Ann"\n', "say `Hi ${name}`", "`"],
     ['let name = "Ann"\n', 'say f"Hi {name}"', 'f"Hi {name}"'],
     // The `for (...)` error comes after those of the `;` in its head.
-    ["", 'for (let i = 0; i < 3; i++) {\n  say "x"\n}', "for (let i = 0; i < 3; i++)"],
+    ["", 'for (let j = 2; j < 7; j++) {\n  say "${j}"\n}', "for (let j = 2; j < 7; j++)"],
     ["let done = true\n", 'if done:\n    say "x"', ":"],
     // Also before a method call.
     ["", 'let items = range(5).toList()\nsay "${items.length}"', "range(5)"],

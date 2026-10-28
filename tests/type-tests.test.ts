@@ -694,7 +694,7 @@ test("is checks a type, and a provably constant test is a warning", () => {
       [
         "error",
         "TSP037",
-        "TeaseScript writes 'or' instead of '||': if a or b { say \"one or both\" }",
+        "TeaseScript writes 'or' with a space on each side instead of '||': if a or b { say \"one or both\" }",
         "||",
       ],
     ],
