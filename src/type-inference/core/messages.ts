@@ -507,14 +507,18 @@ function memberFix(
   return "";
 }
 
-/** The fix of a value that is not true or false where a condition needs one (#1195's decided text). */
+/**
+ * The fix of a value that is not true or false where a condition needs one (#1195's decided text): its advice always,
+ * its example only of a stable path (the lead after Astra r3).
+ */
 function conditionFix(text: string, kinds: readonly ItemTag[]): string {
-  if (!stablePath(text)) return "";
   const kind = known(kinds)[0];
-  if (kind === "integer" || kind === "number") return ` Compare it instead, as in '${text} > 0'.`;
-  if (kind === "string") return ` Compare it instead, as in '${text} != ""'.`;
+  const example = (code: string): string => (stablePath(text) ? `, as in '${code}'.` : ".");
+  if (kind === "integer" || kind === "number")
+    return ` Compare it instead${example(`${text} > 0`)}`;
+  if (kind === "string") return ` Compare it instead${example(`${text} != ""`)}`;
   if (kind === "list" || kind === "set" || kind === "dict")
-    return ` Check its length instead, as in '${text}.length > 0'.`;
+    return ` Check its length instead${example(`${text}.length > 0`)}`;
   return "";
 }
 

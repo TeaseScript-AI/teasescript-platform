@@ -165,16 +165,20 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           OUTSIDE("hostValue"),
       ],
     ],
-    // C3
+    // C3: the advice without an example where the value is no stable path (Astra r3)
     [
       'if 1 { say "x" }\nexit\n',
       [
-        "E TSV043 '1': A condition must be true or false (boolean), but '1' is a whole number (integer).",
+        "E TSV043 '1': A condition must be true or false (boolean), but '1' is a whole number (integer). Compare " +
+          "it instead.",
       ],
     ],
     [
       "let y = not 1\nexit\n",
-      ["E TSV043 '1': 'not' needs true or false (boolean), but '1' is a whole number (integer)."],
+      [
+        "E TSV043 '1': 'not' needs true or false (boolean), but '1' is a whole number (integer). Compare it " +
+          "instead.",
+      ],
     ],
     [
       'let ok = hostValue\nif ok { say "x" }\nexit\n',

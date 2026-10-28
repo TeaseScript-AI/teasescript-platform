@@ -111,14 +111,20 @@ const PORTS: readonly Port[] = [
           : `Keep '${subject}' in a new variable and check the variable first, as in 'if value ${test} { ... }'.`,
       ),
   },
-  // #1195's decided texts
+  // #1195's decided texts; a condition's advice always, its example only of a stable path (Astra r3)
   {
     from: /^Compare it instead, such as '(.+)'\.$/,
-    to: ([, fix]) => exact(`Compare it instead, as in '${fix}'.`),
+    to: ([, fix], { subject }) =>
+      exact(stablePath(subject) ? `Compare it instead, as in '${fix}'.` : "Compare it instead."),
   },
   {
     from: /^Check its length instead, such as '(.+)'\.$/,
-    to: ([, fix]) => exact(`Check its length instead, as in '${fix}'.`),
+    to: ([, fix], { subject }) =>
+      exact(
+        stablePath(subject)
+          ? `Check its length instead, as in '${fix}'.`
+          : "Check its length instead.",
+      ),
   },
   {
     from: /^Show one of its properties instead\.$/,
@@ -915,8 +921,49 @@ test("a length check's fix checks the selection the read takes, under every seed
   }
 });
 
-test("a fix whose subject is no stable path, or not on one line, gives its sentence without an example (#1195)", () => {
+/**
+ * A fix whose subject is no stable path or not on one line loses its example, never its advice (#1195 rule 1, the lead
+ * after Astra r3): each such outcome of every fix with an example, as a whole sentence of its message.
+ */
+test("a fix whose subject is no stable path, or not on one line, keeps its advice without an example (#1195)", () => {
   const cases: readonly (readonly [string, string])[] = [
+    // a condition (Astra r3: a selection, its text and list variants, a call)
+    [
+      'let readings = [0, 73]\nif readings.random { say "selected" }\nexit\n',
+      "Compare it instead.",
+    ],
+    [
+      'let readings = ["", "Harbor"]\nif readings.random { say "selected" }\nexit\n',
+      "Compare it instead.",
+    ],
+    [
+      'let readings = [[], [73]]\nif readings.random { say "selected" }\nexit\n',
+      "Check its length instead.",
+    ],
+    ['function f { return 1 }\nif f() { say "x" }\nexit\n', "Compare it instead."],
+    // a member of a type without it, a speaker's member
+    [
+      "let ns = [1, 2]\nsay ns.random.length\nexit\n",
+      "Convert 'ns.random' to text first with 'toString(...)'.",
+    ],
+    [
+      'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nsay ts.random.year\nexit\n',
+      "Convert 'ts.random' with 'toDateTime()' first.",
+    ],
+    [
+      "let ss = [set[1]]\nsay ss.random.indexOf(1)\nexit\n",
+      "Copy 'ss.random' into a list with 'toList()' first.",
+    ],
+    ["let rack = [player]\nsay rack.random.rank\nexit\n", "Assign the property before this line."],
+    [
+      "let rack = [player]\nsay rack.random.get(0)\nexit\n",
+      "A speaker has no methods. Use one of its properties instead, such as 'title'.",
+    ],
+    // a null check of a value not on one line
+    [
+      "let xs = [7, null]\nsay (xs /* c */ [0]) + 1\nexit\n",
+      "Keep 'xs /* c */ [0]' in a new variable and check the variable first, as in 'if value != null { ... }'.",
+    ],
     // the text join where the operand that is not text spans lines or holds a comment (the owner's review)
     ['let n = 1\nsay "Sum: " + (n\n+2)\nexit\n', "Put the value in the text instead."],
     ['let n = 1\nsay "Sum: " + (n /* two */ + 2)\nexit\n', "Put the value in the text instead."],
@@ -947,6 +994,14 @@ test("a fix whose subject is no stable path, or not on one line, gives its sente
     [
       'say toDate("2026-10-23") < toDateTime("2026-10-23T12:00:00")\nexit\n',
       "Compare its date, with 'toDate(...)'.",
+    ],
+    [
+      'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random + 1 s\nexit\n',
+      "Convert it with 'toAbsoluteDateTime()' first, or use calendar units to keep the clock time.",
+    ],
+    [
+      'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random - ds[0]\nexit\n',
+      "Subtract their dates with 'toDate(...)', or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
     ],
   ];
   for (const [source, fix] of cases) {
