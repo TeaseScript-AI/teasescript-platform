@@ -733,3 +733,26 @@ test("a written union of one type repeated answers as that type does (V30 §13, 
       `${type} | ${type}`,
     );
 });
+
+test("each option's nested choice selects what its own objects hold (#1233, review r4)", () => {
+  // (the two options' nested lists hold the same kinds at each property, but the second's selected `text` may be a
+  // text: the store into `n` warns of it with its check, never counted with the first option as one)
+  const { answers } = analysed(
+    [
+      'let options = [{text: "a", value: {choices: [{value: 1, text: "x"}, {text: null}]}}, {text: "b", value: {choices: [{value: 1, text: null}, {text: "x"}]}}]',
+      "let outer = askChoice options",
+      "let picked = askChoice outer.choices",
+      "let n: integer? = picked",
+      "say n",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    [
+      answers.outcome,
+      answers.diagnostics.map((d) => [d.class, d.code]),
+      answers.checks.map((c) => c.kind),
+    ],
+    ["warning-runtime-check", [["warning-runtime-check", "TSV041"]], ["copy-type"]],
+  );
+});

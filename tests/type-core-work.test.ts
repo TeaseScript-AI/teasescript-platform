@@ -291,15 +291,20 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
   Array.from({ length: k }, (_, index) => row(index)).join(by);
 
 /**
- * Valid scripts whose work grew with a product of two of their dimensions, each with the counter that grew: a written
- * type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written result of
- * k repeated members read k times, each read merging every written member (#1256); a chain of k calls of one untyped
- * helper, each link discovering the helper's parameter again (#1257); a stored sum of k terms, admission's stop index
- * keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's (#1230); and a
- * ring of k copies through a k-element list, the list's index built again for each element and its read re-run whole
- * for each changed element (#1229).
+ * Scripts that compile and whose work grew with a product of two of their dimensions, each with the counter that grew:
+ * a written type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written
+ * result of k repeated members read k times, each read merging every written member (#1256); a chain of k calls of one
+ * untyped helper, each link discovering the helper's parameter again (#1257); a stored sum of k terms, admission's stop
+ * index keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's
+ * (#1230); a ring of k copies through a k-element list, the list's index built again for each element and its read
+ * re-run whole for each changed element (#1229); and k properties read below a choice of k objects holding one value,
+ * or k unchanged aliases or wrappers of it, each read walking every object (#1233).
  */
-const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
+const PRODUCTS: readonly (WorkFamily & {
+  readonly counter: WorkCounter;
+  /** A script that stops at run time, measured for its work alone, its outcome not pinned. */
+  readonly stops?: true;
+})[] = [
   {
     name: "repeated-written-type-copies",
     measures: "#1255: each copy's alias key names its written type, spelled once",
@@ -387,6 +392,63 @@ const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
       },
     ],
   },
+  {
+    name: "choice-properties",
+    measures: "#1233: a choice's objects holding one value read once for each property",
+    counter: "invSteps",
+    // (an option's value that is an object stops the choice at run time, TSR052)
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let payload = {${many(k, (i) => `f${i}: 1`, ", ")}}`,
+          `let options = [${many(k, (i) => `{text: "${i}", value: payload}`, ", ")}]`,
+          "let picked = askChoice options",
+          many(k, (i) => `repeat picked.f${i} {}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "choice-aliases",
+    measures: "#1233: k unchanged aliases of one value, one class, read once for each property",
+    counter: "invSteps",
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let payload = {${many(k, (i) => `f${i}: 1`, ", ")}}`,
+          many(k, (i) => `let p${i} = payload`),
+          `let options = [${many(k, (i) => `{text: "${i}", value: p${i}}`, ", ")}]`,
+          "let picked = askChoice options",
+          many(k, (i) => `repeat picked.f${i} {}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "choice-wrapped",
+    measures:
+      "#1233: k lists each wrapping one value in two objects that select, one class, read once for each property",
+    counter: "invSteps",
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let payload = {${many(k, (i) => `f${i}: 1`, ", ")}}`,
+          `let options = [${many(k, (i) => `{text: "${i}", value: [{value: payload}, {value: payload}]}`, ", ")}]`,
+          "let picked = askChoice options",
+          many(k, (i) => `repeat picked.first.value.f${i} {}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
@@ -395,14 +457,14 @@ const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1229, #1230, #1255–#1257)", () => {
+test("each product a repair removed grows with the program in either order (#1229, #1230, #1233, #1255–#1257)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
       const [small, large] = [at64, at128].map((at) => {
         const answers = analysed(at, reversed);
-        assert.equal(answers.outcome, "valid", at.name);
+        if (family.stops !== true) assert.equal(answers.outcome, "valid", at.name);
         return answers.budget;
       });
       const scale =
