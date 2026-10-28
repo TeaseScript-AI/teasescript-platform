@@ -12,13 +12,19 @@ import {
 } from "./check-obligation-inventory.mjs";
 import { repositoryRoot } from "./files.mjs";
 
-// Where the scratch copies are edited: the class's entry, the file holding `OBLIGATION_SITES`, and the fresh pass.
+// Where the scratch copies are edited, in this layout (the #1071 splits repoint them): the class's entry and where its
+// members are inserted; the file holding `OBLIGATION_SITES`; the fresh pass, its first line, its instance and its label,
+// the path from it to admission's folder, and what it imports to name `Admission`.
 const ADMISSION = "src/type-inference/core/admission.ts";
+const MEMBERS = "  public valueAt(";
 const INVENTORY = ADMISSION;
 const CONSUMERS = "src/type-inference/core/consumers.ts";
 const FRESH = CONSUMERS;
 const FRESH_START = "  #freshStores(): void {\n";
-const MEMBERS = "  public valueAt(";
+const SELF = "this";
+const FRESH_LABEL = "Consumers.#freshStores";
+const FRESH_TO_ADMISSION = "./admission";
+const FRESH_IMPORTS = "";
 // A part of admission's the split layout adds in memory, beside the files the layout already has.
 const PART = "src/type-inference/core/admission/probe.ts";
 const PART_HEAD = 'import type { Admission } from "../admission.js";\n';
@@ -81,7 +87,7 @@ test("a call from an obligation-creating consumer method into an unlisted Admiss
     [ADMISSION]: (text) =>
       text.replace(MEMBERS, "  public newDecision(): number {\n    return 0;\n  }\n\n" + MEMBERS),
     [FRESH]: (text) =>
-      text.replace(FRESH_START, `${FRESH_START}    this.admission.newDecision();\n`),
+      text.replace(FRESH_START, `${FRESH_START}    ${SELF}.admission.newDecision();\n`),
   });
   assert.ok(
     messages.some((message) => message.includes("calls Admission.newDecision")),
@@ -161,17 +167,19 @@ test("an inherited host member that is no listed host read fails too", () => {
 });
 
 /*
- * The derivation model's family (Codex r1–r3 on #1360): each form of declaration, in each layout, by what it does. A
- * creating form must be listed; a form the model cannot name, or a creation outside every form, is reported as unproved;
- * a name two derivations share is reported; an exact forwarder is its function's (the quiet control).
+ * The derivation model's family (Codex r1–r3 on #1360, r4 on #1369): each form of declaration, of creation, of recording
+ * and of use, by what it does. A creating form must be listed; a form the model cannot name, or a creation or a use
+ * outside every form, is reported as unproved; a name two derivations share is reported; an exact forwarder, with or
+ * without wrappers, is its function's (the quiet controls).
  */
 const CREATES = "(error: () => void): void {\n    error();\n  }";
+const KEPT = "this.readChecks[0]!";
 /** Members of the class, the single-file layout: [the name the report gives, the member]. */
 const MEMBER_FORMS = [
   ["probeMethod", `public probeMethod${CREATES}`],
   [
     "probeGetter",
-    "get probeGetter(): number {\n    this.readChecks.push(this.readChecks[0]!);\n    return 0;\n  }",
+    `get probeGetter(): number {\n    this.readChecks.push(${KEPT});\n    return 0;\n  }`,
   ],
   ["probeArrow", "probeArrow = (error: () => void): void => {\n    error();\n  };"],
   [
@@ -180,21 +188,38 @@ const MEMBER_FORMS = [
   ],
   ["probeQuoted", `"probeQuoted"${CREATES}`],
   ["probeComputed", `["probeComputed"]${CREATES}`],
+  // (the creation by its other spellings)
+  [
+    "probeQuotedArray",
+    `public probeQuotedArray(): void {\n    this["readChecks"].push(${KEPT});\n  }`,
+  ],
+  [
+    "probeQuotedPush",
+    `public probeQuotedPush(): void {\n    this.readChecks["push"](${KEPT});\n  }`,
+  ],
+  [
+    "probeAliasArray",
+    `public probeAliasArray(): void {\n    const checks = this.readChecks;\n    checks.push(${KEPT});\n  }`,
+  ],
+  [
+    "probeErrorCall",
+    "public probeErrorCall(error: () => void): void {\n    error.call(undefined);\n  }",
+  ],
+  [
+    "probeErrorApply",
+    "public probeErrorApply(error: () => void): void {\n    error.apply(undefined, []);\n  }",
+  ],
 ];
 /** Top-level forms of the entry: a function taking the instance under a member's name; creations outside every form. */
+const OUTSIDE = "An obligation is created outside";
 const ENTRY_FORMS = [
   [
     "Admission.reject names 2 derivations",
     "function reject(admission: Admission): void {\n  void admission;\n}",
   ],
-  [
-    "An obligation is created outside",
-    "function probeOutside(error: () => void): void {\n  error();\n}",
-  ],
-  [
-    "An obligation is created outside",
-    "class ProbeNested {\n  run(error: () => void): void {\n    error();\n  }\n}",
-  ],
+  [OUTSIDE, "function probeOutside(error: () => void): void {\n  error();\n}"],
+  [OUTSIDE, "function probeOutsideCall(error: () => void): void {\n  error.call(undefined);\n}"],
+  [OUTSIDE, "class ProbeNested {\n  run(error: () => void): void {\n    error();\n  }\n}"],
 ];
 /** Functions of a part, the split layout: [the report, the declaration]. */
 const PART_FORMS = [
@@ -223,21 +248,38 @@ const PART_FORMS = [
     "export function decide(admission: Admission): void {\n  void admission;\n}",
   ],
   [
-    "An obligation is created outside",
+    OUTSIDE,
     "export function probeStructural(admission: { readChecks: unknown[] }, error: () => void): void {\n  void admission;\n  error();\n}",
   ],
   [
-    "An obligation is created outside",
+    OUTSIDE,
     "export function probeOuter(): void {\n  const inner = (error: () => void): void => error();\n  void inner;\n}",
   ],
 ];
-/** Forwarders in the class to a part's function of their name: each wrong in one way but the first (quiet). */
+/** Forwarders in the class to a part's function of their name: [the name, the method, whether reported]. */
 const FORWARDERS = [
+  // (exact: plain, past wrappers, under a quoted name)
   [
     "probeExact",
     "public probeExact(value: number): number {\n    return probeExact(this, value);\n  }",
     false,
   ],
+  [
+    "probeParens",
+    "public probeParens(value: number): number {\n    return (probeParens)(this, value);\n  }",
+    false,
+  ],
+  [
+    "probeWrappedCall",
+    "public probeWrappedCall(value: number): number {\n    return (probeWrappedCall(this, value));\n  }",
+    false,
+  ],
+  [
+    "probeQuotedName",
+    'public "probeQuotedName"(value: number): number {\n    return probeQuotedName(this, value);\n  }',
+    false,
+  ],
+  // (each wrong in one way)
   [
     "probeExtra",
     "public probeExtra(value: number): number {\n    return probeExtra(this, (Math.random(), value));\n  }",
@@ -268,20 +310,17 @@ const forwarded = (name) =>
   `export function ${name}(admission: Admission, a: number, b = 0): number {\n  void admission;\n  return a + b;\n}`;
 const importing = (names, from) => `import { ${names.join(", ")} } from "${from}";\n`;
 
-test("each member form of the single-file layout is a derivation; a creation outside every form is reported", () => {
+test("each member form of the single-file layout is a derivation, each creation by any spelling; a creation outside every form is reported", () => {
   const messages = messagesWith({
     [ADMISSION]: (text) =>
       `${text.replace(MEMBERS, MEMBER_FORMS.map(([, member]) => `  ${member}\n\n`).join("") + MEMBERS)}\n${ENTRY_FORMS.map(([, form]) => form).join("\n\n")}\n`,
   });
   for (const [name] of MEMBER_FORMS) expectStart(messages, `Admission.${name} creates`);
   for (const [start] of ENTRY_FORMS) expectStart(messages, start);
-  assert.equal(
-    messages.filter((message) => message.startsWith("An obligation is created outside")).length,
-    2,
-  );
+  assert.equal(messages.filter((message) => message.startsWith(OUTSIDE)).length, 3);
 });
 
-test("each function form of the split layout is a derivation; only an exact forwarder is its function's", () => {
+test("each function form of the split layout is a derivation; only an exact forwarder, wrappers seen through, is its function's", () => {
   const messages = messagesWith(
     {
       [ADMISSION]: (text) =>
@@ -296,53 +335,91 @@ test("each function form of the split layout is a derivation; only an exact forw
     },
   );
   for (const [start] of PART_FORMS) expectStart(messages, start);
-  assert.equal(
-    messages.filter((message) => message.startsWith("An obligation is created outside")).length,
-    2,
-  );
+  assert.equal(messages.filter((message) => message.startsWith(OUTSIDE)).length, 2);
   for (const [name, , reported] of FORWARDERS)
     expectStart(messages, `Admission.${name} names 2 derivations`, reported);
 });
 
 /** Unlisted derivations a creating consumer calls, by route: [the name, the call in the fresh pass]. */
 const ROUTES = [
-  ["routeMethod", "this.admission.routeMethod();"],
-  ["routeQuoted", 'this.admission["routeQuoted"]();'],
-  ["routeDirect", "routeDirect(this.admission);"],
-  ["routeAlias", "aliased(this.admission);"],
-  ["routeNamespace", "probe.routeNamespace(this.admission);"],
-  ["routeParens", "(routeParens)(this.admission);"],
-  ["routeCall", "routeCall.call(undefined, this.admission);"],
-  ["routeApply", "routeApply.apply(undefined, [this.admission]);"],
+  ["routeMethod", `${SELF}.admission.routeMethod();`],
+  ["routeQuoted", `${SELF}.admission["routeQuoted"]();`],
+  ["routeDirect", `routeDirect(${SELF}.admission);`],
+  ["routeAlias", `aliased(${SELF}.admission);`],
+  ["routeNamespace", `probe.routeNamespace(${SELF}.admission);`],
+  ["routeParens", `(routeParens)(${SELF}.admission);`],
+  ["routeCall", `routeCall.call(undefined, ${SELF}.admission);`],
+  ["routeApply", `routeApply.apply(undefined, [${SELF}.admission]);`],
 ];
 /** What the model cannot follow from a creating consumer: [the report, the statement]. */
 const UNPROVED = [
   [
     "reads Admission.routeMethod as a value",
-    "const stored = this.admission.routeMethod;\n    void stored;",
+    `const stored = ${SELF}.admission.routeMethod;\n    void stored;`,
   ],
-  ["reads Admission.reject as a value", "const { reject } = this.admission;\n    void reject;"],
-  ["hands the Admission instance", "probeHelper(this.admission);"],
-  ["calls the Admission instance in a way", "this.admission[probeKey]();"],
+  [
+    "reads Admission.routeQuoted as a value",
+    `const quoted = ${SELF}.admission["routeQuoted"];\n    void quoted;`,
+  ],
+  ["reads Admission.reject as a value", `const { reject } = ${SELF}.admission;\n    void reject;`],
+  [
+    "reads Admission.sourceOrder as a value",
+    `const { ["sourceOrder"]: order } = ${SELF}.admission;\n    void order;`,
+  ],
+  ["hands the Admission instance", `probeHelper(${SELF}.admission);`],
+  ["calls Admission.[a computed key]", `${SELF}.admission[probeKey]();`],
+  ["calls Admission.probeOpaque", `${SELF}.admission.probeOpaque();`],
+];
+/** Consumers that record by a spelling, each calling its own unlisted derivation: [the consumer, the derivation, the body]. */
+const RECORDING = [
+  ["probeSelf", "routeSelf", "const self = walk;\n  self.diagnostics.push(self.diagnostics[0]!);"],
+  ["probeQuotedRecord", "routeQuotedRecord", 'walk["diagnostics"].push(walk.diagnostics[0]!);'],
+  [
+    "probeBindingRecord",
+    "routeBindingRecord",
+    'const { "diagnostics": found } = walk;\n  found.push(found[0]!);',
+  ],
+  [
+    "probeAliasRecord",
+    "routeAliasRecord",
+    "const list = walk.diagnostics;\n  list.push(list[0]!);",
+  ],
+];
+/** Consumers that record nothing, calling their own unlisted derivation: quiet (a nested class's `this`; a read alone). */
+const QUIET = [
+  [
+    "probeQuiet",
+    "routeQuiet",
+    "class Inner {\n    diagnostics: unknown[] = [];\n    run(): void {\n      this.diagnostics.push(0);\n    }\n  }\n  new Inner().run();",
+  ],
+  ["probeReadOnly", "routeReadOnly", "const { diagnostics } = walk;\n  void diagnostics.length;"],
 ];
 
-test("a creating consumer's call reaches its derivation by any route; what the model cannot follow is unproved; the fresh pass runs a derivation by identity", () => {
+test("a creating consumer's call reaches its derivation by any route; what the model cannot follow is unproved; the fresh pass runs one derivation by identity", () => {
+  const forwarded = [
+    "routeMethod",
+    "routeQuoted",
+    ...[...RECORDING, ...QUIET].map(([, route]) => route),
+  ];
   const unlisted = (name) =>
     `export function ${name}(admission: Admission): number {\n  void admission;\n  return 0;\n}`;
+  const consumerFunction = ([name, route, body]) =>
+    `export function ${name}(walk: Consumers): void {\n  ${body}\n  walk.admission.${route}();\n}\n`;
   const messages = messagesWith(
     edits(
       [
         ADMISSION,
         (text) =>
-          importing(
-            ["routeMethod", "routeQuoted", "routeQuiet", "routeSelf"],
-            "./admission/probe.js",
-          ) +
+          importing(forwarded, "./admission/probe.js") +
           text.replace(
             MEMBERS,
-            ["routeMethod", "routeQuoted", "routeQuiet", "routeSelf"]
-              .map((name) => `  public ${name}(): number {\n    return ${name}(this);\n  }\n\n`)
-              .join("") + MEMBERS,
+            [
+              ...forwarded.map(
+                (name) => `  public ${name}(): number {\n    return ${name}(this);\n  }\n\n`,
+              ),
+              // (a callable no derivation is: unproved where it is called)
+              "  probeOpaque = (() => () => 0)();\n\n",
+            ].join("") + MEMBERS,
           ),
       ],
       [
@@ -350,12 +427,13 @@ test("a creating consumer's call reaches its derivation by any route; what the m
         (text) =>
           text.replace(
             "OBLIGATION_SITES = [\n",
-            'OBLIGATION_SITES = [\n  { method: "freshAliased", runs: "freshAliased" },\n  { method: "freshDecoy", runs: "freshDecoy" },\n',
+            'OBLIGATION_SITES = [\n  { method: "freshAliased", runs: "freshAliased" },\n  { method: "freshDecoy", runs: "freshDecoy" },\n  { method: "freshShared", runs: "freshShared" },\n',
           ),
       ],
       [
         FRESH,
         (text) =>
+          FRESH_IMPORTS +
           importing(
             [
               "routeDirect",
@@ -365,31 +443,41 @@ test("a creating consumer's call reaches its derivation by any route; what the m
               "routeApply",
               "freshAliased as runAliased",
             ],
-            "./admission/probe.js",
+            `${FRESH_TO_ADMISSION}/probe.js`,
           ) +
-          'import * as probe from "./admission/probe.js";\n' +
+          `import * as probe from "${FRESH_TO_ADMISSION}/probe.js";\n` +
           text.replace(
             FRESH_START,
-            `${FRESH_START}${[...ROUTES, ...UNPROVED].map(([, statement]) => `    ${statement}\n`).join("")}    runAliased(this.admission);\n    freshDecoy();\n`,
+            `${FRESH_START}${[...ROUTES, ...UNPROVED].map(([, statement]) => `    ${statement}\n`).join("")}    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
           ) +
-          "\nfunction freshDecoy(): void {}\nfunction probeHelper(admission: unknown): void {\n  void admission;\n}\ndeclare const probeKey: string;\n" +
-          // (a consumer recording through an alias of the instance creates; a nested class's own `this` does not)
-          "export function probeSelf(walk: Consumers): void {\n  const self = walk;\n  self.diagnostics.push(self.diagnostics[0]!);\n  walk.admission.routeSelf();\n}\n" +
-          // (a function the model cannot name as a consumer's, calling into admission: unproved)
-          "interface ProbeView {\n  admission: Admission;\n}\nexport function probeOutside(view: ProbeView): void {\n  view.admission.routeSelf();\n}\n" +
-          "export function probeQuiet(walk: Consumers): void {\n  class Inner {\n    diagnostics: unknown[] = [];\n    run(): void {\n      this.diagnostics.push(0);\n    }\n  }\n  new Inner().run();\n  walk.admission.routeQuiet();\n}\n",
+          // (an unrecognised decoy; a recognised one of a derivation's name; a helper the model does not follow)
+          "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\nfunction probeHelper(admission: unknown): void {\n  void admission;\n}\ndeclare const probeKey: string;\n" +
+          [...RECORDING, ...QUIET].map(consumerFunction).join("") +
+          // (functions the model cannot name as a consumer's, calling or reading admission's: unproved)
+          "interface ProbeView {\n  admission: Admission;\n}\n" +
+          "export function probeOutside(view: ProbeView): void {\n  view.admission.routeSelf();\n}\n" +
+          "export function probeOutsideRead(view: ProbeView): void {\n  const read = view.admission.routeSelf;\n  void read;\n}\n",
       ],
     ),
     {
-      [PART]: `${PART_HEAD}\n${[...ROUTES.map(([name]) => name), "routeQuiet", "routeSelf", "freshAliased", "freshDecoy"].map(unlisted).join("\n\n")}\n`,
+      [PART]: `${PART_HEAD}\n${[...ROUTES.map(([name]) => name), ...forwarded.slice(2), "freshAliased", "freshDecoy", "freshShared"].map(unlisted).join("\n\n")}\n`,
     },
   );
-  for (const [name] of ROUTES)
-    expectStart(messages, `Consumers.#freshStores calls Admission.${name}:`);
-  for (const [report] of UNPROVED) expectStart(messages, `Consumers.#freshStores ${report}`);
-  expectStart(messages, "Consumers.probeSelf calls Admission.routeSelf:");
-  expectStart(messages, "Consumers.probeQuiet calls Admission.routeQuiet:", false);
-  expectStart(messages, "An Admission call is made outside every consumer derivation");
+  for (const [name] of ROUTES) expectStart(messages, `${FRESH_LABEL} calls Admission.${name}:`);
+  for (const [report] of UNPROVED) expectStart(messages, `${FRESH_LABEL} ${report}`);
+  for (const [name, route] of RECORDING)
+    expectStart(messages, `Consumers.${name} calls Admission.${route}:`);
+  for (const [name, route] of QUIET)
+    expectStart(messages, `Consumers.${name} calls Admission.${route}:`, false);
+  assert.equal(
+    messages.filter((message) => message.startsWith("An Admission call or read is made outside"))
+      .length,
+    2,
+  );
   expectStart(messages, "The fresh pass does not call freshDecoy");
   expectStart(messages, "The fresh pass does not call freshAliased", false);
+  expectStart(
+    messages,
+    "OBLIGATION_SITES lists freshShared for freshShared, which names 2 derivations",
+  );
 });
