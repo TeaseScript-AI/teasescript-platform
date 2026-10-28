@@ -297,13 +297,18 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
  * untyped helper, each link discovering the helper's parameter again (#1257); a stored sum of k terms, admission's stop
  * index keeping each operand's chain of operations and evaluation key as a copy one longer than its operation's
  * (#1230); a ring of k copies through a k-element list, the list's index built again for each element and its read
- * re-run whole for each changed element (#1229); and k properties read below a choice of k objects holding one value,
- * or k unchanged aliases or wrappers of it, each read walking every object (#1233).
+ * re-run whole for each changed element (#1229); k properties read below a choice of k objects holding one value, or k
+ * unchanged aliases or wrappers of it, each read walking every object (#1233); and k/4 loads, parses and reads of host
+ * data beside an object of k properties, the list's touch trie walking the object again for each (#1307). A read of
+ * host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
   /** A script that stops at run time, measured for its work alone, its outcome not pinned. */
   readonly stops?: true;
+  readonly outcome?: Answers["outcome"];
+  /** The total left ungated: the value side reads such a list's elements at each property until #1297. */
+  readonly total?: false;
 })[] = [
   {
     name: "repeated-written-type-copies",
@@ -449,22 +454,47 @@ const PRODUCTS: readonly (WorkFamily & {
       },
     ],
   },
+  {
+    name: "host-data-beside-a-wide-object",
+    measures: "#1307: the touch trie walks only the nodes a merge asks, never the object again",
+    counter: "indexSteps",
+    outcome: "warning-runtime-check",
+    total: false,
+    program: (k) => {
+      const kinds = [
+        'load("k", default: hostValue)',
+        'fromJson("{}", default: hostValue)',
+        'load("k", default: raw)',
+        "hostValue",
+      ];
+      const elements = Array.from({ length: k >> 2 }, (_, i) => kinds[i % kinds.length]!);
+      elements.splice(k >> 3, 0, `{${many(k, (i) => `f${i}: 1`, ", ")}}`);
+      return [
+        {
+          path: "main.tease",
+          source: ["let raw = hostValue", `let xs = [${elements.join(", ")}]`, "exit"].join("\n"),
+        },
+      ];
+    },
+  },
 ];
 
 /**
  * Each family's total and its counter in either order under the standard gates; only the named counter, since the
  * helper's parameter's k definitions are sorted and lifted (the TABLE's `n log n` structures), which measure 2.37 here,
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
- * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
+ * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256). The touch family's total is left
+ * ungated: the value side still reads each host-data element at each property (2.95 here), which #1297 removes.
  */
-test("each product a repair removed grows with the program in either order (#1229, #1230, #1233, #1255–#1257)", () => {
+test("each product a repair removed grows with the program in either order (#1229, #1230, #1233, #1255–#1257, #1307)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
       const [small, large] = [at64, at128].map((at) => {
         const answers = analysed(at, reversed);
-        if (family.stops !== true) assert.equal(answers.outcome, "valid", at.name);
+        if (family.stops !== true)
+          assert.equal(answers.outcome, family.outcome ?? "valid", at.name);
         return answers.budget;
       });
       const scale =
@@ -472,7 +502,7 @@ test("each product a repair removed grows with the program in either order (#122
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
       const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (doubling(small!.total, large!.total) > DOUBLING)
+      if (family.total !== false && doubling(small!.total, large!.total) > DOUBLING)
         steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
       const [before, after] = [small!, large!].map(
         (budget) => budget.counts.get(family.counter) ?? 0,

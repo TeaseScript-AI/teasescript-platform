@@ -218,6 +218,11 @@ export class Touches {
   readonly #leaves = new Map<string, Touch>();
   readonly #memo = new Map<string, { readonly node: Touch | null; readonly found: Found }>();
   readonly #expanded = new Map<string, Found>();
+  /** Per mode, whether a node or a branch holds a node `#expand` asks, at or below it (`#asksBelow`). */
+  readonly #asking: Readonly<Record<TouchMode, WeakMap<Touch | Branch, boolean>>> = {
+    meet: new WeakMap(),
+    elements: new WeakMap(),
+  };
   readonly #metOwes = new Map<number, Found>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
@@ -783,17 +788,67 @@ export class Touches {
     return false;
   }
 
-  /** Every node below a node (itself too) with the path to it, for an opaque contributor above them. */
-  #walk(node: Touch, visit: (node: Touch, rest: readonly string[]) => void): void {
+  /** Whether `#expand` asks a node in a mode: one standing there, for `meet` with a written type landed. */
+  #asks(node: Touch, mode: TouchMode): boolean {
+    return node.here && (mode === "elements" || node.landed);
+  }
+
+  /**
+   * Whether a node, or a node below it (for a branch, below its nodes), is one `#expand` asks in a mode; once per node
+   * and branch, after their parts, on an explicit stack. Merges share both, so a node a merge makes costs only its new
+   * branches (#1307).
+   */
+  #asksBelow(root: Touch | Branch, mode: TouchMode): boolean {
+    const memo = this.#asking[mode];
+    afterParts<Touch | Branch>(
+      root,
+      (at) => {
+        if ("branches" in at) return at.branches === null ? [] : [at.branches];
+        const parts: (Touch | Branch)[] = [at.node];
+        if (at.left !== null) parts.push(at.left);
+        if (at.right !== null) parts.push(at.right);
+        return parts;
+      },
+      (at) => memo.has(at),
+      (at) => {
+        this.#charge();
+        memo.set(
+          at,
+          "branches" in at
+            ? this.#asks(at, mode) || (at.branches !== null && memo.get(at.branches)!)
+            : memo.get(at.node)! ||
+                (at.left !== null && memo.get(at.left)!) ||
+                (at.right !== null && memo.get(at.right)!),
+        );
+      },
+    );
+    return memo.get(root)!;
+  }
+
+  /** A branch's entries whose nodes hold a node asked in a mode (`#asksBelow`), in their order. */
+  #askedEntries(branch: Branch | null, mode: TouchMode, out: [string, Touch][]): void {
+    if (branch === null || !this.#asksBelow(branch, mode)) return;
+    this.#askedEntries(branch.left, mode, out);
+    if (this.#asksBelow(branch.node, mode)) out.push([branch.key, branch.node]);
+    this.#askedEntries(branch.right, mode, out);
+  }
+
+  /**
+   * The nodes below a node (itself too) that `#expand` asks in a mode, with the path to each, for an opaque contributor
+   * above them: a node or branch holding none is never entered, so a node's k other properties are not walked again for
+   * each of k contributors merged into it one by one (#1307).
+   */
+  #walk(node: Touch, mode: TouchMode, visit: (node: Touch, rest: readonly string[]) => void): void {
+    if (!this.#asksBelow(node, mode)) return;
     const stack: { readonly node: Touch; readonly rest: readonly string[] }[] = [
       { node, rest: [] },
     ];
     while (stack.length > 0) {
       const { node: at, rest } = stack.pop()!;
       this.#charge();
-      visit(at, rest);
+      if (this.#asks(at, mode)) visit(at, rest);
       const entries: [string, Touch][] = [];
-      this.#entries(at.branches, entries);
+      this.#askedEntries(at.branches, mode, entries);
       for (const [step, child] of entries)
         stack.push({ node: child, rest: keptSteps(this.host.work, rest, [step]) });
     }
@@ -1086,8 +1141,7 @@ export class Touches {
     const known = this.#expanded.get(key);
     if (known !== undefined) return known;
     const found: [readonly string[]][] = [];
-    this.#walk(other, (node, rest) => {
-      if (!node.here || (mode === "meet" && !node.landed)) return;
+    this.#walk(other, mode, (node, rest) => {
       if (mode === "elements") {
         // (a holder beside what stands there: owed where the contents there hold two kinds or more, the payload's
         // kinds asked once per payload node and path)
