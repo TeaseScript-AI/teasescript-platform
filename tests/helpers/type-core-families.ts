@@ -2298,6 +2298,180 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * Admission's hot-candidate discovery by touch tries (#1188, its design note's §1.3 and §4.1): one family per context
+ * that listed a contribution again before the tries, each beside a wide typed root. A place merging two copies, each
+ * then copied beside a second wide record; a literal of a plain wide record beside k such merges (Sol r2); k
+ * configuration prefixes, each copying the root under its own name and under one shared name (Sol r8); k records beside
+ * a wide one in one list, and the same k alone in another (Sol r8); a chain of merges with a partner three times as wide
+ * as the root (Sol r1); k opaque values each copied into itself, in one list (Astra's B1); k cycles of two whole copies
+ * fed by the root, each with a store below it and read through a record into a list (Astra's B3); and k such cycles
+ * split by their two rejected copies, each stored whole into a third place (the design's own). Each at size k, linear.
+ */
+export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "touch-merge-place",
+    measures:
+      "k merge places, each copied beside a second wide record: the root's landing per merge place",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          'let word: string = "x"',
+          `let root = {${fields(k, () => "typed")}}`,
+          `let other = {${fields(k, () => "word", "g")}}`,
+          rows(k, (i) =>
+            lines(
+              `let o${i} = {h${i}: typed}`,
+              `let d${i} = root`,
+              `d${i} = o${i}`,
+              `let a${i} = d${i}`,
+              `a${i} = other`,
+            ),
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-holder-fan-in",
+    measures:
+      "a literal of a plain wide record beside k merge places of the root: each element's holders per path",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          `let other = {${fields(k, () => "1")}}`,
+          rows(k, (i) => lines(`let o${i} = {h${i}: typed}`, `let d${i} = root`, `d${i} = o${i}`)),
+          `let a = [other, ${Array.from({ length: k }, (_, i) => `d${i}`).join(", ")}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-prefix-paths",
+    measures:
+      "k configuration prefixes copying the root under their own name and a shared one: the shared landing per prefix",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          rows(k, (i) =>
+            lines(`let c${i}_0 = {p${i}: root, z: root}`, `let c${i}_1 = {p${i}: root, z: root}`),
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-mix-landed",
+    measures:
+      "k one-field records beside a wide one in one list, and alone in another: each touched path per group",
+    program: (k) => {
+      const records = Array.from({ length: k }, (_, i) => `r${i}`).join(", ");
+      return main(
+        lines(
+          "let typed: integer = 1",
+          rows(k, (i) => `let r${i} = {f${i}: typed}`),
+          `let wide = {${fields(k, () => "typed")}}`,
+          `let a = [${records}, wide]`,
+          `let b = [${records}]`,
+          "exit",
+        ),
+      );
+    },
+  },
+  {
+    name: "touch-chain-partner",
+    measures:
+      "a chain of k merges of the root, each copied beside a partner three times as wide: one walk per merge",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          'let word: string = "x"',
+          `let root = {${fields(k, () => "typed")}}`,
+          `let other = {${fields(3 * k, () => "word", "g")}}`,
+          "let m0 = root",
+          rows(k, (i) =>
+            lines(
+              `let o${i + 1} = {h${i + 1}: typed}`,
+              `let m${i + 1} = m${i}`,
+              `m${i + 1} = o${i + 1}`,
+              `let a${i + 1} = m${i + 1}`,
+              `a${i + 1} = other`,
+            ),
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-opaque-cycles",
+    measures:
+      "k opaque values each copied into itself, in one list beside a record: each contributor's payload once",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          rows(k, (i) => lines(`let u${i} = hostValue`, `u${i} = u${i}`)),
+          `let bag = [${Array.from({ length: k }, (_, i) => `u${i}`).join(", ")}, {x: typed}]`,
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-fed-cycles",
+    measures:
+      "k cycles of two whole copies fed by the root, each read into a list: the root's landing per cycle",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 1",
+          `let root = {${fields(k, () => "typed")}}`,
+          `let peer = {${fields(k, () => "typed", "g")}}`,
+          rows(k, (i) =>
+            lines(
+              `let a${i} = root`,
+              `let b${i} = a${i}`,
+              `a${i} = b${i}`,
+              `b${i}.f0 = typed`,
+              `let c${i} = {nest: b${i}}`,
+              `let pair${i} = [c${i}.nest, peer]`,
+            ),
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "touch-split-cycles",
+    measures:
+      "k cycles of two whole copies split by their two rejected copies, each stored into a third place",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 17",
+          'let word: string = "s"',
+          `let shared = {${fields(k, () => "typed")}}`,
+          rows(k, (i) =>
+            lines(
+              `let a${i} = shared`,
+              `let b${i} = {f0: word}`,
+              `a${i} = b${i}`,
+              `b${i} = a${i}`,
+              `let s${i} = b${i}`,
+              `s${i} = a${i}`,
+            ),
+          ),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
  * Admission (TABLE §5, §10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole

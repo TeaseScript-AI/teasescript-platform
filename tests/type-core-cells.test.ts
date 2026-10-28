@@ -8,7 +8,7 @@ import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
-import { CARRIER_WITNESSES } from "./helpers/type-core-witnesses.js";
+import { CARRIER_WITNESSES, HOT_CANDIDATE_WITNESSES } from "./helpers/type-core-witnesses.js";
 import {
   recordDifferences,
   recordOf,
@@ -4725,6 +4725,37 @@ test("the carrier design's witnesses give their exact records, in both orders (S
   const witnesses = CARRIER_WITNESSES;
 
   for (const [name, source, text] of witnesses) {
+    const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
+    assert.ok(request !== null, name);
+    const expected = recordOf(text);
+    const forward = compactAnalysis(request);
+    const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
+      ),
+    );
+    assert.deepEqual(recordDifferences(expected, forward), [], name);
+    assert.deepEqual(recordDifferences(expected, reversed), [], `${name} reversed`);
+  }
+});
+
+/**
+ * #1188's witnesses, as exact records in both orders (its design note's §2.0 and §2.4):
+ * - rule (a)'s three forms (TABLE r4.121, r4.127, r4.130): a rejected value is ignored, so a list whose elements still
+ *   disagree after it gets an error of its own (Astra's `rule-a-list`); nothing warns about or checks a rejected value
+ *   (`other-written-record`, where the core warned about storing the rejected element into `result` against its type);
+ *   and a later store whose live value does not fit the receiving place's decided type errs, against the surviving type
+ *   (`new-assignment-error`) or where a rejected list's surviving value meets a place decided otherwise
+ *   (`reversed-assignment`);
+ * - a whole cycle split by its two rejected copies keeps each member's own contents, so the outer list's error stays
+ *   (Astra's recheck r3 F1); a fed cycle whose feeder's store is rejected takes none of the rejected value (her N1);
+ * - a merge place deciding by its first copy, beside its second copy in a literal that decides by that copy: the
+ *   literal's check, as the meeting is hot only where the literal decides (§2.4 (d));
+ * - a live nested union, whose outer list now errs where its elements disagree (TABLE r4.128 (1)).
+ */
+test("#1188's witnesses give their exact records, in both orders (rule (a), cycles, containment)", () => {
+  for (const [name, source, text] of HOT_CANDIDATE_WITNESSES) {
     const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
     assert.ok(request !== null, name);
     const expected = recordOf(text);

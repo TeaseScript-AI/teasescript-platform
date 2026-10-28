@@ -11,6 +11,7 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
+  HOT_CANDIDATE_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
@@ -32,7 +33,11 @@ import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
 import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
-import { CARRIER_WITNESSES, WRITTEN_COPY_MATRIX } from "./helpers/type-core-witnesses.js";
+import {
+  CARRIER_WITNESSES,
+  HOT_CANDIDATE_WITNESSES,
+  WRITTEN_COPY_MATRIX,
+} from "./helpers/type-core-witnesses.js";
 import {
   OBJECT_PROPERTY_MATRIX,
   UNION_RULE_MATRIX,
@@ -289,6 +294,8 @@ function programs(): Program[] {
     out.push(one(`composition ${name}`, `${source}exit\n`));
   for (const [name, source] of CARRIER_WITNESSES)
     out.push(one(`witness ${name}`, `${source}exit\n`));
+  for (const [name, source] of HOT_CANDIDATE_WITNESSES)
+    out.push(one(`#1188 witness ${name}`, `${source}exit\n`));
   for (const families of [
     WORK_FAMILIES,
     W34_VARIANTS,
@@ -296,6 +303,7 @@ function programs(): Program[] {
     W45_VARIANTS,
     W34_KNOWN_PRODUCTS,
     ADMISSION_FAMILIES,
+    HOT_CANDIDATE_FAMILIES,
     ADMISSION_KNOWN_PRODUCTS,
     ADMISSION_SAME_SOURCES,
     ADMISSION_INGRESS_PRESETS,
