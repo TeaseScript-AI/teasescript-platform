@@ -51,14 +51,17 @@ export interface StablePath {
   readonly steps: readonly PathStep[];
 }
 
-/** A step's text in a refined location: `.n`, `[0]`, `["key"]`, `[@12]` (an index variable's place), `[*]`. */
+/**
+ * A step's text in a refined location: `.n`, `[number:0]`, `[string:key]`, `[@12]` (an index variable's place), `[*]`.
+ * A key's `\` and `]` are escaped, so its label ends at its first bare `]` and no key text spells another path (#1244).
+ */
 function stepLabel(step: PathStep, work: WorkLedger): string {
   work.charge("eventSteps");
   switch (step.kind) {
     case "property":
       return `.${step.name}`;
     case "fixed":
-      return `[${step.text}]`;
+      return `[${step.text.replace(/[\\\]]/g, "\\$&")}]`;
     case "variable":
       return `[@${step.place}]`;
     case "element":
@@ -140,9 +143,10 @@ export function pathKey(path: StablePath, work: WorkLedger, length = path.steps.
 
 /**
  * The stable path an expression reads (N1): a binding followed by properties, fixed indexes or keys, and indexes or
- * keys held in plain variables; with `trailing`, any element reads at its end (a computed index, `.random`), which only
- * an element scope finds. `null` for anything else: a call, a literal, a path through a computed index, a speaker. An
- * assignment's target names its `root`, which it does not read.
+ * keys held in plain variables; with `trailing`, element reads (a computed index, `.random`) too where every step after
+ * them reads an element (`rows[i + 1][0]`), which only an element scope finds (#1245). `null` for anything else: a
+ * call, a literal, a path through a computed index, a speaker. An assignment's target names its `root`, which it does
+ * not read.
  */
 export function stablePath(
   program: CoreProgram,
@@ -152,7 +156,7 @@ export function stablePath(
   root: PlaceId | null = null,
 ): StablePath | null {
   program.work.charge("eventSteps");
-  // (outermost first, each put in front: whether every step so far is an element read)
+  // (outermost first, each put in front: whether every step so far reads an element)
   const outermost: PathStep[] = [];
   let trailingOnly = true;
   const work = program.work;
@@ -165,7 +169,7 @@ export function stablePath(
         outermost.push({ kind: "element" });
       } else {
         outermost.push({ kind: "property", name });
-        trailingOnly = false;
+        if (!selectsElement(name)) trailingOnly = false;
       }
       current = peel(current.object, work);
       continue;
@@ -174,13 +178,10 @@ export function stablePath(
     const index = peel(current.index, work);
     const fixed = literalOf(index, work)?.key;
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
-    if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
+    if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:")))
       outermost.push({ kind: "fixed", text: fixed });
-      trailingOnly = false;
-    } else if (variable !== null) {
-      outermost.push({ kind: "variable", place: variable });
-      trailingOnly = false;
-    } else if (trailing && trailingOnly) outermost.push({ kind: "element" });
+    else if (variable !== null) outermost.push({ kind: "variable", place: variable });
+    else if (trailing && trailingOnly) outermost.push({ kind: "element" });
     else return null;
     current = peel(current.object, work);
   }
@@ -994,8 +995,9 @@ export class NarrowingIndex {
 
   /**
    * The nearest narrowing definition of a read at `node` (N2): of its own path's text, and of each element scope of its
-   * trailing element steps (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`), the deepest region wins. One walk of the
-   * read's steps down the trie of tested paths, asking only the scopes a test defines: linear in the read's path.
+   * trailing element steps (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`; `rows[i + 1][0]` only `rows[*][*]`, as no
+   * tested path holds a computed step), the deepest region wins. One walk of the read's steps down the trie of tested
+   * paths, asking only the scopes a test defines: linear in the read's path.
    */
   public nearestAt(node: FlowNode): Narrowing | null {
     this.program.work.charge("eventSteps");

@@ -370,6 +370,58 @@ test("a narrowing's refined location is its stable path's text; a computed path,
         "non-null: branch",
       ],
       ["sibling index", [xs, "if xs[0] != null { repeat xs[1] {} }"], "repeat xs[1]", 7, "none"],
+      // a key's text never spells another path's steps (#1244): each path keeps its own location
+      [
+        "a key text spelling another path",
+        [
+          'let d: integer? dict dict = dict {"a": dict {"b].[string:c": null}, "a].[string:b": dict {"c": 1}}',
+          'if d["a"]["b].[string:c"] == null { if d["a].[string:b"]["c"] != null { say d["a"]["b].[string:c"] } }',
+        ],
+        'say d["a"]',
+        4,
+        "null: holds",
+      ],
+      [
+        "the same, the tests' forms swapped",
+        [
+          'let d: integer? dict dict = dict {"a": dict {"b].[string:c": 1}, "a].[string:b": dict {"c": null}}',
+          'if d["a"]["b].[string:c"] != null { if d["a].[string:b"]["c"] == null { say d["a"]["b].[string:c"] } }',
+        ],
+        'say d["a"]',
+        4,
+        "non-null: holds",
+      ],
+      [
+        "a key text holding every delimiter of a location",
+        [
+          'let d: integer? dict dict = dict {"x": dict {"y": 1}}',
+          String.raw`if d["x\\\\"]["y|@*"] == null { if d["x\\].[string:y|@*"] != null { say d["x\\\\"]["y|@*"] } }`,
+        ],
+        "say d",
+        4,
+        "null: holds",
+      ],
+      [
+        "a key text spelling a path one step deeper",
+        [
+          'let d: integer? dict dict dict = dict {"a": dict {"b": dict {"c": null}}}',
+          'if d["a"]["b"]["c"] == null { if d["a].[string:b"]["c"] != null { say d["a"]["b"]["c"] } }',
+        ],
+        "say d",
+        4,
+        "null: holds",
+      ],
+      [
+        "a key text spelling an element scope",
+        [
+          'let d: integer? dict dict = load("d", default: dict {})',
+          'let k = "a"',
+          'if d["a"] is integer dict { if d["a].[*"] == null { say d["a"][k + ""] } }',
+        ],
+        'say d["a"]',
+        4,
+        "is integer element: holds",
+      ],
       [
         "fixed key, held",
         [d, 'if d["a"] != null { repeat d["a"] {} }'],
@@ -480,6 +532,64 @@ test("a collection test defines its element steps; a negative one none (N1)", ()
         "repeat grid[i][0]",
         7,
         "is integer element: holds",
+      ],
+      // a computed or random step under a fixed or variable step or a selection reads the root's element fact (#1245)
+      [
+        "a computed row, then a fixed column",
+        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][0] {} }"],
+        "repeat rows[i",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "a computed row, then a variable column",
+        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][i] {} }"],
+        "repeat rows[i",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "a random row, then a fixed column",
+        [...rows, "if rows is integer[][] { repeat rows.random[0] {} }"],
+        "repeat rows.random",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "a computed row, then a selection",
+        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1].last {} }"],
+        "repeat rows[i",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "below a property",
+        [
+          "let box = {rows: [[1], [null]]}",
+          "let i = 0",
+          "if box.rows is integer[][] { repeat box.rows[i + 1][0] {} }",
+        ],
+        "repeat box.rows[i",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "a computed key, then a fixed key",
+        [
+          'let d: integer? dict dict = dict {"a": dict {"b": 1}}',
+          'let k = "a"',
+          'if d is integer dict dict { repeat d[k + ""]["b"] {} }',
+        ],
+        "repeat d[k",
+        7,
+        "is integer element: holds",
+      ],
+      [
+        "a computed row beside a tested row",
+        [...rows, "let i = 0", "if rows[0] is integer[] { repeat rows[i + 1][0] {} }"],
+        "repeat rows[i",
+        7,
+        "none",
       ],
       [
         "negative",
@@ -1031,6 +1141,49 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
     ),
     "valid",
   );
+  // a key text spelling another path never lends it that path's test: the stored read is the outer test's `null`
+  // (#1244), as with a key that spells nothing
+  const spelling = [
+    'let d: integer? dict dict = dict {"a": dict {"b].[string:c": null}, "a].[string:b": dict {"c": 1}}',
+    'if d["a"]["b].[string:c"] == null { if d["a].[string:b"]["c"] != null {',
+    'let saved: integer = d["a"]["b].[string:c"]',
+    "say saved } }",
+  ];
+  for (const lines of [spelling, spelling.map((line) => line.replaceAll("a].[string:b", "z"))]) {
+    const offset = lines.join("\n").lastIndexOf('d["a"]');
+    const end = offset + 'd["a"]["b].[string:c"]'.length;
+    assert.deepEqual(record(...lines), {
+      outcome: "compile-error",
+      diagnostics: [
+        {
+          kind: "written-target",
+          class: "compile-error",
+          site: { file: "main.tease", offset, end },
+          context: null,
+        },
+      ],
+      checks: [],
+    });
+  }
+  // a computed row under a fixed column reads the root test's element fact, as under a computed column (#1245): the
+  // storage ingress check alone remains
+  const rows = [
+    'let rows: integer?[][] = load("rows", default: [[1], [2]])',
+    "let row = 0",
+    "if rows is integer[][] { let saved: integer = rows[row + 1][0]\n say saved }",
+  ];
+  const computed = rows.map((line) => line.replace("[0]", "[0 + 0]"));
+  for (const lines of [rows, computed]) {
+    const analysed = pass(...lines);
+    const found = narrowingAt(analysed.pass, read(analysed, "rows[row", 0));
+    assert.deepEqual(
+      [found?.g.form, found?.g.elements, found?.fails],
+      [{ kind: "is", kinds: ["integer"] }, 2, null],
+    );
+  }
+  const stored = record(...rows);
+  assert.deepEqual([stored.outcome, stored.diagnostics, stored.checks.length], ["valid", [], 1]);
+  assert.deepEqual(record(...computed), stored);
 });
 
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
