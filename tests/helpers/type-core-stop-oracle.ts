@@ -216,19 +216,26 @@ export function stopProblems(c: StopCase): string[] {
   if (JSON.stringify(before) !== JSON.stringify(after))
     problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);
   // the checks, in their published order: an unstopped one a mark's record owns or one of a marked store's records; a
-  // stopped one a mark's record owns, or one that forms only with the marks, their content (r4.110 (a): the stopped
-  // analysis without them lacks it)
+  // stopped one a mark's record owns, one of a marked store's records the unstopped analysis has too (the record kept,
+  // on both sides alike, TABLE r4.122), or one that forms only with the marks, their content (r4.110 (a): the stopped
+  // analysis without them lacks it); any other stopped check inside a marked store's value is compared
   const marked = new Set<Obligation>(
     [...unstopped.answers.diagnostics, ...stopped.answers.diagnostics, ...marks].flatMap((d) =>
       "obligation" in d && excused.has(recordOf(d.code, d.site)) ? [d.obligation] : [],
     ),
   );
+  const ofStores = unstopped.answers.checks
+    .filter((check) => !marked.has(check) && ofStore(check.site))
+    .map((check) => JSON.stringify(check));
   const owed = unstopped.answers.checks
     .filter((check) => !marked.has(check) && !ofStore(check.site))
     .map((check) => JSON.stringify(check));
-  let kept = stopped.answers.checks
-    .filter((check) => !marked.has(check))
-    .map((check) => JSON.stringify(check));
+  let kept = beyond(
+    stopped.answers.checks
+      .filter((check) => !marked.has(check))
+      .map((check) => JSON.stringify(check)),
+    ofStores,
+  );
   // (an extra the stopped analysis without its marks lacks is their content; a check both have stays compared)
   const extra = beyond(kept, owed);
   if (extra.length > 0 && marks.length > 0) {

@@ -1568,17 +1568,30 @@ export class Admission {
     return withoutEmpty(this.#run(this.pass.values.valueItems(d.value!, d.node, at)));
   }
 
-  /** A place's path in the contract's vocabulary: an element step below a dict is its `entry`. */
-  public pathLabel(place: PlaceId, path: readonly string[]): string {
+  /**
+   * A place's path in the contract's vocabulary: an element step below a dict is its `entry`, the collection above it as
+   * the contract holds it or, where the place's written type `written` reaches it (the finishing path before admission
+   * settled, TABLE r4.122), as the written type has it, final at every stop and asking no solver.
+   */
+  public pathLabel(
+    place: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
-        const kinds = withoutEmpty(
-          this.#run(contract.contractOf(keyOf(place, path.slice(0, index)))),
-        );
-        label = stepText(label, elementStep(kinds.map((item) => item.tag)));
+        const prefix = path.slice(0, index);
+        const term = written === null ? null : termAt(written, prefix);
+        const tags =
+          term !== null
+            ? typeTags(term)
+            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
+                (item) => item.tag,
+              );
+        label = stepText(label, elementStep(tags));
       }
     });
     return label;
@@ -4788,7 +4801,11 @@ export class Admission {
     return fields.get(step);
   }
 
-  /** A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element. */
+  /**
+   * A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element, a
+   * dict's values among them (its `element`, as its type has them). Every walk of a literal's children asks here with its
+   * path's own step, so the step that reaches a child is read in this one place (TABLE r4.122).
+   */
   public literalChildren(value: PlaceId, step: string): Definition[] {
     const { program, definitions } = this.pass;
     const out: Definition[] = [];
@@ -6581,7 +6598,11 @@ export class Admission {
       }
       const path = joinSteps(destination, record.slice(0, common));
       const tags = this.#againstOf(d, path);
-      const label = this.pathLabel(d.place, path);
+      const label = this.pathLabel(
+        d.place,
+        path,
+        written ? writtenOf(program.place(d.place).kind) : null,
+      );
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const key = keptKey(this.#work, d.place, path);
       const message = `validate external data entering ${label} against ${against.join("|")}`;

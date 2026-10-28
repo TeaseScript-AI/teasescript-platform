@@ -617,9 +617,8 @@ export class Consumers {
     // (below a collection or record literal, its own children's, each a leaf: `[hostValue]` at its element)
     const place = program.places[value]?.kind;
     if (rest.length > 0 && place?.kind === "value" && program.hasOf.has(value)) {
-      const step = rest[0] === "element" && place.node === "dictLiteral" ? "entry" : rest[0]!;
       const items: Item[] = [];
-      for (const child of this.admission.literalChildren(value, step)) {
+      for (const child of this.admission.literalChildren(value, rest[0]!)) {
         const found = child.value === undefined ? null : this.#leafKind(child.value, rest.slice(1));
         if (found === null) return null;
         items.push(...found);
@@ -661,8 +660,7 @@ export class Consumers {
       program.work.charge("checks");
       const place = program.places[at]?.kind;
       if (place?.kind === "value" && COLLECTION_LITERALS.has(place.node)) {
-        const step = place.node === "dictLiteral" ? "entry" : "element";
-        for (const child of this.admission.literalChildren(at, step))
+        for (const child of this.admission.literalChildren(at, "element"))
           if (child.value !== undefined) pending.push(child.value);
       } else out.push(...(this.#leafKind(at, []) ?? []));
     }
@@ -980,17 +978,19 @@ export class Consumers {
                 });
           continue;
         }
+        // (an error inside an add's literal stays at the add's argument, as `Admission.siteAt` keeps it unstopped; the
+        // check's target is the written type's path, a dict's value its `entry`: TABLE r4.122)
         if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
           this.#error(
             "written-target",
-            part.site,
+            d.kind === "whole" ? part.site : d.site,
             rule,
             items.map((item) => item.tag),
           );
         else
           this.#storeWarning(
             part.site,
-            targetName(program.place(d.place).label, part.path),
+            this.admission.pathLabel(d.place, part.path, written),
             items.find((item) => !fitting(item)) ?? STOPPED[0]!,
             tags,
             rule,

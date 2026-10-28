@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { compileSourceWithBackend } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
@@ -909,14 +910,17 @@ test("a stop before admission settled checks a written store's literal parts at 
 /**
  * Before admission settled, a written store's literal parts take their collections from the written type and their
  * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
- * a set inside a dict. At a stop in the setup and at the last before admission settled, each error, its rule's steps and
- * its sentence equal the unstopped ones (the analysis: a written set or dict is outside the candidate route).
+ * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument
+ * (TABLE r4.122 (d)). At a stop in the setup and at the last before admission settled, each error, its site, its rule's
+ * steps and its sentence equal the unstopped ones (the analysis: a written set or dict is outside the candidate route).
  */
-test("a stop before admission settled names a written store's collections in its errors", () => {
+test("a stop before admission settled keeps a written store's errors whole, their collections and sites", () => {
   for (const source of [
     'let xs: integer set = set["wrong"]\nexit\n',
     'let d: integer dict = dict{a: "wrong"}\nexit\n',
     'let d: integer set dict = dict{a: set["wrong"]}\nexit\n',
+    'let xs: integer[] set = set[]\nxs.add(["wrong"])\nexit\n',
+    'let xs: integer dict set = set[]\nxs.add(dict{a: "wrong"})\nexit\n',
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);
@@ -933,6 +937,113 @@ test("a stop before admission settled names a written store's collections in its
       assert.deepEqual(errors(stopped), unstopped, `${source} @${allowance}`);
     }
   }
+});
+
+/** The analysis of `source` unstopped, and at a stop in the setup and at the last before admission settled. */
+function unsettledAnalyses(source: string): { unstopped: Answers; stopped: Answers[] } {
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const stopped = [ALLOWANCE, lastUnsettled(source)].map((allowance) => {
+    const answers: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    assert.equal(answers.budget.settled, false, `${source} @${allowance}`);
+    return answers;
+  });
+  return { unstopped: analyseCore(request), stopped };
+}
+
+/**
+ * Every walk of a literal's children asks `literalChildren` with its path's own step, so the step that reaches a dict
+ * literal's values is read in one place (TABLE r4.122, Codex r14), and a written store's checks name its parts as the
+ * written type does (`entry`, a dict's value). At a stop in the setup and at the last before admission settled (each
+ * defect showed at every such stop; the every-stop sweep runs outside CI): a written dict's checks equal the unstopped
+ * ones; a dict default's host data keeps its own boundary; a default's wrong text stays an error; a dict literal's value
+ * answers its kind and properties.
+ */
+test("a stop before admission settled reads a dict literal's values as its syntax and the written type give them", () => {
+  for (const source of [
+    "let d: integer dict = dict{a: hostValue}\nexit\n",
+    "let d: integer[] dict = dict{a: [hostValue]}\nexit\n",
+  ]) {
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    assert.ok(unstopped.checks.some((check) => check.target.includes("entry")));
+    for (const answers of stopped) assert.deepEqual(answers.checks, unstopped.checks, source);
+  }
+  {
+    const source =
+      'let items = [dict{a: 1}]\nlet v = items.get(hostOther, default: dict{a: hostValue})\nsay v["a"]\nexit\n';
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    const site = source.indexOf("hostValue");
+    const boundary = unstopped.checks.find((check) => check.boundary && check.site.start === site);
+    assert.ok(boundary !== undefined);
+    for (const answers of stopped)
+      assert.ok(answers.checks.some((check) => isDeepStrictEqual(check, boundary)));
+  }
+  {
+    const source = 'let v = dict{a: 1}.get(hostOther, default: "wrong")\nsay v\nexit\n';
+    const text = messageSource([source]);
+    const errors = (answers: Answers) =>
+      answers.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    assert.equal(errors(unstopped).length, 1);
+    for (const answers of stopped) assert.deepEqual(errors(answers), errors(unstopped));
+  }
+  {
+    const source = "let d = dict{a: {n: 1}}\nexit\n";
+    const value = (answers: Answers) => {
+      const literal = answers.graph.nodes.find(
+        (node) => node.kind === "expression" && node.expression?.kind === "dictLiteral",
+      );
+      assert.ok(literal !== undefined);
+      const found = answers.valueAt(literal, ["element"]);
+      return {
+        tags: found.items.map((item) => item.tag),
+        properties: [...found.properties].sort(),
+      };
+    };
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    assert.deepEqual(value(unstopped), { tags: ["object"], properties: ["n"] });
+    for (const answers of stopped) assert.deepEqual(value(answers), value(unstopped));
+  }
+});
+
+/**
+ * A store marked with its type undecided stands for its records within its value on both sides alike (r4.111, TABLE
+ * r4.122, Codex r14): a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
+ * index read below the store is no extra check, at a stop in the setup and at the last before admission settled; a
+ * check there that the unstopped analysis lacks, with or without the marks, is still reported.
+ */
+test("a marked store's records within its value are compared alike on both sides", () => {
+  const source = "let items = [[1]]\nlet v = items[hostOther]\nsay v[0]\nexit\n";
+  const unstopped = stopRun(source);
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+    const stopped = stopRun(source, allowance);
+    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
+    assert.deepEqual(
+      stopProblems({ unstopped, stopped, fitting: [host(2, 0)], violating: [host(2, 1.5)] }),
+      [],
+      `@${allowance}`,
+    );
+  }
+  const stopped = stopRun(source, ALLOWANCE);
+  const index = source.indexOf("hostOther");
+  const boundary = stopped.answers.checks.find(
+    (check) => check.boundary && check.site.start === index,
+  );
+  assert.ok(boundary !== undefined);
+  const extra = { ...boundary, against: ["integer" as const] };
+  const added = <T extends { readonly answers: Answers }>(each: T): T => ({
+    ...each,
+    answers: { ...each.answers, checks: [...each.answers.checks, extra] },
+  });
+  const problems = stopProblems({
+    unstopped,
+    stopped: { ...added(stopped), without: (omit, key) => added(stopped.without(omit, key)) },
+    fitting: [],
+    violating: [],
+  });
+  assert.deepEqual(problems, [`extra check ${JSON.stringify(extra)}`]);
 });
 
 /**

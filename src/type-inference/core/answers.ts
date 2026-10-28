@@ -974,11 +974,11 @@ class CoreAnswers implements Answers {
           for (const name of termProperties(has.type)) names.add(name);
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
-    // a dict literal's values are its element path, as keys have them; each child as its own syntax gives it
-    const step = path[0] === "element" && own === "dict" ? "entry" : path[0]!;
+    // each child as its own syntax gives it, at the path's own step (`literalChildren` keys a collection's elements and
+    // a dict's values alike)
     const items: Item[] = [];
     const names = new Set<string>();
-    for (const child of this.#consumers.admission.literalChildren(value, step)) {
+    for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
       if (child.value === undefined) continue;
       const shape = this.#stoppedShape(child.value, path.slice(1));
       for (const item of shape.items) items.push(item);
