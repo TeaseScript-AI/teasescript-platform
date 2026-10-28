@@ -239,6 +239,15 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "at this line.",
       ],
     ],
+    // a method that changes its value, called on a speaker: no property is set, so no speaker takes one (Astra r3 N1)
+    [
+      "function recipient { return player }\nlet target = recipient()\ntarget.add(73)\nexit\n",
+      [
+        "W TSV043 'target.add(73)': 'target' may not have method 'add' here. If it does not, the Tease stops with an " +
+          "error at this line. A speaker has no methods. Use one of its properties instead, such as 'target.title'. " +
+          "'target' is a speaker, whose properties are known only when the script runs.",
+      ],
+    ],
     // a method on a value from outside: called, not set; a literal index of it, with no test and no cause of its own
     // (the owner's review)
     [

@@ -110,13 +110,10 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   const missing = context === "missing" && (rule.rule === "member" || detail.direct);
   // (a literal subject has no origin of its own: its warning is its receiver's, `0` in `value.get(0, ...)`)
   const literal = rule.rule !== "member" && isLiteral(text);
-  // (a store into a speaker alone: the first sentence says what happens, which no cause changes)
+  // (a property store into a speaker alone: the first sentence says what happens, which no cause changes)
   const holder = detail.receiver?.kinds ?? kinds;
   const speaker =
-    rule.rule === "member" &&
-    rule.use === "store" &&
-    holder.length > 0 &&
-    holder.every((kind) => kind === "speaker");
+    setsProperty(rule) && holder.length > 0 && holder.every((kind) => kind === "speaker");
   if (
     !(context === "unknown" && !detail.outside) &&
     context !== "later" &&
@@ -312,6 +309,16 @@ function memberNoun(member: string): string {
   return member.endsWith("()")
     ? `method '${member.slice(1, -2)}'`
     : `property '${member.slice(1)}'`;
+}
+
+/** Whether a member's use sets a property: a store's `use` also marks a method that changes its value, and an element. */
+function setsProperty(rule: DiagnosticRule): boolean {
+  return (
+    rule.rule === "member" &&
+    rule.use === "store" &&
+    rule.member.startsWith(".") &&
+    !rule.member.endsWith("()")
+  );
 }
 
 function capitalized(text: string): string {
@@ -854,15 +861,15 @@ function warningSentence(
         return `'${rule.receiver}' may be ${described(kinds)} here, which has no ${noun}. If it is, ${STOPS}`;
       if (context === "missing")
         return `'${rule.receiver}' may hold an object without ${noun} here. If it does, ${STOPS}`;
-      // a store into a speaker gives it the property when the script runs; one into an object without it stops
+      // (only a property is set by a store: a method is called, an element stored at its index)
+      const settable = setsProperty(rule);
+      // a property store into a speaker gives it the property when the script runs; one into an object without it stops
       const holder = detail.receiver?.kinds ?? kinds;
-      if (rule.use === "store" && (kinds.includes("speaker") || holder.includes("speaker")))
+      if (settable && (kinds.includes("speaker") || holder.includes("speaker")))
         return holder.every((kind) => kind === "speaker")
           ? `'${rule.receiver}' may not have ${noun} here. A speaker takes the property when the script runs.`
           : `'${rule.receiver}' may not have ${noun} here. If it is an object without '${rule.member.slice(1)}', ` +
               `${STOPS} A speaker takes the property.`;
-      // (only a property is set by a store: a method is called, an element stored at its index)
-      const settable = rule.use === "store" && noun.startsWith("property");
       return `'${rule.receiver}' may not have ${noun}${settable ? " that can be set" : ""} here. If it does not, ${STOPS}`;
     }
     case "selection":
