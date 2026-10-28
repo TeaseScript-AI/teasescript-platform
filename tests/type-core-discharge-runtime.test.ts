@@ -15,6 +15,7 @@ import {
 } from "../src/runtime/snapshot/checkpoint.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/host-data/script-storage.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
+import { readExpected, repairedRecord } from "../src/runtime/values/expected-reading.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
@@ -1327,6 +1328,54 @@ test("a typed parse's or load's contract stays the one the core decided, or its 
   assert.deepEqual(contentOf(candidatePlan(ordered)), [
     `expected call@${at(ordered, "fromJson(hostValue, default: {a: 1, b: 2}, files: false)")} {a: integer, b: integer}`,
   ]);
+});
+
+test("a typed parse into a written `object` repairs a deep property without copying the levels below each level again, every key kept, counted through the reader at one doubling, in both orders (#1223, Astra r1 B1)", () => {
+  // a `next` chain `depth` deep in the default and the JSON, its deepest `score` wrong: the run's value, and the reader's
+  // reads of the JSON's objects (their `kind`, as every reading and copy of one reads it) for that value, which a copy of
+  // each level's whole contents at every level makes grow with the square of the depth
+  const work = (depth: number): number => {
+    const fallback = `${"{next: ".repeat(depth)}{score: 4}${"}".repeat(depth)}`;
+    const call = `fromJson(hostValue, default: ${fallback}, files: false)`;
+    const source = `let parcel: object = ${call}\nsay "complete"\nexit\n`;
+    const plan = candidatePlan(source);
+    let json = '{"score":"bad","kept":0}';
+    let value = object({ score: 4, kept: 0 });
+    let given = object({ score: 4 });
+    for (let level = 1; level <= depth; level += 1) {
+      json = `{"next":${json},"kept":${level}}`;
+      value = object({ next: value, kept: level });
+      given = object({ next: given });
+    }
+    const result = runWith(plan, json);
+    assert.deepEqual(ran(result), halted(["complete"], [`TSW020@${at(source, call)}`]));
+    assert.deepEqual(bound(result.snapshot, "parcel"), value);
+    let reads = 0;
+    const counted = (raw: unknown): SerializableRuntimeValue => {
+      if (raw === null || typeof raw !== "object") {
+        // EVIDENCE: fixture: the JSON's scalars are text and numbers.
+        return raw as SerializableRuntimeValue;
+      }
+      const entries = Object.entries(raw).map(([key, field]) => ({ key, value: counted(field) }));
+      return {
+        get kind(): "dict" {
+          reads += 1;
+          return "dict";
+        },
+        entries,
+      };
+    };
+    const parse = planNodes(plan).find((node) => node["kind"] === "call" && "expected" in node);
+    // EVIDENCE: invariant: the plan's typed parse carries its expected type, validated with the plan.
+    const type = parse!["expected"] as TypePlan;
+    const parsed = counted(JSON.parse(json));
+    assert.equal(readExpected(parsed, type, true).kind, "fields");
+    assert.deepEqual(repairedRecord(parsed, given, type, true), value);
+    return reads;
+  };
+  const small = work(16);
+  const large = work(32);
+  assert.ok(large <= 2.15 * small, `reads at depth 16: ${small}, at 32: ${large}`);
 });
 
 test("a typed parse or load into a written `object` keeps every key and takes each property its default names from it per field, plain, nested, optional or as a list's element, in three layers, in both orders (#1223)", () => {

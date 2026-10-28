@@ -399,18 +399,15 @@ export function readExpected(
 }
 
 /**
- * The JSON record `record` as an object of its own fields, each copied, where its type keeps every key (`keepExtra`);
- * else an empty object, which takes the listed fields.
+ * The JSON record `record` as an object of its own fields, their values as they are, where its type keeps every key
+ * (`keepExtra`); else an empty object, which takes the listed fields.
  */
 function jsonRecord(record: SerializableRuntimeValue, type: ObjectPlan): SerializableRuntimeObject {
   return {
     kind: "object",
     properties:
       type.keepExtra === true
-        ? recordFields(record).map((field) => ({
-            name: field.name,
-            value: cloneCapturedSerializableValue(field.value),
-          }))
+        ? recordFields(record).map((field) => ({ name: field.name, value: field.value }))
         : [],
   };
 }
@@ -420,7 +417,8 @@ function jsonRecord(record: SerializableRuntimeValue, type: ObjectPlan): Seriali
  * `readExpected` reads it by (`recordType`): each listed field that reads whole is the candidate's, read as the type
  * reads it; a nested object that is a record in both is repaired the same way; any other field is the fallback's, in the
  * field's place, or after the others where the record lacks it. A stored record keeps its other fields and is copied,
- * never changed; JSON keeps only the listed ones, or every key where the type keeps them (`keepExtra`). A candidate or
+ * never changed; JSON keeps only the listed ones, or every key where the type keeps them (`keepExtra`), and its result,
+ * built of the parts it keeps as they are, is copied once, so no level copies the levels below it again. A candidate or
  * fallback that is no record gives the fallback.
  */
 export function repairedRecord(
@@ -490,11 +488,12 @@ export function repairedRecord(
       }
       const kept = keptField(found, property.type, json);
       // a kept field is the candidate's, `null` included, a stored one in the copy already; a missing or misfit one the
-      // fallback's
+      // fallback's, a copy for a stored record's copy
       if (kept === MISFIT) {
-        if (given !== undefined) place(property.name, cloneCapturedSerializableValue(given));
-      } else if (json) place(property.name, cloneCapturedSerializableValue(kept));
+        if (given !== undefined)
+          place(property.name, json ? given : cloneCapturedSerializableValue(given));
+      } else if (json) place(property.name, kept);
     }
   }
-  return root;
+  return json ? cloneCapturedSerializableValue(root) : root;
 }
