@@ -466,6 +466,15 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       let site: GatherSite;
       if (kind === "selected")
         site = { kind, literal, path, byValue: flags.includes("v"), below: flags.includes("b") };
+      else if (kind === "absent")
+        site = {
+          kind,
+          literal,
+          path,
+          byValue: flags.includes("v"),
+          below: flags.includes("b"),
+          exact: flags.includes("x"),
+        };
       else if (kind === "exact" || kind === "copies" || kind === "others")
         site = { kind, literal, path, deeper: flags === "d" };
       else throw new Error(`No gather is written '${key}'.`);

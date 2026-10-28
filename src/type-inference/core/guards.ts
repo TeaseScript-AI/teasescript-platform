@@ -2,7 +2,7 @@ import type { Expression } from "../../ast.js";
 import { expressionChildren, unwrap } from "../../expression-children.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinSteps, keptText } from "./budget.js";
+import { joinSteps, keepText, keptText } from "./budget.js";
 import {
   keptKey,
   keptPrefixes,
@@ -98,6 +98,8 @@ export class GuardIndex {
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
+  /** Every step of a tested key's path (`testedSteps`). */
+  readonly #testedSteps = new Set<string>();
   #narrowing: NarrowingIndex | null = null;
   #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
@@ -649,6 +651,15 @@ export class GuardIndex {
     return this.#testedLength;
   }
 
+  /**
+   * Every step of a tested key's path: a read at a path none of them is on is marked (§3.2) as one at any other such
+   * path, so a selection answers an absent property by one of these alike (`Contract.#selectionPieces`, #1278).
+   */
+  public testedSteps(): ReadonlySet<string> {
+    this.#relative();
+    return this.#testedSteps;
+  }
+
   #relative(): Map<string, Set<Key>> {
     if (this.#testedRelative !== null) return this.#testedRelative;
     const relative = new Map<string, Set<Key>>();
@@ -657,6 +668,10 @@ export class GuardIndex {
       this.#testedLength = Math.max(this.#testedLength, path.length);
       for (let length = 0; length < path.length; length += 1) {
         this.program.work.charge("indexSteps");
+        if (!this.#testedSteps.has(path[length]!)) {
+          keepText(this.program.work, path[length]!.length);
+          this.#testedSteps.add(path[length]!);
+        }
         const below = keptText(this.program.work, path.slice(length));
         let keys = relative.get(below);
         if (keys === undefined) relative.set(below, (keys = new Set()));
