@@ -425,6 +425,8 @@ export class Consumers {
         run: (work) => this.#solve(work),
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
         read: (value, node, at) => (this.#finishing ? this.#finishingRead(value, node, at) : null),
+        // (a typed call whose expected type the finishing read leaves open: marked at its site, TABLE r4.144)
+        undecidedIngress: (site, label) => this.#ingressMark(site, label),
       },
       rejected,
       cycling,
@@ -554,8 +556,9 @@ export class Consumers {
           found = this.#typedReads.get(link);
           chain.push(link);
         } else {
-          // the default itself: its own kinds, as a typed default reads them
-          const own = this.#leafKind(at, path);
+          // the default itself: its own kinds, else as the finishing read's ordered sources answer it (a named default's
+          // written type among them), as a typed default reads them (TABLE r4.144)
+          const own = this.#leafKind(at, path) ?? this.#finishingRead(at, null, path);
           const decision = typedDefault(path, false);
           found = own === null ? null : decision.answer(decision.choose(own), own);
         }
@@ -1244,6 +1247,35 @@ export class Consumers {
   }
 
   readonly #markedLiterals = new Set<PlaceId>();
+
+  /**
+   * A typed call no store takes in whose expected type the finishing read leaves open after a stop (`Admission.ingressStores`):
+   * marked at its site, its type undecided, standing for its boundary (r4.100, r4.144), once.
+   */
+  #ingressMark(site: SourceSite, label: string): void {
+    const key = siteKey(site);
+    if (this.#markedIngress.has(key)) return;
+    this.#markedIngress.add(key);
+    this.#storeWarning(
+      site,
+      label,
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: pathPhrase({ code: label }, []),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: null,
+        steps: [],
+      },
+      [],
+    );
+  }
+
+  readonly #markedIngress = new Set<string>();
 
   #heldIn: Map<PlaceId, PlaceId> | null = null;
   #storesOf: Map<PlaceId, Definition[]> | null = null;

@@ -959,13 +959,18 @@ class CoreAnswers implements Answers {
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
     // each child as its own syntax gives it, at the path's own step (`literalChildren` keys a collection's elements and
-    // a dict's values alike)
+    // a dict's values alike); a child its syntax leaves open as the finishing read's ordered sources answer it, beside
+    // its known siblings (TABLE r4.138 (3), r4.144)
     const items: Item[] = [];
     const names = new Set<string>();
     for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
       if (child.value === undefined) continue;
       const shape = this.#stoppedShape(child.value, path.slice(1));
-      for (const item of shape.items) items.push(item);
+      const childItems =
+        shape.items === STOPPED
+          ? this.#consumers.finishedItems(child.value, child.node, path.slice(1))
+          : shape.items;
+      for (const item of childItems) items.push(item);
       for (const name of shape.names) names.add(name);
     }
     return { items: items.length === 0 ? STOPPED : items, names };

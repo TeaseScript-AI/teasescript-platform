@@ -852,6 +852,8 @@ export interface AdmissionHost {
    * boundaries read as every consumer does (one derivation, TABLE r4.126).
    */
   read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
+  /** After a stop, a typed call no store takes in whose expected type the finishing read leaves open: its mark. */
+  undecidedIngress?(site: SourceSite, label: string): void;
 }
 
 export class Admission {
@@ -6524,10 +6526,19 @@ export class Admission {
       )
         tags.push("null");
       if (tags.length > 0) found = { label: `${parses ? "fromJson" : "load"}.result`, tags };
+      // (after a stop, a type the finishing read leaves open is no absent one: its boundary is marked, r4.144)
+      else if (
+        this.pass.program.work.stopped !== null &&
+        items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
+      )
+        this.#f18Open.add(c.result);
     }
     this.#f18.set(c.result, found);
     return found;
   }
+
+  /** The typed calls whose expected type the finishing read left open after a stop (`#f18Kinds`). */
+  readonly #f18Open = new Set<PlaceId>();
 
   /**
    * F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
@@ -6538,7 +6549,11 @@ export class Admission {
     for (const c of this.pass.program.constraints) {
       if (skip !== undefined && "result" in c && typedIngress(c) && skip(c.site)) continue;
       const found = this.#f18Admission(c);
-      if (found === null) continue;
+      if (found === null) {
+        if ("result" in c && this.#f18Open.has(c.result))
+          this.host.undecidedIngress?.(c.site, `${c.kind === "load" ? "load" : "fromJson"}.result`);
+        continue;
+      }
       this.readChecks.push(
         boundaryCheck(
           c.site,
@@ -6817,9 +6832,9 @@ export const OBLIGATION_SITES = [
     published:
       "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3, A8)",
     undecided:
-      "a named element: every definition holding its literal, or the literal, marked (#markHolder)",
+      "a named element, one source identity's too (its test comes first): every definition holding its literal, or the literal, marked (#markHolder)",
     declined:
-      "elements of one source identity; a literal landing in a written place, which C1 checks",
+      "elements of one source identity, in a settled pass; a literal landing in a written place, which C1 checks",
   },
   {
     method: "#boundaryAtRead",
@@ -6838,8 +6853,10 @@ export const OBLIGATION_SITES = [
   {
     method: "ingressStores",
     runs: "ingressStores",
-    published: "a typed call's own boundary no store takes in, its type its syntax's (F18)",
-    undecided: "none",
+    published:
+      "a typed call's own boundary no store takes in, its type its syntax's or its default's (F18)",
+    undecided:
+      "a typed call whose default the finishing read leaves STOPPED, marked (`undecidedIngress`)",
     declined: "a typed call no type reaches: the runtime's validation alone",
   },
   {

@@ -1010,6 +1010,106 @@ test("a stop before admission settled reads a dict literal's values as its synta
 });
 
 /**
+ * After a stop a literal's composed questions (`valueAt`, `project`, `properties`) read a child its syntax leaves open as
+ * the child's own read does, beside its known siblings, never `budget` where that read keeps a type (Astra r6 B1, TABLE
+ * r4.144): a written child, a union's, a nullable's, at a stop before admission settled; a decided one at every settled
+ * walk stop.
+ */
+test("after a stop a literal's composed questions read a child as its own read does, beside its siblings", () => {
+  const composed = (answers: Answers, kind: string, step: string) => {
+    const literal = answers.graph.nodes.find(
+      (node) => node.kind === "expression" && node.expression?.kind === kind,
+    );
+    assert.ok(literal !== undefined);
+    const tags = (items: readonly { readonly tag: string }[]) =>
+      [...new Set(items.map((item) => item.tag))].sort();
+    return {
+      valueAt: tags(answers.valueAt(literal, [step]).items),
+      project: tags(answers.project(literal, step === "element" ? "element" : { property: step })),
+      properties:
+        kind === "objectLiteral" ? tags(answers.properties(literal).get(step) ?? []) : null,
+    };
+  };
+  for (const [source, kind, step, tags] of [
+    ["let quantity: number = 3.5\nsay [quantity]\nexit\n", "listLiteral", "element", ["number"]],
+    [
+      'let quantity: number = 3.5\nsay [quantity, "x"]\nexit\n',
+      "listLiteral",
+      "element",
+      ["number", "string"],
+    ],
+    [
+      "let quantity: integer | boolean = 3\nsay [quantity]\nexit\n",
+      "listLiteral",
+      "element",
+      ["boolean", "integer"],
+    ],
+    [
+      "let quantity: integer? = 3\nsay {part: quantity}\nexit\n",
+      "objectLiteral",
+      "part",
+      ["integer", "null"],
+    ],
+  ] as const)
+    for (const answers of unsettledAnalyses(source).stopped)
+      assert.deepEqual(
+        composed(answers, kind, step),
+        { valueAt: tags, project: tags, properties: kind === "objectLiteral" ? tags : null },
+        source,
+      );
+  const source =
+    "let quantity = 8.0\nif quantity is integer { quantity = 3.5\nlet observed: number = quantity\nsay [quantity] }\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const [low, high] = walkEnds(source);
+  for (let allowance = low; allowance <= high; allowance += 1) {
+    const answers: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    assert.deepEqual(
+      composed(answers, "listLiteral", "element"),
+      { valueAt: ["number"], project: ["number"], properties: null },
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
+ * After a stop a typed call no store takes in keeps its boundary through a named default's written type, and is marked
+ * where its default's type is undecided (an inferred variable, a call's result): a missing answer never declines it
+ * silently (Astra r6 B2, TABLE r4.144).
+ */
+test("after a stop a typed call keeps its boundary through a named default, or is marked", () => {
+  for (const source of [
+    "let fallback: integer = 3\nsay fromJson(hostValue, default: fallback)\nexit\n",
+    'let fallback: boolean = false\nsay load("key", default: fallback)\nexit\n',
+    "let fallback: integer[] = [3]\nsay fromJson(hostValue, default: fallback)\nexit\n",
+    'let fallback: object = {amount: 3}\nsay load("key", default: fallback)\nexit\n',
+  ]) {
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    const boundary = unstopped.checks.find((check) => check.boundary);
+    assert.ok(boundary !== undefined, source);
+    for (const answers of stopped)
+      assert.ok(
+        answers.checks.some((check) => isDeepStrictEqual(check, boundary)),
+        source,
+      );
+  }
+  for (const source of [
+    "let fallback = 9\nsay fromJson(hostValue, default: fallback)\nexit\n",
+    "function fallback { return 9 }\nsay fromJson(hostValue, default: fallback())\nexit\n",
+  ]) {
+    const site = { file: 0, start: source.indexOf("fromJson"), end: source.indexOf(")\nexit") + 1 };
+    for (const answers of unsettledAnalyses(source).stopped)
+      assert.ok(
+        answers.budget.deferred.some(
+          (mark) =>
+            mark.obligation.target === "fromJson.result" && isDeepStrictEqual(mark.site, site),
+        ),
+        source,
+      );
+  }
+});
+
+/**
  * A store marked with its type undecided stands for its records within its value on both sides alike (r4.111, TABLE
  * r4.122, Codex r14): a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
  * index read below the store is no extra check, at a stop in the setup and at the last before admission settled; a
