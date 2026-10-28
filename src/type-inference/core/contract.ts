@@ -63,6 +63,7 @@ import {
   firstWriter,
   differsIn,
   holdsLeaves,
+  leafNodes,
   MIXED_FAN,
   MIXED_LEAF,
   makeItem,
@@ -4856,28 +4857,44 @@ export class Contract {
   }
 
   /**
-   * The leaves a value of a class mixed by leaves alone names where its answer holds external data, by role: its own
-   * as an ingress (`entered`), then those of its mixed parts (`#classParts`), each an ingress whose parts are not mixed
-   * (a `load`'s default that reads host data); `null` for any other. Once per value and side.
+   * The leaves a value of a class mixed by leaves alone names where its answer holds external data, by role: of it and
+   * its mixed parts (`#classParts`) at any depth, in their roles' order, each ingress's own (`entered`), so a composite
+   * (`load(…, default: hostValue) otherwise {…}`) names its load's and its default's (#1304); a literal's read entry of
+   * host data each read's it stands for (its unioned leaves, `#indexWork`), so literals of one and of two reads of one
+   * global differ by their roles' count; `null` where a mixed part is mixed by more than its leaves, a leaf lies in a
+   * fixpoint's cell, or none names one. Once per value and side, on an explicit walk.
    */
   #leafRoles(value: PlaceId, exact: boolean): readonly IngressNode[] | null {
     const memo = this.#leafRolesOf[exact ? 1 : 0]!;
     if (memo.has(value)) return memo.get(value)!;
-    const { definitions } = this.pass;
+    const { definitions, program } = this.pass;
     const out: IngressNode[] = [];
-    const own = (of: PlaceId): boolean => {
-      const leaf = definitions.ingress.has(of) ? this.#ingressLeaf(of) : undefined;
-      if (leaf !== undefined) out.push(leaf);
-      return leaf !== undefined;
-    };
-    let found = this.classMixed(value, exact) === MIXED_LEAF;
-    if (found && definitions.ingress.has(value)) found = own(value);
-    for (const part of found ? this.#classParts(value, exact) : []) {
-      if (this.classMixed(part, exact) === 0) continue;
-      found &&=
-        this.classMixed(part, exact) === MIXED_LEAF &&
-        this.#classParts(part, exact).every((inner) => this.classMixed(inner, exact) === 0) &&
-        own(part);
+    const seen = new Set<PlaceId>();
+    const pending = [value];
+    let found = true;
+    while (found && pending.length > 0) {
+      const at = pending.pop()!;
+      const mixed = this.classMixed(at, exact);
+      if (mixed === 0 || seen.has(at)) continue;
+      seen.add(at);
+      const leaf = definitions.ingress.has(at) ? this.#ingressLeaf(at) : null;
+      found = mixed === MIXED_LEAF && leaf !== undefined;
+      if (leaf !== null && leaf !== undefined) out.push(leaf);
+      const parts: PlaceId[] = [];
+      if (!program.hasOf.has(at)) parts.push(...this.#classParts(at, exact));
+      else {
+        const index = this.literalIndex(at);
+        for (const id of this.#pathOrder(index)) {
+          program.work.charge("invSteps");
+          const path = this.#pathTexts[id]!;
+          for (const entry of index.reads.get(path) ?? [])
+            if (entry.ingress === undefined) parts.push(entry.value);
+            else found &&= leafNodes(entry.ingress, out, program.scope);
+          for (const entry of index.others.get(path) ?? []) parts.push(entry.value);
+        }
+        this.#keep(parts.length);
+      }
+      for (let index = parts.length - 1; index >= 0; index -= 1) pending.push(parts[index]!);
     }
     const roles = found && out.length > 0 ? out : null;
     this.#keep(1 + out.length);

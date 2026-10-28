@@ -40,6 +40,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
   ingressLeaves,
+  MIXED_LEAF,
   REASON,
   writerKey,
   type IngressNode,
@@ -5985,8 +5986,10 @@ export class Admission {
    * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
    * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data,
    * there or as the default, the contract's class of its global and guards (`classOf`, #1196: its answer is the
-   * global's external data at every path, so k reads of one global share one discovery, #1207); any other value its
-   * source identity. Values of one class have the same kinds at every path.
+   * global's external data at every path, so k reads of one global share one discovery, #1207); an `otherwise` or a
+   * literal whose class is mixed by its leaves alone that class (`classMixed`: k `load(…) otherwise {…}` of one default
+   * and one fallback, or objects holding them, share one discovery, #1304); any other value its source identity. Values
+   * of one class have the same kinds at every path.
    */
   #conflictClass(value: PlaceId): string {
     const { program, contract, definitions } = this.pass;
@@ -5995,6 +5998,12 @@ export class Admission {
         ? contract.classOf(of, false)
         : null) ?? contract.identityOf(of).id;
     const c = program.opOf.get(value);
+    if (c?.kind === "fallback" || (c === undefined && program.hasOf.has(value)))
+      return (
+        (contract.classMixed(value, false) === MIXED_LEAF
+          ? contract.classOf(value, false)
+          : null) ?? contract.identityOf(value).id
+      );
     if (c === undefined) return source(value);
     let fallback: PlaceId | undefined;
     if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;

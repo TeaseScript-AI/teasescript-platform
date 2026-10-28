@@ -269,6 +269,22 @@ export function holdsLeaves(
   return leaves.every((leaf) => found.has(leaf));
 }
 
+/** Appends the leaves below `node` to `out`, each node visited once, charged; `false` where a cell lies on the way. */
+export function leafNodes(node: IngressNode, out: IngressNode[], scope: ItemScope): boolean {
+  const seen = new Set<IngressNode>();
+  const pending = [node];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    scope.work.charge("mergeItems");
+    seen.add(current);
+    if ("ingress" in current) out.push(current);
+    else if ("parts" in current) pending.push(...current.parts);
+    else return false;
+  }
+  return true;
+}
+
 /** What the item operations of one analysis share: its ledger and its ingress graph. */
 export interface ItemScope {
   readonly work: WorkLedger;
