@@ -402,7 +402,7 @@ export class Evaluator {
         if (value === undefined)
           throw fault(
             "TSR017",
-            `'playerProfile' has no '${expression.name}': the player's profile does not give one. Assign a value to 'player.${expression.name}' and read 'player.${expression.name}' instead.`,
+            `'playerProfile' has no '${expression.name}': the player's profile does not give one. Give 'player.${expression.name}' a value and read 'player.${expression.name}' instead.`,
             expression.span,
           );
         // The host gave the player profile, so a read has no recorded origin.
