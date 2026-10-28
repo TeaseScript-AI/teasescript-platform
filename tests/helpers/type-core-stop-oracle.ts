@@ -326,8 +326,8 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     mechanism:
       "a settled walk stop reads `state.ticks` by its key's finished contract, whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress store brought: a redundant runtime check",
     issue: "#1216",
-    count: 504,
-    settled: 126,
+    count: 532,
+    settled: 133,
   },
   {
     source:
@@ -339,7 +339,7 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     mechanism:
       "a settled walk stop leaves `value.list.element` or its fields undecided (admission decides them lazily, never after a stop), so the store's check opens there; part 3's syntax decision (source 4) decides them from the default literal",
     issue: "#1165",
-    count: 802,
+    count: 984,
   },
   {
     // (#1165's class, a typed parse's nested default: Astra r4's N1, TABLE r4.126)
@@ -353,6 +353,6 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     mechanism:
       "a settled walk stop leaves `parsed.chunks.element` undecided (admission decides it lazily, never after a stop), so the store's check opens there; part 3's syntax decision (source 4) decides it from the default literal",
     issue: "#1165",
-    count: 1024,
+    count: 1180,
   },
 ];
