@@ -35,11 +35,15 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    collection settle nothing. Rule 2 widens an `integer` to a `number` where no type is written. Storing a value of
    another type is a compile error at that store that names the line that decided the type and suggests a written
    union. The compiler ignores the rejected value, so later uses are checked against the decided type and one mistake
-   gives one error. A property that reaches a place only through copies of whole objects is checked at the first direct
-   read or store of that property in that place, not at the copy, and the error there names the copy or store that
-   brought a value of another type. With `let xs = [a, b]`, where `a.n` holds a number and `b.n` text, the error is at
-   the first read or store of `xs[i].n`. The decided type holds wherever the place is used, also before the value that
-   decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime does.
+   gives one error. A property that reaches a place only through copies of whole objects is checked where the copy
+   meets the place, as a property of an object written there is, whether or not anything reads it: with
+   `let xs = [a, b]`, where `a.n` holds a number and `b.n` text, the error is at `b`, and after `let c = a` it is at the
+   store `c = b`. Where the other type reaches the place only through a cycle of copies that moves an object a level
+   deeper or higher each time, such as `a.inner = a` or `a = a.inner`, the property is checked at its first direct read
+   or store instead, and the error there names the copy that brought it: following such a cycle would make the
+   compiler's work grow faster than the script. The decided type holds wherever the place is used, also before the
+   value that decided it, and a read inside an expression sees the value at that point of evaluation, as the runtime
+   does.
 2. `let x = null` without a type takes the type `T?` of the earliest non-null value stored into it. A different non-null
    type is an error that names both places. This is the ordinary rule applied to the first real value, not a general
    union inference. Storing `null` later also makes a place optional: after `let count = 1`, `count = null` makes
@@ -315,8 +319,9 @@ union would be an inferred union (rule 3.4).
   same kinds, so precision comes one rule at a time instead.
 - A compile error for a store that reads its own place through a function: it needs another representation, with
   symbolic obligations, and a further design round.
-- An error or a warning at the copy itself for a property that reaches a place only through copies of whole objects
-  (rule 1.1): it makes the compiler's work grow with the number of copies times the number of properties.
+- Checking a property that reaches a place only through copies of whole objects only at its first direct read or store
+  (the earlier rule 1.1): a conflict nobody read went unreported, unlike the same objects written in place, and the
+  cost it was meant to avoid, copies times properties, does not arise where the copies meet.
 - Accepting a `number` where an integer is required (rule 1.2), with a check when the script runs as in Lua, or with a
   warning: `items[score / 2]` would fail only when `score` is odd.
 - Checking a place where an integer is required by the values that can reach that read (the earlier rule 1.2), with an

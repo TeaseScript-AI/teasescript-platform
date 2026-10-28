@@ -852,14 +852,22 @@ test("a stop before admission settled marks the stores into inferred places and 
 /**
  * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
  * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
- * inside a typed default, and a copy's error reported where it is read. Each rule only so far: the mark narrowed off
- * the record, or the error's store moved elsewhere, and the oracle reports the record.
+ * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value,
+ * TABLE r4.131), and a copy whose conflict is reached only through a cycle of copies that adds steps (r4.154), its
+ * error reported where it is read and naming the copy. Each rule only so far: the mark narrowed off the record, or the
+ * error's store moved elsewhere, and the oracle reports the record. A2's checks run before the stop, so its records at
+ * a literal of copies, a store, a relay inside a cycle of whole copies and a fed ring, and at a literal and a store of
+ * copies of written bindings (Astra r1 N1), stand at an early and the latest unsettled stop as the unstopped analysis
+ * publishes them, or as the marks' content.
  */
 test("a store a stop before admission settled marks stands for its records within its value and the errors it brought", () => {
   const inner =
     'let a = {inner: {n: 1, title: "ok"}}\nlet b = a\nb = {inner: hostValue}\nsay b.inner.n\nsay b.inner.title\nexit\n';
   const copied =
     'let good = {n:1}\nlet bad = {n:"x"}\nlet copy = good\ncopy = bad\nsay copy.n\nlet n: integer = hostValue\nexit\n';
+  const read =
+    'let a = {inner: {n: 1}}\na = a.inner\nlet bad = {n: "x"}\nlet copy = a\ncopy = bad\nsay copy.n\n' +
+    "let n: integer = hostValue\nexit\n";
   const typed =
     'let value = fromJson(hostValue, default: {list: [{n: fromJson("3", default: 0), open: null}]})\nsay value.list.get(0, default: {n: 0, open: null}).n\nsay "DONE"\nexit\n';
   const problems = (
@@ -872,6 +880,7 @@ test("a store a stop before admission settled marks stands for its records withi
   for (const [source, fitting, violating] of [
     [inner, [fields(2)], [fields(1.5)]],
     [copied, [], []],
+    [read, [], []],
     [typed, [], []],
   ] as const) {
     const stopped = stopRun(source, ALLOWANCE);
@@ -894,8 +903,24 @@ test("a store a stop before admission settled marks stands for its records withi
     },
   };
   assert.notDeepEqual(problems(stopRun(inner), narrowed), []);
+  // A2's witnesses (#1293), stopped early and at the latest unsettled unit
+  for (const source of [
+    'let a = {n: 1}\nlet b = {n: "x"}\nlet xs = [a, b]\nlet n: integer = hostValue\nexit\n',
+    'let good = {n: 1}\nlet bad = {n: "x"}\nlet a = {inner: {inner: bad}}\nlet b = {inner: {inner: good}}\n' +
+      'let c = b\nc = a\nsay "AFTER"\nb = c\na = b\nexit\n',
+    'let good = {p0: 1, p1: 1}\nlet bad = {p0: "x", p1: "x"}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\na0 = a2\n' +
+      "a2 = bad\nexit\n",
+    'let w: integer = 1\nlet a = {n: w}\nlet b = {n: "x"}\nlet xs = [a, b]\nsay xs[0].n\nlet n: integer = hostValue\nexit\n',
+    'let s: string = "x"\nlet a = {n: 1}\nlet b = {n: s}\nlet copy = a\ncopy = b\nsay copy.n\n' +
+      "let n: integer = hostValue\nexit\n",
+  ])
+    for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+      const stopped = stopRun(source, allowance);
+      assert.equal(stopped.answers.budget.settled, false, `${source} @${allowance}`);
+      assert.deepEqual(problems(stopRun(source), stopped), [], `${source} @${allowance}`);
+    }
   // the copy's error brought by another store than the marked one
-  const unstopped = stopRun(copied);
+  const unstopped = stopRun(read);
   const elsewhere: StopRun = {
     ...unstopped,
     answers: {
@@ -916,7 +941,7 @@ test("a store a stop before admission settled marks stands for its records withi
         d.rule.brought !== null,
     ),
   );
-  assert.notDeepEqual(problems(elsewhere, stopRun(copied, ALLOWANCE)), []);
+  assert.notDeepEqual(problems(elsewhere, stopRun(read, ALLOWANCE)), []);
 });
 
 /**

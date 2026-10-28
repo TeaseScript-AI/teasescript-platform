@@ -4,6 +4,15 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## Rule A2 where the copy meets the place (#1249, TABLE r4.131, r4.154)
+
+The #1249 builder (Opus) edited 10 records of `cells.jsonl` by hand, with no set revision yet: a property only copies
+of whole objects bring errs at the copy or store that brings the other type, read or not, without a `related` site.
+The four `cp9-cells/s4/s6/owner/bound/record-kind{,-read}/{literal,insert}` records and the six
+`cp9-cells/r42/copy/{unread-field,first-read-after-conflict,first-store-after-conflict,access-before-later-copy,store-control,literal-control}`
+records now hold one compile error at `b` in `[a, b]`, `xs.add(b)` or `c = b`. No other record changed; no record
+has `related` any more. The set's next revision carries the same.
+
 ## End offsets (M4 step S6, `S6-CARRIERS.md` revision 5, §9 step 0)
 
 Opus, 2026-10-26, builder for M4 step S6 (lead Fable; the lead's answer 4, option B). Both files are regenerated from

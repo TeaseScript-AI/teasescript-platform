@@ -396,20 +396,20 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "allow both, declare it as 'let n: (integer | string)[] = ...'.",
       ],
     ],
-    // ADR 0021 rule 1.1 (A2, r4.75 (4)): a property only copies bring, at its first direct read, naming the copy
+    // ADR 0021 rule 1.1 (A2, TABLE r4.131): a property only copies bring, where the copy meets the place
     [
       'let a = {n: 1}\nlet b = {n: "bad"}\nlet xs = [a, b]\nrepeat xs[0].n {}\nexit\n',
       [
-        "E TSV041 'xs[0].n': 'n' of an element of 'xs' holds a number, but 'b' on line 3 brings text (string) " +
-          "into that property. Use a separate property for a value of another type.",
+        "E TSV044 'b': This list mixes objects whose property 'n' holds a whole number (integer) in one and text " +
+          "(string) in another. A list holds one type. Give 'n' one type in every element.",
       ],
     ],
-    // a copy made through a projection, named whole
+    // a copy made through a projection, at the store that brings it
     [
       'let bundle = {left: {n: 1}, right: {n: "bad"}}\nlet c = bundle.left\nc = bundle.right\nsay c.n\nexit\n',
       [
-        "E TSV041 'c.n': 'c.n' holds a whole number (integer) since line 2, but 'bundle.right' on line 3 brings " +
-          "text (string) into that property. Use a separate property for a value of another type.",
+        "E TSV041 'bundle.right': 'c.n' holds a whole number (integer) since line 2, so it cannot take text " +
+          "(string). Use a separate property for a value of another type.",
       ],
     ],
     // a direct store keeps its own error at its value, whatever names the value

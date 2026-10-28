@@ -1230,10 +1230,13 @@ picks.add("three")    // compile error
 - A store of another type is a compile error at that store. It names the line and the type that decided the place, for
   a variable that started without a type also its declaration, and it suggests a written union. The place keeps its
   type: the compiler ignores the rejected value, and later uses are checked against the decided type. A property that
-  reaches a place only through copies of whole objects is checked at the first direct read or store of that property in
-  that place, not at the copy, and the compile error there names the copy or store that brought a value of another
-  type. After `let xs = [a, b]`, where `a.n` holds a number and `b.n` text, the compile error is at the first read or
-  store of `xs[i].n`.
+  reaches a place only through copies of whole objects is checked where the copy meets the place, as a property of an
+  object written there is, whether or not anything reads it. After `let a = {n: 1}` and `let b = {n: "text"}`,
+  `let xs = [a, b]` is a compile error at `b`, as `[{n: 1}, b]` is, and after `let c = a` so is the store `c = b`.
+  Where the other type reaches the place only through a cycle of copies that moves an object a level deeper or higher
+  each time, such as `a.inner = a` or `a = a.inner`, the property is checked at its first direct read or store instead,
+  and the compile error there names the copy that brought it: following such a cycle would make the compiler's work
+  grow faster than the script.
 - The decided type holds wherever the place is used, also before the value that decided it, such as in a function body
   or in another file. A read inside an expression sees the value at that point of evaluation, as the runtime does. A
   copy is a new value: `let b = a`, `a.toSet()`, or a property read into a variable starts with what the source holds

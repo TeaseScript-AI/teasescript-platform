@@ -276,6 +276,22 @@ test("a store of a property its object may lack requires it, in three layers, in
   ]);
 });
 
+test("a copy that brings another type into a cycle of whole copies is checked where it meets the place, before what follows, in three layers, in both orders (A2, Codex r2 B2 on #1293)", () => {
+  // `c` relays `b` and then `a` inside the cycle `c = b`, `c = a`, `b = c`, `a = b`: its own second store brings the
+  // text `a.inner.inner.n` holds where `c.inner.inner.n` holds a whole number, read or not
+  const source =
+    'let good = {n: 1}\nlet bad = {n: "x"}\nlet a = {inner: {inner: bad}}\nlet b = {inner: {inner: good}}\n' +
+    'let c = b\nc = a\nsay "AFTER"\nb = c\na = b\nexit\n';
+  // (the copied `a` of `c = a`)
+  const start = source.indexOf("c = a") + "c = ".length;
+  const copy = `${start}:${start + 1}`;
+  const known = decision(source);
+  assert.ok(known.diagnostics.includes(`warning-runtime-check written-target @${copy}`));
+  assert.ok(known.checks.includes(`copy-type c.inner.inner.n [integer] @${copy}`));
+  // the copy stops the run with its check's error before the message that follows it
+  assert.deepEqual(ran(runWith(candidatePlan(source), 0)), failed(`TSR058@${copy}`));
+});
+
 test("each read of a property one conditional replacement lacks is checked where it reads, in three layers, in both orders (C5c, #1167)", () => {
   const source =
     "let flag: boolean = hostValue\nlet room = {n: 1}\nroom = {n: 1}\nroom = {n: 1}\n" +
