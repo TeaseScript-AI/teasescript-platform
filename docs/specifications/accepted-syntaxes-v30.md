@@ -2731,8 +2731,8 @@ say n + 1
 // 'n' may be null here. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
 ```
 
-Where a check cannot hold that statement as written, the message names the check in words, as in `Check that 'n' is
-not null first`.
+Where that code is not proved to compile in the statement's place, the message names the check in words, as in
+`Check that 'n' is not null first`.
 
 The fallback is `0` for a number, `""` for text and `false` for a boolean, in parentheses where the value is an operand
 or has a property or method read, as in `(n otherwise 0) < 1`. For another value, or a value that may also have a type
