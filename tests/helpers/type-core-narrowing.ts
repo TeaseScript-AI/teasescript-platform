@@ -53,6 +53,16 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
   return pass;
 }
 
+/**
+ * `narrowingPass`, with the solver's worklist reversed when `reversed`: the solver takes the seam when it is made, so
+ * the second order of a work family is set here, not around the asks.
+ */
+export function narrowingPassIn(request: CoreAnalysisRequest, reversed: boolean): CorePass {
+  return reversed
+    ? withSolverSeam({ reverseWorklist: true }, () => narrowingPass(request))
+    : narrowingPass(request);
+}
+
 /** G's filtered kinds: its items as `Values` reads them (its input at the test, filtered), without emptiness. */
 function filteredKinds(pass: CorePass, g: Narrowing): readonly ItemTag[] {
   return pass.solver
@@ -96,19 +106,16 @@ function readNodes(pass: CorePass): FlowNode[] {
 }
 
 /**
- * Every read's narrowing and route asked once, in source order, or reversed with the solver's worklist reversed (the
- * work families' second order): what S10's second part's consumers will ask.
+ * Every read's narrowing and route asked once, in source order, or reversed (the work families' second order): what
+ * S10's second part's consumers will ask. The solver's worklist order is the pass's, taken when the pass is made
+ * (`narrowingPassIn`): a seam around the asks alone would reverse the reads and leave the components' order as it is.
  */
 export function askEveryRead(pass: CorePass, reversed = false): void {
   const reads = readNodes(pass);
-  const ask = (): void => {
-    for (const node of reversed ? reads.reverse() : reads) {
-      narrowingAt(pass, node);
-      routeAt(pass, node);
-    }
-  };
-  if (reversed) withSolverSeam({ reverseWorklist: true }, ask);
-  else ask();
+  for (const node of reversed ? reads.reverse() : reads) {
+    narrowingAt(pass, node);
+    routeAt(pass, node);
+  }
 }
 
 /** The outermost read (an identifier, a property or an index) of the first file starting at `offset`. */
