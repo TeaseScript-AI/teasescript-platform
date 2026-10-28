@@ -297,6 +297,13 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
+/** The collection literals, whose elements (a dict's entries) are their children (`Consumers.#heldHostData`). */
+const COLLECTION_LITERALS: ReadonlySet<string> = new Set([
+  "listLiteral",
+  "setLiteral",
+  "dictLiteral",
+]);
+
 /** The literals whose kind is their own, the finishing path's one proof (`Consumers.#valueItems`). */
 const LITERALS: ReadonlySet<string> = new Set([
   "numberLiteral",
@@ -596,6 +603,28 @@ export class Consumers {
     return binding !== undefined && program.isHost(binding) && !this.#storedHosts().has(binding)
       ? contract.entered(value, [unknownItem(REASON.external)])
       : null;
+  }
+
+  /**
+   * The host data a value holds at every element depth of its own literals (`[hostValue]`, `[[hostValue]]`): each host
+   * read's own ingress there (`#leafKind`), the literals walked once by their own structure. A mark at a default stands in
+   * for its check at every depth, so its host data meets its boundaries with it (TABLE r4.110 (a)).
+   */
+  #heldHostData(value: PlaceId): Item[] {
+    const { program } = this.pass;
+    const out: Item[] = [];
+    const pending = [value];
+    while (pending.length > 0) {
+      const at = pending.pop()!;
+      program.work.charge("checks");
+      const place = program.places[at]?.kind;
+      if (place?.kind === "value" && COLLECTION_LITERALS.has(place.node)) {
+        const step = place.node === "dictLiteral" ? "entry" : "element";
+        for (const child of this.admission.literalChildren(at, step))
+          if (child.value !== undefined) pending.push(child.value);
+      } else out.push(...(this.#leafKind(at, []) ?? []));
+    }
+    return out;
   }
 
   /** The host globals the script stores into, at any path (`#leafKind`), found once. */
@@ -2425,7 +2454,9 @@ export class Consumers {
         (into === null || !typeTags(into).includes("unknown"))
       )
         this.admission.boundariesAt(
-          own.filter((item) => isOpaque(item) || isExternal(item)),
+          [...own, ...this.#heldHostData(value)].filter(
+            (item) => isOpaque(item) || isExternal(item),
+          ),
           this.#obligation(
             "copy-type",
             site,

@@ -204,7 +204,8 @@ test("statements nested past 256 levels are checked when the script runs, the re
       errors: ["TSV041 1.5"],
       stops: 1,
       unchecked: ["top level"],
-      deferred: ["operand hostValue budget"],
+      // (the host read is its own data after the stop, as unstopped: S3 §5 revision 18, TABLE r4.109 (1))
+      deferred: ["operand hostValue unknown"],
     });
   assert.equal(analysed(requestOf(main(chained(255)))).budget.exhausted, null);
   const chain = stopOf(analysed(requestOf(main(chained(257)))), chained(257));
@@ -273,11 +274,18 @@ test("the stop's warning names the heaviest place and marks each function it lef
     const answers = analysed(request, false, Math.floor(total * fraction));
     const stop = stopOf(answers, source);
     assert.equal(stop.stops, 1, String(fraction));
-    // once per function, exactly those whose checks moved
-    const starts = Array.from({ length: 40 }, (_, i) => source.indexOf(`function f${i}(`));
+    // once per function, exactly those whose checks moved, and the top level where a stop before admission settled
+    // marks the arguments into the inferred parameters (TABLE r4.110 (3))
+    const functions = Array.from({ length: 40 }, (_, i) => {
+      const text = `function f${i}(p) {\n  repeat p {}\n}`;
+      const start = source.indexOf(text);
+      return { name: `f${i}`, start, end: start + text.length };
+    });
     const moved = new Set(
       answers.budget.deferred.map(
-        (d) => `f${starts.findLastIndex((start) => start <= d.site.start)}`,
+        (d) =>
+          functions.find((f) => f.start <= d.site.start && d.site.end <= f.end)?.name ??
+          "top level",
       ),
     );
     assert.deepEqual([...stop.unchecked].sort(), [...moved].sort(), String(fraction));

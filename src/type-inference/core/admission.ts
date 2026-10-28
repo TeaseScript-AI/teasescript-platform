@@ -5945,9 +5945,10 @@ export class Admission {
    * walk admission's deciders and C1's contributions read), then every operation's own read, as its own landing; each
    * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
    * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
-   * destination's admitted type, as in live code (AD-3: a written type is no flow fact).
+   * destination's admitted type, as in live code (AD-3: a written type is no flow fact). `keep`: the stops of the stores
+   * it keeps only, no own read walked and nothing kept (`publish` after a stop before admission settled).
    */
-  #landingIndex(): LandingIndex {
+  #landingIndex(keep?: (d: Definition) => boolean): LandingIndex {
     if (this.#landings !== null) return this.#landings;
     const { program, definitions, lists } = this.pass;
     const byStore = new Map<Definition, IngressStop[]>();
@@ -6032,7 +6033,7 @@ export class Admission {
       ...[...definitions.deadArguments.values()].flat(),
     ]) {
       if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
-      if (!lists.live(d)) continue;
+      if (!lists.live(d) || keep?.(d) === false) continue;
       walk(d.value, d.node, (stop, ingress, own) => {
         if (own) {
           entry(ingress).own = true;
@@ -6062,9 +6063,9 @@ export class Admission {
       });
     }
     // an operation's own read is an own read wherever it stands (C10): one no walk reached is its own landing, the
-    // outermost first, so a nested own read its enclosing one's walk reaches is walked once
+    // outermost first, so a nested own read its enclosing one's walk reaches is walked once (not for some stores' stops)
     const owns: { readonly operand: PlaceId; readonly site: SourceSite }[] = [];
-    for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
+    for (const carrier of keep === undefined ? [...program.projOf.keys(), ...program.opOf.keys()] : [])
       for (const { operand, own } of operandsOf(program, carrier)) {
         program.work.charge("indexSteps");
         const site = own ? program.places[operand]?.site : null;
@@ -6097,6 +6098,8 @@ export class Admission {
       const last = chain.at(-1)?.call;
       if (last !== undefined) for (const member of chain) member.call = last;
     }
+    // (some stores' stops only: not the index, `keep` a stop's finishing publication, `publish`)
+    if (keep !== undefined) return { byStore, byIngress };
     this.#landings = { byStore, byIngress };
     return this.#landings;
   }
@@ -6520,17 +6523,21 @@ export class Admission {
    */
   public publish(written = false): void {
     const { definitions, lists, program } = this.pass;
-    const index = this.#landingIndex();
+    const writtenAt = (d: Definition): boolean => {
+      const type = writtenOf(program.place(d.place).kind);
+      return type !== null && termAt(type, this.#destPath(d)) !== null;
+    };
+    // (`written`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
+    const index = this.#landingIndex(written ? writtenAt : undefined);
     const stores = new Set(definitions.storeDefs);
     const elements = elementsBelow;
     for (const [d, stops] of index.byStore) {
       program.work.charge("checks");
       if (stops.length === 0) continue;
-      const destination = this.#destPath(d);
       // (`written`: a stop before admission settled reads no decision, so only a written destination's boundary forms;
       // any other ingress store is marked, TABLE r4.110 (3))
-      const writtenType = written ? writtenOf(program.place(d.place).kind) : null;
-      if (written && (writtenType === null || termAt(writtenType, destination) === null)) continue;
+      if (written && !writtenAt(d)) continue;
+      const destination = this.#destPath(d);
       // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
       // one)
       const typedIngress = stops.some((stop) => {
