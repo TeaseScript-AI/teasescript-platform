@@ -2730,9 +2730,11 @@ when the script runs ([§13](#type-tests-and-narrowing)). The message names the 
 'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0
 ```
 
-The fallback is `0` for a number, `""` for text, `false` for a boolean, and `...` for another value. The message names
-none for a value that an assignment or a method changes, such as `items` in `items.add(1)`, because a fallback gives a
-copy, nor for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
+The fallback is `0` for a number, `""` for text and `false` for a boolean, in parentheses where the value is an operand
+or has a property or method read, as in `(n otherwise 0) < 1`. For another value, or a value that may also have a type
+the use does not take, the message says to give a fallback of the same type with `otherwise`. The message names none for
+a value that an assignment or a method changes, such as `items` in `items.add(1)`, because a fallback gives a copy, nor
+for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
 
 ### Fallback with `otherwise`
 
