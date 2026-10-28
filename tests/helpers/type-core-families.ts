@@ -1571,6 +1571,24 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "W29-guarded-choice-loop",
+    measures:
+      "N2 (Sol's U3 build r1): the same in a loop, its record a loop's own definition, every field stored typed",
+    program: (k) =>
+      main(
+        lines(
+          "repeat 2 {",
+          "let root = hostValue",
+          "if root is object {",
+          `let pick = askChoice ${rows(k, (i) => `{text: "${i}", value: root}`).replaceAll("\n", ", ")}`,
+          rows(k, (i) => `let f${i}: integer = pick.f${i}`),
+          "}",
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "W29-one-location",
     measures:
       "N5: k preserving stores to one location in k branches of one loop, each read through G: k × log, never k²",

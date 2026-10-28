@@ -328,12 +328,18 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
     ],
   ];
   // a parameter copied in a callee only one call calls: a live call's narrowed argument is the parameter's value, the
-  // tested kind (S10 part 2b), which a dead call, binding nothing (F21), never gives: the dead form warns as on `main`
-  const narrowedArguments: readonly (readonly [string, string, string])[] = [
+  // tested kind (S10 part 2b), which a dead call, binding nothing (F21), never gives: the dead form warns as on `main`,
+  // X1's word on the use and the copy's check
+  const narrowedArguments: readonly (readonly [string, string, string, readonly string[]])[] = [
     [
       "a parameter copied in its callee",
       "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
       "if n is integer { f(n) }",
+      [
+        "warning-runtime-check",
+        "integer-use warning-runtime-check dead-code main.tease:'v'",
+        "integer-check v [integer] main.tease:'v'",
+      ],
     ],
   ];
   // such a copy, written or not, as a dead call's argument for a written parameter stays unchecked, as every dead
@@ -366,16 +372,14 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
           differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
       }
     }
-    for (const [what, before, body] of narrowedArguments) {
+    for (const [what, before, body, dead] of narrowedArguments) {
       const live = analysed(`${before}\n${body}\nexit\n`, reversed);
       if (JSON.stringify(live) !== JSON.stringify(["valid"]))
         differing.push(`${what}, live${order}: ${live.join("; ")}`);
+      const expected = JSON.stringify([dead[0], ...dead.slice(1).sort()]);
       for (const [where, shape] of shapes) {
         const found = analysed(shape(before, body), reversed);
-        if (
-          found[0] !== "warning-runtime-check" ||
-          found.some((line) => line.includes("compile-error"))
-        )
+        if (JSON.stringify([found[0], ...found.slice(1).sort()]) !== expected)
           differing.push(`${what}, ${where}${order}: ${found.join("; ")}`);
       }
     }
