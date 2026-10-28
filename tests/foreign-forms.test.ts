@@ -41,12 +41,28 @@ test("each form of another language is one error that names the TeaseScript form
       `let a = 1\nlet done = false\nif a == 1 {\n  say "one"\n}\nelif ${condition} {\n  say "two"\n}\nexit`,
       [["TSP037", writes("else if", "elif", 'if a { say "a" } else if b { say "b" }'), "elif"]],
     ]),
-    ['print "Hello"\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
-    ['print("Hello")\nexit', [["TSP037", writes("say", "print", 'say "Hello"'), "print"]]],
+    ...['print "Hello"', "print()", 'print("one", "two")'].map(
+      (form): [string, [string, string, string][]] => [
+        `${form}\nexit`,
+        [
+          [
+            "TSP037",
+            `TeaseScript writes 'say' with one value instead of 'print': say "Hello"`,
+            "print",
+          ],
+        ],
+      ],
+    ),
     ...["console.log", "console.error", "console.warn"].map(
       (written): [string, [string, string, string][]] => [
-        `${written}("Hello")\nexit`,
-        [["TSP037", writes("say", written, 'say "Hello"'), written]],
+        `${written}()\nexit`,
+        [
+          [
+            "TSP037",
+            `TeaseScript writes 'say' with one value instead of '${written}': say "Hello"`,
+            written,
+          ],
+        ],
       ],
     ),
     ...["None", "nil", "undefined"].map((word): [string, [string, string, string][]] => [
@@ -186,7 +202,29 @@ const USES: Readonly<
     "&": between(ab),
     "||": between(ab),
     "|": between(ab),
-    "!": { names: "let a = true\n", sources: ['if @·a { say "x" }', 'let c = @·a\nsay "${c}"'] },
+    // Also after an operator that 'not' can follow.
+    "!": {
+      names: ab,
+      sources: [
+        'if @·a { say "x" }',
+        'let c = @·a\nsay "${c}"',
+        'if a and·@·b { say "x" }',
+        'if not·@·a { say "x" }',
+      ],
+    },
+    // After a comparison, 'otherwise', arithmetic, a sign, a range, and in a chain of comparisons.
+    "! after an operator": {
+      names: `${ab}let n = 1\n`,
+      sources: [
+        'if a·==·!b { say "x" }',
+        'if n·<·!b { say "x" }',
+        'let c = a otherwise·!b\nsay "${c}"',
+        'let c = n·+·!b\nsay "${c}"',
+        'let c = -·!b\nsay "${c}"',
+        'for i in 1..!b { say "x" }',
+        'if a == b·==·!b { say "x" }',
+      ],
+    },
     "??": {
       names: "let nickname: string? = null\n",
       sources: ['let name = nickname·@·"pet"\nsay name', 'say nickname·@·"pet"'],
@@ -223,7 +261,8 @@ const USES: Readonly<
         'let items = range(2, 7).toList()\nsay "${items.length}"',
       ],
     },
-    print: { names: "", sources: ['@("Hello")', '@ "Hello"'] },
+    // A call with no value or two, which 'say' does not take in place of 'print'.
+    print: { names: "", sources: ['@("Hello")', '@ "Hello"', "@()", '@("one", "two")'] },
     None: { names: "", sources: ["let answer: string? = @"] },
     True: { names: "", sources: ['if @ { say "x" }', 'let done = @\nsay "${done}"'] },
   };
@@ -238,7 +277,7 @@ const USES: Readonly<
       sources: ['if a { say "x" } @ b { say "y" }', 'if a {\n  say "x"\n}\n@ b {\n  say "y"\n}'],
     };
   for (const written of ["console.log", "console.error", "console.warn"])
-    uses[written] = { names: "", sources: ['@("Hello")'] };
+    uses[written] = { names: "", sources: ['@("Hello")', "@()", '@("one", "two")'] };
   for (const word of ["nil", "undefined"]) uses[word] = uses.None!;
   uses.False = { names: "", sources: ['let done = @\nsay "${done}"'] };
   return uses;
