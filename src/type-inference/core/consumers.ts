@@ -1445,13 +1445,14 @@ export class Consumers {
    * syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex r12, r13), one part at a time on
    * its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so not where any of them reads an
    * element by its index or a dict's value by its key, calls a function or a method (whose own reads are not
-   * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent; unproved where
-   * a site has no expression.
+   * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent, or of a
+   * receiver that may be null; and every subject itself, which the form reads, proved non-null (Astra r2 on #1296);
+   * unproved where a site has no expression.
    */
   #present(site: SourceSite, rule: DiagnosticRule): Presence {
     const { program } = this.pass;
     const work: Expression[] = [];
-    for (const at of rule.rule === "operator" ? [site, ...rule.operands] : [site]) {
+    for (const at of rule.rule === "operator" ? rule.operands : [site]) {
       const expression = program.exprAt(at)?.expression;
       if (expression === undefined) return "unproved";
       // (a member's form reads its receiver, not the member it replaces)
@@ -1467,7 +1468,33 @@ export class Consumers {
               : expression;
       work.push(subject);
     }
-    return work.some((subject) => this.#readsAbsent(subject, site)) ? "unproved" : true;
+    return work.some(
+      (subject) => this.#mayBeNull(subject, site) || this.#readsAbsent(subject, site),
+    )
+      ? "unproved"
+      : true;
+  }
+
+  /**
+   * Whether the value of `expression` (in the file of `site`) may be null: a null, or a value the core does not model,
+   * among its items where it stands; also where the core places no value there.
+   */
+  #mayBeNull(expression: Expression, site: SourceSite): boolean {
+    const { program } = this.pass;
+    let inner = expression;
+    while (inner.kind === "parenthesizedExpression") inner = inner.expression;
+    const at: SourceSite = {
+      file: site.file,
+      start: inner.span.start.offset,
+      end: inner.span.end.offset,
+    };
+    const place = program.placeBySite.get(siteKey(at));
+    return (
+      place === undefined ||
+      this.#valueItems(place, program.exprAt(at), []).some(
+        (item) => item.tag === "null" || item.tag === "unknown",
+      )
+    );
   }
 
   /**
@@ -1508,12 +1535,15 @@ export class Consumers {
   /** `#readsAbsent`'s answer per expression. */
   readonly #absentReads = new Map<Expression, boolean>();
 
-  /** Whether a property's read may find nothing: a property an object may lack, an element a selection may not have. */
+  /**
+   * Whether a property's read may find nothing: of a receiver that may be null, a property an object may lack, an
+   * element a selection may not have.
+   */
   #mayBeAbsent(
     access: Extract<Expression, { kind: "propertyAccessExpression" }>,
     site: SourceSite,
   ): boolean {
-    const { program, values } = this.pass;
+    const { program } = this.pass;
     const at = (expression: Expression): SourceSite => ({
       file: site.file,
       start: expression.span.start.offset,
@@ -1526,13 +1556,14 @@ export class Consumers {
     const owner = program.placeBySite.get(siteKey(at(object)));
     if (place === undefined || owner === undefined) return true;
     const node = program.exprAt(at(access));
-    const missing = this.#run(values.valueItems(place, node, [])).some(
+    const missing = this.#valueItems(place, node, []).some(
       (item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0,
     );
     return (
+      this.#mayBeNull(object, site) ||
       missing ||
       (selectsElement(access.property.name) &&
-        this.#run(values.valueItems(owner, node, ["element"])).some((item) => item.tag === "empty"))
+        this.#valueItems(owner, node, ["element"]).some((item) => item.tag === "empty"))
     );
   }
 

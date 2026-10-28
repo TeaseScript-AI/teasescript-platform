@@ -44,6 +44,27 @@ const ELEMENTS: readonly (readonly [string, string])[] = [
   ["set", "set[1]"],
 ];
 
+/** An object that may be null, as a variable, a list's element, a dict's value or a property holds it; one that is there. */
+const RECEIVERS: readonly (readonly [string, string, string])[] = [
+  [
+    "object or null",
+    'let boxes = [{n: 2, text: "hello", items: [1]}, null]\nlet maybe = boxes[1]',
+    "maybe",
+  ],
+  ["null element", 'let boxes = [{n: 2, text: "hello", items: [1]}, null]', "boxes[1]"],
+  [
+    "null dict value",
+    'let maybe = dict{a: {n: 2, text: "hello", items: [1]}, b: null}.values.random',
+    "maybe",
+  ],
+  [
+    "null property",
+    'let boxes = [{n: 2, text: "hello", items: [1]}, null]\nlet outer = {inner: boxes[1]}',
+    "outer.inner",
+  ],
+  ["object", 'let fine = {n: 2, text: "hello", items: [1]}', "fine"],
+];
+
 /** The offers: each fix's code form, on receivers and lists of each element kind. */
 const OFFERS: readonly Offer[] = [
   { name: "text size", setup: 'let t = "hello"', expression: "t.size" },
@@ -70,6 +91,12 @@ const OFFERS: readonly Offer[] = [
   ].flatMap(([value, list]): Offer[] => [
     { name: `${list} + element`, setup: `let d = ${value}`, expression: `${list} + 2` },
     { name: `element + ${list}`, setup: `let d = ${value}`, expression: `2 + ${list}` },
+  ]),
+  // (a receiver that may be null: an object-or-null variable, a list element, a dict value, a nested property, and one
+  // that is there; a member's and a list's form over it, Astra r2 on #1296)
+  ...RECEIVERS.flatMap(([kind, setup, receiver]): Offer[] => [
+    { name: `${kind}'s text size`, setup, expression: `${receiver}.text.size` },
+    { name: `${kind}'s items + element`, setup, expression: `${receiver}.items + 2` },
   ]),
   ...ELEMENTS.flatMap(([kind, value]): Offer[] => [
     { name: `join of ${kind}`, setup: `let items = [${value}]`, expression: "items.join" },
@@ -187,6 +214,16 @@ const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   ...[
     { name: "null element's length", setup: 'let xs = ["ab", null]', expression: "xs[1].length" },
     { name: "null value's length", setup: 'let x = ["ab", null].random', expression: "x.length" },
+    {
+      name: "null property's length",
+      setup: 'let holder = {t: ["ab", null].random}',
+      expression: "holder.t.length",
+    },
+    {
+      name: "null dict value's length",
+      setup: 'let x = dict{a: "ab", b: null}.values.random',
+      expression: "x.length",
+    },
   ].map(
     (offer) =>
       [
@@ -226,6 +263,12 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "[ns[5]].length",
       'toInteger("${d["absent"]}${1}", default: 1)',
       "({n: n}).n",
+      // (Astra r2 on #1296: a property of a receiver that may be null, and of one that is there)
+      "maybe.n",
+      "boxes[1].n",
+      "held.n",
+      "outer.inner.n",
+      "fine.n",
       // (Codex r13: an ask's, a `say`'s and a button's operand, read by a key or there)
       'askInteger("${d["absent"]}")',
       'askInteger("How many?")',
@@ -316,6 +359,11 @@ export function pasteCases(sample = false): PasteCase[] {
             'let s = "2026-10-28"',
             "let d = dict{found: 2}",
             "let ns = [2]",
+            "let boxes = [{n: 2}, null]",
+            "let maybe = boxes[1]",
+            "let held = dict{a: {n: 2}, b: null}.values.random",
+            "let outer = {inner: boxes[1]}",
+            "let fine = {n: 2}",
             site.before,
           ]
             .filter((line) => line !== "")
@@ -372,7 +420,8 @@ export function pastedForms(
         rule.rule === "member"
           ? rule.receiver
           : source.slice(diagnostic.site.start, diagnostic.site.end);
-      if (fallback !== undefined)
+      // (#1213's placeholder fallback `...`, which is no code to paste and is left for #1273)
+      if (fallback !== undefined && !fallback.includes("..."))
         forms.push({
           code: fallback,
           source:

@@ -1630,6 +1630,19 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       'let d = dict{found: 2}\nlet v: duration = toInteger("${d["absent"]}${1}", default: 1)\nsay v\nexit\n',
       "Give the number a unit.",
     ],
+    // (Astra r2 on #1296: a property of a receiver that may be null, as a variable or a property holds it)
+    [
+      "let boxes = [{n: 2}, null]\nlet box = boxes[1]\nlet converted: duration = box.n\nsay converted\nexit\n",
+      "Give the number a unit.",
+    ],
+    [
+      'let boxes = [{text: "hi", items: [1]}, null]\nlet outer = {inner: boxes[1]}\nsay outer.inner.text.size\nexit\n',
+      "Use the length property.",
+    ],
+    [
+      'let boxes = [{text: "hi", items: [1]}, null]\nlet box = boxes[1]\nsay box.items + 2\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
     // (Codex r13: such a read in an ask's operand)
     [
       'let d = dict{found: "Q"}\nlet v: duration = askInteger(d["absent"])\nsay v\nexit\n',
