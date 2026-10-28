@@ -1156,8 +1156,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             }
           }
           // The script's next session loads the imported values: a kept session, with its older view, does not go on.
-          await keptSessions.discard(script.scope).catch(() => {});
-          if (script.scope === scriptStorage?.scope) outdated = undefined;
+          const discarded = await keptSessions.discard(script.scope).then(
+            () => true,
+            () => false,
+          );
+          if (discarded && script.scope === scriptStorage?.scope) outdated = undefined;
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
