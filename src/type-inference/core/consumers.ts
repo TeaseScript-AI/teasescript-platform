@@ -2440,10 +2440,10 @@ export class Consumers {
     if (directTags.length === 0) {
       // a stop left the type it is checked against undecided: the check is owed against that key's contract,
       // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing; its
-      // host data meets its boundary as unstopped (r4.109 (1))
+      // host data meets its boundary as unstopped (r4.109 (1)); its value read only then
+      if (!direct.some(unsettledItem)) return false;
       const own = withoutEmpty(this.#valueItems(value, node, rest));
       if (
-        direct.some(unsettledItem) &&
         !own.every((item) => item.tag === "null") &&
         // (what the mark carries forms only with it: its content, TABLE r4.110 (a))
         this.#storeWarning(site, label, STOPPED[0]!, ["unknown"], {
