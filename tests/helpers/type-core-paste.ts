@@ -224,6 +224,12 @@ const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
       setup: 'let x = dict{a: "ab", b: null}.values.random',
       expression: "x.length",
     },
+    // (a subject whose own text holds an ellipsis, which is no placeholder, Codex r15)
+    {
+      name: "null ellipsis key's length",
+      setup: 'let d = dict{"...": "alpha", b: null}',
+      expression: 'd["..."].length',
+    },
   ].map(
     (offer) =>
       [
@@ -420,8 +426,9 @@ export function pastedForms(
         rule.rule === "member"
           ? rule.receiver
           : source.slice(diagnostic.site.start, diagnostic.site.end);
-      // (#1213's placeholder fallback `...`, which is no code to paste and is left for #1273)
-      if (fallback !== undefined && !fallback.includes("..."))
+      // (#1213's placeholder fallback `...`, which is no code to paste and is left for #1273: the fallback value itself,
+      // not an ellipsis inside its subject, Codex r15)
+      if (fallback !== undefined && !/ otherwise \.\.\.\)?$/.test(fallback))
         forms.push({
           code: fallback,
           source:
