@@ -283,6 +283,22 @@ test("parses type names, unions, grouping, and postfix list, set, dict, and opti
   );
 });
 
+test("a union spans its parentheses when its first or last member is a group", () => {
+  for (const type of [
+    "(integer | boolean) | string set",
+    "string set | (integer | boolean)",
+    "((integer)) | (string |\n  null)",
+  ]) {
+    const source = `let v: ${type} = null`;
+    const result = parse(source);
+    assert.deepEqual(result.diagnostics, [], type);
+    const statement = result.program.statements[0];
+    assert.ok(statement?.kind === "letStatement" && statement.typeAnnotation !== null, type);
+    const { start, end } = statement.typeAnnotation.span;
+    assert.equal(source.slice(start.offset, end.offset), type);
+  }
+});
+
 test("reports a missing or unknown type part at its location", () => {
   for (const [source, code, message] of [
     [
