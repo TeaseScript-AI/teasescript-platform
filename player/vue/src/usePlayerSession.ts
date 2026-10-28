@@ -1116,6 +1116,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptStorage !== undefined && chosen.has(scriptStorage.scope) && !inDebugRoom;
     importing.value = true;
     const failed: string[] = [];
+    // Start keeps saying why the kept session cannot continue while a failed import leaves that session.
+    let outdated = ownChosen ? activation.value?.outdated : undefined;
     try {
       // Debug's rewind could restore this script's earlier saved data over the import, so its history ends too, and so
       // does an inspected state, also one that ended.
@@ -1155,6 +1157,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           }
           // The script's next session loads the imported values: a kept session, with its older view, does not go on.
           await keptSessions.discard(script.scope).catch(() => {});
+          if (script.scope === scriptStorage?.scope) outdated = undefined;
         } catch (error) {
           failed.push(
             `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
@@ -1165,7 +1168,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (ownChosen) {
         await loadScriptStorage();
         importing.value = false;
-        if (lastStart.value !== null && !sessionInProgress.value) prepare(lastStart.value);
+        if (lastStart.value !== null && !sessionInProgress.value)
+          prepareStart(lastStart.value, outdated);
       } else importing.value = false;
     }
     if (failed.length > 0)
