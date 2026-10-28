@@ -3,7 +3,10 @@ import test from "node:test";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
@@ -449,6 +452,252 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
   ];
   for (const [source, expected] of cases)
     assert.deepEqual(messages(main(source)), expected, source);
+});
+
+/**
+ * #1272 (V30 §4 and §16, ADR 0021 1.3): a list's `+` and `+=` hold both lists' elements, so elements of another type
+ * mix as in a literal: the current checker's error and sentence at the join (a `+=`'s at its right operand), its fix on
+ * the first operand's variable or parameter, `values` for any other. Later uses see the left list's elements (A6): a
+ * read of the joined list and a store of it into a decided place add nothing. A nested join's fix writes the union
+ * inside the lists, which V30 §13 permits (the current checker's `(integer[] | string[])[]` it forbids). Numbers beside
+ * whole numbers, `null` and empty lists mix nothing, and a written union admits both, as the variable's (A4) or as the
+ * place the join lands in (A1, where the current checker errs).
+ */
+test("a list's '+' mixes element types as a literal does, with the current checker's sentence at the join (#1272)", () => {
+  const sited = (source: string): string[] => {
+    const request = coreRequest(main(source));
+    assert.ok(request !== null, source);
+    const answers = analyseCore(request);
+    const text = messageSource([source], answers.diagnostics);
+    return [...reportedDiagnostics(answers)].map(
+      (diagnostic) =>
+        `${diagnostic.code} [${diagnostic.site.start},${diagnostic.site.end}) ${coreMessage(diagnostic, text)}`,
+    );
+  };
+  const mix = (operator: string, kinds: string, fix: string): string =>
+    `'${operator}' would mix ${kinds}. A list holds one type. To keep both, ${fix}.`;
+  const integerString = "a whole number (integer) and text (string)";
+  const union = (head: string, type = "(integer | string)[]"): string =>
+    `declare a union type, as in '${head}: ${type} = ...'`;
+  for (const [source, expected] of [
+    [
+      'let xs = [1]\nlet more = xs + ["x"]\nsay more.length\nexit',
+      `TSV044 [24,34) ${mix("+", integerString, union("let xs"))}`,
+    ],
+    [
+      'say ([1] + ["x"]).length\nexit',
+      `TSV044 [5,16) ${mix("+", integerString, union("let values"))}`,
+    ],
+    [
+      'let xs = [1]\nlet ys = ["x"]\nlet both = xs + ys\nsay both.length\nexit',
+      `TSV044 [39,46) ${mix("+", integerString, union("let xs"))}`,
+    ],
+    [
+      'let xs = [1]\nxs += ["x"]\nexit',
+      `TSV044 [19,24) ${mix("+=", integerString, union("let xs"))}`,
+    ],
+    [
+      'let box = {items: [1]}\nbox.items = box.items + ["x"]\nexit',
+      `TSV044 [35,52) ${mix("+", integerString, union("let values"))}`,
+    ],
+    [
+      'let xs = [1]\nlet both = xs + ["x"]\nsay both[1] + 1\nexit',
+      `TSV044 [24,34) ${mix("+", integerString, union("let xs"))}`,
+    ],
+    [
+      'let left = {items: [true]}\nlet right = {items: ["x"]}\nlet both = left.items + right.items\nsay both.length\nexit',
+      `TSV044 [65,89) ${mix("+", "true or false (boolean) and text (string)", union("let values", "(boolean | string)[]"))}`,
+    ],
+    [
+      'function f(xs = [1]) {\n  return xs + ["x"]\n}\nsay f().length\nexit',
+      `TSV044 [32,42) ${mix("+", integerString, "declare the parameter as 'xs: (integer | string)[] = ...'")}`,
+    ],
+    [
+      'let xs = [[1]]\nlet more = xs + [["x"]]\nsay more.length\nexit',
+      `TSV044 [26,38) ${mix("+", "a list (integer[]) and a list (string[])", union("let xs", "(integer | string)[][]"))}`,
+    ],
+    [
+      'let c = [{n: 1}] + [{n: "x"}]\nsay c.length\nexit',
+      "TSV044 [8,29) '+' would mix objects whose property 'n' holds a whole number (integer) in one and text " +
+        "(string) in another. A list holds one type. Give 'n' one type in every element.",
+    ],
+    // host data beside a known element decides nothing, as in a literal; a join's right operand that holds joins is
+    // read with its left neighbours in source order (Codex r1 on #1310)
+    [
+      'let both = [1, hostValue] + ["x"] + [2]\nexit',
+      `TSV044 [11,33) ${mix("+", integerString, union("let values"))}`,
+    ],
+    [
+      'let xs = [1] + ([2] + ["x"])\nexit',
+      `TSV044 [16,27) ${mix("+", integerString, union("let values"))}`,
+    ],
+    // whole numbers beside numbers in one operand are numbers (Codex r2 on #1310); a join in a right operand is decided
+    // on its own, its fix naming its own operand (Astra on #1310)
+    [
+      'let both = [1, 1.5] + ["x"]\nexit',
+      `TSV044 [11,27) ${mix("+", "a number and text (string)", union("let values", "(number | string)[]"))}`,
+    ],
+    [
+      'let ys = [1]\nlet both = [1] + (ys + ["x"])\nexit',
+      `TSV044 [31,41) ${mix("+", integerString, union("let ys"))}`,
+    ],
+    // null elements decide nothing, but each side's sentence and the union the fix writes hold them (Codex r3 on #1310)
+    [
+      'let xs = [1, null]\nlet both = xs + ["x"]\nexit',
+      `TSV044 [30,40) ${mix("+", "a whole number (integer) or null and text (string)", union("let xs", "(integer | string | null)[]"))}`,
+    ],
+    [
+      'let xs = [1]\nlet both = xs + ["x", null]\nexit',
+      `TSV044 [24,40) ${mix("+", "a whole number (integer) and text (string) or null", union("let xs", "(integer | string | null)[]"))}`,
+    ],
+    // a function's written result decides as a variable's written type does (Codex r5 on #1310)
+    [
+      'function make: (integer | boolean)[] {\n  return [1]\n}\nlet both = make() + ["x"]\nexit',
+      `TSV044 [65,79) ${mix("+", "a whole number (integer) or true or false (boolean) and text (string)", union("let values", "(integer | boolean | string)[]"))}`,
+    ],
+    // a run of joins has one element type, whole numbers beside numbers numbers
+    [
+      'say ([1] + [1.5] + ["x"]).length\nexit',
+      `TSV044 [5,24) ${mix("+", "a number and text (string)", union("let values", "(number | string)[]"))}`,
+    ],
+    ["let xs = [1]\nlet b = [1.5]\nsay (xs + b).length\nexit", null],
+    ['let xs = []\nlet more = xs + ["x"]\nsay more.length\nexit', null],
+    ["let xs = [1]\nlet more = xs + []\nsay more.length\nexit", null],
+    ["let xs = [1]\nlet more = xs + [null]\nsay more.length\nexit", null],
+    ['let xs: (integer | string)[] = [1]\nlet both = xs + ["x"]\nsay both.length\nexit', null],
+    [
+      'let xs: (integer | string)[][] = [[1]]\nlet more = xs + [["x"]]\nsay more.length\nexit',
+      null,
+    ],
+    ['let ys: (integer | string)[] = ["x"]\nlet both = [1] + ys\nsay both.length\nexit', null],
+    ['let xs = [1]\nlet both: (integer | string)[] = xs + ["x"]\nsay both.length\nexit', null],
+  ] as const)
+    assert.deepEqual(sited(source), expected === null ? [] : [expected], source);
+});
+
+/**
+ * #1272 (Astra's B1, Codex r7's B1 on #1310, ADR 0021 1.3, 1.10): a join answers the same written inline as kept in a
+ * variable first, its elements' type the one a variable holding them is decided by. Unions declared on the left
+ * operand, on the right, on both, alike or overlapping (`(integer | string)[]` beside `(integer | boolean)[]`), or
+ * none; the join inline in a store (as either operand of another join), a join nested a level deeper, an interpolation,
+ * beside text or a truth value; both orders, the sharing on and off. Each inline form errs as its kept form does, with
+ * the same kinds; inline in an argument the join lands in the parameter's written union, which holds both (A1).
+ */
+test("a list join answers the same inline as kept in a variable (#1272)", () => {
+  const answers = (source: string): string[] => {
+    const request = coreRequest(main(source));
+    assert.ok(request !== null, source);
+    const runs: string[][] = [];
+    for (const shared of [true, false])
+      for (const reversed of [false, true]) {
+        const go = () => analyseCore(request);
+        const ordered = reversed
+          ? () =>
+              withConsumerOrder(
+                (list) => [...list].reverse(),
+                () => withSolverSeam({ reverseWorklist: true }, go),
+              )
+          : go;
+        const answers = shared ? ordered() : withoutSharing(ordered);
+        runs.push(
+          [...reportedDiagnostics(answers)]
+            .filter((diagnostic) => diagnostic.class === "compile-error")
+            .map((diagnostic) =>
+              "rule" in diagnostic && diagnostic.rule.rule === "mixed"
+                ? `${diagnostic.code} ${JSON.stringify([diagnostic.rule.type, diagnostic.kinds])}`
+                : diagnostic.code,
+            ),
+        );
+      }
+    for (const run of runs) assert.deepEqual(run, runs[0], source);
+    return runs[0]!;
+  };
+  const joins = { left: "typed + [1]", right: "[1] + typed", both: "typed + other" };
+  const contexts = [
+    (join: string, beside: string) => `let result = ${beside} + ${join}\nsay result.length`,
+    (join: string, beside: string) => `let result = ${join} + ${beside}\nsay result.length`,
+    (join: string, beside: string) => `show(${beside} + ${join})`,
+    (join: string, beside: string) => `let result = [2] + (${beside} + ${join})\nsay result.length`,
+    (join: string, beside: string) => `say "\${(${join} + ${beside}).length}"`,
+  ];
+  const show = "function show(xs: (integer | string)[]) {\n  say xs.length\n}\n";
+  const declarations = {
+    none: ["", ""],
+    alike: [": (integer | string)[]", ": (integer | string)[]"],
+    overlapping: [": (integer | string)[]", ": (integer | boolean)[]"],
+  };
+  for (const [declared, [typed, other]] of Object.entries(declarations))
+    for (const beside of ['["b"]', "[true]"])
+      for (const [position, join] of Object.entries(joins))
+        for (const context of contexts) {
+          const start = `${show}let typed${typed} = ["a"]\nlet other${other} = [2]\n`;
+          const inline = answers(`${start}${context(`(${join})`, beside)}\nexit\n`);
+          const name = `${declared} ${position}: ${context("J", beside)}`;
+          if (context("J", beside).startsWith("show(")) {
+            if (beside === '["b"]' && declared === "alike") assert.deepEqual(inline, [], name);
+            continue;
+          }
+          const kept = answers(`${start}let inner = ${join}\n${context("inner", beside)}\nexit\n`);
+          // (kept, the inner join's error comes on its own line first)
+          assert.deepEqual(inline.toSorted(), kept.toSorted(), name);
+          // (a union holds the text beside it, never a truth value beside it that neither declaration holds)
+          if (declared === "alike" && beside === '["b"]') assert.deepEqual(inline, [], name);
+          if (declared !== "none" && beside === "[true]" && position === "both")
+            assert.ok(
+              inline.some((answer) => answer.startsWith("TSV044")),
+              name,
+            );
+        }
+});
+
+/**
+ * #1272 (TABLE r4.146, Codex r2–r5 on #1310): the type a join's fix declares holds every value the joined lists bring,
+ * at every list level, so pasted on the variable it names it takes the error away and adds nothing. Every pair of
+ * element kinds (whole numbers, numbers, text, truth values, objects, `null` beside a number and beside text, on
+ * either side); nested lists, optional at one level or more; a number only external data gives; a later `null` in a run;
+ * and the variable's own later stores (Codex r5 on #1310).
+ */
+test("a list join's fix, pasted on the variable it names, holds every element the join brings (#1272)", () => {
+  const reported = (source: string): string[] => {
+    const request = coreRequest(main(source));
+    assert.ok(request !== null, source);
+    const answers = analyseCore(request);
+    const text = messageSource([source], answers.diagnostics);
+    return [...reportedDiagnostics(answers)].map(
+      (diagnostic) => `${diagnostic.code} ${coreMessage(diagnostic, text)}`,
+    );
+  };
+  const elements = ["1", "1.5", '"x"', "true", "{n: 1}", "1, null", "null, 2.5", '"x", null'];
+  const sources: string[] = [];
+  for (const left of elements)
+    for (const right of elements)
+      sources.push(`let xs = [${left}]\nlet both = xs + [${right}]\nexit\n`);
+  sources.push(
+    'let xs = [[1], null]\nlet both = xs + [["x"]]\nexit\n',
+    'let xs = [[[1]], [null], null]\nlet both = xs + [[["x"]]]\nexit\n',
+    'let xs = [1, hostValue / 2]\nlet both = xs + ["x"]\nexit\n',
+    'let xs = [1]\nlet both = xs + ["x"] + [null]\nexit\n',
+    // the variable's later stores stay valid: a written union's, and a number beside whole numbers (Codex r5)
+    'let xs: (integer | boolean)[] = [1]\nlet both = xs + ["x"]\nxs.add(true)\nexit\n',
+    'let xs = [1]\nlet both = xs + ["x"]\nxs.add(1.5)\nexit\n',
+  );
+  let mixed = 0;
+  for (const source of sources) {
+    const found = reported(source);
+    const error = found.filter((line) => line.startsWith("TSV044"));
+    if (error.length === 0) continue;
+    mixed += 1;
+    const fix = /as in 'let xs: (.+) = \.\.\.'\.$/.exec(error.join("\n"));
+    assert.ok(error.length === 1 && fix !== null, `${source}: ${found.join(" | ")}`);
+    const pasted = source.replace(/let xs(: [^=]+)? = /, `let xs: ${fix[1]} = `);
+    // (external data is checked where it comes in, against the type the fix declares, ADR 0021 1.7)
+    assert.deepEqual(
+      reported(pasted).filter((line) => !line.startsWith("TSV041") || !line.includes("hostValue")),
+      found.filter((line) => line !== error[0]),
+      pasted,
+    );
+  }
+  assert.equal(mixed, 48);
 });
 
 test("a union beside a set or a dict suggests the union inside it, in the list's sentence (#1104 point 3)", () => {

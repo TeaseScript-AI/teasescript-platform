@@ -2,6 +2,7 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import {
   joinParts,
+  joinSteps,
   keepText,
   keptParts,
   keptSplit,
@@ -12,7 +13,11 @@ import {
 } from "../budget.js";
 import { defaultOf, typeTags, type IndexNode } from "../contract.js";
 import {
+  joinedOperand,
+  keptKey,
   keptPath,
+  keyOf,
+  keyPath,
   keyPlace,
   SELECTED_TEXT,
   SELECTED_VALUE,
@@ -25,13 +30,15 @@ import type { FlowNode } from "../flow-graph.js";
 import { MIXED_LEAF, REASON, type Item, type ItemTag } from "../items.js";
 import { conversionCategory } from "../method-categories.js";
 import { refText, Touches, type Touch, type TouchRef } from "../touch.js";
+import { decided } from "./decision.js";
 import { hotSets } from "./groups.js";
 import { heldMeetings } from "./held.js";
 import { drive } from "./inherited.js";
-import { concrete, deciding, fits, NUMERIC } from "./kinds.js";
+import { admitsNumber, concrete, deciding, fits, NUMERIC } from "./kinds.js";
 import { inheritance, landedBelow } from "./landings.js";
-import type { OwnStructure } from "./model.js";
+import type { Join, JoinDecided, OwnStructure } from "./model.js";
 import { ownOf } from "./own.js";
+import { permittedAt, unrestricted } from "./permitted.js";
 import { earliestDecider } from "./scan.js";
 import { literalLanding, pathsBelow, sharedPaths, valueStructure } from "./structure.js";
 import { touchCopy, touchesOf, touchOf, touchRead } from "./touches.js";
@@ -557,6 +564,427 @@ function conflictGroups(admission: Admission, list: readonly Definition[]): stri
     }
   }
   return list.map((_, index) => least.get(find(index))!);
+}
+
+/**
+ * ADR 0021 1.3, V30 §4 and §16: a list's `+` (and `+=`) holds both operands' elements, so a join's right operand must
+ * fit the element type its left operand holds (#1272), as a store into a variable holding the left one must. Each
+ * value's element type at a path is the one a variable holding it is decided by (`scanAt`, A2, A4), so a join answers
+ * the same inline as kept in a variable: an operand's own (`decidedAt`: a written copy by its type, a read or a call by
+ * its place's decision, else its elements' kinds as a literal's earliest element decides them, `earliestDecider`); a
+ * join's from its operands' in evaluation order, the earliest deciding there decides, a written type by itself, else
+ * with the kinds of every operand the join holds. A right operand whose elements there are of one other family, none
+ * of whose kinds fits, is an error at its join, unless the written type the tree lands in directly holds both (A1), and
+ * is rejected from that join (A6): the join then holds its left operand's elements alone. A right operand is compared
+ * at the paths of its own structure, a join's at its list levels as a variable holding it is (`pathsBelow`); a join's
+ * paths are its operands', the smaller one's added to the larger one's, so a chain of k joins, on either side, costs
+ * its operands' structures once. `error` hears of each with the join, the path, the decided kinds there and the
+ * operand's, the operands a fix may name and the type it writes: `named`, the operands a fix may declare, in order:
+ * alone in its tree, the join's left one where its elements decided the path, then its right one, whose elements
+ * offend; beside other errors of its tree, only a left one that decided every one of them, whose union holds them all
+ * (Codex r5 on #1310); `levels`, what the tree's elements hold at each list level down to the path, its `null`s and
+ * numbers kept. `undecided`, before admission settled (`Consumers.#freshStores`): a join an operand of which is read
+ * through a decision.
+ */
+export function joinElements(
+  admission: Admission,
+  order: <T>(list: readonly T[]) => T[],
+  error: (found: {
+    readonly c: Join;
+    readonly path: readonly string[];
+    readonly earliest: readonly ItemTag[];
+    readonly kinds: readonly ItemTag[];
+    readonly named: readonly PlaceId[];
+    readonly levels: readonly (readonly ItemTag[])[] | null;
+  }) => void,
+  undecided?: (value: PlaceId) => void,
+): void {
+  const { program, contract } = admission.pass;
+  const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
+  const joins = new Map<PlaceId, Join>();
+  for (const c of program.constraints)
+    if (
+      c.kind === "operation" &&
+      c.contract.family === "operator" &&
+      c.contract.name === "+" &&
+      c.arguments.length === 2
+    )
+      joins.set(c.result, c);
+  // (a tree's root: no join's operand)
+  const inner = new Set<PlaceId>();
+  for (const c of joins.values())
+    for (const operand of c.arguments) if (joins.has(operand)) inner.add(operand);
+  const roots: Join[] = [];
+  for (const c of joins.values()) if (!inner.has(c.result)) roots.push(c);
+  for (const root of order(roots)) {
+    // the tree's operands in source order, each with the node it is read at (a `+=`'s its statement's): what the type
+    // a fix writes holds (`levelsAt`)
+    const operands: { readonly operand: PlaceId; readonly node: FlowNode }[] = [];
+    // (and its joins, each before the joins it holds)
+    const tree: Join[] = [];
+    const pending: { value: PlaceId; node: FlowNode | null }[] = [
+      { value: root.result, node: null },
+    ];
+    while (pending.length > 0) {
+      const { value, node } = pending.pop()!;
+      program.work.charge("checks");
+      const c = joins.get(value);
+      if (c === undefined) {
+        if (node !== null) operands.push({ operand: value, node });
+        continue;
+      }
+      tree.push(c);
+      const at = program.exprAt(c.site) ?? program.flow.statementAt(c.site) ?? null;
+      pending.push({ value: c.arguments[1]!, node: at });
+      pending.push({ value: c.arguments[0]!, node: at });
+    }
+    if (operands.length < 2) continue;
+    // (before admission settled, a decision is read nowhere: a join with an operand that reads a place or holds a
+    // source, a copy or a call, is marked instead, as a literal with a named element is)
+    if (
+      undecided !== undefined &&
+      operands.some(
+        ({ operand }) =>
+          contract.copiedKey(operand) !== null ||
+          contract.resultKey(operand) !== null ||
+          valueStructure(admission, operand).sources.length > 0,
+      )
+    ) {
+      undecided(root.result);
+      continue;
+    }
+    const written = contract.landsIn(root.result, []);
+    const isList = (operand: PlaceId, node: FlowNode): boolean =>
+      admission.items(operand, node, []).some((item) => item.tag === "list");
+    // the place an operand reads, whose admitted type is its type: a variable's or a property's, a call's result
+    // (F20: a written result's type decides, Codex r5 on #1310)
+    const placeOf = (
+      operand: PlaceId,
+    ): { readonly place: PlaceId; readonly path: readonly string[] } | null => {
+      const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
+      return key === null ? null : { place: keyPlace(key), path: keyPath(key) };
+    };
+    // what an operand's elements are at a path: a written copy's type (`open` where it leaves every kind), a read's
+    // place's decision, the earliest deciding value's kinds, else its own kinds of one family and no unknown
+    const decidedAt = (
+      operand: PlaceId,
+      node: FlowNode,
+      path: readonly string[],
+    ): JoinDecided | "open" | null => {
+      const at = joinSteps(["element"], path);
+      const decider = drive(admission, earliestDecider(admission, operand, node, at, null));
+      if (decider !== null && decider.term !== null) {
+        if (unrestricted(decider.term)) return "open";
+        const tags = typeTags(decider.term).filter((tag) => tag !== "null");
+        return {
+          tags,
+          written: true,
+          typed: true,
+          own: tags,
+          nullable: typeTags(decider.term).includes("null"),
+        };
+      }
+      const read = placeOf(operand);
+      const place = read === null ? null : decided(admission, read.place, joinSteps(read.path, at));
+      if (place?.tags !== null && place?.tags !== undefined) {
+        if (place.tags.includes("unknown")) return "open";
+        return {
+          tags: place.tags,
+          written: place.byWritten,
+          typed: place.byWritten,
+          own: place.tags,
+          nullable: place.byWritten && place.nullable,
+        };
+      }
+      const items = admission.items(operand, node, at);
+      const kinds =
+        decider?.tags ??
+        (items.some((item) => item.tag === "unknown")
+          ? []
+          : [...new Set(items.filter(concrete).map((item) => item.tag))]);
+      // (whole numbers beside numbers are numbers, ADR 0021 1.3, as a place's decision has them: r4.28)
+      const own =
+        kinds.includes("integer") && items.some(admitsNumber)
+          ? [...new Set(kinds.map(family))]
+          : kinds;
+      // (elements of several families hold a union an earlier type declared, a written result's through a copy:
+      // each of its kinds fits as itself)
+      return own.length === 0
+        ? null
+        : { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own };
+    };
+    // (the type a fix writes holds every value the tree's operands bring and every legitimate store of the places
+    // they read and it lands in: at each list level down to a path of elements, a place's admitted type, a value's
+    // kinds, `null` among them, and numbers where external data may give one beside whole numbers; per path once,
+    // whatever errs there)
+    const levels = new Map<string, readonly (readonly ItemTag[])[] | null>();
+    const levelsAt = (path: readonly string[]): readonly (readonly ItemTag[])[] | null => {
+      const at = keptText(admission.work, path);
+      if (levels.has(at)) return levels.get(at)!;
+      let out: ItemTag[][] | null = null;
+      if (path.every((step) => step === "element")) {
+        out = [];
+        for (let depth = 0; depth <= path.length; depth += 1) {
+          const kinds = new Set<ItemTag>();
+          let external = false;
+          const prefix = keptSlice(admission.work, path, 0, depth);
+          const steps = joinSteps(["element"], prefix);
+          // (a place's admitted type, every legitimate store into it held: its written type, or its decision with
+          // its null and its numbers; a number external data may store there too)
+          const admitted = (place: PlaceId, path: readonly string[]): boolean => {
+            const below = joinSteps(path, steps);
+            const tags = admission.admitted(place, below).filter((tag) => tag !== "unknown");
+            for (const tag of tags) kinds.add(tag);
+            for (const item of withoutEmpty(
+              admission.run(contract.contractOf(keyOf(place, below))),
+            ))
+              external ||= item.tag === "number" && item.extOnly === true;
+            return tags.length > 0;
+          };
+          for (const { operand, node } of operands) {
+            const read = placeOf(operand);
+            if (read !== null && admitted(read.place, read.path)) continue;
+            // (a value's own elements; external data is checked where it comes in: its kinds are no part of the
+            // type, but a number it may give makes whole numbers numbers, as an operation on it may: r4.36)
+            for (const item of admission.items(operand, node, steps))
+              if (item.tag === "unknown" || item.extOnly === true)
+                external ||= item.tag === "number";
+              else kinds.add(item.tag);
+            // (a written type it copies may hold null where its value does not yet, A4)
+            const ruled = decidedAt(operand, node, prefix);
+            if (ruled !== null && ruled !== "open" && ruled.nullable === true) kinds.add("null");
+          }
+          // (and the place the tree lands in, whose other stores the fix keeps too, once admission settled)
+          if (undecided === undefined)
+            for (const d of admission.pass.definitions.byValue.get(root.result) ?? [])
+              if (d.kind === "whole") admitted(d.place, d.path);
+          // (whole numbers beside numbers are numbers, in the whole numbers' place)
+          out.push(
+            external || kinds.has("number")
+              ? [...new Set([...kinds].map((kind) => (kind === "integer" ? "number" : kind)))]
+              : [...kinds],
+          );
+        }
+      }
+      levels.set(at, out);
+      return out;
+    };
+    // (a place's admitted type holds its null where a read of it, below F11's selection, says nothing)
+    const nullAt = (operand: PlaceId, node: FlowNode, path: readonly string[]): boolean => {
+      const steps = joinSteps(["element"], path);
+      if (admission.items(operand, node, steps).some((item) => item.tag === "null")) return true;
+      const read = placeOf(operand);
+      return (
+        read !== null &&
+        admission.admitted(read.place, joinSteps(read.path, steps)).includes("null")
+      );
+    };
+    // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths
+    // of its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of
+    // every operand it holds there), the earliest operand deciding the element asked at any other path (its type may
+    // give it); read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310)
+    interface Decider {
+      readonly decided: JoinDecided | "open";
+      readonly operand: PlaceId;
+      readonly position: number;
+    }
+    interface Entry {
+      readonly path: readonly string[];
+      first: Decider | null;
+      readonly kinds: Set<ItemTag>;
+      nulls: boolean;
+    }
+    interface Held {
+      readonly entries: Map<string, Entry>;
+      /** Its list levels: where a variable holding it is compared (`pathsBelow`). */
+      readonly levels: Set<string>;
+      head: {
+        readonly operand: PlaceId;
+        readonly node: FlowNode;
+        readonly position: number;
+      } | null;
+    }
+    const positions = new Map<PlaceId, { readonly node: FlowNode; readonly position: number }>();
+    for (const [position, { operand, node }] of operands.entries())
+      positions.set(operand, { node, position });
+    const leaf = (operand: PlaceId): Held | null => {
+      const { node, position } = positions.get(operand)!;
+      if (!isList(operand, node)) return null;
+      const held: Held = { entries: new Map(), levels: new Set(), head: null };
+      const paths: (readonly string[])[] = [[]];
+      for (const path of pathsBelow(admission, operand, []))
+        if (path.length > 1 && path[0] === "element")
+          paths.push(keptSlice(admission.work, path, 1));
+      for (const path of paths) {
+        program.work.charge("checks");
+        const at = keptText(admission.work, path);
+        const ruled = decidedAt(operand, node, path);
+        held.entries.set(at, {
+          path,
+          first: ruled === null ? null : { decided: ruled, operand, position },
+          kinds: new Set(ruled === null || ruled === "open" ? [] : ruled.own),
+          nulls: nullAt(operand, node, path),
+        });
+        if (path.every((step) => step === "element")) held.levels.add(at);
+        if (path.length === 0 && ruled !== null) held.head = { operand, node, position };
+      }
+      return held;
+    };
+    // (a head's decisions at paths its structure does not give, each asked once)
+    const asked = new Map<
+      PlaceId,
+      Map<string, { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null>
+    >();
+    const decisionOf = (
+      held: Held,
+      path: readonly string[],
+      at: string,
+    ): {
+      readonly decided: JoinDecided | "open";
+      readonly decider: PlaceId;
+      readonly nulls: boolean;
+    } | null => {
+      const entry = held.entries.get(at);
+      let first = entry?.first ?? null;
+      let kinds: ReadonlySet<ItemTag> = entry?.kinds ?? new Set();
+      let nulls = entry?.nulls ?? false;
+      const head = held.head;
+      if (head !== null && (first === null || head.position < first.position)) {
+        let mine = asked.get(head.operand);
+        if (mine === undefined) asked.set(head.operand, (mine = new Map()));
+        let found = mine.get(at);
+        if (found === undefined) {
+          const ruled = decidedAt(head.operand, head.node, path);
+          found =
+            ruled === null
+              ? null
+              : { decided: ruled, nulls: nullAt(head.operand, head.node, path) };
+          mine.set(at, found);
+        }
+        if (found !== null) {
+          const { decided: ruled } = found;
+          first = { decided: ruled, operand: head.operand, position: head.position };
+          if (ruled !== "open") kinds = new Set([...kinds, ...ruled.own]);
+          nulls ||= found.nulls;
+        }
+      }
+      if (first === null) return null;
+      const { decided: ruled, operand: decider } = first;
+      if (ruled === "open" || ruled.typed || [...kinds].every((kind) => ruled.own.includes(kind)))
+        return { decided: ruled, decider, nulls };
+      // (a value's kinds, as `decidedAt` reads them: whole numbers beside numbers are numbers, ADR 0021 1.3; several
+      // families each fit as itself)
+      const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
+      return {
+        decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
+        decider,
+        nulls,
+      };
+    };
+    // (a join's paths: the smaller operand's added to the larger one's, the earlier decider at each)
+    const joined = (left: Held, right: Held): Held => {
+      const [into, from] = left.entries.size < right.entries.size ? [right, left] : [left, right];
+      for (const [at, entry] of from.entries) {
+        program.work.charge("checks");
+        const known = into.entries.get(at);
+        if (known === undefined) {
+          into.entries.set(at, entry);
+          continue;
+        }
+        if (
+          entry.first !== null &&
+          (known.first === null || entry.first.position < known.first.position)
+        )
+          known.first = entry.first;
+        for (const kind of entry.kinds) known.kinds.add(kind);
+        known.nulls ||= entry.nulls;
+      }
+      for (const at of from.levels) into.levels.add(at);
+      if (from.head !== null && (into.head === null || from.head.position < into.head.position))
+        into.head = from.head;
+      return into;
+    };
+    // each join after the joins it holds, its operands' values taken once
+    const held = new Map<PlaceId, Held | null>();
+    const take = (value: PlaceId): Held | null => {
+      if (!joins.has(value)) return leaf(value);
+      const found = held.get(value) ?? null;
+      held.delete(value);
+      return found;
+    };
+    const errors: (Omit<Parameters<typeof error>[0], "named"> & { readonly decider: PlaceId })[] =
+      [];
+    for (const c of tree.toReversed()) {
+      const [left, right] = [c.arguments[0]!, c.arguments[1]!];
+      const ours = take(left);
+      const theirs = take(right);
+      let rejected = !admission.pass.lists.joined(right);
+      if (ours !== null && theirs !== null)
+        for (const at of joins.has(right) ? theirs.levels : theirs.entries.keys()) {
+          program.work.charge("checks");
+          const path = theirs.entries.get(at)!.path;
+          const ruled = decisionOf(ours, path, at);
+          if (ruled === null || ruled.decided === "open") continue;
+          const own = decisionOf(theirs, path, at);
+          if (own === null || own.decided === "open") continue;
+          const kinds = own.decided.own;
+          const { tags, written: exact } = ruled.decided;
+          if (
+            (exact ? kinds : kinds.map(family)).some((tag) =>
+              tags.some((ref) => fits(tag, ref, exact)),
+            )
+          )
+            continue;
+          // (A1: a written type the tree lands in directly holds both)
+          const landing =
+            written === null ? null : permittedAt(written, joinSteps(["element"], path));
+          if (
+            landing !== null &&
+            (unrestricted(landing) ||
+              [...ruled.decided.own, ...kinds].every((tag) =>
+                typeTags(landing).some((ref) => fits(tag, ref, true)),
+              ))
+          )
+            continue;
+          errors.push({
+            c,
+            path,
+            earliest:
+              ruled.nulls || ruled.decided.nullable === true
+                ? [...ruled.decided.own, "null"]
+                : ruled.decided.own,
+            kinds: own.nulls || own.decided.nullable === true ? [...kinds, "null"] : kinds,
+            decider: ruled.decider,
+            levels: levelsAt(path),
+          });
+          admission.rejections += 1;
+          const key = keptKey(admission.work, c.result, joinSteps(["element"], path));
+          admission.newlyRejected.set(joinedOperand(right), new Set([key]));
+          rejected = true;
+          break;
+        }
+      held.set(
+        c.result,
+        theirs === null || rejected ? ours : ours === null ? theirs : joined(ours, theirs),
+      );
+    }
+    // (each error's fix, once the tree's errors are known)
+    const shared = errors.every((each) => each.decider === errors[0]?.decider);
+    for (const { decider, ...found } of errors) {
+      const [left, right] = [found.c.arguments[0]!, found.c.arguments[1]!];
+      error({
+        ...found,
+        named:
+          errors.length === 1
+            ? left === decider
+              ? [left, right]
+              : [right]
+            : shared && left === decider
+              ? [left]
+              : [],
+      });
+    }
+  }
 }
 
 /**

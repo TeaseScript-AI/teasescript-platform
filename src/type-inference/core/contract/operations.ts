@@ -175,8 +175,10 @@ export function* contractOfOp(
     const repeated = contract.plusRepeatOf(c.result, false);
     if (repeated !== c.result) return yield* contract.contractOfValueAt(repeated, rest);
     const operands: (readonly Item[])[] = [];
+    // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
     for (const argument of c.arguments)
-      operands.push(yield* contract.contractOfValueAt(argument, rest));
+      if (contract.pass.lists.joined(argument))
+        operands.push(yield* contract.contractOfValueAt(argument, rest));
     return plusElements(operands, rest, contract.pass);
   }
   const conversion = family === "conversion" ? conversionCategory(name) : undefined;

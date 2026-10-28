@@ -12,7 +12,7 @@ import {
 import { withFacts } from "./consumers/diagnostics.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
 import { freshStores, ingressMark } from "./consumers/fresh.js";
-import { mixed } from "./consumers/mixed.js";
+import { mixed, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
   CheapFrontier,
@@ -345,6 +345,7 @@ export class Consumers {
       for (const { site, label } of this.admission.ingressStores()) ingressMark(this, site, label);
       this.rule = 3;
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
+      this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
       // (a pass in which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
       this.settled =
         (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&

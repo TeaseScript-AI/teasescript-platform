@@ -3376,6 +3376,44 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       return main(lines('let seed = "origin"', `let out = ${value}`, "say out", "exit"));
     },
   })),
+  {
+    name: "join-run",
+    measures:
+      "#1272: a run of k joined lists, the last of another type, each operand decided once and the last rejected",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = [0] + ${Array.from({ length: k }, (_, i) => `[${i + 1}]`).join(" + ")} + ["x"]`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "join-right-nested",
+    measures: "#1272 (Codex r1 on #1310): k joins each holding the next in its right operand",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = ${Array.from({ length: k }).reduce<string>((inner, _, i) => `[${i + 1}] + (${inner})`, "[0]")}`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "join-right-nested-fields",
+    measures:
+      "#1272 (Codex r7's B3 on #1310): k joins each holding the next in its right operand, each element's property its own",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = ${Array.from({ length: k }).reduce<string>((inner, _, i) => `[{p${i}: 1}] + (${inner})`, "[{lastValue: 0}]")}`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
   ...INHERITED_FIELD_FAMILIES,
 ];
 

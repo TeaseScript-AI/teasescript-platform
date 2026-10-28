@@ -370,6 +370,16 @@ export const OBLIGATION_SITES = [
       "elements of one source identity, in a settled pass; a literal landing in a written place, which C1 checks",
   },
   {
+    method: "joinElements",
+    runs: "joinElements",
+    published:
+      "a list join's mixed operand's TSV044 where its operands' own kinds decide it (ADR 0021 1.3, V30 §16, #1272)",
+    undecided:
+      "a join with an operand that reads a place (a variable, a property, a call's result, a `+=`'s target) or holds a source: every definition holding it, or the join, marked (#markValue)",
+    declined:
+      "a join of values that are no lists; a join landing in a written place that holds both, which C1 checks (A1)",
+  },
+  {
     method: "boundaryAtRead",
     runs: "the walk",
     published: "an own read's boundary (C9)",

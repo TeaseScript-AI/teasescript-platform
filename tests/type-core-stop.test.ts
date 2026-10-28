@@ -1688,7 +1688,8 @@ test("a marked store's records within its value are compared alike on both sides
  * Before admission settled, a store into a written type is checked by admission's own C1, the derivation the analysis
  * runs unstopped, reading what the stop retained (TABLE r4.125, r4.126, Astra r4's B1): two wrong elements give one
  * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
- * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred; a written
+ * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred, and a
+ * join of two literals' (#1272); a written
  * parameter's every call, a dead one too (Codex r16, r17). At every stop before admission settled the errors, their
  * sites and sentences equal the unstopped ones.
  */
@@ -1703,6 +1704,7 @@ test("a stop before admission settled checks a written store by admission's own 
     'let xs: integer[] set = set[]\nxs.add(["wrong", true])\nexit\n',
     'let xs: (integer | string)[] set = set[]\nxs.add([1, "a"])\nexit\n',
     'let ys = [1, "a"]\nexit\n',
+    'let ys = [1] + ["a"]\nexit\n',
     'function f(xs: integer[]) { say "x" }\nf(["wrong"])\nf(["bad"])\nexit\n',
     'function f(xs: integer[]) { say "x" }\nexit\nf(["wrong"])\n',
   ]) {
@@ -1743,6 +1745,33 @@ test("a stop before admission settled marks the store of a literal whose element
         (d) =>
           d.code === "TSV041" &&
           d.site.start === literal &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown",
+      ),
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
+ * Before admission settled, a list join with an operand read through a decision admission did not make (here an inferred
+ * variable) is not compared for mixed elements (#1272): a join no definition holds is marked at its own site, its type
+ * undecided, as a literal is (`#markValue`). At a stop in the setup and at the last before admission settled the mark
+ * stands.
+ */
+test("a stop before admission settled marks a list join whose operand needs a decision", () => {
+  const source = 'let xs = [1]\nsay (xs + ["a"]).length\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const join = source.indexOf("xs +");
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+    const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    assert.equal(stopped.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.budget.deferred.some(
+        (d) =>
+          d.code === "TSV041" &&
+          d.site.start === join &&
           d.obligation.against.length === 1 &&
           d.obligation.against[0] === "unknown",
       ),

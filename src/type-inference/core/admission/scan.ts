@@ -188,13 +188,22 @@ export function* earliestDecider(
   node: FlowNode,
   at: readonly string[],
   into: Key | null,
-): Inheriting<{ readonly term: TypeTerm | null; readonly site: SourceSite | null } | null> {
+): Inheriting<{
+  readonly term: TypeTerm | null;
+  readonly site: SourceSite | null;
+  /** A deciding value's kinds there (`term` `null`). */
+  readonly tags?: readonly ItemTag[];
+} | null> {
   const { program, values } = admission.pass;
   const transferred = transferredDecider(admission, expand(admission, value, node, []), at);
   if (transferred !== undefined)
     return transferred === null
       ? null
-      : { term: null, site: program.places[transferred]?.site ?? null };
+      : {
+          term: null,
+          site: program.places[transferred.value]?.site ?? null,
+          tags: transferred.tags,
+        };
   const stops = stopsOf(admission, value, node);
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
@@ -276,7 +285,8 @@ export function* earliestDecider(
     const kinds = [...tags].sort().join(",");
     let holds = throughs.get(kinds);
     if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
-    if (through(admission, next.via, at, tags, holds)) return { term: null, site: siteOf(next) };
+    if (through(admission, next.via, at, tags, holds))
+      return { term: null, site: siteOf(next), tags };
   }
 }
 

@@ -939,6 +939,14 @@ export interface Reaching {
 }
 
 /**
+ * A list `+`'s operand that admission rejects from its join (A6, `joinElements`) is kept with the rejected stores, by
+ * a number no definition has (definitions count from 0).
+ */
+export function joinedOperand(operand: PlaceId): number {
+  return -1 - operand;
+}
+
+/**
  * The definition lists of one pass (A6 recomputes them after a rejection): per key its live definitions sorted in
  * dominator order with a lifting table, the nearest dominating definition over a key and its prefixes, the own-event
  * lists, X6's first event between two nodes, and R.
@@ -954,6 +962,8 @@ export class DefinitionLists {
     readonly index: DefinitionIndex,
     /** Whether a store takes part: not rejected by admission (A6). */
     readonly live: (d: Definition) => boolean,
+    /** Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`). */
+    readonly joined: (operand: PlaceId) => boolean = () => true,
   ) {}
 
   get #program(): CoreProgram {

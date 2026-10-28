@@ -208,7 +208,13 @@ export interface DeciderGroup {
   region: Region | null;
   holdsWritten: boolean | null;
   readonly written: Map<number, boolean>;
-  readonly values: Map<string, PlaceId | null>;
+  readonly values: Map<string, DecidingValue | null>;
+}
+
+/** A value that decides a path (`transferredDecider`), with the kinds it decides by there. */
+export interface DecidingValue {
+  readonly value: PlaceId;
+  readonly tags: readonly ItemTag[];
 }
 
 /** A group by its members' tasks, lanes and links' answers, once per pass. */
@@ -565,10 +571,10 @@ function asksType(admission: Admission, group: DeciderGroup, entry: Entry, end: 
 }
 
 /**
- * Whether an entry's own value decides at the decided path's rest from `rest` (`earliestDecider`'s values): a value
- * below an operation only above the path's end, a literal only at it and on no operand; reached through no typed
- * default and given by each operation; of definite kinds, no unknown beside them, each held definitely by each
- * operation above it (`mask`).
+ * The kinds an entry's own value decides by at the decided path's rest from `rest` (`earliestDecider`'s values), `null`
+ * where it decides nothing: a value below an operation only above the path's end, a literal only at it and on no
+ * operand; reached through no typed default and given by each operation; of definite kinds, no unknown beside them,
+ * each held definitely by each operation above it (`mask`).
  */
 function decides(
   admission: Admission,
@@ -577,10 +583,10 @@ function decides(
   at: readonly string[],
   rest: number,
   mask: ReadonlySet<ItemTag> | null,
-): boolean {
+): readonly ItemTag[] | null {
   const { task } = entry;
-  if ((rest === at.length && entry.deep) || member.typed || !member.chosen) return false;
-  if (mask !== null && mask.size === 0) return false;
+  if ((rest === at.length && entry.deep) || member.typed || !member.chosen) return null;
+  if (mask !== null && mask.size === 0) return null;
   const items = withoutEmpty(
     admission.run(
       admission.pass.values.valueItems(
@@ -590,9 +596,11 @@ function decides(
       ),
     ),
   );
-  if (items.some((item) => item.tag === "unknown")) return false;
+  if (items.some((item) => item.tag === "unknown")) return null;
   const definite = deciding(items);
-  return definite.length > 0 && (mask === null || definite.every((item) => mask.has(item.tag)));
+  return definite.length > 0 && (mask === null || definite.every((item) => mask.has(item.tag)))
+    ? definite.map((item) => item.tag)
+    : null;
 }
 
 const EMPTY: ReadonlySet<ItemTag> = new Set();
@@ -738,7 +746,7 @@ function firstValue(
   root: DeciderGroup,
   at: readonly string[],
   ids: readonly number[],
-): PlaceId | null {
+): DecidingValue | null {
   interface Frame {
     readonly group: DeciderGroup;
     readonly rest: number;
@@ -762,8 +770,8 @@ function firstValue(
       root.members.map(() => null),
     ),
   ];
-  let answer: PlaceId | null | undefined = undefined;
-  const finish = (value: PlaceId | null): void => {
+  let answer: DecidingValue | null | undefined = undefined;
+  const finish = (value: DecidingValue | null): void => {
     const done = stack.pop()!;
     if (!done.group.values.has(done.name)) keep(admission.work, 1);
     done.group.values.set(done.name, value);
@@ -835,8 +843,15 @@ function firstValue(
       );
       continue;
     }
-    if (decides(admission, group.members[entry.member]!, entry, at, below, masks[entry.member]!))
-      finish(entry.task.value);
+    const tags = decides(
+      admission,
+      group.members[entry.member]!,
+      entry,
+      at,
+      below,
+      masks[entry.member]!,
+    );
+    if (tags !== null) finish({ value: entry.task.value, tags });
   }
   return answer!;
 }
@@ -844,7 +859,8 @@ function firstValue(
 /**
  * A2, A4, A8: the earliest value that decides a stored value's path (`earliestDecider`), read from its carriers'
  * transfers: `undefined` where a written copy on the path asks a type, which the scan of the stops answers, in its
- * order (its type may wait on another decision, `inheritedInto`); else the first value that decides, `null` for none.
+ * order (its type may wait on another decision, `inheritedInto`); else the first value that decides, with the kinds it
+ * decides by, `null` for none.
  * The value's own task and the literals it holds, by path, then each carrier's operands, their roles merged at each
  * common operand in their keys' order, each group's answer once per pass for its rest of the path, whatever value
  * walks to it (`groupOf`).
@@ -853,7 +869,7 @@ export function transferredDecider(
   admission: Admission,
   task: Expansion,
   at: readonly string[],
-): PlaceId | null | undefined {
+): DecidingValue | null | undefined {
   const root = groupOf(admission, [
     { task, deep: false, single: true, typed: false, chosen: true, surely: true },
   ]);

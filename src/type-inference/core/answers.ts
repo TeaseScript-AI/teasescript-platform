@@ -28,6 +28,7 @@ import {
 import {
   DefinitionIndex,
   DefinitionLists,
+  joinedOperand,
   keyOf,
   type Definition,
   type Key,
@@ -106,7 +107,11 @@ function createPass(
     program,
     definitions,
     // admission's rejections take effect in the next pass (A6)
-    lists: new DefinitionLists(definitions, (d) => !rejected.has(d.uid)),
+    lists: new DefinitionLists(
+      definitions,
+      (d) => !rejected.has(d.uid),
+      (operand) => !rejected.has(joinedOperand(operand)),
+    ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
