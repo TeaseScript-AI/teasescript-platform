@@ -19,6 +19,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, isExpressionStart, isPropertyName, spanFrom } from "./tokens.js";
+import { requireExactDuration } from "./units.js";
 import { parseTaggedQuery } from "./tag-queries.js";
 
 // Images, audio, video, and the camera: their commands, the named media form, its handlers, and its cues.
@@ -224,6 +225,8 @@ function* parseNamedMedia(
         valid = false;
       } else {
         values[argument] = value;
+        if (argument === "startAt" || argument === "endAt")
+          requireExactDuration(parser, value, "A media position");
       }
       if (name.name === "async") {
         if (value.kind !== "booleanLiteral") {
@@ -247,6 +250,7 @@ function* parseNamedMedia(
           });
         } else {
           repeat = Object.freeze({ kind: "value", value, span: copySpan(value.span) });
+          requireExactDuration(parser, value, "A repeat budget");
         }
       }
     }
@@ -409,6 +413,7 @@ function* parseMediaCue(parser: Parser): ParseTask<MediaCue | null> {
     const mark = parser.mark();
     offset = yield* parseChild(parser.parseOr());
     parser.blockEndsCompactInteraction = enclosing;
+    if (offset !== null) requireExactDuration(parser, offset, "A cue position");
     if (offset === null) {
       // A position that reported its own error, as `2 s + {`, needs no second one, and its block still parses.
       parser.reportMissing(

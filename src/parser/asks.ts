@@ -13,6 +13,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, delimiterClosers, isExpressionStart, spanFrom } from "./tokens.js";
+import { requireExactDuration } from "./units.js";
 import { atSayModeBeforeBoundedText, parseSayPresentation, peekAfterSayMode } from "./say.js";
 
 // Asks: the compact and bounded forms of each ask, their named arguments, and a question's presentation and image.
@@ -514,6 +515,9 @@ function askExpression(
 ): InteractionExpression {
   const keepsArguments = NAMED_ASK_OPTIONS.has(interactionKind);
   const has = (name: string) => named.some((argument) => argument.name.name === name);
+  const timeout = named.find((argument) => argument.name.name === "timeout");
+  if (interactionKind === "form" && timeout !== undefined)
+    requireExactDuration(parser, timeout.value, "An askForm timeout");
   if (presentation !== null && question === null && !(keepsArguments && has("message")))
     reportQuestionlessPresentation(parser, command, presentation);
   for (const required of requiredAskOptionNames(interactionKind))

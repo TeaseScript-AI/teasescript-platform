@@ -15,6 +15,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, delimiterClosers, isPropertyName, spanFrom } from "./tokens.js";
+import { requireExactDuration } from "./units.js";
 
 // Speakers and `say`: speaker declarations and properties, and a message's parts, mode, and pacing.
 
@@ -229,6 +230,7 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
       }
       pacing = parsedPacing;
       endSpan = parsedPacing.span;
+      requireExactDuration(parser, pacing, "Say pacing");
     }
   }
   return Object.freeze({
@@ -317,6 +319,7 @@ function* parseBoundedSayText(
     } else {
       pacing = yield* parseChild(parser.parseRequiredExpressionTask());
       if (pacing === null) return null;
+      requireExactDuration(parser, pacing, "Say pacing");
     }
     parser.skipNewlines();
   }

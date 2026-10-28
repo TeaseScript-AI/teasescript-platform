@@ -123,7 +123,7 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
   // After a name, a member, a call, or parentheses too, also in an interpolation and over lines in parentheses.
   const named = "let n = 3\nlet p = { delay: 3 }\nfunction f {\n  return 3\n}\nlet xs = [3]\n";
   for (const [source, message] of [
-    ["wait n months", "A month has no fixed length. Write 'n calendar months'."],
+    ["let a = n months", "A month has no fixed length. Write 'n calendar months'."],
     ["let a = p.delay years", "A year has no fixed length. Write 'p.delay calendar years'."],
     ["let a = f() month", "A month has no fixed length. Write 'f() calendar month'."],
     ['let a = "${n months}"', "A month has no fixed length. Write 'n calendar months'."],
@@ -135,7 +135,7 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     assert.deepEqual(diagnostics(`${named}${source}\nexit`), [["TSP033", message]], source);
   // So does a short 'mo' or 'y', at the unit, also where a list or a call goes on after it.
   for (const [source, message, column, unit] of [
-    ["wait n mo", "A month has no fixed length. Write 'n calendar mo'.", 7, "mo"],
+    ["let a = n mo", "A month has no fixed length. Write 'n calendar mo'.", 10, "mo"],
     [
       "let a = getDate() + xs[0] y",
       "A year has no fixed length. Write 'xs[0] calendar y'.",
@@ -151,7 +151,7 @@ test("days and weeks are exact, calendar units follow 'calendar', and both show 
     ],
     [
       'let b = showButton "Go", timeout: (n + 1) y',
-      "A year has no fixed length. Write '(n + 1) calendar y'.",
+      "A showButton timeout needs an exact length, and a year has none. Write the length in days or weeks, as in '365 days'.",
       42,
       "y",
     ],
@@ -527,6 +527,50 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
     runtimeFailure(`${DYNAMIC}playAudio(file: "a", repeat: dynamic(1 calendar day))\nexit`),
     "TSR065",
   );
+});
+
+test("where only an exact duration fits, a month or a year without 'calendar' asks for days or weeks", () => {
+  const header = "let n = 2\nfunction f(d) {\n  return 1 s\n}\n";
+  const form = 'askForm "Q", fields: { ok: false }, onTimeout: "submit", timeout:';
+  for (const [source, subject, written] of [
+    ["wait #", "A wait", "1 month"],
+    ["wait 1 h + (#)", "A wait", "n months"],
+    ["timer #", "A timer", "n months"],
+    ["timer(duration: #)", "A timer", "1 y"],
+    ['say "Hi", #', "Say pacing", "1 month"],
+    ['say("Hi", #)', "Say pacing", "n months"],
+    ['showButton "Go", timeout: #', "A showButton timeout", "1 month"],
+    [`let a = ${form} #`, "An askForm timeout", "n years"],
+    ['playVideo(file: "videos/intro.mp4", startAt: #)', "A media position", "1 month"],
+    ['playVideo(file: "videos/intro.mp4", repeat: #)', "A repeat budget", "1 month"],
+    [
+      'playVideo "videos/intro.mp4" {\n  beforeEnd # {\n    say "x"\n  }\n}',
+      "A cue position",
+      "1 month",
+    ],
+  ] as const) {
+    const [unit, example] = /y/u.test(written) ? ["year", "365 days"] : ["month", "30 days"];
+    assert.deepEqual(
+      diagnostics(`${header}${source.replace("#", written)}\nexit`),
+      [
+        [
+          "TSP033",
+          `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+        ],
+      ],
+      source,
+    );
+    // The example compiles in its place.
+    assert.notEqual(
+      compileSource(`${header}${source.replace("#", example)}\nexit`).plan,
+      null,
+      source,
+    );
+  }
+  // A month or a year that the value only passes on keeps the calendar fix.
+  assert.deepEqual(diagnostics(`${header}wait f(1 month)\nexit`), [
+    ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
+  ]);
 });
 
 test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {
