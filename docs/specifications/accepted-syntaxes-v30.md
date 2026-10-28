@@ -1796,11 +1796,12 @@ An object default, or an expected object type, reads the JSON as that object: th
 have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a
 missing key takes that property's value from the default, and so does a key whose value has the wrong type; in debug
 or test mode, the developer warning names the key. Extra keys are ignored, and nested objects follow the same rules
-inside. With a written `object`, no key is extra: every key of the JSON is kept, also in nested objects, the default's
-properties are checked as above, and their later uses are checked when they run. Malformed text, or JSON of another
-kind than the default, such as a list or text where the default is an object, gives the whole default. A property that
-is `null` in the default and gets no type anywhere else in the script stays unknown, to be tested with `is` before use,
-as with `default: null`; there is no warning. A dict default, or a written dict type, gives a dict.
+inside. When the destination variable is explicitly declared as `object`, all JSON properties are preserved, including
+those in nested objects. Properties named in the default are checked against their default types, and subsequent
+property accesses are checked at runtime. Malformed text, or JSON of another kind than the default, such as a list or
+text where the default is an object, gives the whole default. A property that is `null` in the default and gets no type
+anywhere else in the script stays unknown, to be tested with `is` before use, as with `default: null`; there is no
+warning. A dict default, or a written dict type, gives a dict.
 
 ```text
 let tasks: string[] = fromJson(saved, default: [])      // a string[]; JSON that is not a list of text gives []
