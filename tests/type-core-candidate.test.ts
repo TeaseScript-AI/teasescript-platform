@@ -1456,6 +1456,55 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
 });
 
 /**
+ * #1240 (V30 §15, ADR 0021 §1.4): a store into an object's own `first`, `last` or `random` sets that property, as any
+ * property's store does, its value checked against the property's type; the runtime assigns it so. Its read stays F11's
+ * warning, never an error. Each name, a copy, a nested object and a list's element compile and run with the stored
+ * value, quiet as the current checker where nothing reads the property back; inside `if`, a function and a compound
+ * store (outside the slice) the core finds nothing; a value of another type gets the current checker's error and fix,
+ * and a list, which has no property to assign, its error.
+ */
+test("a store into an object's own first, last or random sets that property and checks its type (#1240)", () => {
+  for (const [source, says, quiet] of [
+    ['let record = {first: 1}\nrecord.first = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nexit\n", [], true],
+    ['let box = {entry: {random: 1}}\nbox.entry.random = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nsay a.last\nexit\n", ["2"], false],
+    [
+      "let source = {first: 1}\nlet copied = source\ncopied.first = 2\nsay copied.first\nexit\n",
+      ["2"],
+      false,
+    ],
+    ["let xs = [{random: 1}]\nxs[0].random = 2\nsay xs[0].random\nexit\n", ["2"], false],
+  ] as const) {
+    const [{ plan }, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+    assert.ok(
+      quiet
+        ? diagnostics.length === 0
+        : diagnostics.every((diagnostic) => diagnostic.startsWith("warning")),
+      `${source}: ${diagnostics.join(", ")}`,
+    );
+    assert.ok(plan !== null, source);
+    assert.deepEqual(runWith(plan, 0).says, says, source);
+  }
+  for (const source of [
+    "let a = {first: 1, n: 2}\nif a.n > 1 {\n  a.first = 3\n}\nexit\n",
+    "let a = {last: 1}\nfunction f {\n  a.last = 4\n}\nf()\nexit\n",
+    "let a = {random: 1}\na.random += 2\nexit\n",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    assert.deepEqual(analyseCore(request).diagnostics, [], source);
+  }
+  const wrong = candidate('let a = {first: 1}\na.first = "bad"\nexit\n');
+  assert.deepEqual(sited(wrong), ["error TSV041@29"]);
+  assert.match(
+    wrong.diagnostics[0]!.message,
+    / Use a separate property for a value of another type\.$/,
+  );
+  assert.deepEqual(sited(candidate("let xs = [1, 2]\nxs.first = 5\nexit\n")), ["error TSV043@16"]);
+});
+
+/**
  * Deep and broad list literals on the candidate route (TABLE r4.58): their indexes share one text per path and order
  * their identities by path id, and the core charges what they keep. A read 64 levels into a literal, through two
  * aliases, of external data 32 levels in and of the last of 512 elements or 300 rows; and two literals 40 deep stored
