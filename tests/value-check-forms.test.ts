@@ -614,7 +614,7 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
     [
       [["function f(k) {\n    return load(-k, default: 0)\n}", "-k"]],
       "TSV038",
-      "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.",
+      "Storage key must be a string. To compare the loaded value, write 'let value: string? = load(\"k\", default: null)', then 'value == null'.",
       null,
     ],
     [

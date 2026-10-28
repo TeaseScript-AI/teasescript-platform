@@ -2900,7 +2900,7 @@ A trailing `prefill:`, at most once and after the options, preselects the button
 ```text
 let action = askChoice stay: "Stay", leave: "Leave", prefill: "leave"
 let rounds = askChoice 5, 10, 15, prefill: 10
-let level = load("level", default: null)
+let level: integer? = load("level", default: null)
 let next = askChoice 6, 7, 8, 9, prefill: level
 ```
 
@@ -4237,8 +4237,9 @@ arguments. Its `)` ends the `load`, also with a space before `(`, so the result 
 expression:
 
 ```text
-load("k", default: null) == null
-load("a", default: 0) + 1
+let value: string? = load("k", default: null)
+say load("k", default: null) == null
+say load("a", default: 0) + 1
 ```
 
 The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
@@ -4291,7 +4292,7 @@ Rules:
 - Storage keys are plain strings.
 - A key that the compiler can see is not a string, also inside parentheses, is a compile error (`TSV038`). Other keys
   are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
-  `Storage key must be a string. To compare the loaded value, write 'load("k", default: null) == null'.`
+  `Storage key must be a string. To compare the loaded value, write 'let value: string? = load("k", default: null)', then 'value == null'.`
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 

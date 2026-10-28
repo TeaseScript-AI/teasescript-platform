@@ -32,7 +32,7 @@ Labels, described on GitHub:
   the owner; a task that only waits on a decision issue says "Depends on #N" instead;
 - `in progress` while an agent works on it;
 - `spare capacity` for work that must be done but can wait: ready, no owner input, and no more expensive later because
-  nothing upcoming builds on it;
+  nothing upcoming builds on it; a small fix (a sentence or a few lines of code) gets no label and is done directly;
 - `needs triage` until an orchestrator is assigned.
 
 With `gh`, set the type and labels (`--type`, `--label`); triage fills any gap. GitHub shows a single newline in issue
