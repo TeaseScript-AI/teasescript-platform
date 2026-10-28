@@ -4817,6 +4817,9 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
   return labels;
 }
 
+/** Per written list or set option's elements, whether every one is a choice object (`choiceItems`), asked once. */
+const OBJECTS_ONLY = new WeakMap<readonly unknown[], boolean>();
+
 /** Each choice's labels (`choiceLabels`), made once: a wide choice's every part reads them. */
 const LABELS = new WeakMap<ValueConstraint, readonly (ValueKind | null | undefined)[]>();
 
@@ -4912,11 +4915,17 @@ export function* choiceItems(
     }
     if (content?.kind === "list" || content?.kind === "set") {
       // written choice objects alone: together below the list's element step, as its literal analogue reads them
-      // (§3.4: several elements), each by the keys it writes, which no store reaches before the choice
-      if (
-        content.elements.length > 0 &&
-        content.elements.every((element) => element.object !== null)
-      )
+      // (§3.4: several elements), each by the keys it writes, which no store reaches before the choice (once per list:
+      // a wide choice's every part asks it)
+      let objects = OBJECTS_ONLY.get(content.elements);
+      if (objects === undefined)
+        OBJECTS_ONLY.set(
+          content.elements,
+          (objects =
+            content.elements.length > 0 &&
+            content.elements.every((element) => element.object !== null)),
+        );
+      if (objects)
         for (const step of [SELECTED_VALUE, SELECTED_TEXT])
           out.push(...(yield* read(argument, joinSteps(["element", step], rest))));
       else if (part.wide !== undefined && content.elements.length > WIDE)
