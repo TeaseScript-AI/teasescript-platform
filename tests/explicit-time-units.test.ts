@@ -143,8 +143,19 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
       ],
     ],
   );
-  // One duration has one unit, and the operand of a unit is a number.
+  // A unit needs a space before it, one duration has one unit, and the operand of a unit is a number.
   for (const [source, code, message] of [
+    ["let x = 90s", "TSP033", "A unit needs a space before it. Write '90 s'."],
+    [
+      "let n = 2\nlet x = (n + 1)min",
+      "TSP033",
+      "A unit needs a space before it. Write '(n + 1) min'.",
+    ],
+    [
+      "let x = 2calendar months",
+      "TSP033",
+      "A unit needs a space before it. Write '2 calendar months'.",
+    ],
     ["let x = 1 h 30 min", "TSP033", "Add the parts of a duration with '+', as in '1 h + 30 min'."],
     ["let x = 5 s ms", "TSP033", "This duration already has a unit. Remove the 'ms' after it."],
     [
