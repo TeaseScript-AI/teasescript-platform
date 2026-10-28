@@ -37,6 +37,7 @@ import {
   isTakePhotoCall,
 } from "../../capture-call.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
+import { listDraw } from "../../list-methods.js";
 import {
   NO_CORE_CHECKS,
   type CoreRuntimeChecks,
@@ -1375,8 +1376,9 @@ export interface LoweredExpression {
 }
 
 /**
- * Whether two places are the same variable, or the same property, element, or dict value of it, by positions and keys
- * that are the same variables or literals, so that reading both in a row reads one value.
+ * Whether two places are the same stable path (V30 §13), so that reading both in a row reads one value: the same
+ * variable, followed by the same properties, none of which selects anew as `.random` does, and the same positions and
+ * keys, each a literal or a plain variable.
  */
 function samePlace(first: Expression, second: Expression): boolean {
   for (;;) {
@@ -1385,7 +1387,8 @@ function samePlace(first: Expression, second: Expression): boolean {
     if (first.kind === "propertyAccessExpression") {
       if (
         second.kind !== "propertyAccessExpression" ||
-        first.property.name !== second.property.name
+        first.property.name !== second.property.name ||
+        listDraw(first.property.name, "property") !== undefined
       )
         return false;
       [first, second] = [first.object, second.object];

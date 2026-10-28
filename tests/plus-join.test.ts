@@ -199,6 +199,29 @@ test("items = items + more, and += on a speaker's list through any name, join wi
   );
 });
 
+test("items = items + more reads a place that selects anew, as .random does, on each side", () => {
+  // Each `.random` draws (V30 §13: it is no stable path), so the target and the joined list may be different rows.
+  // Adding an empty list changes neither the values nor the draws, but makes the left operand a join of its own.
+  const run = (assignment: string): string[] =>
+    sayTexts(
+      runValidSource(
+        [
+          "let rows = [{ items: [10] }, { items: [20] }, { items: [30] }]",
+          "function same(n) {\n    return n\n}",
+          assignment,
+          "say rows",
+          "say randomInteger(1..=100)",
+          "exit",
+        ].join("\n"),
+        0x12345678,
+      ),
+    );
+  const joined = run("rows.random.items = (rows.random.items + []) + [same(99)]");
+  assert.deepEqual(run("rows.random.items = rows.random.items + [same(99)]"), joined);
+  // With this seed, reading the place once, as `+=` does, gives another result.
+  assert.notDeepEqual(run("rows.random.items += [same(99)]"), joined);
+});
+
 test("+= and items = items + more on any list place, also with a call or an ask on the right, copy no whole list", () => {
   // Diagnostic scale evidence, not a capacity contract (#1186, #1197): four additions copy as many list items, whatever
   // the length of the list they add to.
