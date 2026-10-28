@@ -440,6 +440,34 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     assert.deepEqual(messages(main(source)), expected, source);
 });
 
+test("a union beside a set or a dict suggests the union inside it, in the list's sentence (#1104 point 3)", () => {
+  const sentence = (union: string, fix: string): string[] => [
+    `E TSV075 '${union}': A union cannot hold a whole list, set, or dict beside another type, but '${union}' ` +
+      `does. ${fix}`,
+  ];
+  const write = (suggestion: string): string => `Write '${suggestion}' instead.`;
+  const inside = "Write the union inside the collection instead.";
+  const cases: readonly (readonly [string, string])[] = [
+    // the list's sentence, which the set's and the dict's follow
+    ["integer | string[]", write("(integer | string)[]")],
+    ["integer | string set", write("(integer | string) set")],
+    ["string dict | integer", write("(string | integer) dict")],
+    // three members, and a `?` where it is written: on a member, on the element, on the collection
+    ["integer | boolean | string set", write("(integer | boolean | string) set")],
+    ["integer? | string dict", write("(integer? | string) dict")],
+    ["integer | string?[]?", write("(integer | string?)[]?")],
+    // no suggestion: `null` beside the collection may as well make it optional; the element beside it is `g`'s form
+    ["integer | string set | null", inside],
+    ["string | string dict", inside],
+  ];
+  for (const [union, fix] of cases)
+    assert.deepEqual(
+      messages(main(`function use(x: ${union}) {\n}\nexit\n`)),
+      sentence(union, fix),
+      union,
+    );
+});
+
 test("a warning whose expression never runs is not reported, as the line's TSV065 says it; an error there is (#1195)", () => {
   const shown = (source: string): string[] => {
     const request = coreRequest(main(source));
