@@ -738,6 +738,7 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     "a is integer or b otherwise c == d",
     "a otherwise (b otherwise c + d)",
     "a otherwise f(b otherwise c + d)",
+    "(a otherwise b + c) + d",
     "f(a otherwise b + c) otherwise d",
     "a otherwise b + c otherwise d",
     "a otherwise b > c and d otherwise 0 > 2",

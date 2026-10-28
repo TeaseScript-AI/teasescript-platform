@@ -2156,10 +2156,10 @@ export class Parser {
    */
   public endStatement(start: number, diagnosticCount: number, inBlock: boolean): void {
     if (this.current === start) this.advance();
-    this.#settleOtherwiseOffers(start, diagnosticCount);
     // Recovery has already stopped at the next statement.
     if (this.recoveredAtStatementBoundary) this.recoveredAtStatementBoundary = false;
     else this.finishStatement(inBlock);
+    this.#settleOtherwiseOffers(start, diagnosticCount);
     let end = this.current;
     // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
     // holds the line breaks after it, where an author completes it, as a recovered one does.
