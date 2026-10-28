@@ -35,7 +35,7 @@ export interface ScriptIdentity {
 /**
  * Compiles the host's script, without running it, and prepares Start, or Continue for the session the script keeps; a
  * script that does not compile, or a package that cannot be opened, yields the failure the Player shows instead. Stored
- * values are read before Start too, so Start runs within the player's activation. `identity` is the title and author of `main.tease`'s header, for the title bar.
+ * values are read ahead too, for the start page; Start reads them again. `identity` is the title and author of `main.tease`'s header, for the title bar.
  */
 export function prepareHostedScript(
   player: PlayerSessionHost,
