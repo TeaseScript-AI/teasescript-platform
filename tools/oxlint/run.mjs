@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkChargedIteration } from "./check-charged-iteration.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
 import { lintFiles, repositoryRoot } from "./files.mjs";
 
@@ -18,6 +19,12 @@ for (const file of files) {
     );
     invalidEvidence = true;
   }
+}
+for (const diagnostic of checkChargedIteration(repositoryRoot)) {
+  console.error(
+    `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
+  );
+  invalidEvidence = true;
 }
 
 if (invalidEvidence) {
