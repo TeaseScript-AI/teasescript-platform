@@ -155,6 +155,8 @@ export type DiagnosticRule =
       readonly receiver: string;
       readonly member: string;
       readonly use: "read" | "call" | "store";
+      /** A list's `join` read as a property: its elements' type's kinds, which decide whether a fix's call is valid. */
+      readonly elements?: readonly ItemTag[];
     }
   /**
    * C5c, ADR 1.4: a property no source of `receiver` has: a read's at the read; a store's at the object that lacks it,

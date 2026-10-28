@@ -408,7 +408,7 @@ let name = "Mistress " + title     // text + text
 let menu = ["Back"] + options      // a new list, the left elements first
 name += "!"
 let line = "Score: " + 5           // compile error: write "Score: ${5}"
-let more = menu + "Exit"           // compile error: use menu.add("Exit"), or menu + ["Exit"]
+let more = menu + "Exit"           // compile error: write menu + ["Exit"], or menu.add("Exit") on a line of its own
 ```
 
 A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can

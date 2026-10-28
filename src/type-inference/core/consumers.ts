@@ -3456,6 +3456,14 @@ export class Consumers {
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
+    // (a list's `join` read as a property: its elements' type, every value its elements may take, which decides whether
+    // the fix's call is valid; its current contents may be empty, Codex r4)
+    const elements =
+      property === "join" && owners.some((item) => item.tag === "list")
+        ? withoutEmpty(this.#run(contract.contractOfValueAt(c.owner, ["element"]))).map(
+            (item) => item.tag,
+          )
+        : undefined;
     this.#memberChecks(
       c.site,
       label,
@@ -3467,6 +3475,7 @@ export class Consumers {
       member,
       extra,
       c.owner,
+      elements,
     );
   }
 
@@ -3526,8 +3535,15 @@ export class Consumers {
     member: string,
     extra: readonly Offending[] = [],
     receiverPlace?: PlaceId,
+    elements?: readonly ItemTag[],
   ): void {
-    const rule: DiagnosticRule = { rule: "member", receiver, member, use };
+    const rule: DiagnosticRule = {
+      rule: "member",
+      receiver,
+      member,
+      use,
+      ...(elements === undefined ? {} : { elements }),
+    };
     const detail = {
       text: receiver,
       kinds: kinds.map((item) => item.tag),

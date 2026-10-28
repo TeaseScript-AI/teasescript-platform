@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileProject } from "../src/compiler.js";
+import { CONVERSIONS } from "../src/conversions.js";
 import { createFreshRuntimeSession } from "../src/index.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -12,7 +13,7 @@ import {
 } from "../src/type-inference/core/messages.js";
 import type { CoreDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
-import { coreRequest } from "./helpers/type-core-analysis.js";
+import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
@@ -71,6 +72,12 @@ const STABLE = new RegExp(
 );
 const stablePath = (text: string): boolean => STABLE.test(text);
 const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
+/** Whether a subject is a text literal (`KEY`'s form) that the conversion `name` reads (Codex r3: '"bad"' is not). */
+const readsText = (name: string, subject: string): boolean => {
+  const conversion = Object.entries(CONVERSIONS).find(([key]) => key === name)?.[1];
+  if (conversion?.takes !== "value" || !new RegExp(`^${KEY}$`).test(subject)) return false;
+  return conversion.textProblem(JSON.parse(subject)) === undefined;
+};
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
 
@@ -339,11 +346,162 @@ const PORTS: readonly Port[] = [
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
+  // #1241 under TABLE r4.146: a code form replaces the diagnosed site whole, the stored value or the member access,
+  // with the actual operand; the stored value's own code before a unit (the current checker writes '5 s' into an
+  // element and a result) and inside its conversion; where the form is not complete, the function or the step in words
+  {
+    from: /^Give the number a unit, such as '.+ (s|deg)'\.$/,
+    to: ([, unit], { subject }) =>
+      form("Give the number a unit, such as '", code(grouped(subject)), ` ${unit}'.`),
+  },
+  {
+    from: /^Convert the text with (\w+)\(\.\.\.\)\.$/,
+    to: ([, conversion = ""], { subject }) =>
+      exact(
+        readsText(conversion, subject)
+          ? `Convert the text with '${conversion}(${subject})'.`
+          : `Convert the text with the ${conversion} function.`,
+      ),
+  },
+  // #1241: members of a type without them, the receiver named where it is a stable path
+  {
+    from: /^Use '(toDeg|toRad)\(.+\)' for its size in (degrees|radians)\.$/,
+    to: ([, conversion, unit], { subject }) =>
+      exact(
+        stablePath(subject)
+          ? `Use '${conversion}(${subject})' for its size in ${unit}.`
+          : `Use the ${conversion} function for its size in ${unit}.`,
+      ),
+  },
+  { from: /^Use a dict to look up by name\.$/, to: ([text]) => exact(text) },
+  {
+    from: /^Read a fixed property as '.+\.(\w+)'\.$/,
+    to: ([, key], { subject }) =>
+      exact(
+        stablePath(subject)
+          ? `If '${subject}' has a property '${key}', write '${subject}.${key}' instead.`
+          : `If the object has a property '${key}', use a dot instead of brackets.`,
+      ),
+  },
+  // (an add's key is the script's to choose; a property's store takes its key)
+  {
+    from: /^Store a value by its key, as in dict\[(.+)\] = value\.$/,
+    to: ([, key], { subject }) =>
+      exact(
+        key === "key"
+          ? "Assign the value to a key of the dict instead."
+          : stablePath(subject)
+            ? `If '${subject}' can hold the value, write '${subject}[${key}]' to store it by its key.`
+            : "To store a value by its key, write the key in brackets.",
+      ),
+  },
+  {
+    from: /^To read a value by its key, write '.+(\[.+\])'\.$/,
+    to: ([, key], { subject }) =>
+      exact(
+        stablePath(subject)
+          ? `To read a value by its key, write '${subject}${key}'.`
+          : "To read a value by its key, write the key in brackets.",
+      ),
+  },
+  {
+    from: /^Use (length, keys, or values|contains, remove, clear, or get)\.$/,
+    to: ([, names]) =>
+      exact(
+        `Use one of its ${names!.startsWith("length") ? "properties" : "methods"} instead: ${names}.`,
+      ),
+  },
+  {
+    from: /^Use (\w+(?:, \w+)*), or (\w+)\.$/,
+    to: ([, names, last]) => {
+      const quoted = [...names!.split(", "), last!].map((name) => `'${name}'`);
+      return exact(`Use ${quoted.slice(0, -1).join(", ")}, or ${quoted.at(-1)!}.`);
+    },
+  },
+  {
+    from: /^Use (\w+)(\(\.\.\.\)|\(\))?\.$/,
+    to: ([, member, call], { subject }) =>
+      exact(
+        call === "(...)"
+          ? `Use the ${member} method.`
+          : stablePath(subject)
+            ? `Use '${subject}.${member}${call ?? ""}'.`
+            : `Use the ${member} ${call === undefined ? "property" : "method"}.`,
+      ),
+  },
+  // (a list whose elements the join method cannot show gets words, Astra r2: no classified pair has one, since the
+  // current checker's call fails there too)
+  {
+    from: /^Write \.?(\w+)(\(\.\.\.\)|\(\))? (with|without) parentheses\.$/,
+    to: ([, member, call], { subject }) =>
+      exact(
+        call === "(...)"
+          ? `Call the ${member} method with its arguments in parentheses.`
+          : call === undefined
+            ? stablePath(subject)
+              ? `Write '${subject}.${member}' without parentheses.`
+              : `Read the ${member} property without parentheses.`
+            : stablePath(subject)
+              ? `Write '${subject}.${member}()' with parentheses.`
+              : `Call the ${member} method with parentheses.`,
+      ),
+  },
+  // #1241: '+' of a list and a value that is not one: a list at the diagnosed site, the operation or the operand it
+  // names (`subject`), the list named where it is a stable path, else words; the value put in the list where the list
+  // can hold it (Codex r1), an add on a line of its own (it gives no list, Astra r1 B2)
+  {
+    from: /^To add one element, use '.+', or write '.+' for a new list\.$/,
+    to: (_, { subject, operands: [list = "", value = ""] }) =>
+      exact(
+        stablePath(list) && ownText(value)
+          ? `If '${list}' can hold '${value}', write '${subject === value ? "" : `${list} + `}[${value}]' for a ` +
+              `new list, or add it to '${list}' itself with '${list}.add(${value})' on a line of its own.`
+          : "To add one element, put the element in brackets for a new list, or call the add method on a line " +
+              "of its own.",
+      ),
+  },
+  {
+    from: /^Write '\[.+\] \+ .+' for a new list\.$/,
+    to: (_, { subject, operands: [value = "", list = ""] }) =>
+      exact(
+        stablePath(list) && ownText(value)
+          ? `If '${list}' can hold '${value}', write '[${value}]${subject === value ? "" : ` + ${list}`}' for a ` +
+              "new list."
+          : "Put the element in brackets for a new list.",
+      ),
+  },
+  // (the range as a list, the current checker's code for it beside the list operand, at the operand or the operation
+  // the diagnostic sits on)
+  {
+    from: /^To add the numbers of a range, write '(.+)'\.$/,
+    to: ([, both = ""], { subject, operands: [first = "", second = ""] }) => {
+      const listFirst = both.startsWith(`${first} + `);
+      const [list, range] = listFirst ? [first, second] : [second, first];
+      const numbers = listFirst
+        ? both.slice(first.length + 3)
+        : both.slice(0, both.length - second.length - 3);
+      if (!stablePath(list) || !ownText(range))
+        return exact(
+          "To add the numbers of a range, convert the range with the toList method first.",
+        );
+      const written = subject === range ? numbers : both;
+      return exact(
+        `If '${list}' can hold whole numbers, write '${written}' to add the numbers of the range.`,
+      );
+    },
+  },
+  {
+    from: /^Join sets with union\(\), or copy a set into a list with toList\(\) first\.$/,
+    to: () =>
+      exact(
+        "Join sets with the union method, or copy a set into a list with the toList method first.",
+      ),
+  },
 ];
 
 /** The review's test for a sentence that names a fix (`message-review-2026-10-27/compare.mjs`): every one is ported. */
 const FIX =
-  /^(Round|Use|Put|Compare|Check|Declare|Write|Add|Select|Its |Remove|Call|Store|Give|Copy|Index|To |Convert|Move|Pass|Show|Turn|Test|Assign|Make|Keep|Start|Set|Load|Save|Wrap|Split|Read|Divide|Combine|Subtract|Did you mean)|\bas in\b|\bsuch as\b|\bdeclare it\b/;
+  /^(Round|Use|Put|Compare|Check|Declare|Write|Add|Select|Its |Remove|Call|Store|Give|Copy|Index|To |Convert|Move|Pass|Show|Turn|Test|Assign|Make|Keep|Start|Set|Load|Save|Wrap|Split|Read|Divide|Combine|Subtract|Join|Did you mean)|\bas in\b|\bsuch as\b|\bdeclare it\b/;
 
 const sentences = (text: string): string[] => text.split(/(?<=[.?])\s+(?=[A-Z'"])/);
 
@@ -417,9 +575,15 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
   return (subject ? 2 : 0) + (kinds ? 1 : 0) - (unnamedNull ? 1 : 0);
 }
 
-function pairs(): Pair[] {
+/** The pairs of the records' diagnostics: the expectation set's, or others of the same shape. */
+function pairs(
+  records: readonly {
+    readonly name: string;
+    readonly files: readonly SourceFile[];
+  }[] = readFixture(),
+): Pair[] {
   const found: Pair[] = [];
-  for (const record of readFixture()) {
+  for (const record of records) {
     const files = [...record.files].sort((a, b) => compareProjectPaths(a.path, b.path));
     const request = coreRequest(files);
     if (request === null) continue;
@@ -665,6 +829,92 @@ test("the comparison rejects a fix changed in a kept or an intended pair (negati
 });
 
 /**
+ * #1241: member, conversion and list errors the expectation set does not hold, from the classified pairs (Sol's
+ * #1241 comment) and one sibling per repair the current checker gives: a number given a unit at a declaration, a
+ * property, an operation's value, an element and an argument, an angle; text converted; a number shown as text in a
+ * property; the members of an angle, an object, a dict and text, a list's method read as a property; `+` of a list
+ * and an element, a range or a set.
+ */
+const CLASSIFIED: readonly string[] = [
+  "let pause: duration = 3\nwait pause\nexit\n",
+  "let box = {pause: 1 s}\nbox.pause = 3\nwait box.pause\nexit\n",
+  "let n = 2\nlet p: duration = n + 1\nexit\n",
+  "let xs: duration[] = [1 s]\nxs.add(3)\nexit\n",
+  "function f(p: duration) { wait p }\nf(3)\nexit\n",
+  "let p: angle = 90\nexit\n",
+  'let day: date = "2026-10-28"\nexit\n',
+  'let record = {label: "old"}\nrecord.label = 5\nexit\n',
+  "let a = 90 deg\nsay a.degrees\nexit\n",
+  'let door = {name: "hall"}\nsay door["name"]\nexit\n',
+  "let toys = dict{collar: 1}\ntoys.add(2)\nexit\n",
+  "let toys = dict{collar: 1}\nsay toys.collar\nexit\n",
+  "let d = dict{a: 1}\nd.x = 2\nexit\n",
+  "let d = dict{a: 1}\nsay d.keys()\nexit\n",
+  'let t = "hello"\nsay t.size\nexit\n',
+  'let t = "hello"\nsay t.toUpperCase()\nexit\n',
+  'let t = "hello"\nsay t.length()\nexit\n',
+  'let t = "hello"\nsay t.trim\nexit\n',
+  'let t = "hello"\nsay t.substring\nexit\n',
+  'let items = ["a", "b"]\nsay items.join\nexit\n',
+  'let names = ["Ann"]\nsay names + "Bo"\nexit\n',
+  "let xs = [1]\nsay 2 + xs\nexit\n",
+  "let xs = [1]\nsay xs + (1..3)\nexit\n",
+  "let xs = [1]\nlet s = set[2]\nsay xs + s\nexit\n",
+  // (Codex r3: a text the conversion does not read; operands and ranges with arithmetic, at an operand or a list that
+  // is no stable path)
+  'let value: date = "bad"\nexit\n',
+  "let xs = [{n: 1}]\nsay (xs + {n: 2}).length\nexit\n",
+  "let xs: integer?[] = [1]\nsay (xs + null).length\nexit\n",
+  "let xs = [1]\nlet n = 1\nsay (xs + (n..(n + 2))).length\nexit\n",
+  "let xs = [1]\nlet n = 1\nsay (((n + 1)..4) + xs).length\nexit\n",
+  "let lists = [[1]]\nsay (1..3) + lists.random\nexit\n",
+];
+
+test("each member, conversion and list fix of the current checker is kept on the classified pairs (#1241)", () => {
+  const found = pairs(
+    CLASSIFIED.map((source) => ({ name: source, files: [{ path: "main.tease", source }] })),
+  );
+  assert.deepEqual(
+    found
+      .filter((pair) => pair.forms.length === 0 || !kept(pair))
+      .map((pair) => `${pair.record}\n  current: ${pair.current}\n  new:     ${pair.message}`),
+    [],
+  );
+  // (each source pairs a diagnostic with a fix)
+  assert.equal(new Set(found.map((pair) => pair.record)).size, CLASSIFIED.length);
+  // (Codex r1: a property stored on a type without it gets no read's repair, as the current checker gives none; a key
+  // the object may lack is read as a property only where it has one, and a value put in a list where it can hold it)
+  const messages = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    return analyseCore(request).diagnostics.map((diagnostic) => coreMessage(diagnostic, text));
+  };
+  assert.deepEqual(messages("let xs = [1]\nxs.join = 2\nexit\n"), [
+    "A list has no property 'join', so 'xs.join' cannot be used.",
+  ]);
+  assert.deepEqual(messages("let a = 90 deg\na.degrees = 2\nexit\n"), [
+    "An angle has no property 'degrees', so 'a.degrees' cannot be used.",
+  ]);
+  assert.deepEqual(messages('let a = {n: 1}\nsay a["missing"]\nexit\n'), [
+    `An object has no elements, so 'a["missing"]' cannot be used. Use a dict to look up by name. If 'a' has a ` +
+      "property 'missing', write 'a.missing' instead.",
+  ]);
+  assert.deepEqual(messages('let d = dict{a: 1}\nd.b = "x"\nexit\n'), [
+    "A dict has no property 'b', so 'd.b' cannot be used. If 'd' can hold the value, write 'd[\"b\"]' to store it " +
+      "by its key.",
+  ]);
+  assert.deepEqual(messages('let box = {n: 1}\nbox["n"] = "x"\nexit\n'), [
+    `An object has no elements, so 'box["n"]' cannot be used. Use a dict to look up by name. If 'box' has a ` +
+      "property 'n' that can hold the value, write 'box.n' instead.",
+  ]);
+  assert.deepEqual(messages('let xs = [1]\nsay xs + "x"\nexit\n'), [
+    `'+' cannot combine a list and text (string). If 'xs' can hold '"x"', write 'xs + ["x"]' for a new list, or ` +
+      `add it to 'xs' itself with 'xs.add("x")' on a line of its own.`,
+  ]);
+});
+
+/**
  * Sources whose diagnostic suggests code, `⟦…⟧` around the code the fix replaces: atomic and composed operands, scalar
  * and structured values, each fix's family once, and for an example of a property shown the lines the repaired source
  * says. A declaration's `= ...` keeps the source's own start value.
@@ -742,7 +992,103 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     '⟦let result: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
     /as '([^']*)'/,
   ],
+  // #1241 (TABLE r4.146): each code form pasted whole at the site its diagnostic sits on: a number given a unit, also an
+  // operation's value; text converted; a member the type has; a dict's key, read and stored; an object's property, read
+  // and stored; a list for a join, also where a written list takes it (Astra r1 B2)
+  ["let pause: duration = ⟦3⟧\nsay pause\nexit\n", /such as '([^']*)'/],
+  ["let n = 2\nlet p: duration = ⟦n + 1⟧\nsay p\nexit\n", /such as '([^']*)'/],
+  ['let day: date = ⟦"2026-10-28"⟧\nsay day.year\nexit\n', /with '([^']*)'\./, ["2026"]],
+  ['let at: time = ⟦"10:30"⟧\nsay at.hour\nexit\n', /with '([^']*)'\./, ["10"]],
+  ['let dt: datetime = ⟦"2026-10-28T10:00:00"⟧\nsay dt.year\nexit\n', /with '([^']*)'\./, ["2026"]],
+  [
+    'let ad: absoluteDateTime = ⟦"2026-10-28T10:00:00Z"⟧\nsay ad.toDateTime().year\nexit\n',
+    /with '([^']*)'\./,
+  ],
+  ["let a = 90 deg\nsay ⟦a.degrees⟧\nexit\n", /Use '([^']*)' for its size/, ["90"]],
+  ['let door = {name: "hall"}\nsay ⟦door["name"]⟧\nexit\n', /write '([^']*)' instead/, ["hall"]],
+  ['let box = {n: 1}\n⟦box["n"]⟧ = 2\nsay box.n\nexit\n', /write '([^']*)' instead/, ["2"]],
+  ["let toys = dict{collar: 1}\nsay ⟦toys.collar⟧\nexit\n", /key, write '([^']*)'/, ["1"]],
+  ['let d = dict{a: 1}\n⟦d.b⟧ = 2\nsay d["b"]\nexit\n', /write '([^']*)' to store it/, ["2"]],
+  // (Astra r2: each member's code on a nested receiver, an element and a dict value, valid where its receiver holds
+  // only the type it is for; a join's elements ones it shows)
+  [
+    'let box = {d: dict{a: 1}}\n⟦box.d.b⟧ = 2\nsay box.d["b"]\nexit\n',
+    /write '([^']*)' to store it/,
+    ["2"],
+  ],
+  ["let ds = dict{collar: {n: 1}}\nsay ⟦ds.collar⟧.n\nexit\n", /key, write '([^']*)'/, ["1"]],
+  ["let ds = [dict{collar: 1}]\nsay ⟦ds[0].collar⟧\nexit\n", /key, write '([^']*)'/, ["1"]],
+  [
+    "let box = {toys: dict{collar: 1}}\nsay ⟦box.toys.collar⟧\nexit\n",
+    /key, write '([^']*)'/,
+    ["1"],
+  ],
+  ['let box = {label: "hello"}\nsay ⟦box.label.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let items = ["hello"]\nsay ⟦items[0].size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let d = dict{a: " hello "}\nsay ⟦d["a"].trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
+  ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
+  ['let lists = [["a"]]\nsay ⟦lists[0].join⟧\nexit\n', /Write '([^']*)'/],
+  ["let items: integer[] = []\nsay ⟦items.join⟧\nexit\n", /Write '([^']*)'/],
+  ['let t = "hello"\nsay ⟦t.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
+  ['let t = "hello"\nsay ⟦t.toUpperCase()⟧\nexit\n', /Use '([^']*)'/, ["HELLO"]],
+  ['let t = "hello"\nsay ⟦t.length()⟧\nexit\n', /Write '([^']*)'/, ["5"]],
+  ['let t = " hello "\nsay ⟦t.trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
+  ['let items = ["a", "b"]\nsay ⟦items.join⟧\nexit\n', /Write '([^']*)'/],
+  ['let names = ["Ann"]\nsay ⟦names + "Bo"⟧\nexit\n', /write '([^']*)' for a new list/],
+  [
+    "let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n",
+    /write '([^']*)' for a new list/,
+    ["2"],
+  ],
+  ["let xs = [1]\nsay ⟦2 + xs⟧\nexit\n", /write '([^']*)' for a new list/],
+  ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /write '([^']*)' to add the numbers/, ["3"]],
 ];
+
+/**
+ * #1241 (Astra r1 B2): an `add` a list fix offers on a line of its own, which gives no list: pasted as a line before the
+ * join's line, the list itself where the join stood, `⟦…⟧` around the join; the run says the lines given.
+ */
+const ADDS: readonly (readonly [string, readonly string[]])[] = [
+  ['let names = ["Ann"]\nsay (⟦names + "Bo"⟧).length\nexit\n', ["2"]],
+  ["let xs = [1]\nlet ys: integer[] = ⟦xs + 2⟧\nsay ys.length\nexit\n", ["2"]],
+];
+
+test("a list fix's add, on a line of its own, compiles and runs where the fix offers it (#1241)", () => {
+  for (const [marked, says] of ADDS) {
+    const source = marked.replace(/[⟦⟧]/g, "");
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const text = messageSource([source]);
+    const found = analyseCore(request)
+      .diagnostics.map((diagnostic) =>
+        /add it to '([^']*)' itself with '([^']*)' on a line of its own/.exec(
+          coreMessage(diagnostic, text),
+        ),
+      )
+      .find((match) => match !== null);
+    assert.ok(found !== undefined && found !== null, `an add: ${source}`);
+    const [, list, statement] = found;
+    const line = marked.split("\n").find((candidate) => candidate.includes("⟦"))!;
+    const fixed = marked.replace(line, `${statement!}\n${line.replace(/⟦[^⟧]*⟧/, list!)}`);
+    const compiled = compileProject([{ path: "main.tease", source: fixed }]);
+    assert.deepEqual(
+      compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+      [],
+      fixed,
+    );
+    assert.ok(compiled.plan !== null, fixed);
+    const events = createFreshRuntimeSession(compiled.plan, {
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+    }).run().events;
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+      says,
+      fixed,
+    );
+  }
+});
 
 test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
   for (const [marked, pick, says] of REPAIRS) {
@@ -1019,6 +1365,88 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     [
       'let ds = [toDateTime("2026-01-01T00:00:00")]\nsay ds.random - ds[0]\nexit\n',
       "Subtract their dates with 'toDate(...)', or convert both with 'toAbsoluteDateTime()' for the elapsed time.",
+    ],
+    // #1241 (TABLE r4.146): where no complete code form stands at the site, the function or the step in words: a unit,
+    // a conversion of text not on one line; members of a receiver that is no stable path; a method's arguments; an
+    // add's key; a list joined of a receiver that is no stable path
+    [
+      "let n = 1\nlet p: duration = n /* c */ + 1\nexit\n",
+      "Put the expression in parentheses with a unit after them.",
+    ],
+    ['let day: date = ("2026-" +\n"10-28")\nexit\n', "Convert the text with the toDate function."],
+    // (Codex r3: a text the conversion does not read, or another value, which may be one)
+    ['let day: date = "bad"\nexit\n', "Convert the text with the toDate function."],
+    ['let day: date = "2026-02-30"\nexit\n', "Convert the text with the toDate function."],
+    ['let at: time = "25:00"\nexit\n', "Convert the text with the toTime function."],
+    [
+      'let text = "bad"\nlet day: date = text\nexit\n',
+      "Convert the text with the toDate function.",
+    ],
+    [
+      "let angles = [90 deg]\nsay angles.random.degrees\nexit\n",
+      "Use the toDeg function for its size in degrees.",
+    ],
+    ['let ts = ["a"]\nsay ts.random.trim\nexit\n', "Call the trim method with parentheses."],
+    [
+      'let ts = ["a"]\nsay ts.random.length()\nexit\n',
+      "Read the length property without parentheses.",
+    ],
+    ['let ts = ["a"]\nsay ts.random.size\nexit\n', "Use the length property."],
+    [
+      'let t = "hello"\nsay t.substring\nexit\n',
+      "Call the substring method with its arguments in parentheses.",
+    ],
+    ['let t = "hello"\nsay t.includes("l")\nexit\n', "Use the contains method."],
+    [
+      'let os = [{n: 1}]\nsay os.random["n"]\nexit\n',
+      "If the object has a property 'n', use a dot instead of brackets.",
+    ],
+    [
+      "let ds = [dict{a: 1}]\nsay ds.random.collar\nexit\n",
+      "To read a value by its key, write the key in brackets.",
+    ],
+    [
+      "let ds = [dict{a: 1}]\nds.random.b = 2\nexit\n",
+      "To store a value by its key, write the key in brackets.",
+    ],
+    [
+      "let toys = dict{collar: 1}\ntoys.add(2)\nexit\n",
+      "Assign the value to a key of the dict instead.",
+    ],
+    [
+      'let ls = [["A"]]\nsay ls.random + "B"\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    ["let ls = [[1]]\nsay 2 + ls.random\nexit\n", "Put the element in brackets for a new list."],
+    // (Astra r2, Codex r4: a join of elements whose type it cannot show, also of a list cleared or filled later, of
+    // lists, of a dict's objects, nested; of elements whose type is not known; a warning's receiver, which may be of
+    // another type or null, so its fix is in words)
+    ...[
+      "let items = [{n: 1}]\nsay items.join\nexit\n",
+      "let items = [{n: 1}]\nitems.clear()\nsay items.join\nexit\n",
+      "let items = []\nitems.add({n: 1})\nsay items.join\nexit\n",
+      "let items = [[1]]\nsay items.join\nexit\n",
+      "let ds = dict{a: {n: 1}}\nsay ds.values.join\nexit\n",
+      "let box = {items: [{n: 1}]}\nsay box.items.join\nexit\n",
+    ].map(
+      (source) =>
+        [
+          source,
+          "The join method joins only elements that can be shown as text, so select an element or a property first.",
+        ] as const,
+    ),
+    [
+      "let items = [hostValue]\nsay items.join\nexit\n",
+      "Call the join method with parentheses, on elements that can be shown as text.",
+    ],
+    [
+      'function show(x: string | integer) {\n  say x.trim\n}\nshow("a")\nshow(1)\nexit\n',
+      "Call the trim method with parentheses.",
+    ],
+    ['function show(x) {\n  say x.size\n}\nshow("a")\nshow(1)\nexit\n', "Use the length property."],
+    [
+      'function show(x: string?) {\n  say x.trim\n}\nshow("a")\nshow(null)\nexit\n',
+      "Call the trim method with parentheses.",
     ],
   ];
   for (const [source, fix] of cases) {
