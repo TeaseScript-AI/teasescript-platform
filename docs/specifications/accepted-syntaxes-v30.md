@@ -2754,7 +2754,7 @@ let answer = nickname otherwise askText "Name?"
   that is not `null`. The compile error names both readings, with the code as written:
 
   ```text
-  Put parentheses around what 'otherwise' belongs to: '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'.
+  It is unclear what 'otherwise' belongs to. Put parentheses around that part: '(count otherwise 0) + 1' uses 0 when 'count' is null; 'count otherwise (0 + 1)' uses '0 + 1' when 'count' is null.
   ```
 
 - A sign before the fallback can be read only one way, as in `path.lastIndexOf("/") otherwise -1`. A unit belongs to

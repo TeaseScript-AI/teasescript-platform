@@ -1285,8 +1285,16 @@ export class Parser {
       const text = (expression: Expression) => this.textOf(expression.span, expression.span);
       const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
       return [
-        `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`,
-        `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`,
+        {
+          code: `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`,
+          subject: value,
+          fallback,
+        },
+        {
+          code: `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`,
+          subject: whole,
+          fallback: rest,
+        },
       ];
     });
     return true;
@@ -1311,37 +1319,50 @@ export class Parser {
       const [all, own] = [text(whole), text(operand)];
       if (before) {
         const [rest, fallback] = [all.slice(own.length), text(operand.right)];
+        const subject = text(operand.left);
         return [
-          `(${own})${rest}`,
-          `${own.slice(0, own.length - fallback.length)}(${fallback}${rest})`,
+          { code: `(${own})${rest}`, subject, fallback },
+          {
+            code: `${own.slice(0, own.length - fallback.length)}(${fallback}${rest})`,
+            subject,
+            fallback: `${fallback}${rest}`,
+          },
         ];
       }
       const [rest, value] = [all.slice(0, all.length - own.length), text(next.left)];
-      return [`${rest}(${own})`, `(${rest}${value})${own.slice(value.length)}`];
+      const fallback = text(next.right);
+      return [
+        { code: `${rest}(${own})`, subject: value, fallback },
+        {
+          code: `(${rest}${value})${own.slice(value.length)}`,
+          subject: `${rest}${value}`,
+          fallback,
+        },
+      ];
     });
   }
 
   /**
    * Reports the `otherwise` at `operator`, which needs parentheses, naming both `readings` with the code as written. Only
-   * a short expression is quoted, which also keeps a long chain from being written out for each error in it; an example
-   * stands in for a longer one.
+   * a short expression is quoted, which also keeps a long chain from being written out for each error in it.
    */
   #reportUnclearOtherwise(
     operator: SourceSpan,
     span: SourceSpan,
-    readings: () => readonly [string, string],
+    readings: () => readonly { code: string; subject: string; fallback: string }[],
   ): void {
-    let quoted = ", as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'";
+    let message = "It is unclear what 'otherwise' belongs to. Put parentheses around that part";
     if (span.end.offset - span.start.offset <= 240) {
-      const [nearest, all] = readings();
-      if ([nearest, all].every((reading) => reading.length <= 60 && !reading.includes("\n")))
-        quoted = `: '${nearest}' or '${all}'`;
+      const choices = readings();
+      if (choices.every(({ code }) => code.length <= 60 && !code.includes("\n")))
+        message += `: ${choices
+          .map(
+            ({ code, subject, fallback }) =>
+              `'${code}' uses ${/\s/.test(fallback) ? `'${fallback}'` : fallback} when '${subject}' is null`,
+          )
+          .join("; ")}`;
     }
-    this.reportSpan(
-      parserDiagnosticCode.mixedOtherwise,
-      `Put parentheses around what 'otherwise' belongs to${quoted}.`,
-      operator,
-    );
+    this.reportSpan(parserDiagnosticCode.mixedOtherwise, `${message}.`, operator);
   }
 
   *#parseRange(): ParseTask<Expression | null> {

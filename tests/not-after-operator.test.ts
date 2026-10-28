@@ -165,7 +165,7 @@ test("a comparison too long to quote, an operand with an error of its own, or an
       ],
       [
         "TSP041",
-        "Put parentheses around what 'otherwise' belongs to: '(x otherwise false) == not a' or 'x otherwise (false == not a)'.",
+        "It is unclear what 'otherwise' belongs to. Put parentheses around that part: '(x otherwise false) == not a' uses false when 'x' is null; 'x otherwise (false == not a)' uses 'false == not a' when 'x' is null.",
         "otherwise",
       ],
     ],
