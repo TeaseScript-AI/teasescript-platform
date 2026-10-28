@@ -5,6 +5,7 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CARRIER_ROLES, operandsOf } from "../src/type-inference/core/carriers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { compactAnalysis, coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
@@ -1645,6 +1646,157 @@ test("a selection consumes only its own emptiness mark below get, a loop's visit
         differing.push(`${name}${reversed ? " reversed" : ""}: ${got.join("; ")}`);
     }
   }
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * #1303: host data may be an empty list whatever a written type or a collection test says of its elements (V30 §16;
+ * a test proves no element, #1245), so C6 keeps a selection's `empty-check` and its warning at the selection. #1303's
+ * two witnesses as exact records; then its matrix: `first`, `last` and `random`, with and without a collection test, on
+ * a host list written, with nullable elements, copied, nested, below a property or untyped, beside the `fromJson`,
+ * `load` and literal controls, where only a literal with an element is quiet; and beside it the same data through a
+ * computed key's load, a parameter, loops and an interpolation, with an opaque and a literal control. Every program
+ * alike forward, with the sharing of answers off, and with the consumers' and solver's orders reversed.
+ */
+test("a host list's selection keeps its empty-check under a written type or a collection test (#1303)", () => {
+  const modes: readonly (readonly [string, (run: () => CompactRecord) => CompactRecord])[] = [
+    ["forward", (run) => run()],
+    ["unshared", (run) => withoutSharing(run)],
+    [
+      "reversed",
+      (run) =>
+        withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), run),
+        ),
+    ],
+  ];
+  const analysedIn = (source: string): CompactRecord => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [first, ...others] = modes.map(([, mode]) => mode(() => compactAnalysis(request)));
+    others.forEach((other, index) =>
+      assert.deepEqual(other, first, `${source}(${modes[index + 1]![0]})`),
+    );
+    return first!;
+  };
+  const witnesses: readonly (readonly [string, string])[] = [
+    [
+      'let xs: integer[] = hostValue\nsay "BEFORE"\nlet out = xs.first\nsay "AFTER"\nexit\n',
+      `outcome warning-runtime-check
+       D written-target warning 20:29 unknown
+       D written-target warning 20:29 unknown
+       D member-read warning 53:61 unknown
+       D member-read warning 53:61 unknown
+       C copy-type xs [list] 20:29
+       C copy-type xs.element [integer] 20:29
+       B copy-type xs [list] 20:29
+       C null-check xs [non-null] 53:61
+       C empty-check xs [list] 53:61`,
+    ],
+    [
+      'let xs = hostValue\nif xs is integer[] {\n    let out = xs.first\n    say "AFTER"\n}\nexit\n',
+      `outcome warning-runtime-check
+       D member-read warning 54:62 unknown
+       C empty-check xs [list] 54:62`,
+    ],
+  ];
+  for (const [source, text] of witnesses)
+    assert.deepEqual(recordDifferences(recordOf(text), analysedIn(source)), [], source);
+  // a program's empty-checks, each its target at a read, and at each one's site a warning per check there (§4)
+  const differing: string[] = [];
+  const expect = (source: string, owed: readonly (readonly [string, string])[]): void => {
+    const record = analysedIn(source);
+    const at = (site: CompactSite): string => `${site.offset}:${site.end}`;
+    const got = record.checks
+      .filter((check) => check.kind === "empty-check")
+      .map((check) => `${check.target} [${check.against.join(", ")}] ${at(check.site)}`);
+    const expected = owed.map(([target, read]) => {
+      const start = source.lastIndexOf(read);
+      return `${target} [list] ${start}:${start + read.length}`;
+    });
+    const unwarned = record.checks
+      .filter((check) => check.kind === "empty-check")
+      .filter(
+        (check) =>
+          record.checks.filter((other) => !other.boundary && at(other.site) === at(check.site))
+            .length !==
+          record.diagnostics.filter(
+            (diagnostic) =>
+              diagnostic.kind === "member-read" && at(diagnostic.site) === at(check.site),
+          ).length,
+      );
+    if (JSON.stringify(got) !== JSON.stringify(expected) || unwarned.length > 0)
+      differing.push(`${source}: ${got.join("; ")}${unwarned.length > 0 ? " (unwarned)" : ""}`);
+  };
+  const carriers: readonly (readonly [string, string])[] = [
+    ["let xs: integer[] = hostValue", "xs"],
+    ["let xs: integer?[] = hostValue", "xs"],
+    ["let ys: integer[] = hostValue\nlet xs = ys", "xs"],
+    ["let rows: integer[][] = hostValue\nlet xs = rows[0]", "xs"],
+    ["let ys: integer[] = hostValue\nlet o = { items: ys }", "o.items"],
+    ["let xs = hostValue", "xs"],
+    ["let xs: integer[] = fromJson(hostValue, default: [])", "xs"],
+    ["let xs = fromJson(hostValue, default: [1])", "xs"],
+    ['let xs: integer[] = load("k", default: [])', "xs"],
+    ['let xs = load("k", default: [1])', "xs"],
+    ["let xs: integer[] = []", "xs"],
+    ["let xs: integer[] = [1]", "xs"],
+  ];
+  for (const [carrier, owner] of carriers)
+    for (const tested of [false, true])
+      for (const selection of ["first", "last", "random"]) {
+        const read = `${owner}.${selection}`;
+        const body = tested
+          ? `if ${owner} is integer[] {\n    let out = ${read}\n    say "AFTER"\n}`
+          : `say "BEFORE"\nlet out = ${read}\nsay "AFTER"`;
+        expect(
+          `${carrier}\n${body}\nexit\n`,
+          carrier === "let xs: integer[] = [1]" ? [] : [[owner, read]],
+        );
+      }
+  // a computed key's load is host data (F19), below a property, written or tested, and gathered in a literal too (one
+  // answer for every path below its root, whose mark is the path's, in either order); so is a written parameter's host
+  // argument; a loop over a host list may not run, so the list it fills may stay empty (F5a); a loop's variable over a
+  // host list, nested and written, tested or copied to a written place, may be empty; so may an interpolated written
+  // host list (C11); an opaque value stored after `[]` keeps its check, selected or looped over (F5a); a literal with a
+  // host element holds one
+  const computed = 'let k = askText "key?"\n';
+  const raw = "let key: string = hostValue\nlet raw = load(key, default: {items: [1]})\n";
+  const loads = `${computed}let rows = [load(k, default: [1]), load(k, default: [2])]\n`;
+  expect(`${computed}let xs: integer[] = load(k, default: [1])\nlet out = xs.first\nexit\n`, [
+    ["xs", "xs.first"],
+  ]);
+  expect(`${raw}let xs: integer[] = raw.items\nlet out = xs.first\nexit\n`, [["xs", "xs.first"]]);
+  expect(`${raw}if raw.items is integer[] {\n    let out = raw.items.first\n}\nexit\n`, [
+    ["raw.items", "raw.items.first"],
+  ]);
+  expect(`${loads}let xs: integer[] = rows[0]\nlet out = xs.first\nexit\n`, [["xs", "xs.first"]]);
+  expect(
+    "let rows = hostValue\nfor row in rows {\n    let xs: integer[] = row\n    let out = xs.first\n}\nexit\n",
+    [["xs", "xs.first"]],
+  );
+  expect("function f(xs: integer[]) {\n    return xs.first\n}\nlet out = f(hostValue)\nexit\n", [
+    ["f.xs", "xs.first"],
+  ]);
+  expect(
+    "let xs: integer[] = hostValue\nlet ys: integer[] = []\nfor x in xs {\n    ys.add(x)\n}\nlet out = ys.first\nexit\n",
+    [["ys", "ys.first"]],
+  );
+  expect("let rows: integer[][] = hostValue\nfor xs in rows {\n    let out = xs.first\n}\nexit\n", [
+    ["xs", "xs.first"],
+  ]);
+  expect(
+    "let rows = hostValue\nfor xs in rows {\n    if xs is integer[] {\n        let out = xs.first\n    }\n}\nexit\n",
+    [["xs", "xs.first"]],
+  );
+  expect('let xs: string[] = hostValue\nsay "${xs}"\nexit\n', [["xs", "xs"]]);
+  const opaque = 'let s = "zzz"\nlet xs: string[] = []\nxs = s.findAll(/a/)\n';
+  expect(`${opaque}let out = xs.first\nexit\n`, [["xs", "xs.first"]]);
+  expect(
+    `${opaque}let ys: string[] = []\nfor x in xs {\n    ys.add(x)\n}\nlet out = ys.first\nexit\n`,
+    [["ys", "ys.first"]],
+  );
+  expect("let xs: integer[] = [hostValue]\nlet out = xs.first\nexit\n", []);
   assert.deepEqual(differing, []);
 });
 

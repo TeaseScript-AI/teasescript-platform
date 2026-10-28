@@ -7,6 +7,7 @@ import {
   defaultOf,
   emptyAt,
   heldReference,
+  hostAt,
   ingressNull,
   ONLY_NULL,
   OPAQUE_MEMBER,
@@ -23,6 +24,7 @@ import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
   keptKey,
   keyOf,
+  keyPath,
   keyPlace,
   type Definition,
   type ForLoopFacts,
@@ -143,7 +145,7 @@ export class Values {
     };
     if (program.isHost(keyPlace(key))) {
       route("contract");
-      return { items: [unknownItem(REASON.external)], def: null, guardable: false };
+      return { items: hostAt(keyPath(key)), def: null, guardable: false };
     }
     if (yield* contract.refReceiver(key)) {
       route("contract");
@@ -594,7 +596,7 @@ export class Values {
         return contract.entered(value, yield* this.#operationItems(operation, node, rest));
       if (program.hasOf.has(value) || program.cellOwner.has(value))
         return yield* this.#literalItems(value, rest, node);
-      if (program.isHost(value)) return [unknownItem(REASON.external)];
+      if (program.isHost(value)) return hostAt(rest);
       return yield* this.keyItems(keyOf(value, rest), node);
     } finally {
       this.pass.solver.leaveRead();
@@ -646,7 +648,8 @@ export class Values {
             [item],
           ),
         );
-      else if (item.tag === "unknown") out.push(item);
+      // (an unknown's element: a collection below it may hold none)
+      else if (item.tag === "unknown") out.push(item, ...emptyAt(rest));
     }
     return mergeItems(out, this.pass.program.scope);
   }
@@ -729,13 +732,15 @@ export class Values {
   ): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
     const below = rest.length > 0 && c.kind === "load" && c.key === null;
-    return yield {
+    const items = yield {
       key: below ? joinParts("op-below", c.result) : joinParts("op", c.result, rest),
       kind: "value",
       file: site.file,
       offset: site.start,
       make: () => this.operationValue(c, node, rest),
     };
+    // (the one answer below the root is the path's but for the mark of an element step there, `hostAt`)
+    return below ? [...items, ...emptyAt(rest)] : items;
   }
 
   /** The demand of `#operationItems`. */
@@ -796,6 +801,7 @@ export class Values {
       ];
     } else if (c.kind === "load" && c.key === null) {
       // F19: a computed key is host data
+      // (below the root one answer for every path, `#operationItems`, which marks an element step)
       if (rest.length > 0) out = external();
       else {
         const nullDefault =

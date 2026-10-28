@@ -811,7 +811,7 @@ export class Contract {
     const place = keyPlace(key);
     const found = program.places[place];
     if (found === undefined) return [unknownItem(REASON.external)];
-    if (program.isHost(place)) return [unknownItem(REASON.external)];
+    if (program.isHost(place)) return hostAt(keyPath(key));
     if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
     // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
     const items = yield* this.#keyThrough(key, 0);
@@ -1736,7 +1736,8 @@ export class Contract {
             item,
           ]),
         );
-      else if (item.tag === "unknown") out.push(item);
+      // (an unknown's element: a collection below it may hold none)
+      else if (item.tag === "unknown") out.push(item, ...emptyAt(rest));
     }
     return mergeItems(out, this.pass.program.scope);
   }
@@ -1792,7 +1793,7 @@ export class Contract {
       if (c.key === null) {
         const nullDefault =
           rest.length === 0 && c.fallback !== null && (yield* this.onlyNull(c.fallback)).length > 0;
-        return [unknownItem(REASON.external), ...(nullDefault ? [ingressNull()] : [])];
+        return [...hostAt(rest), ...(nullDefault ? [ingressNull()] : [])];
       }
       const expected = yield* this.expectedOf(c, rest);
       if (expected !== null) return expected;
@@ -4609,23 +4610,25 @@ export class Contract {
   ): Work<readonly Item[]> {
     const { program, values } = this.pass;
     program.work.charge("invSteps");
-    const known = this.#loadsBelowOf.get(groups);
-    if (known !== undefined) return known;
-    const items: Item[] = [];
-    for (const group of groups) {
-      if (!group.loads) continue;
-      for (const members of [group.read, group.rest])
-        for (const entry of members) {
-          const answer = exact
-            ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
-            : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
-          for (const item of answer) items.push(item);
-        }
+    let merged = this.#loadsBelowOf.get(groups);
+    if (merged === undefined) {
+      const items: Item[] = [];
+      for (const group of groups) {
+        if (!group.loads) continue;
+        for (const members of [group.read, group.rest])
+          for (const entry of members) {
+            const answer = exact
+              ? yield* values.valueItems(entry.value, entry.g?.node ?? node, after)
+              : withWriter(yield* this.contractOfValueAt(entry.value, after), group.writer);
+            for (const item of answer) items.push(item);
+          }
+      }
+      merged = withoutEmpty(mergeItems(items, program.scope));
+      this.#keep(1 + merged.length);
+      this.#loadsBelowOf.set(groups, merged);
     }
-    const below = mergeItems(items, program.scope);
-    this.#keep(1 + below.length);
-    this.#loadsBelowOf.set(groups, below);
-    return below;
+    // (the one answer is every step's but for the mark of an element step there, `hostAt`)
+    return [...merged, ...emptyAt(after)];
   }
 
   /**
@@ -5246,6 +5249,14 @@ export function conversionKind(result: string): ItemTag {
 /** A stored or parsed collection may hold none. */
 export function emptyAt(rest: readonly string[]): Item[] {
   return rest.at(-1) === "element" ? [EMPTY] : [];
+}
+
+/**
+ * Host data at a path (C9; F19: a computed key's load too): unknown, and a collection there may hold none, whatever a
+ * written type or a test later says of its elements (V30 §16).
+ */
+export function hostAt(rest: readonly string[]): Item[] {
+  return [unknownItem(REASON.external), ...emptyAt(rest)];
 }
 
 /** The lookup cut by the nesting limit: an unknown destination (V30 §18). */

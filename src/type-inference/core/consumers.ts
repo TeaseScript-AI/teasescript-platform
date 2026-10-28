@@ -2051,7 +2051,12 @@ export class Consumers {
           ["element"],
         );
         this.#selection(value, node, c.site, "${...}");
-      }
+      } else if (
+        // an unknown under a written list type (host data): the type's own check covers its elements, not one's presence
+        kinds.some((item) => item.tag === "unknown") &&
+        this.#run(this.pass.contract.contractOfValue(value)).some((item) => item.tag === "list")
+      )
+        this.#selection(value, node, c.site, "${...}");
       return;
     }
     const operator = operatorOf(c);
