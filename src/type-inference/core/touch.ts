@@ -63,7 +63,8 @@ export interface Touch {
    */
   readonly met: Found;
   /**
-   * Whether a whole-copy ring's shared trie, or a projection of one, stands in it (`Touches.ring`): a containment there
+   * Whether a whole-copy ring's shared trie, or a projection of one, stood in its parts when it was made (`Touches.ring`;
+   * a ring marked later is seen only on the ring's own node and the projections taken of it after): a containment there
    * owes as the accepted design has it, as each member decides by its own first store (#1270, Astra's review B1).
    */
   readonly ring: boolean;
