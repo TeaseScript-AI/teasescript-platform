@@ -5215,8 +5215,10 @@ one unit: `5 s ms` and `1 h 30 min` are errors, and parts are added with `+`, as
 
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
 `calendar` are compile errors that suggest it, or, where only an exact duration fits (a wait, timer, timeout, say
-pacing, media position, or media repeat budget), a length in days or weeks, in words when the month or year is part of a
-calculation there. `m` is not a duration unit, because it would be ambiguous between minutes and months. `calendar` is a
+pacing, media position, media repeat budget, or a variable, global, or parameter written as `duration` or `duration?`),
+a length in days or weeks. Both choices are named in words when the month or year is part of a calculation there, or
+an argument or an assigned value, which may be a `duration` parameter or a timer's `remaining`. `m` is not a duration
+unit, because it would be ambiguous between minutes and months. `calendar` is a
 unit word only where a unit can stand; elsewhere it is an ordinary name. A calendar week is 7 calendar days and a
 calendar year 12 calendar months. Adding months or years to a day that the target month lacks gives that month's last
 day: January 31 plus one calendar month is February 28, or 29 in a leap year, and February 29 plus one calendar year is

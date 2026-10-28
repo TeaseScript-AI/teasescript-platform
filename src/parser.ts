@@ -105,7 +105,7 @@ import {
   parseParenthesized,
   parseStringLiteral,
 } from "./parser/literals.js";
-import { parseDurationUnit, parseUnitSuffix } from "./parser/units.js";
+import { mayRequireExactDuration, parseDurationUnit, parseUnitSuffix } from "./parser/units.js";
 
 export interface ParseResult {
   readonly program: Program;
@@ -844,6 +844,7 @@ export class Parser {
         this.synchronizeStatement();
         return null;
       }
+      mayRequireExactDuration(this, value);
       if (!isAssignmentTarget(expression)) {
         this.reportSpan(
           parserDiagnosticCode.invalidAssignmentTarget,
@@ -1665,7 +1666,10 @@ export class Parser {
         if (sawNamed && value !== null) this.#reportPositionalAfterNamed(value.span);
         sawPositional = true;
       }
-      if (argument !== null) argumentsList.push(argument);
+      if (argument !== null) {
+        argumentsList.push(argument);
+        mayRequireExactDuration(this, argument.value);
+      }
       this.skipNewlines();
       if (!this.match(TokenKind.Comma)) break;
       this.skipNewlines();

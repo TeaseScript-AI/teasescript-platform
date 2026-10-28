@@ -5,6 +5,7 @@ import type {
   DurationUnit,
   UnitExpression,
   NumberLiteral,
+  TypeAnnotation,
 } from "../ast.js";
 import { angleUnit } from "../angle.js";
 import { createDiagnostic, DiagnosticSeverity } from "../diagnostics.js";
@@ -224,6 +225,32 @@ const LENGTH_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "othe
  * `(1 month / 1 calendar month) * 1 s`, the fix names both choices in words.
  */
 export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
+  adviseDuration(parser, value, subject);
+}
+
+/**
+ * `value` is where the parser cannot tell whether only an exact duration fits: an argument, which may be a `duration`
+ * parameter, or an assigned value, which may be a timer's `remaining`. A month or a year without `calendar` in it gets
+ * both choices in words, as inside arithmetic (see `requireExactDuration`).
+ */
+export function mayRequireExactDuration(parser: Parser, value: Expression): void {
+  adviseDuration(parser, value, null);
+}
+
+/** Whether a written type holds exact durations and nothing else but `null`, as `duration` and `duration?` do. */
+export function holdsOnlyExactDurations(type: TypeAnnotation): boolean {
+  let durations = false;
+  const pending = [type];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.kind === "optionalType") pending.push(next.value);
+    else if (next.kind === "unionType") for (const member of next.members) pending.push(member);
+    else if (next.kind === "namedType" && next.name === "duration") durations = true;
+    else if (next.kind !== "namedType" || next.name !== "null") return false;
+  }
+  return durations;
+}
+
+function adviseDuration(parser: Parser, value: Expression, subject: string | null): void {
   const pending: { readonly node: Expression; readonly inside: boolean }[] = [
     { node: value, inside: false },
   ];
@@ -236,11 +263,13 @@ export function requireExactDuration(parser: Parser, value: Expression, subject:
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        inside
+        inside || subject === null
           ? `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
           : `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
         error!.span,
       );
+      // A command that takes the value as an argument knows its place, and its advice comes after.
+      parser.calendarUnitErrors.set(node, parser.diagnostics[index]!);
     } else if (node.kind === "parenthesizedExpression")
       pending.push({ node: node.expression, inside });
     else if (node.kind === "unaryExpression" && node.operator !== "not")

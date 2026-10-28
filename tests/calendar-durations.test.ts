@@ -536,7 +536,9 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
 });
 
 test("where only an exact duration fits, a month or a year without 'calendar' asks for days or weeks", () => {
-  const header = "let n = 2\nlet c = 1 calendar month\nfunction f(d) {\n  return 1 s\n}\n";
+  const header =
+    "let n = 2\nlet c = 1 calendar month\nfunction f(d) {\n  return 1 s\n}\n" +
+    "function rest(length: duration) {\n  wait length\n}\nlet t = timer async 10 s {\n}\n";
   const form = 'askForm "Q", fields: { ok: false }, onTimeout: "submit", timeout:';
   for (const [source, subject, written] of [
     ["wait #", "A wait", "1 month"],
@@ -555,6 +557,10 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
       "A cue position",
       "1 month",
     ],
+    // A written type that holds only durations.
+    ["let delay: duration = #\nwait delay", "'delay'", "1 month"],
+    ["global delay: duration? = #", "'delay'", "n years"],
+    ["function pause(length: duration = #) {\n  wait length\n}", "'length'", "1 month"],
   ] as const) {
     const [unit, example] = /y/u.test(written) ? ["year", "365 days"] : ["month", "30 days"];
     assert.deepEqual(
@@ -590,13 +596,21 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
     ["wait (1 month / (2 * 1 calendar month)) * 1 s", [inWords("month")]],
     ["wait (1 month / c) * 1 s", [inWords("month")]],
     ['showButton "Go", timeout: f(1) otherwise 1 y', [inWords("year")]],
+    // An argument may be for a 'duration' parameter, and an assigned value for a timer's or a media handle's
+    // duration, which the parser cannot tell.
+    ["rest(1 month)", [inWords("month")]],
+    ["wait f(1 month)", [inWords("month")]],
+    ["t.remaining = 1 month", [inWords("month")]],
+    ["c = 2 years", [inWords("year")]],
   ] as const)
     assert.deepEqual(diagnostics(`${header}${source}\nexit`), expected, source);
-  // A month that the value only passes on keeps the calendar fix, which compiles there.
-  assert.deepEqual(diagnostics(`${header}wait f(1 month)\nexit`), [
-    ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
-  ]);
-  assert.notEqual(compileSource(`${header}wait f(1 calendar month)\nexit`).plan, null);
+  // A written type that also holds calendar durations keeps the calendar fix, which compiles there.
+  for (const type of ["calendarDuration", "duration | calendarDuration"]) {
+    assert.deepEqual(diagnostics(`let d: ${type} = 1 month\nexit`), [
+      ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
+    ]);
+    assert.notEqual(compileSource(`let d: ${type} = 1 calendar month\nexit`).plan, null, type);
+  }
 });
 
 test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {
