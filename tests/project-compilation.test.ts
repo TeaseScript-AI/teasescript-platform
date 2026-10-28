@@ -548,4 +548,19 @@ test("a file or folder the host could not load keeps its warning only where code
     ),
     unreadableFiles.map(({ path }) => `${path} TSC011`),
   );
+  // A computed target in a project of main.tease alone may start them too.
+  assert.deepEqual(
+    reported(
+      compileProject(
+        [
+          {
+            path: "main.tease",
+            source: 'let choice = askText "Which?"\ncall script("rooms/${choice}.tease")\nexit',
+          },
+        ],
+        { unreadableFiles },
+      ),
+    ),
+    unreadableFiles.map(({ path }) => `${path} TSC011`),
+  );
 });
