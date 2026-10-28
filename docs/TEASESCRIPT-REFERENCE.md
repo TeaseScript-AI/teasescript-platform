@@ -894,9 +894,10 @@ let values = (1..=3).toList()
 `min(list, by: "property")`, the same for `max`
 
 - **Gives:** `round`, `floor`, `ceil` give an `integer` (`round` takes halves away from zero); with `decimals:` a
-  `number`. `min`/`max` take numbers, durations, calendar durations of one family, angles or one date kind, and keep
-  `integer` when all are.
-- **Fails:** mixed kinds; `null`; an empty list.
+  `number`. `min`/`max` take numbers, durations, calendar durations of one family (compared as calendar quantities
+  without conversion to days or seconds), angles or one date kind, directly or from an explicitly named `by:` property
+  in a list of objects, and keep `integer` when all are.
+- **Fails:** mixed kinds or calendar families; `null`; an empty list.
 - **Status:** Implemented · [rounding](specifications/accepted-syntaxes-v30.md#type-conversion),
   [decimals](specifications/accepted-syntaxes-v30.md#numeric-functions)
 
@@ -1363,9 +1364,9 @@ let nickname: string? = load("nickname", default: null)
   `data:` URLs unless `files: false`. Into a written `object`, every JSON key is kept, and a property the object default
   names takes the default's value when it is missing or of the wrong type.
 - **Fails:** calendar durations, ranges, scripts, regexes and handles in JSON.
-- **Status:** Implemented. Type rule ahead: JSON of the wrong shape gives the default, JSON objects decode to objects,
-  and a default of another type needs a declared union; today such JSON is returned unchanged, JSON objects decode to
-  dicts, and a default of any type is accepted ·
+- **Status:** Implemented. Type rule ahead: JSON of the wrong shape gives the default, JSON objects decode to objects
+  with an object default or written object type and to dicts otherwise, and a default of another type needs a declared
+  union; today such JSON is returned unchanged, JSON objects decode to dicts, and a default of any type is accepted ·
   [JSON](specifications/accepted-syntaxes-v30.md#json-and-base64)
 
 ```tease

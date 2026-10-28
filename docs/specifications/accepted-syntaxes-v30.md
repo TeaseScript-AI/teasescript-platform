@@ -1737,9 +1737,10 @@ ceil(-2.5)   // -2
 `min(...)` and `max(...)` return the smallest or largest of two or more values, or of the values of one list
 ([§16](#statistics)), which are all numbers, all durations, all calendar durations of one family, all angles, or all
 date and time values of one kind ([§35](#35-date-time-and-durations)). The result is an `integer` when every argument is
-an `integer`, a `number` otherwise, and for durations, angles, and date and time values the chosen value itself. Mixing
-numbers, durations, calendar durations or their families, angles, or temporal kinds, other values, `null`, and named
-arguments are compile errors when the types show them, and runtime errors otherwise:
+an `integer`, a `number` otherwise, and for durations, angles, and date and time values the chosen value itself.
+`by: "property"` compares the explicitly named property of each object in one list; mixing numbers, durations,
+calendar durations or their families, angles, or temporal kinds, other values, `null`, and other named arguments are
+compile errors when the types show them, and runtime errors otherwise:
 
 ```text
 let minutes = min(20, 5 + punishments)
@@ -2573,10 +2574,9 @@ stddev(scores)          // 2.8809720581775866
 max(scores)             // 18
 ```
 
-- The values are numbers or durations, for `sum`, `min`, and `max` also angles, and for `min` and `max` also date and
-  time values of one kind
-  ([§35](#35-date-time-and-durations)). With `by:`, the values are a property of a list of objects:
-  `median(sessions, by: "count")`.
+- The values are numbers or durations, for `sum`, `min`, and `max` also angles, and for `min` and `max` also calendar
+  durations of one family or date and time values of one kind ([§35](#35-date-time-and-durations)). With `by:`, the
+  values are an explicitly named property of a list of objects: `median(sessions, by: "count")`.
 - `percentile(list, p)` is the value that `p` percent of the values lie at or below, for `p` from 0 through 100: in
   ascending order, the value at rank p/100 × (n − 1), between the two nearest values in proportion.
   `percentile(list, 50)` is the median, the middle value or the average of the two middle values.
@@ -2586,7 +2586,8 @@ max(scores)             // 18
   numbers. Durations give durations, the `sum` of angles is an angle, and `min` and `max` give the chosen value.
 - The statistics are computed exactly and rounded once, to the number nearest the exact result, so they are the same
   on every device, also for values that cancel or are very large or very small.
-- The statistics take durations, not calendar durations, because a calendar day or month has no fixed length.
+- Only `min` and `max` take calendar durations of one family, comparing calendar quantities without conversion to days
+  or seconds.
 - An empty list, and a list of one value for `stddev`, is a compile error when the compiler can see it, and runtime
   error `TSR018` otherwise. A percentage outside 0 through 100 is a compile error when the compiler can see it, and
   runtime error `TSR039` otherwise. Values of other or mixed kinds, and a missing `by:` property, are compile errors
