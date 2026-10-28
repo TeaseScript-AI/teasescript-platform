@@ -436,16 +436,26 @@ function stopRun(source: string, allowance?: number): StopRun {
   return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
 }
 
-/** The lowest and highest allowance of a source's settled walk stops. */
-function walkEnds(source: string): readonly [number, number] {
+/** A source's settled phases, each with its lowest and highest stopping allowance (`phaseEnds`). */
+function settledEnds(source: string): Map<string, readonly [number, number]> {
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
   assert.ok(request !== null);
-  const walk = phaseEnds(analyseCore(request).budget.total, (allowance) => {
+  return phaseEnds(analyseCore(request).budget.total, (allowance) => {
     const { stoppedIn, settled } = withTestAllowance(allowance, () => analyseCore(request)).budget;
     return settled ? stoppedIn : null;
-  }).get("walk");
+  });
+}
+
+/** The lowest and highest allowance of a source's settled walk stops. */
+function walkEnds(source: string): readonly [number, number] {
+  const walk = settledEnds(source).get("walk");
   assert.ok(walk !== undefined, source);
   return walk;
+}
+
+/** The highest allowance at which a source's analysis stops before admission settled. */
+function lastUnsettled(source: string): number {
+  return Math.min(...[...settledEnds(source).values()].map(([low]) => low)) - 1;
 }
 
 /**
@@ -746,18 +756,9 @@ test("a stop after admission settled marks an inferred list's default it leaves 
  */
 test("a stop before admission settled marks the stores into inferred places and keeps the written ones", () => {
   const source = 'let count = 1\ncount = hostValue\nlet n: integer = hostOther\nsay "DONE"\nexit\n';
-  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
-  assert.ok(request !== null);
   const unstopped = stopRun(source);
-  const settled = phaseEnds(unstopped.answers.budget.total, (allowance) => {
-    const { stoppedIn, settled: done } = withTestAllowance(allowance, () =>
-      analyseCore(request),
-    ).budget;
-    return done ? stoppedIn : null;
-  });
-  const first = Math.min(...[...settled.values()].map(([low]) => low));
   const store = source.indexOf("hostValue");
-  for (const allowance of [ALLOWANCE, first - 1]) {
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
     const stopped = stopRun(source, allowance);
     assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
     assert.ok(
@@ -873,6 +874,31 @@ test("a host read keeps its boundary check at a stop whatever the script stores 
       [],
       source,
     );
+  }
+});
+
+/**
+ * Before admission settled, a store into a written type checks each part of a collection literal the type reaches at the
+ * part's own site, as A8 does (TABLE r4.117, Codex r12's final-check B2): a host read as a written list's element, a
+ * host property the script stored, a nested list's element. At a stop in the setup and at the last before admission
+ * settled, the oracle finds nothing.
+ */
+test("a stop before admission settled checks a written store's literal parts at their own sites", () => {
+  for (const [source, fitting, violating] of [
+    ["let xs: integer[] = [hostValue]\nexit\n", [host(2)], [host("bad")]],
+    ["hostValue.n = 2\nlet xs: integer[] = [hostValue.n]\nexit\n", [host(object({ n: 1 }))], []],
+    ["let xs: integer[][] = [[hostValue]]\nexit\n", [host(2)], [host("bad")]],
+  ] as const) {
+    const unstopped = stopRun(source);
+    for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+      const stopped = stopRun(source, allowance);
+      assert.equal(stopped.answers.budget.settled, false, `${source} @${allowance}`);
+      assert.deepEqual(
+        stopProblems({ unstopped, stopped, fitting, violating }),
+        [],
+        `${source} @${allowance}`,
+      );
+    }
   }
 });
 

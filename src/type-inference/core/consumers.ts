@@ -89,6 +89,7 @@ import {
   joinSteps,
   keepText,
   keptArray,
+  keptSteps,
   pathText,
   stepText,
   WORK_PER_NODE,
@@ -297,11 +298,11 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
-/** The collection literals, whose elements (a dict's entries) are their children (`Consumers.#heldHostData`). */
-const COLLECTION_LITERALS: ReadonlySet<string> = new Set([
-  "listLiteral",
-  "setLiteral",
-  "dictLiteral",
+/** The collection literals and their own kinds; their elements (a dict's entries) are their children. */
+const COLLECTION_LITERALS: ReadonlyMap<string, "list" | "set" | "dict"> = new Map([
+  ["listLiteral", "list"],
+  ["setLiteral", "set"],
+  ["dictLiteral", "dict"],
 ]);
 
 /** The literals whose kind is their own, the finishing path's one proof (`Consumers.#valueItems`). */
@@ -938,39 +939,66 @@ export class Consumers {
         );
         continue;
       }
-      const tags = typeTags(term).filter((tag) => tag !== "unknown");
-      if (tags.length === 0) continue;
-      const rule: DiagnosticRule = {
-        rule: "store",
-        into: this.#placeText(d.place, path),
-        type: tags,
-        written: true,
-        decider: null,
-        brought: null,
-        root: this.#storeRoot(d.place),
-        steps: this.#storeSteps(d.place, path),
-      };
-      // (only what the store's syntax tells: the whole value's type alone would not check the parts it holds)
-      const items = withoutEmpty(this.#literalKind(d.value) ?? STOPPED);
-      const fitting = (item: Item): boolean =>
-        concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
-      if (items.every(fitting)) continue;
-      if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
-        this.#error(
-          "written-target",
-          d.site,
-          rule,
-          items.map((item) => item.tag),
-        );
-      else
-        this.#storeWarning(
-          d.site,
-          label,
-          items.find((item) => !fitting(item)) ?? STOPPED[0]!,
-          tags,
-          rule,
-          items.filter(fitting),
-        );
+      // the store and, through a collection literal's own parts, each part the written type reaches, checked at the
+      // part's own site, as A8 checks a literal's elements (TABLE r4.117)
+      const parts: { value: PlaceId; site: SourceSite; path: readonly string[] }[] = [
+        { value: d.value, site: d.site, path },
+      ];
+      for (let part = parts.pop(); part !== undefined; part = parts.pop()) {
+        program.work.charge("checks");
+        const at = termAt(written!, part.path);
+        const tags = at === null ? [] : typeTags(at).filter((tag) => tag !== "unknown");
+        if (tags.length === 0) continue;
+        const rule: DiagnosticRule = {
+          rule: "store",
+          into: this.#placeText(d.place, part.path),
+          type: tags,
+          written: true,
+          decider: null,
+          brought: null,
+          root: this.#storeRoot(d.place),
+          steps: this.#storeSteps(d.place, part.path),
+        };
+        // (only what the part's syntax tells: a collection literal's own kind, then its parts; else its literal kind)
+        const node = program.places[part.value]?.kind;
+        const own = node?.kind === "value" ? COLLECTION_LITERALS.get(node.node) : undefined;
+        const items =
+          own !== undefined
+            ? [makeItem(own, null, { cert: "def" })]
+            : withoutEmpty(this.#literalKind(part.value) ?? STOPPED);
+        const fitting = (item: Item): boolean =>
+          concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
+        if (items.every(fitting)) {
+          if (own !== undefined)
+            for (const child of this.admission.literalChildren(
+              part.value,
+              own === "dict" ? "entry" : "element",
+            ))
+              if (child.value !== undefined)
+                parts.push({
+                  value: child.value,
+                  site: child.site,
+                  path: keptSteps(program.work, part.path, ["element"]),
+                });
+          continue;
+        }
+        if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
+          this.#error(
+            "written-target",
+            part.site,
+            rule,
+            items.map((item) => item.tag),
+          );
+        else
+          this.#storeWarning(
+            part.site,
+            targetName(program.place(d.place).label, part.path),
+            items.find((item) => !fitting(item)) ?? STOPPED[0]!,
+            tags,
+            rule,
+            items.filter(fitting),
+          );
+      }
     }
     this.admission.publish(true);
     this.published = true;
