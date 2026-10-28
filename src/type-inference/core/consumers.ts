@@ -752,9 +752,12 @@ export class Consumers {
    * `CoreAnswers.#run`).
    */
   #run(work: Work<readonly Item[]>): readonly Item[] {
-    return this.#finishing && (this.pass.program.work.stopped === null || !this.settled)
-      ? STOPPED
-      : this.#solve(work);
+    return this.#asksNothing() ? STOPPED : this.#solve(work);
+  }
+
+  /** Whether a finishing walk asks the solver nothing (`#run`): nested past the limit, or after an unsettled stop. */
+  #asksNothing(): boolean {
+    return this.#finishing && (this.pass.program.work.stopped === null || !this.settled);
   }
 
   /** A demand of the solver, its work counted to the read that asked it (S3 §5). */
@@ -916,14 +919,23 @@ export class Consumers {
       const term = written === null ? null : termAt(written, path);
       const label = targetName(program.place(d.place).label, path);
       if (term === null) {
-        this.#storeWarning(d.site, label, STOPPED[0]!, ["unknown"], {
-          rule: "store",
-          into: this.#placeText(d.place, path),
-          type: ["unknown"],
-          written: false,
-          decider: null,
-          brought: null,
-        });
+        this.#storeWarning(
+          d.site,
+          label,
+          STOPPED[0]!,
+          ["unknown"],
+          {
+            rule: "store",
+            into: this.#placeText(d.place, path),
+            type: ["unknown"],
+            written: false,
+            decider: null,
+            brought: null,
+            root: this.#storeRoot(d.place),
+            steps: this.#storeSteps(d.place, path),
+          },
+          [],
+        );
         continue;
       }
       const tags = typeTags(term).filter((tag) => tag !== "unknown");
@@ -935,6 +947,8 @@ export class Consumers {
         written: true,
         decider: null,
         brought: null,
+        root: this.#storeRoot(d.place),
+        steps: this.#storeSteps(d.place, path),
       };
       // (only what the store's syntax tells: the whole value's type alone would not check the parts it holds)
       const items = withoutEmpty(this.#literalKind(d.value) ?? STOPPED);
@@ -955,6 +969,7 @@ export class Consumers {
           items.find((item) => !fitting(item)) ?? STOPPED[0]!,
           tags,
           rule,
+          items.filter(fitting),
         );
     }
     this.admission.publish(true);
@@ -1321,7 +1336,10 @@ export class Consumers {
     let found = this.#names.get(place);
     if (found === undefined) {
       const start: PropertyNamesTask = "key" in of ? of : { value: of.value, path: [] };
-      found = [...propertyNames(this.pass, (work) => this.#run(work), start)];
+      // (a finishing walk that asks nothing knows no property: `#run`'s rule)
+      found = this.#asksNothing()
+        ? []
+        : [...propertyNames(this.pass, (work) => this.#solve(work), start)];
       this.#names.set(place, found);
     }
     return found;
@@ -1339,23 +1357,25 @@ export class Consumers {
     const known = this.#shown.get(place);
     if (known !== undefined) return known;
     const first: { site: SourceSite | null; names: Iterable<string> } = { site: null, names: [] };
-    propertyNames(
-      this.pass,
-      (work) => this.#run(work),
-      { value, path: [] },
-      (literal, names) => {
-        const site = program.place(literal).site;
-        if (
-          site !== null &&
-          (first.site === null ||
-            site.file < first.site.file ||
-            (site.file === first.site.file && site.start < first.site.start))
-        ) {
-          first.site = site;
-          first.names = names;
-        }
-      },
-    );
+    // (a finishing walk that asks nothing knows no property: `#run`'s rule)
+    if (!this.#asksNothing())
+      propertyNames(
+        this.pass,
+        (work) => this.#solve(work),
+        { value, path: [] },
+        (literal, names) => {
+          const site = program.place(literal).site;
+          if (
+            site !== null &&
+            (first.site === null ||
+              site.file < first.site.file ||
+              (site.file === first.site.file && site.start < first.site.start))
+          ) {
+            first.site = site;
+            first.names = names;
+          }
+        },
+      );
     let found: string | null = null;
     for (const step of first.names) {
       program.work.charge("checks");
@@ -2485,11 +2505,20 @@ export class Consumers {
     written: boolean,
     label: string,
   ): boolean {
-    const { program, values, contract, definitions } = this.pass;
+    const { program, contract, definitions } = this.pass;
     const site = program.places[value]?.site;
     if (site === null || site === undefined || !("result" in c)) return false;
     const direct = directAt(rest);
     const into = contract.landsIn(c.result, rest);
+    // (the declaration the value lands in directly, where a written type is)
+    const root =
+      into === null || rest.length > 0
+        ? null
+        : ((landing) => (landing === undefined ? null : this.#storeRoot(landing.place)))(
+            (definitions.byValue.get(c.result) ?? []).find(
+              (d) => d.kind === "whole" && d.path.length === 0,
+            ),
+          );
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
     if (directTags.length === 0) {
@@ -2501,11 +2530,14 @@ export class Consumers {
       if (
         !own.every((item) => item.tag === "null") &&
         // (what the mark carries forms only with it: its content, TABLE r4.110 (a))
-        this.#storeWarning(site, label, STOPPED[0]!, ["unknown"], {
-          rule: "fallback",
-          fallback: c.kind === "fallback",
-          type: ["unknown"],
-        }) &&
+        this.#storeWarning(
+          site,
+          label,
+          STOPPED[0]!,
+          ["unknown"],
+          { rule: "fallback", fallback: c.kind === "fallback", type: ["unknown"], root },
+          [],
+        ) &&
         (into === null || !typeTags(into).includes("unknown"))
       )
         this.admission.boundariesAt(
@@ -2560,15 +2592,7 @@ export class Consumers {
       rule: "fallback",
       fallback: c.kind === "fallback",
       type: against,
-      // (the declaration the value lands in directly, where a written type is)
-      root:
-        into === null || rest.length > 0
-          ? null
-          : ((root) => (root === undefined ? null : this.#storeRoot(root.place)))(
-              (definitions.byValue.get(c.result) ?? []).find(
-                (d) => d.kind === "whole" && d.path.length === 0,
-              ),
-            ),
+      root,
     };
     const fitting = fallback.filter((item) => concrete(item) && fitsKind(item.tag));
     // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written

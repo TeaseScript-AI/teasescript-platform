@@ -1164,7 +1164,7 @@ class CoreAnswers implements Answers {
         for (const name of this.#stoppedShape(start.value, start.path).names) names.add(name);
       return names;
     }
-    return propertyNames(this.#pass, (work) => this.#run(work), start);
+    return propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start);
   }
 
   public view(node: FlowNode): CoreView {
