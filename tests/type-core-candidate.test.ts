@@ -1334,7 +1334,8 @@ test("a receiver without an index gets its own error alone, never a list index's
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     return analyseCore(request).diagnostics.map((diagnostic) =>
-      diagnostic.kind === "written-type"
+      // (a stop's warning has no rule: its kind, as a written type's error)
+      diagnostic.kind === "written-type" || diagnostic.kind === "budget"
         ? diagnostic.kind
         : `${diagnostic.class} ${diagnostic.rule.rule} ${source.slice(diagnostic.site.start, diagnostic.site.end)}`,
     );
