@@ -2304,7 +2304,9 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
  * a wide one in one list, and the same k alone in another (Sol r8); a chain of merges with a partner three times as wide
  * as the root (Sol r1); k opaque values each copied into itself, in one list (Astra's B1); k cycles of two whole copies
  * fed by the root, each with a store below it and read through a record into a list (Astra's B3); and k such cycles
- * split by their two rejected copies, each stored whole into a third place (the design's own). Each at size k, linear.
+ * split by their two rejected copies, each stored whole into a third place (the design's own); and a merge place of two
+ * wide records, whose k meetings no decision makes hot, copied into k places that each store into it, each beside it in
+ * a list or a place (Sol r6, #1270). Each at size k, linear.
  */
 export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
   {
@@ -2468,6 +2470,30 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  ...(["literal", "place"] as const).map((form): WorkFamily => ({
+    name: `touch-dormant-meetings-${form}`,
+    measures: `a merge place's k meetings beside k copies of it, each with a store of its own, in a ${form} with it`,
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 17",
+          `let exact = {${fields(k, () => "typed")}}`,
+          `let fraction = {${fields(k, () => "1.5")}}`,
+          "let container = fraction",
+          "container = exact",
+          rows(k, (i) =>
+            lines(
+              `let alias${i} = container`,
+              `alias${i}.f${i} = typed`,
+              form === "literal"
+                ? `let final${i} = [container, alias${i}]`
+                : lines(`let final${i} = container`, `final${i} = alias${i}`),
+            ),
+          ),
+          "exit",
+        ),
+      ),
+  })),
   {
     name: "touch-literal-contributors",
     measures:

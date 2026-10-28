@@ -58,8 +58,8 @@ export interface Touch {
   /** The shared nodes down its bases (each contained in it), by id. */
   readonly anchors: IdSet | null;
   /**
-   * The meetings found in making it (`meet`), below it: a merge that finds it containing the other node owes them, as
-   * the other's landed types may decide the place merging them (§2.4 (d)).
+   * The meetings found in making it (`meet`), below it: a merge that finds it containing the other node owes them where
+   * it differs from the other, as the other's landed types may decide the place merging them (§2.4 (d)).
    */
   readonly met: Found;
 }
@@ -200,6 +200,61 @@ function afterParts<T>(
   }
 }
 
+/** An entry of a persistent treap: a children map's (`Branch`) or a found trie's (`FoundBranch`). */
+interface Entry<N> {
+  readonly key: string;
+  readonly node: N;
+  readonly left: Entry<N> | null;
+  readonly right: Entry<N> | null;
+  readonly count: number;
+}
+
+/**
+ * The entries of `a` whose key `b` lacks or holds another node at, passing whole every subtree the two share: a map
+ * made from another by a few insertions shares all of it but those insertions' paths (a key's priority fixes its place),
+ * so this walks only those. `null` past `limit` steps, each charged.
+ */
+function differing<N>(
+  a: Entry<N> | null,
+  b: Entry<N> | null,
+  limit: number,
+  charge: () => void,
+): [string, N][] | null {
+  const out: [string, N][] = [];
+  // (each treap's subtrees and entries still to pass, in key order, the next one last; an open one stands for its own
+  // entry, its children pushed beside it)
+  type Pending = { readonly entry: Entry<N>; readonly open: boolean };
+  const left: Pending[] = a === null ? [] : [{ entry: a, open: false }];
+  const right: Pending[] = b === null ? [] : [{ entry: b, open: false }];
+  const open = (stack: Pending[]): void => {
+    const { entry } = stack.pop()!;
+    if (entry.right !== null) stack.push({ entry: entry.right, open: false });
+    stack.push({ entry, open: true });
+    if (entry.left !== null) stack.push({ entry: entry.left, open: false });
+  };
+  for (let steps = 1; left.length > 0; steps += 1) {
+    if (steps > limit) return null;
+    charge();
+    const x = left[left.length - 1]!;
+    const y = right[right.length - 1];
+    if (y !== undefined && !x.open && !y.open && x.entry === y.entry) {
+      left.pop();
+      right.pop();
+    } else if (!x.open && (y === undefined || y.open || x.entry.count >= y.entry.count)) open(left);
+    else if (y !== undefined && !y.open) open(right);
+    else if (y === undefined || x.entry.key < y.entry.key) {
+      out.push([x.entry.key, x.entry.node]);
+      left.pop();
+    } else if (y.entry.key < x.entry.key) right.pop();
+    else {
+      if (x.entry.node !== y.entry.node) out.push([x.entry.key, x.entry.node]);
+      left.pop();
+      right.pop();
+    }
+  }
+  return out;
+}
+
 const countOf = (branch: Branch | null): number => branch?.count ?? 0;
 
 function made(
@@ -223,7 +278,7 @@ export class Touches {
     meet: new WeakMap(),
     elements: new WeakMap(),
   };
-  readonly #metOwes = new Map<number, Found>();
+  readonly #owes = new Map<string, Found>();
   readonly #summaries: Readonly<Record<TouchMode, Map<number, Summary>>> = {
     meet: new Map(),
     elements: new Map(),
@@ -1090,7 +1145,10 @@ export class Touches {
     this.#foundEntries(branch.right, out);
   }
 
-  /** The paths of both, each once: the smaller's branches put in the larger's, once per pair. */
+  /**
+   * The paths of both, each once: the smaller's branches put in the larger's, once per pair; only those the larger does
+   * not hold as they are, where the two share subtrees (a node's meetings are mostly its parts', #1270).
+   */
   #unite(a: Found, b: Found): Found {
     if (a === b || b === NONE) return a;
     if (a === NONE) return b;
@@ -1099,8 +1157,10 @@ export class Touches {
     if (known !== undefined) return known;
     const [big, small] = foundCount(a.branches) >= foundCount(b.branches) ? [a, b] : [b, a];
     let branches = big.branches;
-    const entries: [string, Found][] = [];
-    this.#foundEntries(small.branches, entries);
+    let entries = differing(small.branches, big.branches, 8 + foundCount(small.branches), () =>
+      this.#charge(),
+    );
+    if (entries === null) this.#foundEntries(small.branches, (entries = []));
     for (const [step, inner] of entries) {
       this.#charge(1 + Math.ceil(Math.log2(1 + foundCount(branches))));
       const other = this.#foundGet(branches, step);
@@ -1171,19 +1231,74 @@ export class Touches {
   }
 
   /**
-   * For `elements`, what a node containing the other (or the same node twice) owes: its meetings found in making it
-   * where its contents hold two kinds or more, as an element standing in the other's stead may offend there (§2.2).
-   * Once per node.
+   * What a node containing another owes where a merge ends at it (§2.2 step 3, §2.4 (d)): its meetings found in making
+   * it, as the contained node's landed types may decide the place merging them; for `elements` only where its contents
+   * hold two kinds or more, as an element standing in the other's stead may offend there. Only where the two differ:
+   * below a path where they are one node, under the same payloads, nothing of the container's own stands, so it meets
+   * the contained node there no more than a node merged with itself does (#1270: a shared node's meetings were owed again
+   * by every place or literal holding it beside a small part of its own). The walk enters the children the two do not
+   * share, found from the smaller of the meetings there and the two children maps' difference. Once per pair.
    */
-  #metOwed(node: Touch): Found {
-    const known = this.#metOwes.get(node.id);
+  #containedOwes(outer: Touch, inner: Touch, mode: TouchMode): Found {
+    const key = keptParts(this.host.work, mode, outer.id, inner.id);
+    const known = this.#owes.get(key);
     if (known !== undefined) return known;
-    const paths: (readonly string[])[] = [];
-    this.paths(node.met, [], paths);
     let out: Found = NONE;
-    for (const path of paths)
-      if (this.kindsAt(node, path).size > 1) out = this.#unite(out, this.#at(path));
-    this.#metOwes.set(node.id, out);
+    // (every meeting below a path: for `meet` the found trie itself, taken whole; for `elements` each path's kinds read)
+    const oweAll = (met: Found, path: readonly string[]): void => {
+      if (mode === "meet") {
+        let at = met;
+        for (let index = path.length - 1; index >= 0; index -= 1)
+          at = this.#under(path[index]!, at);
+        out = this.#unite(out, at);
+        return;
+      }
+      const paths: (readonly string[])[] = [];
+      this.paths(met, path, paths);
+      for (const each of paths)
+        if (this.kindsAt(outer, each).size > 1) out = this.#unite(out, this.#at(each));
+    };
+    const stack: {
+      readonly x: Touch | undefined;
+      readonly y: Touch | undefined;
+      readonly met: Found;
+      readonly path: readonly string[];
+    }[] = [{ x: outer, y: inner, met: outer.met, path: [] }];
+    while (stack.length > 0) {
+      const { x, y, met, path } = stack.pop()!;
+      this.#charge();
+      if (met === NONE || x === y) continue;
+      if (x === undefined || y === undefined || x.opaque !== y.opaque) {
+        // (the contained node stands nowhere here, or a payload of the container's own stands here, which meets
+        // everything below: every meeting below is owed)
+        oweAll(met, path);
+        continue;
+      }
+      if (met.here && (mode === "meet" || this.kindsAt(outer, path).size > 1))
+        out = this.#unite(out, this.#at(path));
+      const differs = differing(x.branches, y.branches, 8 + 2 * foundCount(met.branches), () =>
+        this.#charge(),
+      );
+      const steps: string[] = [];
+      if (differs !== null) for (const [step] of differs) steps.push(step);
+      else {
+        const entries: [string, Found][] = [];
+        this.#foundEntries(met.branches, entries);
+        for (const [step] of entries) steps.push(step);
+      }
+      for (const step of steps) {
+        this.#charge(this.#depth(x.branches));
+        const below = this.#foundGet(met.branches, step);
+        if (below === undefined) continue;
+        stack.push({
+          x: this.#get(x.branches, step),
+          y: this.#get(y.branches, step),
+          met: below,
+          path: keptSteps(this.host.work, path, [step]),
+        });
+      }
+    }
+    this.#owes.set(key, out);
     return out;
   }
 
@@ -1205,7 +1320,8 @@ export class Touches {
   ): { node: Touch | null; found: Found } {
     if (a === null) return { node: b, found: NONE };
     if (b === null) return { node: a, found: NONE };
-    if (a === b) return { node: a, found: mode === "elements" ? this.#metOwed(a) : NONE };
+    // (a node merged with itself meets nothing it did not meet in its making)
+    if (a === b) return { node: a, found: NONE };
     const key = (x: Touch, y: Touch): string =>
       keptParts(this.host.work, mode, Math.min(x.id, y.id), Math.max(x.id, y.id));
     const known = this.#memo.get(key(a, b));
@@ -1237,10 +1353,10 @@ export class Touches {
       spent += hop.cost;
     };
     for (;;) {
-      // (a node containing the other is their union; for `meet` it owes the meetings found in making it, which the
-      // contained node's landed types may decide where the two are merged)
+      // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
+      // other, whose landed types may decide where the two are merged)
       const owes = (outer: Touch, inner: Touch): Found =>
-        mode === "elements" ? this.#metOwed(outer) : outer !== inner ? outer.met : NONE;
+        outer === inner ? NONE : this.#containedOwes(outer, inner, mode);
       if (this.#contains(x, y)) core = { node: x, found: owes(x, y) };
       else if (this.#contains(y, x)) core = { node: y, found: owes(y, x) };
       else core = this.#memo.get(key(x, y)) ?? null;
