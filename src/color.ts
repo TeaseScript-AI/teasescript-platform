@@ -85,8 +85,8 @@ function clampInputChannels(color: Color): void {
   }
 }
 
-/** Concrete opaque CSS colours only; no host variables, relative colours or executable CSS. */
-export function normalizeColor(value: unknown): string | null {
+/** A concrete CSS colour, also one that is not opaque; no host variables, relative colours or executable CSS. */
+function parseColor(value: unknown): Color | null {
   if (typeof value !== "string") return null;
   const source = value.trim().toLowerCase();
   const functional = /^([a-z]+)\(([^()]*)\)$/u.exec(source);
@@ -95,13 +95,27 @@ export function normalizeColor(value: unknown): string | null {
   } else if (!/^(?:#[\da-f]{3,8}|[a-z]+)$/u.test(source)) return null;
   try {
     const parsed = new Color(source);
-    if (
-      ![...parsed.coords, parsed.alpha].every(
-        (coordinate) => coordinate === null || Number.isFinite(coordinate),
-      )
+    return [...parsed.coords, parsed.alpha].every(
+      (coordinate) => coordinate === null || Number.isFinite(coordinate),
     )
-      return null;
-    if (parsed.alpha !== 1) return null;
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `value` is a CSS colour that `normalizeColor` rejects because it is not opaque, as `transparent` is. */
+export function isSeeThroughColor(value: unknown): boolean {
+  const parsed = parseColor(value);
+  return parsed !== null && parsed.alpha !== 1;
+}
+
+/** Concrete opaque CSS colours only; no host variables, relative colours or executable CSS. */
+export function normalizeColor(value: unknown): string | null {
+  const parsed = parseColor(value);
+  if (parsed === null || parsed.alpha !== 1) return null;
+  try {
     clampInputChannels(parsed);
     const color = parsed.to("oklch");
     const coordinates = color.coords.map((coordinate) => coordinate ?? 0);

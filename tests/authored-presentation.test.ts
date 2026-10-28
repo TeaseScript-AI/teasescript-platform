@@ -142,6 +142,91 @@ test("rejects invalid constant colours and presentation options at compile time"
   assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"\nexit').plan, null);
 });
 
+test("a colour error names the rejected value and why, and each example it offers compiles there", () => {
+  // Written values by what is wrong with them: no CSS colour, a CSS colour that is see-through, or nothing.
+  const values = [
+    ["nope", "invalid"],
+    ["inherit", "invalid"],
+    ["transparent", "seeThrough"],
+    ["#33669980", "seeThrough"],
+    ["rgb(255 0 0 / 0.5)", "seeThrough"],
+    ["rebeccapurple", "valid"],
+  ] as const;
+  const colourErrors = (source: string) =>
+    compileSource(`${source}\nexit`)
+      .diagnostics.filter((diagnostic) => diagnostic.code === "TSC008")
+      .map((diagnostic) => diagnostic.message);
+  const compiles = (source: string) => compileSource(`${source}\nexit`).plan !== null;
+  // A valid colour compiles, and so does the example that a rejected one offers.
+  const accepted = (source: string, problem: string, example: string) =>
+    assert.ok(problem === "valid" ? compiles(source) : compiles(example), source);
+  // Every place a presentation option takes a colour, with the value written there or held by a variable.
+  const options = [
+    ['say bubble(color: #) "x"', "color"],
+    ['say prose(background: #) "x"', "background"],
+    ["speaker vera { color: # }", "color"],
+    ["speaker vera { prose: { background: # } }", "background"],
+    ['let a = askBoolean prose(color: #) "Sure?"', "color"],
+  ] as const;
+  for (const [site, name] of options)
+    for (const [value, problem] of values)
+      for (const [before, written] of [
+        ["", `"${value}"`],
+        // A speaker is declared for the whole script, so it reads a global.
+        [`${site.startsWith("speaker") ? "global" : "let"} shade = "${value}"\n`, "shade"],
+      ] as const) {
+        const source = `${before}${site.replace("#", written)}`;
+        const expected = {
+          invalid: [`A message's ${name} must be a CSS colour, such as "#336699", not "${value}".`],
+          seeThrough: [
+            `A message's ${name} must be opaque, not "${value}", which is see-through. Use an opaque colour, such as "#336699".`,
+          ],
+          valid: [],
+        }[problem];
+        assert.deepEqual(colourErrors(source), expected, source);
+        accepted(source, problem, site.replace("#", '"#336699"'));
+      }
+  // A colour tag of markup, also before or after a tag that is text (in a code span, escaped, or never closed) or
+  // valid.
+  const around = [
+    ["", ""],
+    ["`[color=nope]literal[/color]` ", ""],
+    ["", " `[color=nope]literal[/color]`"],
+    ["", " \\\\[color=nope]x"],
+    ["\\\\[color=nope]x ", ""],
+    ["[color=nope]open ", ""],
+    ["[bg=#336699]ok[/bg] ", ""],
+    ["", " [bg=#336699]ok[/bg]"],
+    ["", " [color=nope]open"],
+  ] as const;
+  for (const name of ["color", "bg"])
+    for (const [value, problem] of values)
+      for (const [before, after] of around) {
+        const tag = `[${name}=${value}]`;
+        const said = (opener: string) => `say "${before}${opener}x[/${name}]${after}"`;
+        const source = said(tag);
+        const expected = {
+          invalid: [
+            `'${tag}' does not name a CSS colour. Use a CSS colour, as in '[${name}=#336699]'.`,
+          ],
+          seeThrough: [
+            `'${tag}' names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in '[${name}=#336699]'.`,
+          ],
+          valid: [],
+        }[problem];
+        assert.deepEqual(colourErrors(source), expected, source);
+        accepted(source, problem, said(`[${name}=#336699]`));
+      }
+  // The value a variable holds, and a known null, which keeps the default colour.
+  assert.deepEqual(colourErrors('let line = "[color=inherit]Kneel.[/color]"\nsay line'), [
+    "'[color=inherit]' does not name a CSS colour. Use a CSS colour, as in '[color=#336699]'.",
+  ]);
+  assert.notEqual(
+    compileSource('let c: string? = null\nsay bubble(color: c) "x"\nexit').plan,
+    null,
+  );
+});
+
 test("a presentation option without a value is reported instead of dropped", () => {
   for (const [source, offset] of [
     ['say prose(background:) "Text"', 21],

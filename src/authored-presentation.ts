@@ -1,9 +1,11 @@
 import { isMessagePresentationOption } from "./message-presentation.js";
 import type { Expression, ObjectLiteral, Program, Statement } from "./ast.js";
-import { normalizeColor } from "./color.js";
+import { isSeeThroughColor, normalizeColor } from "./color.js";
 import { knownVisibleText, staticVisibleText, type KnownValue } from "./static-evaluation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { parseMessageMarkup } from "./message-markup.js";
+import { rejectedColorTag } from "./message-markup.js";
+import { messageText } from "./runtime/values/text-length.js";
+import { quotedText } from "./runtime/values/value-text.js";
 
 /** The speaker properties that are presentation options, which `presentationPropertyDiagnostics` checks. */
 export const SPEAKER_PRESENTATION_PROPERTIES: ReadonlySet<string> = new Set([
@@ -39,8 +41,11 @@ export function presentationPropertyDiagnostics(
   const text = shown(expression);
   if (text === undefined || expression.kind === "nullLiteral") return [];
   let message: string | null = null;
+  // The value is named, as the error may be on a variable whose value is written elsewhere.
   if ((name === "color" || name === "background") && normalizeColor(text) === null)
-    message = `A message's ${name} must be a CSS colour, such as "#336699".`;
+    message = isSeeThroughColor(text)
+      ? `A message's ${name} must be opaque, not ${quotedText(messageText(text))}, which is see-through. Use an opaque colour, such as "#336699".`
+      : `A message's ${name} must be a CSS colour, such as "#336699", not ${quotedText(messageText(text))}.`;
   if ((name === "position" || name === "align") && !["left", "center", "right"].includes(text))
     message = `A message's ${name} must be "left", "center", or "right".`;
   if ((name === "presentation" || name === "kind") && text !== "bubble" && text !== "prose")
@@ -55,33 +60,13 @@ export function messageColorDiagnostics(
   shown: Shown = staticVisibleText,
 ): readonly Diagnostic[] {
   const text = shown(expression);
-  if (text === undefined) return [];
-  const content = parseMessageMarkup(text);
-  for (const block of content.blocks) {
-    const lines =
-      block.kind === "heading"
-        ? [block.line]
-        : block.kind === "list"
-          ? block.items.map((item) => item.line)
-          : block.lines;
-    if (
-      lines.some((line) =>
-        line.spans.some(
-          (span) =>
-            (span.kind === "color" || span.kind === "backgroundColor") && span.value === "inherit",
-        ),
-      )
-    )
-      return [
-        createDiagnostic(
-          DiagnosticSeverity.Error,
-          "TSC008",
-          "Invalid authored markup colour.",
-          expression.span,
-        ),
-      ];
-  }
-  return [];
+  const rejected = text === undefined ? null : rejectedColorTag(text);
+  if (rejected === null) return [];
+  const [written, example] = [`'${messageText(rejected.written)}'`, `'[${rejected.name}=#336699]'`];
+  const message = isSeeThroughColor(rejected.color)
+    ? `${written} names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in ${example}.`
+    : `${written} does not name a CSS colour. Use a CSS colour, as in ${example}.`;
+  return [createDiagnostic(DiagnosticSeverity.Error, "TSC008", message, expression.span)];
 }
 
 /**

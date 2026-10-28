@@ -668,7 +668,7 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ['let a = askBoolean prose(color: "not-a-color") "Sure?"', '"not-a-color"'],
       ],
       "TSC008",
-      'A message\'s color must be a CSS colour, such as "#336699".',
+      'A message\'s color must be a CSS colour, such as "#336699", not "not-a-color".',
       null,
     ],
   ]);

@@ -97,6 +97,8 @@ interface SpanSegment {
   readonly spanKind: SpanKind;
   readonly value: string | null;
   readonly children: readonly InlineSegment[];
+  /** The tag as written, as `[color=nope]`, for a span that a closed tag opened. */
+  readonly opener: string | undefined;
 }
 
 interface GroupSegment {
@@ -202,12 +204,32 @@ const URL_STOP_CHARACTER = /[\s\u0000-\u001f\u007f<>"'`*~\[\]]/u;
 const NON_WHITESPACE = /\S/u;
 
 export function parseMessageMarkup(text: string): MessageMarkup {
+  return parseMarkup(text, null);
+}
+
+/**
+ * The first `[color=...]` or `[bg=...]` tag of `text` whose colour `normalizeColor` rejects, which its span shows as
+ * `inherit`: the tag as written, its name, and its colour. The parse that makes the spans finds it, so a tag that is
+ * text, as in a code span, is never named.
+ */
+export function rejectedColorTag(
+  text: string,
+): { readonly written: string; readonly name: string; readonly color: string } | null {
+  const rejected: string[] = [];
+  parseMarkup(text, rejected);
+  const tag = rejected[0] === undefined ? null : COLOR_TAG.exec(rejected[0]);
+  return tag === null ? null : { written: tag[0], name: tag[1]!, color: tag[2]! };
+}
+
+/** `parseMessageMarkup`, which also lists in `rejected` the tags of the colours it rejects, in order. */
+function parseMarkup(text: string, rejected: string[] | null): MessageMarkup {
   const mutableBlocks: MutableBlock[] = [];
   for (const sourceLine of splitLines(text)) {
     const units = tokenizeLine(sourceLine.text);
     const classification = classifyLine(units);
     const parsed = flattenSegments(
       parseInlineSegments(units, classification.contentStart, units.length, true).segments,
+      rejected,
     );
     const line = Object.freeze({
       text: parsed.text,
@@ -756,7 +778,14 @@ function closeFrame(frames: InlineFrame[]): void {
   const frame = frames.pop()!;
   if (frame.kind === "root") throw new Error("The root message-markup frame cannot be closed.");
   flushText(frame);
-  appendSpan(frames.at(-1)!, frame.kind, frame.value, frame.children, frame.hasNonWhitespace);
+  appendSpan(
+    frames.at(-1)!,
+    frame.kind,
+    frame.value,
+    frame.children,
+    frame.hasNonWhitespace,
+    frame.opener,
+  );
 }
 
 function unwindFrame(frames: InlineFrame[]): void {
@@ -780,8 +809,9 @@ function appendSpan(
   value: string | null,
   children: readonly InlineSegment[],
   hasNonWhitespace: boolean,
+  opener?: string,
 ): void {
-  appendSegment(frame, { kind: "span", spanKind: kind, value, children }, hasNonWhitespace);
+  appendSegment(frame, { kind: "span", spanKind: kind, value, children, opener }, hasNonWhitespace);
 }
 
 function appendSegment(
@@ -813,7 +843,7 @@ function extensionOpeningAt(
   if (text === null || text.startsWith("[/")) return null;
   if (text === "[u]") return extension("underline", text, null);
 
-  const color = /^\[(color|bg)=([^\]]*)\]$/u.exec(text);
+  const color = COLOR_TAG.exec(text);
   if (color !== null) {
     const normalized = normalizeColor(color[2]);
     return extension(
@@ -828,6 +858,9 @@ function extensionOpeningAt(
   if (size !== null && SIZES.has(size[1]!)) return extension("size", text, size[1]!);
   return null;
 }
+
+/** A colour tag, `[color=...]` or `[bg=...]`, with its name and its colour. */
+const COLOR_TAG = /^\[(color|bg)=([^\]]*)\]$/u;
 
 function extension(
   kind: ExtensionOpening["kind"],
@@ -1023,7 +1056,10 @@ function matchClosingParentheses(
   return closers;
 }
 
-function flattenSegments(segments: readonly InlineSegment[]): ParsedLineContent {
+function flattenSegments(
+  segments: readonly InlineSegment[],
+  rejected: string[] | null,
+): ParsedLineContent {
   const text: string[] = [];
   const spans: MutableSpan[] = [];
   const pending: FlattenWork[] = [];
@@ -1055,6 +1091,13 @@ function flattenSegments(segments: readonly InlineSegment[]): ParsedLineContent 
         value: work.segment.value,
       };
       spans.push(span);
+      if (
+        rejected !== null &&
+        (span.kind === "color" || span.kind === "backgroundColor") &&
+        span.value === "inherit" &&
+        work.segment.opener !== undefined
+      )
+        rejected.push(work.segment.opener);
       pending.push({ kind: "finish", span });
       for (let index = work.segment.children.length - 1; index >= 0; index -= 1) {
         pending.push({
