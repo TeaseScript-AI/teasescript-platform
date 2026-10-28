@@ -153,7 +153,9 @@ test("a default of another kind fails at compile time or before the field opens"
   assert.equal(result.snapshot.status, "failed");
   assert.equal(result.snapshot.foregroundAction, null);
   assert.equal(result.snapshot.failure?.code, "TSR052");
-  assert.ok(result.snapshot.failure?.message.includes("Convert the text with toDate(...)"));
+  assert.ok(
+    result.snapshot.failure?.message.includes("Convert the text with the toDate function."),
+  );
 });
 
 test("a checkpoint while the field is open restores the control and its default", () => {

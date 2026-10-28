@@ -54,7 +54,7 @@ export function notNumberFix(
   return value === "null"
     ? `Check that ${label === null ? "the value" : `'${label}'`} is not null before using it.`
     : value === "numeric text"
-      ? "Convert the text with toNumber(...) first."
+      ? "Convert the text with the toNumber function."
       : "Use a number instead.";
 }
 

@@ -25,6 +25,7 @@ import { listHasPosition } from "../values/collection-operations.js";
 import { loweredOperand } from "./lowered-operands.js";
 import { durationPropertyMessage } from "../../duration.js";
 import { LIST_INDEX_RULE, negativeListIndexMessage } from "../../operand-rules.js";
+import { ROUND_COUNT_FIX } from "../../loop-rules.js";
 import { missingMemberMessage } from "../values/string-operations.js";
 import { stringLength, unknownTextMemberMessage } from "../../text-operations.js";
 import { missingPropertyMessage } from "../../object-properties.js";
@@ -344,11 +345,11 @@ export function notWholeIndex(
   const subject = indexLabel === null ? "this" : `'${indexLabel}'`;
   const fix =
     typeof value === "number"
-      ? " Round it with floor(...), round(...), or ceil(...) first."
+      ? ROUND_COUNT_FIX
       : value === null
         ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
         : typeof value === "string" && numberFromText(value) !== undefined
-          ? " Convert the text with toInteger(...) first."
+          ? " Convert the text with the toInteger function."
           : "";
   return fault(
     "TSR024",

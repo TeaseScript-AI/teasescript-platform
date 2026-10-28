@@ -40,13 +40,18 @@ test("each typed place rejects a value of another type that the compiler cannot 
       'pick("x")',
     ],
     [
+      'let count: integer = pick("3")',
+      `'count' holds a whole number (integer), so it cannot take text (string) "3". Convert the text with the toInteger function.`,
+      'pick("3")',
+    ],
+    [
       "let count = 1\ncount = pick(2.5)",
-      "'count' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "'count' holds a whole number (integer), so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
       "pick(2.5)",
     ],
     [
       "let count = 1\ncount += pick(0.5)",
-      "'count' holds a whole number (integer), so it cannot take 1.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "'count' holds a whole number (integer), so it cannot take 1.5. Round the number with the floor, round or ceil function first.",
       "count += pick(0.5)",
     ],
     [
@@ -71,7 +76,7 @@ test("each typed place rejects a value of another type that the compiler cannot 
     ],
     [
       "function shout(times = 1) {\n    return times\n}\nshout(times: pick(0.5))",
-      "Parameter 'times' of 'shout' holds a whole number (integer), so it cannot take 0.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "Parameter 'times' of 'shout' holds a whole number (integer), so it cannot take 0.5. Round the number with the floor, round or ceil function first.",
       "pick(0.5)",
     ],
     [
@@ -87,7 +92,7 @@ test("each typed place rejects a value of another type that the compiler cannot 
     ],
     [
       "function score(base): integer {\n    return pick(base)\n}\nscore(2.5)",
-      "The result of 'score' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "The result of 'score' holds a whole number (integer), so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
       "pick(base)",
     ],
   ] as const) {
@@ -104,7 +109,7 @@ test("an arithmetic operand that is not a number names the operand, the value, a
     ],
     [
       'say 2 * pick("3")',
-      "'*' needs a number on its right side, but received text (string) \"3\". Convert the text with toNumber(...) first.",
+      "'*' needs a number on its right side, but received text (string) \"3\". Convert the text with the toNumber function.",
       'pick("3")',
     ],
     [
@@ -158,7 +163,7 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
     [
       "let times = pick(2.5)\nrepeat times {\n}",
       "TSR043",
-      "A repeat count must be a whole number (integer) of at least 0, but 'times' is 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "A repeat count must be a whole number (integer) of at least 0, but 'times' is 2.5. Round the number with the floor, round or ceil function first.",
       "times",
     ],
     [
@@ -170,7 +175,7 @@ test("a condition, comparison, or loop value of the wrong kind names the value a
     [
       "let last = pick(2.5)\nfor step in 1..last {\n}",
       "TSR045",
-      "A 'for' loop needs a range of whole numbers, but this range is 1..2.5. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "A 'for' loop needs a range of whole numbers, but this range is 1..2.5. Round the bounds with the floor, round or ceil function first.",
       "1..last",
     ],
   ] as const) {
@@ -301,7 +306,7 @@ test("an index or member that a value does not have names the value, its bounds,
     [
       "let items = [1]\nlet i = pick(1.5)\nsay items[i]",
       "TSR024",
-      "A list index must be a whole number (integer), but 'i' is 1.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "A list index must be a whole number (integer), but 'i' is 1.5. Round the number with the floor, round or ceil function first.",
       "i",
     ],
     [
@@ -356,7 +361,7 @@ test("an index or member that a value does not have names the value, its bounds,
     [
       'let items = pick([1])\nsay items["1"]',
       "TSR024",
-      'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with toInteger(...) first.',
+      'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with the toInteger function.',
       '"1"',
     ],
     [
@@ -394,7 +399,7 @@ test("a value with unknown parts is checked part by part", () => {
     ],
     [
       "let best = null\nbest = 1\nbest = pick(2.5)",
-      "'best' holds a whole number (integer) or null, so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "'best' holds a whole number (integer) or null, so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
     ],
   ] as const) {
     assert.deepEqual(
@@ -521,7 +526,7 @@ test("a speaker's custom property is checked where a value the compiler cannot k
     [
       "speaker vera { level: 0 }",
       "vera.level += pick(0.5)",
-      "Property 'vera.level' holds a whole number (integer), so it cannot take 0.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "Property 'vera.level' holds a whole number (integer), so it cannot take 0.5. Round the number with the floor, round or ceil function first.",
       "vera.level += pick(0.5)",
     ],
     [
@@ -715,7 +720,7 @@ test("a checked value from an interaction is checked when the answer resumes the
     ["3", "3"],
     [
       "2.5",
-      "'count' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "'count' holds a whole number (integer), so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
     ],
   ] as const) {
     const direct = answer(waiting, submittedText);

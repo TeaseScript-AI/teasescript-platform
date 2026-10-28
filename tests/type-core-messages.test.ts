@@ -41,7 +41,7 @@ const STOPS = "If it is, the Tease stops with an error at this line.";
 const OUTSIDE = (name: string): string =>
   `'${name}' comes from outside the script, so its type is known only when the script runs.`;
 const COUNT = "A repeat count must be a whole number (integer) of at least 0";
-const ROUND = "Round it with floor(...), round(...), or ceil(...) first.";
+const ROUND = "Round the number with the floor, round or ceil function first.";
 
 test("each context word's cause says why the value may be of another type, on the set's record for the word (D1, §3.4)", () => {
   const word = (name: string, expected: readonly string[]): void => {

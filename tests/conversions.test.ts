@@ -210,7 +210,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       'say round("2.5")\nexit',
       "TSV043",
-      "round(...) needs a number, not text (string). Convert text with toNumber(...) first.",
+      "round(...) needs a number, not text (string). Convert the text with the toNumber function.",
       '"2.5"',
     ],
     [
@@ -266,7 +266,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "say round(value)\nexit",
       { value: "2.5" },
       "TSV043",
-      "round(...) needs a number, not text (string). Convert text with toNumber(...) first.",
+      "round(...) needs a number, not text (string). Convert the text with the toNumber function.",
     ],
   ];
   for (const [source, globals, code, message] of cases) {

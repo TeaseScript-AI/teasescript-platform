@@ -42,7 +42,7 @@ export function rangeLength(range: RangeBounds): number {
  * `TSR045`). `why` explains it, from a space.
  */
 export function wholeRangeMessage(subject: string, shown: string, why = ""): string {
-  return `${subject} needs a range of whole numbers, but ${shown}.${why} Round its bounds with floor(...), round(...), or ceil(...) first.`;
+  return `${subject} needs a range of whole numbers, but ${shown}.${why} Round the bounds with the floor, round or ceil function first.`;
 }
 
 /** Why `subject` cannot draw from a range of whole numbers that holds none, or `null` (runtime error `TSR041`). */

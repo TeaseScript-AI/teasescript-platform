@@ -246,9 +246,13 @@ test("an invalid dynamic prefill fails before the field opens", () => {
     "The prefill of askText must be text. Write the value as text with interpolation: 'prefill: \"${...}\"'.";
   const notNumber =
     "The prefill of askNumber must be a finite number. Ask without 'prefill:' when there is no number to offer.";
+  const notWhole =
+    "The prefill of askInteger must be a whole number. Round the prefill with the floor, round or ceil function, or " +
+    "ask without 'prefill:'.";
   const cases = [
     ["let answer = askText prefill: value\nexit", 5, notText],
     ["let answer = askNumber prefill: value\nexit", "10", notNumber],
+    ["let answer = askInteger prefill: value\nexit", 2.5, notWhole],
   ] as const;
   for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });

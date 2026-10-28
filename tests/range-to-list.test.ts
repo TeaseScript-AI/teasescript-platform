@@ -133,14 +133,14 @@ test("toList needs whole-number bounds, checked when the script compiles where i
       [
         [
           "TSV010",
-          "toList() needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+          "toList() needs a range of whole numbers, but its end is a number. Round the bounds with the floor, round or ceil function first.",
           "n",
         ],
       ],
       [
         [
           "TSV010",
-          "toList() needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+          "toList() needs a range of whole numbers, but its start is a number. Round the bounds with the floor, round or ceil function first.",
           "0.5",
         ],
       ],
@@ -151,12 +151,12 @@ test("toList needs whole-number bounds, checked when the script compiles where i
   // A range kept in a variable, or with bounds the compiler cannot know, is checked when toList runs.
   assert.deepEqual(failure("let r = 1..2.5\nsay r.toList()\nexit"), [
     "TSR045",
-    "toList() needs a range of whole numbers, but this range is 1..2.5. Round its bounds with floor(...), round(...), or ceil(...) first.",
+    "toList() needs a range of whole numbers, but this range is 1..2.5. Round the bounds with the floor, round or ceil function first.",
     "r.toList()",
   ]);
   assert.deepEqual(failure(`${PICK}say (1..=pick(2.5)).toList()\nexit`), [
     "TSR045",
-    "toList() needs a range of whole numbers, but this range is 1..=2.5. Round its bounds with floor(...), round(...), or ceil(...) first.",
+    "toList() needs a range of whole numbers, but this range is 1..=2.5. Round the bounds with the floor, round or ceil function first.",
     "(1..=pick(2.5)).toList()",
   ]);
   assert.deepEqual(failure("let r = 0..=9007199254740993\nsay r.toList()\nexit"), [

@@ -279,9 +279,9 @@ function badRepeatCount(
     const count = Math.trunc(numberFromText(value)!);
     fix =
       count < 0
-        ? " Convert the text with toInteger(...), and check that it is at least 0 first."
+        ? " Convert the text with the toInteger function, and check that it is at least 0 first."
         : Number.isSafeInteger(count)
-          ? " Convert the text with toInteger(...) first."
+          ? " Convert the text with the toInteger function."
           : " Use a smaller count.";
   }
   return fault(

@@ -1330,8 +1330,8 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: count }), ["error TSV011@9"]);
   assert.equal(
     count[0]!.message,
-    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round it with " +
-      "floor(...), round(...), or ceil(...) first.",
+    "A repeat count must be a whole number (integer) of at least 0, but '2.5' is a number. Round the number with " +
+      "the floor, round or ceil function first.",
   );
   const listed = inBothOrders(
     () => candidate("let xs = [1, 2]\nlet y = xs[(0.5)]\nexit\n").diagnostics,
@@ -1339,8 +1339,8 @@ test("parentheses answer for their content: a parenthesised count and index read
   assert.deepEqual(sited({ diagnostics: listed }), ["error TSV043@28"]);
   assert.equal(
     listed[0]!.message,
-    "A list index must be a whole number (integer), but '0.5' is a number. Round it with floor(...), round(...), " +
-      "or ceil(...) first.",
+    "A list index must be a whole number (integer), but '0.5' is a number. Round the number with the floor, round " +
+      "or ceil function first.",
   );
   const host = candidate("repeat ((hostValue)) {}\nexit\n");
   assert.deepEqual(sited(host), ["warning TSV011@9"]);

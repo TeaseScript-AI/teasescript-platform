@@ -230,7 +230,7 @@ test("invalid random built-in arguments fail with source-associated errors", () 
   for (const [staticRange, message, subject] of [
     [
       "1.5..=3",
-      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round the bounds with the floor, round or ceil function first.",
       "1.5",
     ],
     // As for a wait or timer range, also when the compiler computes a bound, with the runtime's message.

@@ -634,7 +634,7 @@ function interactionPrefill(
     if (typeof value !== "number" || !Number.isSafeInteger(value))
       throw fault(
         "TSR052",
-        "The prefill of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'prefill:'.",
+        "The prefill of askInteger must be a whole number. Round the prefill with the floor, round or ceil function, or ask without 'prefill:'.",
         span,
       );
     return numberAnswerText(value);
@@ -678,7 +678,7 @@ function temporalPrefill(
         : ["askDateTime", "a date and time"];
   throw fault(
     "TSR052",
-    `The prefill of ${command} must be ${noun}, not ${describeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeValue(value)}.${typeof value === "string" ? ` Convert the text with the ${conversionTo(kind)} function.` : ""}`,
     span,
   );
 }

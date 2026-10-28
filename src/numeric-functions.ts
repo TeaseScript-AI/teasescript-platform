@@ -463,7 +463,7 @@ export function numberArgumentMessage(
       : `${name}(...) needs an angle, not ${given}.`;
   const fix =
     kind === "string"
-      ? " Convert text with toNumber(...) first."
+      ? " Convert the text with the toNumber function."
       : kind === "angle" && signature.result !== "angle"
         ? " Convert it to a number of degrees with toDeg(...) first."
         : "";

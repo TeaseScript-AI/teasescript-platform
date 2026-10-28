@@ -1952,14 +1952,14 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
   assert.deepEqual(mismatches('let count = 5\nfor i in 1..=count / 2 {\n    say "${i}"\n}\nexit'), [
     [
       "TSV010",
-      "A 'for' loop needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "A 'for' loop needs a range of whole numbers, but its end is a number. Round the bounds with the floor, round or ceil function first.",
       "count / 2",
     ],
   ]);
   assert.deepEqual(mismatches("let n = 4\nlet r = randomInteger((0..n))\nn = n / 2\nexit"), [
     [
       "TSV010",
-      "randomInteger(range) needs a range of whole numbers, but its end is a number. 'n' is a number because line 3 can store a non-whole number in it. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "randomInteger(range) needs a range of whole numbers, but its end is a number. 'n' is a number because line 3 can store a non-whole number in it. Round the bounds with the floor, round or ceil function first.",
       "n",
     ],
   ]);
@@ -1977,7 +1977,7 @@ test("a for-loop, randomInteger, wait, or timer range takes whole-number bounds,
   assert.deepEqual(mismatches("let n = 17 / 2\nwait (1..n) s\nexit"), [
     [
       "TSV010",
-      "A wait needs a range of whole numbers, but its end is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "A wait needs a range of whole numbers, but its end is a number. Round the bounds with the floor, round or ceil function first.",
       "n",
     ],
   ]);
