@@ -31,7 +31,7 @@ import {
   type WorkFamily,
 } from "./helpers/type-core-families.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { askEveryRead, narrowingPass } from "./helpers/type-core-narrowing.js";
+import { askEveryRead, narrowingPassIn } from "./helpers/type-core-narrowing.js";
 
 /**
  * The work of the coarse core (checkpoint 9, TABLE §8 and §10.1's W rows) as a sampled regression oracle: every
@@ -152,7 +152,7 @@ test("every W34, W44 and W45 variant's work and each of its counters grow with t
  */
 test("every stage 3b family's index and queries grow with the program in either order (§13.3)", () => {
   const measure = ({ name, request }: Sized, reversed: boolean): Measured => {
-    const pass = narrowingPass(request);
+    const pass = narrowingPassIn(request, reversed);
     askEveryRead(pass, reversed);
     assert.ok(
       pass.program.work.total <= pass.program.work.allowance,
