@@ -13,8 +13,9 @@ import { Project, ts } from "ts-morph";
  * - an inventory entry whose `runs` names a derivation `Consumers.#freshStores` does not call;
  * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
  *   no obligation (a derivation returns what it leaves open to the consumers, which record it), so no new callback
- *   records one for admission whatever its wiring (Codex r23, r24 T1); a listed read's own implementation is trusted
- *   by its listed reason, as `READS`' callers are.
+ *   records one for admission whatever its wiring (Codex r23, r24 T1).
+ * A listed host read is trusted by its reason, as a listed read is: a side effect inside `read` or `run` that records an
+ * obligation is a review matter against that reason, not this check's (TABLE r4.152 (3)).
  * A commented-out call is no call, and a new method is caught whatever its name.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
