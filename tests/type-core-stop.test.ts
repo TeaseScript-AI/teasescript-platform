@@ -1249,6 +1249,71 @@ test("after a settled stop a read answers its place's lazily decided type, as pl
 });
 
 /**
+ * A literal's composed questions read a child through the same sources as the child's own question (TABLE r4.158): at
+ * every settled walk stop of Astra r7's three, a list, two objects deep and a copy's selection in a set, the literal's
+ * element or property answers the selection's lazily decided `integer`, as the selection's own read does, never `budget`.
+ */
+test("after a settled stop a literal's composed questions answer a child's lazily decided type, as its own read does", () => {
+  for (const [source, child, literal, kind, path] of [
+    [
+      "let basket = [2, 4]\nsay [basket.first]\nexit\n",
+      "basket.first",
+      "[",
+      "listLiteral",
+      ["element"],
+    ],
+    [
+      "let basket = [2, 4]\nsay {outer: {inner: basket.first}}\nexit\n",
+      "basket.first",
+      "{outer",
+      "objectLiteral",
+      ["outer", "inner"],
+    ],
+    [
+      "let basket = [2, 4]\nlet mirror = basket\nsay set[mirror.first]\nexit\n",
+      "mirror.first",
+      "set[",
+      "setLiteral",
+      ["element"],
+    ],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const nodeAt = (answers: Answers, offset: number, expression: string) => {
+      const node = answers.graph.nodes.find(
+        (each) =>
+          each.kind === "expression" &&
+          each.expression?.kind === expression &&
+          each.span?.start.offset === offset,
+      );
+      assert.ok(node !== undefined, `${source} @${offset}`);
+      return node;
+    };
+    const kinds = (items: readonly { readonly tag: string }[]) => {
+      assert.ok(items.length > 0 && items.every((item) => item.tag !== "unknown"), source);
+      return [...new Set(items.map((item) => item.tag).filter((tag) => tag !== "empty"))].sort();
+    };
+    const [low, high] = walkEnds(source);
+    for (let allowance = low; allowance <= high; allowance += 1) {
+      const answers: Answers = withTestAllowance(allowance, () => analyseCore(request));
+      const own = answers.at(nodeAt(answers, source.indexOf(child), "propertyAccessExpression"));
+      assert.ok(own !== null, `${source} @${allowance}`);
+      assert.deepEqual(kinds(own.items), ["integer"], `${source} @${allowance}`);
+      const outer = nodeAt(answers, source.indexOf(literal), kind);
+      const composed = [answers.valueAt(outer, path).items];
+      if (path.length === 1) composed.push(answers.project(outer, "element"));
+      else {
+        const inner = nodeAt(answers, source.indexOf("{inner"), "objectLiteral");
+        composed.push(answers.project(inner, { property: "inner" }));
+        composed.push(answers.properties(inner).get("inner") ?? []);
+      }
+      for (const items of composed)
+        assert.deepEqual(kinds(items), ["integer"], `${source} @${allowance}`);
+    }
+  }
+});
+
+/**
  * A member read a stop left unsettled is no proof of the property either (C5, Codex r24 B1): a typed call's member its
  * default lacks keeps its TSV043 or its mark, from a literal and from a named default, at a stop before admission settled
  * and in the settled walk. A literal's own element is proof of one, settled or not (Codex r24 N1): `[count].first` owes no

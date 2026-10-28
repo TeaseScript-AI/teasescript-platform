@@ -855,7 +855,9 @@ class CoreAnswers implements Answers {
   }
 
   /**
-   * A value's items at a node and a path. After a stop, the finishing read's sources in their order (TABLE r4.138): the
+   * A value's items at a node and a path, for every question, direct or composed: a literal's child's items are its own
+   * question's (`#stoppedShape`), and the last two sources are read here alone (TABLE r4.158; the lint check
+   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order (TABLE r4.138): the
    * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
@@ -914,11 +916,12 @@ class CoreAnswers implements Answers {
 
   /**
    * After a stop, what a value's own syntax gives at a path, with no proof (D4 a′): its items and its objects' property
-   * names. A literal gives its own kind, and its children's below it (`#literalShape`); a typed parse's or load's
-   * expected type (F18) is its written destination's (`landsIn`), else its default's as a typed default reads it
-   * (`typedDefault`: a `null` there leaves its level open), at every depth, a literal's child included; any other
-   * value `STOPPED`. Each typed call and path once, every link of a chain of typed defaults sharing it; a literal's own
-   * shape is kept apart from what a typed call makes of it.
+   * names. A literal gives its own kind, and below it its children's items as their own questions answer them (`#items`)
+   * beside its children's own names (`#literalShape`: the descent follows the literal's syntax, so it ends); a typed
+   * parse's or load's expected type (F18) is its written destination's (`landsIn`), else its default's as a typed
+   * default reads it (`typedDefault`: a `null` there leaves its level open), at every depth, a literal's child included;
+   * any other value `STOPPED`. Each typed call and path once, every link of a chain of typed defaults sharing it; a
+   * literal's own shape is kept apart from what a typed call makes of it.
    */
   #stoppedShape(value: PlaceId, path: readonly string[]): StoppedShape {
     const { program, contract } = this.#pass;
@@ -1013,20 +1016,16 @@ class CoreAnswers implements Answers {
           for (const name of termProperties(has.type)) names.add(name);
       return { items: [makeItem(own, null, { cert: "def" })], names };
     }
-    // each child as its own syntax gives it, at the path's own step (`literalChildren` keys a collection's elements and
-    // a dict's values alike); a child its syntax leaves open as the finishing read's ordered sources answer it, beside
-    // its known siblings (TABLE r4.138 (3), r4.144)
+    // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
+    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
+    // TABLE r4.158), beside its known siblings; its names its own syntax's alone
     const items: Item[] = [];
     const names = new Set<string>();
+    const rest = path.slice(1);
     for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
       if (child.value === undefined) continue;
-      const shape = this.#stoppedShape(child.value, path.slice(1));
-      const childItems =
-        shape.items === STOPPED
-          ? this.#consumers.finishedItems(child.value, child.node, path.slice(1))
-          : shape.items;
-      for (const item of childItems) items.push(item);
-      for (const name of shape.names) names.add(name);
+      for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
+      for (const item of this.#items(child.value, child.node, rest)) items.push(item);
     }
     return { items: items.length === 0 ? STOPPED : items, names };
   }
