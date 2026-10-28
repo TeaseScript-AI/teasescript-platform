@@ -487,6 +487,20 @@ interface OtherGroup {
   readonly loads: boolean;
 }
 
+/**
+ * A literal's values of one class at a path (`OtherGroup`, `ReadClassGroup`): those its answer reads, the others of a
+ * mixed class, and the class's earliest cell writer.
+ */
+interface ClassGroup<E extends ValueEntry> {
+  readonly read: readonly E[];
+  readonly rest: readonly E[];
+  readonly writer: Writer | null;
+  readonly mixed: number;
+}
+
+/** A literal's reads of one class at a path (`#readGroupsAt`). */
+type ReadClassGroup = ClassGroup<ReadEntry>;
+
 /** A choice's options of one class (`Contract.choiceOptions`): those its answer reads, the others of a mixed class. */
 export interface ChoiceGroup {
   readonly read: readonly number[];
@@ -495,7 +509,7 @@ export interface ChoiceGroup {
 }
 
 /** A value's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`). */
-interface ValueClass {
+export interface ValueClass {
   readonly cls: string | null;
   readonly writers: readonly (Writer | null)[] | null;
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
@@ -729,6 +743,13 @@ export class Contract {
   readonly #snapshots = new Map<PlaceId, string>();
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
   readonly #readClasses = [new Map<PlaceId, ReadClass>(), new Map<PlaceId, ReadClass>()];
+  /** Per read of a stable binding, its class across bindings on the contract side and the value side (`boundClass`). */
+  readonly #boundClasses = [new Map<PlaceId, ValueClass>(), new Map<PlaceId, ValueClass>()];
+  /** Per read, the one definition of its stable binding on the contract side and the value side (`#stableDefinition`). */
+  readonly #stableDefinitions = [
+    new Map<PlaceId, Definition | null>(),
+    new Map<PlaceId, Definition | null>(),
+  ];
   /** Per value, its class and its roles' writers on the contract side and on the value side (`classOf`). */
   readonly #valueClasses = [new Map<PlaceId, ValueClass>(), new Map<PlaceId, ValueClass>()];
   /** Per literal's list of computed values at a path, its groups on the contract side and the value side (`#othersAt`). */
@@ -736,10 +757,15 @@ export class Contract {
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
   ];
+  /** Per literal's list of reads at a path, its groups for the contract's gather and the value side's (`#readGroupsAt`). */
+  readonly #readClassGroups = [
+    new WeakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(),
+    new WeakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(),
+  ];
   /** Per literal path's computed values on either side (`#othersAt`), its computed-key loads below their root. */
   readonly #loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
   /** Per group of a mixed class (`#othersAt`), the leaves its other members name by role (`#othersLeaves`), or `null`. */
-  readonly #othersLeavesOf = new WeakMap<OtherGroup, IngressNode | null>();
+  readonly #othersLeavesOf = new WeakMap<ClassGroup<ValueEntry>, IngressNode | null>();
   /** Per value and side, the leaves it names by role in its class (`#leafRoles`). */
   readonly #leafRolesOf = [
     new Map<PlaceId, readonly IngressNode[] | null>(),
@@ -979,19 +1005,35 @@ export class Contract {
     return Math.min(count, 2);
   }
 
+  /**
+   * P3's condition on where a read stands (`contractRead`): in live code a parameter, a result, or a place whose live
+   * declaration is reached and dominates the read; in dead code a declared place.
+   */
+  #declaredBefore(place: PlaceId, node: FlowNode): boolean {
+    const { program, definitions, lists } = this.pass;
+    const kind = program.place(place).kind.kind;
+    const declaration = definitions.declOf.get(place);
+    return program.live(node)
+      ? kind === "parameter" ||
+          kind === "result" ||
+          (declaration !== undefined &&
+            lists.live(declaration) &&
+            program.reached(declaration.node) &&
+            program.dom.dominates(declaration.node, node))
+      : declaration !== undefined;
+  }
+
   public *contractRead(
     key: Key,
     node: FlowNode,
     context: ContextWord,
     later = false,
   ): Work<readonly Item[]> {
-    const { program, definitions, lists } = this.pass;
+    const { program } = this.pass;
     const items = yield* this.contractOf(key);
     const kinds = withoutEmpty(items);
     const place = keyPlace(key);
     const path = keyPath(key);
-    const found = program.place(place);
-    const declaration = definitions.declOf.get(place);
     // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
     // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
     // is the error it is in live code (AD-3), unless the kind came through a call (a parameter's, a result's, a copy of
@@ -1000,14 +1042,8 @@ export class Contract {
       kinds.length === 1 &&
       kinds[0]!.tag !== "unknown" &&
       kinds[0]!.guarded !== true &&
-      (program.live(node)
-        ? found.kind.kind === "parameter" ||
-          found.kind.kind === "result" ||
-          (declaration !== undefined &&
-            lists.live(declaration) &&
-            program.reached(declaration.node) &&
-            program.dom.dominates(declaration.node, node))
-        : declaration !== undefined && kinds[0]!.called !== true);
+      this.#declaredBefore(place, node) &&
+      (program.live(node) || kinds[0]!.called !== true);
     // every selection on the way holds an element
     for (let length = 1; length <= path.length && definite; length += 1)
       if (path[length - 1] === "element") {
@@ -2198,11 +2234,8 @@ export class Contract {
   }
 
   /**
-   * The read a read of a stable alias copies, with the alias's writer, or `null` (`readClass`): the binding read is an
-   * unwritten `let` or `global` with one definition, a whole copy of a read (no store below it, in it or into it from
-   * another callable: each would be a second definition), and on the value side that definition is the read's exact
-   * answer (`exactPath` at its node, no rest: every path below the binding is the copy's below it, an event below it
-   * being one of the binding's own, X6).
+   * The read a read of a stable alias copies, with the alias's writer, or `null` (`readClass`): the binding read has one
+   * stable definition (`#stableDefinition`), a whole copy of a read.
    */
   #aliasOf(
     value: PlaceId,
@@ -2214,33 +2247,102 @@ export class Contract {
       base = projection.owner;
       projection = program.projOf.get(base);
     }
-    const binding = program.occurrenceOf.get(base);
-    if (binding === undefined || definitions.ingress.has(base) || program.isHost(binding))
-      return null;
-    program.work.charge("invSteps");
-    const kind = program.place(binding).kind;
-    if (kind.kind !== "binding" || writtenOf(kind) !== null) return null;
-    const key = keyOf(binding, []);
-    const defs = definitions.byKey.get(key) ?? [];
-    const d = defs[0];
-    if (
-      defs.length !== 1 ||
-      d === undefined ||
-      d.kind !== "whole" ||
-      d.weak ||
-      d.value === undefined ||
-      definitions.keysBelow(key).length > 0 ||
-      (definitions.loopAdds.get(key)?.length ?? 0) > 0 ||
-      this.copiedKey(d.value) === null
-    )
-      return null;
-    if (exact) {
-      const node = program.occNode.get(base) ?? null;
-      const answer = node === null ? null : this.pass.exact.exactPath(key, node);
-      if (answer === null || !("def" in answer) || answer.def !== d || answer.rest.length > 0)
-        return null;
+    const d = this.#stableDefinition(base, exact);
+    if (d === null || this.copiedKey(d.value!) === null) return null;
+    return { source: d.value!, writer: definitions.writerOf(d) };
+  }
+
+  /**
+   * The one definition of the binding a read reads, where every path below the binding is that definition's value's
+   * below it: an unwritten `let` or `global` with one definition, a whole store (none below it, in it or into it from
+   * another callable: each would be a second definition), and on the value side the read's exact answer (`exactPath` at
+   * its node, no rest: an event below the binding is one of its own, X6); once per read and side, `null` for any other.
+   */
+  #stableDefinition(read: PlaceId, exact: boolean): Definition | null {
+    const memo = this.#stableDefinitions[exact ? 1 : 0]!;
+    const known = memo.get(read);
+    if (known !== undefined) return known;
+    const { program, definitions } = this.pass;
+    const binding = program.occurrenceOf.get(read);
+    let found: Definition | null = null;
+    if (binding !== undefined && !definitions.ingress.has(read) && !program.isHost(binding)) {
+      program.work.charge("invSteps");
+      const kind = program.place(binding).kind;
+      const key = keyOf(binding, []);
+      const defs = definitions.byKey.get(key) ?? [];
+      const d = defs[0];
+      if (
+        kind.kind === "binding" &&
+        writtenOf(kind) === null &&
+        defs.length === 1 &&
+        d !== undefined &&
+        d.kind === "whole" &&
+        !d.weak &&
+        d.value !== undefined &&
+        definitions.keysBelow(key).length === 0 &&
+        (definitions.loopAdds.get(key)?.length ?? 0) === 0
+      )
+        found = d;
+      if (found !== null && exact) {
+        const node = program.occNode.get(read) ?? null;
+        const answer = node === null ? null : this.pass.exact.exactPath(key, node);
+        if (answer === null || !("def" in answer) || answer.def !== d || answer.rest.length > 0)
+          found = null;
+      }
     }
-    return { source: d.value, writer: definitions.writerOf(d) };
+    memo.set(read, found);
+    return found;
+  }
+
+  /**
+   * #1313: the definition whose value a read of a stable binding (`#stableDefinition`) answers as at every path, where
+   * that value is no read or a read of no read class (a host global's, its leaf its own); `null` for any other read, an
+   * alias's included (`#aliasOf`).
+   */
+  #boundOf(value: PlaceId, exact: boolean): Definition | null {
+    if (!this.pass.program.occurrenceOf.has(value)) return null;
+    const d = this.#stableDefinition(value, exact);
+    return d === null ||
+      (this.copiedKey(d.value!) !== null && this.readClass(d.value!, exact) !== null)
+      ? null
+      : d;
+  }
+
+  /**
+   * #1313: the class a value shares with the values whose answers differ from its own only by their roles' writers and,
+   * where it is mixed, by their leaves or operands (`classOf`'s promise), across bindings: a read of a binding whose value
+   * it answers as (`#boundOf`) by that value's class (`classOf`), with the binding's writer, which stands for every kind
+   * but an emptiness and a missing property, and its own guards and narrowing (`readClass`'s), so k bindings of loads of
+   * one default, of host reads or of alike objects are one class; any other value its own class. Kept apart from
+   * `classOf`, where reads of one binding stay one class unmixed, their leaves one: a site that shares a bound class
+   * reads each member's leaves (`#readGroupsAt`, `#leafRoles`) or decides by kinds alone. Once per read and side.
+   */
+  public boundClass(value: PlaceId, exact: boolean): ValueClass {
+    const d = this.#boundOf(value, exact);
+    if (d === null) return this.#classed(value, exact);
+    const memo = this.#boundClasses[exact ? 1 : 0]!;
+    const known = memo.get(value);
+    if (known !== undefined) return known;
+    const { definitions, guards, values } = this.pass;
+    const source = this.#classed(d.value!, exact);
+    const bound: ValueClass =
+      source.cls === null
+        ? this.#classed(value, exact)
+        : {
+            cls: keptParts(
+              this.#work,
+              "b",
+              source.cls,
+              guards.guardedRead(value) ? "g" : "",
+              guards.guardedBelowRead(value).join(" "),
+              exact ? values.narrowingMark(value) : "",
+            ),
+            writers: source.writers === null ? null : [definitions.writerOf(d), ...source.writers],
+            mixed: source.mixed,
+          };
+    this.#keep(1 + (bound.writers?.length ?? 0));
+    memo.set(value, bound);
+    return bound;
   }
 
   /**
@@ -2576,6 +2678,72 @@ export class Contract {
       this.#keep(1 + below.length);
       this.#othersBelowOf.set(groups, below);
     }
+    return groups;
+  }
+
+  /**
+   * #1313: a literal's reads at a path as a gather reads them (`#gatherAt`), once per list and gather: of the reads of
+   * bound bindings of one class (`#boundOf`, `boundClass`), each unguarded or each guarded, none holding a mark, none
+   * an ingress, its role minima (`roleMinima`), and of a mixed class the others (`#groupItems`), with the contract's
+   * earliest cell writer apart from none (`#othersAt`'s), the value side's by where each read's declaration stands (its
+   * contract read's P3 condition, `#declaredBefore`); any other read by itself. In order, so a list of k bindings of
+   * loads of one default, read at k properties, reads one binding at each.
+   */
+  #readGroupsAt(list: readonly ReadEntry[] | undefined, value: boolean): readonly ReadClassGroup[] {
+    if (list === undefined) return [];
+    const memo = this.#readClassGroups[value ? 1 : 0]!;
+    const known = memo.get(list);
+    if (known !== undefined) return known;
+    const { definitions, program } = this.pass;
+    const cellWriter = (entry: ReadEntry): Writer | null =>
+      entry.g === null ? null : definitions.writerOf(entry.g);
+    const members: ValueClass[] = [];
+    for (const entry of list) {
+      program.work.charge("invSteps");
+      const read = entry.value;
+      const bound =
+        sharing() &&
+        entry.ingress === undefined &&
+        this.#markFree(entry.holder) &&
+        this.#boundOf(read, value) !== null
+          ? this.boundClass(read, value)
+          : NO_CLASS;
+      // (where a read stands decides its contract read's certainty on the value side, its cell's writer on the contract)
+      const node = value ? (program.occNode.get(read) ?? null) : null;
+      const stands =
+        node === null
+          ? ""
+          : `${program.live(node) ? "l" : ""}${this.#declaredBefore(program.occurrenceOf.get(read)!, node) ? "d" : ""}`;
+      const key =
+        bound.cls === null || (value && node === null)
+          ? null
+          : keptParts(
+              this.#work,
+              bound.cls,
+              entry.guarded ? "g" : "",
+              value ? stands : cellWriter(entry) !== null ? "w" : "",
+            );
+      members.push({
+        cls: key,
+        writers: key === null ? null : bound.writers,
+        mixed: key === null ? 0 : bound.mixed,
+      });
+    }
+    const groups: ReadClassGroup[] = [];
+    for (const { read, rest, all, mixed } of roleMinima(members, () =>
+      program.work.charge("invSteps"),
+    )) {
+      let writer: Writer | null = null;
+      for (const member of all) writer = firstWriter(writer, cellWriter(list[member]!));
+      this.#keep(2 + read.length + rest.length);
+      groups.push({
+        read: read.map((member) => list[member]!),
+        rest: rest.map((member) => list[member]!),
+        writer,
+        mixed,
+      });
+    }
+    memo.set(list, groups);
     return groups;
   }
 
@@ -4709,7 +4877,7 @@ export class Contract {
     const index = this.literalIndex(site.literal);
     if (site.kind === "exact") return (index.exact.get(site.path) ?? []).length;
     if (site.kind === "copies" || site.kind === "reads")
-      return (index.reads.get(site.path) ?? []).length;
+      return this.#readGroupsAt(index.reads.get(site.path), site.kind === "copies").length;
     if (site.kind === "selected") return (index.objects.get(site.path)?.list ?? []).length;
     return this.#gatherGroups(site).length;
   }
@@ -4738,20 +4906,16 @@ export class Contract {
       const entry = index.exact.get(site.path)![at]!;
       return yield* values.valueItems(entry.value, entry.g?.node ?? node, rest);
     }
-    if (site.kind === "copies") {
-      const entry = index.reads.get(site.path)![at]!;
-      return this.#annotated(entry, rest, yield* this.#belowRead(entry.value, rest));
-    }
-    if (site.kind === "reads") {
-      const entry = index.reads.get(site.path)![at]!;
-      return this.#annotated(
-        entry,
-        rest,
-        withWriter(
-          yield* this.contractOfValueAt(entry.value, rest),
-          entry.g === null ? null : this.pass.definitions.writerOf(entry.g),
-        ),
-      );
+    if (site.kind === "copies" || site.kind === "reads") {
+      const copies = site.kind === "copies";
+      const group = this.#readGroupsAt(index.reads.get(site.path), copies)[at]!;
+      const self = this;
+      return yield* this.#groupItems(group, copies, function* (entry) {
+        const items = copies
+          ? yield* self.#belowRead(entry.value, rest)
+          : yield* self.contractOfValueAt(entry.value, rest);
+        return self.#annotated(entry, rest, items);
+      });
     }
     if (site.kind === "groups") {
       const group = this.#gatherGroups(site)[at]!;
@@ -4794,14 +4958,14 @@ export class Contract {
    * external data names the others' leaves as well, so a class of k loads of host data read at k properties reads one
    * load at each (#1207).
    */
-  *#groupItems(
-    group: OtherGroup,
+  *#groupItems<E extends ValueEntry>(
+    group: ClassGroup<E>,
     exact: boolean,
-    answer: (entry: ValueEntry) => Work<readonly Item[]>,
+    answer: (entry: E) => Work<readonly Item[]>,
   ): Work<Item[]> {
     const out: Item[] = [];
     const answers: (readonly Item[])[] = [];
-    const read = function* (entry: ValueEntry): Work<readonly Item[]> {
+    const read = function* (entry: E): Work<readonly Item[]> {
       const items = yield* answer(entry);
       return exact ? items : withWriter(items, group.writer);
     };
@@ -4826,7 +4990,7 @@ export class Contract {
    * `null` where any of that fails, or a leaf lies in a fixpoint's growing cell.
    */
   #othersLeaves(
-    group: OtherGroup,
+    group: ClassGroup<ValueEntry>,
     answers: readonly (readonly Item[])[],
     exact: boolean,
   ): IngressNode | null {
@@ -4859,10 +5023,11 @@ export class Contract {
   /**
    * The leaves a value of a class mixed by leaves alone names where its answer holds external data, by role: of it and
    * its mixed parts (`#classParts`) at any depth, in their roles' order, each ingress's own (`entered`), so a composite
-   * (`load(…, default: hostValue) otherwise {…}`) names its load's and its default's (#1304); a literal's read entry of
-   * host data each read's it stands for (its unioned leaves, `#indexWork`), so literals of one and of two reads of one
-   * global differ by their roles' count; `null` where a mixed part is mixed by more than its leaves, a leaf lies in a
-   * fixpoint's cell, or none names one. Once per value and side, on an explicit walk.
+   * (`load(…, default: hostValue) otherwise {…}`) names its load's and its default's (#1304), and a read of a bound
+   * binding its value's (`#boundOf`, #1313); a literal's read entry of host data each read's it stands for (its
+   * unioned leaves, `#indexWork`), so literals of one and of two reads of one global differ by their roles' count;
+   * `null` where a mixed part is mixed by more than its leaves, a leaf lies in a fixpoint's cell, or none names one.
+   * Once per value and side, on an explicit walk.
    */
   #leafRoles(value: PlaceId, exact: boolean): readonly IngressNode[] | null {
     const memo = this.#leafRolesOf[exact ? 1 : 0]!;
@@ -4870,7 +5035,7 @@ export class Contract {
     const { definitions, program } = this.pass;
     const out: IngressNode[] = [];
     const seen = new Set<PlaceId>();
-    const pending = [value];
+    const pending = [this.#boundOf(value, exact)?.value ?? value];
     let found = true;
     while (found && pending.length > 0) {
       const at = pending.pop()!;

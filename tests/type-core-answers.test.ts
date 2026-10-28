@@ -852,6 +852,45 @@ test("a property read of composite fallbacks names every load's and default's le
   ]);
 });
 
+/**
+ * #1313: a read of a binding of one stable definition answers as its value at every path, so k bindings of loads of
+ * one default, or of alike objects, are one class: a property read below their list beside an object reads one binding
+ * and names every load's and default's leaf, as with the sharing off; with no object beside them, where one binding is
+ * tested, and where one is written again and stands apart, too.
+ */
+test("a property read of named bindings in a list names every binding's leaves (#1313)", () => {
+  const bindings = (n: number, value: string): string =>
+    Array.from({ length: n }, (_, i) => `let l${i} = ${value}`).join("\n");
+  assertSharedAsUnshared([
+    [
+      'let l0 = load("a", default: hostValue)\nlet l1 = load("b", default: hostValue)\nlet xs = [l0, {f0: 1, f1: 1}, l1]\nlet a0: integer = xs[0].f0\nlet a1: integer = xs[0].f1\nexit\n',
+      "xs[0].f1",
+      /load|hostValue/g,
+      ["integer", "unknown"],
+    ],
+    [
+      `${bindings(3, 'load("k", default: hostValue)')}\nif l1.f1 is integer {\n  let xs = [l0, l1, {f0: 1, f1: 1}, l2]\n  say xs[0].f1\n}\nexit\n`,
+      "xs[0].f1",
+      null,
+    ],
+    [
+      `${bindings(3, "{f0: 1}")}\nlet xs = [l0, {f0: 1, f1: 1}, l1, l2]\nsay xs[0].f1\nexit\n`,
+      "xs[0].f1",
+      null,
+    ],
+    [
+      `${bindings(3, 'fromJson("{}", default: hostValue)')}\nlet xs = [l0, l1, l2]\nlet a1: integer = xs[0].f1\nexit\n`,
+      "xs[0].f1",
+      /fromJson|hostValue/g,
+    ],
+    [
+      `${bindings(3, 'load("k", default: hostValue)')}\nlet xs = [l0, l1, {f0: 1}, l2]\nlet a0: integer = xs[0].f0\nl1 = hostValue\nexit\n`,
+      "xs[0].f0",
+      null,
+    ],
+  ]);
+});
+
 test("a written union of one type repeated answers as that type does (V30 §13, #1256)", () => {
   // (a union is the alternatives it holds: a result written `object | object` is an object, so adding a number to it is
   // the error it is for `object`, never a warning that the result might be of another type)
