@@ -544,15 +544,18 @@ export interface ChoiceGroup {
   readonly mixed: number;
 }
 
-/** A value's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`). */
+/**
+ * A member's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`), as
+ * `roleMinima` reads them: the writers only where another member of its class compares them (#1357).
+ */
 export interface ValueClass {
   readonly cls: string | null;
-  readonly writers: readonly (Writer | null)[] | null;
+  readonly writers: () => readonly (Writer | null)[];
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
   readonly mixed: number;
 }
 
-const NO_CLASS: ValueClass = { cls: null, writers: null, mixed: 0 };
+const NO_CLASS: ValueClass = { cls: null, writers: () => [], mixed: 0 };
 
 /**
  * A value's class as `classOf` keeps it: its roles' writers (`classWriters`) are its own, then its parts' in turn, read
@@ -580,10 +583,11 @@ function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): 
  * TABLE r4.85: the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
  * answer alike at every path apart from the writers of their roles (`classWriters`), each role's writer standing for
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
- * earliest in some role, merged, answer as all of them, whatever order the writers come in. A member without a class,
- * or whose roles are not known, stands by itself. Per class in the order of its first member: the members read, each
- * once and in role order (the first member for a role no later one is earlier in), the others where the class is
- * mixed (`Contract.classMixed`: read where the read ones' answer holds a leaf or an operand's identity), and all.
+ * earliest in some role, merged, answer as all of them, whatever order the writers come in; a class's roles are read
+ * once a second member comes, so a member alone in its class reads none. A member without a class stands by itself. Per
+ * class in the order of its first member: the members read, each once and in role order (the first member for a role
+ * no later one is earlier in), the others where the class is mixed (`Contract.classMixed`: read where the read ones'
+ * answer holds a leaf or an operand's identity), and all.
  */
 function roleMinima(
   members: readonly ValueClass[],
@@ -594,28 +598,24 @@ function roleMinima(
   readonly all: readonly number[];
   readonly mixed: number;
 }[] {
-  const classes: {
-    readonly read: number[];
-    readonly best: (Writer | null)[];
-    readonly all: number[];
-  }[] = [];
+  const classes: { read: number[]; best: (Writer | null)[] | null; readonly all: number[] }[] = [];
   const byClass = new Map<string, number>();
   for (const [index, { cls, writers }] of members.entries()) {
     charge();
-    const at = cls === null || writers === null ? undefined : byClass.get(cls);
+    const at = cls === null ? undefined : byClass.get(cls);
     if (at === undefined) {
-      if (cls !== null && writers !== null) byClass.set(cls, classes.length);
-      const roles = writers ?? [];
-      classes.push({
-        read: roles.length === 0 ? [index] : roles.map(() => index),
-        best: [...roles],
-        all: [index],
-      });
+      if (cls !== null) byClass.set(cls, classes.length);
+      classes.push({ read: [index], best: null, all: [index] });
       continue;
     }
     const into = classes[at]!;
+    if (into.best === null) {
+      const first = into.all[0]!;
+      into.best = [...members[first]!.writers()];
+      if (into.best.length > 0) into.read = into.best.map(() => first);
+    }
     into.all.push(index);
-    for (const [role, mine] of writers!.entries()) {
+    for (const [role, mine] of writers().entries()) {
       charge();
       const best = into.best[role] ?? null;
       if (mine !== null && best !== null && firstWriter(best, mine) !== best) {
@@ -2793,7 +2793,7 @@ export class Contract {
           : keptParts(this.#work, cls, exact || cellWriter(entry) !== null ? "w" : "");
       members.push({
         cls: key,
-        writers: key === null ? null : this.classWriters(entry.value, exact),
+        writers: () => this.classWriters(entry.value, exact) ?? [],
         mixed: key === null ? 0 : this.classMixed(entry.value, exact),
       });
     }
@@ -2877,7 +2877,7 @@ export class Contract {
             );
       members.push({
         cls: key,
-        writers: key === null ? null : this.#writersOf(bound, value),
+        writers: () => this.#writersOf(bound, value) ?? [],
         mixed: key === null ? 0 : bound.mixed,
       });
     }
@@ -2919,13 +2919,15 @@ export class Contract {
       if (sharing() && member !== null) {
         const cls = member.place === undefined ? null : this.classOf(member.place, exact);
         if (member.place === undefined)
-          classed = { cls: keptParts(this.#work, "l", member.label!), writers: [], mixed: 0 };
-        else if (cls !== null)
+          classed = { cls: keptParts(this.#work, "l", member.label!), writers: () => [], mixed: 0 };
+        else if (cls !== null) {
+          const place = member.place;
           classed = {
             cls: keptParts(this.#work, member.object ? "o" : "c", cls),
-            writers: this.classWriters(member.place, exact),
-            mixed: this.classMixed(member.place, exact),
+            writers: () => this.classWriters(place, exact) ?? [],
+            mixed: this.classMixed(place, exact),
           };
+        }
       }
       members.push(classed);
     }
