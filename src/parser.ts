@@ -195,13 +195,10 @@ interface SharedParse {
    * without this set, but `parse` leaves them out (see `Parser.reportMissing`).
    */
   readonly followUps: WeakSet<Diagnostic>;
-  /**
-   * The source, where the readings of an unclear `otherwise` are proved and named (see `Parser.#settleOtherwiseOffers`),
-   * or `null` in the parses that prove them.
-   */
+  /** The source, where offered fixes are proved (see `Parser.offerFix`), or `null` in the parses that prove them. */
   source: string | null;
-  /** How many characters the parses that prove those readings may still read. */
-  readingBudget: number;
+  /** How many characters the parses that prove those fixes may still read. */
+  proofBudget: number;
 }
 /** A point in a parse, from which `Parser.reportMissing` tells what a failed part reported. */
 export interface ParseMark {
@@ -240,7 +237,7 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftBrace,
   TokenKind.InterpolationStart,
 ]);
-/** TSP041, which `Parser.#settleOtherwiseOffers` follows with both readings where it proves them. */
+/** TSP041, which `Parser.offerFix` follows with both readings where it proves them. */
 const UNCLEAR_OTHERWISE =
   "It is unclear what 'otherwise' belongs to. Put parentheses around that part.";
 /** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, or a text. */
@@ -269,12 +266,12 @@ export function parse(source: string): ParseResult {
 }
 
 /**
- * The share of the source's length that the parses proving `otherwise` readings may read, besides a fixed allowance,
- * which keeps that proof in proportion to the source (see `Parser.#settleOtherwiseOffers`).
+ * The share of the source's length that the parses proving offered fixes may read, besides a fixed allowance, which
+ * keeps that proof in proportion to the source (see `Parser.offerFix`).
  */
-const READING_PROOF_BUDGET = { perCharacter: 4, fixed: 4096 };
+const FIX_PROOF_BUDGET = { perCharacter: 4, fixed: 4096 };
 
-/** `parse`, which with `offers` also proves and names the readings of each unclear `otherwise`. */
+/** `parse`, which with `offers` also proves the fixes that its messages offer as code (see `Parser.offerFix`). */
 function parseSource(source: string, offers: boolean): ParseResult {
   // A `/` where the grammar expects a value starts a regex literal (V30 §8). The lexer tells most such places from the
   // token before; where a parse with errors expected a value at a `/` that the lexer took for division, the source is
@@ -285,8 +282,8 @@ function parseSource(source: string, offers: boolean): ParseResult {
     const parser = new Parser(header.programTokens);
     if (offers) {
       parser.shared.source = source;
-      parser.shared.readingBudget =
-        READING_PROOF_BUDGET.perCharacter * source.length + READING_PROOF_BUDGET.fixed;
+      parser.shared.proofBudget =
+        FIX_PROOF_BUDGET.perCharacter * source.length + FIX_PROOF_BUDGET.fixed;
     }
     const program = parser.parseProgram();
     const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
@@ -312,14 +309,16 @@ function parseSource(source: string, offers: boolean): ParseResult {
 /** The public members serve `parse` and the modules in `parser/`, and are internal to the parser. */
 export class Parser {
   public readonly diagnostics: Diagnostic[] = [];
-  /** The readings of unclear `otherwise` errors that wait for their statement to end (see `#settleOtherwiseOffers`). */
-  readonly #otherwiseOffers: {
+  /** The fixes offered for errors of the statement being read, which wait for it to end (see `offerFix`). */
+  readonly #fixOffers: {
     readonly index: number;
     readonly error: Diagnostic;
-    readonly start: number;
-    readonly end: number;
-    readonly codes: readonly string[];
-    readonly named: string;
+    readonly quoted: string;
+    readonly pastes: readonly {
+      readonly start: number;
+      readonly end: number;
+      readonly code: string;
+    }[];
   }[] = [];
   /**
    * The statement and command ranges. A speculative parser keeps its own, so only those of the parse that counts are
@@ -377,7 +376,7 @@ export class Parser {
       newlineRuns: newlineRuns(tokens),
       followUps: new WeakSet(),
       source: null,
-      readingBudget: 0,
+      proofBudget: 0,
     },
   ) {
     this.shared = shared;
@@ -1402,7 +1401,7 @@ export class Parser {
   /**
    * Offers both readings of the `otherwise` with the error at `index`, when that is the only error in `expression`,
    * which nothing outside binds to (see `parseOr`): the fallback for the values next to it, and for all of each side of
-   * it. `#settleOtherwiseOffers` names them once it has proved them. Only a short expression is quoted, which also keeps
+   * it. `offerFix` names them once it has proved them. Only a short expression is quoted, which also keeps
    * a long chain from being written out.
    */
   #offerOtherwiseReadings(expression: Expression, index: number): void {
@@ -1483,51 +1482,61 @@ export class Parser {
       },
     ];
     if (!readings.every(({ code }) => code.length <= 60 && !code.includes("\n"))) return;
-    this.#otherwiseOffers.push({
+    const named = readings.map(
+      ({ code, subject, fallback }) =>
+        ` '${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null.`,
+    );
+    this.offerFix(
       index,
-      error,
-      start: expression.span.start.offset,
-      end: expression.span.end.offset,
-      codes: readings.map(({ code }) => code),
-      named: readings
-        .map(
-          ({ code, subject, fallback }) =>
-            ` '${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null.`,
-        )
-        .join(""),
-    });
+      `${UNCLEAR_OTHERWISE}${named.join("")}`,
+      readings.map(({ code }) => ({
+        start: expression.span.start.offset,
+        end: expression.span.end.offset,
+        code,
+      })),
+    );
   }
 
   /**
-   * Names the offered readings of each unclear `otherwise` in the statement that starts at token `start` and has read
-   * the errors from `diagnosticCount` on, but only once the statement, with each reading pasted in place of its
-   * expression, parses without any error, lexer errors included. Otherwise the error keeps its instruction in words
-   * (#1268). The parses together read at most `SharedParse.readingBudget` characters.
+   * Offers code for the error at `index`, whose message says the fix in words: `quoted`, a message that shows the code,
+   * replaces it when the statement ends, but only if the statement has no other error and, with each of `pastes` (each
+   * code in place of the source from `start` up to `end`), parses without any error, lexer errors included (#1268). The
+   * parses together read at most `SharedParse.proofBudget` characters.
    */
-  #settleOtherwiseOffers(start: number, diagnosticCount: number): void {
-    const offers = this.#otherwiseOffers;
+  public offerFix(
+    index: number,
+    quoted: string,
+    pastes: readonly { readonly start: number; readonly end: number; readonly code: string }[],
+  ): void {
+    if (this.shared.source !== null)
+      this.#fixOffers.push({ index, error: this.diagnostics[index]!, quoted, pastes });
+  }
+
+  /** Settles the fixes offered for the statement that starts at token `start`, whose errors begin at `diagnosticCount`. */
+  #settleFixOffers(start: number, diagnosticCount: number): void {
+    const offers = this.#fixOffers;
     let first = offers.length;
     while (first > 0 && offers[first - 1]!.index >= diagnosticCount) first -= 1;
     if (first === offers.length) return;
     const source = this.shared.source!;
     const from = this.tokens[start]!.span.start.offset;
     const to = this.lastEnd();
+    const alone = this.diagnostics.length === diagnosticCount + 1;
     for (const offer of offers.splice(first)) {
-      if (this.diagnostics[offer.index] !== offer.error || offer.start < from || offer.end > to)
+      if (
+        !alone ||
+        this.diagnostics[offer.index] !== offer.error ||
+        offer.pastes.some(({ start, end }) => start < from || end > to)
+      )
         continue;
-      const pasted = offer.codes.map(
-        (code) => `${source.slice(from, offer.start)}${code}${source.slice(offer.end, to)}`,
+      const pasted = offer.pastes.map(
+        ({ start, end, code }) => `${source.slice(from, start)}${code}${source.slice(end, to)}`,
       );
       const cost = pasted.reduce((sum, text) => sum + text.length, 0);
-      if (cost > this.shared.readingBudget) continue;
-      this.shared.readingBudget -= cost;
+      if (cost > this.shared.proofBudget) continue;
+      this.shared.proofBudget -= cost;
       if (pasted.some((text) => parseSource(text, false).diagnostics.length > 0)) continue;
-      this.diagnostics[offer.index] = createDiagnostic(
-        DiagnosticSeverity.Error,
-        parserDiagnosticCode.mixedOtherwise,
-        `${UNCLEAR_OTHERWISE}${offer.named}`,
-        offer.error.span,
-      );
+      this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
     }
   }
 
@@ -2159,7 +2168,7 @@ export class Parser {
     // Recovery has already stopped at the next statement.
     if (this.recoveredAtStatementBoundary) this.recoveredAtStatementBoundary = false;
     else this.finishStatement(inBlock);
-    this.#settleOtherwiseOffers(start, diagnosticCount);
+    this.#settleFixOffers(start, diagnosticCount);
     let end = this.current;
     // A statement with an error may be unfinished, such as one that ends in a comma or misses a list's `]`, so it also
     // holds the line breaks after it, where an author completes it, as a recovered one does.
