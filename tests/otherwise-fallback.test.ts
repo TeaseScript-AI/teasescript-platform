@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
@@ -716,6 +717,94 @@ test("otherwise beside any other operator needs parentheses, and one error names
     ).map((diagnostic) => diagnostic[2]),
     Array(4).fill("It is unclear what 'otherwise' belongs to. Put parentheses around that part."),
   );
+});
+
+test("every reading TSP041 quotes parses without an error where it is pasted, wherever the expression stands", () => {
+  // Expressions with an unclear `otherwise` beside every operator, in chains and groups, across lines, and beside other
+  // errors, each in every place an expression stands, also where a leading '(' would change a command's form.
+  const expressions = new Set([
+    "a otherwise b + c",
+    "a otherwise b == c and ready",
+    "ready or a otherwise b > c",
+    "not a otherwise b == c",
+    "a otherwise b otherwise c > d",
+    "1 == a otherwise b otherwise c",
+    "a + b otherwise c otherwise d",
+    "a otherwise -b otherwise c > d",
+    "-a otherwise b",
+    "--a otherwise b",
+    "a otherwise b is integer",
+    "ready and a otherwise b is integer",
+    "a is integer or b otherwise c == d",
+    "a otherwise (b otherwise c + d)",
+    "a otherwise f(b otherwise c + d)",
+    "f(a otherwise b + c) otherwise d",
+    "a otherwise b + c otherwise d",
+    "a otherwise b > c and d otherwise 0 > 2",
+    "a otherwise b == not c",
+    "a otherwise\n b + c",
+    "not\n a otherwise b == c",
+    'a otherwise "\\q" + "x"',
+  ]);
+  for (const left of ["+", "*", ".."])
+    for (const right of ["-", "/", "..="]) expressions.add(`a ${left} b otherwise c ${right} d`);
+  for (const operator of ["==", "<=", "and", "or"])
+    expressions.add(`a otherwise b ${operator} c`).add(`a ${operator} b otherwise c`);
+  const places: readonly (readonly [string, (expression: string) => string])[] = [
+    ["let", (x) => `let result = ${x}`],
+    ["if", (x) => `if ${x} {\n  say "yes"\n}`],
+    ["say", (x) => `say ${x}`],
+    ["pacing", (x) => `say "hi", ${x}`],
+    ["bounded say", (x) => `say (${x}, instant)`],
+    ["say value", (x) => `let result = say ${x}, instant`],
+    ["interpolation", (x) => `say "answer: \${${x}}"`],
+    ["argument", (x) => `say f(${x})`],
+    ["list", (x) => `let result = [${x}]`],
+    ["compact load", (x) => `let result = load ${x}, default: 0`],
+    ["popup", (x) => `showPopup ${x}`],
+    ["wait", (x) => `wait ${x}`],
+  ];
+  const before =
+    "function f(value) {\n  return value\n}\nlet a = f(null)\nlet b = f(null)\nlet c = f(null)\nlet d = f(null)\nlet ready = true\n";
+  // The part of `expression` that a reading is of: its text, also over lines, without the parentheses a reading adds.
+  const bare = (text: string) => text.replace(/\n\s*/gu, " ").replace(/[()]/gu, "");
+  const paste = (expression: string, reading: string) => {
+    for (let length = bare(reading).length; length <= expression.length; length += 1)
+      for (let start = 0; start + length <= expression.length; start += 1) {
+        const part = expression.slice(start, start + length);
+        if (bare(part) === bare(reading))
+          return `${expression.slice(0, start)}${reading}${expression.slice(start + length)}`;
+      }
+    assert.fail(`'${reading}' is no reading of '${expression}'`);
+  };
+  const UNCLEAR = "It is unclear what 'otherwise' belongs to. Put parentheses around that part.";
+  const quoted = new Set<string>();
+  for (const expression of expressions)
+    for (const [place, wrap] of places)
+      for (const { code, message } of parse(`${before}${wrap(expression)}\nexit\n`).diagnostics) {
+        if (code !== "TSP041") continue;
+        const readings = message.slice(UNCLEAR.length).matchAll(/ '(.+?)' uses .*? when '.+?' is null\./gu);
+        for (const [, reading] of readings) {
+          const pasted = `${before}${wrap(paste(expression, reading!))}\nexit\n`;
+          assert.deepEqual(
+            parse(pasted).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+            [],
+            `${place}: ${pasted}`,
+          );
+          quoted.add(`${place}: ${expression}`);
+        }
+      }
+  // Readings are shown where they hold, and words where a '(' would change the command or the value has another error.
+  for (const place of ["let", "if", "say", "pacing", "bounded say", "interpolation", "argument", "list", "wait"])
+    assert.ok(quoted.has(`${place}: a otherwise b + c`), place);
+  for (const shown of [
+    "say value: a otherwise b + c",
+    "compact load: a otherwise b + c",
+    "popup: a otherwise b + c",
+    'let: a otherwise "\\q" + "x"',
+    "let: a .. b otherwise c ..= d",
+  ])
+    assert.ok(!quoted.has(shown), shown);
 });
 
 test("both readings of a type test with a grouped type keep its ')', and each compiles", () => {
