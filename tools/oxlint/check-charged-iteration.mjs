@@ -108,12 +108,13 @@ const CHARGING = [
 
 /**
  * Walks no more than the step that calls it charges (TABLE r4.58: a plain making is that step's own work): a key's or
- * path's text or steps, made or read where the step charges one unit per step or the text as kept; a parenthesis or
- * sign `peel` charges; a literal's parts and text, an expression's parts (`childrenOf`), an operand's items and a
- * read's loops, each charged at the call.
+ * path's text or steps, made or read where the step charges one unit per step or the text as kept (a key's text escaped
+ * as its label is made, `stepLabel`); a parenthesis or sign `peel` charges; a literal's parts and text, an expression's
+ * parts (`childrenOf`), an operand's items and a read's loops, each charged at the call.
  */
 const STEP = [
   "lib:Number",
+  "lib:String.replace",
   "lib:String.startsWith",
   ...core("expression-children.ts", ["expressionChildren"]),
   ...core("switch-cases.ts", ["caseLiteral"]),

@@ -51,14 +51,17 @@ export interface StablePath {
   readonly steps: readonly PathStep[];
 }
 
-/** A step's text in a refined location: `.n`, `[0]`, `["key"]`, `[@12]` (an index variable's place), `[*]`. */
+/**
+ * A step's text in a refined location: `.n`, `[number:0]`, `[string:key]`, `[@12]` (an index variable's place), `[*]`.
+ * A key's `\` and `]` are escaped, so its label ends at its first bare `]` and no key text spells another path (#1244).
+ */
 function stepLabel(step: PathStep, work: WorkLedger): string {
   work.charge("eventSteps");
   switch (step.kind) {
     case "property":
       return `.${step.name}`;
     case "fixed":
-      return `[${step.text}]`;
+      return `[${step.text.replace(/[\\\]]/g, "\\$&")}]`;
     case "variable":
       return `[@${step.place}]`;
     case "element":

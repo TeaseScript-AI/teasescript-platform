@@ -370,6 +370,58 @@ test("a narrowing's refined location is its stable path's text; a computed path,
         "non-null: branch",
       ],
       ["sibling index", [xs, "if xs[0] != null { repeat xs[1] {} }"], "repeat xs[1]", 7, "none"],
+      // a key's text never spells another path's steps (#1244): each path keeps its own location
+      [
+        "a key text spelling another path",
+        [
+          'let d: integer? dict dict = dict {"a": dict {"b].[string:c": null}, "a].[string:b": dict {"c": 1}}',
+          'if d["a"]["b].[string:c"] == null { if d["a].[string:b"]["c"] != null { say d["a"]["b].[string:c"] } }',
+        ],
+        'say d["a"]',
+        4,
+        "null: holds",
+      ],
+      [
+        "the same, the tests' forms swapped",
+        [
+          'let d: integer? dict dict = dict {"a": dict {"b].[string:c": 1}, "a].[string:b": dict {"c": null}}',
+          'if d["a"]["b].[string:c"] != null { if d["a].[string:b"]["c"] == null { say d["a"]["b].[string:c"] } }',
+        ],
+        'say d["a"]',
+        4,
+        "non-null: holds",
+      ],
+      [
+        "a key text holding every delimiter of a location",
+        [
+          'let d: integer? dict dict = dict {"x": dict {"y": 1}}',
+          String.raw`if d["x\\\\"]["y|@*"] == null { if d["x\\].[string:y|@*"] != null { say d["x\\\\"]["y|@*"] } }`,
+        ],
+        "say d",
+        4,
+        "null: holds",
+      ],
+      [
+        "a key text spelling a path one step deeper",
+        [
+          'let d: integer? dict dict dict = dict {"a": dict {"b": dict {"c": null}}}',
+          'if d["a"]["b"]["c"] == null { if d["a].[string:b"]["c"] != null { say d["a"]["b"]["c"] } }',
+        ],
+        "say d",
+        4,
+        "null: holds",
+      ],
+      [
+        "a key text spelling an element scope",
+        [
+          'let d: integer? dict dict = load("d", default: dict {})',
+          'let k = "a"',
+          'if d["a"] is integer dict { if d["a].[*"] == null { say d["a"][k + ""] } }',
+        ],
+        'say d["a"]',
+        4,
+        "is integer element: holds",
+      ],
       [
         "fixed key, held",
         [d, 'if d["a"] != null { repeat d["a"] {} }'],
@@ -1031,6 +1083,30 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
     ),
     "valid",
   );
+  // a key text spelling another path never lends it that path's test: the stored read is the outer test's `null`
+  // (#1244), as with a key that spells nothing
+  const spelling = [
+    'let d: integer? dict dict = dict {"a": dict {"b].[string:c": null}, "a].[string:b": dict {"c": 1}}',
+    'if d["a"]["b].[string:c"] == null { if d["a].[string:b"]["c"] != null {',
+    'let saved: integer = d["a"]["b].[string:c"]',
+    "say saved } }",
+  ];
+  for (const lines of [spelling, spelling.map((line) => line.replaceAll("a].[string:b", "z"))]) {
+    const offset = lines.join("\n").lastIndexOf('d["a"]');
+    const end = offset + 'd["a"]["b].[string:c"]'.length;
+    assert.deepEqual(record(...lines), {
+      outcome: "compile-error",
+      diagnostics: [
+        {
+          kind: "written-target",
+          class: "compile-error",
+          site: { file: "main.tease", offset, end },
+          context: null,
+        },
+      ],
+      checks: [],
+    });
+  }
 });
 
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
