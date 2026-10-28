@@ -161,8 +161,8 @@ export class GuardIndex {
   }
 
   /**
-   * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis
-   * that reads none pays for none (TABLE r4.117; no consumer reads them before S10's second part).
+   * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis,
+   * or a finishing pass after a stop, that reads none pays for none (TABLE r4.117).
    */
   public get narrowing(): NarrowingIndex {
     return (this.#narrowing ??= NarrowingIndex.of(this.program));
