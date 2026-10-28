@@ -1089,6 +1089,10 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     ["2"],
   ],
   ["let xs = [1]\nsay (xs + (⟦1..3⟧)).length\nexit\n", /Write '([^']*)' to add the numbers/, ["3"]],
+  // a fallback the fix writes (ADR 0021 rule 1.9) where the value does not divide, and a receiver's in parentheses
+  // (Astra on #1273)
+  ["let xs = [4, null]\nsay ⟦xs[1]⟧ / 2\nexit\n", /fallback, as in '([^']*)'/, ["0"]],
+  ['let xs = ["ab", null]\nsay ⟦xs[1]⟧.length\nexit\n', /fallback, as in '([^']*)'/, ["0"]],
 ];
 
 /**
@@ -1534,6 +1538,20 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       'function show(x: string?) {\n  say x.trim\n}\nshow("a")\nshow(null)\nexit\n',
       "Call the trim method with parentheses.",
     ],
+    // (Astra on #1273: a fallback the fix would write where the value divides, as a divisor, through a calculation or a
+    // member, where a written zero stops the run)
+    ...[
+      "let xs = [4, null]\nsay 1 / xs[1]\nexit\n",
+      "let xs = [4, null]\nsay 7 % xs[1]\nexit\n",
+      "let xs = [4, null]\nsay 1 / (xs[1] * 2)\nexit\n",
+      'let xs = ["ab", null]\nsay 4 / xs[1].length\nexit\n',
+    ].map(
+      (source) =>
+        [
+          source,
+          "or give a fallback after 'otherwise' that does not lead to a division by zero.",
+        ] as const,
+    ),
   ];
   for (const [source, fix] of cases) {
     const request = coreRequest([{ path: "main.tease", source }]);

@@ -61,7 +61,13 @@ import {
   selectsElement,
 } from "./method-categories.js";
 import { Laminar } from "./narrowing.js";
-import { COMPARISONS, OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
+import {
+  COMPARISONS,
+  DIVISIONS,
+  OPERATOR_ROWS,
+  operatorRow,
+  type Operator,
+} from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import {
   propertyName,
@@ -1397,7 +1403,7 @@ export class Consumers {
    * own result depends on the value (an operator's, a member's), the
    * kinds it takes whose result its own site takes in turn, up the expression to a consumer that does not; a comparison,
    * a logic operator, an interpolation give one type whatever they take. Any other consumer takes nothing a fix can
-   * prove.
+   * prove. A divisor's value divides, and so does a calculation's operand or a member's receiver whose result does.
    */
   #expected(site: SourceSite): SiteExpectation {
     const { program } = this.pass;
@@ -1496,6 +1502,10 @@ export class Consumers {
                 ),
             )
             .map((row) => row.result);
+        // (a divisor, or an operand whose zero can give a zero result where that result divides)
+        const divides =
+          (DIVISIONS.some((found) => found === operator) && consumer.index === 1) ||
+          outer.divides === true;
         return {
           takes: domain.filter(
             (kind) =>
@@ -1508,6 +1518,7 @@ export class Consumers {
             : outer.elements === undefined
               ? {}
               : { elements: outer.elements }),
+          ...(divides ? { divides } : {}),
         };
       }
       case "method": {
@@ -1520,6 +1531,7 @@ export class Consumers {
               : [],
           binds: "receiver",
           elements: null,
+          ...(outer.divides === true ? { divides: true } : {}),
         };
       }
       case "access": {
@@ -1544,6 +1556,7 @@ export class Consumers {
                 : [],
           binds: "receiver",
           elements: null,
+          ...(outer.divides === true ? { divides: true } : {}),
         };
       }
       case "use": {
@@ -1603,8 +1616,15 @@ export class Consumers {
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
     };
     if (this.#finishing && leftOutWarning(diagnostic)) return false;
-    (this.#finishing ? this.deferred : this.diagnostics).push(diagnostic);
-    this.rules.set(diagnostic, this.#rule);
+    // (a null value's fallback stands where the operation or the member takes the value, TABLE r4.151)
+    const expects =
+      item.tag === "null" &&
+      (rule.rule === "operator" || (rule.rule === "member" && rule.use !== "store"))
+        ? this.#expected(site)
+        : undefined;
+    const reported = expects === undefined ? diagnostic : { ...diagnostic, expects };
+    (this.#finishing ? this.deferred : this.diagnostics).push(reported);
+    this.rules.set(reported, this.#rule);
     return true;
   }
 

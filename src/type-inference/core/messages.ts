@@ -123,7 +123,7 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
     rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : text;
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
-    warningFix(rule, text, kinds, diagnostic.fits, detail, context, source),
+    warningFix(rule, text, kinds, diagnostic.fits, detail, context, source, diagnostic.expects),
   ];
   // a warning whose value has no word of its own (an exact value the rule still checks) has no cause; `later`'s first
   // sentence names the deciding line, and a member's missing property is its first sentence
@@ -404,13 +404,15 @@ const STRUCTURED: ReadonlySet<ItemTag> = new Set(["object", "list", "set", "dict
 
 /**
  * A code form a fix offers: its code, what each of its operations takes (fact 1), and the kinds its value has (fact 2),
- * with a collection's elements' kinds.
+ * with a collection's elements' kinds; `writes`, a value the fix writes itself (a fallback's), which the script never
+ * held.
  */
 interface CodeForm {
   readonly code: string;
   readonly takes: readonly Takes[];
   readonly gives: readonly ItemTag[];
   readonly elements?: readonly ItemTag[];
+  readonly writes?: true;
 }
 
 /** A site no fact describes: no value is proved to fit it. */
@@ -442,9 +444,9 @@ function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["re
  * where (1) each operation takes its subject: every kind of it known, and one the operation takes, a value it holds
  * of a flat structure; (2) its value fits what the site takes (`site`, read from what consumes the value there: any
  * value where nothing restricts it), a structured value only there or as a collection of scalars against its
- * elements' kinds; and (3)
- * it binds there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter than its
- * code. Its code, so grouped, where it holds; `null` where it does not, and the fix gives its advice in words.
+ * elements' kinds, and a value the fix writes itself only where the value does not divide; and (3) it binds there: as
+ * the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code. Its code, so
+ * grouped, where it holds; `null` where it does not, and the fix gives its advice in words.
  */
 function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   const proved = (kinds: readonly ItemTag[]): boolean =>
@@ -461,6 +463,9 @@ function codeAt(form: CodeForm, site: SiteExpectation): string | null {
     )
   )
     return null;
+  // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
+  // the value divides, Astra on #1273)
+  if (form.writes === true && site.divides === true) return null;
   if (site.takes !== null) {
     if (!fit(form.gives, site.takes) || form.gives.includes("object")) return null;
     const collection = form.gives.some((kind) => STRUCTURED.has(kind));
@@ -1307,9 +1312,14 @@ function fallbackValue(kinds: readonly ItemTag[]): string | null {
 
 /**
  * The check that makes a use safe (ADR 0021 rules 1.9 and 3.5): of a variable directly, of any other value kept in a
- * variable first, since only a variable narrows (rule 5); for null with a fallback where it has one.
+ * variable first, since only a variable narrows (rule 5); for null with a fallback where it has one, written where its
+ * site admits it (`codeAt`), else in words.
  */
-function checkFix(text: string, test: string, fallback: string | null, operand = false): string {
+function checkFix(
+  text: string,
+  test: string,
+  fallback: { readonly value: string; readonly site: SiteExpectation } | null,
+): string {
   const name = variable(text);
   // (a value kept in a variable shows its `let`, where its own text may stand in code)
   const check =
@@ -1319,9 +1329,20 @@ function checkFix(text: string, test: string, fallback: string | null, operand =
         ? `Keep '${text}' in a new variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
         : `Keep '${text}' in a new variable and check the variable first, as in 'if value ${test} { ... }'`;
   if (fallback === null || !ownText(text)) return `${check}.`;
+  const { value, site } = fallback;
   // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
-  const code = `${operandText(text)} otherwise ${fallback}`;
-  return `${check}, or give a fallback, as in '${operand ? `(${code})` : code}'.`;
+  const code = `${operandText(text)} otherwise ${value}`;
+  // (#1213's placeholder `...` is left for #1273; a value the fix writes goes through the predicate)
+  const fix =
+    value === "..."
+      ? site.binds === "operand"
+        ? `(${code})`
+        : code
+      : codeAt({ code, takes: [], gives: [], writes: true }, site);
+  if (fix !== null) return `${check}, or give a fallback, as in '${fix}'.`;
+  return site.divides === true
+    ? `${check}, or give a fallback after 'otherwise' that does not lead to a division by zero.`
+    : `${check}.`;
 }
 
 /** The literals an example may write beside a named value as the source writes them. */
@@ -1364,6 +1385,7 @@ function warningFix(
   detail: ContextDetail,
   context: ContextWord,
   source: MessageSource,
+  expects: SiteExpectation | undefined,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
   if (kinds.includes("null")) {
@@ -1375,11 +1397,23 @@ function warningFix(
           (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
             dictMethod(rule.member.slice(1, -2))?.changes !== undefined)));
     const fallback = changed ? null : fallbackValue(fits.length > 0 ? fits : ruleKinds(rule));
+    // (a fallback of the value's own kinds that the rule takes, rule 1.9, fits where the value does: its site adds how
+    // it binds there and whether the value divides)
+    const binds =
+      rule.rule === "operator" || (rule.rule === "boolean" && rule.operator !== null)
+        ? "operand"
+        : rule.rule === "member"
+          ? "receiver"
+          : "whole";
     return checkFix(
       subject,
       "!= null",
-      fallback,
-      rule.rule === "operator" || (rule.rule === "boolean" && rule.operator !== null),
+      fallback === null
+        ? null
+        : {
+            value: fallback,
+            site: { takes: null, binds, ...(expects?.divides === true ? { divides: true } : {}) },
+          },
     );
   }
   switch (rule.rule) {

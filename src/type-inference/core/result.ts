@@ -197,6 +197,8 @@ export interface SiteExpectation {
   readonly binds: "whole" | "operand" | "receiver";
   /** A collection's elements' kinds there (`null`, any; none: not known, so no collection is proved to fit). */
   readonly elements?: readonly ItemTag[] | null;
+  /** The value divides, as a divisor or through an operation or a member that gives one: a zero there stops the run. */
+  readonly divides?: true;
 }
 
 /** A store's root (`DiagnosticRule` `store`): how it is declared, its name, and a parameter's default as a fix writes it. */
@@ -297,6 +299,8 @@ export type CoreDiagnostic =
        * a fallback stands in for (rule 1.9). None where every known kind offends, which takes the error's fix.
        */
       readonly fits: readonly ItemTag[];
+      /** A null value's operation or member: what the place its value lands in takes, which a fallback must fit. */
+      readonly expects?: SiteExpectation;
     };
 
 export interface CoreResult {
