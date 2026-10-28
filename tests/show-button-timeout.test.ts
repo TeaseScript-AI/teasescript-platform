@@ -220,7 +220,11 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
     { source: 'showButton "Go", timeout: 1 s, timeout: 2 s', code: "TSP032", fix: "one timeout:" },
     { source: 'showButton "Go", 5', code: "TSP032", fix: "background: and timeout:" },
     { source: 'showButton("Go", 5)', code: "TSP032", fix: "Parenthesized" },
-    { source: 'showButton "Go", timeout:', code: "TSP028", fix: "timeout: 500 ms" },
+    {
+      source: 'showButton "Go", timeout:',
+      code: "TSP028",
+      fix: "Expected a button timeout after 'timeout:', such as '30 s' or '500 ms'.",
+    },
     {
       source: 'function f(elapsed = showButton "Go") {\n}',
       code: "TSV032",
@@ -236,6 +240,9 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
     assert.equal(diagnostics[0]?.code, code, source);
     assert.ok(diagnostics[0]?.message.includes(fix), `${source}: ${diagnostics[0]?.message}`);
   }
+  // The examples of a missing timeout compile after 'timeout:'.
+  for (const example of ["30 s", "500 ms"])
+    compileValidPlan(`showButton "Go", timeout: ${example}\nexit`);
 });
 
 test("a timeout the compiler cannot know fails at runtime before the button appears", () => {
