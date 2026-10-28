@@ -261,11 +261,12 @@ export class Values {
   }
 
   /**
-   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items, or the value of the exact path's
-   * definition D where D lies after G's entry (a preserving store there, the read's nearest candidate, §13.2 (2));
-   * where it fails, the read as before, marked (§3.2's fallback). A demand per read. The read, G's items and N2's query are always asked,
-   * so what it reads never depends on what they answer; G's kinds still being solved with the read's own component
-   * (its input a definition in a loop around the test) give no preserving store.
+   * A read that takes its narrowing G (N2, S10 part 2b): where G holds, G's items, or, where the exact path's
+   * definition D reaches the read, D's value (after G's entry: a preserving store there, the read's nearest candidate,
+   * §13.2 (2)) or D's value filtered by G's form (before it); where G fails, the read as before, marked (§3.2's
+   * fallback). A demand per read. The read, G's items and N2's query are always asked, so what it reads never depends
+   * on what they answer. G's kinds never wait on the read's own component (`narrowingValue`); were they still being
+   * solved, the read would ask N2 with no preserving store, the conservative answer.
    */
   *#narrowedRead(narrowed: NarrowedRead, node: FlowNode | null): Work<readonly Item[]> {
     const { program, contract, guards, solver } = this.pass;
@@ -283,14 +284,24 @@ export class Values {
         root,
         read.guardable && guards.narrowed(key, at!) ? marked(read.items) : read.items,
       );
-    if (read.def !== null && program.dom.dominates(g.node, read.def.node))
-      return contract.entered(root, read.items);
+    // (the exact path's definition, where it reaches the read, is the value G tested: after G's entry itself, before it
+    // filtered by G's form)
+    if (read.def !== null)
+      return contract.entered(
+        root,
+        program.dom.dominates(g.node, read.def.node)
+          ? read.items
+          : narrowedItems(g.form, read.items, program.scope),
+      );
     return contract.entered(root, items);
   }
 
   /**
    * G's items (N1): its key read at its input, as part 1 reads it (the exact path's definition value at the test, else
-   * the contract; unmarked, no other narrowing), filtered by its form. A demand per G.
+   * the contract; unmarked, no other narrowing), filtered by its form; a definition inside a loop around the test is
+   * read as the contract, since its value may read the loop's own narrowings (through a store of the loop, by copies),
+   * so G's kinds never wait on the component they decide, and a read the definition still reaches filters its value
+   * itself (`#narrowedRead`). A demand per G.
    */
   public *narrowingValue(g: Narrowing): Work<readonly Item[]> {
     return yield {
@@ -305,22 +316,22 @@ export class Values {
   /** The demand of `narrowingValue`. */
   *#narrowingMade(g: Narrowing): Work<readonly Item[]> {
     const read = yield* this.#keyRead(g.key, g.input, false);
-    return narrowedItems(g.form, read.items, this.pass.program.scope);
+    const input =
+      read.def !== null && g.input.loops.length > 0
+        ? yield* this.pass.contract.contractOf(g.key)
+        : read.items;
+    return narrowedItems(g.form, input, this.pass.program.scope);
   }
 
   /**
    * What a read's answer takes from its narrowing, for the value classes that share answers (S10 part 2b): nothing for
-   * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it alike);
-   * its own node where G's input is a definition in a loop around the test, whose kinds may wait on the read's own
-   * component (`#narrowedRead`).
+   * a read that takes none; else its G's environment (`NarrowingEvents.environment`: two reads with one answer it
+   * alike).
    */
   public narrowingMark(value: PlaceId): string {
     const narrowed = this.#narrowingOf(value);
     if (narrowed === null) return "";
-    const { exact, guards } = this.pass;
-    const { g, read } = narrowed;
-    if (g.input.loops.length > 0 && "def" in exact.exactPath(g.key, g.input)) return `n${read.id}`;
-    return `n${guards.narrowings(this.pass).events.environment(g, read)}`;
+    return `n${this.pass.guards.narrowings(this.pass).events.environment(narrowed.g, narrowed.read)}`;
   }
 
   /**
