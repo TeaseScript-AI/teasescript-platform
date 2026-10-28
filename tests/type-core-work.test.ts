@@ -712,6 +712,26 @@ const PRODUCTS: readonly (WorkFamily & {
       },
     ],
   },
+  {
+    name: "choice-two-shared",
+    measures:
+      "#1291: a choice's objects over two values whose properties differ in type, one per class on the value side",
+    counter: "invSteps",
+    stops: true,
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let payload = {${many(k, (i) => `f${i}: 1`, ", ")}}`,
+          `let second = {${many(k, (i) => `f${i}: ${i % 2 ? "1" : "2.5"}`, ", ")}}`,
+          `let options = [${many(k, (i) => `{text: "${i}", value: ${i % 2 ? "second" : "payload"}}`, ", ")}]`,
+          "let picked = askChoice options",
+          many(k, (i) => `repeat picked.f${i} {}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /**
@@ -720,7 +740,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1304, #1307, #1313)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1278, #1291, #1304, #1307, #1313)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];

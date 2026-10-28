@@ -769,15 +769,18 @@ export class Contract {
   readonly #literals = new Map<PlaceId, LiteralIndex>();
   /** The literals whose index is being built, each its own cycle's stop (`#own`). */
   readonly #indexing = new Set<PlaceId>();
-  /** Per literal, path, selected key and depth, the objects a contract-side selection reads (`#selectionObjects`). */
+  /** Per literal, path, selected key, depth and side, the objects a selection reads (`#selectionObjects`). */
   readonly #selections = new Map<string, readonly LiteralObject[]>();
   /** Per literal, path, selected key, depth and side, its objects by their names (`#selectionOf`). */
   readonly #selectionsOf = new Map<string, Selection>();
   /** Per selected cell and per binding read there, the names it holds, or `null` (`#heldNames`). */
   readonly #heldNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
   readonly #bindingNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
-  /** Per cell, the class of what it stores (`#storedClass`), and per class's text, its name. */
-  readonly #storedClasses = new Map<PlaceId, StoredClass | null>();
+  /** Per cell, the class of what it stores on either side (`#storedClass`), and per class's text, its name. */
+  readonly #storedClasses = [
+    new Map<PlaceId, StoredClass | null>(),
+    new Map<PlaceId, StoredClass | null>(),
+  ];
   readonly #storedNames = new Map<string, string>();
   /**
    * The paths of the literal indexes, each made once per pass (TABLE r4.58): a path is its parent's and one step, with
@@ -5336,8 +5339,8 @@ export class Contract {
 
   /**
    * #1278: a selection's objects on one side, once per literal, path, selected key and depth: those that select by the
-   * key (on the contract side one of each stored class, `#selectionObjects`), each closed where its selected value holds
-   * only its names (`#heldNames`), indexed by them.
+   * key, one of each stored class (`#selectionObjects`), each closed where its selected value holds only its names
+   * (`#heldNames`), indexed by them.
    */
   #selectionOf(
     literal: PlaceId,
@@ -5351,21 +5354,7 @@ export class Contract {
     const known = this.#selectionsOf.get(memoKey);
     if (known !== undefined) return known;
     const { program } = this.pass;
-    let objects: readonly LiteralObject[];
-    if (!exact) objects = this.#selectionObjects(literal, index, path, byValue, below);
-    else {
-      const selecting: LiteralObject[] = [];
-      for (const object of index.objects.get(path)?.list ?? []) {
-        program.work.charge("invSteps");
-        if (
-          object.term.properties === null
-            ? byValue
-            : (object.selected?.name === "value") === byValue
-        )
-          selecting.push(object);
-      }
-      objects = selecting;
-    }
+    const objects = this.#selectionObjects(literal, index, path, byValue, below, exact);
     const open: number[] = [];
     const closed: number[] = [];
     const sets = new Map<string, ReadonlySet<string>[]>();
@@ -5641,12 +5630,12 @@ export class Contract {
   }
 
   /**
-   * The objects a contract-side selection reads (#1233), once per literal, path, selected key and depth: those that
-   * select by the key, each left out whose contribution at every path an earlier one's holds. A contract answer is merged
+   * The objects a selection reads on one side (#1233, #1291), once per literal, path, selected key, depth and side: those
+   * that select by the key, each left out whose contribution at every path an earlier one's holds. An answer is merged
    * before it is read (each kind once, its earliest writer, kinds in the order they first come), so of the objects whose
-   * selected properties store one value (`#storedClass`) one counts, the earliest: its span ends before the others'
-   * start, so each writer of its answer from inside its option comes first, and the rest (a missing property's) are the
-   * class's own, alike in each. So do the objects with unknown keys and those with neither key.
+   * selected properties store one value on the side (`#storedClass`) one counts, the earliest: its span ends before the
+   * others' start, so each writer of its answer from inside its option comes first, and the rest (a missing property's)
+   * are the class's own, alike in each. So do the objects with unknown keys and those with neither key.
    * So k questions below a choice of k objects storing one value read one object each, not k.
    */
   #selectionObjects(
@@ -5655,8 +5644,9 @@ export class Contract {
     path: string,
     byValue: boolean,
     below: boolean,
+    exact: boolean,
   ): readonly LiteralObject[] {
-    const memoKey = joinParts(literal, path, byValue, below);
+    const memoKey = joinParts(literal, path, byValue, below, exact);
     const known = this.#selections.get(memoKey);
     if (known !== undefined) return known;
     const { program } = this.pass;
@@ -5672,7 +5662,7 @@ export class Contract {
       if (object.term.properties === null) alike = ["o", null];
       else if (selected === null) alike = [joinParts("m", object.token.file), object.token];
       else if (selected.type.kind === "ref") {
-        const stored = this.#storedClass(selected.type.place);
+        const stored = this.#storedClass(selected.type.place, exact);
         const { token } = object;
         if (
           stored !== null &&
@@ -5697,22 +5687,24 @@ export class Contract {
   }
 
   /**
-   * #1233: what a cell stores, as a class: two cells of one class answer every contract-side question below them alike
+   * #1233: what a cell stores, as a class: two cells of one class answer every question of the side below them alike
    * but for the writers inside them, which lie inside the extent kept with the class; the others (a missing property's,
    * which keeps its source's) are the class's own, alike in both. The rule: a cell stores the sequence of its
-   * live definitions' values; a read stores its read class (`readClass`: its source resolved through unchanged whole
-   * copies, its own steps, the guards that hold it at and below its path) and whether its identity is guarded; an inline
+   * live definitions' values; a read stores its read class on the side (`readClass`: its source resolved through
+   * unchanged whole copies, its own steps, the guards that hold it at and below its path; on the value side, #1291, its
+   * snapshot and its narrowing too) and whether its identity is guarded; an inline
    * literal stores its structure (an object its properties in order, each its cell's class; a list, set or dict its
    * element cell's; a kind its name); a computed value, external data, a reference kind, an object of unknown properties
    * and a written property type store no class. So a store into a copy makes it no alias (its own read class), a guard
    * holding a read is part of its class, and an ingress gives none. Once per cell, each class named by a short name, so
    * wrappers k deep cost k.
    */
-  #storedClass(cell: PlaceId): StoredClass | null {
-    const known = this.#storedClasses.get(cell);
+  #storedClass(cell: PlaceId, exact: boolean): StoredClass | null {
+    const classes = this.#storedClasses[exact ? 1 : 0]!;
+    const known = classes.get(cell);
     if (known !== undefined) return known;
     // (a cell its own literal holds has no class)
-    this.#storedClasses.set(cell, null);
+    classes.set(cell, null);
     const { program, definitions, lists } = this.pass;
     let file = -1;
     let start = Infinity;
@@ -5732,7 +5724,7 @@ export class Contract {
     const term = (type: TypeTerm): string | null => {
       program.work.charge("invSteps");
       if (type.kind === "ref") {
-        const inner = this.#storedClass(type.place);
+        const inner = this.#storedClass(type.place, exact);
         return inner !== null && take(inner) ? inner.name : null;
       }
       if (type.kind === "list" || type.kind === "set" || type.kind === "dict") {
@@ -5761,7 +5753,7 @@ export class Contract {
         return `l(${parts.join("&")})`;
       }
       if (this.copiedKey(stored) === null || this.#ingressLeaf(stored) !== undefined) return null;
-      const read = this.readClass(stored, false);
+      const read = this.readClass(stored, exact);
       return read === null ? null : `r${this.identityOf(stored).guarded ? "g" : ""}(${read})`;
     };
     const parts: string[] = [];
@@ -5783,7 +5775,7 @@ export class Contract {
     }
     const found: StoredClass = { name, file, start, end };
     this.#keep(2);
-    this.#storedClasses.set(cell, found);
+    classes.set(cell, found);
     return found;
   }
 
