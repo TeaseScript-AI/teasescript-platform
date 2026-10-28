@@ -49,7 +49,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
     errors.push(planError("TSC010", "Unsupported instruction-plan format.", "$.format"));
   }
   if (value.version !== INSTRUCTION_PLAN_VERSION) {
-    errors.push(planError("TSC010", "Unsupported instruction-plan version.", "$.version"));
+    errors.push(planError("TSC010", "Unsupported instruction-plan revision.", "$.version"));
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);

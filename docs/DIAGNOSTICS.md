@@ -225,7 +225,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSC007` | Host call stack exhausted | error | compiler |
 | `TSC008` | Invalid presentation option or markup colour | error | type checker |
 | `TSC009` | Invalid or repeated package path | error | compiler |
-| `TSC010` | Unsupported instruction plan format or version | error | plan validation |
+| `TSC010` | Unsupported instruction plan format or revision | error | plan validation |
 | `TSC011` | Package file that could not be loaded | error or warning | name pass, compiler |
 
 ## Codes with more than one owner

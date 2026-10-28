@@ -1407,13 +1407,13 @@ async function keptSessionScenario(cdp, origin, profile) {
       cdp,
       `[document.querySelector('[data-start-title]')?.textContent, ...[...document.querySelectorAll('${outdated} h2, ${outdated} [data-problem-summary]')].map((element) => element.textContent), document.activeElement === document.querySelector('${start}'), document.querySelector('${outdated} [data-problem-technical-toggle]')?.getAttribute('aria-expanded')].join(' / ')`,
     ),
-    "Kept session fixture / This session cannot continue / The Player has been updated and can no longer open your saved session. Choose Start to begin this Tease again. / true / false",
+    "Kept session fixture / This session cannot continue / The Player has been updated and can no longer resume your session. Choose Start to begin this Tease again. / true / false",
     "The start page says why the kept session cannot continue, and Start takes focus",
   );
   await physicalClick(cdp, `${outdated} [data-problem-technical-toggle]`);
   await waitFor(
     cdp,
-    `document.querySelector('${outdated} [data-problem-technical]')?.textContent.trim() === 'Unsupported instruction-plan version. Saved revision: ${supported - 1}. Supported revision: ${supported}.'`,
+    `document.querySelector('${outdated} [data-problem-technical]')?.textContent.trim() === 'Unsupported instruction-plan revision. Saved revision: ${supported - 1}. Supported revision: ${supported}.'`,
     5_000,
     "Technical details do not name the kept plan's revisions",
   );

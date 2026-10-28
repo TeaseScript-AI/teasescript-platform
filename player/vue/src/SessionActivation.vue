@@ -57,7 +57,7 @@ defineExpose({ focus });
         v-if="outdated"
         class="mb-4"
         title="This session cannot continue"
-        summary="The Player has been updated and can no longer open your saved session. Choose Start to begin this Tease again."
+        :summary="`The Player has been updated and can no longer resume your session. Choose ${label} to begin this Tease again.`"
         :problems="[outdated]"
         data-outdated-session
       />

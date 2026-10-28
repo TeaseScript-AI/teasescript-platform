@@ -440,14 +440,14 @@ test("Start says why a kept session cannot continue only when a Player update ch
   // fields changed with its revision.
   assert.deepEqual(await reload(older), [
     "start",
-    { message: `Unsupported instruction-plan version. ${revisions(INSTRUCTION_PLAN_VERSION)}` },
+    { message: `Unsupported instruction-plan revision. ${revisions(INSTRUCTION_PLAN_VERSION)}` },
   ]);
   assert.deepEqual(await reload((_, snapshot) => older(snapshot)), [
     "start",
     {
       code: "TSK001",
       path: "$.snapshot",
-      message: `Unsupported runtime-snapshot version. ${revisions(RUNTIME_SNAPSHOT_VERSION)}`,
+      message: `Unsupported runtime-snapshot revision. ${revisions(RUNTIME_SNAPSHOT_VERSION)}`,
     },
   ]);
   assert.deepEqual(

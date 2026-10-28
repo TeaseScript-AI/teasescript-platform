@@ -1432,9 +1432,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } else if (lastStart.value !== null) prepareStart(lastStart.value, continued?.outdated);
   }
   /**
-   * The kept session, restored, when it runs `plan` and has not ended; else, in the normal room, why it cannot continue
-   * when its plan or state is of another revision than this Player's, or `null`, such as for a changed script, an ended
-   * session, or one that cannot be read. The photos only it uses are its session media again.
+   * The kept session, restored, when it runs `plan` and has not ended; else why it cannot continue when its plan or
+   * state is of another revision than this Player's, or `null`, such as for a changed script, an ended session, or one
+   * that cannot be read. The photos only it uses are its session media again.
    */
   async function restoreKept(
     plan: InstructionPlan,
@@ -1449,17 +1449,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const stored = await store.session(keptScope).catch(() => null);
     const found = stored === null ? null : keptSession(stored);
     if (found === null) return null;
-    // Only the normal room says why, and not for a session that ended, which only its events can show when its state is
-    // of another revision: the engine ends a session with an `exit` or `runtimeFailure` event.
-    const explain =
-      store === keptSessions &&
-      !found.events.some((event) => event.kind === "exit" || event.kind === "runtimeFailure");
+    // Not for a session that ended, which only its events can show when its state is of another revision: the engine
+    // ends a session with an `exit` or `runtimeFailure` event.
+    const explain = !found.events.some(
+      (event) => event.kind === "exit" || event.kind === "runtimeFailure",
+    );
     if (found.planJson !== JSON.stringify(plan)) {
       // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
       const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
       return revisions === null
         ? null
-        : { outdated: { message: `Unsupported instruction-plan version. ${revisions}` } };
+        : { outdated: { message: `Unsupported instruction-plan revision. ${revisions}` } };
     }
     let restored: PlayerRuntimeSession;
     try {

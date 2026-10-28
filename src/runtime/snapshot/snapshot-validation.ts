@@ -213,7 +213,7 @@ function validateCapturedRuntimeSnapshotDetails(
   }
   if (value.version !== RUNTIME_SNAPSHOT_VERSION) {
     if (errors.length === 0) failureKind = "unsupported";
-    errors.push("Unsupported runtime-snapshot version.");
+    errors.push("Unsupported runtime-snapshot revision.");
   }
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
