@@ -105,7 +105,7 @@ import {
   parseParenthesized,
   parseStringLiteral,
 } from "./parser/literals.js";
-import { mayRequireExactDuration, parseDurationUnit, parseUnitSuffix } from "./parser/units.js";
+import { parseDurationUnit, parseUnitSuffix } from "./parser/units.js";
 
 export interface ParseResult {
   readonly program: Program;
@@ -324,7 +324,10 @@ export class Parser {
   /** The values before a `calendar` without a unit, so that after a `say` mode or skip word, `calendar` is the text. */
   public readonly unitlessCalendars = new WeakSet<Expression>();
   /** The error of each month or year without `calendar`, which a place that takes only an exact duration rewords. */
-  public readonly calendarUnitErrors = new WeakMap<Expression, Diagnostic>();
+  public readonly calendarUnitErrors = new WeakMap<
+    Expression,
+    { readonly diagnostic: Diagnostic; readonly calendar: string }
+  >();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   public readonly shared: SharedParse;
 
@@ -844,7 +847,6 @@ export class Parser {
         this.synchronizeStatement();
         return null;
       }
-      mayRequireExactDuration(this, value);
       if (!isAssignmentTarget(expression)) {
         this.reportSpan(
           parserDiagnosticCode.invalidAssignmentTarget,
@@ -1666,10 +1668,7 @@ export class Parser {
         if (sawNamed && value !== null) this.#reportPositionalAfterNamed(value.span);
         sawPositional = true;
       }
-      if (argument !== null) {
-        argumentsList.push(argument);
-        mayRequireExactDuration(this, argument.value);
-      }
+      if (argument !== null) argumentsList.push(argument);
       this.skipNewlines();
       if (!this.match(TokenKind.Comma)) break;
       this.skipNewlines();

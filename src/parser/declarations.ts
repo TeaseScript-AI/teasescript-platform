@@ -13,7 +13,7 @@ import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
 import { parseTypeAnnotation } from "./types.js";
-import { holdsOnlyExactDurations, requireExactDuration } from "./units.js";
+import { adviseDeclaredDuration } from "./units.js";
 
 // Declarations: `let`, `global`, and functions with their parameters and `return`.
 
@@ -50,8 +50,7 @@ export function parseLetStatement(parser: Parser): LetStatement | null {
     parser.synchronizeStatement();
     return null;
   }
-  if (typeAnnotation !== null && holdsOnlyExactDurations(typeAnnotation))
-    requireExactDuration(parser, initializer, `'${name.name}'`);
+  adviseDeclaredDuration(parser, initializer, typeAnnotation, `'${name.name}'`);
   return Object.freeze({
     kind: "letStatement",
     name,
@@ -103,8 +102,7 @@ export function* parseGlobalStatement(
     parser.synchronizeStatement();
     return null;
   }
-  const exact = typeAnnotation !== null && holdsOnlyExactDurations(typeAnnotation);
-  if (exact) requireExactDuration(parser, value, `'${name.name}'`);
+  adviseDeclaredDuration(parser, value, typeAnnotation, `'${name.name}'`);
   const defaultOffset = parser.offsetAfterComma();
   if (defaultOffset === null || !parser.atNamedDefault(defaultOffset))
     return Object.freeze({
@@ -121,7 +119,7 @@ export function* parseGlobalStatement(
     parser.synchronizeStatement();
     return null;
   }
-  if (exact) requireExactDuration(parser, start, `'${name.name}'`);
+  adviseDeclaredDuration(parser, start, typeAnnotation, `'${name.name}'`);
   const span = spanFrom(keyword.span, start.span);
   return Object.freeze({
     kind: "globalStatement",
@@ -241,8 +239,7 @@ function parseFunctionParameter(parser: Parser): FunctionParameter | null {
       parser.synchronizeParameter();
       return null;
     }
-    if (typeAnnotation !== null && holdsOnlyExactDurations(typeAnnotation))
-      requireExactDuration(parser, defaultValue, `'${name.name}'`);
+    adviseDeclaredDuration(parser, defaultValue, typeAnnotation, `'${name.name}'`);
     end = defaultValue.span;
   }
   return Object.freeze({

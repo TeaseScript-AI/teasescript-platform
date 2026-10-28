@@ -197,9 +197,14 @@ function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | u
   return unit;
 }
 
+/** The advice for a month or a year without `calendar` that names both choices, wherever neither is known to fit. */
+function calendarUnitWords(unit: "month" | "year"): string {
+  return `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`;
+}
+
 /**
- * A month or a year after `amount` without `calendar`, which gives `duration`; days and weeks are exact units. The fix
- * names the calendar unit, unless `duration` is where only an exact duration fits (see `requireExactDuration`).
+ * A month or a year after `amount` without `calendar`. Which fix compiles depends on where the value goes, so the error
+ * names both choices in words until its place proves one (see `adviseDuration`).
  */
 function reportCalendarUnitWithoutCalendar(
   parser: Parser,
@@ -209,72 +214,92 @@ function reportCalendarUnitWithoutCalendar(
 ): void {
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
-    `A ${calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"} has no fixed length. Write '${amount} calendar ${unit.lexeme}'.`,
+    calendarUnitWords(calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"),
     unit,
   );
-  parser.calendarUnitErrors.set(duration, parser.diagnostics.at(-1)!);
+  parser.calendarUnitErrors.set(duration, {
+    diagnostic: parser.diagnostics.at(-1)!,
+    calendar: `${amount} calendar ${unit.lexeme}`,
+  });
 }
-
-/** The operators whose operands make up an exact duration's length, as in `1 h + 30 min`. */
-const LENGTH_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
 
 /**
  * `value` is where only an exact duration fits, such as a wait's length, which `subject` names, so a month or a year
- * without `calendar` in it does not get the calendar fix (ADR 0026 §5). As the whole value, also in parentheses or after
- * a sign, it gets days or weeks. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
- * `(1 month / 1 calendar month) * 1 s`, the fix names both choices in words.
+ * without `calendar` in it gets days or weeks (ADR 0026 §5).
  */
 export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
-  adviseDuration(parser, value, subject);
+  adviseDuration(parser, value, { exact: subject });
+}
+
+/** `value` is where any value fits, such as the text of a `say`, so a month or a year without `calendar` gets it. */
+export function allowCalendarDuration(parser: Parser, value: Expression): void {
+  adviseDuration(parser, value, "calendar");
 }
 
 /**
- * `value` is where the parser cannot tell whether only an exact duration fits: an argument, which may be a `duration`
- * parameter, or an assigned value, which may be a timer's `remaining`. A month or a year without `calendar` in it gets
- * both choices in words, as inside arithmetic (see `requireExactDuration`).
+ * `value` is that of a declaration with the written type `type`, or none: one that takes a calendar duration gets the
+ * calendar fix, and one that holds exact durations and nothing else but `null` gets days or weeks. Any other type, such
+ * as a list, keeps both choices in words.
  */
-export function mayRequireExactDuration(parser: Parser, value: Expression): void {
-  adviseDuration(parser, value, null);
+export function adviseDeclaredDuration(
+  parser: Parser,
+  value: Expression,
+  type: TypeAnnotation | null,
+  subject: string,
+): void {
+  const names = type === null ? null : writtenNames(type);
+  if (type === null || names?.has("calendarDuration") === true)
+    adviseDuration(parser, value, "calendar");
+  else if (
+    names?.has("duration") === true &&
+    [...names].every((name) => name === "duration" || name === "null")
+  )
+    adviseDuration(parser, value, { exact: subject });
 }
 
-/** Whether a written type holds exact durations and nothing else but `null`, as `duration` and `duration?` do. */
-export function holdsOnlyExactDurations(type: TypeAnnotation): boolean {
-  let durations = false;
+/** The type names a written type is made of, through `?` and unions, or `null` when it has a collection type. */
+function writtenNames(type: TypeAnnotation): ReadonlySet<string> | null {
+  const names = new Set<string>();
   const pending = [type];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    if (next.kind === "optionalType") pending.push(next.value);
-    else if (next.kind === "unionType") for (const member of next.members) pending.push(member);
-    else if (next.kind === "namedType" && next.name === "duration") durations = true;
-    else if (next.kind !== "namedType" || next.name !== "null") return false;
+    if (next.kind === "optionalType") {
+      names.add("null");
+      pending.push(next.value);
+    } else if (next.kind === "unionType") for (const member of next.members) pending.push(member);
+    else if (next.kind === "namedType") names.add(next.name);
+    else return null;
   }
-  return durations;
+  return names;
 }
 
-function adviseDuration(parser: Parser, value: Expression, subject: string | null): void {
-  const pending: { readonly node: Expression; readonly inside: boolean }[] = [
-    { node: value, inside: false },
-  ];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    const { node, inside } = next;
+/**
+ * The one rule for what a month or a year without `calendar` in `value` gets at `place`. As the whole value, also in
+ * parentheses or after a sign, it gets days or weeks where only an exact duration fits, and the calendar unit where
+ * any duration does. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
+ * `(1 month / 1 calendar month) * 1 s`, and wherever no place proves a fix, the error names both choices in words.
+ */
+function adviseDuration(
+  parser: Parser,
+  value: Expression,
+  place: { readonly exact: string } | "calendar",
+): void {
+  const pending = [value];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
     const error = parser.calendarUnitErrors.get(node);
-    const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error);
+    const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
       const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        inside || subject === null
-          ? `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
-          : `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
-        error!.span,
+        place === "calendar"
+          ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
+          : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+        error!.diagnostic.span,
       );
       // A command that takes the value as an argument knows its place, and its advice comes after.
-      parser.calendarUnitErrors.set(node, parser.diagnostics[index]!);
-    } else if (node.kind === "parenthesizedExpression")
-      pending.push({ node: node.expression, inside });
-    else if (node.kind === "unaryExpression" && node.operator !== "not")
-      pending.push({ node: node.operand, inside });
-    else if (node.kind === "binaryExpression" && LENGTH_OPERATORS.has(node.operator))
-      pending.push({ node: node.left, inside: true }, { node: node.right, inside: true });
+      parser.calendarUnitErrors.set(node, { ...error!, diagnostic: parser.diagnostics[index]! });
+    } else if (node.kind === "parenthesizedExpression") pending.push(node.expression);
+    else if (node.kind === "unaryExpression" && node.operator !== "not") pending.push(node.operand);
   }
 }

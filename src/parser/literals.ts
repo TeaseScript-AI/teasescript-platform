@@ -17,6 +17,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, isPropertyName, spanFrom } from "./tokens.js";
+import { allowCalendarDuration } from "./units.js";
 
 // Literals: parentheses, lists and sets, objects, dicts, and strings with their interpolations.
 
@@ -303,6 +304,8 @@ function* parseStringInterpolation(
     parser.match(TokenKind.InterpolationEnd);
     return null;
   }
+  // Interpolation shows any value.
+  allowCalendarDuration(parser, expression);
   parser.skipNewlines();
   if (!parser.match(TokenKind.InterpolationEnd)) {
     if (!reported && !parser.check(TokenKind.StringEnd) && !parser.check(TokenKind.EndOfFile)) {
