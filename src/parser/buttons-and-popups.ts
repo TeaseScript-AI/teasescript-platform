@@ -242,7 +242,7 @@ export function* parseShowButtonParts(parser: Parser): ParseTask<ShowButtonParts
         parserDiagnosticCode.expectedInteractionText,
         option === "background"
           ? "Expected a button background colour."
-          : "Expected a button timeout, such as timeout: 5 or timeout: 500 ms.",
+          : "Expected a button timeout after 'timeout:', such as '30 s' or '500 ms'.",
       );
       // A statement at the start of a continued line is kept, as for choice values.
       if (parser.previous().kind === TokenKind.Newline && parser.atStatementStart())
