@@ -28,12 +28,18 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
-import { nodeOf, reportedDiagnostics, SliceIndex } from "../src/type-inference/core/consumer.js";
+import {
+  coreCheckResult,
+  nodeOf,
+  reportedDiagnostics,
+  SliceIndex,
+} from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { analyzeTypes } from "../src/type-inference/index.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
@@ -2504,6 +2510,114 @@ test("the candidate's side outputs follow the flow graph's literal facts and the
   assert.deepEqual(sited(large), ["error TSV011@32"]);
   assert.match(large.diagnostics[0]!.message, /Use a smaller count\.$/);
   assert.deepEqual(sited(candidate('say "[color=bad]x[/color]"\nexit\n')), ["error TSC008@4"]);
+});
+
+/**
+ * V30 §13 (#1105): a conversion the compiler can prove invalid is a compile error, also with a `default:`, which would
+ * hide the text. The check reads the argument's known value through its view, so a known text gets the written
+ * literal's error and sentence, as the production checker gives them for the literal.
+ */
+test("a conversion of known text that does not convert is the written literal's compile error, also with a default, in both orders (#1105, V30 §13)", () => {
+  const converted = (result: Pick<CompilationResult, "diagnostics">): string[] =>
+    result.diagnostics
+      .filter((diagnostic) => diagnostic.code === "TSV043")
+      .map((diagnostic) => `${diagnostic.span.start.offset} ${diagnostic.message}`);
+  // each conversion that reads text, through a copy of a copy, with a default the slice takes
+  for (const [name, text, fallback] of [
+    ["toNumber", "12a", "0.5"],
+    ["toInteger", "12a", "0"],
+    ["toBoolean", "True", "false"],
+    ["toDate", "2026-02-30", "hostValue"],
+    ["toTime", "25:61", "hostValue"],
+    ["toDateTime", "2026-02-30T12:30", "hostValue"],
+    ["toAbsoluteDateTime", "2026-02-30T12:30:00Z", "hostValue"],
+  ] as const) {
+    const call = (operand: string) =>
+      `let value = ${name}(${operand}, default: ${fallback})\nexit\n`;
+    const [literal] = converted(compileSource(call(JSON.stringify(text)), OPTIONS));
+    assert.ok(literal !== undefined, `${name}: the literal's error`);
+    const sentence = literal.slice(literal.indexOf(" ") + 1);
+    const source = `let seed = ${JSON.stringify(text)}\nlet text = seed\n${call("text")}`;
+    const result = inBothOrders(() => candidate(source));
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(converted(result), [`${source.indexOf("text,")} ${sentence}`], source);
+  }
+  // the literal itself, a variable, a written type and parentheses
+  const sentence =
+    'toInteger(...) cannot convert text (string) "12a" to a whole number (integer). The text must be a number such as 2.5 or -3.';
+  for (const [source, operand] of [
+    ['say toInteger("12a", default: 0)\nexit\n', '"12a"'],
+    ['let text = "12a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let text: string = "12a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let text = "12a"\nsay toInteger((text), default: 0)\nexit\n', "(text)"],
+  ] as const)
+    assert.deepEqual(
+      converted(inBothOrders(() => candidate(source))),
+      [`${source.indexOf(operand, source.indexOf("toInteger("))} ${sentence}`],
+      source,
+    );
+  // the forms the route's slice does not take yet (S9b), through the bridge: a concatenation, a two-step constant and
+  // calls without a default
+  for (const [source, operand] of [
+    ['say toInteger("12" + "a", default: 0)\nexit\n', '"12" + "a"'],
+    ['let first = "12"\nlet text = first + "a"\nsay toInteger(text, default: 0)\nexit\n', "text,"],
+    ['let seed = "12a"\nlet text = seed\nsay toInteger(text)\nexit\n', "text)"],
+    ['say toInteger("12" + "a")\nexit\n', '"12" + "a"'],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const [, bridged] = inBothOrdersAs(
+      () =>
+        coreCheckResult(
+          analyseCore(request),
+          new SliceIndex(request.files.map((file) => file.program)),
+          request,
+        ),
+      (checked) => converted({ diagnostics: checked.diagnostics.flat() }),
+    );
+    assert.deepEqual(bridged, [`${source.lastIndexOf(operand)} ${sentence}`], source);
+  }
+});
+
+/**
+ * #1105's controls: a value merged across branches is not known, so its text gives the default when the script runs;
+ * a known text, number or true or false that converts converts; a parse keeps its fallback for text it cannot read.
+ */
+test("a conversion of a value that converts, that is unknown, or that a parse cannot read compiles and runs as before, in both orders (#1105)", () => {
+  for (const [source, says] of [
+    [
+      'let text = "12a"\nif load("flag", default: false) {\n  text = "12a"\n}\nsay toInteger(text, default: 0)\nexit\n',
+      ["0"],
+    ],
+    ['let seed = "12"\nlet text = seed\nsay toInteger(text, default: 0)\nexit\n', ["12"]],
+    ["let amount = 2.5\nlet copy = amount\nsay toInteger(copy, default: 0)\nexit\n", ["2"]],
+    ["let flag = true\nlet copy = flag\nsay toBoolean(copy, default: false)\nexit\n", ["true"]],
+    ['let text = "{"\nsay fromJson(text, default: null)\nexit\n', ["null"]],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [], source);
+    assert.deepEqual(runWith(result.plan!, null).says, says, source);
+  }
+});
+
+test("the known values the conversions' checks read are folded once, however many conversions read them, at one doubling, in both orders (#1105)", () => {
+  // a chain of `size` copies of one text and `size` conversions of its last copy: a fold per check grows with the
+  // square of the size
+  const folds = (size: number): number => {
+    const lines = ['let v0 = "12"'];
+    for (let at = 1; at <= size; at += 1) lines.push(`let v${at} = v${at - 1}`);
+    for (let at = 1; at <= size; at += 1)
+      lines.push(`let n${at} = toInteger(v${size}, default: 0)`);
+    const source = `${lines.join("\n")}\nexit\n`;
+    return inBothOrders(() =>
+      withValidationTestStatistics((finish) => {
+        assert.notEqual(candidate(source).plan, null, `${size}: a plan`);
+        return finish().counts.staticFolds ?? 0;
+      }),
+    );
+  };
+  const [small, large] = [folds(32), folds(64)];
+  assert.ok(large <= 2.15 * small, `folds at 32 and 64: ${small}, ${large}`);
 });
 
 test("the candidate's facts list every binding, read and value of the program with the core's types", () => {

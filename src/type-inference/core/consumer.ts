@@ -12,6 +12,7 @@ import type {
   Statement,
 } from "../../ast.js";
 import { messageColorDiagnostics } from "../../authored-presentation.js";
+import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import { isRepeatCount, repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
 import {
@@ -28,6 +29,7 @@ import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
+import { cannotConvert } from "../../runtime/values/value-types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type {
   CoreRuntimeChecks,
@@ -52,7 +54,8 @@ import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
  * the slice `CORE_BACKEND` accepts (`backend.ts`): the core's C1 and C2 diagnostics with their codes, the runtime checks
  * their obligations and C9's boundary checks owe, the ways and the code that never runs from the flow graph's literal
  * facts (P7), the known values, and the kept checks the slice reaches (a `say`'s markup colours, a known repeat
- * count). The slice has no form, speaker property or storage key, so those outputs are empty.
+ * count, a known value a conversion cannot convert). The slice has no form, speaker property or storage key, so those
+ * outputs are empty.
  */
 
 /** The store statement of the slice that brings an expression into its place. */
@@ -492,6 +495,10 @@ export function coreCheckResult(
       }
     } else if (statement.kind === "sayStatement")
       diagnostics[index.fileOf(statement)]!.push(...messageColorDiagnostics(statement.value));
+  for (const call of index.calls) {
+    const error = knownConversionError(answers, index, call);
+    if (error !== null) diagnostics[index.fileOf(call)]!.push(error);
+  }
   // by site, so a file's order does not follow the core's consumer order (a receiver's and a member's warnings start alike)
   for (const list of diagnostics)
     list.sort(
@@ -512,6 +519,41 @@ export function coreCheckResult(
     storageTypes: [],
     known,
   };
+}
+
+/**
+ * V30 §13: a conversion of a value the compiler knows and the conversion cannot convert is a compile error, also with a
+ * `default:` (#1105). The value is the argument's known value through its view, never the call's, which the default
+ * would give. A value of a type the conversion does not take, and the parts of `toDateTime(date, time)`, are the
+ * built-in signature check's (C13, S9b); the conversions of text keep their fallback for content they cannot read.
+ */
+function knownConversionError(
+  answers: Answers,
+  index: SliceIndex,
+  call: CallExpression,
+): Diagnostic | null {
+  if (call.callee.kind !== "identifier" || !isConversion(call.callee.name)) return null;
+  const name = call.callee.name;
+  const conversion: Conversion = CONVERSIONS[name];
+  const positional = call.arguments.filter((argument) => argument.kind === "positionalArgument");
+  if (
+    conversion.takes !== "value" ||
+    positional.length !== 1 ||
+    call.arguments.some(
+      (argument) => argument.kind === "namedArgument" && argument.name.name !== "default",
+    )
+  )
+    return null;
+  const value = positional[0]!.value;
+  const text = answers.view(nodeOf(answers, index, value)).known;
+  return typeof text === "string" && conversion.textProblem(text) !== undefined
+    ? createDiagnostic(
+        DiagnosticSeverity.Error,
+        "TSV043",
+        cannotConvert(name, conversion, text),
+        value.span,
+      )
+    : null;
 }
 
 /**
