@@ -535,6 +535,7 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
   for (const [source, subject, written] of [
     ["wait #", "A wait", "1 month"],
     ["wait 1 h + (#)", "A wait", "n months"],
+    ["wait # / 2", "A wait", "1 month"],
     ["timer #", "A timer", "n months"],
     ["timer(duration: #)", "A timer", "1 y"],
     ['say "Hi", #', "Say pacing", "1 month"],
@@ -567,10 +568,19 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
       source,
     );
   }
-  // A month or a year that the value only passes on keeps the calendar fix.
-  assert.deepEqual(diagnostics(`${header}wait f(1 month)\nexit`), [
-    ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
-  ]);
+  // A month or a year that the value only passes on, or divides into a ratio, keeps the calendar fix, which compiles.
+  for (const source of ["wait f(#)", "wait (# / 1 calendar month) * 1 s"]) {
+    assert.deepEqual(
+      diagnostics(`${header}${source.replace("#", "1 month")}\nexit`),
+      [["TSP033", "A month has no fixed length. Write '1 calendar month'."]],
+      source,
+    );
+    assert.notEqual(
+      compileSource(`${header}${source.replace("#", "1 calendar month")}\nexit`).plan,
+      null,
+      source,
+    );
+  }
 });
 
 test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {

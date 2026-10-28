@@ -214,13 +214,15 @@ function reportCalendarUnitWithoutCalendar(
   parser.calendarUnitErrors.set(duration, parser.diagnostics.at(-1)!);
 }
 
-/** The operators whose operands give their result its unit, so an exact duration needs exact operands. */
-const EXACT_OPERANDS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
+/** The operators whose operands both give their result its unit, so an exact duration needs exact operands. */
+const EXACT_OPERANDS: ReadonlySet<string> = new Set(["+", "-", "*", "otherwise"]);
 
 /**
  * `value` is where only an exact duration fits, such as a wait's length, which `subject` names: a month or a year
- * without `calendar` in it, also inside parentheses, a sign, arithmetic, or `otherwise`, gets days or weeks as its
- * fix, because a calendar duration has no fixed length either (ADR 0026 §5).
+ * without `calendar` in it, also inside parentheses, a sign, `+`, `-`, `*`, or `otherwise`, or before `/` and a number
+ * literal, gets days or weeks as its fix, because a calendar duration has no fixed length either (ADR 0026 §5). A
+ * divisor, or a dividend over anything else, may be a ratio, as in `(1 month / 1 calendar month) * 1 s`, and keeps the
+ * calendar fix.
  */
 export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
   const pending = [value];
@@ -239,5 +241,11 @@ export function requireExactDuration(parser: Parser, value: Expression, subject:
     else if (node.kind === "unaryExpression" && node.operator !== "not") pending.push(node.operand);
     else if (node.kind === "binaryExpression" && EXACT_OPERANDS.has(node.operator))
       pending.push(node.left, node.right);
+    else if (
+      node.kind === "binaryExpression" &&
+      node.operator === "/" &&
+      node.right.kind === "numberLiteral"
+    )
+      pending.push(node.left);
   }
 }
