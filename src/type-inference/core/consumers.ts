@@ -957,7 +957,7 @@ export class Consumers {
           decider: null,
           brought: null,
           root: this.#storeRoot(d.place),
-          steps: this.#storeSteps(d.place, part.path),
+          steps: this.#storeSteps(d.place, part.path, written),
         };
         // (only what the part's syntax tells: a collection literal's own kind, then its parts; else its literal kind)
         const node = program.places[part.value]?.kind;
@@ -969,11 +969,9 @@ export class Consumers {
         const fitting = (item: Item): boolean =>
           concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
         if (items.every(fitting)) {
+          // (a dict literal's values, too, at its `element`, as its type has them)
           if (own !== undefined)
-            for (const child of this.admission.literalChildren(
-              part.value,
-              own === "dict" ? "entry" : "element",
-            ))
+            for (const child of this.admission.literalChildren(part.value, "element"))
               if (child.value !== undefined)
                 parts.push({
                   value: child.value,
@@ -1420,14 +1418,27 @@ export class Consumers {
 
   readonly #shown = new Map<Key | PlaceId, string | null>();
 
-  /** The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it. */
-  #storeSteps(root: PlaceId, path: readonly string[]): StoreStep[] {
+  /**
+   * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
+   * the root's written type reaches it (the finishing path's descent, TABLE r4.120), the collection written there,
+   * final at every stop and asking no solver.
+   */
+  #storeSteps(
+    root: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): StoreStep[] {
     return path.map((step, index): StoreStep => {
       if (step === "entry") return { collection: "dict" };
       if (step !== "element") return { property: propertyName(step) };
-      const above = withoutEmpty(
-        this.#run(this.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
-      ).map((item) => item.tag);
+      const prefix = path.slice(0, index);
+      const term = written === null ? null : termAt(written, prefix);
+      const above =
+        term !== null
+          ? typeTags(term)
+          : withoutEmpty(this.#run(this.pass.contract.contractOf(keyOf(root, prefix)))).map(
+              (item) => item.tag,
+            );
       return {
         collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list",
       };

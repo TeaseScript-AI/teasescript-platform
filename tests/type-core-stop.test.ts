@@ -10,6 +10,7 @@ import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
+import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -453,9 +454,12 @@ function walkEnds(source: string): readonly [number, number] {
   return walk;
 }
 
-/** The highest allowance at which a source's analysis stops before admission settled. */
+/**
+ * The highest allowance at which a source's analysis stops before admission settled: below its total where none settles.
+ */
 function lastUnsettled(source: string): number {
-  return Math.min(...[...settledEnds(source).values()].map(([low]) => low)) - 1;
+  const lows = [...settledEnds(source).values()].map(([low]) => low);
+  return (lows.length > 0 ? Math.min(...lows) : analysisTotal(source)) - 1;
 }
 
 /**
@@ -898,6 +902,35 @@ test("a stop before admission settled checks a written store's literal parts at 
         [],
         `${source} @${allowance}`,
       );
+    }
+  }
+});
+
+/**
+ * Before admission settled, a written store's literal parts take their collections from the written type and their
+ * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
+ * a set inside a dict. At a stop in the setup and at the last before admission settled, each error, its rule's steps and
+ * its sentence equal the unstopped ones (the analysis: a written set or dict is outside the candidate route).
+ */
+test("a stop before admission settled names a written store's collections in its errors", () => {
+  for (const source of [
+    'let xs: integer set = set["wrong"]\nexit\n',
+    'let d: integer dict = dict{a: "wrong"}\nexit\n',
+    'let d: integer set dict = dict{a: set["wrong"]}\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const text = messageSource([source]);
+    const errors = (answers: Answers) =>
+      answers.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const unstopped = errors(analyseCore(request));
+    assert.equal(unstopped.length, 1, source);
+    for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+      const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
+      assert.equal(stopped.budget.settled, false, `${source} @${allowance}`);
+      assert.deepEqual(errors(stopped), unstopped, `${source} @${allowance}`);
     }
   }
 });
