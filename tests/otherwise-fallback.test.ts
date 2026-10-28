@@ -551,7 +551,7 @@ test("otherwise beside any other operator needs parentheses, and one error names
       "(a otherwise 1)..=3",
       "a otherwise (1..=3)",
       "uses 1 when 'a' is null",
-      "uses 1..=3 when 'a' is null",
+      "uses '1..=3' when 'a' is null",
     ],
     [
       "1..a otherwise 3",

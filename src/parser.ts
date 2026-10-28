@@ -233,6 +233,8 @@ const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftBrace,
   TokenKind.InterpolationStart,
 ]);
+/** A fallback that a TSP041 message names without quotes: a number, `true`, `false`, `null`, a name, or a text. */
+const SIMPLE_FALLBACK = /^(?:-?\d+(?:\.\d+)?|[A-Za-z_]\w*|"[^"\n]*")$/;
 /** Tokens that start a value but cannot go on from a name before them, as an operator or a call can. */
 const OPERAND_STARTS: ReadonlySet<TokenKind> = new Set([
   TokenKind.Identifier,
@@ -1358,7 +1360,7 @@ export class Parser {
         message += `: ${choices
           .map(
             ({ code, subject, fallback }) =>
-              `'${code}' uses ${/\s/.test(fallback) ? `'${fallback}'` : fallback} when '${subject}' is null`,
+              `'${code}' uses ${SIMPLE_FALLBACK.test(fallback) ? fallback : `'${fallback}'`} when '${subject}' is null`,
           )
           .join("; ")}`;
     }
