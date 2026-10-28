@@ -706,7 +706,7 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
               ? "365 days"
               : "30 days";
       const expected = exact
-        ? `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks${offered === null ? "" : `, as in '${offered}'`}.`
+        ? `${advice} needs an exact length, and a ${name} has none. ${name.startsWith("calendar") ? "Leave out 'calendar' and put a space before the unit." : `Write the length in days or weeks${offered === null ? "" : `, as in '${offered}'`}.`}`
         : spaced
           ? offered === null
             ? space

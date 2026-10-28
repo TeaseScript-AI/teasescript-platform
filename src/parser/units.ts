@@ -381,11 +381,16 @@ function adviseDuration(
       // No code form is proved for a known calendar amount that is not whole, as in `1.5 month`, nor for a length after a
       // sign where only an exact duration fits, as in `wait -(1 month)`: the words name the choice that remains.
       const proved = place === "calendar" ? wholeAmount(node) : !signed;
+      // Days and weeks are exact without `calendar`, as in `wait 2 weeks`.
+      const exactFix =
+        example === null
+          ? "Leave out 'calendar' and put a space before the unit."
+          : `Write the length in days or weeks${proved ? `, as in '${example}'` : ""}.`;
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
         place !== "calendar"
-          ? `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks${proved && example !== null ? `, as in '${example}'` : ""}.`
+          ? `${place.exact} needs an exact length, and a ${unit} has none. ${exactFix}`
           : error!.spaced
             ? proved
               ? `${UNIT_WITHOUT_SPACE} Write '${error!.calendar}'.`
