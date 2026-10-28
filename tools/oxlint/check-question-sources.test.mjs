@@ -25,10 +25,10 @@ project.resolveSourceFileDependencies();
 
 /**
  * The check's messages for the repository's three files, each changed in memory by its `edit` (a scratch copy), and an
- * `other` source file beside them when given. The files as they are pass the check in `npm run lint` (`run.mjs`); these
- * are its negative checks (TABLE r4.158).
+ * `other` source file beside them when given; with `full`, its diagnostics. The files as they are pass the check in
+ * `npm run lint` (`run.mjs`); these are its negative checks (TABLE r4.158).
  */
-function messagesWith(edits, other) {
+function messagesWith(edits, other, full = false) {
   for (const [file, text] of originals) {
     const edit = edits[file];
     const changed = edit === undefined ? text : edit(text);
@@ -40,13 +40,18 @@ function messagesWith(edits, other) {
       ? null
       : project.createSourceFile(resolve(repositoryRoot, OTHER), other, { overwrite: true });
   try {
-    return questionSourceDiagnostics(project.getProgram().compilerObject, repositoryRoot, {
-      answers: ANSWERS,
-      consumers: CONSUMERS,
-      admission: ADMISSION,
-      others: scratch === null ? [] : [OTHER],
-      reads: QUESTION_READS,
-    }).map((diagnostic) => diagnostic.message);
+    const diagnostics = questionSourceDiagnostics(
+      project.getProgram().compilerObject,
+      repositoryRoot,
+      {
+        answers: ANSWERS,
+        consumers: CONSUMERS,
+        admission: ADMISSION,
+        others: scratch === null ? [] : [OTHER],
+        reads: QUESTION_READS,
+      },
+    );
+    return full ? diagnostics : diagnostics.map((diagnostic) => diagnostic.message);
   } finally {
     if (scratch !== null) project.removeSourceFile(scratch);
   }
@@ -179,32 +184,68 @@ test("a wrapper of the finishing read fails wherever and however it is read (Cod
     );
 });
 
-test("a Consumers or Admission value used whole as another type fails: a structural parameter, a cast", () => {
+test("a Consumers or Admission value used whole as another type fails, however it gets there (Codex r27 B1)", () => {
+  // (each form on a line of its own: a structural parameter, a cast, a copy, a container's element; Codex r27's witness
+  // in the composed child)
   const structural = `{ settle${READ} }`;
-  const messages = messagesWith({
-    [ANSWERS]: (text) =>
-      text
-        .replace(
-          "  public valueAt(",
-          [
-            "  #bypasses(value: PlaceId, node: FlowNode): unknown[] {",
-            "    return [",
-            "      helper(this.#consumers, value, node),",
-            `      (this.#consumers.admission as unknown as ${structural}).settle(value, node, []),`,
-            "    ];",
-            "  }",
-            "",
+  // (each failing form on a line of its own: a structural parameter, a cast, a container's element, a copy by
+  // `Object.assign`, a spread or a rest element, an intersection's value, a shorthand property; Codex r27's witness in
+  // the composed child)
+  const statements = [
+    "void helper(this.#consumers, value, node, []);",
+    `void (this.#consumers.admission as unknown as ${structural}).settle(value, node, []);`,
+    'void helper(new Map([["c", this.#consumers]]).get("c")!, value, node, []);',
+    "void helper(Object.assign({}, this.#consumers), value, node, []);",
+    "const copy = { ...this.#consumers };",
+    "const { ...rest } = this.#consumers;",
+    "const both: Consumers & { readonly tag?: string } = this.#consumers;",
+    "void helper(both, value, node, []);",
+    "const c = this.#consumers;",
+    `const held: { readonly c: ${structural} } = { c };`,
+  ];
+  const witness = "helper([this.#consumers][0]!, child.value, child.node, rest)";
+  const forms = [
+    ...statements.filter(
+      (statement) => !statement.startsWith("const both") && !statement.startsWith("const c ="),
+    ),
+    witness,
+  ];
+  let mutated = "";
+  const diagnostics = messagesWith(
+    {
+      [ANSWERS]: (text) =>
+        (mutated = text
+          .replace(COMPOSED, `for (const item of ${witness}) items.push(item);`)
+          .replace(
             "  public valueAt(",
-          ].join("\n"),
-        )
-        .concat(
-          `\nfunction helper(c: ${structural}, value: PlaceId, node: FlowNode): readonly Item[] {\n  return c.settle(value, node, []);\n}\n`,
-        ),
-  });
-  assert.equal(
-    messages.filter((message) => message.startsWith("A Consumers or Admission value is used here"))
-      .length,
-    2,
-    messages.join("\n"),
+            [
+              "  #bypasses(value: PlaceId, node: FlowNode): unknown[] {",
+              ...statements.map((statement) => `    ${statement}`),
+              "    return [copy, rest, held];",
+              "  }",
+              "",
+              "  public valueAt(",
+            ].join("\n"),
+          )
+          .concat(
+            `\nfunction helper(c: ${structural}, ...[value, node, path]: Parameters<${structural}["settle"]>): readonly Item[] {\n  return c.settle(value, node, path);\n}\n`,
+          )),
+    },
+    undefined,
+    true,
   );
+  const lines = new Set(
+    diagnostics
+      .filter((diagnostic) =>
+        diagnostic.message.startsWith("A Consumers or Admission value is used"),
+      )
+      .map((diagnostic) => diagnostic.line),
+  );
+  for (const form of forms) {
+    const line = mutated.slice(0, mutated.indexOf(form)).split("\n").length;
+    assert.ok(
+      lines.has(line),
+      `${form} (line ${line}):\n${diagnostics.map((d) => `${d.line}: ${d.message}`).join("\n")}`,
+    );
+  }
 });

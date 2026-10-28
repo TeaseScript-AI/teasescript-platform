@@ -14,8 +14,11 @@ import { Project, ts } from "ts-morph";
  * - outside consumers.ts and admission.ts, a reference to a `Consumers` or `Admission` member the list lacks, whatever
  *   its form (a call, an alias, `.bind`, a destructured or quoted name, a helper's, another module's), so a new wrapper of
  *   the finishing read, a method or a function-valued field, fails wherever it is read (Codex r26 B1);
- * - there, a `Consumers` or `Admission` value used whole as another type (an argument or a cast to a structural type, a
- *   generic), whose members the check could not see;
+ * - there, a `Consumers` or `Admission` value (any expression of either type, a union's or an intersection's member) used
+ *   whole as another type, whose members the check could not see: where the place it flows to expects another type (a
+ *   structural parameter, field or return, a cast, a generic's type parameter), or spread or rest-destructured into a
+ *   copy; a value kept as it is (a binding of its own type, an array or a map of it, a comparison) is checked where it is
+ *   read again (Codex r27 B1);
  * - an `#items` that calls either source nowhere, and a listed member nothing reads.
  * A listed member is trusted by its reason, as the inventory check's reads are (TABLE r4.152 (3)). A member reached by a
  * computed name is not seen.
@@ -88,9 +91,15 @@ export function checkQuestionSources(root) {
 export function questionSourceDiagnostics(program, root, files) {
   const checker = program.getTypeChecker();
   const diagnostics = [];
+  const reported = new Set();
   const report = (node, message) => {
     const sourceFile = node.getSourceFile();
-    const location = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const start = node.getStart(sourceFile);
+    // (once per site: an expression and the one around it that starts there are one use)
+    const key = `${sourceFile.fileName}:${start}:${message}`;
+    if (reported.has(key)) return;
+    reported.add(key);
+    const location = sourceFile.getLineAndCharacterOfPosition(start);
     diagnostics.push({
       fileName: relative(root, sourceFile.fileName).split(sep).join("/"),
       line: location.line + 1,
@@ -138,9 +147,6 @@ export function questionSourceDiagnostics(program, root, files) {
   }));
   const ownerOf = (declaration) =>
     guarded.find((each) => declaration?.parent === each.declaration)?.name ?? null;
-  const guardedType = (type) =>
-    type !== undefined &&
-    (type.isUnion() ? type.types : [type]).some((each) => guarded.some((g) => g.type === each));
 
   // 1. each mention of a source's name: its declaration, or the callee of a call in #items' own body; else a failure
   const called = new Set();
@@ -199,6 +205,55 @@ export function questionSourceDiagnostics(program, root, files) {
     const owner = ownerOf(declaration);
     return owner === null ? null : `${owner}.${declaration.name?.getText() ?? "constructor"}`;
   };
+  // a type that is a guarded class, or a union or intersection holding one
+  const holds = (type) =>
+    type !== undefined &&
+    (type.isUnionOrIntersection()
+      ? type.types.some(holds)
+      : guarded.some((each) => each.type === type));
+  const AS_ANOTHER_TYPE =
+    "A Consumers or Admission value is used here as another type: read its listed members instead.";
+  // its context: a member read (above), the value kept as it is (an expression around it that holds it too, a binding
+  // of its own type, a comparison), or a place expecting its own type; never spread, rest-destructured, or expected as
+  // another type (a structural parameter or field, a cast, a generic's type parameter)
+  const whole = (expression) => {
+    const parent = expression.parent;
+    if (
+      (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+      parent.expression === expression
+    )
+      return;
+    if (ts.isSpreadAssignment(parent) || ts.isSpreadElement(parent)) {
+      report(expression, AS_ANOTHER_TYPE);
+      return;
+    }
+    // (destructured: its names are member reads, above; a rest element copies the rest as another type)
+    const pattern =
+      ts.isVariableDeclaration(parent) && parent.initializer === expression
+        ? parent.name
+        : ts.isBinaryExpression(parent) &&
+            parent.right === expression &&
+            parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+          ? parent.left
+          : null;
+    if (
+      pattern !== null &&
+      (ts.isObjectBindingPattern(pattern) || ts.isObjectLiteralExpression(pattern))
+    ) {
+      const elements = ts.isObjectBindingPattern(pattern) ? pattern.elements : pattern.properties;
+      if (
+        elements.some((element) =>
+          ts.isBindingElement(element)
+            ? element.dotDotDotToken !== undefined
+            : ts.isSpreadAssignment(element),
+        )
+      )
+        report(expression, AS_ANOTHER_TYPE);
+      return;
+    }
+    const expected = checker.getContextualType(expression);
+    if (expected !== undefined && !holds(expected)) report(expression, AS_ANOTHER_TYPE);
+  };
   const visitMembers = (node) => {
     if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || ts.isStringLiteralLike(node)) {
       const member = memberOf(node);
@@ -210,39 +265,25 @@ export function questionSourceDiagnostics(program, root, files) {
             `${member} is no listed question read: list it in QUESTION_READS with why it reads no value's items, or ask CoreAnswers.#items.`,
           );
       }
-      // a binding or field of a guarded type: the whole value, where it is used
-      const symbol = checker.getSymbolAtLocation(node);
-      const declaration = symbol?.valueDeclaration;
-      const whole =
-        ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
-          ? node.parent
-          : node;
-      if (
-        declaration !== undefined &&
-        !(declaration.name === node) &&
-        !(ts.isPropertyAccessExpression(whole.parent) && whole.parent.expression === whole) &&
-        !(ts.isElementAccessExpression(whole.parent) && whole.parent.expression === whole) &&
-        // (destructured: its names are member reads, above)
-        !(
-          ts.isVariableDeclaration(whole.parent) &&
-          whole.parent.initializer === whole &&
-          ts.isObjectBindingPattern(whole.parent.name)
-        ) &&
-        !(
-          ts.isBinaryExpression(whole.parent) &&
-          whole.parent.right === whole &&
-          ts.isObjectLiteralExpression(whole.parent.left)
-        ) &&
-        guardedType(checker.getTypeOfSymbolAtLocation(symbol, node))
-      ) {
-        const expected = checker.getContextualType(whole);
-        if (expected !== undefined && !guardedType(expected))
-          report(
-            whole,
-            "A Consumers or Admission value is used here as another type: read its listed members instead.",
-          );
-      }
     }
+    // an expression of a guarded type: the whole value, wherever it flows (Codex r27 B1)
+    if (ts.isShorthandPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent)) {
+      const value = checker.getShorthandAssignmentValueSymbol(node);
+      if (value !== undefined && holds(checker.getTypeOfSymbolAtLocation(value, node.name))) {
+        // (the property's expected type, in each member of the object's expected union that has it)
+        const object = checker.getContextualType(node.parent);
+        const expected =
+          object === undefined
+            ? null
+            : (object.isUnion() ? object.types : [object]).flatMap((each) => {
+                const property = each.getProperty(node.name.text);
+                return property === undefined
+                  ? []
+                  : [checker.getTypeOfSymbolAtLocation(property, node.parent)];
+              });
+        if (expected !== null && !expected.some(holds)) report(node, AS_ANOTHER_TYPE);
+      }
+    } else if (ts.isExpressionNode(node) && holds(checker.getTypeAtLocation(node))) whole(node);
     node.forEachChild(visitMembers);
   };
   for (const file of [files.answers, ...files.others]) sourceOf(file).forEachChild(visitMembers);
