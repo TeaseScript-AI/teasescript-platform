@@ -1005,6 +1005,21 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
     ),
     "valid",
   );
+  // a test whose input is a definition in a loop around it reads the contract, never that definition's value, which
+  // would wait on the test's own component (Sol's U3 build review r2): the inner loop's stores preserve both facts
+  assert.equal(
+    outcome(
+      FLAG,
+      "let a: integer? = 1",
+      "if flagHost { a = null }",
+      "if a != null { repeat 2 { let n = a",
+      "if n != null { repeat 2 { a = n",
+      "n = n + 1",
+      "let m: integer = n",
+      "a = m } } } }",
+    ),
+    "valid",
+  );
   // an element test's input is the element key's read at the test, never the collection's narrowing
   assert.equal(
     outcome(

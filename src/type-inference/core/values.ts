@@ -315,12 +315,17 @@ export class Values {
 
   /** The demand of `narrowingValue`. */
   *#narrowingMade(g: Narrowing): Work<readonly Item[]> {
-    const read = yield* this.#keyRead(g.key, g.input, false);
-    const input =
-      read.def !== null && g.input.loops.length > 0
-        ? yield* this.pass.contract.contractOf(g.key)
-        : read.items;
-    return narrowedItems(g.form, input, this.pass.program.scope);
+    const { program, contract, exact } = this.pass;
+    // (the contract chosen before any definition's value is asked: asking it would make G wait on it)
+    const loopDefinition =
+      g.input.loops.length > 0 &&
+      !program.isHost(keyPlace(g.key)) &&
+      !(yield* contract.refReceiver(g.key)) &&
+      "def" in exact.exactPath(g.key, g.input);
+    const input = loopDefinition
+      ? yield* contract.contractOf(g.key)
+      : (yield* this.#keyRead(g.key, g.input, false)).items;
+    return narrowedItems(g.form, input, program.scope);
   }
 
   /**
