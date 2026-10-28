@@ -1,5 +1,5 @@
 import { globSync, readFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { posix, resolve, sep } from "node:path";
 import { ts } from "ts-morph";
 
 /**
@@ -13,13 +13,18 @@ import { ts } from "ts-morph";
  * finishing read. A reference the syntax does not name (an inherited member reached through an inferred wrapper, a
  * generic receiver, a computed name) is outside this check, a review matter against r4.158 (r4.165).
  *
- * A class's members, for this check, are its own and the functions whose first parameter's type names the class: a
+ * A class's members, for this check, are its own and the functions whose first parameter's type binds to the class: a
  * method whose body moved to a function in the class's folder (#1071). Names compare without `#`, so a member and the
- * function it moved to are one name. A public method that only forwards to the function of its name (`return f(this,
- * …)` or `f(this, …);`, its own parameters in order, none with an initializer, no decorator or other modifier) is that
- * function: its call names no reference. Neither does an import under the name's own name, whose uses are checked.
- * A site this check allows is one declaration: two members of one class and name there, but such a forwarder and its
- * function or a getter and its setter, are reported, so no other declaration takes the site's place.
+ * function it moved to are one name. Identity is read lexically, in one place (`bindingOf`): a name binds to the one
+ * top-level declaration of its file, or of the source file a relative import names. A guarded class is the one class
+ * of its name in the sources, a nested one included; a second is reported. A public method that only forwards to the
+ * function of its name (`return f(this, …)` or `f(this, …);`, its own parameters in order, none with an initializer,
+ * no decorator or other modifier), the callee bound to that function of its class, is that function: its call names
+ * no reference. Neither does an import whose local name binds to the guarded declaration, whose uses are checked. What
+ * binds to nothing proved (an import from outside the sources, a type parameter of the class's name, a global) gives
+ * no owner and no exemption, and is reported where it names a guarded name. A site this check allows is one
+ * declaration: two members of one class and name there, but such a forwarder and its function or a getter and its
+ * setter, are reported, so no other declaration takes the site's place.
  */
 const CORE = "src/type-inference/core";
 
@@ -96,14 +101,108 @@ export function questionSourceDiagnostics(sources, readers) {
     (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteralLike(name))
       ? name.text
       : null;
-  // a top-level function's owner: the class its first parameter's type names, else null
+
+  // Identity, decided lexically in one place (Codex r1 B1, N1 on #1371): the files by path, each with its top-level
+  // declarations and its named imports; a name binds to the one top-level declaration of its file or of the source file
+  // a relative import names, else to nothing (unproved).
+  const files = new Map();
+  for (const { file, sourceFile } of parsed) {
+    const top = new Map();
+    const imports = new Map();
+    const declare = (name, declaration) => top.set(name, [...(top.get(name) ?? []), declaration]);
+    sourceFile.forEachChild((node) => {
+      if (
+        (ts.isClassDeclaration(node) ||
+          ts.isFunctionDeclaration(node) ||
+          ts.isInterfaceDeclaration(node) ||
+          ts.isTypeAliasDeclaration(node)) &&
+        node.name !== undefined
+      ) {
+        // (an overload's signature is no declaration of its own)
+        if (!ts.isFunctionDeclaration(node) || node.body !== undefined)
+          declare(node.name.text, node);
+      } else if (ts.isVariableStatement(node)) {
+        for (const declaration of node.declarationList.declarations)
+          if (ts.isIdentifier(declaration.name)) declare(declaration.name.text, declaration);
+      } else if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(node.importClause.namedBindings)
+      )
+        for (const specifier of node.importClause.namedBindings.elements)
+          imports.set(specifier.name.text, {
+            module: node.moduleSpecifier.text,
+            imported: (specifier.propertyName ?? specifier.name).text,
+          });
+    });
+    files.set(file, { top, imports });
+  }
+  const moduleFile = (from, specifier) => {
+    if (!specifier.startsWith(".")) return null;
+    const file = posix
+      .normalize(posix.join(posix.dirname(from), specifier))
+      .replace(/\.js$/, ".ts");
+    return files.has(file) ? file : null;
+  };
+  const bindingOf = (file, name, seen = new Set()) => {
+    const entry = files.get(file);
+    if (entry === undefined || seen.has(`${file} ${name}`)) return null;
+    seen.add(`${file} ${name}`);
+    const own = entry.top.get(name);
+    if (own !== undefined) return own.length === 1 ? own[0] : null;
+    const imported = entry.imports.get(name);
+    const target = imported === undefined ? null : moduleFile(file, imported.module);
+    return target === null ? null : bindingOf(target, imported.imported, seen);
+  };
+  // the guarded classes, each the one class of its name in the sources (a nested one counts): a second is reported
+  const GUARDED = new Set(
+    [...OWNERS.values()].flatMap((guarded) => [guarded.declaredIn, guarded.owner]),
+  );
+  const classes = new Map();
+  for (const { file, sourceFile } of parsed) {
+    const visit = (node) => {
+      if (ts.isClassLike(node) && node.name !== undefined && GUARDED.has(node.name.text))
+        classes.set(node.name.text, [
+          ...(classes.get(node.name.text) ?? []),
+          { declaration: node, file, sourceFile },
+        ]);
+      node.forEachChild(visit);
+    };
+    visit(sourceFile);
+  }
+  for (const [name, found] of classes)
+    if (found.length > 1)
+      for (const { declaration, file, sourceFile } of found)
+        reportIn(
+          file,
+          sourceFile,
+          declaration.name,
+          `class ${name} is declared ${found.length} times: this check knows its class by that name, so rename all but one.`,
+        );
+  const guardedClass = (name) =>
+    classes.get(name)?.length === 1 ? classes.get(name)[0].declaration : undefined;
+  // a class's guarded name, if it is that guarded class itself
+  const classOwner = (cls) =>
+    cls?.name !== undefined && guardedClass(cls.name.text) === cls ? cls.name.text : null;
+  // a top-level function's owner: the guarded class its first parameter's type binds to, else null
   const functionOwner = (fn) => {
     const type = fn.parameters[0]?.type;
-    return type !== undefined && ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName)
-      ? type.typeName.text
-      : null;
+    if (type === undefined || !ts.isTypeReferenceNode(type) || !ts.isIdentifier(type.typeName))
+      return null;
+    const name = type.typeName.text;
+    if ((fn.typeParameters ?? []).some((parameter) => parameter.name.text === name)) return null;
+    const cls = guardedClass(name);
+    return cls !== undefined && bindingOf(fn.getSourceFile().fileName, name) === cls ? name : null;
   };
-  // the member a node lies in, the innermost, with its class (a class's member, or a function the class owns)
+  // a declaration's owner: its class's, or the class a top-level function belongs to
+  const ownerOf = (declaration) =>
+    ts.isFunctionDeclaration(declaration) && ts.isSourceFile(declaration.parent)
+      ? functionOwner(declaration)
+      : ts.isClassLike(declaration.parent)
+        ? classOwner(declaration.parent)
+        : null;
+  // the member a node lies in, the innermost, with its owner (a class's member, or a function the class owns)
   const memberOf = (node, sourceFile) => {
     let member = node;
     while (
@@ -112,16 +211,11 @@ export function questionSourceDiagnostics(sources, readers) {
       !(ts.isFunctionDeclaration(member) && member.parent === sourceFile)
     )
       member = member.parent;
-    const owner = ts.isClassLike(member.parent ?? member)
-      ? (member.parent?.name?.text ?? null)
-      : ts.isFunctionDeclaration(member)
-        ? functionOwner(member)
-        : null;
     const name = ts.isConstructorDeclaration(member) ? "constructor" : nameText(member.name);
-    return { member, owner, name: name === null ? null : bare(name) };
+    return { member, owner: ownerOf(member), name: name === null ? null : bare(name) };
   };
 
-  // every member with a body, by its class and bare name
+  // every member with a body, by its owner and bare name
   const members = new Map();
   const addMember = (owner, name, declaration, file, sourceFile) => {
     if (owner === null || name === null) return;
@@ -130,20 +224,20 @@ export function questionSourceDiagnostics(sources, readers) {
   };
   for (const { file, sourceFile } of parsed)
     sourceFile.forEachChild((node) => {
-      if (ts.isClassDeclaration(node) && node.name !== undefined)
+      if (ts.isClassDeclaration(node))
         for (const member of node.members) {
           const body = ts.isFunctionLike(member) ? member.body : undefined;
           if (body === undefined) continue;
           const name = ts.isConstructorDeclaration(member) ? "constructor" : nameText(member.name);
-          addMember(node.name.text, name, member, file, sourceFile);
+          addMember(classOwner(node), name, member, file, sourceFile);
         }
       else if (ts.isFunctionDeclaration(node) && node.body !== undefined)
         addMember(functionOwner(node), nameText(node.name), node, file, sourceFile);
     });
-  // a public method that only forwards to the function of its name, with that function's name node: its callee
+  // a public method that only forwards to the function of its name, its callee bound to that function of its class
   const forwarders = new Map();
   for (const declarations of members.values())
-    for (const { declaration } of declarations) {
+    for (const { declaration, file } of declarations) {
       if (
         !ts.isMethodDeclaration(declaration) ||
         !ts.isIdentifier(declaration.name) ||
@@ -155,7 +249,8 @@ export function questionSourceDiagnostics(sources, readers) {
           (parameter) =>
             parameter.initializer !== undefined ||
             parameter.dotDotDotToken !== undefined ||
-            !ts.isIdentifier(parameter.name),
+            !ts.isIdentifier(parameter.name) ||
+            parameter.name.text === declaration.name.text,
         )
       )
         continue;
@@ -181,11 +276,13 @@ export function questionSourceDiagnostics(sources, readers) {
           )
       )
         continue;
-      const owner = declaration.parent.name?.text ?? null;
-      const target = (members.get(`${owner} ${declaration.name.text}`) ?? []).find((candidate) =>
-        ts.isFunctionDeclaration(candidate.declaration),
-      );
-      if (target !== undefined) forwarders.set(declaration, call.expression);
+      const target = bindingOf(file, call.expression.text);
+      if (
+        target !== null &&
+        ts.isFunctionDeclaration(target) &&
+        ownerOf(target) === ownerOf(declaration)
+      )
+        forwarders.set(declaration, call.expression);
     }
   // the sites this check allows are one declaration each
   const allowed = new Set([
@@ -226,11 +323,14 @@ export function questionSourceDiagnostics(sources, readers) {
       if (name !== null && OWNERS.has(name)) {
         const { member, owner, name: memberName } = memberOf(node, sourceFile);
         const guarded = OWNERS.get(name);
-        // (its own declaration names no reference; nor a forwarder's call of its function, nor an import under the
-        // name's own name, whose uses are checked)
+        // (its own declaration names no reference; nor a forwarder's call of its function, nor an import whose local
+        // name binds to the guarded declaration, whose uses are checked: an aliased import's local name binds to none)
         if (member.name === node && owner === guarded.declaredIn);
         else if (forwarders.get(member) === node && owner === guarded.declaredIn);
-        else if (ts.isImportSpecifier(node.parent) && node.parent.propertyName === undefined);
+        else if (
+          ts.isImportSpecifier(node.parent) &&
+          ownerOf(bindingOf(file, text) ?? node.parent) === guarded.declaredIn
+        );
         else if (
           owner === guarded.owner &&
           (memberName === guarded.member || (name === "finishingRead" && readers.has(memberName)))

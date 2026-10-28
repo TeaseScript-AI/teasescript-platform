@@ -169,3 +169,125 @@ test("a forwarder that is not exact names its function as a reference (the split
     messages.join("\n"),
   );
 });
+
+/*
+ * Identity (Codex r1 B1, N1 on #1371): a function's owner and a forwarder's target are the declarations their names
+ * bind to, read lexically. Each case changes the clean split layout on one axis: the reports it must give (a file, or
+ * a message's start), or none.
+ */
+const withoutTypedRead = SPLIT_PART.replace(
+  "export function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n",
+  "",
+);
+const reader = (head) =>
+  `${head}import { finishingRead } from "./finishing.js";\nexport function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n`;
+const IDENTITY = [
+  // [what changes, the entry's text, the part's text, the files added, the reports, or [] for none]
+  ["the clean layout", SPLIT_CLASS, SPLIT_PART, {}, []],
+  [
+    "the owner imported as `{ type Consumers }`",
+    SPLIT_CLASS,
+    SPLIT_PART.replace(
+      'import type { Consumers } from "../consumers.js";',
+      'import { type Consumers } from "../consumers.js";',
+    ),
+    {},
+    [],
+  ],
+  [
+    "the facade's function imported from outside the sources",
+    SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead } from "./consumers/finishing.js";\nimport { finishedItems } from "../review-helper.js";',
+    ),
+    SPLIT_PART,
+    {},
+    [`${CONSUMERS}: finishedItems is named only in`],
+  ],
+  [
+    "the facade's function bound to nothing (not imported)",
+    SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead } from "./consumers/finishing.js";',
+    ),
+    SPLIT_PART,
+    {},
+    [`${CONSUMERS}: finishedItems is named only in`],
+  ],
+  [
+    "the facade's function bound to a same-file decoy",
+    `${SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead } from "./consumers/finishing.js";',
+    )}\nfunction finishedItems(walk: unknown, value: number): number {\n  void walk;\n  return value;\n}\n`,
+    SPLIT_PART,
+    {},
+    [`${CONSUMERS}: finishedItems is named only in`],
+  ],
+  [
+    "a reader whose `Consumers` comes from outside the sources",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    { [part("foreign")]: reader('import type { Consumers } from "../../elsewhere.js";\n') },
+    [
+      `${part("foreign")}: finishingRead is named only in`,
+      "FINISHING_READERS lists Consumers.typedRead",
+    ],
+  ],
+  [
+    "a reader whose `Consumers` is a type parameter",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    {
+      [part("generic")]:
+        'import type { Consumers } from "../consumers.js";\nimport { finishingRead } from "./finishing.js";\nexport function typedRead<Consumers>(walk: Consumers): number {\n  return finishingRead(walk as never, 0);\n}\n',
+    },
+    [
+      `${part("generic")}: finishingRead is named only in`,
+      "FINISHING_READERS lists Consumers.typedRead",
+    ],
+  ],
+  [
+    "a second class named `Consumers`, nested",
+    SPLIT_CLASS,
+    SPLIT_PART,
+    {
+      [part("nested")]:
+        "export function wrap(): void {\n  class Consumers {\n    typedRead(): number {\n      return 0;\n    }\n  }\n  void Consumers;\n}\n",
+    },
+    ["class Consumers is declared 2 times"],
+  ],
+  [
+    "the finishing read imported from outside the sources",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    {
+      [part("imported")]:
+        'import type { Consumers } from "../consumers.js";\nimport { finishingRead } from "../../elsewhere.js";\nexport function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n',
+    },
+    [`${part("imported")}: finishingRead is named only in`],
+  ],
+];
+
+test("a function's owner and a forwarder's target are what their names bind to; unproved bindings are reported", () => {
+  for (const [label, entry, finishing, added, reports] of IDENTITY)
+    for (const reversed of [false, true]) {
+      const sources = [
+        { file: ANSWERS, text: readFileSync(resolve(repositoryRoot, ANSWERS), "utf8") },
+        { file: CONSUMERS, text: entry },
+        { file: PART, text: finishing },
+        ...Object.entries(added).map(([file, text]) => ({ file, text })),
+      ];
+      const messages = questionSourceDiagnostics(
+        reversed ? sources.reverse() : sources,
+        FINISHING_READERS,
+      ).map((diagnostic) => `${diagnostic.fileName}: ${diagnostic.message}`);
+      const where = `${label}${reversed ? ", reversed" : ""}:\n${messages.join("\n")}`;
+      if (reports.length === 0) assert.deepEqual(messages, [], where);
+      for (const report of reports)
+        assert.ok(
+          messages.some((message) => message.startsWith(report) || message.includes(`: ${report}`)),
+          `${report} — ${where}`,
+        );
+    }
+});
