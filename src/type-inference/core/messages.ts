@@ -110,10 +110,14 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   const missing = context === "missing" && (rule.rule === "member" || detail.direct);
   // (a literal subject has no origin of its own: its warning is its receiver's, `0` in `value.get(0, ...)`)
   const literal = rule.rule !== "member" && isLiteral(text);
-  // (a property store into a speaker alone: the first sentence says what happens, which no cause changes)
+  // (a speaker alone: a property store's first sentence says what happens, and a method call's fix that a speaker has
+  // none, which no cause changes; Astra r3, Sol r7)
   const holder = detail.receiver?.kinds ?? kinds;
   const speaker =
-    setsProperty(rule) && holder.length > 0 && holder.every((kind) => kind === "speaker");
+    rule.rule === "member" &&
+    (setsProperty(rule) || rule.member.endsWith("()")) &&
+    holder.length > 0 &&
+    holder.every((kind) => kind === "speaker");
   if (
     !(context === "unknown" && !detail.outside) &&
     context !== "later" &&
