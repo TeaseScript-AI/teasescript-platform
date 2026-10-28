@@ -202,7 +202,25 @@ const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
 
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */
 const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
-  ["duration", "1 s", ["3", "n + 1", "-3", "1.5", 'd["found"]', 'd["absent"]', "ns[0]", "ns[5]"]],
+  [
+    "duration",
+    "1 s",
+    [
+      "3",
+      "n + 1",
+      "-3",
+      "1.5",
+      'd["found"]',
+      'd["absent"]',
+      "ns[0]",
+      "ns[5]",
+      // (Codex r12: such reads inside a literal and an interpolation; a literal's own property, which is there)
+      '({n: d["absent"]}).n',
+      "[ns[5]].length",
+      'toInteger("${d["absent"]}${1}", default: 1)',
+      "({n: n}).n",
+    ],
+  ],
   ["angle", "1 deg", ["90", "n", 'd["absent"]', "ns[5]"]],
   ["date", 'toDate("2026-01-01")', ['"2026-10-28"', '"bad"', '"2026-02-30"', "s"]],
   ["time", 'toTime("10:00")', ['"10:30"', '"25:00"']],

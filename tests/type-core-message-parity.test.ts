@@ -1612,6 +1612,15 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Give the number a unit.",
     ],
     ["let ns = [2]\nlet v: duration = ns[0]\nsay v\nexit\n", "Give the number a unit."],
+    // (Codex r12: such a read inside a literal or an interpolation, also before another part)
+    [
+      'let d = dict{found: 2}\nlet v: duration = ({n: d["absent"]}).n\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    [
+      'let d = dict{found: 2}\nlet v: duration = toInteger("${d["absent"]}${1}", default: 1)\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
     ['let items = ["hello"]\nsay items[0].size\nexit\n', "Use the length property."],
     ['let lists = [["a"]]\nsay lists[0].join\nexit\n', "Call the join method with parentheses."],
     [

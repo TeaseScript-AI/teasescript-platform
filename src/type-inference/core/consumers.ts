@@ -1,5 +1,6 @@
 import type { Expression } from "../../ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
+import { expressionChildren } from "../../expression-children.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
@@ -1409,61 +1410,69 @@ export class Consumers {
   }
 
   /**
-   * Whether every value the diagnosed expression at `site` reads is there when the script runs, an operation's every
-   * operand's too (`Presence`, TABLE r4.162, Astra on #1296): not where it reads an element by its index or a dict's value
-   * by its key, there or in any value it is computed from; unproved where the site has no place.
+   * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
+   * TABLE r4.162, r4.168): its subject's, a member's receiver's, an operation's operands', by a walk of their whole
+   * syntax (`expressionChildren`, Codex r12): not where any of them reads an element by its index or a dict's value by
+   * its key, calls a function or a method (whose own reads are not followed), or reads a property or a selection the
+   * core finds may be absent; unproved where a site has no expression.
    */
   #present(site: SourceSite, rule: DiagnosticRule): Presence {
     const { program } = this.pass;
-    const sites = rule.rule === "operator" ? [site, ...rule.operands] : [site];
-    for (const at of sites) {
-      const place = program.placeBySite.get(siteKey(at));
-      if (place === undefined || runCompileTask(this.#indexedTask(place))) return "unproved";
+    const work: Expression[] = [];
+    for (const at of rule.rule === "operator" ? [site, ...rule.operands] : [site]) {
+      const expression = program.exprAt(at)?.expression;
+      if (expression === undefined) return "unproved";
+      // (a member's form reads its receiver, not the member it replaces)
+      const subject =
+        rule.rule !== "member"
+          ? expression
+          : expression.kind === "callExpression" &&
+              expression.callee.kind === "propertyAccessExpression"
+            ? expression.callee.object
+            : expression.kind === "propertyAccessExpression" ||
+                expression.kind === "indexExpression"
+              ? expression.object
+              : expression;
+      work.push(subject);
+    }
+    for (let expression = work.pop(); expression !== undefined; expression = work.pop()) {
+      program.work.charge("checks");
+      if (expression.kind === "indexExpression" || expression.kind === "callExpression")
+        return "unproved";
+      if (expression.kind === "propertyAccessExpression" && this.#mayBeAbsent(expression, site))
+        return "unproved";
+      work.push(...expressionChildren(expression));
     }
     return true;
   }
 
-  /** Whether the value at `place` reads an element by its index or a dict's value by its key, once per place. */
-  *#indexedTask(place: PlaceId): CompileTask<boolean> {
-    const known = this.#indexed.get(place);
-    if (known !== undefined) return known;
-    // (a value computed from itself proves nothing)
-    this.#indexed.set(place, true);
-    const { program } = this.pass;
-    program.work.charge("checks");
-    const projection = program.projOf.get(place);
-    const op = program.opOf.get(place);
-    const inputs: PlaceId[] = projection === undefined ? [] : [projection.owner];
-    if (op !== undefined)
-      switch (op.kind) {
-        case "operation":
-          if (op.receiver !== null) inputs.push(op.receiver);
-          inputs.push(...op.arguments, ...op.named.map((named) => named.value));
-          break;
-        case "call":
-          inputs.push(...op.arguments, ...op.named.map((named) => named.value));
-          break;
-        case "get":
-          inputs.push(op.receiver, op.fallback, ...(op.key === null ? [] : [op.key]));
-          break;
-        case "fallback":
-          inputs.push(op.left, op.right);
-          break;
-        case "load":
-          if (op.fallback !== null) inputs.push(op.fallback);
-          break;
-      }
-    let found = projection?.step === "index";
-    for (const input of inputs) {
-      if (found) break;
-      found = yield* compileChild(this.#indexedTask(input));
-    }
-    this.#indexed.set(place, found);
-    return found;
+  /** Whether a property's read may find nothing: a property an object may lack, an element a selection may not have. */
+  #mayBeAbsent(
+    access: Extract<Expression, { kind: "propertyAccessExpression" }>,
+    site: SourceSite,
+  ): boolean {
+    const { program, values } = this.pass;
+    const at = (expression: Expression): SourceSite => ({
+      file: site.file,
+      start: expression.span.start.offset,
+      end: expression.span.end.offset,
+    });
+    // (a grouped receiver's value is its inner expression's, which the core places)
+    let object = access.object;
+    while (object.kind === "parenthesizedExpression") object = object.expression;
+    const place = program.placeBySite.get(siteKey(at(access)));
+    const owner = program.placeBySite.get(siteKey(at(object)));
+    if (place === undefined || owner === undefined) return true;
+    const node = program.exprAt(at(access));
+    const missing = this.#run(values.valueItems(place, node, [])).some(
+      (item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0,
+    );
+    return (
+      missing ||
+      (selectsElement(access.property.name) &&
+        this.#run(values.valueItems(owner, node, ["element"])).some((item) => item.tag === "empty"))
+    );
   }
-
-  /** `#indexedTask`'s answer per place. */
-  readonly #indexed = new Map<PlaceId, boolean>();
 
   /**
    * TABLE r4.151: what the place the value at `site` lands in takes, read from what consumes it
