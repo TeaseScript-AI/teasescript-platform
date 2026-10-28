@@ -158,9 +158,12 @@ function unionError(file: number, type: TypeAnnotation): WrittenTypeError | null
 }
 
 /**
- * V30's suggestion for a union of the form of its example `h`, `integer | string[]`: one list of a type name beside type
- * names that are no collection, not `null` and not the list's element, whose union belongs inside the list,
- * `(integer | string)[]`, the members in their written order. Any other union has none.
+ * V30's suggestion for a union of the form of its example `h`, `integer | string[]`: one list, set or dict of a type name
+ * beside type names that are no collection, not `null` and not the collection's element, whose union belongs inside the
+ * collection (the owner's #1104 point 3): `(integer | string)[]`, `(integer | string) set`, `(integer | string) dict`,
+ * the members in their written order, each once. A `?` stays where it is written, on a member (`integer? | string set`
+ * suggests `(integer? | string) set`) or on the collection (`integer | string set?`, `(integer | string) set?`). Any other
+ * union has none, also one with `null` itself beside the collection, which may as well make the collection optional.
  */
 function suggestionFor(union: UnionType): string | null {
   const members: TypeAnnotation[] = [];
@@ -169,19 +172,38 @@ function suggestionFor(union: UnionType): string | null {
     if (next.kind === "unionType")
       for (let at = next.members.length - 1; at >= 0; at -= 1) pending.push(next.members[at]!);
     else members.push(next);
-  const scalar = (type: TypeAnnotation): type is NamedType =>
-    type.kind === "namedType" && !COLLECTION_NAMES.has(type.name) && type.name !== "null";
-  const [list, ...more] = members.filter(
-    (member): member is CollectionType => member.kind === "listType",
-  );
-  if (list === undefined || more.length > 0 || !scalar(list.element)) return null;
-  const element = list.element.name;
-  const names: string[] = [];
-  for (const member of members)
-    if (member === list) names.push(element);
-    else if (scalar(member) && member.name !== element) names.push(member.name);
-    else return null;
-  return `(${names.join(" | ")})[]`;
+  // a type name that is no collection and not `null`, also as `T?`: its name and its written text
+  const scalar = (
+    type: TypeAnnotation,
+  ): { readonly name: string; readonly text: string } | null => {
+    const named = type.kind === "optionalType" ? type.value : type;
+    return named.kind === "namedType" && !COLLECTION_NAMES.has(named.name) && named.name !== "null"
+      ? { name: named.name, text: named === type ? named.name : `${named.name}?` }
+      : null;
+  };
+  const collectionOf = (type: TypeAnnotation): CollectionType | null => {
+    const inner = type.kind === "optionalType" ? type.value : type;
+    return inner.kind === "listType" || inner.kind === "setType" || inner.kind === "dictType"
+      ? inner
+      : null;
+  };
+  const [whole, ...more] = members.filter((member) => collectionOf(member) !== null);
+  const collection = whole === undefined ? null : collectionOf(whole);
+  const element = collection === null ? null : scalar(collection.element);
+  if (whole === undefined || collection === null || element === null || more.length > 0)
+    return null;
+  const names = new Set<string>();
+  for (const member of members) {
+    const named = member === whole ? element : scalar(member);
+    if (named === null || (member !== whole && named.name === element.name)) return null;
+    names.add(named.text);
+  }
+  const inside = `(${[...names].join(" | ")})`;
+  const written =
+    collection.kind === "listType"
+      ? `${inside}[]`
+      : `${inside} ${collection.kind === "setType" ? "set" : "dict"}`;
+  return whole.kind === "optionalType" ? `${written}?` : written;
 }
 
 function siteOf(file: number, span: SourceSpan): SourceSite {

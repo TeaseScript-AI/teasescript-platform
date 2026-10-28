@@ -2457,6 +2457,25 @@ test("a program outside the slice throws at its first construct outside it", () 
   }
 });
 
+/**
+ * The owner's #1104 point 1: `min` and `max` compare the property `by:` names in one list of objects, and calendar
+ * durations of one family (months and years, or days and weeks), as the current checker does. The analysis gives them no
+ * diagnostic; the route leaves the list functions to S9b, which brings their results (F25) and argument checks (C13).
+ */
+test("min and max with by: and with calendar durations of one family have no diagnostic (#1104 point 1)", () => {
+  for (const source of [
+    'say min([{ count: 2 }, { count: 1 }], by: "count")\nexit\n',
+    'say max([{ count: 2 }, { count: 1 }], by: "count")\nexit\n',
+    "say min(1 calendar month, 2 calendar months)\nexit\n",
+    "say max(1 calendar day, 2 calendar weeks)\nexit\n",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const answers = analyseCore(request);
+    assert.deepEqual([answers.outcome, answers.diagnostics], ["valid", []], source);
+  }
+});
+
 test("the candidate's side outputs follow the flow graph's literal facts and the kept checks", () => {
   const source =
     'if true {\n  say "a"\n} else {\n  say "b"\n}\nrepeat 0 {\n  say "c"\n}\nrepeat 1 {\n  exit\n}\nsay "d"\nexit\n';

@@ -1170,18 +1170,33 @@ function emptyOf(form: Form): string {
 }
 
 /**
- * V30's suggestion for its example `h`'s form, here `integer[]` beside a type name that is no collection, not `null` and
- * not `integer` (`g`'s form has none): the union inside the list, its members in their written order.
+ * The whole collections of `integer` that have V30's suggestion for its example `h`'s form (the owner's #1104 point 3),
+ * each with the text that stands for it inside the union and the collection around the union, a `?` where it is written.
+ */
+const SUGGESTED: Readonly<Record<string, readonly [string, (inside: string) => string]>> = {
+  "integer[]": ["integer", (inside) => `(${inside})[]`],
+  "integer set": ["integer", (inside) => `(${inside}) set`],
+  "integer dict": ["integer", (inside) => `(${inside}) dict`],
+  "integer?[]": ["integer?", (inside) => `(${inside})[]`],
+  "integer[]?": ["integer", (inside) => `(${inside})[]?`],
+};
+
+/**
+ * V30's suggestion for its example `h`'s form, here a `SUGGESTED` collection beside a type name that is no collection,
+ * not `null` and not `integer` (`g`'s form has none): the union inside the collection, its members in their written order.
  */
 function suggestionOf(pair: readonly Form[]): string | null {
   const texts = pair.map(formText);
-  const at = texts.indexOf("integer[]");
+  const at = texts.findIndex((text) => Object.hasOwn(SUGGESTED, text));
   const other = pair[1 - at];
-  return at < 0 ||
+  if (
+    at < 0 ||
     other?.kind !== "name" ||
     ["integer", "null", "list", "set", "dict"].includes(other.name)
-    ? null
-    : `(${texts.map((text) => (text === "integer[]" ? "integer" : text)).join(" | ")})[]`;
+  )
+    return null;
+  const [element, around] = SUGGESTED[texts[at]!]!;
+  return around(texts.map((text, index) => (index === at ? element : text)).join(" | "));
 }
 
 /**
