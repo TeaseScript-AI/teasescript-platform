@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
@@ -173,3 +176,86 @@ test("filter refuses a pattern whose only matches are in a node_modules folder, 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("the full suite runs every file once, each in its own process, with the costly files first", async () => {
+  // EVIDENCE: tools/costly-test-files.mjs exports `costlyTestFiles` as an array of file names, as the filter reads it.
+  const { costlyTestFiles } = (await import(
+    pathToFileURL(resolve(process.cwd(), "tools/costly-test-files.mjs")).href
+  )) as { costlyTestFiles: string[] };
+  const files = [...costlyTestFiles, "a.test.js", "z.test.js"];
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+  for (const file of files) {
+    // A file that ran in the process of another would find its mark.
+    writeFileSync(
+      resolve(directory, "dist/tests", file),
+      `const assert = require("node:assert/strict");
+       assert.equal(globalThis.testFile, undefined);
+       globalThis.testFile = ${JSON.stringify(file)};
+       require("node:test")(${JSON.stringify(file)}, () => {
+         ${file === "z.test.js" ? 'assert.fail("deliberate failure");' : ""}
+       });`,
+    );
+  }
+  try {
+    const result = spawnSync(process.execPath, [filterPath, "--full-output"], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+
+    assert.equal(result.status, 1, result.stderr);
+    // Node reports the files in the order the runner starts them, whichever ends first.
+    const results = result.stdout.slice(0, result.stdout.indexOf("ℹ tests"));
+    assert.deepEqual(
+      [...results.matchAll(/^([✔✖] \S+) \(/gmu)].map((match) => match[1]),
+      files.map((file) => `${file === "z.test.js" ? "✖" : "✔"} ${file}`),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "Ctrl+C stops the full suite without an error",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const started = resolve(directory, "started");
+    mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+    writeFileSync(
+      resolve(directory, "dist/tests/running.test.js"),
+      `require("node:test")("running", () => {
+         require("node:fs").writeFileSync(${JSON.stringify(started)}, "");
+         return new Promise(() => setInterval(() => {}, 1000));
+       });`,
+    );
+    // In a process group of its own, which receives the signal as a terminal's group does.
+    const filter = spawn(process.execPath, [filterPath], {
+      cwd: directory,
+      env: environment,
+      detached: true,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const closed = once(filter, "close");
+    const group = filter.pid;
+    assert.ok(group !== undefined);
+    try {
+      for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
+      assert.ok(existsSync(started), stderr);
+      process.kill(-group, "SIGINT");
+      // The close waits for the runner too, which writes to the same error output.
+      assert.deepEqual(await closed, [null, "SIGINT"]);
+      assert.doesNotMatch(stderr, /Error/);
+    } finally {
+      if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
