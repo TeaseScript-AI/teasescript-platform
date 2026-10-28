@@ -164,6 +164,17 @@ test("every stage 3b family's index and queries grow with the program in either 
 });
 
 /**
+ * N5's families through the analysis (S10 part 2b): a read in a stored value takes its narrowing, so the stores' own
+ * preserving tests run as the analysis asks them, components included; the same gate.
+ */
+test("stage 3b's N5 families grow with the program through the analysis too, in either order (§13.3)", () => {
+  assert.deepEqual(
+    steepCounters(NARROWING_FAMILIES.filter((family) => family.name.startsWith("W29"))),
+    [],
+  );
+});
+
+/**
  * #1167's shapes, each asking one question per read of one place, read k times: an object replaced k times, once
  * conditionally by one that lacks `n`, then `room.n` read k times, each warning's `missing` word asking whether the
  * object lacking `n` is one of `room`'s own stores; and an unwritten parameter's property read k times in a function

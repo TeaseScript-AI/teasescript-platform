@@ -1430,14 +1430,21 @@ export interface KnownProduct extends WorkFamily {
   readonly measured: number;
 }
 
+/** The sum of `(a_i otherwise 0)` for i in [lo, hi), as a balanced tree of `+`. */
+const balancedSum = (lo: number, hi: number): string =>
+  hi - lo === 1
+    ? `(a${lo} otherwise 0)`
+    : `(${balancedSum(lo, (lo + hi) >> 1)} + ${balancedSum((lo + hi) >> 1, hi)})`;
+
 /** A k-field record's literal, every field `value`. */
 const record = (k: number, value: string): string => `{${fields(k, () => value)}}`;
 
 /**
  * Stage 3b's families (TABLE §13.3, W27–W34 and the tested-copy variant), as §13.3 defines them: each makes the
  * narrowing index's construction or its queries a product of two program dimensions in some realization of it. They are
- * measured with every read's narrowing and route asked (`tests/helpers/type-core-narrowing.ts`), since no consumer
- * reads the index before S10's second part.
+ * measured with every read's narrowing and route asked (`tests/helpers/type-core-narrowing.ts`), as the consumers will
+ * ask them; N5's (W29 and its variants) through the analysis too, whose stored values read their narrowings (S10 part
+ * 2b).
  */
 export const NARROWING_FAMILIES: readonly WorkFamily[] = [
   {
@@ -1512,6 +1519,71 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
           rows(k, (i) => `if v${i} == null { exit }`),
           "repeat 2 {",
           rows(k, (i) => `repeat v${i} {}\nv${i} = v${i} + 1`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  ...(
+    [
+      ["W29-wide-chain", "null"],
+      ["W29-wide-ring", "total otherwise null"],
+    ] as const
+  ).map(([name, last]): WorkFamily => ({
+    name,
+    measures:
+      "N5 (Astra's G2): a wide surviving store whose k operands' facts are lost one by one, each loss one operand's work",
+    // (the k operands summed as a balanced tree: a stored left-deep run of k terms keeps text quadratic in k on its
+    // own, outside N5)
+    program: (k) =>
+      main(
+        lines(
+          "let keep: boolean = hostValue",
+          rows(k, (i) => `let a${i}: integer? = hostValue`),
+          "let total: integer? = 0",
+          `if total != null and ${rows(k, (i) => `a${i} != null`).replaceAll("\n", " and ")} {`,
+          "while keep {",
+          `total = ${balancedSum(0, k)}`,
+          rows(k - 1, (i) => `a${i} = a${i + 1}`),
+          `a${k - 1} = ${last}`,
+          "repeat total {}",
+          "}",
+          "}",
+          "exit",
+        ),
+      ),
+  })),
+  {
+    name: "W29-guarded-choice",
+    measures:
+      "N2 (Sol's U3 r1): k options holding one tested record, read at k fields: one value class for one environment",
+    program: (k) =>
+      main(
+        lines(
+          `let root = ${record(k, "1")}`,
+          "if hostValue { root = null }",
+          "if root != null {",
+          `let pick = askChoice ${rows(k, (i) => `{text: "${i}", value: root}`).replaceAll("\n", ", ")}`,
+          rows(k, (i) => `let f${i} = pick.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "W29-one-location",
+    measures:
+      "N5: k preserving stores to one location in k branches of one loop, each read through G: k × log, never k²",
+    program: (k) =>
+      main(
+        lines(
+          "let v: integer? = 1",
+          "if flagHost { v = null }",
+          "if v != null {",
+          "repeat 2 {",
+          rows(k, (i) => `if hostValue == ${i} { v = v + 1 }`),
+          "repeat v {}",
+          "}",
           "}",
           "exit",
         ),
