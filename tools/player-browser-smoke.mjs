@@ -1179,14 +1179,14 @@ async function packageScenario(cdp, origin) {
   await navigate(cdp, `${origin}/player/?package=unreadable-file`);
   await waitFor(
     cdp,
-    `document.querySelector('[data-script-failure-summary]')?.textContent === "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."`,
+    `document.querySelector('[data-problem-summary]')?.textContent === "A file of this Tease cannot be read, so the Tease cannot start. The creator of this Tease needs to fix the file."`,
     8_000,
     "The Player did not say that a file of the package cannot be read",
   );
   assertEqual(
     await value(
       cdp,
-      `document.querySelector('[data-script-failure-technical-toggle]')?.getAttribute('aria-expanded') === 'false' && !document.querySelector('[data-script-failure-technical]')`,
+      `document.querySelector('[data-problem-technical-toggle]')?.getAttribute('aria-expanded') === 'false' && !document.querySelector('[data-problem-technical]')`,
     ),
     true,
     "The Player did not start with the technical details collapsed",
@@ -1201,11 +1201,11 @@ async function packageScenario(cdp, origin) {
   );
 
   await navigate(cdp, `${origin}/player/?package=broken`);
-  await waitFor(cdp, `!!document.querySelector('[data-script-failure-technical-toggle]')`);
-  await physicalClick(cdp, "[data-script-failure-technical-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-problem-technical-toggle]')`);
+  await physicalClick(cdp, "[data-problem-technical-toggle]");
   await waitFor(
     cdp,
-    `document.querySelector('[data-script-failure-technical]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
+    `document.querySelector('[data-problem-technical]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
     8_000,
     "The Player did not show the broken package's diagnostic",
   );
