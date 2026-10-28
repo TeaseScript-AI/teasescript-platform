@@ -152,8 +152,8 @@ function within(inner: Span, outer: Span): boolean {
  * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108–r4.111), none at a
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
- * brought, and C5's error at a literal for the mark of the store that owes it. The diagnostics and the checks are
- * compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
+ * brought, and C5's error at a literal for the mark of the store that owes it. The diagnostics, whole, and the checks
+ * are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
  * own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose obligation
  * is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's records: the
  * content that leaving them out of each compile's analysis and discharge removes. The fitting runs are unchanged; a
@@ -211,9 +211,7 @@ export function stopProblems(c: StopCase): string[] {
   const shown = (each: StopRun): string[] =>
     each.result.diagnostics
       .filter((d) => d.code !== "TSV076" && !excused.has(recordOf(d.code, offsets(d))))
-      .map(
-        (d) => `${d.severity} ${d.code} ${d.span.start.offset}:${d.span.end.offset} ${d.message}`,
-      );
+      .map((d) => JSON.stringify(d));
   const [before, after] = [shown(unstopped), shown(stopped)];
   if (JSON.stringify(before) !== JSON.stringify(after))
     problems.push(`diagnostics ${after.join(" | ")} against ${before.join(" | ")}`);

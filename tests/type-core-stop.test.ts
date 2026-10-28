@@ -451,7 +451,8 @@ function walkEnds(source: string): readonly [number, number] {
 /**
  * The stop oracle itself (TABLE r4.108 (1)): the whole plan, a mark excusing only its own record. Changes to a compile
  * stand in for a stop that made them: a store check's place, type or presence (Codex r8's T1), a property store's
- * guard (Astra r3's T1), alone and beside the mark of a default the stop left undecided, and the diagnostics' order.
+ * guard (Astra r3's T1), alone and beside the mark of a default the stop left undecided, the diagnostics' order and a
+ * coordinate of one (Codex r12's T1).
  */
 test("the stop oracle sees every change no mark of the stop names", () => {
   // `edit` applied to every node of the plan, changing one at least
@@ -514,13 +515,23 @@ test("the stop oracle sees every change no mark of the stop names", () => {
     unguarded.some((problem) => problem.startsWith("violating ")),
     unguarded.join(" | "),
   );
-  // the diagnostics in their published order
+  // the diagnostics whole, in their published order: the order, and a coordinate of a span (Codex r12's T1)
   assert.ok(unstopped.result.diagnostics.length > 1);
-  const reordered = [...unstopped.result.diagnostics].reverse();
+  const diagnostics = (list: typeof unstopped.result.diagnostics): StopRun => ({
+    ...unstopped,
+    result: { ...unstopped.result, diagnostics: list },
+  });
   assert.notDeepEqual(
-    problems(unstopped, { ...unstopped, result: { ...unstopped.result, diagnostics: reordered } }),
+    problems(unstopped, diagnostics([...unstopped.result.diagnostics].reverse())),
     [],
   );
+  const [first, ...others] = unstopped.result.diagnostics;
+  assert.ok(first !== undefined);
+  for (const span of [
+    { ...first.span, start: { ...first.span.start, line: first.span.start.line + 1 } },
+    { ...first.span, end: { ...first.span.end, column: first.span.end.column + 1 } },
+  ])
+    assert.notDeepEqual(problems(unstopped, diagnostics([{ ...first, span }, ...others])), []);
 });
 
 /**
