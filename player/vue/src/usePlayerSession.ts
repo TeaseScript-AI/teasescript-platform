@@ -333,27 +333,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           : new Set<string>();
       return enterDebugRoom(normalStorage.scope, debugRoom.value ?? { session: false }, durable);
     });
-  // Every change this Player makes to the stored values goes through here, which keeps the values the next Start loads
-  // (`storedEntries`) equal to what the provider holds, so the Start that follows the end dialog runs without reading
-  // storage again. A failed change leaves them as they were; session-local values (`null`) stay session-local.
+  // Every change this Player makes to the stored values goes through here, which keeps `storedEntries` equal to what the
+  // provider holds as far as this Player knows, such as for the debug room's offer to delete them; another tab's
+  // changes arrive with the next read. A failed change leaves them as they were; session-local values (`null`) stay
+  // session-local.
   const scriptStorage: ScriptStorageProvider | undefined = storageProvider && {
     scope: storageProvider.scope,
     load: () => storageProvider.load(),
     write: (key, value) =>
-      seeding(storageProvider.write(key, value), () => seedNextStart(key, value)),
+      whenStored(storageProvider.write(key, value), () => noteStored(key, value)),
     replace: (entries) =>
-      seeding(storageProvider.replace(entries), () => {
+      whenStored(storageProvider.replace(entries), () => {
         if (storedEntries.value !== null) storedEntries.value = [...entries];
       }),
     clear: () =>
-      seeding(storageProvider.clear(), () => {
+      whenStored(storageProvider.clear(), () => {
         if (storedEntries.value !== null) storedEntries.value = [];
       }),
   };
-  // Seeds once the provider stored the change, before its caller learns of it, and hands the caller the provider's own
-  // promise, so the change settles for it exactly as it would without seeding.
-  function seeding(change: Promise<void>, seed: () => void): Promise<void> {
-    change.then(seed, () => {});
+  // Notes the change once the provider stored it, before its caller learns of it, and hands the caller the provider's
+  // own promise, so the change settles for it exactly as it would without the note.
+  function whenStored(change: Promise<void>, note: () => void): Promise<void> {
+    change.then(note, () => {});
     return change;
   }
   // Changes whenever the session camera may have opened, failed, ended, or been released.
@@ -786,8 +787,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Counts changes this Player made to the saved values: a stored save, a clear, an import, or a fresh read.
   const savedDataRevision = ref(0);
   /**
-   * Reads the stored values freshly for the next Start; call it before each `prepare`. Reading ahead keeps Start
-   * synchronous within the player's activation.
+   * Reads the stored values freshly; call it before the first `prepare`, so the start page knows them. Each Start reads
+   * them again (`activate`).
    */
   async function loadScriptStorage(): Promise<void> {
     if (!scriptStorage) return;
@@ -861,9 +862,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends; while a
   // clear runs, no second clear and no Start can begin, so a new session never starts from the values being removed.
   const clearing = ref(false);
-  // A Start or Continue waiting for the camera already owns its view of the stored values, although its session is not
-  // published yet; a restored one may still write them.
-  const openingCamera = ref(false);
+  // A Start waiting for its read of the stored values or for the camera, or a Continue waiting for the camera, already
+  // owns its view of the stored values, although its session is not published yet; a restored one may still write them.
+  const beginning = ref(false);
   // While an import replaces the saved data, no Start, Continue, or clear begins.
   const importing = ref(false);
   // Debug storage edits (DEBUGGER.md "Player Debug"), one at a time. An edit is stored first and reaches the running
@@ -871,8 +872,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
   // script. A write the script issues while an edit is being stored settles as usual first.
   let editChain: Promise<unknown> = Promise.resolve();
-  /** Puts a stored value into the values the next Start loads, as the provider now holds them; see `scriptStorage`. */
-  function seedNextStart(key: string, value: SerializableRuntimeValue) {
+  /** Puts a stored value into `storedEntries`, as the provider now holds it; see `scriptStorage`. */
+  function noteStored(key: string, value: SerializableRuntimeValue) {
     const entries = storedEntries.value;
     if (entries === null) return;
     const others = entries.filter((entry) => entry.key !== key);
@@ -889,7 +890,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     !stopped.value &&
     (session.value.state.status === "running" || session.value.state.status === "waiting") &&
     activation.value === null &&
-    !openingCamera.value;
+    !beginning.value;
   /** Whether the running session's own write waits for the host, so it takes no edit until that settled. */
   const scriptSaving = () =>
     liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.state) !== null;
@@ -945,7 +946,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (
       importing.value ||
       clearing.value ||
-      openingCamera.value ||
+      beginning.value ||
       inspecting.value ||
       activation.value?.kind === "continue"
     )
@@ -1006,7 +1007,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       storedEntries.value !== null &&
       !clearing.value &&
       !importing.value &&
-      !openingCamera.value &&
+      !beginning.value &&
       !inspecting.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
@@ -1191,7 +1192,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Whether a session runs, waits for Continue, or is starting; its own view of the saved values is in use. */
   const sessionInProgress = computed(
     () =>
-      openingCamera.value ||
+      beginning.value ||
       activation.value?.kind === "continue" ||
       (session.value !== null &&
         session.value.state.status !== "halted" &&
@@ -1203,7 +1204,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function endSession() {
     activationToken++;
-    openingCamera.value = false;
+    beginning.value = false;
     activation.value = null;
     captures.reset();
     fileStores.reset();
@@ -1760,11 +1761,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       session.value !== null &&
       (session.value.state.status === "running" || session.value.state.status === "waiting"),
   );
-  // The screen stays on from the Start or Continue click, while the camera opens, until the session ends or stops; also
+  // The screen stays on from the Start or Continue click, while the session begins, until it ends or stops; also
   // while Debug holds it at an inspected state or a random draw, where a draw in its first statement leaves it `ready`.
   useScreenWakeLock(
     () =>
-      openingCamera.value ||
+      beginning.value ||
       (session.value !== null &&
         !stopped.value &&
         session.value.state.status !== "halted" &&
@@ -1929,7 +1930,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       activation.value === null &&
       !importing.value &&
       !clearing.value &&
-      !openingCamera.value &&
+      !beginning.value &&
       editsInFlight.value === 0 &&
       pendingPlayerRuntimeStorageWrite(session.value.state) === null,
   );
@@ -2018,7 +2019,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Shows Start for `create`, with `outdated`, why the kept session cannot continue, on the start page. */
   function prepareStart(create: PlayerSessionStart, outdated?: Problem) {
     activationToken++;
-    openingCamera.value = false;
+    beginning.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
     activation.value = {
@@ -2047,7 +2048,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function prepareRestore(restored: PlayerRuntimeSession, marks?: DebugHistoryMarks) {
     activationToken++;
-    openingCamera.value = false;
+    beginning.value = false;
     camera.release();
     activation.value = {
       kind: "continue",
@@ -2081,35 +2082,39 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /**
    * Runs the prepared Start or Continue; call it from the activating click. With the camera capability it first opens
    * the session camera, so any browser permission request happens here, before ordinary script execution. A camera
-   * failure never prevents the session from starting.
+   * failure never prevents the session from starting. Start then reads the stored values again, which another tab may
+   * have changed since they were read; Continue goes on with its session's own view of them.
    */
   async function activate() {
     const pending = activation.value;
     if (!pending || clearing.value || importing.value) return;
     activation.value = null;
     const token = ++activationToken;
-    if (options.capabilities?.camera !== true) {
-      // Without the capability nothing waits: `takePhoto()` is unconfigured (settled before `open` returns), and the
-      // session starts within the activating click.
+    const withCamera = options.capabilities?.camera === true;
+    const reading = pending.kind === "start" && scriptStorage !== undefined;
+    if (!withCamera && !reading) {
+      // Nothing waits: `takePhoto()` is unconfigured (settled before `open` returns), and the session starts within the
+      // activating click.
       void camera.open(false);
       captures.reset();
       startFrom(pending);
       return;
     }
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
-    // receives an element the browser still blocks, and it cannot project media while the camera opens.
+    // receives an element the browser still blocks, and it cannot project media while it waits.
     session.value = null;
     device.reset();
     primeAudio();
-    openingCamera.value = true;
+    beginning.value = true;
     let opened: boolean;
     try {
-      opened = await camera.open(true);
+      opened = await camera.open(withCamera);
+      if (opened && reading && !disposed && token === activationToken) await loadScriptStorage();
     } finally {
       // A superseding prepare already reset it for its own activation.
-      if (token === activationToken) openingCamera.value = false;
+      if (token === activationToken) beginning.value = false;
     }
-    // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
+    // Replaced, re-prepared, or unmounted while it waited: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
     startFrom(pending);
@@ -2220,7 +2225,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         storedEntries.value !== null &&
         !importing.value &&
         !clearing.value &&
-        !openingCamera.value &&
+        !beginning.value &&
         !inspecting.value &&
         activation.value?.kind !== "continue",
       live: liveSession(),

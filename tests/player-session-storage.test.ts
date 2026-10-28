@@ -49,7 +49,7 @@ interface StorageHost {
   toStartPage(): Promise<void>;
   debugRecording(): { readonly operations: readonly { readonly kind: string }[] } | null;
   prepareRestore(restored: PlayerRuntimeSession): void;
-  activate(): void;
+  activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number };
   editSavedData(edit: {
@@ -99,10 +99,22 @@ function createHost(
   provider: ScriptStorageProvider,
   temporalContext?: () => TemporalContext,
 ) {
-  // Event targets are the only browser surface these storage-only scripts use; no media elements are created.
-  for (const name of ["document", "window"]) {
+  // Event targets are the only browser surface these storage-only scripts use, besides the audio elements a Start
+  // primes while it reads the stored values.
+  const values = {
+    document: new EventTarget(),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  for (const [name, value] of Object.entries(values)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value: new EventTarget() });
+    Object.defineProperty(globalThis, name, { configurable: true, value });
     context.after(() => {
       if (previous) Object.defineProperty(globalThis, name, previous);
       else Reflect.deleteProperty(globalThis, name);
@@ -122,9 +134,8 @@ function createHost(
 }
 
 async function start(host: StorageHost, source: string) {
-  await host.loadScriptStorage();
   host.prepare(() => createPlayerRuntimeSession(source, host.scriptStorageOptions()));
-  host.activate();
+  await host.activate();
   assert.ok(host.session.value);
   return host.session.value;
 }
@@ -342,14 +353,16 @@ test("Vue host reloads before each Start and falls back to session-local storage
 test("Vue host clears once, and no Start begins until the clear settles", async (context) => {
   const clearing = deferred();
   let clears = 0;
+  let stored = [{ key: "answer", value: "old" }];
   const { host } = createHost(context, {
     scope: "test",
-    load: async () => [{ key: "answer", value: "old" }],
+    load: async () => stored,
     write: async () => {},
     replace: async () => {},
-    clear: () => {
+    clear: async () => {
       clears++;
-      return clearing.promise;
+      await clearing.promise;
+      stored = [];
     },
   });
   await host.loadScriptStorage();
@@ -365,14 +378,14 @@ test("Vue host clears once, and no Start begins until the clear settles", async 
   assert.equal(host.activation.value, null);
   // Read through a function: an assertion narrows the reactive value's type for the rest of the test.
   const current = (): PlayerRuntimeSession | null => host.session.value;
-  host.activate();
+  await host.activate();
   assert.equal(current(), null);
 
   clearing.resolve();
   assert.equal(await first, true);
   assert.equal(clears, 1);
   assert.equal(host.activation.value, "start");
-  host.activate();
+  await host.activate();
   // The session starts from the cleared view, not from the values loaded before the clear.
   assert.deepEqual(playerRuntimeSnapshot(current()!).scriptStorage, []);
 });
@@ -485,7 +498,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
       ...host.temporalCapture(),
     }),
   );
-  host.activate();
+  await host.activate();
   const started = host.session.value;
   assert.ok(started);
   assert.equal(
@@ -497,7 +510,7 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   account = DEFAULT_TEMPORAL_CONTEXT;
   context.mock.method(Date, "now", () => utc("2026-10-05T09:00:00"));
   host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
-  host.activate();
+  await host.activate();
   const continued = playerRuntimeSnapshot(host.session.value!);
   assert.ok(continued);
   assert.equal(resolved, 2);
@@ -538,7 +551,7 @@ test("Vue host's Continue resumes a restored ready session within the activating
   assert.equal(beforeActivation, null);
 
   // No timer, observation, or page lifecycle event is needed after the click.
-  host.activate();
+  void host.activate();
   assert.deepEqual(
     host.session.value?.transcriptEntries.map((entry) => entry.text),
     ["Resumed"],
@@ -618,7 +631,7 @@ test("Vue host records every session from Start and from Continue for a debug ex
   host.prepare((recording) =>
     createPlayerRuntimeSession('let name = askText "Name"\nexit', recording),
   );
-  host.activate();
+  await host.activate();
   assert.deepEqual(
     host.debugRecording()?.operations.map((operation) => operation.kind),
     ["run"],
@@ -626,7 +639,7 @@ test("Vue host records every session from Start and from Continue for a debug ex
   const started = host.session.value;
   assert.ok(started);
   host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
-  host.activate();
+  await host.activate();
   assert.deepEqual(
     host.debugRecording()?.operations.map((operation) => operation.kind),
     ["recordContinueCapture", "run"],
@@ -763,9 +776,10 @@ test("an edit of a session that was replaced or unmounted meanwhile changes neit
   await start(host, loadsAroundButton);
   // The edit reads the stored values while a new run replaces the session.
   const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
-  // A new run starts from the values already read; its Start does not wait for storage.
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  assert.equal(reads, 2);
   host.prepare(() => createPlayerRuntimeSession(loadsAroundButton, host.scriptStorageOptions()));
-  host.activate();
+  await host.activate();
   const replaced = host.session.value!;
   firstRead.resolve();
   assert.equal((await edit).kind, "failed");
@@ -788,7 +802,7 @@ test("an edit stored while Start is prepared is what that Start loads", async (c
     kind: "saved",
     live: false,
   });
-  host.activate();
+  await host.activate();
   assert.deepEqual(said(host.session.value), ["2"]);
 });
 
@@ -906,7 +920,7 @@ test("a new run releases an edit that waits for the old run's write, also while 
   host.prepare(() =>
     createPlayerRuntimeSession('save 3 as "newer"\nexit', host.scriptStorageOptions()),
   );
-  host.activate();
+  await host.activate();
   for (let turn = 0; turn < 5 && result === undefined; turn += 1) await settleTasks(context);
   assert.deepEqual(result, { kind: "saved", live: false });
   assert.deepEqual(await host.editSavedData({ key: "k", value: 4, expected: 2 }), { kind: "busy" });
@@ -978,4 +992,24 @@ test("Play again starts from the values the previous run saved and deleted", asy
   await host.activate();
   assert.equal(await playOut(), "2 none");
   assert.deepEqual([...stored], [["runs", 2]]);
+});
+
+test("each Start loads what another tab saved since the page opened or the previous run", async (context) => {
+  const storage = memoryStorage({});
+  const { host } = createHost(context, storage.provider);
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession(
+      'let value = load("value", default: "empty")\nsay "Loaded: ${value}", instant\nexit',
+      host.scriptStorageOptions(),
+    ),
+  );
+  // Another tab's save reaches only the provider.
+  storage.entries.set("value", "latest");
+  await host.activate();
+  assert.deepEqual(said(host.session.value), ["Loaded: latest"]);
+  await host.toStartPage();
+  storage.entries.set("value", "newer");
+  await host.activate();
+  assert.deepEqual(said(host.session.value), ["Loaded: newer"]);
 });
