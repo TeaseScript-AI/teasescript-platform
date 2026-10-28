@@ -1120,6 +1120,58 @@ test("a stop before admission settled marks the store of a literal whose element
 });
 
 /**
+ * After a settled stop a boundary's type is a read like any other (TABLE r4.126, Astra r4's B2): where admission retained
+ * no decision for `total`, its boundary takes its stored value's finished contract, `integer | number`, as the finishing
+ * read answers it. At every settled stop it equals the unstopped boundary, in four modes; the quiet controls (a
+ * subtraction, a multiplication, a comparison, a written `number` destination) keep theirs, in the core's order.
+ */
+test("a settled stop keeps a boundary's type from its stored value's finished contract", () => {
+  const reversed = <T>(make: () => T): T =>
+    withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), make),
+    );
+  const modes: readonly (<T>(make: () => T) => T)[] = [
+    (make) => make(),
+    reversed,
+    (make) => withoutSharing(make),
+    (make) => withoutSharing(() => reversed(make)),
+  ];
+  for (const [source, inModes] of [
+    ["let total = hostValue + 8\nrepeat hostOther { say total }\nexit\n", modes],
+    ["let total = hostValue - 8\nrepeat hostOther { say total }\nexit\n", modes.slice(0, 1)],
+    ["let total = hostValue * 8\nrepeat hostOther { say total }\nexit\n", modes.slice(0, 1)],
+    ["let total = hostValue < 8\nrepeat hostOther { say total }\nexit\n", modes.slice(0, 1)],
+    [
+      "let total: number = hostValue + 8\nrepeat hostOther { say total }\nexit\n",
+      modes.slice(0, 1),
+    ],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const site = source.indexOf("hostValue");
+    const boundary = (answers: Answers) =>
+      answers.checks.filter((check) => check.boundary && check.site.start === site);
+    for (const inMode of inModes) {
+      const at = (allowance?: number): Answers =>
+        inMode(() =>
+          allowance === undefined
+            ? analyseCore(request)
+            : withTestAllowance(allowance, () => analyseCore(request)),
+        );
+      const unstopped = at();
+      assert.equal(boundary(unstopped).length, 1, source);
+      const phaseOf = (allowance: number): string | null => {
+        const { stoppedIn, settled } = at(allowance).budget;
+        return settled ? stoppedIn : null;
+      };
+      for (const [low, high] of phaseEnds(unstopped.budget.total, phaseOf).values())
+        for (let allowance = low; allowance <= high; allowance += 1)
+          assert.deepEqual(boundary(at(allowance)), boundary(unstopped), `${source} @${allowance}`);
+    }
+  }
+});
+
+/**
  * A stop takes back its running unit's read checks with all that made them (Codex r12's final check): the dedupe keys
  * and the ingress resolutions, so finishing makes a projected fallback's own-read boundary again. At every settled walk
  * stop, in the source order (an interior stop: a phase's ends miss it), the compile keeps every record.

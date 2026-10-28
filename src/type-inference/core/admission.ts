@@ -6555,6 +6555,26 @@ export class Admission {
   #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
     if (!this.#besideDefault(d)) {
       const tags = this.admitted(d.place, path);
+      // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
+      // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
+      // TABLE r4.126)
+      const destination = this.#destPath(d);
+      if (
+        tags.length === 0 &&
+        this.pass.program.work.stopped !== null &&
+        d.value !== undefined &&
+        path.length >= destination.length
+      ) {
+        const read = this.host.read?.(d.value, d.node, path.slice(destination.length)) ?? [];
+        const kinds = [
+          ...new Set(
+            withoutEmpty(read)
+              .filter((item) => concrete(item))
+              .map((item) => item.tag),
+          ),
+        ];
+        if (kinds.length > 0) return kinds;
+      }
       // (an unrestricted destination, a copy's as the written part's, owes no boundary: every kind fits, V30 §13)
       return tags.includes("unknown") ? [] : tags;
     }
