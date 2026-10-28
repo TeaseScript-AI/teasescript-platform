@@ -1068,23 +1068,25 @@ test("N5's component: stores that read one another, through copies too, preserve
     assert.equal(atReversed(lines, marker, delta), expected, `${name}, reversed`);
 });
 
-test("a read in a stored value takes its narrowing where it holds, and its mark where it fails (S10 part 2b)", () => {
-  const record = (...lines: readonly string[]): CompactRecord => {
-    const request = coreRequest([{ path: "main.tease", source: `${lines.join("\n")}\nexit\n` }]);
-    assert.ok(request !== null, lines.join("\n"));
-    const modes = [
-      compactAnalysis(request),
-      withoutSharing(() => compactAnalysis(request)),
-      withSolverSeam({ reverseWorklist: true }, () =>
-        withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => compactAnalysis(request),
-        ),
+/** A program's analysis, alike with the sharing of answers off and with the consumers' and solver's orders reversed. */
+function record(...lines: readonly string[]): CompactRecord {
+  const request = coreRequest([{ path: "main.tease", source: `${lines.join("\n")}\nexit\n` }]);
+  assert.ok(request !== null, lines.join("\n"));
+  const modes = [
+    compactAnalysis(request),
+    withoutSharing(() => compactAnalysis(request)),
+    withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder(
+        (list) => [...list].reverse(),
+        () => compactAnalysis(request),
       ),
-    ];
-    for (const other of modes.slice(1)) assert.deepEqual(other, modes[0], lines.join("\n"));
-    return modes[0]!;
-  };
+    ),
+  ];
+  for (const other of modes.slice(1)) assert.deepEqual(other, modes[0], lines.join("\n"));
+  return modes[0]!;
+}
+
+test("a read in a stored value takes its narrowing where it holds, and its mark where it fails (S10 part 2b)", () => {
   const outcome = (...lines: readonly string[]): string => record(...lines).outcome;
   const real = "let n = 2.0";
   // a whole number passes `is integer`: the stored value is the tested kind
@@ -1184,6 +1186,114 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
   const stored = record(...rows);
   assert.deepEqual([stored.outcome, stored.diagnostics, stored.checks.length], ["valid", [], 1]);
   assert.deepEqual(record(...computed), stored);
+});
+
+test("a stored selection takes its element's narrowing as an index does, never its emptiness (U4a, N1)", () => {
+  // (a record without its sites: an index and a selection of one owner differ in their spans)
+  const answer = (...lines: readonly string[]): string => {
+    const { outcome, diagnostics, checks } = record(...lines);
+    return [
+      outcome,
+      ...diagnostics.map((d) => `${d.kind} ${d.context ?? "-"}`),
+      ...checks.map((c) => c.kind),
+    ].join(", ");
+  };
+  const choice = 'let choice = askBoolean "change?"';
+  const xs = [choice, "let xs: integer?[] = [1]", "if choice { xs = [null] }"];
+  const rows = [choice, "let rows: integer?[][] = [[1]]", "if choice { rows = [[null]] }"];
+  // each program read at `@` by an index and by selections: a selection answers as the index does (Astra's N1 on
+  // #1228), where G holds and where it fails
+  const scenarios: readonly (readonly [string, readonly string[]])[] = [
+    ["a collection test", [...xs, "if xs is integer[] { let sink: integer = xs@ }"]],
+    [
+      "a root test, which proves no element's kind",
+      [
+        choice,
+        "let xs: integer?[]? = [1]",
+        "if choice { xs = [null] }",
+        "if choice { xs = null }",
+        "if xs != null { let sink: integer = xs@ }",
+      ],
+    ],
+    [
+      "a mutation after the test",
+      [...xs, "if xs is integer[] { xs.reverse()\nlet sink: integer = xs@ }"],
+    ],
+    [
+      "a call storing the list after the test",
+      [
+        ...xs,
+        "function spoil { xs = [null] }",
+        "if xs is integer[] { spoil()\nlet sink: integer = xs@ }",
+      ],
+    ],
+    ["a nearer store", [...xs, "if xs is integer[] { xs = [null]\nlet sink: integer = xs@ }"]],
+    [
+      "one literal's reads before and after a call (one class per environment)",
+      [
+        ...xs,
+        "function spoil { xs = [null]\nreturn 1 }",
+        "if xs is integer[] { let both: integer[] = [xs@, spoil(), xs@] }",
+      ],
+    ],
+    [
+      "a computed row under a test of every row",
+      [...rows, "let row = 0", "if rows is integer[][] { let sink: integer = rows[row + 1]@ }"],
+    ],
+    ["another row's test", [...rows, "if rows[0] is integer[] { let sink: integer = rows[1]@ }"]],
+    [
+      "a parameter given a list and an object with its own `first`",
+      [
+        "function pick(v) {",
+        'if v is integer[] { let sink: integer = v@\nsay "${sink}" }',
+        "}",
+        "pick([1])",
+        'pick({first: "a"})',
+      ],
+    ],
+  ];
+  const indexes = scenarios.map(([name, lines]) => {
+    const index = answer(...lines.map((line) => line.replaceAll("@", "[0]")));
+    for (const selection of [".first", ".last", ".random"])
+      assert.equal(
+        answer(...lines.map((line) => line.replaceAll("@", selection))),
+        index,
+        `${name}: ${selection}`,
+      );
+    return index;
+  });
+  assert.equal(indexes[0], "valid");
+  // a selected path's own test narrows it as an index's does; `.random` selects anew, so it is no path, and a test of
+  // one path says nothing of another
+  const tested = (test: string, read: string): string =>
+    answer(...xs, `if ${test} != null { let sink: integer = ${read} }`);
+  const untested = (read: string): string => answer(...xs, `let sink: integer = ${read}`);
+  assert.equal(tested("xs.first", "xs.first"), tested("xs[0]", "xs[0]"));
+  assert.equal(tested("xs.random", "xs.random"), untested("xs.random"));
+  assert.equal(tested("xs.first", "xs.last"), untested("xs.last"));
+  // an empty list passes every element test: C6 still asks the selection's element of its owner
+  const empty = record(
+    choice,
+    "let xs: integer?[] = []",
+    "if choice { xs = [null] }",
+    "if xs is integer[] { let sink: integer = xs.first }",
+  );
+  assert.deepEqual(
+    empty.checks.map((c) => c.kind),
+    ["empty-check"],
+  );
+  // an owner that may be an object keeps its own `first` opaque beside the narrowed element (F11)
+  const own = record(
+    "function pick(v) {",
+    'if v.first != null { let sink: integer = v.first\nsay "${sink}" }',
+    "}",
+    "pick([1, null])",
+    "pick({first: null})",
+  );
+  assert.deepEqual(
+    own.diagnostics.filter((d) => d.kind === "written-target").map((d) => d.context),
+    ["unmodelled"],
+  );
 });
 
 /** The work one query charges, at k = 64 and 128, per doubling of the source: about 2 for linear work. */
