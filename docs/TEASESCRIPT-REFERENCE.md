@@ -201,7 +201,8 @@ let maybe: integer[]? = null
 
 - **Gives:** inside `if value != null` the value is not `null`. `a otherwise b` gives `a`, or `b` (only evaluated
   then) when `a` is `null`.
-- **Fails:** a possibly null value where a value is required; `a otherwise b + c` (write `(a otherwise b) + c`).
+- **Fails:** a possibly null value where a value is required; `otherwise` next to any other operator, as in
+  `a otherwise b + c` or `a otherwise b == c` (write `(a otherwise b) + c`); a chain of `otherwise` is fine.
   `otherwise` handles `null`, not errors.
 - **Status:** Implemented. Type rule ahead: a fallback of another type needs a declared union, as in
   `let x: integer | string = a otherwise "none"`; today the union is inferred ·
