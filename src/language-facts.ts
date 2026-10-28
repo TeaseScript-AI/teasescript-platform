@@ -314,8 +314,11 @@ export interface ForeignForm {
   readonly message: string;
   /** For a word that starts a statement, as `def` in `def countTo(n)`, the word that the parser reads in its place. */
   readonly statement?: "function" | "let" | "say" | "else if";
-  /** Whether the name pass reports the form where no declaration takes the name, as `None` or `print(...)`. */
-  readonly name?: true;
+  /**
+   * Whether the name pass reports the form where no declaration takes the name, as `None` or `print(...)`, or only where
+   * it is called, as `range(5)`.
+   */
+  readonly name?: true | "call";
 }
 
 function foreignForm(
@@ -335,7 +338,8 @@ function foreignForm(
 
 /**
  * The forms of other languages that TeaseScript writes another way, by how they are written. The parser reads a symbol
- * as its word and goes on (V30 §39), and a statement word as the TeaseScript word.
+ * as its word and goes on (V30 §39), and a statement word as the TeaseScript word. The lexer reads `~=` as `!=`, a `#`
+ * comment as a comment, and text in backticks as text.
  */
 export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   foreignForm("&&", "and", "if a and b { ... }"),
@@ -345,13 +349,38 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
   foreignForm("??", "otherwise", 'let name = nickname otherwise "pet"'),
   foreignForm("===", "==", "if a == b { ... }"),
   foreignForm("!==", "!=", "if a != b { ... }"),
+  foreignForm("~=", "!=", 'if a != b { say "different" }'),
   foreignForm("++", "+= 1", "count += 1"),
   foreignForm("--", "-= 1", "count -= 1"),
   [
     ";",
     { message: "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'." },
   ],
+  foreignForm("#", "//", "// a comment"),
+  [
+    "`",
+    {
+      message:
+        "TeaseScript writes text between double quotes instead of backticks, and a backslash before each double " +
+        'quote in the text: say "She said \\"Hi ${name}\\""',
+    },
+  ],
+  foreignForm('f"Hi {name}"', '"Hi ${name}"', 'say "Hi ${name}"'),
   foreignForm("for (...)", "for ... in", "for i in 0..3 { ... }"),
+  [
+    ":",
+    {
+      message:
+        "TeaseScript writes a block between '{' and '}' instead of after ':': if done { say \"done\" }",
+    },
+  ],
+  [
+    "range",
+    {
+      message: `TeaseScript writes '(0..5)' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
+      name: "call",
+    },
+  ],
   ...["def", "fn", "func", "fun"].map((word) =>
     foreignForm(word, "function", "function countTo(n) { ... }", { statement: "function" }),
   ),
@@ -362,7 +391,9 @@ export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
     foreignForm(word, "else if", "if a { ... } else if b { ... }", { statement: "else if" }),
   ),
   foreignForm("print", "say", 'say "Hello"', { statement: "say", name: true }),
-  foreignForm("console.log", "say", 'say "Hello"', { name: true }),
+  ...["console.log", "console.error", "console.warn"].map((written) =>
+    foreignForm(written, "say", 'say "Hello"', { name: true }),
+  ),
   ...["None", "nil", "undefined"].map((word) =>
     foreignForm(word, "null", "let answer = null", { name: true }),
   ),

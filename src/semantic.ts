@@ -1376,7 +1376,7 @@ export class SemanticValidator {
             );
           } else if (
             !this.#reportFileName(name, expression.callee.span) &&
-            !this.#reportForeignName(name, expression.callee.span)
+            !this.#reportForeignName(name, expression.callee.span, true)
           ) {
             // A statement reads `say unskippable("Hi")` as a call, as before parentheses could hold a value's text, and an
             // ask reads `askText prose("Name?")` as a question that calls `prose`, as `say` does.
@@ -1400,7 +1400,7 @@ export class SemanticValidator {
             object.kind === "identifier" &&
             scope.resolve(object.name) === undefined &&
             this.#root.resolve(object.name) === undefined &&
-            this.#reportForeignName(`${object.name}.${method.property.name}`, method.span)
+            this.#reportForeignName(`${object.name}.${method.property.name}`, method.span, true)
           ))
             yield* compileChild(this.#validateExpressionTask(object, scope, contextualSpeaker));
           // No value has a method by an earlier name, so its call names the fix whatever the value is.
@@ -1676,10 +1676,13 @@ export class SemanticValidator {
     return true;
   }
 
-  /** Reports a name of another language that no declaration takes, as `None` (`FOREIGN_FORMS`), or returns `false`. */
-  #reportForeignName(written: string, span: SourceSpan): boolean {
+  /**
+   * Reports a name of another language that no declaration takes, as `None`, or, where it is `called`, `range(5)`
+   * (`FOREIGN_FORMS`), or returns `false`.
+   */
+  #reportForeignName(written: string, span: SourceSpan, called = false): boolean {
     const foreign = FOREIGN_FORMS.get(written);
-    if (foreign?.name !== true) return false;
+    if (foreign?.name === undefined || (foreign.name === "call" && !called)) return false;
     this.report(semanticCode.foreignForm, foreign.message, span);
     return true;
   }

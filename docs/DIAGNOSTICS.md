@@ -235,7 +235,7 @@ code each.
 
 - `TSP037`
   - lexer: a symbol of another language that is no token, as `;`, with the text of `FOREIGN_FORMS`
-  - parser: the same rule with the same text for a symbol that is a token, such as `&&`, a word that starts a statement, such as `def`, and a loop head in parentheses, each where the source fails without it
+  - parser: the same rule with the same text for a symbol that is a token, such as `&&`, a word that starts a statement, such as `def`, an `f` that touches text, a loop head in parentheses, and a `:` that ends the line before a block, each where the source fails without it
   - name pass: the same rule with the same text for a name that no declaration takes, such as `None` or `print(...)`
 - `TSV001`
   - parser: a declaration whose name is a keyword or another protected name, where it reads the name

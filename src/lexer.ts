@@ -50,6 +50,9 @@ export function lex(source: string, regexStarts: ReadonlySet<number> = new Set()
   return new Lexer(source, regexStarts).scan();
 }
 
+/** The quote of text: `"`, or the backtick of another language. */
+type Quote = '"' | "`";
+
 class Lexer {
   readonly #tokens: Token[] = [];
   readonly #comments: SourceSpan[] = [];
@@ -60,8 +63,12 @@ class Lexer {
   #singleLineStringDepth = 0;
   /** By the index of each `InterpolationEnd` token, the index of the `InterpolationStart` token it closes. */
   readonly #interpolationStarts = new Map<number, number>();
-  /** The end of the line `#quotesFollowOnLine` last searched, and the offset of the second-to-last quote before it. */
-  #quoteSearch = { lineEnd: -1, secondToLastQuote: -1 };
+  /** The end of the line `#quotesFollowOnLine` last searched, the offset of the second-to-last `quote` before it. */
+  #quoteSearch: { lineEnd: number; secondToLastQuote: number; quote: Quote } = {
+    lineEnd: -1,
+    secondToLastQuote: -1,
+    quote: '"',
+  };
   /** For `:]` and `\E` in a regex literal, where the last search began and what it found: an offset, or -1 before `end`. */
   readonly #markerSearches = new Map<string, { from: number; found: number; end: number }>();
 
@@ -113,6 +120,17 @@ class Lexer {
       this.#scanLineComment();
       return;
     }
+    if (character === "#" && this.#startsHashComment()) {
+      const start = this.#position();
+      this.#scanLineComment();
+      this.#report(
+        diagnosticCodes.foreignForm,
+        FOREIGN_FORMS.get("#")!.message,
+        start,
+        createSourcePosition(start.offset + 1, start.line, start.column + 1),
+      );
+      return;
+    }
     if (character === "/" && this.#peek(1) === "*") {
       this.#scanBlockComment();
       return;
@@ -149,7 +167,40 @@ class Lexer {
         this.#scanOptionalEqual(TokenKind.Greater, TokenKind.GreaterEqual);
         return;
       case '"':
-        yield* parseChild(this.#scanString());
+        yield* parseChild(this.#scanString('"'));
+        return;
+      case "`":
+        // Text in the backticks of another language, which is read as text in quotes.
+        this.#report(
+          diagnosticCodes.foreignForm,
+          FOREIGN_FORMS.get("`")!.message,
+          this.#position(),
+          createSourcePosition(this.#offset + 1, this.#line, this.#column + 1),
+        );
+        yield* parseChild(this.#scanString("`"));
+        return;
+      case "~":
+        // Lua's `~=`, which is read as `!=`: the token's lexeme is the operator that the parser takes.
+        if (this.#peek(1) === "=" && this.#peek(2) !== "=") {
+          const start = this.#position();
+          this.#advanceCodeUnit();
+          this.#advanceCodeUnit();
+          this.#report(
+            diagnosticCodes.foreignForm,
+            FOREIGN_FORMS.get("~=")!.message,
+            start,
+            this.#position(),
+          );
+          this.#tokens.push(
+            createToken({
+              kind: TokenKind.BangEqual,
+              lexeme: "!=",
+              span: createSourceSpan(start, this.#position()),
+            }),
+          );
+          return;
+        }
+        this.#scanInvalidCharacter();
         return;
       default:
         this.#scanInvalidCharacter();
@@ -219,6 +270,21 @@ class Lexer {
 
   #consumeDigits(): void {
     while (isDigit(this.#peek())) this.#advanceCodeUnit();
+  }
+
+  /**
+   * Whether the `#` here starts the comment of another language: it comes first on its line, or before a space or the
+   * end of its line, so that Lua's `#items` stays an invalid character.
+   */
+  #startsHashComment(): boolean {
+    const next = this.#peek(1);
+    return (
+      (this.#tokens.at(-1)?.kind ?? TokenKind.Newline) === TokenKind.Newline ||
+      isHorizontalWhitespace(next) ||
+      next === "\n" ||
+      next === "\r" ||
+      this.#offset + 1 >= this.source.length
+    );
   }
 
   #scanLineComment(): void {
@@ -425,10 +491,11 @@ class Lexer {
     this.#emitToken(TokenKind.Newline, startOffset, start, this.#position());
   }
 
-  *#scanString(): ParseTask<void> {
+  /** Text in quotes, or in backticks (`quote`), which only a form of another language uses. */
+  *#scanString(quote: Quote): ParseTask<void> {
     const stringOffset = this.#offset;
     const stringStart = this.#position();
-    const block = this.#peek(1) === '"' && this.#peek(2) === '"';
+    const block = quote === '"' && this.#peek(1) === '"' && this.#peek(2) === '"';
     const delimiterLength = block ? 3 : 1;
     if (!block) this.#singleLineStringDepth += 1;
     for (let index = 0; index < delimiterLength; index += 1) this.#advanceCodeUnit();
@@ -440,7 +507,7 @@ class Lexer {
     let value = "";
 
     while (!this.#isAtEnd()) {
-      if (this.#isStringDelimiter(block)) {
+      if (this.#isStringDelimiter(block, quote)) {
         this.#emitStringText(textOffset, textStart, value, stringParts);
         const endOffset = this.#offset;
         const endStart = this.#position();
@@ -465,8 +532,9 @@ class Lexer {
           this.#position(),
         );
         if (
-          (yield* parseChild(this.#scanInterpolation(interpolationStart, startToken, block))) ===
-          "eof"
+          (yield* parseChild(
+            this.#scanInterpolation(interpolationStart, startToken, block, quote),
+          )) === "eof"
         ) {
           if (block) this.#normalizeBlockText(stringParts);
           if (!block) this.#singleLineStringDepth -= 1;
@@ -515,14 +583,15 @@ class Lexer {
     );
   }
 
-  #isStringDelimiter(block: boolean): boolean {
-    return this.#peek() === '"' && (!block || (this.#peek(1) === '"' && this.#peek(2) === '"'));
+  #isStringDelimiter(block: boolean, quote: Quote): boolean {
+    return this.#peek() === quote && (!block || (this.#peek(1) === '"' && this.#peek(2) === '"'));
   }
 
   *#scanInterpolation(
     interpolationStart: SourcePosition,
     startToken: number,
     outerBlock: boolean,
+    outerQuote: Quote,
   ): ParseTask<"closed" | "stringEnd" | "eof"> {
     let braceDepth = 0;
     // The brackets, parentheses, and braces still open inside the interpolation. A single-line string cannot end inside
@@ -541,8 +610,8 @@ class Lexer {
         return "closed";
       }
       if (
-        this.#isStringDelimiter(outerBlock) &&
-        !(openDelimiters > 0 && !outerBlock && this.#quotesFollowOnLine()) &&
+        this.#isStringDelimiter(outerBlock, outerQuote) &&
+        !(openDelimiters > 0 && !outerBlock && this.#quotesFollowOnLine(outerQuote)) &&
         !this.#canStartNestedString()
       ) {
         this.#report(
@@ -572,18 +641,18 @@ class Lexer {
     return "eof";
   }
 
-  /** Whether at least two more quotes follow the quote at the current offset on its line. */
-  #quotesFollowOnLine(): boolean {
-    if (this.#offset >= this.#quoteSearch.lineEnd) {
+  /** Whether at least two more `quote`s follow the one at the current offset on its line. */
+  #quotesFollowOnLine(quote: Quote): boolean {
+    if (this.#offset >= this.#quoteSearch.lineEnd || quote !== this.#quoteSearch.quote) {
       let last = -1;
       let secondToLast = -1;
       let index = this.#offset + 1;
       for (; index < this.source.length && this.source[index] !== "\n"; index += 1) {
-        if (this.source[index] !== '"') continue;
+        if (this.source[index] !== quote) continue;
         secondToLast = last;
         last = index;
       }
-      this.#quoteSearch = { lineEnd: index, secondToLastQuote: secondToLast };
+      this.#quoteSearch = { lineEnd: index, secondToLastQuote: secondToLast, quote };
     }
     return this.#offset < this.#quoteSearch.secondToLastQuote;
   }
@@ -760,8 +829,9 @@ class Lexer {
   #scanInvalidCharacter(): void {
     const start = this.#position();
     const character = this.#advanceCodePoint();
-    // A symbol of another language, such as `;`, names what TeaseScript writes instead.
-    const foreign = FOREIGN_FORMS.get(character);
+    // A symbol of another language, such as `;`, names what TeaseScript writes instead, and a `#` only where it starts a
+    // comment (`#startsHashComment`).
+    const foreign = character === "#" ? undefined : FOREIGN_FORMS.get(character);
     this.#report(
       foreign === undefined ? diagnosticCodes.invalidCharacter : diagnosticCodes.foreignForm,
       foreign?.message ?? `Invalid character ${JSON.stringify(character)}.`,

@@ -183,7 +183,8 @@ export function* parseFunctionDeclaration(
   }
 
   let returnTypeAnnotation: TypeAnnotation | null = null;
-  if (parser.match(TokenKind.Colon)) {
+  // A `:` that ends the line starts Python's block, not a return type.
+  if (!parser.atColonBlock() && parser.match(TokenKind.Colon)) {
     returnTypeAnnotation = parseTypeAnnotation(parser);
     if (returnTypeAnnotation === null) {
       parser.synchronizeStatement();

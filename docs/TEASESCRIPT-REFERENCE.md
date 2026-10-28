@@ -1458,14 +1458,19 @@ mistakes from other languages; most errors name the replacement.
 | Do not write | Write |
 | --- | --- |
 | `;` | nothing: one statement per line |
+| `# note` | `// note` |
 | `` `text ${x}` `` | `"text ${x}"` |
+| `f"text {x}"` | `"text ${x}"` |
 | `"Score: " + 5` | `"Score: ${5}"` |
 | `if count { }` | `if count > 0 { }` |
 | `&&`, `\|\|`, `!`, `??` | `and`, `or`, `not`, `otherwise` |
 | `===`, `!==`; `i++`, `i--` | `==`, `!=`; `i += 1`, `i -= 1` |
+| `a ~= b` | `a != b` |
 | `def`, `fn`, `func`, `fun`; `var`, `local` | `function`; `let` |
 | `elif`; `for (let i = 0; i < 3; i++)` | `else if`; `for i in 0..3` |
-| `print(x)`, `console.log(x)` | `say x` |
+| `for i in range(3)` | `for i in 0..3` |
+| `if a:` and an indented block | `if a {`, the block, and `}` |
+| `print(x)`, `console.log(x)`, `console.error(x)`, `console.warn(x)` | `say x` |
 | `None`, `nil`, `undefined`; `True`, `False` | `null`; `true`, `false` |
 | `1 < x < 5` | `1 < x and x < 5` |
 | `set x = 1`, `procedure`, `record` | `x = 1`, `function`, an object literal |
