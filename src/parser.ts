@@ -160,6 +160,37 @@ const PROTECTED_NAMES: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES
 const LINE_STATEMENTS: ReadonlySet<string> = new Set(
   Object.keys(COMMANDS).filter((name) => commandFacts(name)?.statement === "line"),
 );
+/**
+ * Code that a message offers in place of the source from `start` up to `end`, and with `expression` one that must be one
+ * expression there, which keeps a reading from changing how the code around it groups (see `Parser.offerFix`).
+ */
+interface FixPaste {
+  readonly start: number;
+  readonly end: number;
+  readonly code: string;
+  readonly expression: boolean;
+}
+
+/** Whether `program` has a node from offset `start` up to `end`, which then holds all of that source. */
+function spansNode(program: Program, start: number, end: number): boolean {
+  // Every node, found with a list rather than by recursion, as source may nest deeply.
+  const pending: unknown[] = [program];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (typeof node !== "object" || node === null) continue;
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: invariant: the parser builds every node as an object with its `kind` and `span`.
+    const { kind, span } = node as { kind?: unknown; span?: SourceSpan };
+    if (typeof kind === "string" && span?.start.offset === start && span.end.offset === end)
+      return true;
+    for (const [key, child] of Object.entries(node))
+      if (key !== "span" && !key.endsWith("Span")) pending.push(child);
+  }
+  return false;
+}
+
 /** What the parsers over one token list share. */
 interface SharedParse {
   /**
@@ -277,17 +308,22 @@ function parseSource(source: string, offers: boolean): ParseResult {
   // token before; where a parse with errors expected a value at a `/` that the lexer took for division, the source is
   // lexed and parsed again with a regex there, until no new one appears. A parse without errors is never changed.
   const regexStarts = new Set<number>();
+  // One allowance for the parses that prove offered fixes, over every pass below.
+  let budget = FIX_PROOF_BUDGET.perCharacter * source.length + FIX_PROOF_BUDGET.fixed;
   for (;;) {
-    const header = readScriptHeader(lex(source, regexStarts));
+    const lexed = lex(source, regexStarts);
+    const header = readScriptHeader(lexed);
     const parser = new Parser(header.programTokens);
-    if (offers) {
+    // A lexer error may lie outside the statement that a proof reads, so with one no fix is proved.
+    if (offers && lexed.diagnostics.length === 0) {
       parser.shared.source = source;
-      parser.shared.proofBudget =
-        FIX_PROOF_BUDGET.perCharacter * source.length + FIX_PROOF_BUDGET.fixed;
+      parser.shared.proofBudget = budget;
     }
     const program = parser.parseProgram();
+    if (parser.shared.source !== null) budget = parser.shared.proofBudget;
     const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
-    if (added.length > 0 && parser.diagnostics.length > 0) {
+    // A parse that proves a fix does not lex again: its fix is then not proved.
+    if (offers && added.length > 0 && parser.diagnostics.length > 0) {
       for (const offset of added) regexStarts.add(offset);
       continue;
     }
@@ -314,11 +350,7 @@ export class Parser {
     readonly index: number;
     readonly error: Diagnostic;
     readonly quoted: string;
-    readonly pastes: readonly {
-      readonly start: number;
-      readonly end: number;
-      readonly code: string;
-    }[];
+    readonly pastes: readonly FixPaste[];
   }[] = [];
   /**
    * The statement and command ranges. A speculative parser keeps its own, so only those of the parse that counts are
@@ -1493,21 +1525,18 @@ export class Parser {
         start: expression.span.start.offset,
         end: expression.span.end.offset,
         code,
+        expression: true,
       })),
     );
   }
 
   /**
    * Offers code for the error at `index`, whose message says the fix in words: `quoted`, a message that shows the code,
-   * replaces it when the statement ends, but only if the statement has no other error and, with each of `pastes` (each
-   * code in place of the source from `start` up to `end`), parses without any error, lexer errors included (#1268). The
-   * parses together read at most `SharedParse.proofBudget` characters.
+   * replaces it when the statement ends, but only if the file lexes without an error, the statement has no other error,
+   * and with each of `pastes` in place the statement parses without any error, also as one expression where a paste
+   * asks for it (#1268). The parses together read at most `SharedParse.proofBudget` characters.
    */
-  public offerFix(
-    index: number,
-    quoted: string,
-    pastes: readonly { readonly start: number; readonly end: number; readonly code: string }[],
-  ): void {
+  public offerFix(index: number, quoted: string, pastes: readonly FixPaste[]): void {
     if (this.shared.source !== null)
       this.#fixOffers.push({ index, error: this.diagnostics[index]!, quoted, pastes });
   }
@@ -1540,7 +1569,14 @@ export class Parser {
       const cost = pasted.reduce((sum, text) => sum + text.length, 0);
       if (cost > this.shared.proofBudget) continue;
       this.shared.proofBudget -= cost;
-      if (pasted.every((text) => parseSource(text, false).diagnostics.length === 0))
+      const proved = offer.pastes.every(({ start, code, expression }, index) => {
+        const result = parseSource(pasted[index]!, false);
+        return (
+          result.diagnostics.length === 0 &&
+          (!expression || spansNode(result.program, start - from, start - from + code.length))
+        );
+      });
+      if (proved)
         this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
       else if (!outermost) retried.push(offer);
     }

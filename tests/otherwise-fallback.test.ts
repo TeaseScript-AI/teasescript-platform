@@ -760,6 +760,8 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     ["pacing", (x) => `say "hi", ${x}`],
     ["bounded say", (x) => `say (${x}, instant)`],
     ["say value", (x) => `let result = say ${x}, instant`],
+    ["say value alone", (x) => `let result = say ${x}`],
+    ["lexer error after", (x) => `let result = ${x}@`],
     ["interpolation", (x) => `say "answer: \${${x}}"`],
     ["argument", (x) => `say f(${x})`],
     ["list", (x) => `let result = [${x}]`],
@@ -820,6 +822,8 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     assert.ok(quoted.has(`${place}: a otherwise b + c`), place);
   for (const shown of [
     "say value: a otherwise b + c",
+    "say value alone: a otherwise b + c",
+    "lexer error after: a otherwise b + c",
     "compact load: a otherwise b + c",
     "popup: a otherwise b + c",
     'let: a otherwise "\\q" + "x"',
