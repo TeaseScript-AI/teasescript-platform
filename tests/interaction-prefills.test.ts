@@ -242,7 +242,8 @@ test("inside an object literal, prefill: belongs to the nearest ask unless paren
 });
 
 test("an invalid dynamic prefill fails before the field opens", () => {
-  const notText = "The prefill of askText must be text. Put the value into a text with interpolation.";
+  const notText =
+    "The prefill of askText must be text. Put the value into a text with interpolation.";
   const notNumber =
     "The prefill of askNumber must be a finite number. Ask without 'prefill:' when there is no number to offer.";
   const notWhole =
