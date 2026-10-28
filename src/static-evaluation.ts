@@ -64,6 +64,11 @@ export function staticVisibleText(expression: Expression): string | undefined {
   return known === undefined ? undefined : scalarText(known.value);
 }
 
+/** The visible text of a known scalar, as `staticVisibleText` gives it; `undefined` for any other value. */
+export function knownVisibleText(value: KnownValue | undefined): string | undefined {
+  return isShownScalar(value) ? scalarText(value) : undefined;
+}
+
 function unwrapParentheses(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;

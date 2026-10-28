@@ -655,7 +655,7 @@ test("Continue, a rewind, and a restore point check the kept state once and refu
 
 test("invalid dynamic markup colours preserve enclosing colours in delivered pieces", () => {
   const session = createPlayerRuntimeSession(`
-let bad = "invalid"
+let bad = load("bad colour", default: "invalid")
 say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/color] outer[/bg][/color] [color=\${bad}][bg=\${bad}]plain[/bg][/color]", instant
 exit
 `);

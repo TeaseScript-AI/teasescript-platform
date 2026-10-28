@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 
-// The type checker checks every value rule, so one problem gets one code and one text in every form of the source, the
+// The compiler checks every value rule, so one problem gets one code and one text in every form of the source, the
 // runtime gives the same rule's text where the compiler cannot know the value, and no value problem waits for another
 // error to be fixed (IMPLEMENTATION-AND-REVIEW.md, "One home for each language rule").
 
@@ -662,6 +662,10 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ['say prose(color: "not-a-color") "x"', '"not-a-color"'],
         ['say prose(color: ("not-a-color")) "x"', '"not-a-color"'],
         ['speaker vera { color: "not-a-color" }', '"not-a-color"'],
+        ['let shade = "not-a-color"\nsay prose(color: shade) "x"', "shade"],
+        ['say prose(color: "not-a-" + "color") "x"', '"not-a-" + "color"'],
+        ['global shade = "not-a-color"\nglobal copy = shade\nspeaker vera { color: copy }', "copy"],
+        ['let a = askBoolean prose(color: "not-a-color") "Sure?"', '"not-a-color"'],
       ],
       "TSC008",
       'A message\'s color must be a CSS colour, such as "#336699".',
