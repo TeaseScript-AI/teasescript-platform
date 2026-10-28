@@ -87,7 +87,10 @@ test("a head that stops at the '{' of its block is one error that names the oper
   assert.deepEqual(
     diagnostics(source(`if a &&${body}`)).map(([code, message]) => [code, message]),
     [
-      ["TSP037", "TeaseScript writes 'and' instead of '&&': if a and b { ... }"],
+      [
+        "TSP037",
+        "TeaseScript writes 'and' with a space on each side instead of '&&': if a and b { say \"both\" }",
+      ],
       ["TSP012", missing("and")],
     ],
   );

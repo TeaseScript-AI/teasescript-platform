@@ -303,6 +303,20 @@ export const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([
   ["toTimestamp", "toAbsoluteDateTime"],
 ]);
 
+/** Whether `character` can start a name. */
+export function isIdentifierStart(character: string): boolean {
+  return (
+    (character >= "A" && character <= "Z") ||
+    (character >= "a" && character <= "z") ||
+    character === "_"
+  );
+}
+
+/** Whether `character` can stand in a name, which a neighbouring one joins. */
+export function isIdentifierPart(character: string): boolean {
+  return isIdentifierStart(character) || (character >= "0" && character <= "9");
+}
+
 /** The code of a form of another language (`FOREIGN_FORMS`), which the lexer, the parser, and the name pass report. */
 export const FOREIGN_FORM_CODE = "TSP037";
 
@@ -321,19 +335,30 @@ export interface ForeignForm {
   readonly name?: true | "call";
 }
 
+/**
+ * The one rule for the code in a message about a form of another language (owner, #1268): the message shows code to
+ * write only where it compiles when pasted in place of the form, in every spelling. A string `writes` replaces
+ * `written` where it stands: shown as it is where each end is a word for a word or a symbol for a symbol, so that it
+ * joins its neighbours as `written` did, as `'==' instead of '==='`, and otherwise with a space on each side, as `'and'`
+ * for the `&&` of `a&&b`. Anything else is said in `words`, the whole sentence before the example.
+ */
 function foreignForm(
   written: string,
-  teaseScript: string,
-  example: string,
+  writes: string | { readonly words: string },
+  example: string | null,
   reads: Omit<ForeignForm, "message"> = {},
 ): readonly [string, ForeignForm] {
-  return [
-    written,
-    {
-      message: `TeaseScript writes '${teaseScript}' instead of '${written}': ${example}`,
-      ...reads,
-    },
-  ];
+  let sentence: string;
+  if (typeof writes !== "string") sentence = writes.words;
+  else {
+    const joinsLike = (end: number) =>
+      isIdentifierPart(written.at(end)!) === isIdentifierPart(writes.at(end)!);
+    sentence =
+      joinsLike(0) && joinsLike(-1)
+        ? `TeaseScript writes '${writes}' instead of '${written}'`
+        : `TeaseScript writes '${writes}' with a space on each side instead of '${written}'`;
+  }
+  return [written, { message: example === null ? sentence : `${sentence}: ${example}`, ...reads }];
 }
 
 /**
@@ -342,55 +367,78 @@ function foreignForm(
  * comment as a comment, and text in backticks as text.
  */
 export const FOREIGN_FORMS: ReadonlyMap<string, ForeignForm> = new Map([
-  foreignForm("&&", "and", "if a and b { ... }"),
-  foreignForm("&", "and", "if a and b { ... }"),
-  foreignForm("||", "or", "if a or b { ... }"),
-  foreignForm("!", "not", "if not a { ... }"),
+  ...["&&", "&"].map((symbol) => foreignForm(symbol, "and", 'if a and b { say "both" }')),
+  ...["||", "|"].map((symbol) => foreignForm(symbol, "or", 'if a or b { say "one or both" }')),
+  foreignForm("!", "not", 'if not a { say "not a" }'),
   foreignForm("??", "otherwise", 'let name = nickname otherwise "pet"'),
-  foreignForm("===", "==", "if a == b { ... }"),
-  foreignForm("!==", "!=", "if a != b { ... }"),
+  foreignForm("===", "==", 'if a == b { say "same" }'),
+  foreignForm("!==", "!=", 'if a != b { say "different" }'),
   foreignForm("~=", "!=", 'if a != b { say "different" }'),
-  foreignForm("++", "+= 1", "count += 1"),
-  foreignForm("--", "-= 1", "count -= 1"),
-  [
+  // An assignment stands on its own line, not inside a value, as in `let value = count++`.
+  foreignForm(
+    "++",
+    { words: "TeaseScript writes '+= 1' on a line of its own instead of '++'" },
+    "count += 1",
+  ),
+  foreignForm(
+    "--",
+    { words: "TeaseScript writes '-= 1' on a line of its own instead of '--'" },
+    "count -= 1",
+  ),
+  foreignForm(
     ";",
-    { message: "TeaseScript ends a statement with a line break instead of ';'. Remove the ';'." },
-  ],
+    { words: "TeaseScript ends a statement with a line break instead of ';'." },
+    null,
+  ),
   foreignForm("#", "//", "// a comment"),
-  [
+  foreignForm(
     "`",
     {
-      message:
+      words:
         "TeaseScript writes text between double quotes instead of backticks, and a backslash before each double " +
-        'quote in the text: say "She said \\"Hi ${name}\\""',
+        "quote in the text",
     },
-  ],
-  foreignForm('f"Hi {name}"', '"Hi ${name}"', 'say "Hi ${name}"'),
-  foreignForm("for (...)", "for ... in", "for i in 0..3 { ... }"),
-  [
+    'say "She said \\"Hi ${name}\\""',
+  ),
+  foreignForm(
+    'f"Hi {name}"',
+    {
+      words:
+        "TeaseScript writes text without the 'f' before the quotes, and with '$' before each '{'",
+    },
+    'say "Hi ${name}"',
+  ),
+  foreignForm(
+    "for (...)",
+    { words: "TeaseScript writes a loop with 'in' instead of 'for (...)'" },
+    'for i in 0..3 { say "${i}" }',
+  ),
+  foreignForm(
     ":",
-    {
-      message:
-        "TeaseScript writes a block between '{' and '}' instead of after ':': if done { say \"done\" }",
-    },
-  ],
-  [
+    { words: "TeaseScript writes a block between '{' and '}' instead of after ':'" },
+    'if done { say "done" }',
+  ),
+  foreignForm(
     "range",
-    {
-      message: `TeaseScript writes '(0..5)' instead of 'range(5)': for i in 0..5 { say "\${i}" }`,
-      name: "call",
-    },
-  ],
+    { words: "TeaseScript writes a range with '..' instead of 'range(...)'" },
+    'for i in 0..5 { say "${i}" }',
+    { name: "call" },
+  ),
   ...["def", "fn", "func", "fun"].map((word) =>
-    foreignForm(word, "function", "function countTo(n) { ... }", { statement: "function" }),
+    foreignForm(word, "function", 'function greet(name) { say "Hi ${name}" }', {
+      statement: "function",
+    }),
   ),
   ...["var", "local"].map((word) =>
     foreignForm(word, "let", "let count = 1", { statement: "let" }),
   ),
   ...["elif", "elsif", "elseif"].map((word) =>
-    foreignForm(word, "else if", "if a { ... } else if b { ... }", { statement: "else if" }),
+    foreignForm(word, "else if", 'if a { say "a" } else if b { say "b" }', {
+      statement: "else if",
+    }),
   ),
-  foreignForm("print", "say", 'say "Hello"', { statement: "say", name: true }),
+  // Only a call, as `let f = print` cannot read `say`.
+  foreignForm("print", "say", 'say "Hello"', { statement: "say", name: "call" }),
   ...["console.log", "console.error", "console.warn"].map((written) =>
     foreignForm(written, "say", 'say "Hello"', { name: true }),
   ),

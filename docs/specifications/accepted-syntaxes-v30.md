@@ -6429,10 +6429,10 @@ written, so no other error follows from it. `!=` stays the comparison, and `?` a
 ([§18](#18-null-and-optional-values)):
 
 ```text
-TeaseScript writes 'and' instead of '&&': if a and b { ... }
-TeaseScript writes 'or' instead of '||': if a or b { ... }
-TeaseScript writes 'not' instead of '!': if not a { ... }
-TeaseScript writes 'otherwise' instead of '??': let name = nickname otherwise "pet"
+TeaseScript writes 'and' with a space on each side instead of '&&': if a and b { say "both" }
+TeaseScript writes 'or' with a space on each side instead of '||': if a or b { say "one or both" }
+TeaseScript writes 'not' with a space on each side instead of '!': if not a { say "not a" }
+TeaseScript writes 'otherwise' with a space on each side instead of '??': let name = nickname otherwise "pet"
 ```
 
 ### Reserved generic media controls

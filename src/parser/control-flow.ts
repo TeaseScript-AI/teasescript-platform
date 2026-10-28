@@ -190,7 +190,7 @@ export function* parseSwitchStatement(parser: Parser): ParseTask<SwitchStatement
   if (parser.check(TokenKind.LeftBrace)) {
     parser.reportInsertion(
       parserDiagnosticCode.expectedExpression,
-      "Expected the value to switch on, as in 'switch answer { ... }'.",
+      `Expected a value after 'switch', as in 'switch answer { case "yes" { say "yes" } }'.`,
     );
     parser.skipMalformedBlock();
     return null;
@@ -343,7 +343,7 @@ function parseCaseValues(parser: Parser): readonly Expression[] | null {
     if (parser.check(TokenKind.LeftBrace)) {
       parser.reportInsertion(
         parserDiagnosticCode.expectedExpression,
-        "Expected a value after 'case', as in 'case \"open\" { ... }'.",
+        `Expected a value after 'case', as in 'switch answer { case "yes" { say "yes" } }'.`,
       );
       return null;
     }
