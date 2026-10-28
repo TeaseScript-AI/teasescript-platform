@@ -1816,6 +1816,87 @@ test("a stopped demand's proof is not reused by a later demand of its key, in ei
 });
 
 /**
+ * S3 §5's allowance by where a read sits (Astra r1 B3 on #1165): a top-level read reads globals every file stores, so in
+ * any file it takes 256 × the program's nodes, not its file's; a function's read takes its function's. `g136` copies a
+ * number through 136 globals of a second file, and main's read of it stays the error it is: with its file's 11 nodes it
+ * stopped with a moved check instead.
+ */
+test("a top-level read takes the program's allowance in every file, a function's read its function's (S3 §5)", () => {
+  const files = [
+    { path: "main.tease", source: 'repeat g136 {}\ng136 = 2\ncheck()\nsay "DONE"\nexit\n' },
+    {
+      path: "data.tease",
+      source:
+        [
+          "global g0 = 1.5",
+          ...Array.from({ length: 136 }, (_, i) => `global g${i + 1} = g${i}`),
+          "global h: integer = g136",
+          "global function check {",
+          "  repeat g136 {}",
+          "}",
+          "end",
+        ].join("\n") + "\n",
+    },
+  ];
+  const request = coreRequest(files);
+  assert.ok(request !== null);
+  for (const reversed of [false, true]) {
+    const answers: Answers = reversed
+      ? withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => analyseCore(request),
+          ),
+        )
+      : analyseCore(request);
+    const { graph, budget } = answers;
+    const functionNodes = new Map<unknown, number>();
+    for (const node of graph.nodes) {
+      const owner = graph.callableOf(node.region);
+      if (owner?.kind === "function") functionNodes.set(owner, (functionNodes.get(owner) ?? 0) + 1);
+    }
+    const reads = budget.demands.filter((read) => read.bounded);
+    const where = (file: string, inFunction: boolean) =>
+      reads.filter((read) => {
+        const node = graph.nodes[read.node]!;
+        return (
+          request.files[node.file]!.path === file &&
+          (graph.callableOf(node.region)?.kind === "function") === inFunction
+        );
+      });
+    for (const [file, inFunction] of [
+      ["main.tease", false],
+      ["data.tease", false],
+      ["data.tease", true],
+    ] as const)
+      assert.ok(where(file, inFunction).length > 0, `${file}, function: ${inFunction}`);
+    for (const read of reads) {
+      const owner = graph.callableOf(graph.nodes[read.node]!.region);
+      const nodes = owner?.kind === "function" ? functionNodes.get(owner)! : graph.nodes.length;
+      assert.equal(read.allowance, 256 * nodes, `reversed: ${reversed}`);
+    }
+    // (the top-level reads prove their errors; the function's 7 nodes may stop its own read, its check moved)
+    assert.ok(
+      !reads.some(
+        (read) =>
+          read.stopped && graph.callableOf(graph.nodes[read.node]!.region)?.kind !== "function",
+      ),
+      `reversed: ${reversed}`,
+    );
+    const at = (file: string, start: number): string[] =>
+      answers.diagnostics
+        .filter((d) => request.files[d.site.file]!.path === file && d.site.start === start)
+        .map((d) => d.class);
+    assert.deepEqual(at("main.tease", 7), ["compile-error"], `reversed: ${reversed}`);
+    assert.deepEqual(
+      at("data.tease", files[1]!.source.indexOf("g136\nglobal function")),
+      ["compile-error"],
+      `reversed: ${reversed}`,
+    );
+  }
+});
+
+/**
  * TABLE r4.100, S3 revision 21: a settled walk stop leaves a typed parse's nested paths undecided (admission decides
  * them lazily, never after a stop); source 4 decides them from its default literal's syntax, so the store's check stays
  * whole (#1165's class, a named exception of the oracle before: 984 and 1,180 stop points over four modes, the first

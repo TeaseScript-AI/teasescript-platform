@@ -1214,19 +1214,25 @@ export class Consumers {
     }
   }
 
-  /** S3 §5: a demand's allowance, 256 × the nodes of the reading site's callable. */
+  /**
+   * S3 §5: a demand's allowance, 256 × the nodes of the reading site's function, or of the whole program at a file's top
+   * level (a top-level read reads the globals every file stores, so its file's nodes do not bound its work).
+   */
   #demandAllowance(node: FlowNode): number {
     const { program } = this.pass;
     if (this.#callableNodes === null) {
       this.#callableNodes = new Map();
       for (const found of program.flow.nodes) {
         const callable = program.flow.callableOf(found.region);
-        this.#callableNodes.set(callable, (this.#callableNodes.get(callable) ?? 0) + 1);
+        if (callable?.kind === "function")
+          this.#callableNodes.set(callable, (this.#callableNodes.get(callable) ?? 0) + 1);
       }
     }
     const callable = program.flow.callableOf(node.region);
     return demandAllowanceFor(
-      callable === null ? program.flow.nodes.length : (this.#callableNodes.get(callable) ?? 0),
+      callable?.kind === "function"
+        ? (this.#callableNodes.get(callable) ?? 0)
+        : program.flow.nodes.length,
     );
   }
 
