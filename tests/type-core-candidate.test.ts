@@ -1317,6 +1317,45 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.match(parenthesized.diagnostics[0]!.message, /^A list index must be a whole number/);
 });
 
+/**
+ * #1242 (V30 §15, ADR 0021 §1.8, TABLE C2, C12, C5b): an index or a key owes a list's whole number or a dict's text
+ * only where the receiver may be a list or a dict, and a `removeAt`, `take` or `takeLast` argument only where it may
+ * have the method; any other receiver gets its own error alone, as the current checker gives it: an object indexed by
+ * text, a truth value or a number, read or stored, by `get`; a whole number, true or false, text. A list's index and a
+ * dict's key keep their rules.
+ */
+test("a receiver without an index gets its own error alone, never a list index's (#1242)", () => {
+  const original = inBothOrders(() =>
+    candidate('let door = {name: "hall"}\nsay door["name"]\nexit\n'),
+  );
+  assert.deepEqual(sited(original), ["error TSV043@30"]);
+  assert.match(original.diagnostics[0]!.message, /^An object has no elements, so 'door\["name"\]'/);
+  const rules = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return analyseCore(request).diagnostics.map((diagnostic) =>
+      diagnostic.kind === "written-type"
+        ? diagnostic.kind
+        : `${diagnostic.class} ${diagnostic.rule.rule} ${source.slice(diagnostic.site.start, diagnostic.site.end)}`,
+    );
+  };
+  for (const [source, expected] of [
+    ['let box = {n: 1}\nbox["n"] = 2\nexit\n', 'member box["n"]'],
+    ["let a = {n: 1}\nsay a[true]\nexit\n", "member a[true]"],
+    ["let a = {n: 1}\nsay a[1.5]\nexit\n", "member a[1.5]"],
+    ['let a = {n: 1}\nsay a.get("n", default: 0)\nexit\n', 'member a.get("n", default: 0)'],
+    ['let a = 1\nsay a["n"]\nexit\n', 'member a["n"]'],
+    ["let a = true\na[false] = 2\nexit\n", "member a[false]"],
+    ['let t = "abc"\nsay t["n"]\nexit\n', 'member t["n"]'],
+    ['let a = {n: 1}\na.removeAt("x")\nexit\n', 'member a.removeAt("x")'],
+    ['let t = "abc"\nsay t.take("x")\nexit\n', 'member t.take("x")'],
+    ['let a = [1]\nsay a["n"]\nexit\n', 'count "n"'],
+    ["let a = dict{n: 1}\nsay a[0]\nexit\n", "key 0"],
+    ['let xs = [1, 2]\nsay xs.take("x")\nexit\n', 'count "x"'],
+  ] as const)
+    assert.deepEqual(rules(source), [`compile-error ${expected}`], source);
+});
+
 test("parentheses answer for their content: a parenthesised count and index read as bare ones (S3 3.4)", () => {
   // the flow graph's node of a parenthesised expression is its content's, the value the parentheses hold
   const source = "let n = 2\nrepeat ((n)) {}\nlet xs = [1, 2]\nlet y = xs[(n)]\nexit\n";
@@ -1453,6 +1492,55 @@ test("a written scalar a singleton literal gives stays strict on the candidate r
   const [compiled, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
   assert.deepEqual(diagnostics, [`error TSV041@${source.lastIndexOf("2.5")}`]);
   assert.equal(compiled.plan, null);
+});
+
+/**
+ * #1240 (V30 §15, ADR 0021 §1.4): a store into an object's own `first`, `last` or `random` sets that property, as any
+ * property's store does, its value checked against the property's type; the runtime assigns it so. Its read stays F11's
+ * warning, never an error. Each name, a copy, a nested object and a list's element compile and run with the stored
+ * value, quiet as the current checker where nothing reads the property back; inside `if`, a function and a compound
+ * store (outside the slice) the core finds nothing; a value of another type gets the current checker's error and fix,
+ * and a list, which has no property to assign, its error.
+ */
+test("a store into an object's own first, last or random sets that property and checks its type (#1240)", () => {
+  for (const [source, says, quiet] of [
+    ['let record = {first: 1}\nrecord.first = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nexit\n", [], true],
+    ['let box = {entry: {random: 1}}\nbox.entry.random = 2\nsay "DONE"\nexit\n', ["DONE"], true],
+    ["let a = {last: 1}\na.last = 2\nsay a.last\nexit\n", ["2"], false],
+    [
+      "let source = {first: 1}\nlet copied = source\ncopied.first = 2\nsay copied.first\nexit\n",
+      ["2"],
+      false,
+    ],
+    ["let xs = [{random: 1}]\nxs[0].random = 2\nsay xs[0].random\nexit\n", ["2"], false],
+  ] as const) {
+    const [{ plan }, diagnostics] = inBothOrdersAs(() => candidate(source), sited);
+    assert.ok(
+      quiet
+        ? diagnostics.length === 0
+        : diagnostics.every((diagnostic) => diagnostic.startsWith("warning")),
+      `${source}: ${diagnostics.join(", ")}`,
+    );
+    assert.ok(plan !== null, source);
+    assert.deepEqual(runWith(plan, 0).says, says, source);
+  }
+  for (const source of [
+    "let a = {first: 1, n: 2}\nif a.n > 1 {\n  a.first = 3\n}\nexit\n",
+    "let a = {last: 1}\nfunction f {\n  a.last = 4\n}\nf()\nexit\n",
+    "let a = {random: 1}\na.random += 2\nexit\n",
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    assert.deepEqual(analyseCore(request).diagnostics, [], source);
+  }
+  const wrong = candidate('let a = {first: 1}\na.first = "bad"\nexit\n');
+  assert.deepEqual(sited(wrong), ["error TSV041@29"]);
+  assert.match(
+    wrong.diagnostics[0]!.message,
+    / Use a separate property for a value of another type\.$/,
+  );
+  assert.deepEqual(sited(candidate("let xs = [1, 2]\nxs.first = 5\nexit\n")), ["error TSV043@16"]);
 });
 
 /**

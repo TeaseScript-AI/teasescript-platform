@@ -307,13 +307,22 @@ export class CoreProgram {
 
   /**
    * The place a value is stored into or read from, with the path of steps below it: through every projection to the
-   * binding or literal at its root (`state.party.element.hp`).
+   * binding or literal at its root (`state.party.element.hp`). A store (`store`) through a property sets that property,
+   * as the runtime assigns it, so the stored place's own `first`, `last` or `random` is an object's property there (V30
+   * §15, ADR 0021 §1.4); only a read takes the name as the collector's element selection (F11).
    */
-  public targetRoot(id: PlaceId): { readonly root: PlaceId; readonly path: readonly string[] } {
+  public targetRoot(
+    id: PlaceId,
+    store = false,
+  ): { readonly root: PlaceId; readonly path: readonly string[] } {
     const steps: string[] = [];
     let current = id;
     for (let projection = this.projOf.get(current); projection !== undefined;) {
-      steps.push(stepName(projection.step));
+      steps.push(
+        store && current === id && selectsElement(projection.step)
+          ? projection.step
+          : stepName(projection.step),
+      );
       current = this.occurrenceOf.get(projection.owner) ?? projection.owner;
       projection = this.projOf.get(current);
     }

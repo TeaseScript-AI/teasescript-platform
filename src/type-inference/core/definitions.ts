@@ -374,7 +374,7 @@ export class DefinitionIndex {
 
   #store(constraint: Extract<CoreProgram["constraints"][number], { kind: "store" }>): void {
     const program = this.program;
-    const target = program.targetRoot(constraint.into);
+    const target = program.targetRoot(constraint.into, true);
     const projection = program.projOf.get(constraint.into);
     const add =
       ["element", "elements", "entry"].includes(constraint.how) &&
