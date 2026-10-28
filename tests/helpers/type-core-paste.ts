@@ -157,6 +157,10 @@ const SITES: readonly Site[] = [
   { name: "literal divisor", before: "", line: "say 1 / [@][0]" },
   { name: "property divisor", before: "", line: "say 1 / ({n: @}).n" },
   { name: "interpolation divisor", before: "", line: 'say 1 / toInteger("${@}", default: 1)' },
+  // (an operand of a `say`, an ask and a button, which the presence walk enumerates: Codex r13, the lead)
+  { name: "say operand", before: "", line: 'let shown = say("${@ + 1}", instant)' },
+  { name: "ask prompt", before: "", line: 'let asked = askInteger("${@ + 1}")' },
+  { name: "button label", before: "", line: 'let pressed = showButton "${@ + 1}"' },
 ];
 
 /**
@@ -171,6 +175,9 @@ const NUMBER_SITES = [
   "divisor",
   "integer argument",
   "count",
+  "say operand",
+  "ask prompt",
+  "button label",
 ];
 const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
   // (read by an index, which may be absent: a warning's own read, which its program already performs, wrapped in
@@ -219,9 +226,13 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "[ns[5]].length",
       'toInteger("${d["absent"]}${1}", default: 1)',
       "({n: n}).n",
-      // (Codex r13: an ask's operand, read or there)
+      // (Codex r13: an ask's, a `say`'s and a button's operand, read by a key or there)
       'askInteger("${d["absent"]}")',
       'askInteger("How many?")',
+      '[say("${d["absent"]}", instant)].length',
+      '[say("Strokes: 0", instant)].length',
+      '[(showButton "${d["absent"]}")].length',
+      '[(showButton "Continue")].length',
     ],
   ],
   ["angle", "1 deg", ["90", "n", 'd["absent"]', "ns[5]"]],

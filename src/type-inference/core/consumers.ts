@@ -165,6 +165,36 @@ const UNPROVED: SiteExpectation = {
   divides: "unproved",
 };
 
+/**
+ * The expression kinds whose presence the core proves (`Consumers.#present`): each reads nothing that may be absent
+ * itself, and `expressionParts` gives every operand it evaluates; a property's read is proved by its own facts. An index
+ * or a key read, a call, and every kind not listed are unproved, so a fix there gives words (TABLE r4.162).
+ */
+const PRESENT_KINDS: ReadonlySet<Expression["kind"]> = new Set<Expression["kind"]>([
+  "booleanLiteral",
+  "nullLiteral",
+  "numberLiteral",
+  "durationLiteral",
+  "regexLiteral",
+  "stringLiteral",
+  "identifier",
+  "parenthesizedExpression",
+  "listLiteral",
+  "setLiteral",
+  "objectLiteral",
+  "dictLiteral",
+  "propertyAccessExpression",
+  "unaryExpression",
+  "unitExpression",
+  "angleExpression",
+  "binaryExpression",
+  "rangeExpression",
+  "typeTestExpression",
+  "interactionExpression",
+  "sayExpression",
+  "showButtonExpression",
+]);
+
 /** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
 
@@ -1413,9 +1443,10 @@ export class Consumers {
    * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
    * TABLE r4.162, r4.168): its subject's, a member's receiver's, an operation's operands', by a walk of their whole
    * syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex r12, r13), one part at a time on
-   * its own stack, however wide: not where any of them reads an element by its index or a dict's value by
-   * its key, calls a function or a method (whose own reads are not followed), or reads a property or a selection the
-   * core finds may be absent; unproved where a site has no expression.
+   * its own stack, however wide: proved only through the kinds `PRESENT_KINDS` lists, so not where any of them reads an
+   * element by its index or a dict's value by its key, calls a function or a method (whose own reads are not
+   * followed), is of a kind not listed, or reads a property or a selection the core finds may be absent; unproved where
+   * a site has no expression.
    */
   #present(site: SourceSite, rule: DiagnosticRule): Presence {
     const { program } = this.pass;
@@ -1458,9 +1489,10 @@ export class Consumers {
         continue;
       }
       program.work.charge("checks");
+      // (only a kind whose every operand `expressionParts` gives, and which reads nothing absent itself, proves
+      // presence; any other kind, a new one too, is unproved: TABLE r4.162, the lead after Codex r13)
       if (
-        expression.kind === "indexExpression" ||
-        expression.kind === "callExpression" ||
+        !PRESENT_KINDS.has(expression.kind) ||
         (expression.kind === "propertyAccessExpression" && this.#mayBeAbsent(expression, site))
       ) {
         known.set(expression, true);
