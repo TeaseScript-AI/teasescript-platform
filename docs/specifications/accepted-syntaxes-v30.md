@@ -5215,14 +5215,14 @@ one unit: `5 s ms` and `1 h 30 min` are errors, and parts are added with `+`, as
 
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `month` and `year` (and `mo` and `y`) without
 `calendar` are compile errors that suggest it, or, where only an exact duration fits (a wait, timer, timeout, say
-pacing, media position, or media repeat budget), a length in days or weeks. `m` is not a duration unit, because it
-would be ambiguous between minutes and months. `calendar` is a unit word only where a unit can stand; elsewhere it is
-an ordinary name. A calendar week is 7 calendar days and a calendar year 12 calendar months. Adding months or years to
-a day that the target month
-lacks gives that month's last day: January 31 plus one calendar month is February 28, or 29 in a leap year, and February
-29 plus one calendar year is February 28. Calendar months and days are whole after normalizing: `0.5 calendar years` is
-6 months, while `1.5 calendar days`, `1.5 calendar weeks`, and `1 calendar month * 1.5` are errors, at compile time when
-the values are known. Exact time keeps fractions: `1 day / 2` is `12 h`.
+pacing, media position, or media repeat budget), a length in days or weeks, in words when the month or year is part of a
+calculation there. `m` is not a duration unit, because it would be ambiguous between minutes and months. `calendar` is a
+unit word only where a unit can stand; elsewhere it is an ordinary name. A calendar week is 7 calendar days and a
+calendar year 12 calendar months. Adding months or years to a day that the target month lacks gives that month's last
+day: January 31 plus one calendar month is February 28, or 29 in a leap year, and February 29 plus one calendar year is
+February 28. Calendar months and days are whole after normalizing: `0.5 calendar years` is 6 months, while `1.5 calendar
+days`, `1.5 calendar weeks`, and `1 calendar month * 1.5` are errors, at compile time when the values are known. Exact
+time keeps fractions: `1 day / 2` is `12 h`.
 
 A calendar duration stays one in every sum with a duration, also when it cancels to zero, so `1 calendar month -
 1 calendar month` is a zero calendar duration, and `1 calendar month + 1 day` equals `1 day + 1 calendar month`. Exact

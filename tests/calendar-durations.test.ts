@@ -530,13 +530,11 @@ test("an absolute date and time moves only by exact time, and elapsed-time consu
 });
 
 test("where only an exact duration fits, a month or a year without 'calendar' asks for days or weeks", () => {
-  const header = "let n = 2\nfunction f(d) {\n  return 1 s\n}\n";
+  const header = "let n = 2\nlet c = 1 calendar month\nfunction f(d) {\n  return 1 s\n}\n";
   const form = 'askForm "Q", fields: { ok: false }, onTimeout: "submit", timeout:';
   for (const [source, subject, written] of [
     ["wait #", "A wait", "1 month"],
-    ["wait 1 h + (#)", "A wait", "n months"],
-    ["wait # / n", "A wait", "1 month"],
-    ["wait (2 h / #) * 1 s", "A wait", "1 month"],
+    ["wait (#)", "A wait", "n months"],
     ["timer #", "A timer", "n months"],
     ["timer(duration: #)", "A timer", "1 y"],
     ['say "Hi", #', "Say pacing", "1 month"],
@@ -569,20 +567,29 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
       source,
     );
   }
-  // A month or a year that the value only passes on, or that meets a calendar duration, keeps the calendar fix, which
-  // compiles.
-  for (const source of ["wait f(#)", "wait (# / (1 calendar month)) * 1 s"]) {
-    assert.deepEqual(
-      diagnostics(`${header}${source.replace("#", "1 month")}\nexit`),
-      [["TSP033", "A month has no fixed length. Write '1 calendar month'."]],
-      source,
-    );
-    assert.notEqual(
-      compileSource(`${header}${source.replace("#", "1 calendar month")}\nexit`).plan,
-      null,
-      source,
-    );
-  }
+  // Inside arithmetic it may be part of a ratio, so which fix compiles depends on the other operand: the fix is in words.
+  const inWords = (unit: string): [string, string] => [
+    "TSP033",
+    `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`,
+  ];
+  for (const [source, expected] of [
+    ["wait 1 h + (n months)", [inWords("month")]],
+    ["wait 1 month + 2 months", [inWords("month"), inWords("month")]],
+    ["wait 1 month / (2)", [inWords("month")]],
+    ["wait 1 month / +2", [inWords("month")]],
+    ["wait 1 month / n", [inWords("month")]],
+    ["wait (2 h / 1 month) * 1 s", [inWords("month")]],
+    ["wait (1 month / 1 calendar month) * 1 s", [inWords("month")]],
+    ["wait (1 month / (2 * 1 calendar month)) * 1 s", [inWords("month")]],
+    ["wait (1 month / c) * 1 s", [inWords("month")]],
+    ['showButton "Go", timeout: f(1) otherwise 1 y', [inWords("year")]],
+  ] as const)
+    assert.deepEqual(diagnostics(`${header}${source}\nexit`), expected, source);
+  // A month that the value only passes on keeps the calendar fix, which compiles there.
+  assert.deepEqual(diagnostics(`${header}wait f(1 month)\nexit`), [
+    ["TSP033", "A month has no fixed length. Write '1 calendar month'."],
+  ]);
+  assert.notEqual(compileSource(`${header}wait f(1 calendar month)\nexit`).plan, null);
 });
 
 test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {

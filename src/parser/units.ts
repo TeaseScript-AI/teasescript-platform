@@ -214,18 +214,21 @@ function reportCalendarUnitWithoutCalendar(
   parser.calendarUnitErrors.set(duration, parser.diagnostics.at(-1)!);
 }
 
-/** The operators whose operands give their result its unit, or with `/` its ratio, read for an exact duration. */
-const EXACT_OPERANDS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
+/** The operators whose operands make up an exact duration's length, as in `1 h + 30 min`. */
+const LENGTH_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
 
 /**
- * `value` is where only an exact duration fits, such as a wait's length, which `subject` names: a month or a year
- * without `calendar` in it, also inside parentheses, a sign, `+`, `-`, `*`, `/`, or `otherwise`, gets days or weeks as
- * its fix, because a calendar duration has no fixed length either (ADR 0026 §5). Beside a calendar duration it keeps
- * the calendar fix, as in the ratio `(1 month / 1 calendar month) * 1 s`.
+ * `value` is where only an exact duration fits, such as a wait's length, which `subject` names, so a month or a year
+ * without `calendar` in it does not get the calendar fix (ADR 0026 §5). As the whole value, also in parentheses or after
+ * a sign, it gets days or weeks. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
+ * `(1 month / 1 calendar month) * 1 s`, the fix names both choices in words.
  */
 export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
-  const pending = [value];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+  const pending: { readonly node: Expression; readonly inside: boolean }[] = [
+    { node: value, inside: false },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { node, inside } = next;
     const error = parser.calendarUnitErrors.get(node);
     const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
@@ -233,25 +236,16 @@ export function requireExactDuration(parser: Parser, value: Expression, subject:
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+        inside
+          ? `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
+          : `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
         error!.span,
       );
-    } else if (node.kind === "parenthesizedExpression") pending.push(node.expression);
-    else if (node.kind === "unaryExpression" && node.operator !== "not") pending.push(node.operand);
-    else if (node.kind === "binaryExpression" && EXACT_OPERANDS.has(node.operator)) {
-      if (!isCalendarDuration(node.right)) pending.push(node.left);
-      if (!isCalendarDuration(node.left)) pending.push(node.right);
-    }
+    } else if (node.kind === "parenthesizedExpression")
+      pending.push({ node: node.expression, inside });
+    else if (node.kind === "unaryExpression" && node.operator !== "not")
+      pending.push({ node: node.operand, inside });
+    else if (node.kind === "binaryExpression" && LENGTH_OPERATORS.has(node.operator))
+      pending.push({ node: node.left, inside: true }, { node: node.right, inside: true });
   }
-}
-
-/** Whether `expression` is a calendar duration with its unit, also in parentheses or after a sign. */
-function isCalendarDuration(expression: Expression): boolean {
-  let inner = expression;
-  while (
-    inner.kind === "parenthesizedExpression" ||
-    (inner.kind === "unaryExpression" && inner.operator !== "not")
-  )
-    inner = inner.kind === "parenthesizedExpression" ? inner.expression : inner.operand;
-  return (inner.kind === "durationLiteral" || inner.kind === "unitExpression") && inner.calendar;
 }
