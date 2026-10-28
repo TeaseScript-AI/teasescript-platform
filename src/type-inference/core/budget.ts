@@ -1,10 +1,11 @@
 /**
  * The work budget of the coarse core (checkpoint 9, TABLE §8): every unit of work the analysis does is charged to one
  * counter as it runs, and the charged total is checked against the program's allowance at each charge, so an analysis
- * stops at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax node;
- * statement nesting has its own limit. The fallback of a demand over its own allowance (TABLE B1: that read and the
- * reads that waited on it take the contract with the reason `budget`, while independent demands of the same key keep
- * their proofs) is not part of this module yet: here the allowance is only the emergency stop.
+ * stops proving at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax
+ * node; statement nesting and a read chain's depth have their own limits. A stop is no compile error (the owner's D4,
+ * option a′, TABLE r4.54): the ledger then only finishes, every later charge counted apart and none stopping it, and
+ * each unit before the stop is counted to the place that spent it, so one warning can name the heaviest. The fallback
+ * of a demand over its own allowance (TABLE B1) is not part of this module.
  */
 
 /** The allowance every program has, however small (TABLE §8). */
@@ -13,7 +14,10 @@ export const WORK_FLOOR = 30_000_000;
 /** The allowance per syntax node of a larger program (TABLE §8). */
 export const WORK_PER_NODE = 256;
 
-/** The statement nesting the analysis accepts; realistic scripts nest about ten deep (TABLE §8). */
+/**
+ * The statement nesting the analysis proves (TABLE §8); realistic scripts nest about ten deep. A statement nested deeper
+ * is checked when the script runs (TABLE r4.55): the pipeline itself handles depth 10,000.
+ */
 export const NESTING_LIMIT = 256;
 
 /** The work allowance of a program with `syntaxNodes` parsed nodes: max(30,000,000, 256 × nodes) (TABLE §8). */
@@ -222,8 +226,9 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
 };
 
 /**
- * Thrown by `charge` at the unit that exceeds the allowance, by `checkNesting` past the nesting limit and by
- * `checkReadDepth` past the read-depth limit.
+ * Thrown by `charge` at the unit that exceeds the allowance and by `checkReadDepth` past the read-depth limit: the
+ * analysis catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when
+ * the script runs (`nesting`).
  */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
@@ -234,23 +239,77 @@ export class BudgetExhausted extends Error {
 
 /**
  * The work of one analysis. Counters change only through `charge`, which adds to the total too, so the counters always
- * sum to the total; the budget's test checks that identity over charged work.
+ * sum to the total; the budget's test checks that identity over charged work. Until the analysis stops, each unit is
+ * also counted to its spender (`spender`: 0 for setup, else a callable's number); after the stop (`stop`) the ledger
+ * only counts the finishing work (`finishing`), never stopping it again.
  */
 export class WorkLedger {
   readonly #counts = new Map<WorkCounter, number>();
   #total = 0;
+  #stopped: BudgetLimit | null = null;
+  /** Work counted as finishing work, the analysis not stopped (`finishing`'s callback). */
+  #apart = false;
+  #finishing = 0;
+  readonly #spent: number[] = [0];
+  #spender = 0;
 
   public constructor(public readonly allowance: number) {}
 
-  /** Charges `units` of work to `counter`; throws `BudgetExhausted` when the total then exceeds the allowance. */
+  /**
+   * Charges `units` of work to `counter`; throws `BudgetExhausted` when the total then exceeds the allowance. After the
+   * stop, counts them as finishing work.
+   */
   public charge(counter: WorkCounter, units = 1): void {
+    if (this.#stopped !== null || this.#apart) {
+      this.#finishing += units;
+      return;
+    }
     this.#counts.set(counter, (this.#counts.get(counter) ?? 0) + units);
     this.#total += units;
+    this.#spent[this.#spender] = (this.#spent[this.#spender] ?? 0) + units;
     if (this.#total > this.allowance) throw new BudgetExhausted("work");
   }
 
   public get total(): number {
     return this.#total;
+  }
+
+  /** The limit the analysis stopped at, from then on, or `null`. */
+  public get stopped(): BudgetLimit | null {
+    return this.#stopped;
+  }
+
+  /** Stops the analysis at `limit`: from now on its work only finishes (the first limit stays). */
+  public stop(limit: BudgetLimit): void {
+    this.#stopped ??= limit;
+  }
+
+  /** The work after the stop: the finishing path's. */
+  public get finishing(): number {
+    return this.#finishing;
+  }
+
+  /**
+   * Runs `callback` as finishing work without a stop: the checks of statements nested past the nesting limit after an
+   * analysis that ran to its end (D4 a′), counted apart and never stopping it.
+   */
+  public apart<T>(callback: () => T): T {
+    this.#apart = true;
+    try {
+      return callback();
+    } finally {
+      this.#apart = false;
+    }
+  }
+
+  /** Who the next units are counted to: 0 for setup, a callable's number otherwise. */
+  public set spender(spender: number) {
+    this.#spender = spender;
+  }
+
+  /** The units each spender spent before the stop, by its number (unset numbers spent none). */
+  public spent(): readonly number[] {
+    return this.#spent;
   }
 
   /** The charged counters with their units, in the order they were first charged. */
@@ -259,22 +318,17 @@ export class WorkLedger {
   }
 }
 
-/** Throws `BudgetExhausted` when `depth` nested statements exceed the nesting limit. */
-export function checkNesting(depth: number): void {
-  if (depth > NESTING_LIMIT) throw new BudgetExhausted("nesting");
-}
-
 /**
  * The levels of a read chain the analysis follows in one run of native calls: a read's projections and operations
  * (`value[0][0]…`, `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s
  * `contractOfValue` and `#valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack. Past it the
- * analysis stops with `read-depth` instead of overflowing that stack. A technical bound, not a language limit: on Node
+ * analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a language limit: on Node
  * 24.18.0's default stack (984 KiB) such a chain overflowed at 2,552 levels, alike on the laptop worker and the agent
  * host, for index, property, `.first`, deep-literal and untyped reads; 1,024 is about 40 % of that, leaving the stack
  * a compile is called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it
- * (`compiler.core-read-depth`).
+ * (`compiler.core-read-depth`). After a stop, a read past it is not settled (`Solver.enterRead`).
  */
-const READ_DEPTH_LIMIT = 1_024;
+export const READ_DEPTH_LIMIT = 1_024;
 
 /** Throws `BudgetExhausted` when a read chain `depth` levels deep exceeds the read-depth limit. */
 export function checkReadDepth(depth: number): void {

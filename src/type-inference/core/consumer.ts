@@ -22,7 +22,12 @@ import {
   type TypePropertyPlan,
 } from "../../plan/model.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
-import type { SourceSpan } from "../../source.js";
+import {
+  createSourcePosition,
+  createSourceSpan,
+  type SourcePosition,
+  type SourceSpan,
+} from "../../source.js";
 import { KnownValues } from "../../static-evaluation.js";
 import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import { typeFromAnnotation } from "../../static-types/annotations.js";
@@ -42,6 +47,7 @@ import type { PlaceId, SourceSite } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
+import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
@@ -422,20 +428,30 @@ function declarationOf(
 }
 
 /**
- * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class, its
- * sentences (`messages.ts`, D1) and its site's span (D2).
+ * A diagnostic of the core as the compiler reports it: its rule's code (D3 (a)), the severity of its class ("not
+ * checked (budget)" at the editor's information level, TABLE r4.54), its sentences (`messages.ts`, D1) and its site's
+ * span (D2).
  */
-function diagnosticOf(
-  diagnostic: CoreDiagnostic,
-  index: SliceIndex,
-  source: MessageSource,
-): Diagnostic {
+function diagnosticOf(diagnostic: CoreDiagnostic, source: MessageSource): Diagnostic {
   return createDiagnostic(
-    diagnostic.class === "compile-error" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning,
+    diagnostic.class === "compile-error"
+      ? DiagnosticSeverity.Error
+      : diagnostic.class === "not-checked-budget"
+        ? DiagnosticSeverity.Info
+        : DiagnosticSeverity.Warning,
     diagnostic.code,
     coreMessage(diagnostic, source),
-    index.spanAt(diagnostic.site),
+    createSourceSpan(
+      positionAt(source, diagnostic.site.file, diagnostic.site.start),
+      positionAt(source, diagnostic.site.file, diagnostic.site.end),
+    ),
   );
+}
+
+/** A source position at an offset of a file, its line and column from the source's line index (each file's once). */
+function positionAt(source: MessageSource, file: number, offset: number): SourcePosition {
+  const site = { file, start: offset, end: offset };
+  return createSourcePosition(offset, source.line(site) - 1, source.column(site));
 }
 
 /** What the compiler consumes of the analysis of a program inside the slice. */
@@ -451,9 +467,10 @@ export function coreCheckResult(
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "operator")
       throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
-    sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
+    if (diagnostic.kind !== "budget")
+      sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
     if (shown.has(diagnostic))
-      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, index, source));
+      diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, source));
   }
   const { checks, core } = runtimeChecks(answers, index, request);
   // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets
@@ -582,13 +599,16 @@ function runtimeChecks(
     expected: new Map<CallExpression, TypePlan>(),
     repairs: new Set<LoadExpression>(),
   };
-  const owed: Obligation[] = [];
+  // each owed check with the kinds its rule names, a stopped analysis's store type where it decided none (D4 a′)
+  const owed: { readonly obligation: Obligation; readonly kinds: readonly ItemTag[] | null }[] = [];
   const fallbacks = new Map<
     BinaryExpression | CallExpression,
     { readonly fallback: Expression; readonly depths: FallbackDepth[] }
   >();
-  for (const diagnostic of answers.diagnostics) {
-    if (diagnostic.class !== "warning-runtime-check") continue;
+  // the warnings' checks, and those a stop moved to the runtime
+  for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
+    if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
+    if (leftOutWarning(diagnostic)) continue;
     const expression = index.expressionAt(diagnostic.site);
     switch (diagnostic.kind) {
       case "written-target": {
@@ -596,7 +616,11 @@ function runtimeChecks(
         // depth, C1's a place (S6's departure 6)
         const steps = fallbackSteps(diagnostic.obligation.target, textOf(expression));
         const owner = steps === null ? undefined : index.fallbackOf(expression);
-        if (owner === undefined) owed.push(diagnostic.obligation);
+        if (owner === undefined)
+          owed.push({
+            obligation: diagnostic.obligation,
+            kinds: diagnostic.rule.rule === "store" ? diagnostic.rule.type : null,
+          });
         // C10: a load's default is checked as the load's result; any other where it is selected, all its depths at once
         else if (owner.kind !== "loadExpression") {
           const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
@@ -626,7 +650,15 @@ function runtimeChecks(
     if (type !== null)
       core.fallbackChecks.set(owner, { type, place: `the value of '${textOf(owner)}'` });
   }
-  for (const check of answers.checks) if (check.boundary) owed.push(check);
+  // (a boundary carries the kinds it was retained with through the discharge, never derived again: TABLE r4.138)
+  for (const check of answers.checks)
+    if (check.boundary && !leftOutCheck(check))
+      owed.push({
+        obligation: check,
+        kinds: check.against.filter(
+          (kind): kind is Exclude<typeof kind, "non-null"> => kind !== "non-null",
+        ),
+      });
   // the types a typed load and a `fromJson` read their value as (F18)
   const typed = new Set<Expression>();
   for (const load of index.loads) {
@@ -643,7 +675,8 @@ function runtimeChecks(
       typed.add(call);
       core.expected.set(call, type);
     }
-  for (const obligation of owed) {
+  const stopped = answers.budget.exhausted !== null;
+  for (const { obligation, kinds } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
     // every plan: no plan content (S3 §4)
     if (obligation.against.length === 1 && obligation.against[0] === "unknown") continue;
@@ -654,10 +687,27 @@ function runtimeChecks(
       throw new Error("A check of the slice belongs to no store.");
     }
     if (checks.has(store)) continue;
-    const type = contracts.stored(store);
+    const type = contracts.stored(store) ?? (stopped ? storedKinds(store, kinds) : null);
     if (type !== null) checks.set(store, type);
   }
   return { checks, core };
+}
+
+/**
+ * A store's check by the kinds its warning names, where a stopped analysis decided no type to check it against (D4 a′):
+ * the type admission decided before the stop, its kinds' containers unrestricted below them.
+ */
+function storedKinds(store: Store, kinds: readonly ItemTag[] | null): TypeCheckPlan | null {
+  const types = (kinds ?? []).map(closedType).filter((type): type is StaticType => type !== null);
+  const type = types.length === 0 ? null : typePlan(union(types));
+  if (type === null) return null;
+  const target =
+    store.kind === "letStatement"
+      ? store.name.name
+      : store.target.kind === "identifier"
+        ? store.target.name
+        : null;
+  return { type, place: target === null ? "the place" : `'${target}'` };
 }
 
 /** C10's obligation at one depth of a fallback: its element steps below the fallback, and the kinds it requires there. */

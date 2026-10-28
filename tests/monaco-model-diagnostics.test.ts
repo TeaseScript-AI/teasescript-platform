@@ -32,7 +32,7 @@ test("each project file gets its own markers and header, and edits replace stale
       { path: "rooms/hall.tease", model: hall },
       { path: "main.tease", model: main },
     ],
-    { Error: 8, Warning: 4 },
+    { Error: 8, Warning: 4, Info: 2 },
     (files) => publications.push(files),
   );
   const [first] = publications;
@@ -77,7 +77,7 @@ test("a project diagnostic without its own file still gets a row", () => {
   let files: readonly ProjectFileView[] = [];
   watchProjectDiagnostics(
     [{ path: "rooms/hall.tease", model: new FakeModel("exit") }],
-    { Error: 8, Warning: 4 },
+    { Error: 8, Warning: 4, Info: 2 },
     (published) => (files = published),
   ).dispose();
   assert.deepEqual(
@@ -102,7 +102,7 @@ test("paths that differ only by `\\` or by a drive-like folder's case keep their
   let files: readonly ProjectFileView[] = [];
   watchProjectDiagnostics(
     paths.map((path) => ({ path, model: new FakeModel("exit") })),
-    { Error: 8, Warning: 4 },
+    { Error: 8, Warning: 4, Info: 2 },
     (published) => (files = published),
   ).dispose();
   assert.deepEqual(
@@ -123,7 +123,7 @@ test("tag queries search the package images the project is watched with", () => 
     let files: readonly ProjectFileView[] = [];
     watchProjectDiagnostics(
       models,
-      { Error: 8, Warning: 4 },
+      { Error: 8, Warning: 4, Info: 2 },
       (published) => (files = published),
       images === undefined ? {} : { images },
     ).dispose();

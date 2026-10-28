@@ -91,9 +91,12 @@ interface InheritedCopy {
   readonly path: readonly string[];
   readonly from: PlaceId;
   readonly strip: readonly string[];
-  /** The store making it and the literal cells it passes (A6: a rejected one is dead in the next pass, #1188). */
+  /**
+   * The store making it, and whether the literal cells it passes are all live (A6: a rejected one is dead in the next
+   * pass, #1188).
+   */
   readonly store?: Definition;
-  readonly cells?: readonly Definition[];
+  readonly cellsLive?: boolean;
 }
 
 /**
@@ -847,6 +850,12 @@ function compatible(items: readonly Item[], term: TypeTerm | null): boolean {
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
+  /**
+   * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
+   * finished answer and contract, the retained type: TABLE r4.102, r4.106, r4.109), else `null`: admission's C1 and its
+   * boundaries read as every consumer does (one derivation, TABLE r4.126).
+   */
+  read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
 }
 
 export class Admission {
@@ -890,7 +899,7 @@ export class Admission {
       readonly path: readonly string[];
       readonly binding: PlaceId;
       readonly strip: readonly string[];
-      readonly cells: readonly Definition[];
+      readonly cellsLive: boolean;
     }[]
   >();
   /** The copies of places that may inherit a written type (`#inheriting`), where they land. */
@@ -912,6 +921,7 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
+  readonly #everyStop = new Map<PlaceId, Stops>();
   /**
    * A representative store's later equivalent ones (`#grouped`), each recorded once per pass with its representative
    * (`#representative`), and the bindings defined by one whole store.
@@ -946,6 +956,8 @@ export class Admission {
   readonly #pending = new Map<number, Definition>();
   readonly #readSeen = new Set<PlaceId>();
   readonly #hostSeen = new Set<string>();
+  /** The key each read check took in `#readSeen` or `#hostSeen`, in `readChecks`' order (`null`: F18's, none). */
+  readonly #readCheckKeys: (PlaceId | string | null)[] = [];
   /** Per provenance node, the ingresses its leaves name, and whether one of them no walk reached (`#resolve`). */
   readonly #nodeIngresses = new Map<IngressNode, ReadonlySet<PlaceId>>();
   /** Per store, the ingresses that reach its value through an operation's own read (`#ownLeaves`). */
@@ -1062,7 +1074,7 @@ export class Admission {
       ) {
         // (one landing path and key per copied path, its copies' shared one, charged before it is made)
         const landed = new Map<readonly string[], readonly string[]>();
-        for (const { path, binding, strip, cells } of this.#copySources(d.value)) {
+        for (const { path, binding, strip, cellsLive } of this.#copySources(d.value)) {
           const written = writtenOf(program.place(binding).kind);
           const term = written === null ? null : permittedAt(written, strip);
           if (term === null && (written !== null || !this.#inheriting.has(binding))) continue;
@@ -1086,7 +1098,7 @@ export class Admission {
               from: binding,
               strip,
               store: d,
-              cells,
+              cellsLive,
             });
         }
       }
@@ -1570,20 +1582,39 @@ export class Admission {
   public valueAt(d: Definition, at: readonly string[]): Item[] {
     this.pass.program.work.charge("checks");
     if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
-    return withoutEmpty(this.#run(this.pass.values.valueItems(d.value!, d.node, at)));
+    return this.#items(d.value!, d.node, at);
   }
 
-  /** A place's path in the contract's vocabulary: an element step below a dict is its `entry`. */
-  public pathLabel(place: PlaceId, path: readonly string[]): string {
+  /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
+  #items(value: PlaceId, node: FlowNode, at: readonly string[]): Item[] {
+    const finished = this.host.read?.(value, node, at) ?? null;
+    return withoutEmpty(finished ?? this.#run(this.pass.values.valueItems(value, node, at)));
+  }
+
+  /**
+   * A place's path in the contract's vocabulary: an element step below a dict is its `entry`, the collection above it as
+   * the contract holds it or, where the place's written type `written` reaches it (the finishing path before admission
+   * settled, TABLE r4.122), as the written type has it, final at every stop and asking no solver.
+   */
+  public pathLabel(
+    place: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): string {
     const { program, contract } = this.pass;
     let label = program.place(place).label;
     path.forEach((step, index) => {
       if (step !== "element") label = stepText(label, step);
       else {
-        const kinds = withoutEmpty(
-          this.#run(contract.contractOf(keyOf(place, path.slice(0, index)))),
-        );
-        label = stepText(label, elementStep(kinds.map((item) => item.tag)));
+        const prefix = path.slice(0, index);
+        const term = written === null ? null : termAt(written, prefix);
+        const tags =
+          term !== null
+            ? typeTags(term)
+            : withoutEmpty(this.#run(contract.contractOf(keyOf(place, prefix)))).map(
+                (item) => item.tag,
+              );
+        label = stepText(label, elementStep(tags));
       }
     });
     return label;
@@ -1591,10 +1622,29 @@ export class Admission {
 
   // ------------------------------------------------------------------------------------------- the decision
 
+  /**
+   * The stores admission walks: the stores, adds, returns, parameter defaults and single-site arguments into each key (a
+   * multi-site argument decides nothing, F21), found once.
+   */
+  public stores(): readonly Definition[] {
+    if (this.#stores === null) {
+      const { definitions, lists } = this.pass;
+      this.#stores = [...definitions.storeDefs, ...definitions.transferDefs].filter(
+        (d) =>
+          (d.kind === "whole" || d.kind === "add") &&
+          (d.how !== "argument" || lists.singleSite(d.fn)) &&
+          !this.#besideDefault(d),
+      );
+    }
+    return this.#stores;
+  }
+
+  #stores: readonly Definition[] | null = null;
+
   /** Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements. */
   public groups(): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
     if (this.#groups !== null) return this.#groups;
-    const { program, definitions, lists } = this.pass;
+    const { program, definitions } = this.pass;
     const work = program.work;
     const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
     for (const c of program.constraints)
@@ -1604,14 +1654,7 @@ export class Admission {
           tracked.add(keptKey(this.#work, target.root, target.path));
       }
     for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(this.#work, binding, []));
-    // the stores, adds, returns, parameter defaults and single-site arguments into each key (a multi-site argument
-    // decides nothing, F21)
-    const reaching = [...definitions.storeDefs, ...definitions.transferDefs].filter(
-      (d) =>
-        (d.kind === "whole" || d.kind === "add") &&
-        (d.how !== "argument" || lists.singleSite(d.fn)) &&
-        !this.#besideDefault(d),
-    );
+    const reaching = this.stores();
     const stores = new Map<Key, number>();
     for (const d of reaching)
       for (const key of [d.key, ...keptPrefixes(this.#work, d.key)]) {
@@ -1786,11 +1829,7 @@ export class Admission {
     // (whether a live store makes each copy, Astra's B2)
     for (const copy of this.#a4Inherits) {
       const id = keptParts(this.#work, copy.place, copy.path, copy.from, copy.strip);
-      if (
-        copy.store !== undefined &&
-        this.pass.lists.live(copy.store) &&
-        (copy.cells ?? []).every((cell) => this.pass.lists.live(cell))
-      )
+      if (copy.store !== undefined && this.pass.lists.live(copy.store) && copy.cellsLive !== false)
         this.#liveCopies.add(id);
     }
     // a cycle's landed paths, sources before it: a copy from outside it brings its own path and every path landed below
@@ -2485,6 +2524,8 @@ export class Admission {
    */
   #lazily(place: PlaceId, path: readonly string[]): void {
     if (this.#attempted.has(keyOf(place, path)) || !this.#landed(place, path)) return;
+    // (after a stop admission decides nothing more: such a path is answered from what it retained, `#retainedSource`)
+    if (this.pass.program.work.stopped !== null) return;
     this.decide(place, path, true);
   }
 
@@ -2610,7 +2651,12 @@ export class Admission {
     return {
       root,
       path,
-      label: this.pathLabel(root, path),
+      // (a written path's label from its written type, final at every stop, TABLE r4.122)
+      label: this.pathLabel(
+        root,
+        path,
+        byWritten ? writtenOf(this.pass.program.place(root).kind) : null,
+      ),
       tags,
       written: byWritten,
       own: found.own,
@@ -3009,6 +3055,7 @@ export class Admission {
     const written = writtenOf(program.place(place).kind);
     const term = written === null ? null : termAt(written, path);
     if (term !== null) return [...new Set(typeTags(term).filter((tag) => tag !== "unknown"))];
+    if (this.#undecidedCopy(place, path)) return this.#retainedSource(place, path)?.tags ?? [];
     this.#lazily(place, path);
     const key = keyOf(place, path);
     // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
@@ -3028,8 +3075,101 @@ export class Admission {
       : tags;
   }
 
+  /**
+   * After a stop, a path's admitted type as admission retained it, without new solving (S3 §5 revision 14, TABLE r4.102):
+   * its written type (A1), its decision (A2), else a copied written type landing there (A4's seeds), else, where a copy
+   * of another place lands at or above it (a lazily decided copy path among them), that source's at the same path below
+   * the copy, through the copy forest's edges; with `null` where the decision admits one (admission's null rule, its
+   * contract question answered as admitting); `null` where none of these decides the path, `["unknown"]` where every
+   * kind fits it.
+   */
+  public retained(place: PlaceId, path: readonly string[]): ItemTag[] | null {
+    return this.#retainedSource(place, path)?.tags ?? null;
+  }
+
+  /**
+   * `retained`'s answer, and whether a written type decides it through copies (A4: a seed, a copy's source's written
+   * type, or a source's decision that inherits one): the copy forest walked from the path with an explicit worklist,
+   * each key once, in the copies' order; round a cycle of copies a path never grows (a copy of a member's part is not
+   * followed within the cycle, as F1's landings), so the walk ends.
+   */
+  #retainedSource(
+    place: PlaceId,
+    path: readonly string[],
+  ): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
+    const { program } = this.pass;
+    const seen = new Set<Key>();
+    const pending: {
+      readonly place: PlaceId;
+      readonly path: readonly string[];
+      readonly copied: boolean;
+    }[] = [{ place, path, copied: false }];
+    while (pending.length > 0) {
+      const at = pending.pop()!;
+      const written = writtenOf(program.place(at.place).kind);
+      const term = written === null ? null : termAt(written, at.path);
+      if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
+      // (kept in `seen`)
+      const key = keptKey(this.#work, at.place, at.path);
+      if (this.#unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };
+      const decided = this.decided.get(key);
+      if (decided !== undefined)
+        return {
+          tags:
+            this.#permitsNull.has(key) || this.#nullable.get(key) !== false
+              ? [...new Set([...decided, "null" as const])]
+              : [...decided],
+          inherited: this.#inheritsWritten.has(key),
+        };
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const { seeds, into, cycleOf } = this.#inheritance();
+      const levels = seeds.get(at.place)?.get(pathText(at.path));
+      if (levels !== undefined)
+        return {
+          tags: [...new Set([...levels].flatMap((level) => typeTags(level)))],
+          inherited: true,
+        };
+      const copies = into.get(at.place) ?? [];
+      const cycle = cycleOf.get(at.place);
+      // (pushed in reverse: the first copy is taken first)
+      for (let index = copies.length - 1; index >= 0; index -= 1) {
+        const copy = copies[index]!;
+        program.work.charge("checks");
+        if (copy.path.length > at.path.length || copy.path.some((step, i) => at.path[i] !== step))
+          continue;
+        if (
+          cycle !== undefined &&
+          cycleOf.get(copy.from) === cycle &&
+          copy.strip.length > copy.path.length
+        )
+          continue;
+        pending.push({
+          place: copy.from,
+          path: keptSteps(this.#work, copy.strip, at.path.slice(copy.path.length)),
+          copied: true,
+        });
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Whether, after a stop, a path is one `#lazily` would decide now (copies land there, `groups` left it out): no
+   * decision is made after a stop (S3 §5 revision 14), so it is answered from what admission retained.
+   */
+  #undecidedCopy(place: PlaceId, path: readonly string[]): boolean {
+    return (
+      this.pass.program.work.stopped !== null &&
+      !this.#attempted.has(keyOf(place, path)) &&
+      this.#landed(place, path)
+    );
+  }
+
   /** Whether a copy of a written type decides a place's path, not the place's own written type (A4, r4.75 (1)). */
   public inheritsWritten(place: PlaceId, path: readonly string[]): boolean {
+    if (this.#undecidedCopy(place, path))
+      return this.#retainedSource(place, path)?.inherited ?? false;
     this.#lazily(place, path);
     return (
       this.#inheritsWritten.has(keyOf(place, path)) ||
@@ -4685,7 +4825,11 @@ export class Admission {
     return fields.get(step);
   }
 
-  /** A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element. */
+  /**
+   * A literal value's stores at one step, in evaluation order: a property's one store, a collection's every element, a
+   * dict's values among them (its `element`, as its type has them). Every walk of a literal's children asks here with its
+   * path's own step, so the step that reaches a child is read in this one place (TABLE r4.122).
+   */
   public literalChildren(value: PlaceId, step: string): Definition[] {
     const { program, definitions } = this.pass;
     const out: Definition[] = [];
@@ -4718,14 +4862,7 @@ export class Admission {
       if (index + 1 === at.length) {
         for (const child of children) {
           this.pass.program.work.charge("checks");
-          if (
-            leaf(
-              withoutEmpty(
-                this.#run(this.pass.values.valueItems(child.value!, child.node ?? node, [])),
-              ),
-            )
-          )
-            return child;
+          if (leaf(this.#items(child.value!, child.node ?? node, []))) return child;
         }
       } else
         for (let position = children.length - 1; position >= 0; position -= 1)
@@ -4763,8 +4900,13 @@ export class Admission {
     readonly path: readonly string[];
     readonly binding: PlaceId;
     readonly strip: readonly string[];
-    /** The literal cells the copy passes through (Astra's B2). */
-    readonly cells: readonly Definition[];
+    /**
+     * Whether the literal cells the copy passes through are all live (Astra's B2), kept as one answer, not the cells:
+     * a list of them per copy grew with the literal's depth, a source of every reference below it (16,384 references
+     * 4,096 deep held about 780 MiB after a stop before admission settled, the fresh pass's copies beside the stopped
+     * one's).
+     */
+    readonly cellsLive: boolean;
   }[] {
     const known = this.#copies.get(value);
     if (known !== undefined) return known;
@@ -4773,20 +4915,20 @@ export class Admission {
       path: readonly string[];
       binding: PlaceId;
       strip: readonly string[];
-      cells: readonly Definition[];
+      cellsLive: boolean;
     }[] = [];
-    const pending: [PlaceId, readonly string[], readonly string[], readonly Definition[]][] = [
-      [value, [], [], []],
+    const pending: [PlaceId, readonly string[], readonly string[], boolean][] = [
+      [value, [], [], true],
     ];
     while (pending.length > 0) {
-      const [current, path, strip, cells] = pending.pop()!;
+      const [current, path, strip, cellsLive] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        out.push({ path, binding, strip, cells });
+        out.push({ path, binding, strip, cellsLive });
         continue;
       }
-      const next: [PlaceId, readonly string[], readonly string[], readonly Definition[]][] = [];
+      const next: [PlaceId, readonly string[], readonly string[], boolean][] = [];
       // (its cells' tasks share one rest of the strip, charged as kept)
       let rest: readonly string[] | null = null;
       if (program.hasOf.has(current))
@@ -4800,13 +4942,13 @@ export class Admission {
               const child = strip.length === 0 ? keptSteps(this.#work, path, [name]) : path;
               for (const d of definitions.cellDefs.get(term.place) ?? []) {
                 rest ??= strip.length === 0 ? strip : keptSlice(this.#work, strip, 1);
-                next.push([d.value!, child, rest, [...cells, d]]);
+                next.push([d.value!, child, rest, cellsLive && this.pass.lists.live(d)]);
               }
             }
         }
       else
         for (const [carried, rest] of this.#carriersOf(current, strip))
-          next.push([carried, path, rest, cells]);
+          next.push([carried, path, rest, cellsLive]);
       for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
     }
     this.#copies.set(value, out);
@@ -4853,10 +4995,13 @@ export class Admission {
   /**
    * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
    * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
-   * elements stand below them; once per value.
+   * elements stand below them; once per value. `once`: later copies or calls of one source identity at a path are one
+   * stop (F2), as every walk made before a stop has them; a walk made after one keeps every stop instead, the same
+   * boundaries and sites without asking identities nothing else after the stop asks (TABLE r4.55, r4.126).
    */
-  #stopsOf(value: PlaceId, node: FlowNode): Stops {
-    const known = this.#stops.get(value);
+  #stopsOf(value: PlaceId, node: FlowNode, once = true): Stops {
+    const memo = once ? this.#stops : this.#everyStop;
+    const known = memo.get(value);
     if (known !== undefined) return known;
     const { program, definitions, contract } = this.pass;
     const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
@@ -4981,6 +5126,7 @@ export class Admission {
       // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
       // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
       if (
+        once &&
         sharing() &&
         path.length > 0 &&
         map === stops.values &&
@@ -5039,7 +5185,7 @@ export class Admission {
         program.work.charge("checks", sortCost(list.length));
         list.sort((a, b) => compareKeys(a.key, b.key));
       }
-    this.#stops.set(value, stops);
+    memo.set(value, stops);
     return stops;
   }
 
@@ -5726,7 +5872,9 @@ export class Admission {
    * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
    * (r4.35) and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
    * store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a sentence
-   * names) and the offending element's (D1).
+   * names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal whose element
+   * needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`) is not
+   * compared; it is reported there instead, so its store marks (TABLE r4.126).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
@@ -5741,6 +5889,7 @@ export class Admission {
         readonly kinds: readonly ItemTag[];
       },
     ) => void,
+    undecided?: (cell: PlaceId) => void,
   ): void {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
@@ -5751,10 +5900,14 @@ export class Admission {
     // a typed ingress's type and default), the paths below them where their contracts hold more than one kind: only there
     // can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
-    for (const [cell, list] of order([...definitions.cellDefs])) {
+    cells: for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
+      if (undecided !== undefined && list.some(named)) {
+        undecided(cell);
+        continue;
+      }
       let shared: readonly (readonly string[])[] | null = null;
       if (list.some(named)) {
         const ids = list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id));
@@ -5857,7 +6010,15 @@ export class Admission {
         const below = known !== undefined ? [] : (shared ?? this.#pathsBelow(d.value, []));
         for (const path of [[], ...below]) {
           const at = keptText(this.#work, path);
-          const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
+          const items = this.valueAt(d, path);
+          if (
+            undecided !== undefined &&
+            items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
+          ) {
+            undecided(cell);
+            continue cells;
+          }
+          const own = [...new Set(deciding(items).map((item) => item.tag))];
           if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
             // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
@@ -6028,9 +6189,10 @@ export class Admission {
    * walk admission's deciders and C1's contributions read), then every operation's own read, as its own landing; each
    * ingress stop recorded by the store that brings it, or as an own read. Built once per pass, at its first use. A store
    * in dead code and a dead call's argument for a written parameter are walked too: their boundaries are against the
-   * destination's admitted type, as in live code (AD-3: a written type is no flow fact).
+   * destination's admitted type, as in live code (AD-3: a written type is no flow fact). `keep`: the stops of the stores
+   * it keeps only, no own read walked and nothing kept (`publish` after a stop before admission settled).
    */
-  #landingIndex(): LandingIndex {
+  #landingIndex(keep?: (d: Definition) => boolean): LandingIndex {
     if (this.#landings !== null) return this.#landings;
     const { program, definitions, lists } = this.pass;
     const byStore = new Map<Definition, IngressStop[]>();
@@ -6095,7 +6257,7 @@ export class Admission {
       node: FlowNode,
       found: (stop: Stop, ingress: PlaceId, own: boolean) => void,
     ): void => {
-      const stops = this.#stopsOf(value, node);
+      const stops = this.#stopsOf(value, node, this.pass.program.work.stopped === null);
       for (const map of [stops.written, stops.values, stops.literals])
         for (const list of map.values())
           for (const stop of list) {
@@ -6115,7 +6277,7 @@ export class Admission {
       ...[...definitions.deadArguments.values()].flat(),
     ]) {
       if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined) continue;
-      if (!lists.live(d)) continue;
+      if (!lists.live(d) || keep?.(d) === false) continue;
       walk(d.value, d.node, (stop, ingress, own) => {
         if (own) {
           entry(ingress).own = true;
@@ -6145,9 +6307,11 @@ export class Admission {
       });
     }
     // an operation's own read is an own read wherever it stands (C10): one no walk reached is its own landing, the
-    // outermost first, so a nested own read its enclosing one's walk reaches is walked once
+    // outermost first, so a nested own read its enclosing one's walk reaches is walked once (not for some stores' stops)
     const owns: { readonly operand: PlaceId; readonly site: SourceSite }[] = [];
-    for (const carrier of [...program.projOf.keys(), ...program.opOf.keys()])
+    for (const carrier of keep === undefined
+      ? [...program.projOf.keys(), ...program.opOf.keys()]
+      : [])
       for (const { operand, own } of operandsOf(program, carrier)) {
         program.work.charge("indexSteps");
         const site = own ? program.places[operand]?.site : null;
@@ -6180,6 +6344,8 @@ export class Admission {
       const last = chain.at(-1)?.call;
       if (last !== undefined) for (const member of chain) member.call = last;
     }
+    // (some stores' stops only: not the index, `keep` a stop's finishing publication, `publish`)
+    if (keep !== undefined) return { byStore, byIngress };
     this.#landings = { byStore, byIngress };
     return this.#landings;
   }
@@ -6471,6 +6637,7 @@ export class Admission {
         `validate external data entering ${label} against its own unknown contract`,
       ),
     );
+    this.#readCheckKeys.push(value);
   }
 
   /**
@@ -6494,6 +6661,22 @@ export class Admission {
       on: `validate external data ${here.target}`,
       boundary: true,
     });
+    this.#readCheckKeys.push(at);
+  }
+
+  /**
+   * Takes back the read checks from `length` on, with the keys they took and the ingress resolutions that made them, so
+   * the walk that finishes their unit after a stop makes them again (D4 a′: the running unit's findings are taken back,
+   * TABLE r4.54).
+   */
+  public takeBackReadChecks(length: number): void {
+    const taken = this.#readCheckKeys.splice(length);
+    for (const key of taken)
+      if (typeof key === "number") this.#readSeen.delete(key);
+      else if (key !== null) this.#hostSeen.delete(key);
+    this.readChecks.length = length;
+    // (an ingress resolved in the unit made its own read's check there: resolved again, its idempotent effects redone)
+    if (taken.length > 0) this.#resolved.clear();
   }
 
   public boundariesAt(items: readonly Item[], here: Obligation | null): void {
@@ -6504,7 +6687,7 @@ export class Admission {
   #f18Admission(
     c: CorePass["program"]["constraints"][number],
   ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
-    if (!("result" in c)) return null;
+    if (!("result" in c) || !typedIngress(c)) return null;
     // (a typed ingress no store brings, an own read or unreached, is checked where it runs: §3.3, r4.57)
     const found = this.#landingIndex().byIngress.get(c.result);
     return found === undefined || found.stores.size === 0 ? this.#f18Kinds(c) : null;
@@ -6517,14 +6700,14 @@ export class Admission {
     const known = this.#f18.get(c.result);
     if (known !== undefined) return known;
     const { program, contract, values } = this.pass;
-    const parses =
-      c.kind === "operation" &&
-      c.contract.family === "conversion" &&
-      conversionCategory(c.contract.name)?.kind === "parses";
+    const parses = c.kind === "operation" && typedIngress(c);
     let found: { readonly label: string; readonly tags: readonly ItemTag[] } | null = null;
     const node = c.kind === "load" || parses ? program.exprAt(c.site) : null;
     if (node !== null && program.live(node)) {
-      const items = withoutEmpty(this.#run(values.valueItems(c.result, node, [])));
+      // (after a stop, as the finishing read answers it: a typed call's expected type by its syntax, F18, r4.138)
+      const items = withoutEmpty(
+        this.host.read?.(c.result, node, []) ?? this.#run(values.valueItems(c.result, node, [])),
+      );
       const tags: ItemTag[] = [
         ...new Set(items.filter((item) => concrete(item)).map((item) => item.tag)),
       ];
@@ -6538,16 +6721,39 @@ export class Admission {
       )
         tags.push("null");
       if (tags.length > 0) found = { label: `${parses ? "fromJson" : "load"}.result`, tags };
+      // (after a stop, a type the finishing read leaves open is no absent one: its boundary is marked, r4.144)
+      else if (
+        this.pass.program.work.stopped !== null &&
+        items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
+      )
+        this.#f18Open.add(c.result);
     }
     this.#f18.set(c.result, found);
     return found;
   }
 
-  /** F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. */
-  public ingressStores(): void {
+  /** The typed calls whose expected type the finishing read left open after a stop (`#f18Kinds`). */
+  readonly #f18Open = new Set<PlaceId>();
+
+  /**
+   * F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
+   * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
+   * index `publish` made there, of the stores into written places alone, answers for the rest (TABLE r4.138). Returns
+   * the calls whose expected type a stop left open (`#f18Open`), each with its label, for the consumers to mark: no
+   * obligation is declined for a missing answer (TABLE r4.144).
+   */
+  public ingressStores(
+    skip?: (site: SourceSite) => boolean,
+  ): readonly { readonly site: SourceSite; readonly label: string }[] {
+    const open: { site: SourceSite; label: string }[] = [];
     for (const c of this.pass.program.constraints) {
+      if (skip !== undefined && "result" in c && typedIngress(c) && skip(c.site)) continue;
       const found = this.#f18Admission(c);
-      if (found === null) continue;
+      if (found === null) {
+        if ("result" in c && this.#f18Open.has(c.result))
+          open.push({ site: c.site, label: `${c.kind === "load" ? "load" : "fromJson"}.result` });
+        continue;
+      }
       this.readChecks.push(
         boundaryCheck(
           c.site,
@@ -6556,7 +6762,9 @@ export class Admission {
           `validate external data entering ${found.label} against ${found.tags.join("|")}`,
         ),
       );
+      this.#readCheckKeys.push(null);
     }
+    return open;
   }
 
   /**
@@ -6568,6 +6776,26 @@ export class Admission {
   #againstOf(d: Definition, path: readonly string[]): ItemTag[] {
     if (!this.#besideDefault(d)) {
       const tags = this.admitted(d.place, path);
+      // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
+      // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
+      // TABLE r4.126)
+      const destination = this.#destPath(d);
+      if (
+        tags.length === 0 &&
+        this.pass.program.work.stopped !== null &&
+        d.value !== undefined &&
+        path.length >= destination.length
+      ) {
+        const read = this.host.read?.(d.value, d.node, path.slice(destination.length)) ?? [];
+        const kinds = [
+          ...new Set(
+            withoutEmpty(read)
+              .filter((item) => concrete(item))
+              .map((item) => item.tag),
+          ),
+        ];
+        if (kinds.length > 0) return kinds;
+      }
       // (an unrestricted destination, a copy's as the written part's, owes no boundary: every kind fits, V30 §13)
       return tags.includes("unknown") ? [] : tags;
     }
@@ -6585,15 +6813,24 @@ export class Admission {
    * least evaluation key; owed where a consumer met one of its ingresses' items, where a typed ingress lands where a
    * type is admitted (a parameter default too, r4.28; an argument or a return that carries a typed `load` or
    * `fromJson`, Sol M3 r8), or where one of its ingress stops stands where a type is admitted (the owner's F1).
+   * `written`: only the stores whose destination has a written type (a stop before admission settled).
    */
-  public publish(): void {
+  public publish(written = false): void {
     const { definitions, lists, program } = this.pass;
-    const index = this.#landingIndex();
+    const writtenAt = (d: Definition): boolean => {
+      const type = writtenOf(program.place(d.place).kind);
+      return type !== null && termAt(type, this.#destPath(d)) !== null;
+    };
+    // (`written`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
+    const index = this.#landingIndex(written ? writtenAt : undefined);
     const stores = new Set(definitions.storeDefs);
     const elements = elementsBelow;
     for (const [d, stops] of index.byStore) {
       program.work.charge("checks");
       if (stops.length === 0) continue;
+      // (`written`: a stop before admission settled reads no decision, so only a written destination's boundary forms;
+      // any other ingress store is marked, TABLE r4.110 (3))
+      if (written && !writtenAt(d)) continue;
       const destination = this.#destPath(d);
       // (a store or a parameter default of an ingress or carrying a typed one; an argument or a return carrying a typed
       // one)
@@ -6632,7 +6869,11 @@ export class Admission {
       }
       const path = joinSteps(destination, record.slice(0, common));
       const tags = this.#againstOf(d, path);
-      const label = this.pathLabel(d.place, path);
+      const label = this.pathLabel(
+        d.place,
+        path,
+        written ? writtenOf(program.place(d.place).kind) : null,
+      );
       const against: RequiredKind[] = tags.length > 0 ? tags.map(requiredKind) : ["unknown"];
       const key = keptKey(this.#work, d.place, path);
       const message = `validate external data entering ${label} against ${against.join("|")}`;
@@ -6766,6 +7007,76 @@ function boundaryCheck(
     site: { file: site.file, start: site.start, end: site.end },
     boundary: true,
   };
+}
+
+/**
+ * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled
+ * (TABLE r4.126, r4.138): where the fresh pass runs it (`Consumers.#freshStores`, or its walk, which finishes every
+ * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A C1 obligation
+ * comes from a decision (`decide`), which the consumers check. The lint check `check-obligation-inventory` reads the
+ * syntax tree: every method here that creates one, and every `Admission` method a consumer method that creates one
+ * calls, is an entry here or a read it lists with why (TABLE r4.143).
+ *
+ * @public (read by that check from the syntax tree, not imported)
+ */
+export const OBLIGATION_SITES = [
+  {
+    method: "decide",
+    runs: "#admittedStores",
+    published: "C1 against a written type at a store's path (A1)",
+    undecided: "a store into an inferred place, marked (#storeMark)",
+    declined: "an unrestricted destination; a multi-site argument decides nothing (F21)",
+  },
+  {
+    method: "literalElements",
+    runs: "literalElements",
+    published:
+      "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3, A8)",
+    undecided:
+      "a named element, one source identity's too (its test comes first): every definition holding its literal, or the literal, marked (#markHolder)",
+    declined:
+      "elements of one source identity, in a settled pass; a literal landing in a written place, which C1 checks",
+  },
+  {
+    method: "#boundaryAtRead",
+    runs: "the walk",
+    published: "an own read's boundary (C9)",
+    undecided: "none: ingress is structural (r4.113)",
+    declined: "none",
+  },
+  {
+    method: "boundaryFor",
+    runs: "the walk",
+    published: "an item's ingress boundary (C9)",
+    undecided: "none: ingress is structural (r4.113)",
+    declined: "an ingress the store owns (`ownIngress`)",
+  },
+  {
+    method: "ingressStores",
+    runs: "ingressStores",
+    published:
+      "a typed call's own boundary no store takes in, its type its syntax's or its default's (F18)",
+    undecided:
+      "a typed call whose default the finishing read leaves STOPPED: returned, the consumers mark it (#ingressMark)",
+    declined: "a typed call no type reaches: the runtime's validation alone",
+  },
+  {
+    method: "publish",
+    runs: "publish",
+    published: "an ingress store's boundary against a written destination (C9, S6-CARRIERS §3.3)",
+    undecided: "an ingress store into an inferred place, marked (#storeMark)",
+    declined: "an unrestricted destination (V30 §13)",
+  },
+] as const;
+
+/** Whether a constraint is a typed ingress (F18): a load, or a parse of text to a type. */
+function typedIngress(c: CorePass["program"]["constraints"][number]): boolean {
+  return (
+    c.kind === "load" ||
+    (c.kind === "operation" &&
+      c.contract.family === "conversion" &&
+      conversionCategory(c.contract.name)?.kind === "parses")
+  );
 }
 
 /** A required kind as an obligation names it. */

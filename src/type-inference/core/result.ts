@@ -8,6 +8,7 @@ import {
   type ItemTag,
   type Writer,
 } from "./items.js";
+import type { BudgetLimit } from "./budget.js";
 import { propertyName } from "./program.js";
 
 /**
@@ -17,7 +18,7 @@ import { propertyName } from "./program.js";
  * composes them (D1–D3). The record the set compares holds no sentence.
  */
 
-export type DiagnosticClass = "compile-error" | "warning-runtime-check";
+export type DiagnosticClass = "compile-error" | "warning-runtime-check" | "not-checked-budget";
 
 /**
  * The consumer a diagnostic belongs to (§10.5): a store into a typed place (and a fallback, C10), a member or element
@@ -28,8 +29,11 @@ export type DiagnosticKind = "written-target" | "member-read" | "integer-use" | 
 export type ObligationKind =
   "copy-type" | "null-check" | "operand" | "integer-check" | "empty-check";
 
-/** The worst diagnostic's class, `valid` without one, or `budget-error` at the emergency stop (TABLE §8, B1). */
-export type CoreOutcome = "valid" | DiagnosticClass | "budget-error";
+/**
+ * The worst diagnostic's class, or `valid` without one; a stop of the analysis is a warning (the owner's D4, TABLE
+ * r4.54), never an outcome of its own.
+ */
+export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check";
 
 /**
  * A kind an obligation requires: a value kind; `unknown`, any value the runtime can represent (a boundary check with no
@@ -206,13 +210,50 @@ export interface WrittenTypeError {
 }
 
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
-export type CoreCode = "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075";
+export type CoreCode =
+  "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
+
+/** A place the analysis counts work to and names: a function, or a file's top level, with its lines' site. */
+export interface WorkPlace {
+  /** The function's name, or `null` for a file's top level. */
+  readonly name: string | null;
+  /** The file's project path. */
+  readonly path: string;
+  /** The function's whole declaration, or the file's top-level code. */
+  readonly lines: SourceSite;
+}
+
+/**
+ * The analysis stopped proving (D4, option a′, TABLE r4.54, r4.55): past the work allowance, at a read chain past its
+ * depth (`read-depth`), or at statements nested past the nesting limit (`nesting`). One warning, at the heaviest place
+ * (the deepest nesting for `nesting`): the checks it moved to the runtime, `deferred` in number.
+ */
+export interface BudgetStop {
+  readonly class: "warning-runtime-check";
+  readonly kind: "budget";
+  readonly code: "TSV076";
+  readonly site: SourceSite;
+  readonly limit: BudgetLimit;
+  readonly place: WorkPlace;
+  readonly deferred: number;
+}
+
+/** "Not checked (budget)" (TABLE r4.54): a function, or a file's top level, some of whose checks run when it runs. */
+export interface NotChecked {
+  readonly class: "not-checked-budget";
+  readonly kind: "budget";
+  readonly code: "TSV076";
+  readonly site: SourceSite;
+  readonly place: WorkPlace;
+}
 
 /**
  * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
  * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
  */
 export type CoreDiagnostic =
+  | BudgetStop
+  | NotChecked
   | {
       readonly class: "compile-error";
       readonly kind: DiagnosticKind;
@@ -249,7 +290,9 @@ export interface CoreResult {
 export function outcomeOf(diagnostics: readonly CoreDiagnostic[]): CoreOutcome {
   if (diagnostics.some((diagnostic) => diagnostic.class === "compile-error"))
     return "compile-error";
-  return diagnostics.length > 0 ? "warning-runtime-check" : "valid";
+  return diagnostics.some((diagnostic) => diagnostic.class === "warning-runtime-check")
+    ? "warning-runtime-check"
+    : "valid";
 }
 
 /**
@@ -414,35 +457,39 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
     ...(check.boundary ? { boundary: true, reason: "external-data" } : {}),
   });
   const diagnostics = result.diagnostics.map((diagnostic): RecordDiagnostic =>
-    diagnostic.class === "compile-error"
-      ? {
-          class: diagnostic.class,
-          kind: diagnostic.kind,
-          site: site(diagnostic.site),
-          ...(diagnostic.kind === "written-type"
-            ? { union: site(diagnostic.union), suggestion: diagnostic.suggestion }
-            : diagnostic.rule.rule === "store" && diagnostic.rule.brought !== null
-              ? { related: site(diagnostic.rule.brought) }
-              : {}),
-        }
-      : {
-          class: diagnostic.class,
-          kind: diagnostic.kind,
-          site: site(diagnostic.site),
-          provenance: {
-            writers: diagnostic.provenance.writers.map(
-              (writer) => `${writer.kind}@${path(writer.file)}:${writer.start}`,
-            ),
-            more: false,
-            context: diagnostic.provenance.context,
+    diagnostic.kind === "budget"
+      ? { class: diagnostic.class, kind: diagnostic.kind, site: site(diagnostic.site) }
+      : diagnostic.class === "compile-error"
+        ? {
+            class: diagnostic.class,
+            kind: diagnostic.kind,
+            site: site(diagnostic.site),
+            ...(diagnostic.kind === "written-type"
+              ? { union: site(diagnostic.union), suggestion: diagnostic.suggestion }
+              : diagnostic.rule.rule === "store" && diagnostic.rule.brought !== null
+                ? { related: site(diagnostic.rule.brought) }
+                : {}),
+          }
+        : {
+            class: diagnostic.class,
+            kind: diagnostic.kind,
+            site: site(diagnostic.site),
+            provenance: {
+              writers: diagnostic.provenance.writers.map(
+                (writer) => `${writer.kind}@${path(writer.file)}:${writer.start}`,
+              ),
+              more: false,
+              context: diagnostic.provenance.context,
+            },
+            obligation: obligation(diagnostic.obligation),
           },
-          obligation: obligation(diagnostic.obligation),
-        },
   );
   // each diagnostic's obligation, also where two read alike (§4: a diagnostic per obligation), then every other check once,
   // in the answers' order (`checksBySite`)
   const owned = result.diagnostics.flatMap((diagnostic) =>
-    diagnostic.class === "compile-error" ? [] : [diagnostic.obligation],
+    diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget"
+      ? [diagnostic.obligation]
+      : [],
   );
   const listed = new Set(owned.map((check) => JSON.stringify(obligation(check))));
   const others: Obligation[] = [];

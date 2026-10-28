@@ -7,7 +7,7 @@ import * as handles from "../adapters/handles.js";
 import type { OperandView, OperationInputs } from "../adapters/relation.js";
 import * as text from "../adapters/text.js";
 import type { MemberRules } from "../adapters/views.js";
-import type { Constraint, PlaceId, SourceSite } from "../graph.js";
+import type { Constraint, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import {
   Admission,
   concrete,
@@ -26,15 +26,28 @@ import {
   OWN_SELECTION,
   REFERENCE,
   termAt,
+  typedDefault,
   typeTags,
+  unknownItem,
+  writtenOf,
 } from "./contract.js";
-import { keyOf, keyPath, keyPlace, type Definition, type Key } from "./definitions.js";
+import {
+  keptKey,
+  keptKeyBelow,
+  keyOf,
+  keyPath,
+  keyPlace,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import {
+  EMPTY,
   firstWriter,
   makeItem,
   REASON,
+  STOPPED,
   type ContextWord,
   type Item,
   type ItemTag,
@@ -47,6 +60,7 @@ import {
   measuresLength,
   selectsElement,
 } from "./method-categories.js";
+import { Laminar } from "./narrowing.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "./operator-table.js";
 import { operatorOf } from "./contract.js";
 import { propertyName, propertyStep, siteKey, stepName, type ValueConstraint } from "./program.js";
@@ -58,6 +72,7 @@ import {
   explainingItem,
   offendingKinds,
   provenanceOf,
+  targetName,
   type ContextDetail,
   type CoreDiagnostic,
   type CountUse,
@@ -71,13 +86,18 @@ import {
 } from "./result.js";
 import type { ReadWork } from "./answers.js";
 import {
+  BudgetExhausted,
   joinParts,
   joinSteps,
   keepText,
   keptArray,
+  keptParts,
+  keptSlice,
+  keptSteps,
   pathText,
   stepText,
   WORK_PER_NODE,
+  type BudgetLimit,
 } from "./budget.js";
 import type { Work } from "./solver.js";
 
@@ -228,10 +248,48 @@ function inDomainOrder(kinds: Iterable<ItemTag>): ItemTag[] {
   return [...new Set(kinds)].sort((a, b) => rank(a) - rank(b));
 }
 
+/** Whether two passes reject the same stores (A6): the pass's admission settled. */
+function sameStores(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown>): boolean {
+  return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
+}
+
 /** A member check's offending kind beside the default one: its item, its `on` words. */
 type Offending = readonly [Item, string];
 
 let consumerOrder: (<T>(list: readonly T[]) => T[]) | null = null;
+
+/** The records a test leaves out (`withoutRecords`): warnings, and checks no warning owns. */
+export interface Omission {
+  readonly diagnostic: (diagnostic: CoreDiagnostic) => boolean;
+  readonly check: (check: Obligation) => boolean;
+}
+
+let leftOut: Omission | null = null;
+
+/**
+ * Test-only: runs `callback` with what `omit` names left out: the marks a stop makes, with what their consumer forms only
+ * with them, and the warnings and checks every discharge inside it plans (`consumer.ts`). The stop oracle's measure of a
+ * record's content (`tests/helpers/type-core-stop-oracle.ts`, TABLE r4.108, r4.110).
+ */
+export function withoutRecords<T>(omit: Omission, callback: () => T): T {
+  if (leftOut !== null) throw new Error("Records are already left out.");
+  leftOut = omit;
+  try {
+    return callback();
+  } finally {
+    leftOut = null;
+  }
+}
+
+/** Whether `withoutRecords` leaves a warning out of the discharge. */
+export function leftOutWarning(diagnostic: CoreDiagnostic): boolean {
+  return leftOut?.diagnostic(diagnostic) === true;
+}
+
+/** Whether `withoutRecords` leaves a check no warning owns out of the discharge. */
+export function leftOutCheck(check: Obligation): boolean {
+  return leftOut?.check(check) === true;
+}
 
 /** Test-only: runs `callback` with every analysis inside it visiting its consumers in `order` (ADR 0021 1.6). */
 export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], callback: () => T): T {
@@ -244,10 +302,80 @@ export function withConsumerOrder<T>(order: <U>(list: readonly U[]) => U[], call
   }
 }
 
+/** The collection literals and their own kinds; their elements (a dict's entries) are their children. */
+const COLLECTION_LITERALS: ReadonlyMap<string, "list" | "set" | "dict"> = new Map([
+  ["listLiteral", "list"],
+  ["setLiteral", "set"],
+  ["dictLiteral", "dict"],
+]);
+
+/** The literals whose kind is their own, the finishing path's one proof (`Consumers.#valueItems`). */
+const LITERALS: ReadonlySet<string> = new Set([
+  "numberLiteral",
+  "booleanLiteral",
+  "nullLiteral",
+  "stringLiteral",
+  "durationLiteral",
+  "regexLiteral",
+]);
+
+/** Whether an item is the unknown a stop leaves where nothing is settled (`STOPPED`'s). */
+function unsettledItem(item: Item): boolean {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
+}
+
+/** The walk's stages after admission's, in order (D4: a stop keeps every unit before it). */
+const STAGES = 4;
+
+/** The rank of a stop's own warning and marks among a site's diagnostics: after every consumer's (`Consumers.rules`). */
+export const STOP_RULE = 5 + STAGES;
+
+/** A typed parse or load (F18), with its default where it has one; `null` for any other value. */
+export function typedCall(
+  program: CorePass["program"],
+  value: PlaceId,
+): { readonly fallback: PlaceId | undefined } | null {
+  const c = program.opOf.get(value);
+  if (c?.kind === "load") return { fallback: c.fallback ?? undefined };
+  if (
+    c?.kind === "operation" &&
+    c.contract.family === "conversion" &&
+    conversionCategory(c.contract.name)?.kind === "parses"
+  )
+    return { fallback: defaultOf(c) ?? undefined };
+  return null;
+}
+
 export class Consumers {
   readonly diagnostics: CoreDiagnostic[] = [];
-  /** Where each consumer's diagnostics end, in the order the consumers run (the published order's rules, r4.86 (1)). */
-  readonly rules: number[] = [];
+  /**
+   * The finishing path's warnings (D4 a′): the checks the stop or the nesting limit moved to the runtime, never shown
+   * one by one; the stop's one warning counts them, and each function they stand in is marked not checked.
+   */
+  readonly deferred: Extract<CoreDiagnostic, { obligation: unknown }>[] = [];
+  /**
+   * Each diagnostic's rank, `diagnostics`' and `deferred`'s alike: its consumer's place in the order the consumers run,
+   * from 1 (the published order's rules, TABLE r4.86 (1)); the finishing path ranks its findings as the walk does.
+   */
+  readonly rules = new Map<CoreDiagnostic, number>();
+  /** The rank of the consumer running now (`rules`): admission's three, the walk's four stages, the publication. */
+  #rule = 0;
+  /** The limit the walk stopped at, or `null`. */
+  stopped: BudgetLimit | null = null;
+  /** Whether admission settled in this pass: its rejections are the pass's own (A6), so its findings stand. */
+  settled = false;
+  /** Whether admission's boundary checks were published (`Admission.publish`), the walk's last step. */
+  published = false;
+  /** The walk's place: its stage (-1 admission, `STAGES` publication) and the next unit in it. */
+  #stage = -1;
+  #unit = 0;
+  /** Where the walk stopped, the stage and the unit it was in; `null` before a stop, or to finish every unit. */
+  #stoppedAt: { readonly stage: number; readonly unit: number } | null = null;
+  /** What the walk had found before the running unit: a stop takes its partial findings back. */
+  #mark = { diagnostics: 0, readChecks: 0 };
+  #finishing = false;
+  readonly #last: boolean;
+  readonly #rejected: ReadonlyMap<number, ReadonlySet<Key>>;
   /** Admission's decisions, rejections and boundary checks (§5, C9). */
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -256,11 +384,23 @@ export class Consumers {
   readonly #quietSides = new Set<string>();
   /** Each consumer read's demand and the work it was the first to compute (S3 §5: a counter only here). */
   readonly reads: ReadWork[] = [];
-  #reading: FlowNode | null = null;
+  #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
   readonly #order: <T>(list: readonly T[]) => T[];
   readonly #getOf = new Map<PlaceId, PlaceId>();
   readonly #resultOfCall = new Map<PlaceId, PlaceId>();
+  /**
+   * What a label's walk up a projection chain asks, once per value (`#keyLabel` asks it at every level of every label,
+   * each a walk of up to 256 steps or a contract): the element step below each owner, and whether each chain passes a
+   * derived list or starts at no place.
+   */
+  readonly #elementSteps = new Map<PlaceId, string>();
+  readonly #derivedChains = new Map<PlaceId, boolean>();
+  readonly #anonymousChains = new Map<PlaceId, boolean>();
+  /** Per value read in the finishing path, the written type at its own path (`#writtenRead`), `null` for none. */
+  readonly #writtenReads = new Map<PlaceId, TypeTerm | null>();
+  /** Per value read in the finishing path, its key (`#readKey`), `null` for none. */
+  readonly #readKeys = new Map<PlaceId, Key | null>();
   readonly #presence = new Map<
     string,
     { readonly state: "none" | "some" | "all"; readonly literal: Writer | null }
@@ -271,9 +411,24 @@ export class Consumers {
     readonly pass: CorePass,
     rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map(),
     cycling: ReadonlySet<number> = new Set(),
+    last = false,
+    finishing = false,
   ) {
+    this.#rejected = rejected;
+    this.#last = last;
+    // (a walk made for the finishing path asks nothing from its start: admission's own setup asks values too)
+    this.#finishing = finishing;
     this.#order = consumerOrder ?? ((list) => [...list]);
-    this.admission = new Admission(pass, { run: (work) => this.#run(work) }, rejected, cycling);
+    this.admission = new Admission(
+      pass,
+      {
+        run: (work) => this.#solve(work),
+        // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
+        read: (value, node, at) => (this.#finishing ? this.#finishingRead(value, node, at) : null),
+      },
+      rejected,
+      cycling,
+    );
     const program = pass.program;
     for (const c of program.constraints) {
       if (c.kind === "get") this.#getOf.set(c.result, c.receiver);
@@ -281,7 +436,494 @@ export class Consumers {
     }
   }
 
-  #run<T>(work: Work<T>): T {
+  /** The node a consumer reads at, its callable the spender of the work that follows (the heaviest place, D4). */
+  get #reading(): FlowNode | null {
+    return this.#readingNode;
+  }
+
+  set #reading(node: FlowNode | null) {
+    this.#readingNode = node;
+    if (node !== null) this.pass.program.work.spender = this.pass.program.spenderOf(node);
+  }
+
+  /**
+   * A value's items at a node and a path: every consumer's one read, unstopped or finishing, so a stop's obligations
+   * come from the same consumers as an unstopped analysis's (TABLE r4.99). In the finishing path it reads what is
+   * settled (`#finishingRead`), `STOPPED` only where nothing is.
+   */
+  #valueItems(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement = false,
+  ): readonly Item[] {
+    return this.#finishing
+      ? this.#finishingRead(value, node, rest, requirement)
+      : this.#run(this.pass.values.valueItems(value, node, rest));
+  }
+
+  /**
+   * After a stop, a value's items at a node and a path as the finishing read answers them (`#finishingRead`), for the
+   * route's questions: one derivation with the consumers' (TABLE r4.138).
+   */
+  public finishedItems(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): readonly Item[] {
+    return this.#finishingRead(value, node, rest);
+  }
+
+  /**
+   * A read in the finishing path (D4 a′, TABLE r4.90, r4.99; S3 §5 revision 14, r4.102), answered from the retained
+   * state only, the first source that decides it winning: a leaf's own kind (`#leafKind`), which no proof decides (an
+   * error found there stands, a host read's boundary check forms); the read itself, then its key's contract, as the analysis had finished them before the stop (`#run`:
+   * the solver answers only from what had finished); the admitted type admission retained at its key's path (written,
+   * decided, or a copy's through the copy forest, `Admission.retained`); `STOPPED` (`unknown` with the reason `budget`)
+   * only where none of these decides it, so its consumer owes its check when the script runs. Only a leaf's kind and the
+   * read's own answer are the value at the read; the key's contract, the written and the retained type are domains,
+   * what the key may hold over all its stores (revisions 15, 16; r4.105, r4.106): read as the value for a fixed need,
+   * possibly empty at an element; for a `requirement` that follows from the value's kinds (C10's family) only through
+   * `#required`.
+   */
+  #finishingRead(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement = false,
+  ): readonly Item[] {
+    // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
+    // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126)
+    const { program } = this.pass;
+    if (
+      rest.length > 0 &&
+      program.places[value]?.kind.kind === "value" &&
+      program.hasOf.has(value)
+    ) {
+      const items: Item[] = [];
+      for (const child of this.admission.literalChildren(value, rest[0]!))
+        if (child.value !== undefined && this.#stands(child))
+          items.push(
+            ...this.#finishingRead(
+              child.value,
+              child.node ?? node,
+              keptSlice(program.work, rest, 1),
+              requirement,
+            ),
+          );
+      if (items.length > 0) return items;
+    }
+    const own = this.#leafKind(value, rest);
+    if (own !== null) return own;
+    const items = this.#laterSources(value, node, rest, requirement);
+    // (a host read's ingress is structural whatever the script stores into its global: its C9 boundary forms from it,
+    // beside the kinds the later sources give, TABLE r4.113)
+    const ingress = requirement ? null : this.#hostIngress(value);
+    return ingress === null || items.some((item) => item.ingress !== undefined)
+      ? items
+      : [...items, ...ingress];
+  }
+
+  /**
+   * After a stop, a typed parse's or load's expected type at a path (F18): its written destination's (`landsIn`), else its
+   * default's own kinds as a typed default reads it (`typedDefault`: a `null` there leaves its level open), through a
+   * chain of typed defaults, as the route's stopped answers read it (`CoreAnswers.#stoppedShape`); `null` for any other
+   * value and where none gives a type. Each link of a chain and path once.
+   */
+  #typedRead(value: PlaceId, path: readonly string[]): readonly Item[] | null {
+    const { program, contract } = this.pass;
+    if (typedCall(program, value) === null) return null;
+    const memo = keptParts(program.work, value, path);
+    const known = this.#typedReads.get(memo);
+    if (known !== undefined) return known;
+    const chain = [memo];
+    let found: readonly Item[] | null | undefined;
+    for (let at = value, call = typedCall(program, at); found === undefined;) {
+      program.work.charge("checks");
+      const written = contract.landsIn(at, []);
+      if (written !== null) {
+        const term = termAt(written, path);
+        const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
+        found = tags.length === 0 ? null : tags.map((tag) => makeItem(tag, null, { cert: "def" }));
+      } else if (call?.fallback === undefined) found = null;
+      else {
+        at = call.fallback;
+        call = typedCall(program, at);
+        const link = keptParts(program.work, at, path);
+        if (call !== null) {
+          found = this.#typedReads.get(link);
+          chain.push(link);
+        } else {
+          // the default itself: its own kinds as a typed default reads them; a default no literal gives (a named one, a
+          // call's result) by its read's finished answer, else by its domain (its written, contract or retained type,
+          // TABLE r4.144) only where one kind no narrower kind refines decides it: a domain is not the value (an
+          // `integer?` may hold null alone, which leaves the level open; a `number` an integer), so elsewhere the type
+          // stays open, `STOPPED`, and the call is marked (Codex r22 B1)
+          const decision = typedDefault(path, false);
+          let own = this.#leafKind(at, path);
+          if (own === null && !this.#literalSyntax(at)) {
+            own = this.#finishedAnswer(at, null, path);
+            if (own === null) {
+              const domain = this.#finishingRead(at, null, path);
+              own =
+                domain.length === 1 && concrete(domain[0]!) && domain[0]!.tag !== "number"
+                  ? domain
+                  : STOPPED;
+            }
+          }
+          found =
+            own === null
+              ? null
+              : own === STOPPED
+                ? STOPPED
+                : decision.answer(decision.choose(own), own);
+        }
+      }
+    }
+    for (const link of chain) this.#typedReads.set(link, found);
+    return found;
+  }
+
+  readonly #typedReads = new Map<string, readonly Item[] | null>();
+
+  /** Whether a value is a literal's own syntax: a scalar, collection or record literal. */
+  #literalSyntax(value: PlaceId): boolean {
+    const place = this.pass.program.places[value]?.kind;
+    return (
+      place?.kind === "value" &&
+      (LITERALS.has(place.node) ||
+        COLLECTION_LITERALS.has(place.node) ||
+        place.node === "objectLiteral")
+    );
+  }
+
+  /** After a stop, a read's own finished answer (the solver answers only what had finished); `null` where it had not. */
+  #finishedAnswer(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): readonly Item[] | null {
+    if (this.pass.program.work.stopped === null) return null;
+    const items = this.#run(this.pass.values.valueItems(value, node, rest));
+    return items.some(unsettledItem) ? null : items;
+  }
+
+  /** `#finishingRead`'s sources after a leaf's own kind: the read's finished answer, then the domains. */
+  #laterSources(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+    requirement: boolean,
+  ): readonly Item[] {
+    const { contract } = this.pass;
+    // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
+    const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
+      const items = this.#run(work());
+      return items.some(unsettledItem) ? null : items;
+    };
+    // the value at the read: its own finished answer
+    const exact = this.#finishedAnswer(value, node, rest);
+    if (exact !== null) return exact;
+    // else its own syntax: a typed parse's or load's expected type (F18), as the route's stopped answers read it; a type,
+    // so a domain like those below (a typed list may be empty: C6), but external data where no type reaches it
+    const typed = this.#typedRead(value, rest);
+    if (typed !== null && typed.some(isExternal)) return typed;
+    const typedTags =
+      typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
+    // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
+    const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
+    if (held !== null)
+      return requirement ? this.#required(withoutEmpty(held).map((item) => item.tag)) : held;
+    // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
+    // decision or a copy's only where admission settled
+    const written = typedTags === null ? this.#writtenRead(value) : null;
+    const term = written === null ? null : termAt(written, rest);
+    const tags =
+      typedTags ??
+      (term !== null
+        ? typeTags(term)
+        : this.settled
+          ? (this.#retainedRead(value, rest) ?? [])
+          : []);
+    if (requirement) return this.#required(tags);
+    if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
+    const items = tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
+    const step = rest.at(-1) ?? this.pass.program.projOf.get(value)?.step;
+    return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+  }
+
+  /**
+   * A key's read in the finishing path (a store's receiver), from the same retained state as `#finishingRead`: its own
+   * finished answer at the node; else, domains, its finished contract and its written or retained admitted type (S3 §5
+   * revisions 14, 16); `STOPPED` where none decides it. A receiver the retained state decides keeps its shape, so a store
+   * into a property no source has keeps its error at the literal (TABLE r4.108).
+   */
+  #finishingKeyRead(key: Key, node: FlowNode): readonly Item[] {
+    const { program } = this.pass;
+    // (a host global holds its own external data where the script stores at no path at or above the key, as its reads
+    // do: `#leafKind`; that data is there whatever it stores, so its C9 boundary forms, TABLE r4.113)
+    const host = program.isHost(keyPlace(key));
+    if (host && !this.#storedAbove(keyPlace(key), keyPath(key)))
+      return [unknownItem(REASON.external)];
+    const items = this.#laterKeySources(key, node);
+    return host && !items.some((item) => isExternal(item))
+      ? [...items, unknownItem(REASON.external)]
+      : items;
+  }
+
+  /** `#finishingKeyRead`'s sources after a host global's own data: the key's finished answer, then the domains. */
+  #laterKeySources(key: Key, node: FlowNode): readonly Item[] {
+    const { contract, values, program } = this.pass;
+    const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
+      const items = this.#run(work());
+      return items.some(unsettledItem) ? null : items;
+    };
+    const found =
+      (program.work.stopped === null ? null : settled(() => values.keyItems(key, node))) ??
+      settled(() => contract.contractOf(key));
+    if (found !== null) return found;
+    const [place, path] = [keyPlace(key), keyPath(key)];
+    const written = writtenOf(program.place(place).kind);
+    const term = written === null ? null : termAt(written, path);
+    const tags =
+      term !== null
+        ? typeTags(term)
+        : this.settled
+          ? (this.admission.retained(place, path) ?? [])
+          : [];
+    return tags.length === 0 || tags.includes("unknown")
+      ? STOPPED
+      : tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+  }
+
+  /**
+   * A domain read for a requirement that follows from the value's kinds (C10's family; S3 §5 revisions 15, 16): every
+   * value in it must give the same requirement. One family without `null` gives it, as possible kinds (a domain proves
+   * nothing); `null` only gives none; any other domain leaves it undecided (`STOPPED`: r4.100's mark).
+   */
+  #required(tags: readonly ItemTag[]): readonly Item[] {
+    if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
+    const families = new Set(
+      tags.filter((tag) => tag !== "null").map((tag) => (tag === "integer" ? "number" : tag)),
+    );
+    if (families.size === 0) return [makeItem("null", null, { cert: "pos" })];
+    return families.size === 1 && !tags.includes("null")
+      ? tags.map((tag) => makeItem(tag, null, { cert: "pos" }))
+      : STOPPED;
+  }
+
+  /** The admitted type admission retained at a read's key path and `rest` (`Admission.retained`), else `null`. */
+  #retainedRead(value: PlaceId, rest: readonly string[]): readonly ItemTag[] | null {
+    const key = this.#readKey(value);
+    return key === null
+      ? null
+      : this.admission.retained(keyPlace(key), joinSteps(keyPath(key), rest));
+  }
+
+  /**
+   * A read's key: its binding's root and path, then a step per projection, each value's kept once and made from its
+   * owner's by its step (`#writtenRead`'s walk); `null` where a loop's element or no binding is read.
+   */
+  #readKey(value: PlaceId): Key | null {
+    const { program } = this.pass;
+    const chain: PlaceId[] = [];
+    let at = value;
+    for (
+      let projection = program.projOf.get(at);
+      projection !== undefined && !this.#readKeys.has(at);
+      projection = program.projOf.get(at)
+    ) {
+      chain.push(at);
+      at = projection.owner;
+    }
+    let key = this.#readKeys.get(at);
+    if (key === undefined) {
+      program.work.charge("checks");
+      const binding = program.occurrenceOf.get(at);
+      const target = binding === undefined ? null : program.targetRoot(binding);
+      key = target === null ? null : keptKey(program.work, target.root, target.path);
+      this.#readKeys.set(at, key);
+    }
+    for (const next of chain.reverse()) {
+      program.work.charge("checks");
+      const step = program.projOf.get(next)!.step;
+      key =
+        key === null || step === "iteration"
+          ? null
+          : keptKeyBelow(program.work, key, [stepName(step)]);
+      this.#readKeys.set(next, key);
+    }
+    return key;
+  }
+
+  /** A scalar literal's own kind, which no proof decides (an error found there stands, D4 a′); `null` for any other value. */
+  /**
+   * A leaf's own kind (S3 §5 revision 18, TABLE r4.109 (1)): a literal's own kind at the read, and below it its
+   * children's, or a host read's own ingress, directly or through projections (`Contract.ingressOf`), where the script
+   * stores into its host global at no path at or above the read's own: what the value is, known from the program's
+   * structure without solving; else `null`.
+   */
+  #leafKind(value: PlaceId, rest: readonly string[]): readonly Item[] | null {
+    const { program } = this.pass;
+    const own =
+      rest.length === 0 ? (this.#literalKind(value) ?? this.#ownLiteralKind(value)) : null;
+    if (own !== null) return own;
+    // (below a collection or record literal, its own children's, each a leaf: `[hostValue]` at its element)
+    const place = program.places[value]?.kind;
+    if (rest.length > 0 && place?.kind === "value" && program.hasOf.has(value)) {
+      const items: Item[] = [];
+      for (const child of this.admission.literalChildren(value, rest[0]!)) {
+        const found = child.value === undefined ? null : this.#leafKind(child.value, rest.slice(1));
+        if (found === null) return null;
+        items.push(...found);
+      }
+      return items.length === 0 ? null : items;
+    }
+    // (a host read: its kinds only where the script stores at no path at or above the read's own, TABLE r4.113)
+    const ingress = this.#hostIngress(value);
+    const key = ingress === null ? null : this.#readKey(value);
+    return key !== null && !this.#storedAbove(keyPlace(key), joinSteps(keyPath(key), rest))
+      ? ingress
+      : null;
+  }
+
+  /**
+   * A host read's ingress, directly or through projections (`Contract.ingressOf`): its external data named by its leaf,
+   * known from the program's structure whatever the script stores into the global (TABLE r4.113); else `null`.
+   */
+  #hostIngress(value: PlaceId): readonly Item[] | null {
+    const { contract, program } = this.pass;
+    const ingress = contract.ingressOf(value);
+    const binding = ingress === null ? undefined : program.occurrenceOf.get(ingress);
+    return binding !== undefined && program.isHost(binding)
+      ? contract.entered(value, [unknownItem(REASON.external)])
+      : null;
+  }
+
+  /**
+   * The host data a value holds at every element depth of its own literals (`[hostValue]`, `[[hostValue]]`): each host
+   * read's own ingress there (`#leafKind`), the literals walked once by their own structure. A mark at a default stands in
+   * for its check at every depth, so its host data meets its boundaries with it (TABLE r4.110 (a)).
+   */
+  #heldHostData(value: PlaceId): Item[] {
+    const { program } = this.pass;
+    const out: Item[] = [];
+    const pending = [value];
+    while (pending.length > 0) {
+      const at = pending.pop()!;
+      program.work.charge("checks");
+      const place = program.places[at]?.kind;
+      if (place?.kind === "value" && COLLECTION_LITERALS.has(place.node)) {
+        for (const child of this.admission.literalChildren(at, "element"))
+          if (child.value !== undefined) pending.push(child.value);
+      } else out.push(...(this.#leafKind(at, []) ?? []));
+    }
+    return out;
+  }
+
+  /**
+   * Whether the script stores into the host global `place` at `path` or at a path above it (a store below or beside it
+   * does not replace the value read there), each global's stored paths found once (`#leafKind`, TABLE r4.113).
+   */
+  #storedAbove(place: PlaceId, path: readonly string[]): boolean {
+    if (this.#hostStores === null) {
+      const { program, definitions } = this.pass;
+      const stored = new Map<PlaceId, Definition[]>();
+      for (const d of definitions.storeDefs) {
+        program.work.charge("checks");
+        if (!program.isHost(d.place)) continue;
+        const list = stored.get(d.place);
+        if (list === undefined) stored.set(d.place, [d]);
+        else list.push(d);
+      }
+      this.#hostStores = stored;
+    }
+    // (an add stores at its path's element)
+    return (this.#hostStores.get(place) ?? []).some((d) => {
+      const length = d.path.length + (d.kind === "add" ? 1 : 0);
+      return (
+        length <= path.length &&
+        d.path.every((step, index) => path[index] === step) &&
+        (d.kind !== "add" || path[d.path.length] === "element")
+      );
+    });
+  }
+
+  #hostStores: Map<PlaceId, Definition[]> | null = null;
+
+  /** A collection or record literal's own kind, its syntax (as the stopped shapes read it); `null` for any other value. */
+  #ownLiteralKind(value: PlaceId): readonly Item[] | null {
+    const place = this.pass.program.places[value]?.kind;
+    if (place?.kind !== "value") return null;
+    const own = place.node === "objectLiteral" ? "object" : COLLECTION_LITERALS.get(place.node);
+    return own === undefined ? null : [makeItem(own, null, { cert: "def" })];
+  }
+
+  #literalKind(value: PlaceId): readonly Item[] | null {
+    const { program } = this.pass;
+    const place = program.places[value]?.kind;
+    const has = program.hasOf.get(value);
+    return place?.kind === "value" &&
+      LITERALS.has(place.node) &&
+      has?.length === 1 &&
+      has[0]!.type.kind === "atom"
+      ? [makeItem(has[0]!.type.name, null, { cert: "def" })]
+      : null;
+  }
+
+  /**
+   * The written type a value's read holds at its own path: its binding's written type at the path its projections
+   * read; each value's made from its owner's by its step, so a chain of k projections takes k steps.
+   */
+  #writtenRead(value: PlaceId): TypeTerm | null {
+    const { program } = this.pass;
+    const chain: PlaceId[] = [];
+    let at = value;
+    for (
+      let projection = program.projOf.get(at);
+      projection !== undefined && !this.#writtenReads.has(at);
+      projection = program.projOf.get(at)
+    ) {
+      chain.push(at);
+      at = projection.owner;
+    }
+    let term = this.#writtenReads.get(at);
+    if (term === undefined) {
+      program.work.charge("checks");
+      const binding = program.occurrenceOf.get(at);
+      const target = binding === undefined ? null : program.targetRoot(binding);
+      const written = target === null ? null : writtenOf(program.place(target.root).kind);
+      term = written === null ? null : termAt(written, target!.path);
+      this.#writtenReads.set(at, term);
+    }
+    for (const next of chain.reverse()) {
+      program.work.charge("checks");
+      const step = program.projOf.get(next)!.step;
+      // (a loop's element read is the loop's own binding, read by its own occurrences)
+      term = term === null || step === "iteration" ? null : termAt(term, [stepName(step)]);
+      this.#writtenReads.set(next, term);
+    }
+    return term ?? null;
+  }
+
+  /**
+   * A consumer's question of the solver. In the finishing path after a stop the solver answers only from what had
+   * finished, else `STOPPED` (`Solver.run`); it is not asked at all where nothing stopped (the units nested past the
+   * nesting limit) nor where admission had not settled (a fresh pass, nothing finished: as the route's questions,
+   * `CoreAnswers.#run`).
+   */
+  #run(work: Work<readonly Item[]>): readonly Item[] {
+    return this.#asksNothing() ? STOPPED : this.#solve(work);
+  }
+
+  /** Whether a finishing walk asks the solver nothing (`#run`): nested past the limit, or after an unsettled stop. */
+  #asksNothing(): boolean {
+    return this.#finishing && (this.pass.program.work.stopped === null || !this.settled);
+  }
+
+  /** A demand of the solver, its work counted to the read that asked it (S3 §5). */
+  #solve<T>(work: Work<T>): T {
     const ledger = this.pass.program.work;
     const before = ledger.total;
     const result = this.pass.solver.run(work);
@@ -317,23 +959,362 @@ export class Consumers {
     for (const value of values) if (value !== undefined) this.quiet.add(value);
   }
 
-  /** Every consumer of the program, once, each one's diagnostics ending at its entry of `rules`. */
+  /** The phase of this pass the stop came in: admission's walk, the consumers' walk or the publication; else `null`. */
+  public stopPhase(): "admission" | "walk" | "publication" | null {
+    if (this.stopped === null || this.#stoppedAt === null) return null;
+    const { stage } = this.#stoppedAt;
+    return stage < 0 ? "admission" : stage === STAGES ? "publication" : "walk";
+  }
+
+  /**
+   * Every consumer of the program, once. A stop (the work allowance, a read chain's depth) ends the walk: the units it
+   * finished keep their findings, the running unit's are taken back (D4 a′, TABLE r4.54); whether they stand is
+   * `settled`'s, since a later pass of admission may still change them (A6).
+   */
   public check(): void {
-    const consumers = [
-      () => this.#admittedStores(),
-      () => this.admission.ingressStores(),
-      () => this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found)),
-      () => this.#operations(),
-      () => this.#uses(),
-      () => this.#receivers(),
-      () => this.#speakers(),
-      () => this.admission.publish(),
-    ];
-    for (const consumer of consumers) {
-      consumer();
-      this.rules.push(this.diagnostics.length);
+    try {
+      this.#rule = 1;
+      this.#admittedStores();
+      this.#rule = 2;
+      for (const { site, label } of this.admission.ingressStores()) this.#ingressMark(site, label);
+      this.#rule = 3;
+      this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found));
+      this.settled = this.#last || sameStores(this.admission.newlyRejected, this.#rejected);
+      // (admission's findings are the walk's before its first unit)
+      this.#mark = {
+        diagnostics: this.diagnostics.length,
+        readChecks: this.admission.readChecks.length,
+      };
+      this.#walk();
+      // (the walk's findings stand whole before the publication: a stop in it takes none of them back)
+      this.#stage = STAGES;
+      this.#rule = 4 + STAGES;
+      this.#mark = {
+        diagnostics: this.diagnostics.length,
+        readChecks: this.admission.readChecks.length,
+      };
+      this.admission.publish();
+      this.published = true;
+    } catch (error) {
+      if (!(error instanceof BudgetExhausted)) throw error;
+      this.pass.program.work.stop(error.limit);
+      this.stopped = error.limit;
+      this.#stoppedAt = { stage: this.#stage, unit: this.#unit - 1 };
+      this.diagnostics.length = this.#mark.diagnostics;
+      this.admission.takeBackReadChecks(this.#mark.readChecks);
     }
   }
+
+  /** The consumers that operations, uses, receivers and speakers are, in that order (the walk's stages). */
+  #walk(): void {
+    this.#operations();
+    this.#uses();
+    this.#receivers();
+    this.#speakers();
+  }
+
+  /**
+   * The finishing path (D4 a′, TABLE r4.54, r4.55): the units a stop left, or with `all` every one (admission did not
+   * settle, so nothing before the stop stands), and the units nested past the nesting limit, each with no further
+   * proving: every value they read is `unknown` with the reason `budget` (`STOPPED`), so each consumer owes its check,
+   * its warning one of `deferred`. With `all`, also the stores' obligations admission's walk would have made, no
+   * decision read (`#freshStores`). Without `all`, admission settled: what it decided and what the walk found before the stop stand
+   * (TABLE r4.90), and a publication the stop cut or never reached finishes against those decisions, the solver
+   * answering only what it had finished. Bounded by the units, each a constant number of steps besides its own syntax.
+   */
+  public finish(all: boolean): void {
+    this.#finishing = true;
+    this.#stoppedAt = all ? null : (this.#stoppedAt ?? { stage: STAGES, unit: 0 });
+    this.#walk();
+    // (the stores' obligations rank as admission's do)
+    this.#rule = all ? 1 : 4 + STAGES;
+    if (all) this.#freshStores();
+    else if (!this.published) {
+      // (from its start: what the cut publication had made is made again)
+      this.admission.boundaries.clear();
+      this.admission.publish();
+      this.published = true;
+    }
+  }
+
+  /**
+   * Whether the walk runs its next unit at `site`: in the analysis, every unit but those nested past the limit (checked
+   * when the script runs); in the finishing path, those and the units the stop left. Marks what was found before it.
+   */
+  #runs(site: SourceSite): boolean {
+    const unit = this.#unit;
+    this.#unit += 1;
+    this.#mark = {
+      diagnostics: this.diagnostics.length,
+      readChecks: this.admission.readChecks.length,
+    };
+    const deep = this.pass.program.isDeep(site);
+    if (!this.#finishing) return !deep;
+    const at = this.#stoppedAt;
+    return (
+      deep || at === null || this.#stage > at.stage || (this.#stage === at.stage && unit >= at.unit)
+    );
+  }
+
+  /** The walk enters its stage `stage` (`#walk`'s order). */
+  #enter(stage: number): void {
+    this.#stage = stage;
+    this.#unit = 0;
+    this.#rule = 4 + stage;
+  }
+
+  /**
+   * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), reading no
+   * decision (A6: a later pass may admit a store this one rejected, so its decisions may be narrower than the settled
+   * ones). It runs every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's
+   * exits: TABLE r4.126, r4.138), as admission runs it, reading what the stop retained as every consumer does (one
+   * derivation): C1 against a written type at a store's path (`#admittedStores`); ADR 0021 1.3's mixed literal elements
+   * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`#markHolder`);
+   * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
+   * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
+   * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
+   */
+  #freshStores(): void {
+    const { program, definitions } = this.pass;
+    // (every store and transfer, an argument to a parameter several calls reach and one beside a default among them,
+    // which `Admission.stores` leaves out of its decisions but whose obligations it owes: r4.138)
+    for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+      program.work.charge("checks");
+      if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
+      const written = writtenOf(program.place(d.place).kind);
+      const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
+      if (written !== null && termAt(written, path) !== null) continue;
+      this.#storeMark(d, path);
+    }
+    // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
+    // keep, as unstopped admission's passes converge on: A6)
+    this.#rule = 3;
+    this.admission.literalElements(
+      this.#order,
+      (site, found) => this.#mixed(site, found),
+      (cell) => this.#markHolder(cell),
+    );
+    this.#rule = 1;
+    this.#admittedStores(true);
+    // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
+    this.admission.publish(true);
+    this.#rule = 2;
+    const open = this.admission.ingressStores((site) => this.#inMarkedValue(site));
+    for (const { site, label } of open) this.#ingressMark(site, label);
+    this.#rule = 1;
+    this.published = true;
+  }
+
+  /**
+   * Whether a literal's element stands (A6, ADR 0021 1.3): no pass's admission rejected it, nor this fresh pass's mixed
+   * elements whole, as the unstopped values read it.
+   */
+  #stands(d: Definition): boolean {
+    if (!this.pass.lists.live(d)) return false;
+    return !(
+      this.#finishing &&
+      !this.settled &&
+      (this.admission.newlyRejected.get(d.uid)?.has(keyOf(d.place, [])) ?? false)
+    );
+  }
+
+  /**
+   * The places and paths admission decides by a written type: the roots `Admission.groups` starts from (every key with a
+   * definition or a candidate: a store, add, argument or return, a multi-site or dead call's argument among them, which
+   * decides nothing but C1 checks, ADR 0021 1.5), the written ones, each at every path of its written type, which is as
+   * large as the source that writes it. The fresh pass's C1 decides these alone (`groups` would group every key and walk
+   * every store's landings again, unbounded after a stop: TABLE r4.55, r4.126).
+   */
+  #writtenGroups(): { readonly root: PlaceId; readonly path: readonly string[] }[] {
+    const { program, definitions } = this.pass;
+    const out: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
+    const seen = new Set<PlaceId>();
+    for (const key of [...definitions.byKey.keys(), ...definitions.candidates.keys()]) {
+      program.work.charge("checks");
+      const place = keyPlace(key);
+      if (seen.has(place)) continue;
+      seen.add(place);
+      const written = writtenOf(program.place(place).kind);
+      if (written === null) continue;
+      const pending: [TypeTerm, readonly string[]][] = [[written, []]];
+      for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+        program.work.charge("checks");
+        const [term, path] = next;
+        out.push({ root: place, path });
+        if (term.kind === "union") for (const member of term.members) pending.push([member, path]);
+        else if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
+          pending.push([term.element, keptSteps(program.work, path, ["element"])]);
+        else if (term.kind === "object")
+          for (const property of term.properties ?? [])
+            pending.push([
+              property.type,
+              keptSteps(program.work, path, [propertyStep(property.name)]),
+            ]);
+      }
+    }
+    // (a union's members reach one path more than once: each path once)
+    const unique = new Map<string, { readonly root: PlaceId; readonly path: readonly string[] }>();
+    for (const group of out) unique.set(keptParts(program.work, group.root, group.path), group);
+    return [...unique.values()];
+  }
+
+  /** A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once. */
+  #storeMark(d: Definition, path: readonly string[]): void {
+    if (this.#marked.has(d.uid)) return;
+    this.#marked.add(d.uid);
+    const { program } = this.pass;
+    this.#storeWarning(
+      d.site,
+      targetName(program.place(d.place).label, path),
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: this.#placeText(d.place, path),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: this.#storeRoot(d.place),
+        steps: this.#storeSteps(d.place, path),
+      },
+      [],
+    );
+  }
+
+  readonly #marked = new Set<number>();
+
+  /**
+   * Whether a site lies inside the value of a store or transfer the fresh pass marked (`#storeMark`): one laminar list of
+   * their values' spans per file, made once, and a walk up from the innermost span holding the site's start.
+   */
+  #inMarkedValue(site: SourceSite): boolean {
+    const { program, definitions } = this.pass;
+    const work = program.work;
+    if (this.#markedSpans === null) {
+      const byFile = new Map<number, { start: number; end: number; item: null }[]>();
+      for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+        work.charge("checks");
+        if (!this.#marked.has(d.uid) || d.value === undefined) continue;
+        const at = program.places[d.value]?.site ?? null;
+        if (at === null) continue;
+        const spans = byFile.get(at.file);
+        const span = { start: at.start, end: at.end, item: null };
+        if (spans === undefined) byFile.set(at.file, [span]);
+        else spans.push(span);
+      }
+      this.#markedSpans = new Map();
+      for (const [file, spans] of byFile) this.#markedSpans.set(file, new Laminar(work, spans));
+    }
+    const spans = this.#markedSpans.get(site.file);
+    if (spans === undefined) return false;
+    for (let index = spans.innermostIndex(site.start); index >= 0;) {
+      work.charge("checks");
+      if (spans.ends[index]! >= site.end) return true;
+      index = spans.parents[index]!;
+    }
+    return false;
+  }
+
+  #markedSpans: Map<number, Laminar<null>> | null = null;
+
+  /**
+   * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
+   * settled): each definition of the outermost literal holding it marked (`#storeMark`: a store, an add, an argument
+   * whether one call or several reaches its parameter, a return), standing for its records within its value, the mixed
+   * elements' among them (TABLE r4.126); a literal no definition holds (a consumer's own, `say [count, "bad"]`, or a
+   * receiver's) marked itself, standing for its records within it (r4.138).
+   */
+  #markHolder(cell: PlaceId): void {
+    const { program, definitions } = this.pass;
+    if (this.#heldIn === null) {
+      this.#heldIn = new Map();
+      for (const [at, list] of definitions.cellDefs)
+        for (const d of list) {
+          program.work.charge("checks");
+          if (d.value !== undefined) this.#heldIn.set(d.value, at);
+        }
+      this.#storesOf = new Map();
+      for (const d of [...definitions.storeDefs, ...definitions.transferDefs]) {
+        program.work.charge("checks");
+        if (d.value === undefined) continue;
+        const list = this.#storesOf.get(d.value);
+        if (list === undefined) this.#storesOf.set(d.value, [d]);
+        else list.push(d);
+      }
+    }
+    let literal = program.cellOwner.get(cell)?.owner;
+    for (let up = literal; up !== undefined;) {
+      program.work.charge("checks");
+      literal = up;
+      const holder = this.#heldIn.get(up);
+      up = holder === undefined ? undefined : program.cellOwner.get(holder)?.owner;
+    }
+    if (literal === undefined) return;
+    const holders = this.#storesOf?.get(literal) ?? [];
+    for (const d of holders)
+      this.#storeMark(d, d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path);
+    if (holders.length === 0) this.#literalMark(literal);
+  }
+
+  /** A literal no definition holds, marked at its own site, its type undecided (r4.100, r4.138), once. */
+  #literalMark(literal: PlaceId): void {
+    const { program } = this.pass;
+    const site = program.places[literal]?.site ?? null;
+    if (site === null || this.#markedLiterals.has(literal)) return;
+    this.#markedLiterals.add(literal);
+    this.#storeWarning(
+      site,
+      program.place(literal).label,
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: this.#placeText(literal, []),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: null,
+        steps: [],
+      },
+      [],
+    );
+  }
+
+  readonly #markedLiterals = new Set<PlaceId>();
+
+  /**
+   * A typed call no store takes in whose expected type the finishing read leaves open after a stop (`Admission.ingressStores`
+   * returns it): marked at its site, its type undecided, standing for its boundary (r4.100, r4.144), once.
+   */
+  #ingressMark(site: SourceSite, label: string): void {
+    const key = siteKey(site);
+    if (this.#markedIngress.has(key)) return;
+    this.#markedIngress.add(key);
+    this.#storeWarning(
+      site,
+      label,
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: pathPhrase({ code: label }, []),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: null,
+        steps: [],
+      },
+      [],
+    );
+  }
+
+  readonly #markedIngress = new Set<string>();
+
+  #heldIn: Map<PlaceId, PlaceId> | null = null;
+  #storesOf: Map<PlaceId, Definition[]> | null = null;
 
   // ----------------------------------------------------------------------------------------- diagnostics
 
@@ -348,20 +1329,24 @@ export class Consumers {
     rule: DiagnosticRule,
     kinds: readonly ItemTag[],
   ): void {
-    this.diagnostics.push({
+    // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
+    const diagnostic: CoreDiagnostic = {
       class: "compile-error",
       kind,
       code: codeOf(rule),
       site: this.#site(site),
       rule,
       kinds: [...new Set(kinds)],
-    });
+    };
+    this.diagnostics.push(diagnostic);
+    this.rules.set(diagnostic, this.#rule);
   }
 
   /**
    * A warning of `rule` explained by `item`; `fits`, the value's items that the rule takes (its fixes' types);
    * `receiver`, a member's receiver as its context sentence names it, `read` the value whose read the word is (a
-   * member's receiver; else the value at `site`).
+   * member's receiver; else the value at `site`). Whether it was made: a mark a test leaves out (`withoutRecords`) is
+   * not.
    */
   #warning(
     kind: DiagnosticKind,
@@ -372,8 +1357,8 @@ export class Consumers {
     fits: readonly Item[],
     receiver: ContextDetail["receiver"] = null,
     read?: PlaceId,
-  ): void {
-    this.diagnostics.push({
+  ): boolean {
+    const diagnostic: Extract<CoreDiagnostic, { obligation: unknown }> = {
       class: "warning-runtime-check",
       kind,
       code: codeOf(rule),
@@ -383,7 +1368,11 @@ export class Consumers {
       provenance: provenanceOf(item, this.#detail(item, site, rule, receiver, read)),
       obligation,
       fits: [...new Set(fits.filter(concrete).map((found) => found.tag))],
-    });
+    };
+    if (this.#finishing && leftOutWarning(diagnostic)) return false;
+    (this.#finishing ? this.deferred : this.diagnostics).push(diagnostic);
+    this.rules.set(diagnostic, this.#rule);
+    return true;
   }
 
   /**
@@ -404,8 +1393,10 @@ export class Consumers {
     const word = contextOf(item);
     const node = program.exprAt(site);
     const value = read ?? program.placeBySite.get(siteKey(site));
+    // (`later` is the store's own; `budget` the whole analysis's stop)
     const direct =
       word === "later" ||
+      word === "budget" ||
       // a reference's member the check itself names (F19a: a speaker's field by its name has no receiver place)
       (word === "unmodelled" && receiver?.kinds.some((kind) => REFERENCE.has(kind)) === true) ||
       (value !== undefined && this.#directWord(word, item, value, node, read !== undefined));
@@ -586,8 +1577,8 @@ export class Consumers {
     against: readonly ItemTag[],
     rule: DiagnosticRule,
     fits: readonly Item[],
-  ): void {
-    this.#warning(
+  ): boolean {
+    return this.#warning(
       "written-target",
       site,
       item,
@@ -685,7 +1676,10 @@ export class Consumers {
     let found = this.#names.get(place);
     if (found === undefined) {
       const start: PropertyNamesTask = "key" in of ? of : { value: of.value, path: [] };
-      found = [...propertyNames(this.pass, (work) => this.#run(work), start)];
+      // (a finishing walk that asks nothing knows no property: `#run`'s rule)
+      found = this.#asksNothing()
+        ? []
+        : [...propertyNames(this.pass, (work) => this.#solve(work), start)];
       this.#names.set(place, found);
     }
     return found;
@@ -703,23 +1697,25 @@ export class Consumers {
     const known = this.#shown.get(place);
     if (known !== undefined) return known;
     const first: { site: SourceSite | null; names: Iterable<string> } = { site: null, names: [] };
-    propertyNames(
-      this.pass,
-      (work) => this.#run(work),
-      { value, path: [] },
-      (literal, names) => {
-        const site = program.place(literal).site;
-        if (
-          site !== null &&
-          (first.site === null ||
-            site.file < first.site.file ||
-            (site.file === first.site.file && site.start < first.site.start))
-        ) {
-          first.site = site;
-          first.names = names;
-        }
-      },
-    );
+    // (a finishing walk that asks nothing knows no property: `#run`'s rule)
+    if (!this.#asksNothing())
+      propertyNames(
+        this.pass,
+        (work) => this.#solve(work),
+        { value, path: [] },
+        (literal, names) => {
+          const site = program.place(literal).site;
+          if (
+            site !== null &&
+            (first.site === null ||
+              site.file < first.site.file ||
+              (site.file === first.site.file && site.start < first.site.start))
+          ) {
+            first.site = site;
+            first.names = names;
+          }
+        },
+      );
     let found: string | null = null;
     for (const step of first.names) {
       program.work.charge("checks");
@@ -736,14 +1732,27 @@ export class Consumers {
 
   readonly #shown = new Map<Key | PlaceId, string | null>();
 
-  /** The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it. */
-  #storeSteps(root: PlaceId, path: readonly string[]): StoreStep[] {
+  /**
+   * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
+   * the root's written type reaches it (the finishing path's descent, TABLE r4.120), the collection written there,
+   * final at every stop and asking no solver.
+   */
+  #storeSteps(
+    root: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): StoreStep[] {
     return path.map((step, index): StoreStep => {
       if (step === "entry") return { collection: "dict" };
       if (step !== "element") return { property: propertyName(step) };
-      const above = withoutEmpty(
-        this.#run(this.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
-      ).map((item) => item.tag);
+      const prefix = path.slice(0, index);
+      const term = written === null ? null : termAt(written, prefix);
+      const above =
+        term !== null
+          ? typeTags(term)
+          : withoutEmpty(this.#run(this.pass.contract.contractOf(keyOf(root, prefix)))).map(
+              (item) => item.tag,
+            );
       return {
         collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list",
       };
@@ -896,15 +1905,17 @@ export class Consumers {
     const known = reach.next.get(step);
     if (known !== undefined) return known;
     if (reach.children === null) {
-      // its literals' children indexed by step once, so each step below asks only its own
-      reach.children = new Map();
+      // its literals' children indexed by step once, so each step below asks only its own; kept only whole (a stop
+      // inside leaves none for the finishing path to read)
+      const children = new Map<string, PlaceId[]>();
       for (const literal of reach.literals)
         for (const [at, values] of this.#childrenOf(literal) ?? []) {
           this.pass.program.work.charge("checks", values.length);
-          let list = reach.children.get(at);
-          if (list === undefined) reach.children.set(at, (list = []));
+          let list = children.get(at);
+          if (list === undefined) children.set(at, (list = []));
           for (const value of values) list.push(value);
         }
+      reach.children = children;
     }
     const values: PlaceId[] = [];
     for (const value of reach.children.get(step) ?? []) values.push(value);
@@ -1211,7 +2222,7 @@ export class Consumers {
    * selection or index `xs.element`, a dict's `d.entry`, a parameter `use.data`, a result `f.result`), else its text.
    */
   #keyLabel(value: PlaceId, depth = 0): string {
-    const { program, contract } = this.pass;
+    const { program } = this.pass;
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) return program.place(binding).label;
     const projection =
@@ -1227,11 +2238,7 @@ export class Consumers {
       // a selection, index or `get` is `element` (an object's own `first` too, F11), a dict's value `entry`
       const step =
         stepName(projection.step) === "element" && projection.step !== "element"
-          ? elementStep(
-              withoutEmpty(this.#run(contract.contractOfValue(projection.owner))).map(
-                (item) => item.tag,
-              ),
-            )
+          ? this.#elementStepOf(projection.owner)
           : propertyName(projection.step);
       return stepText(this.#keyLabel(projection.owner, depth + 1), step);
     }
@@ -1241,8 +2248,27 @@ export class Consumers {
     return site === null ? "the value" : program.textAt(site);
   }
 
-  /** Whether a projection chain passes a dict's `values` or `keys`: a derived list, which no place holds. */
+  /** A label's step below an owner an index or a selection reads: an element, or a dict's value; once per owner. */
+  #elementStepOf(owner: PlaceId): string {
+    let step = this.#elementSteps.get(owner);
+    if (step === undefined) {
+      step = elementStep(
+        withoutEmpty(this.#run(this.pass.contract.contractOfValue(owner))).map((item) => item.tag),
+      );
+      this.#elementSteps.set(owner, step);
+    }
+    return step;
+  }
+
+  /** Whether a projection chain passes a dict's `values` or `keys`: a derived list, which no place holds (once each). */
   #derived(value: PlaceId): boolean {
+    let derived = this.#derivedChains.get(value);
+    if (derived === undefined)
+      this.#derivedChains.set(value, (derived = this.#derivedChain(value)));
+    return derived;
+  }
+
+  #derivedChain(value: PlaceId): boolean {
     const { program, contract } = this.pass;
     let at: PlaceId = value;
     for (let depth = 0; depth < 256; depth += 1) {
@@ -1260,8 +2286,15 @@ export class Consumers {
     return false;
   }
 
-  /** Whether a projection chain starts at a value no place holds: no variable's read, no call's result. */
+  /** Whether a projection chain starts at a value no place holds: no variable's read, no call's result (once each). */
   #anonymous(value: PlaceId): boolean {
+    let anonymous = this.#anonymousChains.get(value);
+    if (anonymous === undefined)
+      this.#anonymousChains.set(value, (anonymous = this.#anonymousChain(value)));
+    return anonymous;
+  }
+
+  #anonymousChain(value: PlaceId): boolean {
     const { program } = this.pass;
     let at: PlaceId = value;
     for (let depth = 0; depth < 256; depth += 1) {
@@ -1285,7 +2318,7 @@ export class Consumers {
   }
 
   #kindsOf(value: PlaceId, node: FlowNode | null): Item[] {
-    return withoutEmpty(this.#run(this.pass.values.valueItems(value, node, [])));
+    return withoutEmpty(this.#valueItems(value, node, []));
   }
 
   /**
@@ -1312,12 +2345,16 @@ export class Consumers {
    * type an error at that element (A8); a value none of whose kinds fits a written type or one decided earlier in the
    * source an error even when every item is possible (ADR 1.7), never under a guard; otherwise one `copy-type` per
    * offending kind, whatever its certainty, a copy made before its decider with context `later` (A7), and a
-   * `null-check` for a possible null. The store's external data brings its boundary checks (C9).
+   * `null-check` for a possible null. The store's external data brings its boundary checks (C9). `writtenOnly`: the
+   * places whose written type reaches the path alone, the finishing path's C1 before admission settled (TABLE r4.126: one
+   * derivation, the written type final at every stop).
    */
-  #admittedStores(): void {
+  #admittedStores(writtenOnly = false): void {
     const { program, definitions } = this.pass;
     const admission = this.admission;
-    for (const { root, path } of this.#order(admission.groups())) {
+    for (const { root, path } of this.#order(
+      writtenOnly ? this.#writtenGroups() : admission.groups(),
+    )) {
       const decision = admission.decide(root, path);
       if (decision === null) continue;
       const { label, tags, nullable, decider } = decision;
@@ -1343,7 +2380,7 @@ export class Consumers {
         decider: decider?.site ?? null,
         brought,
         root: this.#storeRoot(root),
-        steps: this.#storeSteps(root, path),
+        steps: this.#storeSteps(root, path, written ? writtenOf(program.place(root).kind) : null),
       });
       // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
@@ -1679,7 +2716,7 @@ export class Consumers {
   /** The consumers that operations and projections are: C2–C6, C11, C12, C13's iterable, ADR 1.5. */
   #operations(): void {
     const { program } = this.pass;
-    const { values, contract } = this.pass;
+    const { contract } = this.pass;
     const finals = this.#order(
       program.constraints.filter(
         (c) =>
@@ -1690,7 +2727,9 @@ export class Consumers {
           c.kind === "load",
       ),
     );
+    this.#enter(0);
     for (const c of finals) {
+      if (!this.#runs(c.site)) continue;
       const node = program.exprAt(c.site);
       if (node === null) continue;
       this.#reading = node;
@@ -1703,9 +2742,7 @@ export class Consumers {
           c,
           node,
           (rest) =>
-            withoutEmpty(
-              this.#run(values.valueItems(c.receiver, node, joinSteps(["element"], rest))),
-            ),
+            withoutEmpty(this.#valueItems(c.receiver, node, joinSteps(["element"], rest), true)),
           c.fallback,
         );
         continue;
@@ -1714,7 +2751,7 @@ export class Consumers {
         this.#fallbackFits(
           c,
           node,
-          (rest) => withoutEmpty(this.#run(values.valueItems(c.left, node, rest))),
+          (rest) => withoutEmpty(this.#valueItems(c.left, node, rest, true)),
           c.right,
         );
         continue;
@@ -1825,14 +2862,55 @@ export class Consumers {
     written: boolean,
     label: string,
   ): boolean {
-    const { program, values, contract, definitions } = this.pass;
+    const { program, contract, definitions } = this.pass;
     const site = program.places[value]?.site;
     if (site === null || site === undefined || !("result" in c)) return false;
     const direct = directAt(rest);
     const into = contract.landsIn(c.result, rest);
+    // (the declaration the value lands in directly, where a written type is)
+    const root =
+      into === null || rest.length > 0
+        ? null
+        : ((landing) => (landing === undefined ? null : this.#storeRoot(landing.place)))(
+            (definitions.byValue.get(c.result) ?? []).find(
+              (d) => d.kind === "whole" && d.path.length === 0,
+            ),
+          );
     const family = (tag: ItemTag): ItemTag => (tag === "integer" ? "number" : tag);
     const directTags = [...new Set(direct.filter(concrete).map((item) => item.tag))];
-    if (directTags.length === 0) return false;
+    if (directTags.length === 0) {
+      // a stop left the type it is checked against undecided: the check is owed against that key's contract,
+      // `unknown` with the reason `budget`, never dropped (TABLE r4.100); a `null` fallback alone owes nothing; its
+      // host data meets its boundary as unstopped (r4.109 (1)); its value read only then
+      if (!direct.some(unsettledItem)) return false;
+      const own = withoutEmpty(this.#valueItems(value, node, rest));
+      if (
+        !own.every((item) => item.tag === "null") &&
+        // (what the mark carries forms only with it: its content, TABLE r4.110 (a))
+        this.#storeWarning(
+          site,
+          label,
+          STOPPED[0]!,
+          ["unknown"],
+          { rule: "fallback", fallback: c.kind === "fallback", type: ["unknown"], root },
+          [],
+        ) &&
+        (into === null || !typeTags(into).includes("unknown"))
+      )
+        this.admission.boundariesAt(
+          [...own, ...this.#heldHostData(value)].filter(
+            (item) => isOpaque(item) || isExternal(item),
+          ),
+          this.#obligation(
+            "copy-type",
+            site,
+            label,
+            ["unknown"],
+            `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label}`,
+          ),
+        );
+      return false;
+    }
     const directFamilies = new Set(directTags.map(family));
     // one domain for the quiet path, the error, the warning and the check: a written type's own kinds, else the family
     const admits = (tag: ItemTag, refs: readonly ItemTag[]): boolean =>
@@ -1864,22 +2942,14 @@ export class Consumers {
     const fallback =
       quiet !== null && quiet.every(fitsKind)
         ? []
-        : withoutEmpty(this.#run(values.valueItems(value, node, rest)));
+        : withoutEmpty(this.#valueItems(value, node, rest));
     const off = fallback.filter((item) => item.tag !== "unknown" && !fitsKind(item.tag));
     const what = c.kind === "fallback" ? "the fallback" : "the default";
     const rule: DiagnosticRule = {
       rule: "fallback",
       fallback: c.kind === "fallback",
       type: against,
-      // (the declaration the value lands in directly, where a written type is)
-      root:
-        into === null || rest.length > 0
-          ? null
-          : ((root) => (root === undefined ? null : this.#storeRoot(root.place)))(
-              (definitions.byValue.get(c.result) ?? []).find(
-                (d) => d.kind === "whole" && d.path.length === 0,
-              ),
-            ),
+      root,
     };
     const fitting = fallback.filter((item) => concrete(item) && fitsKind(item.tag));
     // an unknown the fallback may hold is possible: `copy-type` on the fallback against that family, unless a written
@@ -1939,7 +3009,7 @@ export class Consumers {
     rest: readonly string[],
     fitsKind: (tag: ItemTag) => boolean,
   ): { readonly site: SourceSite; readonly kinds: readonly ItemTag[] } | null {
-    const { program, values } = this.pass;
+    const { program } = this.pass;
     const pending: [PlaceId, FlowNode, number][] = rest.length === 0 ? [] : [[value, node, 0]];
     while (pending.length > 0) {
       const [current, at, index] = pending.pop()!;
@@ -1952,9 +3022,7 @@ export class Consumers {
       if (index + 1 < rest.length) continue;
       for (const child of children) {
         program.work.charge("checks");
-        const items = withoutEmpty(
-          this.#run(values.valueItems(child.value!, child.node ?? at, [])),
-        );
+        const items = withoutEmpty(this.#valueItems(child.value!, child.node ?? at, []));
         if (
           items.length > 0 &&
           items.every((item) => item.cert === "def" && concrete(item)) &&
@@ -2069,7 +3137,7 @@ export class Consumers {
     operator: Operator,
     node: FlowNode,
   ): void {
-    const { program, values } = this.pass;
+    const { program } = this.pass;
     const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);
     const fit = (kinds: readonly ItemTag[]): "row" | "value" | "none" => {
       const row = operatorRow(operator, kinds);
@@ -2087,7 +3155,7 @@ export class Consumers {
       }
     }
     const operands = c.arguments.map((argument) =>
-      withoutEmpty(this.#run(values.valueItems(argument, node, []))),
+      withoutEmpty(this.#valueItems(argument, node, [])),
     );
     const matches = (row: (typeof rows)[number], index: number, tag: ItemTag): boolean =>
       row.operands[index] === tag;
@@ -2177,7 +3245,7 @@ export class Consumers {
       against: readonly RequiredKind[],
       index: number | null,
       pair: readonly ItemTag[] = [],
-    ): void =>
+    ): boolean =>
       this.#warning(
         "operator",
         site,
@@ -2278,7 +3346,7 @@ export class Consumers {
 
   /** A projection: a `for` loop's iterable (C13), an element selection (C6), a member read (C5a–c, F11, F19a). */
   #projection(c: Extract<Constraint, { kind: "project" }>, node: FlowNode): void {
-    const { contract, values } = this.pass;
+    const { contract } = this.pass;
     if (c.step === "iteration" || c.step === "entry") {
       this.#consume(
         c.owner,
@@ -2314,6 +3382,8 @@ export class Consumers {
             (tag === "object" ? !indexStep : hasProperty(tag, property)),
         ) &&
         !own.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) &&
+        // (a member contract a stop left unsettled is no proof of the property)
+        !own.some(unsettledItem) &&
         !(
           selectsElement(property) &&
           quiet.some((tag) => tag === "list" || tag === "set" || tag === "object")
@@ -2351,7 +3421,7 @@ export class Consumers {
       // F11 (r4.4): an object's own `first`, `last` or `random`: opaque, the member obligation, never an error
       extra.push([OWN_SELECTION, `has its own .${property}`]);
     else if (objects && typeof c.step === "object") {
-      const value = this.#run(values.valueItems(c.into, node, []));
+      const value = this.#valueItems(c.into, node, []);
       const missing = value.filter(
         (item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0,
       );
@@ -2380,7 +3450,9 @@ export class Consumers {
         );
         return;
       }
-      if (missing.length > 0) extra.push([missing[0]!, `has .${property} before the read`]);
+      // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's)
+      const open = missing.length > 0 ? missing[0] : value.find(unsettledItem);
+      if (open !== undefined) extra.push([open, `has .${property} before the read`]);
     }
     const takes = (tag: ItemTag): boolean =>
       tag === "object" ? !indexStep : hasProperty(tag, property);
@@ -2514,21 +3586,27 @@ export class Consumers {
 
   /** C6: an element selection needs an element: M held by the contract, or by the exact value. */
   #selection(value: PlaceId, node: FlowNode, site: SourceSite, what: string): void {
-    const { contract, values } = this.pass;
+    const { contract } = this.pass;
     const elements = this.#run(contract.contractOfValueAt(value, ["element"]));
     if (
       elements.length > 0 &&
       !elements.some((item) => item.tag === "empty") &&
+      // (an element contract a stop left unsettled says nothing of emptiness)
+      !elements.some(unsettledItem) &&
       !this.#run(contract.contractOfValue(value)).some((item) => item.tag === "unknown")
     ) {
       this.#skip(value);
       return;
     }
-    const read = this.#run(values.valueItems(value, node, ["element"]));
+    const read = this.#valueItems(value, node, ["element"]);
     const kinds = this.#kindsOf(value, node);
     if (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
+      // (an element read a stop left unsettled is no proof of an element, a literal's own element is: Codex r24 N1)
+      (!read.some(unsettledItem) ||
+        (this.#literalSyntax(value) &&
+          this.admission.literalChildren(value, "element").length > 0)) &&
       !kinds.some((item) => item.tag === "unknown")
     )
       return;
@@ -2585,7 +3663,7 @@ export class Consumers {
     soft: Item | boolean = false,
   ): void {
     if (value === undefined) return;
-    const { program, values } = this.pass;
+    const { program } = this.pass;
     const owedBy = typeof soft === "object" ? soft : null;
     const quiet = this.#quietKinds(value, rest);
     if (owedBy === null && quiet !== null && quiet.every((tag) => need.has(tag))) {
@@ -2593,7 +3671,7 @@ export class Consumers {
       return;
     }
     program.work.charge("checks");
-    const items = withoutEmpty(this.#run(values.valueItems(value, node, rest)));
+    const items = withoutEmpty(this.#valueItems(value, node, rest));
     const bad = items.filter((item) =>
       item.tag === "unknown" ? isOpaque(item) || isExternal(item) : !need.has(item.tag),
     );
@@ -2621,7 +3699,7 @@ export class Consumers {
           ? `check that ${label} is a whole number at ${what}`
           : `check the operand ${label} at ${what} when it runs`;
     const required = against.map((tag) => requiredKind(tag));
-    const owe = (item: Item, obliged: ObligationKind): void =>
+    const owe = (item: Item, obliged: ObligationKind): boolean =>
       this.#warning(
         kind,
         at,
@@ -2658,7 +3736,7 @@ export class Consumers {
     use: CountUse,
     soft: Item | boolean = false,
   ): void {
-    const { program, values } = this.pass;
+    const { program } = this.pass;
     const rule: DiagnosticRule = { rule: "count", use };
     const owedBy = typeof soft === "object" ? soft : null;
     // §3.3: a whole number on every run
@@ -2670,7 +3748,7 @@ export class Consumers {
       }
     }
     program.work.charge("checks");
-    const items = withoutEmpty(this.#run(values.valueItems(value, node, [])));
+    const items = withoutEmpty(this.#valueItems(value, node, []));
     // a number, a null, text, a truth value...
     const offending = items.filter((item) =>
       item.tag === "unknown" ? isOpaque(item) || isExternal(item) : item.tag !== "integer",
@@ -2693,7 +3771,7 @@ export class Consumers {
       return;
     }
     // S4, §4: the null owes its null-check, every other offending kind its integer check
-    const owe = (item: Item, obliged: ObligationKind, on: string): void =>
+    const owe = (item: Item, obliged: ObligationKind, on: string): boolean =>
       this.#warning(
         "integer-use",
         at,
@@ -2787,43 +3865,49 @@ export class Consumers {
     const visited: string[] = [];
     let found: { readonly key: Key; readonly at: FlowNode } | null = null;
     let next: { readonly key: Key; readonly at: FlowNode } | null = { key, at };
-    while (next !== null) {
-      const step: { readonly key: Key; readonly at: FlowNode } = next;
-      next = null;
-      const memoKey = joinParts(step.key, step.at.id);
-      if (this.#defaults.has(memoKey)) {
-        found = this.#defaults.get(memoKey)!;
-        break;
-      }
-      // a copy cycle leads to no parameter
-      keepText(program.work, memoKey.length);
-      this.#defaults.set(memoKey, null);
-      visited.push(memoKey);
-      program.work.charge("checks");
-      const place = program.place(keyPlace(step.key)).kind;
-      if (guards.narrowed(step.key, step.at)) found = null;
-      else if (place.kind === "parameter" && keyPath(step.key).length === 0)
-        found = place.written === null ? step : null;
-      else {
-        const reaching = lists.reachingDef(step.key, step.at);
-        const copy =
-          reaching !== null &&
-          reaching.def.kind === "whole" &&
-          reaching.def.value !== undefined &&
-          reaching.def.how !== "argument" &&
-          reaching.def.how !== "parameter default" &&
-          lists.eventBetween(step.key, reaching.def.node, step.at) === null;
-        // the copy's value at the rest of the path, through its literal's fields
-        let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
-        for (const part of copy ? reaching.rest : []) {
-          const children = value === undefined ? [] : this.admission.storesAt(value, part);
-          value = children.length === 1 ? children[0]!.value : undefined;
-          if (value === undefined) break;
+    try {
+      while (next !== null) {
+        const step: { readonly key: Key; readonly at: FlowNode } = next;
+        next = null;
+        const memoKey = joinParts(step.key, step.at.id);
+        if (this.#defaults.has(memoKey)) {
+          found = this.#defaults.get(memoKey)!;
+          break;
         }
-        const copied = value === undefined ? null : this.pass.contract.copiedKey(value);
-        found = null;
-        if (copied !== null && reaching !== null) next = { key: copied, at: reaching.def.node };
+        // a copy cycle leads to no parameter
+        keepText(program.work, memoKey.length);
+        this.#defaults.set(memoKey, null);
+        visited.push(memoKey);
+        program.work.charge("checks");
+        const place = program.place(keyPlace(step.key)).kind;
+        if (guards.narrowed(step.key, step.at)) found = null;
+        else if (place.kind === "parameter" && keyPath(step.key).length === 0)
+          found = place.written === null ? step : null;
+        else {
+          const reaching = lists.reachingDef(step.key, step.at);
+          const copy =
+            reaching !== null &&
+            reaching.def.kind === "whole" &&
+            reaching.def.value !== undefined &&
+            reaching.def.how !== "argument" &&
+            reaching.def.how !== "parameter default" &&
+            lists.eventBetween(step.key, reaching.def.node, step.at) === null;
+          // the copy's value at the rest of the path, through its literal's fields
+          let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
+          for (const part of copy ? reaching.rest : []) {
+            const children = value === undefined ? [] : this.admission.storesAt(value, part);
+            value = children.length === 1 ? children[0]!.value : undefined;
+            if (value === undefined) break;
+          }
+          const copied = value === undefined ? null : this.pass.contract.copiedKey(value);
+          found = null;
+          if (copied !== null && reaching !== null) next = { key: copied, at: reaching.def.node };
+        }
       }
+    } catch (error) {
+      // a stop inside leaves no step's provisional answer for the finishing path to read
+      for (const memoKey of visited) this.#defaults.delete(memoKey);
+      throw error;
     }
     for (const memoKey of visited) this.#defaults.set(memoKey, found);
     return found;
@@ -2836,6 +3920,8 @@ export class Consumers {
     member: string,
     use: "read" | "call",
   ): void {
+    // (a fresh finishing pass settled no default to find: `#run` answers `STOPPED`, so its walk could find nothing)
+    if (this.#finishing && !this.settled) return;
     const { program, definitions, lists, values, contract } = this.pass;
     const key = contract.copiedKey(owner);
     const source =
@@ -2873,7 +3959,10 @@ export class Consumers {
       ...flow.conditionUses.map((use) => ({ use, what: "condition" })),
       ...flow.keyUses.map((use) => ({ use, what: "dict key" })),
     ]);
+    this.#enter(1);
     for (const { use, what } of uses) {
+      if (!this.#runs({ file: use.file, start: use.span.start.offset, end: use.span.end.offset }))
+        continue;
       const operandSite: SourceSite = {
         file: use.file,
         start: use.operand.span.start.offset,
@@ -2992,13 +4081,19 @@ export class Consumers {
   /** Every store through a member and every add: its receiver (C5a–c, F19a). */
   #receivers(): void {
     const { program, definitions, values } = this.pass;
+    this.#enter(2);
     for (const d of this.#order(
       definitions.storeDefs.filter(
         (found) => found.recv !== null && (found.kind === "whole" || found.kind === "add"),
       ),
     )) {
+      if (!this.#runs(d.site)) continue;
       this.#reading = d.prep ?? d.node;
-      const receiver = withoutEmpty(this.#run(values.keyItems(d.recv!, d.prep ?? d.node)));
+      const receiver = withoutEmpty(
+        this.#finishing
+          ? this.#finishingKeyRead(d.recv!, d.prep ?? d.node)
+          : this.#run(values.keyItems(d.recv!, d.prep ?? d.node)),
+      );
       const owner = d.into === undefined ? undefined : program.projOf.get(d.into)?.owner;
       // §3.4: the whole member or element access, including a mutator's call.
       const at = d.into !== undefined ? this.#own(d.into, d.site) : d.site;
@@ -3107,8 +4202,10 @@ export class Consumers {
     const accesses = program.constraints.filter(
       (c) => c.kind === "speakerRead" || (c.kind === "speakerStore" && c.role !== "start value"),
     );
+    this.#enter(3);
     for (const c of this.#order(accesses)) {
       if (c.kind !== "speakerRead" && c.kind !== "speakerStore") continue;
+      if (!this.#runs(c.site)) continue;
       program.work.charge("checks");
       // a store's receiver: the nearest speaker site before it in its file, by binary search
       let low = 0;

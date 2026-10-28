@@ -34,7 +34,7 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
   const range = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(0, 0, 0));
   const markers = toMonacoMarkers(
     [createDiagnostic(DiagnosticSeverity.Error, "TST001", "bad", range)],
-    { Error: 8, Warning: 4 },
+    { Error: 8, Warning: 4, Info: 2 },
   );
   assert.deepEqual(markers[0], {
     startLineNumber: 1,
@@ -46,6 +46,19 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
     message: "bad",
     source: "TeaseScript",
   });
+});
+
+test("an error, a warning and an information take Monaco's three levels (TABLE r4.54)", () => {
+  const range = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(0, 0, 0));
+  const levels = toMonacoMarkers(
+    [
+      createDiagnostic(DiagnosticSeverity.Error, "TSV041", "error", range),
+      createDiagnostic(DiagnosticSeverity.Warning, "TSV076", "the stop", range),
+      createDiagnostic(DiagnosticSeverity.Info, "TSV076", "not checked", range),
+    ],
+    { Error: 8, Warning: 4, Info: 2 },
+  ).map((marker) => marker.severity);
+  assert.deepEqual(levels, [8, 4, 2]);
 });
 
 test("Monaco providers receive presentation-only completion, hover, and signature shapes", () => {

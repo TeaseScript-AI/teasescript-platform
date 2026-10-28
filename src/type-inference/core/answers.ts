@@ -6,17 +6,18 @@ import type { OperandView } from "../adapters/relation.js";
 import type { DynamicWhy, PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import {
   BudgetExhausted,
-  checkNesting,
   joinParts,
   joinSteps,
+  keepText,
   splitPath,
   type BudgetLimit,
   type WorkCounter,
 } from "./budget.js";
-import { Consumers } from "./consumers.js";
+import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
 import {
   Contract,
+  typedDefault,
   typeTags,
   termAt,
   writtenOf,
@@ -32,10 +33,10 @@ import {
 } from "./definitions.js";
 import type { Dominators } from "./dominators.js";
 import { ExactPath, withoutEmpty } from "./exact-path.js";
-import type { Callable, FlowGraph, FlowNode } from "./flow-graph.js";
+import type { Callable, FileRegion, FlowGraph, FlowNode, FunctionRegion } from "./flow-graph.js";
 import { GuardIndex } from "./guards.js";
 import { HandlerIndex } from "./handlers.js";
-import { REASON, type Item, type ItemTag } from "./items.js";
+import { EMPTY, makeItem, REASON, STOPPED, type Item, type ItemTag } from "./items.js";
 import {
   CoreProgram,
   propertyStep,
@@ -46,10 +47,13 @@ import {
 import {
   checksBySite,
   outcomeOf,
+  type BudgetStop,
   type CoreDiagnostic,
   type CoreOutcome,
   type CoreResult,
+  type NotChecked,
   type Obligation,
+  type WorkPlace,
   type WrittenTypeError,
 } from "./result.js";
 import { Solver, type DemandWork, type Work } from "./solver.js";
@@ -184,8 +188,22 @@ export interface BudgetAnswer {
   readonly total: number;
   readonly allowance: number;
   readonly counts: ReadonlyMap<WorkCounter, number>;
-  /** The limit the analysis reached, or `null`. */
+  /** The limit the analysis stopped proving at (D4 a′), or `null`. */
   readonly exhausted: BudgetLimit | null;
+  /** The warnings of the checks the stop moved to the runtime, never shown one by one (`Consumers.deferred`). */
+  readonly deferred: readonly Extract<CoreDiagnostic, { obligation: unknown }>[];
+  /** The work after the stop: the finishing path's, apart from `total`. */
+  readonly finishing: number;
+  /**
+   * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
+   * consumers' walk, the publication of boundaries, or the questions after a finished analysis; `null` without a stop.
+   */
+  readonly stoppedIn: StopPhase | null;
+  /**
+   * Whether what the analysis found before the stop stands: its pass's admission had settled (A6), or the analysis had
+   * finished; else nothing of it stands and every unit was finished afresh. True without a stop.
+   */
+  readonly settled: boolean;
   /** Each consumer read's demand: the work it was the first to compute, against its demand allowance (S3 §5). */
   readonly demands: readonly ReadWork[];
   /** The finished demands with their work. */
@@ -193,6 +211,8 @@ export interface BudgetAnswer {
   /** Facts of the indexes for the identity and mark controls (not work). */
   readonly facts: ContractFacts;
 }
+
+export type StopPhase = "setup" | "admission" | "walk" | "publication" | "questions";
 
 export interface ReadWork {
   readonly node: number;
@@ -227,6 +247,11 @@ export interface Answers {
   readonly initializers: ReadonlyMap<string, SourceSite>;
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
+  /**
+   * These answers stopped at `limit` after the analysis ran to its end (a question after it spent the allowance): its
+   * findings and decisions stand, its warning says so, and what is asked from then on answers `STOPPED` (D4 a′).
+   */
+  stoppedAt(limit: BudgetLimit): Answers;
   /** The occurrence answer at a path step below a value: a collection's `element`, a dict's `entry`, a property. */
   project(
     node: FlowNode,
@@ -249,65 +274,117 @@ export interface Answers {
   shareKnown(known: (expression: Expression) => KnownValue | undefined): void;
 }
 
-/** The analysis of a project by the coarse core: its answers, published after its last pass. */
-export function analyseCore(request: CoreAnalysisRequest): Answers {
+/**
+ * The analysis of a project by the coarse core: its answers, published after its last pass. A stop is no compile
+ * error (the owner's D4, option a′, TABLE r4.54, r4.55): past the work allowance or a read chain's depth the analysis
+ * stops proving, and statements nested past the nesting limit are not proved at all; what it found stays, every check it
+ * did not decide runs when the script runs, and one warning says so (`finished`). `stopped`: the analysis stops at
+ * its start, as a question after an analysis that crossed the allowance stops it (the candidate route).
+ */
+export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit): Answers {
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
-  let exhausted: BudgetLimit | null = null;
-  try {
-    // the nesting limit stops the analysis before any of it (TABLE §8; S3 §5's third stop)
-    checkNesting(program.nesting);
-    program.index();
-    // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-    // whose changing stores stay possibilities
-    let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
-    let cycling: ReadonlySet<number> = new Set();
-    const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
-    for (let last = false; ;) {
-      const pass = createPass(program, rejected);
-      const consumers = new Consumers(pass, rejected, cycling);
-      analysed = null;
-      consumers.check();
-      analysed = { pass, consumers };
-      const now = consumers.admission.newlyRejected;
-      if (last || sameSet(now, rejected)) break;
-      program.work.charge("rejectPasses");
-      const repeated = sets.findIndex((set) => sameSet(set, now));
-      if (repeated >= 0) {
-        // the stores every set of the cycle rejects stay rejected, the others are its possibilities
-        const cycle = sets.slice(repeated);
-        const every = new Map<number, ReadonlySet<Key>>();
-        const some = new Set<number>();
-        for (const set of cycle)
-          for (const [uid, keys] of set)
-            if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
-            else some.add(uid);
-        rejected = every;
-        cycling = some;
-        last = true;
-        continue;
+  let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
+  if (stopped !== undefined) program.work.stop(stopped);
+  else
+    try {
+      program.index();
+      // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
+      // whose changing stores stay possibilities
+      let cycling: ReadonlySet<number> = new Set();
+      const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
+      for (let last = false; ;) {
+        const pass = createPass(program, rejected);
+        const consumers = new Consumers(pass, rejected, cycling, last);
+        analysed = { pass, consumers };
+        consumers.check();
+        if (consumers.stopped !== null) break;
+        const now = consumers.admission.newlyRejected;
+        if (last || sameSet(now, rejected)) break;
+        program.work.charge("rejectPasses");
+        const repeated = sets.findIndex((set) => sameSet(set, now));
+        if (repeated >= 0) {
+          // the stores every set of the cycle rejects stay rejected, the others are its possibilities
+          const cycle = sets.slice(repeated);
+          const every = new Map<number, ReadonlySet<Key>>();
+          const some = new Set<number>();
+          for (const set of cycle)
+            for (const [uid, keys] of set)
+              if (cycle.every((other) => other.has(uid))) every.set(uid, keys);
+              else some.add(uid);
+          rejected = every;
+          cycling = some;
+          last = true;
+          continue;
+        }
+        rejected = now;
+        sets.push(rejected);
       }
-      rejected = now;
-      sets.push(rejected);
+    } catch (error) {
+      // a stop in the setup or in a pass's own setup, outside the consumers' walk
+      if (!(error instanceof BudgetExhausted)) throw error;
+      program.work.stop(error.limit);
     }
-  } catch (error) {
-    if (!(error instanceof BudgetExhausted)) throw error;
-    exhausted = error.limit;
-  }
-  // a stop in the setup leaves nothing to ask: the answers are the stop's
-  if (analysed === null) return new StoppedAnswers(program, exhausted!);
   // the written types' own errors (V30 §13's union rule), from the declarations alone
-  const written =
-    exhausted === null ? writtenTypeErrors(request.files.map((file) => file.program)) : [];
-  return new CoreAnswers(analysed.pass, analysed.consumers, exhausted, written);
+  const written = writtenTypeErrors(request.files.map((file) => file.program));
+  if (program.work.stopped !== null) return finished(program, analysed, rejected, written);
+  // statements nested past the limit, the analysis run to its end: their checks run when the script runs
+  const { pass, consumers } = analysed!;
+  if (program.deep.length > 0) program.work.apart(() => consumers.finish(false));
+  try {
+    return new CoreAnswers(
+      pass,
+      consumers,
+      written,
+      consumers.deferred.length > 0 ? "nesting" : null,
+    );
+  } catch (error) {
+    // (the answers' own setup after the finished analysis: a stop there is a question's, `stoppedAt`)
+    if (!(error instanceof BudgetExhausted)) throw error;
+    program.work.stop(error.limit);
+    return new CoreAnswers(pass, consumers, written, error.limit, "questions");
+  }
 }
 
-/** The core's result in S2's record shape, derived from its answers: the diagnostics, and the checks none owns. */
+/**
+ * The finishing path of an analysis that stopped at `limit` (D4 a′, S3 §5): only cheap work, no further proving. The
+ * setup the stop cut is finished; a pass whose admission settled keeps what its walk found and walks the units the stop
+ * left, and the units nested past the nesting limit; any other walks every unit from a fresh pass, none of its findings
+ * standing (A6: a later pass could still change them). Each unit reads every value as `unknown` with the reason
+ * `budget`, so it owes its check when the script runs.
+ */
+function finished(
+  program: CoreProgram,
+  analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null,
+  rejected: ReadonlyMap<number, ReadonlySet<Key>>,
+  written: readonly WrittenTypeError[],
+): Answers {
+  const limit = program.work.stopped!;
+  program.index();
+  const standing = analysed !== null && analysed.consumers.settled ? analysed : null;
+  const { pass, consumers } =
+    standing ??
+    (() => {
+      const pass = createPass(program, rejected);
+      return { pass, consumers: new Consumers(pass, rejected, new Set(), true, true) };
+    })();
+  const phase = analysed?.consumers.stopPhase() ?? "setup";
+  consumers.finish(standing === null);
+  return new CoreAnswers(pass, consumers, written, limit, phase);
+}
+
+/**
+ * The core's result in S2's record shape, derived from its answers: the diagnostics, and the checks none owns (the
+ * boundary checks, and those a stop moved to the runtime).
+ */
 export function coreResult(answers: Answers): CoreResult {
   return {
     outcome: answers.outcome,
     diagnostics: answers.diagnostics,
-    checks: answers.checks.filter((check) => check.boundary),
+    checks: [
+      ...answers.checks.filter((check) => check.boundary),
+      ...answers.budget.deferred.map((diagnostic) => diagnostic.obligation),
+    ],
   };
 }
 
@@ -450,6 +527,116 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   }
 }
 
+/**
+ * The places work is counted to and the stop names (D4 a′): each file's top level and each function, by its region,
+ * and the one a site stands in (functions stand at a file's top level, never nested: V30 §11).
+ */
+function workPlaces(program: CoreProgram): {
+  readonly of: (site: SourceSite) => FileRegion | FunctionRegion;
+  readonly place: (region: FileRegion | FunctionRegion) => WorkPlace;
+  readonly site: (region: FileRegion | FunctionRegion) => SourceSite;
+} {
+  const files = new Map<number, FileRegion>();
+  const functions = new Map<number, FunctionRegion[]>();
+  for (const region of program.flow.regions)
+    if (region.kind === "file") files.set(region.file, region);
+    else if (region.kind === "function") {
+      const list = functions.get(region.file);
+      if (list === undefined) functions.set(region.file, [region]);
+      else list.push(region);
+    }
+  for (const list of functions.values())
+    list.sort((a, b) => a.declaration.span.start.offset - b.declaration.span.start.offset);
+  const spanSite = (file: number, span: FunctionRegion["declaration"]["span"]): SourceSite => ({
+    file,
+    start: span.start.offset,
+    end: span.end.offset,
+  });
+  return {
+    of: (site) => {
+      const list = functions.get(site.file) ?? [];
+      let low = 0;
+      let high = list.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (list[middle]!.declaration.span.start.offset <= site.start) low = middle + 1;
+        else high = middle;
+      }
+      const found = list[low - 1];
+      return found !== undefined && site.end <= found.declaration.span.end.offset
+        ? found
+        : files.get(site.file)!;
+    },
+    place: (region) =>
+      region.kind === "function"
+        ? {
+            name: region.declaration.name.name,
+            path: files.get(region.file)?.path ?? "",
+            lines: spanSite(region.file, region.declaration.span),
+          }
+        : { name: null, path: region.path, lines: program.fileSite(region.file) },
+    site: (region) =>
+      region.kind === "function"
+        ? spanSite(region.file, region.declaration.name.span)
+        : { file: region.file, start: 0, end: 0 },
+  };
+}
+
+/**
+ * The stop's diagnostics (D4 a′, TABLE r4.54): one warning at the heaviest place, the function or top level whose work
+ * was the most before the stop (the deepest nesting's for `nesting`), counting the checks moved to the runtime; and
+ * "not checked (budget)", once per function or top level one of those checks stands in, at its name or at its first.
+ */
+function stopDiagnostics(
+  program: CoreProgram,
+  limit: BudgetLimit,
+  deferred: readonly Extract<CoreDiagnostic, { obligation: unknown }>[],
+): (BudgetStop | NotChecked)[] {
+  const places = workPlaces(program);
+  const unchecked = new Map<FileRegion | FunctionRegion, SourceSite>();
+  for (const diagnostic of [...deferred].sort(
+    // (in source order, the whole site: one order for every order of the walk)
+    (a, b) => a.site.file - b.site.file || a.site.start - b.site.start || a.site.end - b.site.end,
+  )) {
+    const region = places.of(diagnostic.site);
+    if (!unchecked.has(region))
+      unchecked.set(region, region.kind === "function" ? places.site(region) : diagnostic.site);
+  }
+  let heaviest: FileRegion | FunctionRegion;
+  if (limit === "nesting") heaviest = places.of(program.deep[0]!);
+  else {
+    // the most work counted to one place, the earliest region on a tie; setup's (0) names none, nor a block's creator
+    const spent = program.work.spent();
+    let best = 0;
+    for (let spender = 1; spender < spent.length; spender += 1)
+      if ((spent[spender] ?? 0) > (best === 0 ? 0 : (spent[best] ?? 0))) best = spender;
+    const region = best === 0 ? undefined : program.flow.regions[best - 1];
+    heaviest =
+      region?.kind === "function" || region?.kind === "file"
+        ? region
+        : places.of({ file: 0, start: 0, end: 0 });
+  }
+  const stop: BudgetStop = {
+    class: "warning-runtime-check",
+    kind: "budget",
+    code: "TSV076",
+    site: unchecked.get(heaviest) ?? places.site(heaviest),
+    limit,
+    place: places.place(heaviest),
+    deferred: deferred.length,
+  };
+  return [
+    stop,
+    ...[...unchecked].map(([region, site]): NotChecked => ({
+      class: "not-checked-budget",
+      kind: "budget",
+      code: "TSV076",
+      site,
+      place: places.place(region),
+    })),
+  ];
+}
+
 /** Whether two passes reject the same stores. */
 function sameSet(a: ReadonlyMap<number, unknown>, b: ReadonlyMap<number, unknown>): boolean {
   return a.size === b.size && [...a.keys()].every((uid) => b.has(uid));
@@ -520,73 +707,37 @@ function initializersOf(program: CoreProgram): Map<string, SourceSite> {
   return links;
 }
 
-/**
- * The answers of an analysis stopped before its consumers ran (TABLE §8): `budget-error` with no diagnostics, the
- * graph and the ledger as far as they came; each question raises the stop again, as a question after any stop does.
- */
-class StoppedAnswers implements Answers {
-  readonly outcome: CoreOutcome = "budget-error";
-  readonly diagnostics: readonly CoreDiagnostic[] = [];
-  readonly checks: readonly Obligation[] = [];
-  readonly graph: FlowGraph;
-  readonly dominators: Dominators;
-  readonly budget: BudgetAnswer;
-  readonly deferred = { parameters: [], results: [] };
-  readonly initializers: ReadonlyMap<string, SourceSite>;
-  readonly #limit: BudgetLimit;
+/** The literals whose own syntax gives their kind after a stop: a scalar's (`atom`), or a collection's or an object's. */
+const OWN_KINDS: ReadonlyMap<string, "atom" | "list" | "set" | "dict" | "object"> = new Map([
+  ["numberLiteral", "atom"],
+  ["booleanLiteral", "atom"],
+  ["nullLiteral", "atom"],
+  ["stringLiteral", "atom"],
+  ["durationLiteral", "atom"],
+  ["regexLiteral", "atom"],
+  ["listLiteral", "list"],
+  ["setLiteral", "set"],
+  ["dictLiteral", "dict"],
+  ["objectLiteral", "object"],
+]);
 
-  public constructor(program: CoreProgram, limit: BudgetLimit) {
-    this.graph = program.flow;
-    this.dominators = program.dom;
-    this.initializers = initializersOf(program);
-    this.#limit = limit;
-    this.budget = {
-      total: program.work.total,
-      allowance: program.work.allowance,
-      counts: program.work.counts(),
-      exhausted: limit,
-      demands: [],
-      finished: [],
-      facts: {
-        prefixEntries: 0,
-        literalEntries: 0,
-        markNodes: 0,
-        markVisits: 0,
-        selectionVisits: 0,
-        decidedPaths: 0,
-      },
-    };
-  }
+/** What a value's own syntax gives at a path after a stop (`CoreAnswers.#stoppedShape`): items and property names. */
+interface StoppedShape {
+  readonly items: readonly Item[];
+  readonly names: ReadonlySet<string>;
+}
 
-  public at(): OccurrenceAnswer | null {
-    throw new BudgetExhausted(this.#limit);
-  }
+const NO_NAMES: ReadonlySet<string> = new Set();
 
-  public place(): PlaceAnswer {
-    throw new BudgetExhausted(this.#limit);
-  }
+/** Whether an item is the unknown a stop leaves (`STOPPED`'s). */
+function isStopped(item: Item): boolean {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0;
+}
 
-  public project(): readonly Item[] {
-    throw new BudgetExhausted(this.#limit);
-  }
-
-  public properties(): ReadonlyMap<string, readonly Item[]> {
-    throw new BudgetExhausted(this.#limit);
-  }
-
-  public placeProperties(): ReadonlySet<string> {
-    throw new BudgetExhausted(this.#limit);
-  }
-
-  public valueAt(): ValueAnswer {
-    throw new BudgetExhausted(this.#limit);
-  }
-
-  public view(): CoreView {
-    throw new BudgetExhausted(this.#limit);
-  }
-
-  public shareKnown(): void {}
+/** The property names a type term gives, through its unions. */
+function termProperties(term: TypeTerm): string[] {
+  if (term.kind === "union") return term.members.flatMap(termProperties);
+  return term.kind === "object" ? (term.properties ?? []).map((property) => property.name) : [];
 }
 
 class CoreAnswers implements Answers {
@@ -603,62 +754,71 @@ class CoreAnswers implements Answers {
   readonly initializers: ReadonlyMap<string, SourceSite>;
   readonly #pass: CorePass;
   readonly #consumers: Consumers;
+  readonly #written: readonly WrittenTypeError[];
   readonly #obligations = new Map<string, Obligation[]>();
   #stores: Map<FlowNode, Definition> | null = null;
   #known: ((expression: Expression) => KnownValue | undefined) | null = null;
+  /** The analysis stopped (D4 a′): no question asks the solver, every value read is `unknown` with `budget`. */
+  readonly #stopped: boolean;
 
   public constructor(
     pass: CorePass,
     consumers: Consumers,
-    exhausted: BudgetLimit | null,
     written: readonly WrittenTypeError[],
+    exhausted: BudgetLimit | null,
+    stoppedIn: StopPhase | null = null,
   ) {
     this.#pass = pass;
     this.#consumers = consumers;
+    this.#written = written;
+    // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
+    this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;
     this.graph = program.flow;
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
     // published in source order of their sites, at one site the written types' errors first, then each consumer's in
-    // the order they run (TABLE r4.86 (1))
-    const rules = new Map<CoreDiagnostic, number>();
-    let rule = 0;
-    consumers.diagnostics.forEach((diagnostic, index) => {
-      while (rule < consumers.rules.length && index >= consumers.rules[rule]!) rule += 1;
-      rules.set(diagnostic, 1 + rule);
+    // the order they run (TABLE r4.86 (1)), the finishing path's as the walk's, then a stop's own warning and marks
+    const ranked = (
+      item: CoreDiagnostic,
+    ): { readonly item: CoreDiagnostic; readonly rule: number } => ({
+      item,
+      rule: consumers.rules.get(item) ?? 0,
     });
-    this.diagnostics =
-      exhausted === null
-        ? bySite(
-            [...written, ...consumers.diagnostics].map((item) => ({
-              item,
-              rule: rules.get(item) ?? 0,
-            })),
-          )
-        : [];
-    this.outcome = exhausted === null ? outcomeOf(this.diagnostics) : "budget-error";
+    this.diagnostics = bySite([
+      ...[...written, ...consumers.diagnostics].map(ranked),
+      ...(exhausted === null ? [] : stopDiagnostics(program, exhausted, consumers.deferred)).map(
+        (item) => ({ item, rule: STOP_RULE }),
+      ),
+    ]);
+    this.outcome = outcomeOf(this.diagnostics);
     // each warning's obligation, one per warning (§4), then the boundary checks no warning owes: in source order of their
-    // sites, at one site the warnings' obligations in the diagnostics' order, then the others (`checksBySite`)
+    // sites, at one site the warnings' obligations in the diagnostics' order (a stop's moved checks after the shown
+    // ones'), then the others (`checksBySite`)
     const owned: Obligation[] = [];
     for (const diagnostic of this.diagnostics)
-      if (diagnostic.class === "warning-runtime-check") {
+      if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
         owned.push(diagnostic.obligation);
         const at = siteKey(diagnostic.obligation.site);
         const list = this.#obligations.get(at);
         if (list === undefined) this.#obligations.set(at, [diagnostic.obligation]);
         else list.push(diagnostic.obligation);
       }
+    for (const diagnostic of bySite(
+      consumers.deferred.map((item) => ({ item, rule: consumers.rules.get(item) ?? 0 })),
+    ))
+      owned.push(diagnostic.obligation);
     const others: { readonly item: Obligation; readonly rule: number }[] = [];
-    if (exhausted === null) {
+    // (the boundaries are the walk's last step, finished after any stop: where admission had not settled, those into
+    // written types, every other ingress store marked)
+    if (consumers.published)
       for (const list of consumers.admission.boundaries.values())
         for (const item of list) others.push({ item, rule: 0 });
-      for (const item of consumers.admission.readChecks) others.push({ item, rule: 1 });
-    }
+    for (const item of consumers.admission.readChecks) others.push({ item, rule: 1 });
     this.checks = checksBySite(owned, bySite(others));
     const deferredParameters: PlaceId[] = [];
     const deferredResults: PlaceId[] = [];
-    // after a stop the ledger is spent: nothing more is computed, so no binding is published as deferred
-    for (const fn of exhausted === null ? program.graph.functions : []) {
+    for (const fn of program.graph.functions) {
       if (!pass.lists.singleSite(fn.id))
         for (const parameter of fn.parameters) {
           const kind = program.place(parameter).kind;
@@ -676,14 +836,198 @@ class CoreAnswers implements Answers {
       allowance: program.work.allowance,
       counts: program.work.counts(),
       exhausted,
+      deferred: consumers.deferred,
+      finishing: program.work.finishing,
+      stoppedIn,
+      settled: exhausted === null || consumers.settled,
       demands: consumers.reads,
       finished: pass.solver.demandWork(),
       facts: { ...pass.contract.facts },
     };
   }
 
-  #run<T>(work: Work<T>): T {
-    return this.#pass.solver.run(work);
+  /**
+   * A question of a value's items. After a stop the solver computes nothing and answers what it had finished (its
+   * memo) or `STOPPED`; where admission had not settled even those may change, so every value is `STOPPED` (D4 a′).
+   */
+  #run(work: Work<readonly Item[]>): readonly Item[] {
+    return this.#stopped && !this.#consumers.settled ? STOPPED : this.#pass.solver.run(work);
+  }
+
+  /**
+   * A value's items at a node and a path, for every question, direct or composed: a literal's child's items are its own
+   * question's (`#stoppedShape`), and the last two sources are read here alone (TABLE r4.158; the lint check
+   * `check-question-sources.mjs`). After a stop, the finishing read's sources in their order (TABLE r4.138): the
+   * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
+   * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
+   * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
+   * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
+   * as `place` answers it (`#lazilyDecided`).
+   */
+  #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
+    const answered = this.#run(this.#pass.values.valueItems(value, node, path));
+    if (!this.#stopped || !answered.some(isStopped)) return answered;
+    const own = this.#stoppedShape(value, path).items;
+    if (own !== STOPPED) return own;
+    const finished = this.#consumers.finishedItems(value, node, path);
+    return finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished;
+  }
+
+  /**
+   * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
+   * its written type, its decision, or its key's finished contract where admission decides a path lazily (S3 §5: a
+   * lazily decided path is a source; TABLE r4.152 (2)). A domain, as the finishing read reads one (a collection's element
+   * possibly absent, C6); `null` where the read has no place or nothing decides it. One check unit, no new walk: after a
+   * stop admission decides nothing more, it reads what had finished.
+   */
+  #lazilyDecided(value: PlaceId, path: readonly string[]): readonly Item[] | null {
+    const { program } = this.#pass;
+    if (!this.#consumers.settled) return null;
+    const place = this.#readPlace(value);
+    if (place === null) return null;
+    program.work.charge("checks");
+    const at = joinSteps(place.path, path);
+    const written = writtenOf(program.place(place.root).kind);
+    const admitted = this.#admitted(place.root, at, written === null ? null : termAt(written, at));
+    if (admitted.by === "undecided" || admitted.kinds.includes("unknown")) return null;
+    const items = admitted.kinds.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    const step = path.at(-1) ?? program.projOf.get(value)?.step;
+    return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+  }
+
+  /**
+   * The place a read reads: its binding's root and path, a step per projection; `null` for a projection of a literal, a
+   * call or an operation, which is no place.
+   */
+  #readPlace(value: PlaceId): { readonly root: PlaceId; readonly path: readonly string[] } | null {
+    const { program } = this.#pass;
+    let base = value;
+    for (
+      let projection = program.projOf.get(base);
+      projection !== undefined;
+      projection = program.projOf.get(base)
+    )
+      base = projection.owner;
+    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
+    return program.occurrenceOf.has(base)
+      ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
+      : null;
+  }
+
+  /**
+   * After a stop, what a value's own syntax gives at a path, with no proof (D4 a′): its items and its objects' property
+   * names. A literal gives its own kind, and below it its children's items as their own questions answer them (`#items`)
+   * beside its children's own names (`#literalShape`: the descent follows the literal's syntax, so it ends); a typed
+   * parse's or load's expected type (F18) is its written destination's (`landsIn`), else its default's as a typed
+   * default reads it (`typedDefault`: a `null` there leaves its level open), at every depth, a literal's child included;
+   * any other value `STOPPED`. Each typed call and path once, every link of a chain of typed defaults sharing it; a
+   * literal's own shape is kept apart from what a typed call makes of it.
+   */
+  #stoppedShape(value: PlaceId, path: readonly string[]): StoppedShape {
+    const { program, contract } = this.#pass;
+    if (typedCall(program, value) === null) return this.#literalShape(value, path);
+    const known = this.#typedShapes.get(joinParts(value, path));
+    if (known !== undefined) return known;
+    const chain: PlaceId[] = [value];
+    let at = value;
+    let found: StoppedShape | null = null;
+    for (let call = typedCall(program, at); found === null && call !== null;) {
+      program.work.charge("checks");
+      const written = contract.landsIn(at, []);
+      if (written !== null) {
+        const term = termAt(written, path);
+        const tags = term === null ? [] : typeTags(term).filter((tag) => tag !== "unknown");
+        found = {
+          items:
+            tags.length === 0 ? STOPPED : tags.map((tag) => makeItem(tag, null, { cert: "def" })),
+          names: term === null ? NO_NAMES : new Set(termProperties(term)),
+        };
+      } else if (call.fallback === undefined) found = { items: STOPPED, names: NO_NAMES };
+      else {
+        at = call.fallback;
+        call = typedCall(program, at);
+        if (call !== null) {
+          found = this.#typedShapes.get(joinParts(at, path)) ?? null;
+          chain.push(at);
+        } else {
+          // the default itself: its own shape, as a typed default reads it
+          const own = this.#literalShape(at, path);
+          const decision = typedDefault(path, false);
+          found = {
+            items:
+              own.items === STOPPED
+                ? STOPPED
+                : decision.answer(decision.choose(own.items), own.items),
+            names: own.names,
+          };
+        }
+      }
+    }
+    // (an expected type is no proof of an element: a typed collection may be empty, as unstopped and as the consumers'
+    // typed read gives it, C6; the plan takes no kind from it)
+    const step = path.at(-1);
+    if (
+      found!.items !== STOPPED &&
+      step !== undefined &&
+      stepName(step) === "element" &&
+      !found!.items.some((item) => item.tag === "empty")
+    )
+      found = { ...found!, items: [...found!.items, EMPTY] };
+    for (const link of chain) {
+      const key = joinParts(link, path);
+      keepText(program.work, key.length);
+      this.#typedShapes.set(key, found!);
+    }
+    return found!;
+  }
+
+  readonly #typedShapes = new Map<string, StoppedShape>();
+
+  /** A literal's own shape at a path: a scalar's kind, a collection's or an object's, and its children's below it. */
+  #literalShape(value: PlaceId, path: readonly string[]): StoppedShape {
+    const key = joinParts(value, path);
+    let shape = this.#literalShapes.get(key);
+    if (shape === undefined) {
+      keepText(this.#pass.program.work, key.length);
+      shape = this.#literalShapeOf(value, path);
+      this.#literalShapes.set(key, shape);
+    }
+    return shape;
+  }
+
+  readonly #literalShapes = new Map<string, StoppedShape>();
+
+  #literalShapeOf(value: PlaceId, path: readonly string[]): StoppedShape {
+    const { program } = this.#pass;
+    program.work.charge("checks");
+    const kind = program.places[value]?.kind;
+    const own = kind?.kind === "value" ? OWN_KINDS.get(kind.node) : undefined;
+    if (own === undefined) return { items: STOPPED, names: NO_NAMES };
+    if (own === "atom") {
+      const has = program.hasOf.get(value);
+      return path.length === 0 && has?.length === 1 && has[0]!.type.kind === "atom"
+        ? { items: [makeItem(has[0]!.type.name, null, { cert: "def" })], names: NO_NAMES }
+        : { items: STOPPED, names: NO_NAMES };
+    }
+    if (path.length === 0) {
+      const names = new Set<string>();
+      if (own === "object")
+        for (const has of program.hasOf.get(value) ?? [])
+          for (const name of termProperties(has.type)) names.add(name);
+      return { items: [makeItem(own, null, { cert: "def" })], names };
+    }
+    // each child at the path's own step (`literalChildren` keys a collection's elements and a dict's values alike): its
+    // items as its own question answers them, through every ordered source (`#items`: one endpoint for every question,
+    // TABLE r4.158), beside its known siblings; its names its own syntax's alone
+    const items: Item[] = [];
+    const names = new Set<string>();
+    const rest = path.slice(1);
+    for (const child of this.#consumers.admission.literalChildren(value, path[0]!)) {
+      if (child.value === undefined) continue;
+      for (const name of this.#stoppedShape(child.value, rest).names) names.add(name);
+      for (const item of this.#items(child.value, child.node, rest)) items.push(item);
+    }
+    return { items: items.length === 0 ? STOPPED : items, names };
   }
 
   /** The value place of an expression node, the place a statement stores into, or `null`. */
@@ -696,8 +1040,13 @@ class CoreAnswers implements Answers {
     );
   }
 
+  public stoppedAt(limit: BudgetLimit): Answers {
+    this.#pass.program.work.stop(limit);
+    return new CoreAnswers(this.#pass, this.#consumers, this.#written, limit, "questions");
+  }
+
   public at(node: FlowNode): OccurrenceAnswer | null {
-    const { program, values } = this.#pass;
+    const { values } = this.#pass;
     if (node.span === null) return null;
     const obligations =
       this.#obligations.get(
@@ -710,33 +1059,25 @@ class CoreAnswers implements Answers {
       return d === null
         ? null
         : {
-            items: d.value === undefined ? [] : this.#run(values.valueItems(d.value, node, [])),
+            items: d.value === undefined ? [] : this.#items(d.value, node, []),
             route: "value",
             place: { id: d.place, path: d.path },
             obligations,
             narrowing: null,
           };
     }
-    const items = this.#run(values.valueItems(value, node, []));
+    const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
-    let base = value;
-    for (
-      let projection = program.projOf.get(base);
-      projection !== undefined;
-      projection = program.projOf.get(base)
-    )
-      base = projection.owner;
-    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
-    const target = program.occurrenceOf.has(base)
-      ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
-      : null;
+    const target = this.#readPlace(value);
     // the route the read's answer took, recorded as it was answered (Astra B5)
     const route: Route =
       target === null
         ? "value"
         : this.#consumers.quiet.has(value)
           ? "quiet"
-          : values.valueRoute(value, node, []);
+          : this.#stopped
+            ? "contract"
+            : values.valueRoute(value, node, []);
     return {
       items,
       route,
@@ -768,6 +1109,7 @@ class CoreAnswers implements Answers {
     const elements = kinds.some((item) => COLLECTION_TAGS.has(item.tag))
       ? this.#run(contract.contractOf(keyOf(id, joinSteps(path, ["element"]))))
       : [];
+    let defined: PlaceAnswer["definitions"] | null = null;
     return {
       admitted: this.#admitted(id, path, term),
       contract: {
@@ -776,12 +1118,15 @@ class CoreAnswers implements Answers {
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
       ingresses: this.#consumers.admission.boundaries.get(key) ?? [],
-      // the exact service's list, not the raw stores (Astra B8)
-      definitions: {
-        list: lists.definitionsOf(key).list,
-        owner: definitions.declaringCallable(id),
-        ownedAway: definitions.ownedAway(key),
-        events: lists.ownEvents(key),
+      // the exact service's list, not the raw stores (Astra B8), made where it is read: a key's events walk its
+      // prefixes, and most askers want the place's types alone (the slice's facts ask one per expression)
+      get definitions() {
+        return (defined ??= {
+          list: lists.definitionsOf(key).list,
+          owner: definitions.declaringCallable(id),
+          ownedAway: definitions.ownedAway(key),
+          events: lists.ownEvents(key),
+        });
       },
     };
   }
@@ -789,6 +1134,8 @@ class CoreAnswers implements Answers {
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {
     // (each kind once: `(null | string)?` admits `null` and `string`)
     if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
+    // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
+    if (this.#stopped && !this.#consumers.settled) return { by: "undecided" };
     const { admission } = this.#consumers;
     const kinds = admission.admitted(id, path);
     // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
@@ -812,7 +1159,7 @@ class CoreAnswers implements Answers {
     if (value === null) return [];
     // a dict's entries are its element path (the collector's step names)
     const path = typeof step === "string" ? stepName(step) : propertyStep(step.property);
-    return this.#run(this.#pass.values.valueItems(value, node, [path]));
+    return this.#items(value, node, [path]);
   }
 
   public properties(node: FlowNode): ReadonlyMap<string, readonly Item[]> {
@@ -820,7 +1167,7 @@ class CoreAnswers implements Answers {
     const out = new Map<string, readonly Item[]>();
     if (value === null) return out;
     for (const name of [...this.#propertyNames({ value, path: [] })].sort())
-      out.set(name, this.#run(this.#pass.values.valueItems(value, node, [propertyStep(name)])));
+      out.set(name, this.#items(value, node, [propertyStep(name)]));
     return out;
   }
 
@@ -831,7 +1178,7 @@ class CoreAnswers implements Answers {
   public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {
     const value = this.#valueOf(node);
     if (value === null) return { items: [], properties: new Set() };
-    const items = this.#run(this.#pass.values.valueItems(value, node, path));
+    const items = this.#items(value, node, path);
     // only an object has properties to find
     return {
       items,
@@ -842,13 +1189,20 @@ class CoreAnswers implements Answers {
   }
 
   #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
-    return propertyNames(this.#pass, (work) => this.#run(work), start);
+    // (after a stop before admission settled only what a value's own syntax names: a literal's or a written
+    // destination's properties)
+    if (this.#stopped && !this.#consumers.settled) {
+      const names = new Set<string>();
+      if ("value" in start)
+        for (const name of this.#stoppedShape(start.value, start.path).names) names.add(name);
+      return names;
+    }
+    return propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start);
   }
 
   public view(node: FlowNode): CoreView {
     const value = this.#valueOf(node);
-    const items =
-      value === null ? [] : withoutEmpty(this.#run(this.#pass.values.valueItems(value, node, [])));
+    const items = value === null ? [] : withoutEmpty(this.#items(value, node, []));
     const alternatives = items
       .map((item) => closedType(item.tag))
       .filter((type): type is StaticType => type !== null);

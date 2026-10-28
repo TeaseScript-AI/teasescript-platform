@@ -41,13 +41,29 @@ export function toMonacoRange(span: SourceSpan): MonacoRange {
   };
 }
 
+/** Monaco's marker severities this mapping uses (`monaco.MarkerSeverity`). */
+export interface MonacoSeverities {
+  readonly Error: number;
+  readonly Warning: number;
+  readonly Info: number;
+}
+
+/**
+ * The markers of diagnostics: an error at Monaco's error level, an information (the new checker's "not checked
+ * (budget)", TABLE r4.54) at its information level, in the default theme's colour, every other at its warning level.
+ */
 export function toMonacoMarkers(
   diagnostics: readonly LanguageDiagnostic[],
-  severity: { readonly Error: number; readonly Warning: number },
+  severity: MonacoSeverities,
 ): MonacoMarker[] {
   return diagnostics.map((diagnostic) => ({
     ...toMonacoRange(diagnostic.span),
-    severity: diagnostic.severity === "error" ? severity.Error : severity.Warning,
+    severity:
+      diagnostic.severity === "error"
+        ? severity.Error
+        : diagnostic.severity === "info"
+          ? severity.Info
+          : severity.Warning,
     code: diagnostic.code,
     message: diagnostic.message,
     source: "TeaseScript",

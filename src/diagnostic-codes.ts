@@ -413,6 +413,12 @@ export const DIAGNOSTIC_CODES = {
     "Union with a whole list, set, or dict beside another type",
     DOCS.values,
   ),
+  TSV076: entry(
+    ["type checker"],
+    ["warning", "info"],
+    "Script too large to check completely before it plays",
+    DOCS.values,
+  ),
 
   TST001: entry(["parser"], "error", "Invalid tag query", DOCS.tags),
   TST002: entry(["type checker"], "error", "Tag query that matches nothing", DOCS.tags),

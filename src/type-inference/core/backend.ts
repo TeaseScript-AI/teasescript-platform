@@ -42,8 +42,8 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required
  * check, S10), a property read of a value that may be no object, a value `say` may not show, an argument of another
- * kind than its built-in takes (the built-in signature check C13, S9b), lists nested `SLICE_DEPTH` deep, and the work
- * allowance (S8).
+ * kind than its built-in takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A stop of
+ * the analysis is no exclusion: the program compiles with the stop's warning and its checks at runtime (D4 a′).
  */
 
 /** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
@@ -78,25 +78,38 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     );
     const answers = analyseCore(core);
     try {
-      const after = outsideAnswers(answers, index, core.files);
-      if (after !== null) throw outsideSlice(core, after);
-      const checked = coreCheckResult(answers, index, core);
-      // computed here, so that a question past the allowance rejects the program instead of failing a later caller
-      const facts = coreFacts(answers, index, core);
-      return { checked, facts: () => facts };
+      return outcomeOf(answers, index, core);
     } catch (error) {
-      if (error instanceof OutsideContract)
-        throw outsideSlice(core, {
-          file: index.fileOf(error.expression),
-          span: error.expression.span,
-          what: error.what,
-        });
-      // the questions after the analysis spend the same allowance (TABLE §8); its fallback is S8's
+      // the questions after the analysis spend the same allowance (TABLE §8): one past it stops there, the finished
+      // analysis's findings and decisions standing, and what is asked from then on answers `STOPPED` (D4 a′)
       if (!(error instanceof BudgetExhausted)) throw error;
-      throw outsideSlice(core, overAllowance(core.files));
+      return outcomeOf(answers.stoppedAt(error.limit), index, core);
     }
   },
 };
+
+/** The compiler's view of the core's answers to a program inside the slice, the facts computed here, before a caller. */
+function outcomeOf(
+  answers: Answers,
+  index: SliceIndex,
+  core: CoreAnalysisRequest,
+): TypeAnalysisOutcome {
+  try {
+    const after = outsideAnswers(answers, index);
+    if (after !== null) throw outsideSlice(core, after);
+    const checked = coreCheckResult(answers, index, core);
+    const facts = coreFacts(answers, index, core);
+    return { checked, facts: () => facts };
+  } catch (error) {
+    if (error instanceof OutsideContract)
+      throw outsideSlice(core, {
+        file: index.fileOf(error.expression),
+        span: error.expression.span,
+        what: error.what,
+      });
+    throw error;
+  }
+}
 
 /** The request with what the core reads beside the programs; the compiler gives both for every file. */
 function coreRequest(request: TypeAnalysisRequest): CoreAnalysisRequest {
@@ -381,25 +394,12 @@ function letNames(program: Program): Set<string> {
 /** The kinds of the values a `say` of the slice shows: the scalars, and an unknown that the runtime shows as it is. */
 const SHOWN: readonly string[] = ["string", "integer", "number", "boolean", "null", "unknown"];
 
-/** A program whose analysis crossed the work allowance (S8's fallback). */
-function overAllowance(files: readonly CoreFile[]): Outside {
-  return {
-    file: 0,
-    span: files[0]!.program.span,
-    what: "a program over the analysis's work allowance",
-  };
-}
-
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
-function outsideAnswers(
-  answers: Answers,
-  index: SliceIndex,
-  files: readonly CoreFile[],
-): Outside | null {
+function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
     index.spanAt(site);
-  if (answers.outcome === "budget-error") return overAllowance(files);
   for (const diagnostic of answers.diagnostics) {
+    if (diagnostic.kind === "budget") continue;
     if (diagnostic.kind === "operator")
       return { file: diagnostic.site.file, span: at(diagnostic.site), what: "this operand" };
     // a possible `null` needs narrowing's required check (S10); a member a receiver may lack is C5's own

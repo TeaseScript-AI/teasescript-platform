@@ -30,9 +30,9 @@ import { siteKey, stepName, type CoreProgram } from "./program.js";
  * branch that tests it and always leaves (the way past the test is a branch entry of its own), and in the right operand
  * of an `and` or `or` whose left operand tests it. Guards are indexed per tested key, as definitions are: a read asks
  * its key and each prefix, a binary search each, never a root's other keys and never an `and` chain's other tests.
- * Stage 3b's narrowing definitions (§13, S10) join this index: built with the program's first one (`NarrowingIndex`, N1
- * and N2's lists, and the statements with N3's shared layer, `StatementTree`), and asked per pass through `narrowings`
- * (N2 with N5, N3).
+ * Stage 3b's narrowing definitions (§13, S10) join this index: built on their first read, once per program
+ * (`NarrowingIndex`, N1 and N2's lists, and the statements with N3's shared layer, `StatementTree`), and asked per pass
+ * through `narrowings` (N2 with N5, N3).
  * A read in a stored value takes its narrowing where it holds (`Values`, S10 part 2b); every other read still takes a
  * test as a guard until its consumer reads the narrowings (part 2c).
  */
@@ -98,9 +98,7 @@ export class GuardIndex {
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
-  /** Stage 3b's statements with N3's shared layer, and its narrowing definitions and invalidations (§13). */
-  readonly statements: StatementTree;
-  readonly narrowing: NarrowingIndex;
+  #narrowing: NarrowingIndex | null = null;
   #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
   public constructor(readonly program: CoreProgram) {
@@ -160,8 +158,19 @@ export class GuardIndex {
         keys.push(key);
       }
     }
-    this.narrowing = NarrowingIndex.of(program);
-    this.statements = this.narrowing.statements;
+  }
+
+  /**
+   * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis,
+   * or a finishing pass after a stop, that reads none pays for none (TABLE r4.117).
+   */
+  public get narrowing(): NarrowingIndex {
+    return (this.#narrowing ??= NarrowingIndex.of(this.program));
+  }
+
+  /** Stage 3b's statements with N3's shared layer (`narrowing`'s). */
+  public get statements(): StatementTree {
+    return this.narrowing.statements;
   }
 
   /** Stage 3b's queries of this pass (§13): N2's events with N5's preserving stores, and N3's routes. */

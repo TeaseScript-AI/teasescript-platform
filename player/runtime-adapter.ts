@@ -516,7 +516,7 @@ export interface PlayerScriptDiagnostic {
   readonly path: string;
   readonly line: number;
   readonly column: number;
-  readonly severity: "error" | "warning";
+  readonly severity: "error" | "warning" | "info";
   readonly code: string;
   readonly message: string;
 }

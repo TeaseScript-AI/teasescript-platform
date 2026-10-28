@@ -957,6 +957,7 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
       const answers = analyseCore(request);
       return {
         outcome: answers.outcome,
+        exhausted: answers.budget.exhausted,
         levels: places.map((place) => decision(answers, ids.get(place)!, path).levels),
       };
     };
@@ -981,7 +982,11 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     "let typed: integer?[] = [1]\nlet a = typed\nlet b = [2]\nlet tmp = a\na = b\nb = tmp\ntmp = [null]\nexit\n",
     ["tmp"],
   );
-  assert.deepEqual(swap, { outcome: "valid", levels: [[["list"], ["integer", "null"]]] });
+  assert.deepEqual(swap, {
+    outcome: "valid",
+    exhausted: null,
+    levels: [[["list"], ["integer", "null"]]],
+  });
   // a cycle of copies before the source's written copy: the copy admits what its source does
   const cycle = levelsOf(
     "let typed: null[] = [null]\nlet a = null\nlet b = a\na = b\na = typed\nlet out = b\nout = [hostValue]\nexit\n",
@@ -994,7 +999,11 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     ["out"],
     [],
   );
-  assert.deepEqual(inside, { outcome: "warning-runtime-check", levels: [[["null"]]] });
+  assert.deepEqual(inside, {
+    outcome: "warning-runtime-check",
+    exhausted: null,
+    levels: [[["null"]]],
+  });
   // a cycle of whole copies brings every member the written type's paths (Sol's round 4 B1)
   const round = levelsOf(
     "let typed: null[] = [null]\nlet a0 = typed\nlet a1 = a0\nlet a2 = a1\na0 = a2\nlet out = a2\nout = hostValue\nexit\n",
@@ -1011,7 +1020,7 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
     ["out"],
     [],
   );
-  assert.notEqual(nesting.outcome, "budget-error");
+  assert.equal(nesting.exhausted, null);
 });
 
 /**

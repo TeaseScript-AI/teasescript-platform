@@ -16,11 +16,14 @@ import { REFERENCE } from "./contract.js";
 import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
+  BudgetStop,
   ContextDetail,
   CoreCode,
   CoreDiagnostic,
   DiagnosticRule,
+  NotChecked,
   StoreRoot,
+  WorkPlace,
   WrittenTypeError,
 } from "./result.js";
 
@@ -33,10 +36,11 @@ import type {
  * semicolons, no implementation terms, and "type", never "kind" (`docs/DIAGNOSTICS.md`, "Messages").
  */
 
-/** How a message names the source: the text at a site, and the line it starts on (1-based). */
+/** How a message names the source: the text at a site, the line it starts on (1-based) and its column (0-based). */
 export interface MessageSource {
   readonly text: (site: SourceSite) => string;
   readonly line: (site: SourceSite) => number;
+  readonly column: (site: SourceSite) => number;
 }
 
 /** The message source of a project's files: each file's text, its lines counted once, on first need. */
@@ -53,20 +57,22 @@ export function messageSource(sources: readonly string[]): MessageSource {
     }
     return found;
   };
+  // the index of the last line start at or before the site, by binary search
+  const lineIndex = (site: SourceSite): number => {
+    const lines = linesOf(site.file);
+    let low = 0;
+    let high = lines.length;
+    while (high - low > 1) {
+      const middle = (low + high) >> 1;
+      if (lines[middle]! <= site.start) low = middle;
+      else high = middle;
+    }
+    return low;
+  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
-    line: (site) => {
-      // the last line start at or before the site, by binary search
-      const lines = linesOf(site.file);
-      let low = 0;
-      let high = lines.length;
-      while (high - low > 1) {
-        const middle = (low + high) >> 1;
-        if (lines[middle]! <= site.start) low = middle;
-        else high = middle;
-      }
-      return low + 1;
-    },
+    line: (site) => lineIndex(site) + 1,
+    column: (site) => site.start - linesOf(site.file)[lineIndex(site)]!,
   };
 }
 
@@ -92,6 +98,7 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
 export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): string {
   if (diagnostic.kind === "written-type") return writtenTypeMessage(diagnostic, source);
+  if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;
   if (diagnostic.class === "compile-error") return errorSentence(rule, text, kinds, source);
@@ -1082,6 +1089,36 @@ function memberWarningFix(
     : memberFix(rule, kinds).trimStart();
 }
 
+/** A place the stop names, with its lines: `'tally' (lines 3–9)`, `the top level of 'main.tease' (lines 1–40)`. */
+function placeText(place: WorkPlace, source: MessageSource): string {
+  const first = source.line(place.lines);
+  const last = source.line({
+    ...place.lines,
+    start: Math.max(place.lines.start, place.lines.end - 1),
+  });
+  const lines = first === last ? `line ${first}` : `lines ${first}–${last}`;
+  return `${place.name === null ? `the top level of '${place.path}'` : `'${place.name}'`} (${lines})`;
+}
+
+/**
+ * The stop's warning and its "not checked (budget)" mark (the owner's D4, TABLE r4.54: the warning as the owner's
+ * example words it; the nesting limit's in the same form).
+ */
+function budgetMessage(diagnostic: BudgetStop | NotChecked, source: MessageSource): string {
+  const place = placeText(diagnostic.place, source);
+  if (diagnostic.class === "not-checked-budget")
+    return `${capitalized(place)} is not checked completely before the script plays, so its checks run while it plays.`;
+  const count = diagnostic.deferred;
+  const moved =
+    count === 0
+      ? ""
+      : ` ${count} ${count === 1 ? "check runs" : "checks run"} while it plays instead.`;
+  return diagnostic.limit === "nesting"
+    ? `This script nests statements too deeply to check completely before it plays.${moved} The deepest nesting is ` +
+        `in ${place}.`
+    : `This script is too large to check completely before it plays.${moved} Most of the work went to ${place}.`;
+}
+
 /** V30 §13: a union that holds a whole collection beside another type, with V30's suggestion where it has one. */
 function writtenTypeMessage(error: WrittenTypeError, source: MessageSource): string {
   return (
@@ -1131,6 +1168,8 @@ function originSentence(word: ContextWord, name: string): string {
     // (the word also covers an object's own `first` and opaque operations: no reference is established)
     case "unmodelled":
       return `The type of '${name}' is known only when the script runs.`;
+    case "budget":
+      return `Checking '${name}' here before the script plays would take too long, so it is checked when the script runs.`;
   }
 }
 
@@ -1188,6 +1227,8 @@ function contextSentence(
     }
     case "unknown":
       return `'${name}' comes from outside the script, so its type is known only when the script runs.`;
+    case "budget":
+      return `Checking '${name}' here before the script plays would take too long, so it is checked when the script runs.`;
     case "unmodelled": {
       // (the warning's own kind where it is a reference: one warning per reference kind of a union)
       const reference =

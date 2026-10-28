@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { checkChargedIteration } from "./check-charged-iteration.mjs";
 import { checkEvidenceComments } from "./check-evidence.mjs";
+import { checkObligationInventory } from "./check-obligation-inventory.mjs";
+import { checkQuestionSources } from "./check-question-sources.mjs";
 import { lintFiles, repositoryRoot } from "./files.mjs";
 
 const files = lintFiles();
@@ -20,7 +22,11 @@ for (const file of files) {
     invalidEvidence = true;
   }
 }
-for (const diagnostic of checkChargedIteration(repositoryRoot)) {
+for (const diagnostic of [
+  ...checkChargedIteration(repositoryRoot),
+  ...checkObligationInventory(repositoryRoot),
+  ...checkQuestionSources(repositoryRoot),
+]) {
   console.error(
     `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
   );

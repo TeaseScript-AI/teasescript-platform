@@ -3,7 +3,9 @@
 Every code that a compiler diagnostic, runtime failure, developer warning, or checkpoint error carries is registered
 once in `src/diagnostic-codes.ts`: the pass or component that reports it (its owner), its severity, a short title, and
 the section that explains it. A rule that is an error where the compiler proves the problem and a warning where the
-script checks it when it runs keeps one code with both severities, shown as `error or warning`. Code that reports a
+script checks it when it runs keeps one code with both severities, shown as `error or warning`. The new checker's stop
+(`TSV076`) warns once and marks each function it did not check completely with an information (`info`), which the
+editor shows at its information level and which never stops a compile. Code that reports a
 diagnostic takes the registry's code types, so an unregistered code does not compile. `tests/diagnostic-codes.test.ts`
 checks that every code in `src/` is registered and reported only by its owners, and that every registered code is still
 reported or marked as retired. A retired code stays registered, so that it is never given to another problem.
@@ -201,6 +203,7 @@ The parser reads a file's header ([V30 file header](specifications/accepted-synt
 | `TSV073` | `call` that may start the running file | warning | plan analysis |
 | `TSV074` | `goto` that may lead to a file of declarations only | warning | plan analysis |
 | `TSV075` | Union with a whole list, set, or dict beside another type | error | type checker |
+| `TSV076` | Script too large to check completely before it plays | warning or info | type checker |
 
 ## Tags (TST)
 

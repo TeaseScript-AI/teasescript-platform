@@ -15,6 +15,9 @@ import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
 
+/** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
+type Compared = Exclude<CoreDiagnostic, { readonly kind: "budget" }>;
+
 /*
  * The new checker keeps every fix the current checker gives (#1195): on every record of the expectation set, the two
  * checkers' TSV diagnostics pair by file, line and code, and each fix sentence of the current checker's message is in
@@ -352,7 +355,7 @@ function fixes(message: string): string[] {
 }
 
 /** What a diagnostic names, in the source's own text. */
-function namedBy(diagnostic: CoreDiagnostic, source: MessageSource): Named {
+function namedBy(diagnostic: Compared, source: MessageSource): Named {
   if (diagnostic.kind === "written-type")
     return { subject: source.text(diagnostic.site), member: "", operands: [] };
   const { rule } = diagnostic;
@@ -376,7 +379,7 @@ function namedBy(diagnostic: CoreDiagnostic, source: MessageSource): Named {
 interface Pair {
   readonly record: string;
   readonly current: string;
-  readonly diagnostic: CoreDiagnostic;
+  readonly diagnostic: Compared;
   readonly message: string;
   readonly named: Named;
   /** The current checker's fixes and their new forms; `null` where no port takes the fix. */
@@ -390,7 +393,7 @@ const kept = (pair: Pair): boolean =>
  * How well a new diagnostic answers a current one on its line and code: whether the current message names its subject,
  * and whether it names every kind of its value.
  */
-function correspondence(message: string, diagnostic: CoreDiagnostic, named: Named): number {
+function correspondence(message: string, diagnostic: Compared, named: Named): number {
   const subject =
     message.includes(`'${named.subject}'`) ||
     message.includes(`if ${named.subject} `) ||
@@ -421,8 +424,9 @@ function pairs(): Pair[] {
     const request = coreRequest(files);
     if (request === null) continue;
     const source = messageSource(files.map((file) => file.source));
-    const core = new Map<string, { diagnostic: CoreDiagnostic; message: string; named: Named }[]>();
+    const core = new Map<string, { diagnostic: Compared; message: string; named: Named }[]>();
     for (const diagnostic of reportedDiagnostics(analyseCore(request))) {
+      if (diagnostic.kind === "budget") continue;
       const key = `${files[diagnostic.site.file]!.path}:${source.line(diagnostic.site)}:${diagnostic.code}`;
       const list = core.get(key) ?? [];
       list.push({

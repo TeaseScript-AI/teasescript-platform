@@ -3307,12 +3307,14 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
   // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
   // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
-  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays
+  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays;
+  // 45,355 / 156,458 (3.4675) with S8's stop (#1063): fewer index steps at both sizes (25,209 / 91,385 against 25,579 /
+  // 92,075), more of them saved at 64 than at 128
   {
     name: "I1106-nested-choice-lists",
     measures:
       'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
-    measured: 3.46,
+    measured: 3.47,
     program: (k) => {
       let expression = 'askChoice "seed"';
       for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
@@ -3829,8 +3831,10 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-first-chain",
     measures: "F12, §8: a list nested k deep read through k `.first` into a written destination",
-    // 212,369 / 1,014,728 units at k = 64, 128 in both orders (4.8876); `main` stops at the allowance from k = 20
-    measured: 4.89,
+    // 204,495 / 982,598 units at k = 64, 128 in both orders (4.9150); S6c measured 212,369 / 1,014,728 (4.8876):
+    // S8 runs fewer frames (2,180 against 10,181 at k = 128), so the literal walk's square, the same 114,212 / 642,491
+    // units, is a larger share; `main` before S6c stops at the allowance from k = 20
+    measured: 4.92,
     program: (k) =>
       main(
         lines(

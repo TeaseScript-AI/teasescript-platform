@@ -72,7 +72,7 @@ function analysed({ name, request }: Sized, reversed = false, unshared = false):
         )
       : analyseCore(request);
   const answers = unshared ? withoutSharing(run) : run();
-  assert.notEqual(answers.outcome, "budget-error", `${name}: within the allowance`);
+  assert.equal(answers.budget.exhausted, null, `${name}: within the allowance`);
   return answers;
 }
 
@@ -256,6 +256,7 @@ test("a question asked by every read of one place, read k times, takes work that
           const own = answers.diagnostics.filter(
             (found) =>
               found.class === "warning-runtime-check" &&
+              "provenance" in found &&
               found.provenance.context === "missing" &&
               found.provenance.detail.direct,
           );
@@ -874,22 +875,6 @@ test("W34's two known products grow no faster than measured", () => {
     }
   }
   assert.deepEqual(steep, []);
-});
-
-test("the analysis stops above 256 levels of nested blocks, an `else if` one level", () => {
-  const nested = (depth: number): string =>
-    `${"if true {\n".repeat(depth)}say "deep"\n${"}\n".repeat(depth)}exit`;
-  const chained = (length: number): string =>
-    `let n = 1\n${Array.from({ length }, (_, i) => `${i === 0 ? "" : "else "}if n == ${i} { say "${i}" }`).join("\n")}\nexit`;
-  const outcome = (source: string): string => {
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null);
-    return analyseCore(request).outcome;
-  };
-  assert.equal(outcome(nested(256)), "valid");
-  assert.equal(outcome(nested(257)), "budget-error");
-  assert.equal(outcome(chained(255)), "valid");
-  assert.equal(outcome(chained(257)), "budget-error");
 });
 
 /** A program's published record in one order, as the oracle's analysis gives it, which the chain control reuses. */
