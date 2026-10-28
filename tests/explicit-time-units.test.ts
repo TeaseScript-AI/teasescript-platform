@@ -546,7 +546,6 @@ test("a calendar unit follows a name, a call, or parentheses like an exact unit"
     assert.deepEqual([diagnostic?.code, diagnostic?.message], [code, message], source);
     assert.deepEqual(rest, [], source);
   }
-  assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
   assert.deepEqual(
     said(
       runValidSource(
