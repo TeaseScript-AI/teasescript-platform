@@ -784,7 +784,9 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
     for (const [place, wrap] of places)
       for (const { code, message } of parse(`${before}${wrap(expression)}\nexit\n`).diagnostics) {
         if (code !== "TSP041") continue;
-        const readings = message.slice(UNCLEAR.length).matchAll(/ '(.+?)' uses .*? when '.+?' is null\./gu);
+        const readings = message
+          .slice(UNCLEAR.length)
+          .matchAll(/ '(.+?)' uses .*? when '.+?' is null\./gu);
         for (const [, reading] of readings) {
           const pasted = `${before}${wrap(paste(expression, reading!))}\nexit\n`;
           assert.deepEqual(
@@ -796,7 +798,17 @@ test("every reading TSP041 quotes parses without an error where it is pasted, wh
         }
       }
   // Readings are shown where they hold, and words where a '(' would change the command or the value has another error.
-  for (const place of ["let", "if", "say", "pacing", "bounded say", "interpolation", "argument", "list", "wait"])
+  for (const place of [
+    "let",
+    "if",
+    "say",
+    "pacing",
+    "bounded say",
+    "interpolation",
+    "argument",
+    "list",
+    "wait",
+  ])
     assert.ok(quoted.has(`${place}: a otherwise b + c`), place);
   for (const shown of [
     "say value: a otherwise b + c",
