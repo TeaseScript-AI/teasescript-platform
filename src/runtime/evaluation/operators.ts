@@ -525,7 +525,7 @@ function notComparable(
       numberFromText(right) !== undefined) ||
     (typeof right === "number" && typeof left === "string" && numberFromText(left) !== undefined)
   )
-    fix = " Convert the text with toNumber(...) first.";
+    fix = " Convert the text with the toNumber function.";
   return fault(
     "TSR009",
     `${orderRule(expression.operator)}, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,

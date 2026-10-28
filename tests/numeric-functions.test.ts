@@ -291,7 +291,7 @@ test("numeric functions check their arguments", () => {
     [
       [
         "TSV043",
-        "pow(...) needs a number, not text (string). Convert text with toNumber(...) first.",
+        "pow(...) needs a number, not text (string). Convert the text with the toNumber function.",
         '"3"',
       ],
       ["TSV020", "sqrt() takes 1 argument (value), received 0.", "sqrt()"],
@@ -311,7 +311,7 @@ test("numeric functions check their arguments", () => {
   );
   assert.deepEqual(failure(`${DYNAMIC}say pow(dynamic("2"), 3)\nexit`), [
     "TSV043",
-    "pow(...) needs a number, not text (string). Convert text with toNumber(...) first.",
+    "pow(...) needs a number, not text (string). Convert the text with the toNumber function.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}say abs(dynamic(null))\nexit`), [
     "TSV043",

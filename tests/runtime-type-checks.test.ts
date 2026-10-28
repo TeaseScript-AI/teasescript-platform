@@ -40,6 +40,11 @@ test("each typed place rejects a value of another type that the compiler cannot 
       'pick("x")',
     ],
     [
+      'let count: integer = pick("3")',
+      `'count' holds a whole number (integer), so it cannot take text (string) "3". Convert the text with the toInteger function.`,
+      'pick("3")',
+    ],
+    [
       "let count = 1\ncount = pick(2.5)",
       "'count' holds a whole number (integer), so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
       "pick(2.5)",
@@ -104,7 +109,7 @@ test("an arithmetic operand that is not a number names the operand, the value, a
     ],
     [
       'say 2 * pick("3")',
-      "'*' needs a number on its right side, but received text (string) \"3\". Convert the text with toNumber(...) first.",
+      "'*' needs a number on its right side, but received text (string) \"3\". Convert the text with the toNumber function.",
       'pick("3")',
     ],
     [
@@ -356,7 +361,7 @@ test("an index or member that a value does not have names the value, its bounds,
     [
       'let items = pick([1])\nsay items["1"]',
       "TSR024",
-      'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with toInteger(...) first.',
+      'A list index must be a whole number (integer), but this is text (string) "1". Convert the text with the toInteger function.',
       '"1"',
     ],
     [

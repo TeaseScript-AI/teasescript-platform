@@ -678,7 +678,7 @@ function temporalPrefill(
         : ["askDateTime", "a date and time"];
   throw fault(
     "TSR052",
-    `The prefill of ${command} must be ${noun}, not ${describeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversionTo(kind)}(...).` : ""}`,
+    `The prefill of ${command} must be ${noun}, not ${describeValue(value)}.${typeof value === "string" ? ` Convert the text with the ${conversionTo(kind)} function.` : ""}`,
     span,
   );
 }

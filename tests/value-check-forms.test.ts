@@ -97,11 +97,11 @@ test("a range, handle member, or media position problem has one code and one tex
     [
       [['for i in "3"..5 {\n}', '"3"']],
       "TSV010",
-      "A range needs a number as its start, but this is text (string). Convert the text with toNumber(...) first.",
+      "A range needs a number as its start, but this is text (string). Convert the text with the toNumber function.",
       [
         `${PICK}for i in pick("3")..5 {\n}`,
         "TSR027",
-        `A range needs a number as its start, but this is text (string) "3". Convert the text with toNumber(...) first.`,
+        `A range needs a number as its start, but this is text (string) "3". Convert the text with the toNumber function.`,
       ],
     ],
     [

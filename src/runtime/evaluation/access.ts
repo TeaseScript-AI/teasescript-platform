@@ -349,7 +349,7 @@ export function notWholeIndex(
       : value === null
         ? ` Check that ${indexLabel === null ? "the index" : `'${indexLabel}'`} is not null first.`
         : typeof value === "string" && numberFromText(value) !== undefined
-          ? " Convert the text with toInteger(...) first."
+          ? " Convert the text with the toInteger function."
           : "";
   return fault(
     "TSR024",

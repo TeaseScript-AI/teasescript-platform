@@ -94,9 +94,9 @@ function typeFix({ value, type }: TypeMismatch): string {
     return ROUND_COUNT_FIX;
   if (typeof value === "string") {
     if ((kinds.has("integer") || kinds.has("number")) && numberFromText(value) !== undefined)
-      return ` Convert the text with ${kinds.has("number") ? "toNumber" : "toInteger"}(...) first.`;
+      return ` Convert the text with the ${kinds.has("number") ? "toNumber" : "toInteger"} function.`;
     if (kinds.has("boolean") && booleanFromText(value) !== undefined)
-      return " Convert the text with toBoolean(...) first.";
+      return " Convert the text with the toBoolean function.";
   }
   if ((typeof value === "number" || typeof value === "boolean") && kinds.has("string"))
     return " Convert it with toString(...) first.";
