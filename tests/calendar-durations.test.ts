@@ -606,21 +606,53 @@ test("where only an exact duration fits, a month or a year without 'calendar' as
   }
 });
 
-test("a month or a year without 'calendar' gets a fix only where its place proves that the fix compiles", () => {
+test("a month or a year without 'calendar', or a calendar unit without a space, gets a fix only where its place proves that the fix compiles", () => {
   const header =
     // A global, which a global's start value may read too.
     "global n = 2\nlet elapsed = 10 s\nlet c = 1 calendar month\nfunction rest(length: duration) {\n  wait length\n}\n" +
     "function f2(value) {\n  return value\n}\nlet t = timer async 10 s {\n}\n";
-  // Each form, with its amount and unit, and its place inside the value: after a sign, and with a written amount that
-  // is not a whole number of months, or is one.
-  const forms = [
-    ["1 month", "1", "month"],
-    ["n months", "n", "months"],
-    ["(2 years)", "2", "years"],
-    ["-1 month", "1", "month"],
-    ["1.5 month", "1.5", "month"],
-    ["0.5 year", "0.5", "year"],
-  ] as const;
+  // Each form: the part that a fix replaces, the code that a calendar place shows (with 'calendar', or with the space),
+  // and its place inside the value: after a sign, and with an amount that is a whole number of months or days, also
+  // where only the known-value fold gives it, or is not.
+  const forms: readonly {
+    readonly form: string;
+    readonly written: string;
+    readonly calendar: string;
+    readonly name: string;
+    readonly spaced?: true;
+    readonly whole?: false;
+  }[] = [
+    { form: "1 month", written: "1 month", calendar: "1 calendar month", name: "month" },
+    { form: "n months", written: "n months", calendar: "n calendar months", name: "month" },
+    { form: "(2 years)", written: "2 years", calendar: "2 calendar years", name: "year" },
+    { form: "-1 month", written: "1 month", calendar: "1 calendar month", name: "month" },
+    { form: "1.5 month", written: "1.5 month", calendar: "", name: "month", whole: false },
+    { form: "0.5 year", written: "0.5 year", calendar: "0.5 calendar year", name: "year" },
+    { form: "(3) months", written: "(3) months", calendar: "(3) calendar months", name: "month" },
+    { form: "(1.5) month", written: "(1.5) month", calendar: "", name: "month", whole: false },
+    { form: "(3 / 2) month", written: "(3 / 2) month", calendar: "", name: "month", whole: false },
+    ...(
+      [
+        ["2calendar months", "2 calendar months", "month"],
+        ["(n)calendar weeks", "(n) calendar weeks", "calendar week"],
+        ["-2calendar d", "2 calendar d", "calendar day"],
+      ] as const
+    ).map(([form, calendar, name]) => ({
+      form,
+      written: form.replace("-", ""),
+      calendar,
+      name,
+      spaced: true as const,
+    })),
+    {
+      form: "1.5calendar months",
+      written: "1.5calendar months",
+      calendar: "",
+      name: "month",
+      spaced: true,
+      whole: false,
+    },
+  ];
   const places: readonly (readonly [string, "calendar" | "words" | string])[] = [
     // Places that take any duration: the calendar unit compiles there.
     ["let d = #", "calendar"],
@@ -640,7 +672,7 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     ['say "x", #', "Say pacing"],
     ["timer(duration: #)", "A timer"],
     ["global g: duration = #, default: 1 s", "'g'"],
-    // Places whose type is not known here, and calculations: both choices in words.
+    // Places whose type is not known here, and calculations: the fix in words.
     ["rest(#)", "words"],
     ["f2(#)", "words"],
     ["t.remaining = #", "words"],
@@ -655,32 +687,35 @@ test("a month or a year without 'calendar' gets a fix only where its place prove
     ["global g = #, default: 1 s", "words"],
     ["global g = 1 s, default: #", "words"],
   ];
+  const space = "A unit needs a space before it.";
   for (const [place, advice] of places)
-    for (const [form, amount, unit] of forms) {
-      const written = `${amount} ${unit}`;
+    for (const { form, written, calendar, name, spaced, whole } of forms) {
       const source = place.replace("#", form);
-      const name = unit.startsWith("y") ? "year" : "month";
+      const exact = advice !== "calendar" && advice !== "words";
       // A calendar amount must be whole, and a negative length is wrong whatever its unit, so no code form compiles:
-      // the words name the choice that remains.
+      // the words name the choice that remains. A calendar day or week has no example in days or weeks.
       const unproved =
-        (advice === "calendar" && form === "1.5 month") ||
-        (advice !== "calendar" && advice !== "words" && form.startsWith("-"));
+        (advice === "calendar" && whole === false) ||
+        (exact && (form.startsWith("-") || name.startsWith("calendar")));
       const offered =
         unproved || advice === "words"
           ? null
           : advice === "calendar"
-            ? `${amount} calendar ${unit}`
+            ? calendar
             : name === "year"
               ? "365 days"
               : "30 days";
-      const expected =
-        advice === "words"
-          ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`
-          : advice === "calendar"
-            ? unproved
+      const expected = exact
+        ? `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks${offered === null ? "" : `, as in '${offered}'`}.`
+        : spaced
+          ? offered === null
+            ? space
+            : `${space} Write '${offered}'.`
+          : advice === "words"
+            ? `A ${name} has no fixed length. For a length, use days or weeks. For a calendar step, write 'calendar' before the unit.`
+            : unproved
               ? `A ${name} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
-              : `A ${name} has no fixed length. Write '${offered}'.`
-            : `${advice} needs an exact length, and a ${name} has none. Write the length in days or weeks${unproved ? "" : `, as in '${offered}'`}.`;
+              : `A ${name} has no fixed length. Write '${offered}'.`;
       assert.deepEqual(diagnostics(`${header}${source}\nexit`), [["TSP033", expected]], source);
       if (offered !== null) {
         const pasted = `${header}${source.replace(written, offered)}\nexit`;

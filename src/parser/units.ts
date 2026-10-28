@@ -2,6 +2,7 @@ import type {
   Expression,
   AngleExpression,
   CalendarDurationUnit,
+  DurationLiteral,
   DurationUnit,
   UnitExpression,
   NumberLiteral,
@@ -11,9 +12,9 @@ import { angleUnit } from "../angle.js";
 import { createDiagnostic, DiagnosticSeverity } from "../diagnostics.js";
 import {
   calendarDurationUnit,
-  durationLiteralValue,
   elapsedDurationUnit,
   UNIT_OPERANDS,
+  unitValue,
 } from "../duration.js";
 import {
   CALENDAR_DURATION_UNITS,
@@ -22,6 +23,7 @@ import {
 } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
+import { staticNumber } from "../static-evaluation.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
 
@@ -63,7 +65,7 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
       const unit = calendarUnit(parser, parser.advance());
       if (unit !== undefined) {
         result = withUnit({ calendar: true, unit }, parser.advance());
-        reportUnitWithoutSpace(parser, expression, start, parser.current - 2);
+        reportUnitWithoutSpace(parser, expression, start, parser.current - 2, result);
       } else parser.unitlessCalendars.add(expression);
     } else if (withoutCalendar !== undefined) {
       const amount = parser.sourceText(start, parser.current);
@@ -113,21 +115,43 @@ function reportSecondUnit(parser: Parser, result: Expression): Expression {
 /**
  * A unit needs a space before it, as in `90 s`, `count s`, or `(a + b) min` (V30 §3): `90s`, `2min`, and `90deg` are
  * errors that suggest the spaced form. `operand` begins at token `start` and the unit at token `first`, and the unit
- * ends at the token just read.
+ * ends at the token just read. The spaced form of a `calendar` duration fits only where a calendar duration does, so it
+ * is shown only where its place proves that (see `adviseDuration`).
  */
 function reportUnitWithoutSpace(
   parser: Parser,
   operand: Expression,
   start: number,
   first: number,
+  calendar?: DurationLiteral | UnitExpression,
 ): void {
   const unit = parser.tokens[first]!;
-  if (unit.span.start.offset === operand.span.end.offset)
-    parser.reportToken(
-      parserDiagnosticCode.unsupportedDurationUnit,
-      `A unit needs a space before it. Write '${parser.sourceText(start, first)} ${parser.sourceText(first, parser.current)}'.`,
-      unit,
-    );
+  if (unit.span.start.offset !== operand.span.end.offset) return;
+  const spaced = `${parser.sourceText(start, first)} ${parser.sourceText(first, parser.current)}`;
+  parser.reportToken(
+    parserDiagnosticCode.unsupportedDurationUnit,
+    calendar === undefined ? `${UNIT_WITHOUT_SPACE} Write '${spaced}'.` : UNIT_WITHOUT_SPACE,
+    unit,
+  );
+  if (calendar !== undefined)
+    parser.calendarUnitErrors.set(calendar, {
+      diagnostic: parser.diagnostics.at(-1)!,
+      calendar: spaced,
+      spaced: true,
+    });
+}
+
+const UNIT_WITHOUT_SPACE = "A unit needs a space before it.";
+
+/**
+ * Whether the amount of the calendar duration `duration` gives whole days or months, also where the known-value fold
+ * gives it, as in `(3 / 2) month`, or the amount is not known, as in `n months`.
+ */
+function wholeAmount(duration: DurationLiteral | UnitExpression): boolean {
+  if (!duration.calendar) return true;
+  const amount =
+    duration.kind === "durationLiteral" ? duration.amount.value : staticNumber(duration.operand);
+  return amount === undefined || typeof unitValue(amount, duration) !== "string";
 }
 
 /**
@@ -163,7 +187,7 @@ export function parseDurationUnit(
       | { readonly calendar: false; readonly unit: DurationUnit }
       | { readonly calendar: true; readonly unit: CalendarDurationUnit },
     last: Token,
-  ): Expression =>
+  ): DurationLiteral =>
     Object.freeze({
       kind: "durationLiteral",
       amount,
@@ -175,7 +199,7 @@ export function parseDurationUnit(
     const unit = calendarUnit(parser, parser.advance());
     if (unit === undefined) return amount;
     const result = literal({ calendar: true, unit }, parser.advance());
-    reportUnitWithoutSpace(parser, amount, start, parser.current - 2);
+    reportUnitWithoutSpace(parser, amount, start, parser.current - 2, result);
     return result;
   }
   const exact = elapsedDurationUnit(token.lexeme);
@@ -275,6 +299,7 @@ function reportCalendarUnitWithoutCalendar(
   parser.calendarUnitErrors.set(duration, {
     diagnostic: parser.diagnostics.at(-1)!,
     calendar: `${amount} calendar ${unit.lexeme}`,
+    spaced: false,
   });
 }
 
@@ -329,11 +354,12 @@ function writtenNames(type: TypeAnnotation): ReadonlySet<string> {
 }
 
 /**
- * The one rule for what a month or a year without `calendar` in `value` gets at `place`. As the whole value, also in
- * parentheses, it gets days or weeks where only an exact duration fits (in words after a sign), and the calendar unit
- * where any duration does (also after a sign, and in words for a written amount that is not whole). Inside `+`, `-`,
- * `*`, `/`, or `otherwise`, where it may be part of a ratio such as `(1 month / 1 calendar month) * 1 s`, and wherever
- * no place proves a fix, the error names both choices in words.
+ * The one rule for what a month or a year without `calendar` in `value` gets at `place`, and a calendar duration without
+ * a space before its unit, as in `2calendar months`. As the whole value, also in parentheses, it gets days or weeks
+ * where only an exact duration fits (in words after a sign), and the calendar unit or the space where any duration does
+ * (also after a sign, and in words for a known amount that is not whole, as in `(1.5) month`). Inside `+`, `-`, `*`,
+ * `/`, or `otherwise`, where it may be part of a ratio such as `(1 month / 1 calendar month) * 1 s`, and wherever no
+ * place proves a fix, the error says the fix in words.
  */
 function adviseDuration(
   parser: Parser,
@@ -346,21 +372,27 @@ function adviseDuration(
     const error = parser.calendarUnitErrors.get(node);
     const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
-      const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
-      // No code form is proved for a written calendar amount that is not whole, as in `1.5 month`, nor for a length after
-      // a sign where only an exact duration fits, as in `wait -(1 month)`: the words name the choice that remains.
-      const proved =
-        place === "calendar"
-          ? node.kind !== "durationLiteral" || typeof durationLiteralValue(node) !== "string"
-          : !signed;
+      const [unit, example] =
+        node.unit === "y"
+          ? ["year", "365 days"]
+          : node.unit === "mo"
+            ? ["month", "30 days"]
+            : [node.unit === "w" ? "calendar week" : "calendar day", null];
+      // No code form is proved for a known calendar amount that is not whole, as in `1.5 month`, nor for a length after a
+      // sign where only an exact duration fits, as in `wait -(1 month)`: the words name the choice that remains.
+      const proved = place === "calendar" ? wholeAmount(node) : !signed;
       parser.diagnostics[index] = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        place === "calendar"
-          ? proved
-            ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
-            : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
-          : `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks${proved ? `, as in '${example}'` : ""}.`,
+        place !== "calendar"
+          ? `${place.exact} needs an exact length, and a ${unit} has none. Write the length in days or weeks${proved && example !== null ? `, as in '${example}'` : ""}.`
+          : error!.spaced
+            ? proved
+              ? `${UNIT_WITHOUT_SPACE} Write '${error!.calendar}'.`
+              : UNIT_WITHOUT_SPACE
+            : proved
+              ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
+              : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`,
         error!.diagnostic.span,
       );
       // A command that takes the value as an argument knows its place, and its advice comes after.

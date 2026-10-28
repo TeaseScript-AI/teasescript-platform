@@ -2,6 +2,7 @@ import { parseChild, type ParseTask } from "../parse-continuation.js";
 import type {
   Block,
   Expression,
+  RangeExpression,
   WaitStatement,
   TimerStatement,
   TimerParts,
@@ -9,6 +10,8 @@ import type {
   DurationUnit,
 } from "../ast.js";
 import { startsCallForm } from "../language-facts.js";
+import { emptyRangeProblem, rangeStartProblem } from "../range-checks.js";
+import { staticNumber } from "../static-evaluation.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -140,6 +143,7 @@ function timerDuration(
   parser: Parser,
   written: Expression,
   command: "wait" | "timer" | "duration:",
+  repeat = false,
 ): { duration: Expression; unit: DurationUnit | null } {
   if (written.kind === "unitExpression" && !written.calendar)
     return { duration: written.operand, unit: written.unit };
@@ -151,29 +155,77 @@ function timerDuration(
   const end = written.end.kind === "durationLiteral" ? written.end.amount : written.end.operand;
   const range = `${parser.textOf(written.start.span, end.span)}`;
   const unit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
-  // The range in parentheses, which only compiles where nothing else in the statement is wrong (see `Parser.offerFix`).
   const message = "A unit after a range belongs to its end alone. Put the range in parentheses";
   parser.reportSpan(
     parserDiagnosticCode.unsupportedDurationUnit,
     `${message}, with the unit after the closing parenthesis.`,
     written.span,
   );
-  parser.offerFix(
-    parser.diagnostics.length - 1,
-    `${message}, as in '${command} (${range}) ${unit}'.`,
-    [
-      {
-        start: written.span.start.offset,
-        end: written.span.end.offset,
-        code: `(${range}) ${unit}`,
-        // A wait or timer keeps the unit apart from the range, so no node holds both.
-        expression: false,
-      },
-    ],
-  );
+  // The range in parentheses, which only compiles where nothing else in the statement is wrong (see `Parser.offerFix`),
+  // and where the range rules hold for every bound the parser knows (see `knownRangeHolds`).
+  if (!written.end.calendar && knownRangeHolds(written, end, command, repeat, written.end.unit))
+    parser.offerFix(
+      parser.diagnostics.length - 1,
+      `${message}, as in '${command} (${range}) ${unit}'.`,
+      [
+        {
+          start: written.span.start.offset,
+          end: written.span.end.offset,
+          code: `(${range}) ${unit}`,
+          // A wait or timer keeps the unit apart from the range, so no node holds both.
+          expression: false,
+        },
+      ],
+    );
   return {
     duration: Object.freeze({ ...written, end, span: spanFrom(written.start.span, end.span) }),
     unit: written.end.calendar ? null : written.end.unit,
+  };
+}
+
+/**
+ * Whether the range from the start of `range` to `end`, which a wait or timer counts in `unit`s, holds the rules of such
+ * a range (`range-checks.ts`) as far as the parser knows its bounds (see `knownBound`). A bound the known-value fold
+ * does not know, such as a name, is the type checker's to check.
+ */
+function knownRangeHolds(
+  range: RangeExpression,
+  end: Expression,
+  command: "wait" | "timer" | "duration:",
+  repeat: boolean,
+  unit: DurationUnit,
+): boolean {
+  const start = knownBound(range.start);
+  const stop = knownBound(end);
+  if ([start, stop].some(({ value, whole }) => value !== undefined && !whole)) return false;
+  const timer = command === "wait" ? "wait" : "timer";
+  if (start.value !== undefined && rangeStartProblem(timer, repeat, start.value, unit, "") !== null)
+    return false;
+  return (
+    start.value === undefined ||
+    stop.value === undefined ||
+    emptyRangeProblem("", { start: start.value, end: stop.value, inclusive: range.inclusive }) ===
+      null
+  );
+}
+
+/**
+ * A range bound's value where the known-value fold gives it, and whether it is a whole number by its type: one written as
+ * it is, also with a sign or in parentheses. Another known value, such as `4 / 2`, may be of type `number`.
+ */
+function knownBound(bound: Expression): {
+  readonly value: number | undefined;
+  readonly whole: boolean;
+} {
+  let written = bound;
+  while (
+    written.kind === "parenthesizedExpression" ||
+    (written.kind === "unaryExpression" && written.operator !== "not")
+  )
+    written = written.kind === "parenthesizedExpression" ? written.expression : written.operand;
+  return {
+    value: staticNumber(bound),
+    whole: written.kind === "numberLiteral" && written.numericType === "integer",
   };
 }
 
@@ -251,7 +303,7 @@ function* parseNamedTimer(parser: Parser, command: Token): ParseTask<TimerParts 
   }
   const handler = yield* parseChild(parseTimerHandler(parser));
   if (handler === false || duration === null || !valid) return null;
-  const parts = timerDuration(parser, duration, "duration:");
+  const parts = timerDuration(parser, duration, "duration:", flags.repeat);
   return {
     form: "named",
     async: flags.async,
