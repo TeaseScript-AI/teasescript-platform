@@ -40,6 +40,7 @@ import type { Callable, FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
   ingressLeaves,
+  MIXED_LEAF,
   REASON,
   writerKey,
   type IngressNode,
@@ -5167,11 +5168,11 @@ export class Admission {
   }
 
   /**
-   * Of a decider's values (`#earliestDecider`), the first of each value-side class (`Contract.classOf`) at one node,
+   * Of a decider's values (`#earliestDecider`), the first of each value-side class (`Contract.boundClass`) at one node,
    * strip and chain of operations: the values of one class answer alike at every path but for their roles' writers and
    * the leaves or operands they name (C9, F16), none of which decides, so a later one decides as the first does and is
    * never read where the first decides nothing (k loads of one default before a literal's object, decided at its k
-   * properties, Astra's review B2). Each value of no class as itself.
+   * properties, Astra's review B2; k bindings of them, #1313). Each value of no class as itself.
    */
   #classFirsts(list: readonly Stop[]): readonly Stop[] {
     if (!sharing() || list.length < 2) return list;
@@ -5180,7 +5181,7 @@ export class Admission {
     const out: Stop[] = [];
     for (const stop of list) {
       program.work.charge("checks");
-      const cls = contract.classOf(stop.value, true);
+      const cls = contract.boundClass(stop.value, true).cls;
       if (cls !== null) {
         const key = joinParts(
           cls,
@@ -5983,19 +5984,24 @@ export class Admission {
   /**
    * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
    * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
-   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data,
-   * there or as the default, the contract's class of its global and guards (`classOf`, #1196: its answer is the
-   * global's external data at every path, so k reads of one global share one discovery, #1207); any other value its
-   * source identity. Values of one class have the same kinds at every path.
+   * share one discovery, while each keeps its own identity and its boundary check (C9, §8 r4.15); a read of host data
+   * as the default the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
+   * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
+   * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads
+   * of one default, #1313, each share one discovery); any other value its source identity. Values of one class have the
+   * same kinds at every path.
    */
   #conflictClass(value: PlaceId): string {
     const { program, contract, definitions } = this.pass;
+    const c = program.opOf.get(value);
+    if (c === undefined || c.kind === "fallback") {
+      const own = contract.boundClass(value, false);
+      return (own.mixed === MIXED_LEAF ? own.cls : null) ?? contract.identityOf(value).id;
+    }
     const source = (of: PlaceId): string =>
       (program.occurrenceOf.has(of) && definitions.ingress.has(of)
         ? contract.classOf(of, false)
         : null) ?? contract.identityOf(of).id;
-    const c = program.opOf.get(value);
-    if (c === undefined) return source(value);
     let fallback: PlaceId | undefined;
     if (c.kind === "load" && c.key !== null) fallback = c.fallback ?? undefined;
     else if (

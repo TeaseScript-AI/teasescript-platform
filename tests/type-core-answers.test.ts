@@ -6,7 +6,12 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
-import { ingressLeaves, REASON, writerKey } from "../src/type-inference/core/items.js";
+import {
+  ingressLeaves,
+  REASON,
+  writerKey,
+  type ItemTag,
+} from "../src/type-inference/core/items.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
@@ -722,17 +727,70 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
 });
 
 /**
+ * Each program analysed with the sharing on answers as with it off (`withoutSharing`), where each member of a class is
+ * read by itself: every occurrence's answer, its items whole with their leaves, and the program's diagnostics and checks,
+ * in both orders. Where `named` is given, the read's items are `kinds` in order, its unknown naming the sites of the
+ * texts `named` matches and every other item none.
+ */
+function assertSharedAsUnshared(
+  programs: readonly (readonly [
+    source: string,
+    read: string,
+    named: RegExp | null,
+    kinds?: readonly ItemTag[],
+  ])[],
+): void {
+  for (const [source, text, named, kinds = ["unknown"]] of programs) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const published = (sharing: boolean, reversed: boolean): string => {
+      const run = (): Answers =>
+        sharing ? analyseCore(request) : withoutSharing(() => analyseCore(request));
+      const answers = reversed
+        ? withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), run),
+          )
+        : run();
+      if (named !== null) {
+        const start = source.indexOf(text);
+        const read = answers.graph.expressionAt({ file: 0, start, end: start + text.length });
+        assert.ok(read !== undefined, text);
+        const sites = [...source.matchAll(named)].map((match) => match.index);
+        assert.deepEqual(
+          answers
+            .at(read)!
+            .items.map((item) => [
+              item.tag,
+              item.ingress === undefined
+                ? []
+                : ingressLeaves(item.ingress).map(({ start }) => start),
+            ]),
+          kinds.map((tag) => [tag, tag === "unknown" ? sites : []]),
+          source,
+        );
+      }
+      return everyAnswer(answers);
+    };
+    for (const reversed of [false, true])
+      assert.equal(
+        published(true, reversed),
+        published(false, reversed),
+        `${source}, reversed: ${reversed}`,
+      );
+  }
+}
+
+/**
  * #1207: k loads whose default reads host data, directly or through one named copy, are one class, mixed by the leaves
  * they name (each load's, and a direct default's, C9). A property read below their list reads one of them and names
- * every other's leaves beside its own: each load's and each default's, as with the sharing off (`withoutSharing`),
- * where each load is read by itself. Every occurrence's answer, its items whole with their leaves, and the program's
- * diagnostics and checks are the same either way, in both orders, for a guarded list and two classes in one list too.
+ * every other's leaves beside its own: each load's and each default's, as with the sharing off, where each load is
+ * read by itself; for a guarded list and two classes in one list too.
  */
 test("a property read of loads defaulting to host data names every load's and default's leaf (#1207)", () => {
   const loads = (n: number, fallback: string): string =>
     Array.from({ length: n }, () => `load("k", default: ${fallback})`).join(", ");
   // per program a read with the texts whose sites its unknown names, `null` where only the sharing is compared
-  const programs: readonly (readonly [source: string, read: string, named: RegExp | null])[] = [
+  assertSharedAsUnshared([
     [
       `let wide = [${loads(3, "hostValue")}]\nlet first = wide[0]\nlet a: integer = first.f0\nsay wide[1].f1\nexit\n`,
       "first.f0",
@@ -753,44 +811,84 @@ test("a property read of loads defaulting to host data names every load's and de
       "wide[0].f1",
       null,
     ],
-  ];
-  for (const [source, text, named] of programs) {
-    const request = coreRequest([{ path: "main.tease", source }]);
-    assert.ok(request !== null, source);
-    const published = (sharing: boolean, reversed: boolean): string => {
-      const run = (): Answers =>
-        sharing ? analyseCore(request) : withoutSharing(() => analyseCore(request));
-      const answers = reversed
-        ? withSolverSeam({ reverseWorklist: true }, () =>
-            withConsumerOrder((list) => [...list].reverse(), run),
-          )
-        : run();
-      if (named !== null) {
-        const start = source.indexOf(text);
-        const read = answers.graph.expressionAt({ file: 0, start, end: start + text.length });
-        assert.ok(read !== undefined, text);
-        assert.deepEqual(
-          answers
-            .at(read)!
-            .items.map((item) => [
-              item.tag,
-              item.ingress === undefined
-                ? []
-                : ingressLeaves(item.ingress).map(({ start }) => start),
-            ]),
-          [["unknown", [...source.matchAll(named)].map((match) => match.index)]],
-          source,
-        );
-      }
-      return everyAnswer(answers);
-    };
-    for (const reversed of [false, true])
-      assert.equal(
-        published(true, reversed),
-        published(false, reversed),
-        `${source}, reversed: ${reversed}`,
-      );
-  }
+  ]);
+});
+
+/**
+ * #1304: k `load(…, default: hostValue) otherwise {p0: 1}` are one class mixed by their leaves alone, at any depth of
+ * their parts: a property read below their list beside an object of k properties reads one of them and names every
+ * load's and every default's leaf, as with the sharing off; for `fromJson`, a composite two deep and one inside an
+ * object too.
+ */
+test("a property read of composite fallbacks names every load's and default's leaf (#1304)", () => {
+  const list = (element: string, wide = "{p0: 1, p1: 1, p2: 1}"): string =>
+    `let xs = [${element}, ${wide}, ${element}, ${element}]`;
+  const composite = '(load("k", default: hostValue) otherwise {p0: 1})';
+  assertSharedAsUnshared([
+    [
+      `${list(composite)}\nlet n1: integer = xs[0].p1\nexit\n`,
+      "xs[0].p1",
+      /load|hostValue/g,
+      ["integer", "unknown"],
+    ],
+    [
+      `${list('(fromJson("{}", default: hostValue) otherwise {p0: 1})')}\nlet n0: integer = xs[0].p0\nexit\n`,
+      "xs[0].p0",
+      /fromJson|hostValue/g,
+      ["integer", "unknown"],
+    ],
+    [
+      `${list('(load("k", default: hostValue) otherwise (load("j", default: hostValue) otherwise {p0: 1}))')}\nlet n2: integer = xs[0].p2\nexit\n`,
+      "xs[0].p2",
+      /load|hostValue/g,
+      ["integer", "unknown"],
+    ],
+    [
+      `${list(`{box: ${composite}}`, "{box: {p0: 1, p1: 1, p2: 1}}")}\nlet n1: integer = xs[0].box.p1\nexit\n`,
+      "xs[0].box.p1",
+      /load|hostValue/g,
+      ["integer", "unknown"],
+    ],
+  ]);
+});
+
+/**
+ * #1313: a read of a binding of one stable definition answers as its value at every path, so k bindings of loads of
+ * one default, or of alike objects, are one class: a property read below their list beside an object reads one binding
+ * and names every load's and default's leaf, as with the sharing off; with no object beside them, where one binding is
+ * tested, and where one is written again and stands apart, too.
+ */
+test("a property read of named bindings in a list names every binding's leaves (#1313)", () => {
+  const bindings = (n: number, value: string): string =>
+    Array.from({ length: n }, (_, i) => `let l${i} = ${value}`).join("\n");
+  assertSharedAsUnshared([
+    [
+      'let l0 = load("a", default: hostValue)\nlet l1 = load("b", default: hostValue)\nlet xs = [l0, {f0: 1, f1: 1}, l1]\nlet a0: integer = xs[0].f0\nlet a1: integer = xs[0].f1\nexit\n',
+      "xs[0].f1",
+      /load|hostValue/g,
+      ["integer", "unknown"],
+    ],
+    [
+      `${bindings(3, 'load("k", default: hostValue)')}\nif l1.f1 is integer {\n  let xs = [l0, l1, {f0: 1, f1: 1}, l2]\n  say xs[0].f1\n}\nexit\n`,
+      "xs[0].f1",
+      null,
+    ],
+    [
+      `${bindings(3, "{f0: 1}")}\nlet xs = [l0, {f0: 1, f1: 1}, l1, l2]\nsay xs[0].f1\nexit\n`,
+      "xs[0].f1",
+      null,
+    ],
+    [
+      `${bindings(3, 'fromJson("{}", default: hostValue)')}\nlet xs = [l0, l1, l2]\nlet a1: integer = xs[0].f1\nexit\n`,
+      "xs[0].f1",
+      /fromJson|hostValue/g,
+    ],
+    [
+      `${bindings(3, 'load("k", default: hostValue)')}\nlet xs = [l0, l1, {f0: 1}, l2]\nlet a0: integer = xs[0].f0\nl1 = hostValue\nexit\n`,
+      "xs[0].f0",
+      null,
+    ],
+  ]);
 });
 
 test("a written union of one type repeated answers as that type does (V30 §13, #1256)", () => {

@@ -307,6 +307,48 @@ const nestedObjects = (
 };
 
 /**
+ * k elements beside an object of k properties amid them, each property read through the list's first element (below
+ * `box`, where the elements are objects holding their values there): #1304's composite fallbacks.
+ */
+const besideWide = (
+  k: number,
+  element: (index: number) => string,
+  box?: string,
+): readonly SourceFile[] => {
+  const wide = `{${many(k, (i) => `f${i}: 1`, ", ")}}`;
+  const elements = Array.from({ length: k }, (_, i) => element(i));
+  elements.splice(k >> 1, 0, box === undefined ? wide : `{${box}: ${wide}}`);
+  const at = box === undefined ? "xs[0]" : `xs[0].${box}`;
+  return [
+    {
+      path: "main.tease",
+      source: [
+        `let xs = [${elements.join(", ")}]`,
+        many(k, (i) => `let a${i}: integer = ${at}.f${i}`),
+        "exit",
+      ].join("\n"),
+    },
+  ];
+};
+
+/** #1313's list: k bindings of `value`, each read in a list beside an object of k properties amid them, at each. */
+const named = (k: number, value: (index: number) => string): readonly SourceFile[] => {
+  const elements = Array.from({ length: k }, (_, i) => `l${i}`);
+  elements.splice(k >> 1, 0, `{${many(k, (i) => `f${i}: 1`, ", ")}}`);
+  return [
+    {
+      path: "main.tease",
+      source: [
+        many(k, (i) => `let l${i} = ${value(i)}`),
+        `let xs = [${elements.join(", ")}]`,
+        many(k, (i) => `let a${i}: integer = xs[0].f${i}`),
+        "exit",
+      ].join("\n"),
+    },
+  ];
+};
+
+/**
  * Scripts that compile and whose work grew with a product of two of their dimensions, each with the counter that grew:
  * a written type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written
  * result of k repeated members read k times, each read merging every written member (#1256); a chain of k calls of one
@@ -319,9 +361,11 @@ const nestedObjects = (
  * two properties they share or in one-element lists there, the wide one first, amid or last (Astra's review B1); a list
  * of k reads of host data, or of k loads defaulting to such a read or to one named copy of it, read at k properties,
  * each element read again at each (#1207); k such loads beside a wide object, each property's decision reading every
- * load before the object (Astra's review B2); and k/4 loads, parses and reads of host data beside an object of k
- * properties, the list's touch trie walking the object again for each (#1307). A read of host data compiles with its
- * runtime check.
+ * load before the object (Astra's review B2); k/4 loads, parses and reads of host data beside an object of k
+ * properties, the list's touch trie walking the object again for each (#1307); k `load(…) otherwise {…}` beside a wide
+ * object, directly or each in an object, each member read again at each property (#1304); and k named bindings of
+ * loads, of host reads or of alike objects beside one, each binding read again at each (#1313). A read of host data
+ * compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -598,6 +642,35 @@ const PRODUCTS: readonly (WorkFamily & {
       ];
     },
   },
+  {
+    name: "composite-fallbacks-beside-a-wide-object",
+    measures: "#1304: one composite of a class read at each property, naming every member's leaves",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) => besideWide(k, () => '(load("k", default: hostValue) otherwise {f0: 1})'),
+  },
+  {
+    name: "boxed-composite-fallbacks-beside-a-wide-object",
+    measures: "#1304: objects holding composites of one class one class of the list's elements",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) =>
+      besideWide(k, () => '{box: (load("k", default: hostValue) otherwise {f0: 1})}', "box"),
+  },
+  {
+    name: "named-loads-beside-a-wide-object",
+    measures: "#1313: bindings of loads of one default one class, one read at each property",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) => named(k, () => 'load("k", default: hostValue)'),
+  },
+  {
+    name: "named-host-reads-and-objects-beside-a-wide-object",
+    measures: "#1313: bindings of host reads, and of alike objects, one class each",
+    counter: "mergeItems",
+    outcome: "warning-runtime-check",
+    program: (k) => named(k, (i) => (i % 2 === 0 ? "hostValue" : "{f0: 1}")),
+  },
 ];
 
 /**
@@ -606,7 +679,7 @@ const PRODUCTS: readonly (WorkFamily & {
  * as they do with a written parameter, and the ring's changed elements each re-run the depth of the list's tree of
  * demands, one more here (its members' signatures 2.41, and 2.33 at k = 128 → 256).
  */
-test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1307)", () => {
+test("each product a repair removed grows with the program in either order (#1199, #1207, #1229, #1230, #1233, #1255–#1257, #1304, #1307, #1313)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
