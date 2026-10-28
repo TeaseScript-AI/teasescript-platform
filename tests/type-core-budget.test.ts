@@ -368,19 +368,32 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
  * lands. Linear, not `16 × nodes`: the program's own index, built after a stop at the first unit, costs about 21 units
  * per node of this shape.
  */
-test("a stop at the first unit finishes a deeply nested list literal in linear work", () => {
-  const finishing = (k: number) => {
-    const source = `let xs = ${"[".repeat(k)}1${"]".repeat(k)}\nsay "DONE"\nexit`;
-    const { budget } = analysed(requestOf(main(source)), false, 1);
-    assert.equal(budget.exhausted, "work");
-    return { units: budget.finishing, nodes: budget.counts.get("syntaxNodes")! };
+/**
+ * A deeply nested list literal, and a typed parse's or load's nested default read as deep: before admission settled the
+ * syntax decides nothing (TABLE r4.135), so no read's key is made for it (Astra r1 B2 on #1165: 2.8 to 3.2 per doubling).
+ */
+test("a stop at the first unit finishes a deeply nested literal and a read as deep of a typed default in linear work", () => {
+  const nested = (k: number) => `${"{branch: ".repeat(k)}7${"}".repeat(k)}`;
+  const shapes: Record<string, (k: number) => string> = {
+    list: (k) => `let xs = ${"[".repeat(k)}1${"]".repeat(k)}\nsay "DONE"`,
+    parse: (k) =>
+      `let layers = fromJson("{}", default: ${nested(k)})\nsay layers${".branch".repeat(k)}`,
+    load: (k) =>
+      `let layers = load("state", default: ${nested(k)})\nsay layers${".branch".repeat(k)}`,
   };
-  const [small, large] = [finishing(64), finishing(128)];
-  const doubling = (2 * (large.units / small.units)) / (large.nodes / small.nodes);
-  assert.ok(
-    doubling <= 2.15,
-    `${small.units} -> ${large.units} units: ${doubling.toFixed(3)} per doubling`,
-  );
+  for (const [shape, make] of Object.entries(shapes)) {
+    const finishing = (k: number) => {
+      const { budget } = analysed(requestOf(main(`${make(k)}\nexit`)), false, 1);
+      assert.equal(budget.exhausted, "work");
+      return { units: budget.finishing, nodes: budget.counts.get("syntaxNodes")! };
+    };
+    const [small, large] = [finishing(64), finishing(128)];
+    const doubling = (2 * (large.units / small.units)) / (large.nodes / small.nodes);
+    assert.ok(
+      doubling <= 2.15,
+      `${shape}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)} per doubling`,
+    );
+  }
 });
 
 /**

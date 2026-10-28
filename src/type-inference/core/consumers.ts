@@ -910,8 +910,12 @@ export class Consumers {
       : STOPPED;
   }
 
-  /** What the stores' syntax decides at a read's key path and `rest` (`cheapDecided`), else `null`. */
+  /**
+   * What the stores' syntax decides at a read's key path and `rest` (`cheapDecided`), else `null`; the key made only
+   * where syntax may decide (`#syntaxDecides`).
+   */
   #syntaxRead(value: PlaceId, rest: readonly string[]): readonly ItemTag[] | null {
+    if (!this.#syntaxDecides()) return null;
     const key = this.#readKey(value);
     return key === null
       ? null
@@ -1393,10 +1397,7 @@ export class Consumers {
    * above it, is undecided by the stop, and syntax decides nothing there (S3 §5: every read of it `budget`).
    */
   public cheapDecided(root: PlaceId, path: readonly string[]): CheapDecision | null {
-    // (before admission settled nothing: admission's decision rests on a contract a fresh pass has not solved, TABLE
-    // r4.135)
-    if (this.#finishing && !this.settled) return null;
-    if (this.admission.decisionStopped(root, path)) return null;
+    if (!this.#syntaxDecides() || this.admission.decisionStopped(root, path)) return null;
     const memo = keptKey(this.pass.program.work, root, path);
     const known = this.#cheapDecisions.get(memo);
     if (known !== undefined) return known;
@@ -1433,6 +1434,14 @@ export class Consumers {
         : { kinds: tags.has("null") ? [...kinds, "null"] : kinds, names, decider, inherited };
     this.#cheapDecisions.set(memo, decision);
     return decision;
+  }
+
+  /**
+   * Whether the stores' syntax may decide (source 4): not in a finishing walk before admission settled, where admission's
+   * decision rests on a contract a fresh pass has not solved (TABLE r4.135).
+   */
+  #syntaxDecides(): boolean {
+    return !this.#finishing || this.settled;
   }
 
   /**

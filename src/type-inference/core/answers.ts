@@ -1257,10 +1257,6 @@ class CoreAnswers implements Answers {
       const names = new Set<string>();
       if ("value" in start)
         for (const name of this.#stoppedShape(start.value, start.path).names) names.add(name);
-      else if ("key" in start)
-        for (const name of this.#consumers.cheapDecided(keyPlace(start.key), keyPath(start.key))
-          ?.names ?? [])
-          names.add(name);
       return names;
     }
     return propertyNames(this.#pass, (work) => this.#pass.solver.run(work), start);
