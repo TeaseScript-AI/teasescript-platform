@@ -858,13 +858,58 @@ class CoreAnswers implements Answers {
    * A value's items at a node and a path. After a stop, the finishing read's sources in their order (TABLE r4.138): the
    * solver's finished answer where admission had settled; else what the value's own syntax gives (`#stoppedShape`: a
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
-   * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`).
+   * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
+   * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
+   * as `place` answers it (`#lazilyDecided`).
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
     if (!this.#stopped || !answered.some(isStopped)) return answered;
     const own = this.#stoppedShape(value, path).items;
-    return own !== STOPPED ? own : this.#consumers.finishedItems(value, node, path);
+    if (own !== STOPPED) return own;
+    const finished = this.#consumers.finishedItems(value, node, path);
+    return finished.every(isStopped) ? (this.#lazilyDecided(value, path) ?? finished) : finished;
+  }
+
+  /**
+   * After a stop where admission had settled, the type admission gives a read's place at a path, as `place` answers it:
+   * its written type, its decision, or its key's finished contract where admission decides a path lazily (S3 §5: a
+   * lazily decided path is a source; TABLE r4.152 (2)). A domain, as the finishing read reads one (a collection's element
+   * possibly absent, C6); `null` where the read has no place or nothing decides it. One check unit, no new walk: after a
+   * stop admission decides nothing more, it reads what had finished.
+   */
+  #lazilyDecided(value: PlaceId, path: readonly string[]): readonly Item[] | null {
+    const { program } = this.#pass;
+    if (!this.#consumers.settled) return null;
+    const place = this.#readPlace(value);
+    if (place === null) return null;
+    program.work.charge("checks");
+    const at = joinSteps(place.path, path);
+    const written = writtenOf(program.place(place.root).kind);
+    const admitted = this.#admitted(place.root, at, written === null ? null : termAt(written, at));
+    if (admitted.by === "undecided" || admitted.kinds.includes("unknown")) return null;
+    const items = admitted.kinds.map((tag) => makeItem(tag, null, { cert: "pos" }));
+    const step = path.at(-1) ?? program.projOf.get(value)?.step;
+    return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+  }
+
+  /**
+   * The place a read reads: its binding's root and path, a step per projection; `null` for a projection of a literal, a
+   * call or an operation, which is no place.
+   */
+  #readPlace(value: PlaceId): { readonly root: PlaceId; readonly path: readonly string[] } | null {
+    const { program } = this.#pass;
+    let base = value;
+    for (
+      let projection = program.projOf.get(base);
+      projection !== undefined;
+      projection = program.projOf.get(base)
+    )
+      base = projection.owner;
+    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
+    return program.occurrenceOf.has(base)
+      ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
+      : null;
   }
 
   /**
@@ -1002,7 +1047,7 @@ class CoreAnswers implements Answers {
   }
 
   public at(node: FlowNode): OccurrenceAnswer | null {
-    const { program, values } = this.#pass;
+    const { values } = this.#pass;
     if (node.span === null) return null;
     const obligations =
       this.#obligations.get(
@@ -1024,17 +1069,7 @@ class CoreAnswers implements Answers {
     }
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
-    let base = value;
-    for (
-      let projection = program.projOf.get(base);
-      projection !== undefined;
-      projection = program.projOf.get(base)
-    )
-      base = projection.owner;
-    // a bare read's place is its binding's, as a read below one is (S3 §1, Astra B7)
-    const target = program.occurrenceOf.has(base)
-      ? program.targetRoot(program.occurrenceOf.get(value) ?? value)
-      : null;
+    const target = this.#readPlace(value);
     // the route the read's answer took, recorded as it was answered (Astra B5)
     const route: Route =
       target === null

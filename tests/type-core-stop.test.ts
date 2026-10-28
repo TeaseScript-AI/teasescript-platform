@@ -1218,6 +1218,37 @@ test("after a stop a selection of a typed call with a named list default owes it
 });
 
 /**
+ * After a settled stop a read's answer takes the type admission gives its place as `place` does, a path admission decides
+ * lazily among them (S3 §5, TABLE r4.152 (2)): at every settled walk stop, `src.first`'s `at` and `valueAt` hold the kinds
+ * `place(src, ["element"])` admits, never `budget` (the matrix's 116).
+ */
+test("after a settled stop a read answers its place's lazily decided type, as place does", () => {
+  const source =
+    'let count: integer = 2\nlet base: integer[] = [1]\nlet src = [1, 2]\nsay src.first\nsay "DONE"\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const at = source.indexOf("src.first");
+  const [low, high] = walkEnds(source);
+  for (let allowance = low; allowance <= high; allowance += 1) {
+    const answers: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    const read = answers.graph.nodes.find(
+      (node) =>
+        node.expression?.kind === "propertyAccessExpression" && node.span?.start.offset === at,
+    );
+    assert.ok(read !== undefined);
+    const answer = answers.at(read);
+    assert.ok(answer !== null && answer.place !== null, `@${allowance}`);
+    const admitted = answers.place(answer.place.id, answer.place.path).admitted;
+    assert.equal(admitted.by, "decided", `@${allowance}`);
+    const kinds = (items: readonly { readonly tag: string }[]) =>
+      [...new Set(items.map((item) => item.tag).filter((tag) => tag !== "empty"))].sort();
+    const expected = [...admitted.kinds].sort();
+    assert.deepEqual(kinds(answer.items), expected, `@${allowance}`);
+    assert.deepEqual(kinds(answers.valueAt(read, []).items), expected, `@${allowance}`);
+  }
+});
+
+/**
  * A member read a stop left unsettled is no proof of the property either (C5, Codex r24 B1): a typed call's member its
  * default lacks keeps its TSV043 or its mark, from a literal and from a named default, at a stop before admission settled
  * and in the settled walk. A literal's own element is proof of one, settled or not (Codex r24 N1): `[count].first` owes no
