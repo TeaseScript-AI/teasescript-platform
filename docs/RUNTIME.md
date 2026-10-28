@@ -417,13 +417,14 @@ permanent buttons, the Stage image, monotonic identities, bounded settlement rep
 time/completion operations. The Player reconstructs presentation from canonical state. Production cross-origin host wiring,
 server time integrity, and server persistence remain deferred.
 
-`items += more` appends copies of the elements of `more` in place, as `.addAll(more)` does, on a variable, a property,
-an element, or a dict value, also when `more` calls a script function or asks. Since the value read before the call is
-stored as it was ([V30 §14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)), it
-copies the whole list when the list may have changed meanwhile: when the call, a block that runs during it, or `more`
-itself assigns to the list, into it, or to what holds it, or changes in place a list, set, or dict that the same
-variable holds. A property of a speaker or handle, and `items = items + more` with a call or an ask in `more`, also
-copy the whole list.
+`items += more` appends copies of the elements of `more` in place, as `.addAll(more)` does, on a variable, a property
+of an object or a speaker, an element, or a dict value, also when `more` calls a script function or asks; so does
+`items = items + more` when both sides name the place with the same names, and positions or keys that are the same
+variables or literals. Since the value read before the call is stored as it was
+([V30 §14](specifications/accepted-syntaxes-v30.md#variables-in-timer-media-and-button-blocks)), it copies the whole
+list when the list may have changed meanwhile: when the call, a block that runs during it, or `more` itself assigns to
+the list, into it, or to what holds it, through any name, or changes in place a list, set, or dict that the same
+variable holds, or, for a list in a speaker's properties, any list, set, or dict.
 
 ## Owner-resolved future runtime semantics
 
