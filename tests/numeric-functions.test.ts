@@ -185,7 +185,7 @@ test("abs keeps an integer whole, pow of a whole number to a known whole power i
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let whole: integer = abs(dynamic(-2.5))\nexit`), [
     "TSR058",
-    "'whole' holds a whole number (integer), so it cannot take 2.5. Round it with floor(...), round(...), or ceil(...) first.",
+    "'whole' holds a whole number (integer), so it cannot take 2.5. Round the number with the floor, round or ceil function first.",
   ]);
 });
 

@@ -333,7 +333,7 @@ const PORTS: readonly Port[] = [
   },
   // ADR 0021 rule 2.2's rounding, as the count's sentence words it (S8c's, #1173)
   {
-    from: /^Round it with floor\(\.\.\.\), round\(\.\.\.\), or ceil\(\.\.\.\) first\.$/,
+    from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
 ];
@@ -462,7 +462,7 @@ function pairs(): Pair[] {
 let made: Pair[] | null = null;
 const allPairs = (): Pair[] => (made ??= pairs());
 
-const ROUND = "Round it with floor(...), round(...), or ceil(...) first.";
+const ROUND = "Round the number with the floor, round or ceil function first.";
 
 /**
  * The type test of a subject (ADR 0021 rule 3.5): of a variable directly, of any other value kept in one first, its

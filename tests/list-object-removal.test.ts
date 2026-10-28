@@ -127,7 +127,7 @@ test("removal fails at runtime for an invalid index or an empty list", () => {
     [
       'function dynamic(value) {\n    return value\n}\nlet items = ["a"]\nitems.removeAt(dynamic(1 / 2))\nexit',
       "TSR024",
-      "A list index must be a whole number (integer), but this is 0.5. Round it with floor(...), round(...), or ceil(...) first.",
+      "A list index must be a whole number (integer), but this is 0.5. Round the number with the floor, round or ceil function first.",
     ],
     [
       "let items = []\nitems.removeFirst()\nexit",

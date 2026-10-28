@@ -392,7 +392,7 @@ test("a wait takes a range with a unit like a hidden timer, drawn once in whole 
     [
       "wait (1.5..3) s",
       "TSV010",
-      "A wait needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "A wait needs a range of whole numbers, but its start is a number. Round the bounds with the floor, round or ceil function first.",
     ],
   ] as const) {
     const [diagnostic, ...rest] = compileSource(`${source}\nexit`).diagnostics;

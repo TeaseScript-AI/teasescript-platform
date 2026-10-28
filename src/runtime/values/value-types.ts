@@ -15,6 +15,7 @@ import { quotedText } from "./value-text.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import { isAngle, isAnyDuration, isDict, isList, isObject, isSet } from "./value-predicates.js";
 import { describeValue, VALUE_KINDS } from "../../value-kinds.js";
+import { ROUND_COUNT_FIX } from "../../loop-rules.js";
 import type { MissingField } from "./expected-reading.js";
 import { copySpan } from "../../plan/source-location.js";
 
@@ -90,7 +91,7 @@ function typeFix({ value, type }: TypeMismatch): string {
   );
   if (value === null) return " Check that the value is not null first.";
   if (typeof value === "number" && kinds.has("integer") && !kinds.has("number"))
-    return " Round it with floor(...), round(...), or ceil(...) first.";
+    return ROUND_COUNT_FIX;
   if (typeof value === "string") {
     if ((kinds.has("integer") || kinds.has("number")) && numberFromText(value) !== undefined)
       return ` Convert the text with ${kinds.has("number") ? "toNumber" : "toInteger"}(...) first.`;

@@ -60,12 +60,12 @@ test("a range, handle member, or media position problem has one code and one tex
         ],
       ],
       "TSV010",
-      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "randomInteger(range) needs a range of whole numbers, but its start is a number. Round the bounds with the floor, round or ceil function first.",
       // The runtime names the range it got.
       [
         "function draw(low) {\n    return randomInteger(low..=3)\n}\nsay draw(1.5)",
         "TSR045",
-        "randomInteger(range) needs a range of whole numbers, but this range is 1.5..=3. Round its bounds with floor(...), round(...), or ceil(...) first.",
+        "randomInteger(range) needs a range of whole numbers, but this range is 1.5..=3. Round the bounds with the floor, round or ceil function first.",
       ],
     ],
     [
@@ -74,11 +74,11 @@ test("a range, handle member, or media position problem has one code and one tex
         ["for i in (1.5..=3) {\n}", "1.5"],
       ],
       "TSV010",
-      "A 'for' loop needs a range of whole numbers, but its start is a number. Round its bounds with floor(...), round(...), or ceil(...) first.",
+      "A 'for' loop needs a range of whole numbers, but its start is a number. Round the bounds with the floor, round or ceil function first.",
       [
         `${PICK}for i in pick(1.5)..=3 {\n}`,
         "TSR045",
-        "A 'for' loop needs a range of whole numbers, but this range is 1.5..=3. Round its bounds with floor(...), round(...), or ceil(...) first.",
+        "A 'for' loop needs a range of whole numbers, but this range is 1.5..=3. Round the bounds with the floor, round or ceil function first.",
       ],
     ],
     [
@@ -368,7 +368,7 @@ test("a length, count, file, repeat, index, loop source, key, colour, or present
         ["function f(n: number) {\n    repeat n {\n    }\n}", "n"],
       ],
       "TSV011",
-      "A repeat count must be a whole number (integer) of at least 0, but this is a number. Round it with floor(...), round(...), or ceil(...) first.",
+      "A repeat count must be a whole number (integer) of at least 0, but this is a number. Round the number with the floor, round or ceil function first.",
       null,
     ],
     [
