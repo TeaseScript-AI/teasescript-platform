@@ -26,8 +26,9 @@ import {
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′, TABLE r4.54; the
  * runtime-check evidence rule of `docs/TESTING.md`): at a small test allowance the analysis stops, and the program still
- * compiles. The decision: a check that waits on the stop is moved to the runtime with the reason `budget`, one warning
- * says so, and a literal's error found by the finishing path stands. The plan: the moved check stands at its site. The
+ * compiles. The decision: a check that waits on the stop is moved to the runtime, with the reason its value gives (host
+ * data its own, as unstopped: TABLE r4.126; a value the stop leaves undecided `budget`), one warning says so, and a
+ * literal's error found by the finishing path stands. The plan: the moved check stands at its site. The
  * execution: a value that fits reaches the next effect; one that does not stops at the check.
  */
 
@@ -80,7 +81,7 @@ function ran(
 test("a check the stop moves to the runtime is decided, planned and run, in both orders (D4 a′)", () => {
   const source = 'let v: integer = hostValue\nsay "AFTER"\nexit\n';
   const value = source.indexOf("hostValue");
-  // the decision: the store's check with the reason `budget`, and one warning
+  // the decision: the store's check with the host data's own reason, and one warning
   const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
   assert.ok(request !== null);
   const decided = withTestAllowance(ALLOWANCE, () =>
@@ -98,7 +99,7 @@ test("a check the stop moves to the runtime is decided, planned and run, in both
   );
   assert.deepEqual(decided, {
     exhausted: "work",
-    moved: [`copy-type v [integer] @${value} budget`],
+    moved: [`copy-type v [integer] @${value} unknown`],
   });
   const { diagnostics, plan } = compiled(source);
   // (the warning and the mark at the first moved check, the program's top level its heaviest place)
@@ -1044,6 +1045,78 @@ test("a marked store's records within its value are compared alike on both sides
     violating: [],
   });
   assert.deepEqual(problems, [`extra check ${JSON.stringify(extra)}`]);
+});
+
+/**
+ * Before admission settled, a store into a written type is checked by admission's own C1, the derivation the analysis
+ * runs unstopped, reading what the stop retained (TABLE r4.125, r4.126, Astra r4's B1): two wrong elements give one
+ * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
+ * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred. At every
+ * stop before admission settled the errors, their sites and sentences equal the unstopped ones.
+ */
+test("a stop before admission settled checks a written store by admission's own C1, error for error", () => {
+  for (const source of [
+    'let rows: integer[] = ["one", "two"]\nexit\n',
+    'let rows: integer set = set["one", "two"]\nexit\n',
+    'let rows: integer dict = dict{a: "one", b: "two"}\nexit\n',
+    'let rows: integer[][] = [["one", "two"]]\nexit\n',
+    "let rows: integer[] = [{n: hostValue}]\nexit\n",
+    "let rows: integer set = set[{n: 4}]\nexit\n",
+    'let xs: integer[] set = set[]\nxs.add(["wrong", true])\nexit\n',
+    'let xs: (integer | string)[] set = set[]\nxs.add([1, "a"])\nexit\n',
+    'let ys = [1, "a"]\nexit\n',
+  ]) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const text = messageSource([source]);
+    const errors = (answers: Answers) =>
+      answers.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => ({ ...d, message: coreMessage(d, text) }));
+    const unstopped = analyseCore(request);
+    const want = errors(unstopped);
+    assert.ok(want.length > 0, source);
+    let stops = 0;
+    for (let allowance = 1; allowance < unstopped.budget.total; allowance += 1) {
+      const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
+      if (stopped.budget.settled) continue;
+      stops += 1;
+      assert.deepEqual(errors(stopped), want, `${source} @${allowance}`);
+    }
+    assert.ok(stops > 0, source);
+  }
+});
+
+/**
+ * Before admission settled, a literal whose element needs a decision admission did not make (here a copy of an inferred
+ * place) is not compared for mixed elements: the store holding it is marked at its site, its type undecided, standing for
+ * its records within its value (TABLE r4.126). At every stop before admission settled the mark stands and the oracle
+ * finds nothing else.
+ */
+test("a stop before admission settled marks the store of a literal whose element needs a decision", () => {
+  const source =
+    'let base = 1\nlet xs: (integer | string)[] set = set[]\nxs.add([base, "a"])\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const literal = source.indexOf("[base");
+  const unstopped = analyseCore(request);
+  let stops = 0;
+  for (let allowance = 1; allowance < unstopped.budget.total; allowance += 1) {
+    const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    if (stopped.budget.settled) continue;
+    stops += 1;
+    assert.ok(
+      stopped.budget.deferred.some(
+        (d) =>
+          d.code === "TSV041" &&
+          d.site.start === literal &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown",
+      ),
+      `@${allowance}`,
+    );
+  }
+  assert.ok(stops > 0);
 });
 
 /**

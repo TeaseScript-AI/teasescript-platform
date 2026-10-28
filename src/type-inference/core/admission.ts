@@ -846,6 +846,12 @@ function compatible(items: readonly Item[], term: TypeTerm | null): boolean {
 /** What admission asks of the consumers it runs beside: their solver runs, with each read's accounting. */
 export interface AdmissionHost {
   run<T>(work: Work<T>): T;
+  /**
+   * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
+   * finished answer and contract, the retained type: TABLE r4.102, r4.106, r4.109), else `null`: admission's C1 and its
+   * boundaries read as every consumer does (one derivation, TABLE r4.126).
+   */
+  read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
 }
 
 export class Admission {
@@ -911,6 +917,7 @@ export class Admission {
   readonly #whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly #stops = new Map<PlaceId, Stops>();
+  readonly #everyStop = new Map<PlaceId, Stops>();
   /**
    * A representative store's later equivalent ones (`#grouped`), each recorded once per pass with its representative
    * (`#representative`), and the bindings defined by one whole store.
@@ -1565,7 +1572,13 @@ export class Admission {
   public valueAt(d: Definition, at: readonly string[]): Item[] {
     this.pass.program.work.charge("checks");
     if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
-    return withoutEmpty(this.#run(this.pass.values.valueItems(d.value!, d.node, at)));
+    return this.#items(d.value!, d.node, at);
+  }
+
+  /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
+  #items(value: PlaceId, node: FlowNode, at: readonly string[]): Item[] {
+    const finished = this.host.read?.(value, node, at) ?? null;
+    return withoutEmpty(finished ?? this.#run(this.pass.values.valueItems(value, node, at)));
   }
 
   /**
@@ -2632,7 +2645,12 @@ export class Admission {
     return {
       root,
       path,
-      label: this.pathLabel(root, path),
+      // (a written path's label from its written type, final at every stop, TABLE r4.122)
+      label: this.pathLabel(
+        root,
+        path,
+        byWritten ? writtenOf(this.pass.program.place(root).kind) : null,
+      ),
       tags,
       written: byWritten,
       own: found.own,
@@ -4838,14 +4856,7 @@ export class Admission {
       if (index + 1 === at.length) {
         for (const child of children) {
           this.pass.program.work.charge("checks");
-          if (
-            leaf(
-              withoutEmpty(
-                this.#run(this.pass.values.valueItems(child.value!, child.node ?? node, [])),
-              ),
-            )
-          )
-            return child;
+          if (leaf(this.#items(child.value!, child.node ?? node, []))) return child;
         }
       } else
         for (let position = children.length - 1; position >= 0; position -= 1)
@@ -4973,10 +4984,13 @@ export class Admission {
   /**
    * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
    * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
-   * elements stand below them; once per value.
+   * elements stand below them; once per value. `once`: later copies or calls of one source identity at a path are one
+   * stop (F2), as every walk made before a stop has them; a walk made after one keeps every stop instead, the same
+   * boundaries and sites without asking identities nothing else after the stop asks (TABLE r4.55, r4.126).
    */
-  #stopsOf(value: PlaceId, node: FlowNode): Stops {
-    const known = this.#stops.get(value);
+  #stopsOf(value: PlaceId, node: FlowNode, once = true): Stops {
+    const memo = once ? this.#stops : this.#everyStop;
+    const known = memo.get(value);
     if (known !== undefined) return known;
     const { program, definitions, contract } = this.pass;
     const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
@@ -5101,6 +5115,7 @@ export class Admission {
       // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
       // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
       if (
+        once &&
         sharing() &&
         path.length > 0 &&
         map === stops.values &&
@@ -5159,7 +5174,7 @@ export class Admission {
         program.work.charge("checks", sortCost(list.length));
         list.sort((a, b) => compareKeys(a.key, b.key));
       }
-    this.#stops.set(value, stops);
+    memo.set(value, stops);
     return stops;
   }
 
@@ -5768,7 +5783,9 @@ export class Admission {
    * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
    * (r4.35) and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
    * store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a sentence
-   * names) and the offending element's (D1).
+   * names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal whose element
+   * needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`) is not
+   * compared; it is reported there instead, so its store marks (TABLE r4.126).
    */
   public literalElements(
     order: <T>(list: readonly T[]) => T[],
@@ -5783,6 +5800,7 @@ export class Admission {
         readonly kinds: readonly ItemTag[];
       },
     ) => void,
+    undecided?: (cell: PlaceId) => void,
   ): void {
     const { program, definitions, contract } = this.pass;
     const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
@@ -5793,10 +5811,14 @@ export class Admission {
     // a typed ingress's type and default), the paths below them where their contracts hold more than one kind: only there
     // can one element offend another (F2)
     const conflicts = new Map<string, readonly (readonly string[])[]>();
-    for (const [cell, list] of order([...definitions.cellDefs])) {
+    cells: for (const [cell, list] of order([...definitions.cellDefs])) {
       const owner = program.cellOwner.get(cell);
       if (owner?.kind !== "cell" || list.length < 2 || contract.landsIn(owner.owner, []) !== null)
         continue;
+      if (undecided !== undefined && list.some(named)) {
+        undecided(cell);
+        continue;
+      }
       let shared: readonly (readonly string[])[] | null = null;
       if (list.some(named)) {
         const ids = list.map((d) => (d.value === undefined ? "" : contract.identityOf(d.value).id));
@@ -5896,7 +5918,15 @@ export class Admission {
         const below = known !== undefined ? [] : (shared ?? this.#pathsBelow(d.value, []));
         for (const path of [[], ...below]) {
           const at = keptText(this.#work, path);
-          const own = [...new Set(deciding(this.valueAt(d, path)).map((item) => item.tag))];
+          const items = this.valueAt(d, path);
+          if (
+            undecided !== undefined &&
+            items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
+          ) {
+            undecided(cell);
+            continue cells;
+          }
+          const own = [...new Set(deciding(items).map((item) => item.tag))];
           if (!first.has(at)) {
             // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
             // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
@@ -6030,7 +6060,7 @@ export class Admission {
       node: FlowNode,
       found: (stop: Stop, ingress: PlaceId, own: boolean) => void,
     ): void => {
-      const stops = this.#stopsOf(value, node);
+      const stops = this.#stopsOf(value, node, this.pass.program.work.stopped === null);
       for (const map of [stops.written, stops.values, stops.literals])
         for (const list of map.values())
           for (const stop of list) {

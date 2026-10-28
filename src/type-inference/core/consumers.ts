@@ -89,6 +89,7 @@ import {
   joinSteps,
   keepText,
   keptArray,
+  keptSlice,
   keptSteps,
   pathText,
   stepText,
@@ -399,7 +400,16 @@ export class Consumers {
     // (a walk made for the finishing path asks nothing from its start: admission's own setup asks values too)
     this.#finishing = finishing;
     this.#order = consumerOrder ?? ((list) => [...list]);
-    this.admission = new Admission(pass, { run: (work) => this.#solve(work) }, rejected, cycling);
+    this.admission = new Admission(
+      pass,
+      {
+        run: (work) => this.#solve(work),
+        // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
+        read: (value, node, at) => (this.#finishing ? this.#finishingRead(value, node, at) : null),
+      },
+      rejected,
+      cycling,
+    );
     const program = pass.program;
     for (const c of program.constraints) {
       if (c.kind === "get") this.#getOf.set(c.result, c.receiver);
@@ -451,6 +461,27 @@ export class Consumers {
     rest: readonly string[],
     requirement = false,
   ): readonly Item[] {
+    // (below a literal, its children's own reads, each through every source: a child no leaf kind decides keeps what the
+    // later sources give and a host read's ingress, as unstopped each child is its own value, TABLE r4.126)
+    const { program } = this.pass;
+    if (
+      rest.length > 0 &&
+      program.places[value]?.kind.kind === "value" &&
+      program.hasOf.has(value)
+    ) {
+      const items: Item[] = [];
+      for (const child of this.admission.literalChildren(value, rest[0]!))
+        if (child.value !== undefined && this.#stands(child))
+          items.push(
+            ...this.#finishingRead(
+              child.value,
+              child.node ?? node,
+              keptSlice(program.work, rest, 1),
+              requirement,
+            ),
+          );
+      if (items.length > 0) return items;
+    }
     const own = this.#leafKind(value, rest);
     if (own !== null) return own;
     const items = this.#laterSources(value, node, rest, requirement);
@@ -612,7 +643,8 @@ export class Consumers {
    */
   #leafKind(value: PlaceId, rest: readonly string[]): readonly Item[] | null {
     const { program } = this.pass;
-    const own = rest.length === 0 ? this.#literalKind(value) : null;
+    const own =
+      rest.length === 0 ? (this.#literalKind(value) ?? this.#ownLiteralKind(value)) : null;
     if (own !== null) return own;
     // (below a collection or record literal, its own children's, each a leaf: `[hostValue]` at its element)
     const place = program.places[value]?.kind;
@@ -696,6 +728,14 @@ export class Consumers {
   }
 
   #hostStores: Map<PlaceId, Definition[]> | null = null;
+
+  /** A collection or record literal's own kind, its syntax (as the stopped shapes read it); `null` for any other value. */
+  #ownLiteralKind(value: PlaceId): readonly Item[] | null {
+    const place = this.pass.program.places[value]?.kind;
+    if (place?.kind !== "value") return null;
+    const own = place.node === "objectLiteral" ? "object" : COLLECTION_LITERALS.get(place.node);
+    return own === undefined ? null : [makeItem(own, null, { cert: "def" })];
+  }
 
   #literalKind(value: PlaceId): readonly Item[] | null {
     const { program } = this.pass;
@@ -903,10 +943,17 @@ export class Consumers {
   /**
    * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), over admission's
    * own store list (`Admission.stores`) and reading no decision (A6: a later pass may admit a store this one rejected,
-   * so its decisions may be narrower than the settled ones). A store into a written type at its path keeps its C1
-   * against it (A1, the type the runtime checks it against): a literal's own kind fits or errs, any other value is
-   * checked when the script runs; an ingress store there its boundary (`Admission.publish`). Every other store is marked
-   * at its site, its type undecided (r4.100).
+   * so its decisions may be narrower than the settled ones). It runs every derivation of admission's that rests on
+   * written types and literal syntax alone, as admission runs it, reading what the stop retained as every consumer does
+   * (one derivation, TABLE r4.126), and marks where one would need a decision admission did not make:
+   *
+   * 1. C1 against a written type at the store's path (A1, the type the runtime checks it against: `#admittedStores`);
+   * 2. ADR 0021 1.3's mixed literal elements (`Admission.literalElements`), where an element would need a decision
+   *    (a named one, or one the read leaves `STOPPED`) the store holding the literal marked instead (`#markHolder`);
+   * 3. the ingress stores' boundaries against written types (`Admission.publish`).
+   *
+   * Every store into an inferred place is marked at its site, its type undecided (r4.100); a mark stands for the store's
+   * records within its value (r4.111).
    */
   #freshStores(): void {
     const { program } = this.pass;
@@ -915,92 +962,137 @@ export class Consumers {
       if (d.value === undefined) continue;
       const written = writtenOf(program.place(d.place).kind);
       const path = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
-      const term = written === null ? null : termAt(written, path);
-      const label = targetName(program.place(d.place).label, path);
-      if (term === null) {
-        this.#storeWarning(
-          d.site,
-          label,
-          STOPPED[0]!,
-          ["unknown"],
-          {
-            rule: "store",
-            into: this.#placeText(d.place, path),
-            type: ["unknown"],
-            written: false,
-            decider: null,
-            brought: null,
-            root: this.#storeRoot(d.place),
-            steps: this.#storeSteps(d.place, path),
-          },
-          [],
-        );
-        continue;
-      }
-      // the store and, through a collection literal's own parts, each part the written type reaches, checked at the
-      // part's own site, as A8 checks a literal's elements (TABLE r4.117)
-      const parts: { value: PlaceId; site: SourceSite; path: readonly string[] }[] = [
-        { value: d.value, site: d.site, path },
-      ];
-      for (let part = parts.pop(); part !== undefined; part = parts.pop()) {
-        program.work.charge("checks");
-        const at = termAt(written!, part.path);
-        const tags = at === null ? [] : typeTags(at).filter((tag) => tag !== "unknown");
-        if (tags.length === 0) continue;
-        const rule: DiagnosticRule = {
-          rule: "store",
-          into: this.#placeText(d.place, part.path),
-          type: tags,
-          written: true,
-          decider: null,
-          brought: null,
-          root: this.#storeRoot(d.place),
-          steps: this.#storeSteps(d.place, part.path, written),
-        };
-        // (only what the part's syntax tells: a collection literal's own kind, then its parts; else its literal kind)
-        const node = program.places[part.value]?.kind;
-        const own = node?.kind === "value" ? COLLECTION_LITERALS.get(node.node) : undefined;
-        const items =
-          own !== undefined
-            ? [makeItem(own, null, { cert: "def" })]
-            : withoutEmpty(this.#literalKind(part.value) ?? STOPPED);
-        const fitting = (item: Item): boolean =>
-          concrete(item) && tags.some((tag) => fits(item.tag, tag, true));
-        if (items.every(fitting)) {
-          // (a dict literal's values, too, at its `element`, as its type has them)
-          if (own !== undefined)
-            for (const child of this.admission.literalChildren(part.value, "element"))
-              if (child.value !== undefined)
-                parts.push({
-                  value: child.value,
-                  site: child.site,
-                  path: keptSteps(program.work, part.path, ["element"]),
-                });
-          continue;
-        }
-        // (an error inside an add's literal stays at the add's argument, as `Admission.siteAt` keeps it unstopped; the
-        // check's target is the written type's path, a dict's value its `entry`: TABLE r4.122)
-        if (items.every((item) => item.cert === "def" && concrete(item)) && !items.some(fitting))
-          this.#error(
-            "written-target",
-            d.kind === "whole" ? part.site : d.site,
-            rule,
-            items.map((item) => item.tag),
-          );
-        else
-          this.#storeWarning(
-            part.site,
-            this.admission.pathLabel(d.place, part.path, written),
-            items.find((item) => !fitting(item)) ?? STOPPED[0]!,
-            tags,
-            rule,
-            items.filter(fitting),
-          );
-      }
+      if (written !== null && termAt(written, path) !== null) continue;
+      this.#storeMark(d, path);
     }
+    // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
+    // keep, as unstopped admission's passes converge on: A6)
+    this.#rule = 3;
+    this.admission.literalElements(
+      this.#order,
+      (site, found) => this.#mixed(site, found),
+      (cell) => this.#markHolder(cell),
+    );
+    this.#rule = 1;
+    this.#admittedStores(true);
     this.admission.publish(true);
     this.published = true;
   }
+
+  /**
+   * Whether a literal's element stands (A6, ADR 0021 1.3): no pass's admission rejected it, nor this fresh pass's mixed
+   * elements whole, as the unstopped values read it.
+   */
+  #stands(d: Definition): boolean {
+    if (!this.pass.lists.live(d)) return false;
+    return !(
+      this.#finishing &&
+      !this.settled &&
+      (this.admission.newlyRejected.get(d.uid)?.has(keyOf(d.place, [])) ?? false)
+    );
+  }
+
+  /**
+   * The places and paths admission decides by a written type that admission's own stores reach (`Admission.stores`):
+   * every path of each such place's written type, which is as large as the source that writes it. The fresh pass's C1
+   * decides these alone (`groups` would group every key and walk every store's landings again, unbounded after a
+   * stop: TABLE r4.55, r4.126).
+   */
+  #writtenGroups(): { readonly root: PlaceId; readonly path: readonly string[] }[] {
+    const { program } = this.pass;
+    const out: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
+    const seen = new Set<PlaceId>();
+    for (const d of this.admission.stores()) {
+      program.work.charge("checks");
+      if (seen.has(d.place)) continue;
+      seen.add(d.place);
+      const written = writtenOf(program.place(d.place).kind);
+      if (written === null) continue;
+      const pending: [TypeTerm, readonly string[]][] = [[written, []]];
+      for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+        program.work.charge("checks");
+        const [term, path] = next;
+        out.push({ root: d.place, path });
+        if (term.kind === "union") for (const member of term.members) pending.push([member, path]);
+        else if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
+          pending.push([term.element, keptSteps(program.work, path, ["element"])]);
+        else if (term.kind === "object")
+          for (const property of term.properties ?? [])
+            pending.push([
+              property.type,
+              keptSteps(program.work, path, [propertyStep(property.name)]),
+            ]);
+      }
+    }
+    // (a union's members reach one path more than once: each path once)
+    const unique = new Map<string, { readonly root: PlaceId; readonly path: readonly string[] }>();
+    for (const group of out) unique.set(joinParts(group.root, group.path), group);
+    return [...unique.values()];
+  }
+
+  /** A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once. */
+  #storeMark(d: Definition, path: readonly string[]): void {
+    if (this.#marked.has(d.uid)) return;
+    this.#marked.add(d.uid);
+    const { program } = this.pass;
+    this.#storeWarning(
+      d.site,
+      targetName(program.place(d.place).label, path),
+      STOPPED[0]!,
+      ["unknown"],
+      {
+        rule: "store",
+        into: this.#placeText(d.place, path),
+        type: ["unknown"],
+        written: false,
+        decider: null,
+        brought: null,
+        root: this.#storeRoot(d.place),
+        steps: this.#storeSteps(d.place, path),
+      },
+      [],
+    );
+  }
+
+  readonly #marked = new Set<number>();
+
+  /**
+   * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
+   * settled): each store of the outermost literal holding it marked (`#storeMark`), standing for its records within
+   * its value, the mixed elements' among them (TABLE r4.126).
+   */
+  #markHolder(cell: PlaceId): void {
+    const { program, definitions } = this.pass;
+    if (this.#heldIn === null) {
+      this.#heldIn = new Map();
+      for (const [at, list] of definitions.cellDefs)
+        for (const d of list) {
+          program.work.charge("checks");
+          if (d.value !== undefined) this.#heldIn.set(d.value, at);
+        }
+      this.#storesOf = new Map();
+      for (const d of this.admission.stores()) {
+        program.work.charge("checks");
+        if (d.value === undefined) continue;
+        const list = this.#storesOf.get(d.value);
+        if (list === undefined) this.#storesOf.set(d.value, [d]);
+        else list.push(d);
+      }
+    }
+    let literal = program.cellOwner.get(cell)?.owner;
+    for (let up = literal; up !== undefined;) {
+      program.work.charge("checks");
+      literal = up;
+      const holder = this.#heldIn.get(up);
+      up = holder === undefined ? undefined : program.cellOwner.get(holder)?.owner;
+    }
+    if (literal === undefined) return;
+    for (const d of this.#storesOf?.get(literal) ?? [])
+      this.#storeMark(d, d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path);
+  }
+
+  #heldIn: Map<PlaceId, PlaceId> | null = null;
+  #storesOf: Map<PlaceId, Definition[]> | null = null;
 
   // ----------------------------------------------------------------------------------------- diagnostics
 
@@ -2031,12 +2123,16 @@ export class Consumers {
    * type an error at that element (A8); a value none of whose kinds fits a written type or one decided earlier in the
    * source an error even when every item is possible (ADR 1.7), never under a guard; otherwise one `copy-type` per
    * offending kind, whatever its certainty, a copy made before its decider with context `later` (A7), and a
-   * `null-check` for a possible null. The store's external data brings its boundary checks (C9).
+   * `null-check` for a possible null. The store's external data brings its boundary checks (C9). `writtenOnly`: the
+   * places whose written type reaches the path alone, the finishing path's C1 before admission settled (TABLE r4.126: one
+   * derivation, the written type final at every stop).
    */
-  #admittedStores(): void {
+  #admittedStores(writtenOnly = false): void {
     const { program, definitions } = this.pass;
     const admission = this.admission;
-    for (const { root, path } of this.#order(admission.groups())) {
+    for (const { root, path } of this.#order(
+      writtenOnly ? this.#writtenGroups() : admission.groups(),
+    )) {
       const decision = admission.decide(root, path);
       if (decision === null) continue;
       const { label, tags, nullable, decider } = decision;
@@ -2062,7 +2158,7 @@ export class Consumers {
         decider: decider?.site ?? null,
         brought,
         root: this.#storeRoot(root),
-        steps: this.#storeSteps(root, path),
+        steps: this.#storeSteps(root, path, written ? writtenOf(program.place(root).kind) : null),
       });
       // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
       // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
