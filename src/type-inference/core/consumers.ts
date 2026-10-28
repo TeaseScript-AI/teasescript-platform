@@ -1,6 +1,6 @@
 import type { Expression } from "../../ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
-import { expressionChildren } from "../../expression-children.js";
+import { expressionParts } from "../../expression-children.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
@@ -1412,7 +1412,8 @@ export class Consumers {
   /**
    * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
    * TABLE r4.162, r4.168): its subject's, a member's receiver's, an operation's operands', by a walk of their whole
-   * syntax (`expressionChildren`, Codex r12): not where any of them reads an element by its index or a dict's value by
+   * syntax, an ask's, a `say`'s and a button's operands too (`expressionParts`, Codex r12, r13), one part at a time on
+   * its own stack, however wide: not where any of them reads an element by its index or a dict's value by
    * its key, calls a function or a method (whose own reads are not followed), or reads a property or a selection the
    * core finds may be absent; unproved where a site has no expression.
    */
@@ -1435,16 +1436,45 @@ export class Consumers {
               : expression;
       work.push(subject);
     }
-    for (let expression = work.pop(); expression !== undefined; expression = work.pop()) {
-      program.work.charge("checks");
-      if (expression.kind === "indexExpression" || expression.kind === "callExpression")
-        return "unproved";
-      if (expression.kind === "propertyAccessExpression" && this.#mayBeAbsent(expression, site))
-        return "unproved";
-      work.push(...expressionChildren(expression));
-    }
-    return true;
+    return work.some((subject) => this.#readsAbsent(subject, site)) ? "unproved" : true;
   }
+
+  /**
+   * Whether `root` may read something absent (`#present`), each expression once, its parts before it on an explicit
+   * stack.
+   */
+  #readsAbsent(root: Expression, site: SourceSite): boolean {
+    const { program } = this.pass;
+    const known = this.#absentReads;
+    const stack: [Expression, boolean][] = [[root, false]];
+    for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+      const [expression, partsDone] = top;
+      if (known.has(expression)) continue;
+      if (partsDone) {
+        known.set(
+          expression,
+          expressionParts(expression).some((part) => known.get(part) === true),
+        );
+        continue;
+      }
+      program.work.charge("checks");
+      if (
+        expression.kind === "indexExpression" ||
+        expression.kind === "callExpression" ||
+        (expression.kind === "propertyAccessExpression" && this.#mayBeAbsent(expression, site))
+      ) {
+        known.set(expression, true);
+        continue;
+      }
+      stack.push([expression, true]);
+      for (const part of expressionParts(expression))
+        if (!known.has(part)) stack.push([part, false]);
+    }
+    return known.get(root) === true;
+  }
+
+  /** `#readsAbsent`'s answer per expression. */
+  readonly #absentReads = new Map<Expression, boolean>();
 
   /** Whether a property's read may find nothing: a property an object may lack, an element a selection may not have. */
   #mayBeAbsent(

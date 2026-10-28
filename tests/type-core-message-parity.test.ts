@@ -1191,7 +1191,7 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
   assert.ok(pasted > 0, `${pasted} forms pasted`);
 });
 
-test("what a site takes is read through a long chain of untyped copies or calls (#1241, Codex r8)", () => {
+test("what a site takes is read through a long chain of untyped copies or calls, and a wide literal (#1241, Codex r8, r13)", () => {
   const lines = (count: number, line: (index: number) => string): string =>
     Array.from({ length: count }, (_, index) => line(index)).join("\n");
   const call = (index: number): string => (index === 1023 ? "p" : `f${index + 1}(p)`);
@@ -1208,6 +1208,15 @@ test("what a site takes is read through a long chain of untyped copies or calls 
       ),
     );
   }
+  // (Codex r13: a literal wide enough that one native call per element would exhaust the stack, where its presence is
+  // walked)
+  const wide = `let d: duration = [${"1, ".repeat(131071)}2].length\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source: wide }]);
+  assert.ok(request !== null);
+  assert.deepEqual(
+    analyseCore(request).diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV041"],
+  );
 });
 
 test("the code each fix suggests compiles where it stands and runs, saying what it should (#1195)", () => {
@@ -1619,6 +1628,11 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
     ],
     [
       'let d = dict{found: 2}\nlet v: duration = toInteger("${d["absent"]}${1}", default: 1)\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    // (Codex r13: such a read in an ask's operand)
+    [
+      'let d = dict{found: "Q"}\nlet v: duration = askInteger(d["absent"])\nsay v\nexit\n',
       "Give the number a unit.",
     ],
     ['let items = ["hello"]\nsay items[0].size\nexit\n', "Use the length property."],

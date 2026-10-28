@@ -219,6 +219,9 @@ const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
       "[ns[5]].length",
       'toInteger("${d["absent"]}${1}", default: 1)',
       "({n: n}).n",
+      // (Codex r13: an ask's operand, read or there)
+      'askInteger("${d["absent"]}")',
+      'askInteger("How many?")',
     ],
   ],
   ["angle", "1 deg", ["90", "n", 'd["absent"]', "ns[5]"]],
