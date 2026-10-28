@@ -2711,8 +2711,9 @@ export class Admission {
    */
   #lazily(place: PlaceId, path: readonly string[]): void {
     if (this.#attempted.has(keyOf(place, path)) || !this.#landed(place, path)) return;
-    // (after a stop admission decides nothing more: such a path is answered from what it retained, `#retainedSource`)
-    if (this.pass.program.work.stopped !== null) return;
+    // (after a stop admission decides nothing more: such a path is answered from what it retained, `#retainedSource`;
+    // nor below a decision that stopped, S3 §5)
+    if (this.pass.program.work.stopped !== null || this.decisionStopped(place, path)) return;
     this.decide(place, path, true);
   }
 
@@ -3392,6 +3393,8 @@ export class Admission {
       const written = writtenOf(program.place(at.place).kind);
       const term = written === null ? null : termAt(written, at.path);
       if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
+      // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5)
+      if (this.decisionStopped(at.place, at.path)) return null;
       // (kept in `seen`)
       const key = keptKey(this.#work, at.place, at.path);
       if (this.#unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };

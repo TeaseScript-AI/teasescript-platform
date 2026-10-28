@@ -895,9 +895,11 @@ class CoreAnswers implements Answers {
    * literal's own kinds, a typed call's expected type at every depth); else the domains the consumers' finishing read
    * holds, the key's finished contract and its written or retained admitted type (`Consumers.finishedItems`); where none
    * of them retains anything after a stop where admission had settled, the type admission gives the read's place there,
-   * as `place` answers it (`#lazilyDecided`).
+   * as `place` answers it (`#lazilyDecided`). A read of a key whose decision stopped, or of a key below one, is
+   * `STOPPED` before any source, with or without a stop of the analysis (S3 §5).
    */
   #items(value: PlaceId, node: FlowNode | null, path: readonly string[]): readonly Item[] {
+    if (this.#consumers.admission.readsStoppedDecision(value, path)) return STOPPED;
     const answered = this.#run(this.#pass.values.valueItems(value, node, path));
     if (!this.#stopped || !answered.some(isStopped)) return answered;
     const own = this.#stoppedShape(value, path).items;
@@ -1102,13 +1104,14 @@ class CoreAnswers implements Answers {
     const items = this.#items(value, node, []);
     // a read of a binding or of a path below one; a projection of a literal, a call or an operation is no place
     const target = this.#readPlace(value);
-    // the route the read's answer took, recorded as it was answered (Astra B5)
+    // the route the read's answer took, recorded as it was answered (Astra B5); a read of a stopped decision's key takes
+    // its contract, `budget` (`#items`)
     const route: Route =
       target === null
         ? "value"
         : this.#consumers.quiet.has(value)
           ? "quiet"
-          : this.#stopped
+          : this.#stopped || this.#consumers.admission.readsStoppedDecision(value, [])
             ? "contract"
             : values.valueRoute(value, node, []);
     return {
@@ -1240,6 +1243,14 @@ class CoreAnswers implements Answers {
   }
 
   #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
+    // (a key whose decision stopped names nothing, as its reads hold nothing but `unknown`, S3 §5)
+    const { admission } = this.#consumers;
+    if (
+      "value" in start
+        ? admission.readsStoppedDecision(start.value, start.path)
+        : "key" in start && admission.decisionStopped(keyPlace(start.key), keyPath(start.key))
+    )
+      return new Set();
     // (after a stop before admission settled only what a value's own syntax names: a literal's or a written
     // destination's properties)
     if (this.#stopped && !this.#consumers.settled) {

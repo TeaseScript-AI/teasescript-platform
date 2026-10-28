@@ -1909,3 +1909,92 @@ test("an admission decision past its allowance stops: its key undecided, its rea
     }
   }
 });
+
+/**
+ * Astra r1 B1 on #1165: a decision stopped at its allowance stays undecided at every reader, also after a program stop
+ * where admission had settled, when the finishing path asks retained, lazily decided and syntax sources (source 4 tells
+ * a stopped decision from a path admission decides lazily). `tally`'s decision scans its 14 stores; its place stays
+ * undecided and its read answers `budget` before the program stop and at its first settled and its last stop, a list
+ * literal's element holding it decides nothing, and the stop changes nothing the oracle does not excuse, no boundary
+ * among it. The generated family (shapes, readers, caps and allowances around the stop) runs outside CI.
+ */
+test("a stopped decision stays undecided at every reader, also after a settled program stop (S3 §5)", () => {
+  const source =
+    [
+      "let tally = 1",
+      ...Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}`),
+      "tally = hostValue",
+      "let picked: integer = tally",
+      "let pair = [tally]",
+      "let other = tally",
+      "repeat tally {}",
+      "repeat other {}",
+      'say "DONE"',
+      "exit",
+    ].join("\n") + "\n";
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const tally = new CoreProgram(request).places.find(
+    ({ kind }) => kind.kind === "binding" && kind.name === "tally",
+  )!.id;
+  const read = source.indexOf("tally {}");
+  const pair = source.indexOf("[tally]");
+  for (const reversed of [false, true]) {
+    const inOrder = <T>(make: () => T): T =>
+      reversed
+        ? withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), make),
+          )
+        : make();
+    const { decisions } = inOrder(() => analyseCore(request)).budget;
+    const own = decisions.find((d) => d.place === tally && d.path.length === 0)!;
+    const capped = <T>(make: () => T): T =>
+      withTestDemandAllowance(Math.floor(own.units / 2), () => inOrder(make));
+    const unstopped = capped(() => stopRun(source));
+    const total = unstopped.answers.budget.total;
+    const [first] = capped(() => [...settledEnds(source).values()]).reduce(
+      (lowest, ends) => (ends[0] < lowest[0] ? ends : lowest),
+      [total, total] as const,
+    );
+    for (const allowance of [undefined, first, total - 1]) {
+      const where = `reversed: ${reversed}, allowance: ${allowance}`;
+      const run = allowance === undefined ? unstopped : capped(() => stopRun(source, allowance));
+      const { answers } = run;
+      assert.equal(answers.budget.settled, true, where);
+      assert.ok(
+        answers.budget.decisions.some((d) => d.place === tally && d.stopped),
+        where,
+      );
+      assert.deepEqual(answers.place(tally).admitted, { by: "undecided" }, where);
+      const node = (start: number, kind: string) =>
+        answers.graph.nodes.find(
+          (each) => each.expression?.kind === kind && each.span?.start.offset === start,
+        )!;
+      const budget = (items: readonly { tag: string; reasons: number }[]) =>
+        items.map((item) => `${item.tag}/${item.reasons}`);
+      assert.deepEqual(budget(answers.at(node(read, "identifier"))!.items), ["unknown/16"], where);
+      // (a literal's element decides nothing either: `budget` where the question composes it from its child's own read,
+      // after a stop, else the solver's value of the read, host data here)
+      assert.deepEqual(
+        [
+          ...new Set(
+            answers
+              .valueAt(node(pair, "listLiteral"), ["element"])
+              .items.filter((item) => item.tag !== "empty")
+              .map((item) => item.tag),
+          ),
+        ],
+        ["unknown"],
+        where,
+      );
+      if (allowance !== undefined)
+        assert.deepEqual(
+          capped(() =>
+            stopProblems({ unstopped, stopped: run, fitting: [host(2)], violating: [host(2.5)] }),
+          ),
+          [],
+          where,
+        );
+    }
+  }
+});
