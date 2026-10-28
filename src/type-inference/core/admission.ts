@@ -6793,6 +6793,61 @@ function boundaryCheck(
   };
 }
 
+/**
+ * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled
+ * (TABLE r4.126, r4.138): where the fresh pass runs it (`Consumers.#freshStores`, or its walk, which finishes every
+ * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A C1 obligation
+ * comes from a decision (`decide`), which the consumers check. `type-core-stop`'s inventory test finds every method of
+ * `Admission` that creates an obligation in this file and fails where one is missing here.
+ */
+export const OBLIGATION_SITES = [
+  {
+    method: "decide",
+    runs: "#admittedStores",
+    published: "C1 against a written type at a store's path (A1)",
+    undecided: "a store into an inferred place, marked (#storeMark)",
+    declined: "an unrestricted destination; a multi-site argument decides nothing (F21)",
+  },
+  {
+    method: "literalElements",
+    runs: "literalElements",
+    published:
+      "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3, A8)",
+    undecided:
+      "a named element: every definition holding its literal, or the literal, marked (#markHolder)",
+    declined:
+      "elements of one source identity; a literal landing in a written place, which C1 checks",
+  },
+  {
+    method: "#boundaryAtRead",
+    runs: "the walk",
+    published: "an own read's boundary (C9)",
+    undecided: "none: ingress is structural (r4.113)",
+    declined: "none",
+  },
+  {
+    method: "boundaryFor",
+    runs: "the walk",
+    published: "an item's ingress boundary (C9)",
+    undecided: "none: ingress is structural (r4.113)",
+    declined: "an ingress the store owns (`ownIngress`)",
+  },
+  {
+    method: "ingressStores",
+    runs: "ingressStores",
+    published: "a typed call's own boundary no store takes in, its type its syntax's (F18)",
+    undecided: "none",
+    declined: "a typed call no type reaches: the runtime's validation alone",
+  },
+  {
+    method: "publish",
+    runs: "publish",
+    published: "an ingress store's boundary against a written destination (C9, S6-CARRIERS §3.3)",
+    undecided: "an ingress store into an inferred place, marked (#storeMark)",
+    declined: "an unrestricted destination (V30 §13)",
+  },
+] as const;
+
 /** Whether a constraint is a typed ingress (F18): a load, or a parse of text to a type. */
 function typedIngress(c: CorePass["program"]["constraints"][number]): boolean {
   return (

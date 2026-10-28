@@ -1017,19 +1017,15 @@ export class Consumers {
   }
 
   /**
-   * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), over admission's
-   * own store list (`Admission.stores`) and reading no decision (A6: a later pass may admit a store this one rejected,
-   * so its decisions may be narrower than the settled ones). It runs every derivation of admission's that rests on
-   * written types and literal syntax alone, as admission runs it, reading what the stop retained as every consumer does
-   * (one derivation, TABLE r4.126), and marks where one would need a decision admission did not make:
-   *
-   * 1. C1 against a written type at the store's path (A1, the type the runtime checks it against: `#admittedStores`);
-   * 2. ADR 0021 1.3's mixed literal elements (`Admission.literalElements`), where an element would need a decision
-   *    (a named one, or one the read leaves `STOPPED`) the store holding the literal marked instead (`#markHolder`);
-   * 3. the ingress stores' boundaries against written types (`Admission.publish`).
-   *
-   * Every store into an inferred place is marked at its site, its type undecided (r4.100); a mark stands for the store's
-   * records within its value (r4.111).
+   * The stores' obligations in the finishing path where admission had not settled (TABLE r4.110 (3)), reading no
+   * decision (A6: a later pass may admit a store this one rejected, so its decisions may be narrower than the settled
+   * ones). It runs every derivation of admission's that creates an obligation (`OBLIGATION_SITES`, with each one's
+   * exits: TABLE r4.126, r4.138), as admission runs it, reading what the stop retained as every consumer does (one
+   * derivation): C1 against a written type at a store's path (`#admittedStores`); ADR 0021 1.3's mixed literal elements
+   * (`literalElements`), a literal whose element needs a decision marked through its holders or itself (`#markHolder`);
+   * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
+   * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
+   * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
    */
   #freshStores(): void {
     const { program, definitions } = this.pass;

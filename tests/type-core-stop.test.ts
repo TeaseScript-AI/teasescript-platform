@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
@@ -6,6 +7,7 @@ import { compileSourceWithBackend } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import { OBLIGATION_SITES } from "../src/type-inference/core/admission.js";
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
@@ -1215,4 +1217,33 @@ test("the named exception for #1216 stands at its counted stops", () => {
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, exception.settled);
+});
+
+/**
+ * The derivation inventory (TABLE r4.138): every method of `Admission` that creates an obligation is in
+ * `OBLIGATION_SITES`, with its exits after a stop before admission settled, and the fresh pass runs each where the list
+ * says (`Consumers.#freshStores`, or its walk). A method that comes to create one fails here until it is listed.
+ */
+test("every admission derivation that creates an obligation is in the inventory the fresh pass runs", () => {
+  const source = (file: string): string =>
+    readFileSync(new URL(`../../src/type-inference/core/${file}`, import.meta.url), "utf8");
+  const creating = new Set<string>();
+  let method: string | null = null;
+  for (const line of source("admission.ts").split("\n")) {
+    const header = /^ {2}(?:public |private |static )*(#?\w+)(?:<[^>]*>)?\(/.exec(line);
+    if (header !== null) method = header[1]!;
+    if (line.trimStart().startsWith("//") || line.startsWith("function ")) continue;
+    if (method !== null && /boundaryCheck\(|readChecks\.push\(|^\s+error\(/.test(line))
+      creating.add(method);
+  }
+  const listed = new Set<string>(OBLIGATION_SITES.map((site) => site.method));
+  assert.deepEqual(
+    [...creating].filter((found) => !listed.has(found)),
+    [],
+  );
+  assert.ok(creating.size >= 5, [...creating].join(", "));
+  const fresh =
+    /#freshStores\(\): void \{([\s\S]*?)\n {2}\}/.exec(source("consumers.ts"))?.[1] ?? "";
+  for (const site of OBLIGATION_SITES)
+    if (site.runs !== "the walk") assert.ok(fresh.includes(site.runs), site.runs);
 });
