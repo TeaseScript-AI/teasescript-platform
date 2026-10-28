@@ -179,6 +179,24 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     assert.deepEqual(rest, [], source);
   }
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
+  // A word taken for a unit names the unit meant and every unit, and the form it offers compiles in its place.
+  const units =
+    "The units of time are ms, s, min, h, d, and w, and after 'calendar' also mo and y.";
+  for (const [source, word, meant, offered] of [
+    ["wait 5 m", "m", "minutes", "5 min"],
+    ["wait 30 sec", "sec", "seconds", "30 s"],
+    ["let x = 1.5 hrs", "hrs", "hours", "1.5 h"],
+    ["wait 5mins", "mins", "minutes", "5 min"],
+  ] as const) {
+    const why = word === "m" ? ", because it could mean minutes or months" : "";
+    assert.deepEqual(
+      compileSource(`${source}\nexit`).diagnostics.map(({ code, message }) => [code, message]),
+      [["TSP033", `'${word}' is not a unit${why}. For ${meant}, write '${offered}'. ${units}`]],
+      source,
+    );
+    const pasted = `${source.slice(0, source.lastIndexOf(offered.split(" ")[0]!))}${offered}`;
+    assert.notEqual(compileSource(`${pasted}\nexit`).plan, null, pasted);
+  }
   // A wait or timer keeps its unit apart, as it also takes a range there, but the amount before the unit is one rule with
   // one code and text wherever a unit stands, at compile time and at runtime.
   const consumers = [
