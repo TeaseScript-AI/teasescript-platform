@@ -877,6 +877,23 @@ test("a host read keeps its boundary check at a stop whatever the script stores 
 });
 
 /**
+ * A stop takes back its running unit's read checks with all that made them (Codex r12's final check): the dedupe keys
+ * and the ingress resolutions, so finishing makes a projected fallback's own-read boundary again. At every settled walk
+ * stop, in the source order (an interior stop: a phase's ends miss it), the compile keeps every record.
+ */
+test("every settled walk stop keeps a projected fallback's own-read boundary", () => {
+  const source = "hostValue.n = 2\nsay 1 otherwise hostValue.n\nexit\n";
+  const unstopped = stopRun(source);
+  const [low, high] = walkEnds(source);
+  for (let allowance = low; allowance <= high; allowance += 1)
+    assert.deepEqual(
+      stopProblems({ unstopped, stopped: stopRun(source, allowance), fitting: [], violating: [] }),
+      [],
+      `@${allowance}`,
+    );
+});
+
+/**
  * The oracle's named exception for #1216 (TABLE r4.110 (b)): a settled walk stop adds a redundant read check of
  * `state.ticks`, read by its key's contract that lost the ingress origin; counted at every stop of the settled phases in
  * the analysis's own order, the test fails where the count moves (the exception goes when #1216 lands).

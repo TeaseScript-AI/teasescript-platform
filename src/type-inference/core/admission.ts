@@ -6421,14 +6421,18 @@ export class Admission {
   }
 
   /**
-   * Takes back the read checks from `length` on, with the keys they took, so the walk that finishes their unit after a
-   * stop makes them again (D4 a′: the running unit's findings are taken back, TABLE r4.54).
+   * Takes back the read checks from `length` on, with the keys they took and the ingress resolutions that made them, so
+   * the walk that finishes their unit after a stop makes them again (D4 a′: the running unit's findings are taken back,
+   * TABLE r4.54).
    */
   public takeBackReadChecks(length: number): void {
-    for (const key of this.#readCheckKeys.splice(length))
+    const taken = this.#readCheckKeys.splice(length);
+    for (const key of taken)
       if (typeof key === "number") this.#readSeen.delete(key);
       else if (key !== null) this.#hostSeen.delete(key);
     this.readChecks.length = length;
+    // (an ingress resolved in the unit made its own read's check there: resolved again, its idempotent effects redone)
+    if (taken.length > 0) this.#resolved.clear();
   }
 
   public boundariesAt(items: readonly Item[], here: Obligation | null): void {
