@@ -552,6 +552,63 @@ test("the stop oracle sees every change no mark of the stop names", () => {
 });
 
 /**
+ * Before admission settled a written store's mark stands for its records within its value (TABLE r4.152 (1), r4.111): a
+ * literal holding an element admission left undecided (`v = [kept]`) is marked at the literal, while unstopped its
+ * TSV041 stands at the element; the oracle excuses that record, and the same record planted outside the value is still
+ * reported.
+ */
+test("a written store's mark stands for its records within its value, and for none outside it", () => {
+  const source = "let kept = 8.0\nlet v: integer[] = [1]\nv = [kept]\nexit\n";
+  const unstopped = stopRun(source);
+  const start = source.indexOf("[kept]");
+  const error = unstopped.result.diagnostics.find((d) => d.code === "TSV041");
+  assert.ok(error !== undefined && error.span.start.offset === start + 1);
+  // the same record at the declaration's `[1]`, outside the store's value
+  const outside = source.indexOf("[1]");
+  const planted: StopRun = {
+    ...unstopped,
+    result: {
+      ...unstopped.result,
+      diagnostics: [
+        {
+          ...error,
+          span: {
+            ...error.span,
+            start: { ...error.span.start, offset: outside },
+            end: { ...error.span.end, offset: outside + 3 },
+          },
+        },
+        ...unstopped.result.diagnostics,
+      ],
+    },
+  };
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+    const stopped = stopRun(source, allowance);
+    assert.equal(stopped.answers.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.answers.budget.deferred.some(
+        (mark) =>
+          mark.rule.rule === "store" &&
+          mark.rule.written &&
+          mark.site.start === start &&
+          mark.site.end === start + "[kept]".length,
+      ),
+      `@${allowance}`,
+    );
+    assert.deepEqual(
+      stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
+      [],
+      `@${allowance}`,
+    );
+    assert.notDeepEqual(
+      stopProblems({ unstopped: planted, stopped, fitting: [], violating: [] }),
+      [],
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
  * C5's record where the retained state decides its receiver's shape (TABLE r4.108 (2), Astra r3's N1): a store of a
  * property no source of its receiver has is an error at the literal the receiver copies, and a stop after admission
  * settled publishes it there, not a mark at the store.

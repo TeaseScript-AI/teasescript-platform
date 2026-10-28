@@ -152,7 +152,8 @@ function within(inner: Span, outer: Span): boolean {
  * What a stop changed of the unstopped compile that no deferred mark excuses (TABLE r4.99, r4.108–r4.111), none at a
  * sound stop, settled or not. A mark excuses the record with its code at its site and nothing else; before admission
  * settled, a store marked with its type undecided also stands for its records within its value and for the errors it
- * brought, and C5's error at a literal for the mark of the store that owes it. The diagnostics, whole, and the checks
+ * brought, a written store's mark for its records within its value (TABLE r4.152 (1)), and C5's error at a literal for
+ * the mark of the store that owes it. The diagnostics, whole, and the checks
  * are compared in their published order (r4.86 (1)) besides those records, what forms only with the marks, and the stop's
  * own warning. The plans are compared whole; a difference stands only inside the plan content of a mark whose obligation
  * is not the unstopped one at its code and site (one that is owes the same check), or of a marked store's records: the
@@ -175,18 +176,19 @@ export function stopProblems(c: StopCase): string[] {
   const excused = new Set(marks.map((mark) => recordOf(mark.code, mark.site)));
   // before admission settled no decision is read (r4.110 (3)): each store marked with its type undecided stands for its
   // records within its value and for the errors it brought (r4.111), and C5's error at a literal may stand as the mark
-  // of the store that owes it, its receiver's shape undecided (r4.108 (2))
-  const stores = stopped.answers.budget.settled
+  // of the store that owes it, its receiver's shape undecided (r4.108 (2)); a written store's mark stands for its
+  // records within its value too (an element its literal holds that admission left undecided), never for one outside
+  // it (TABLE r4.152 (1))
+  const storeMarks = stopped.answers.budget.settled
     ? []
-    : marks
-        .filter(
-          (mark) =>
-            mark.rule.rule === "store" &&
-            mark.obligation.against.length === 1 &&
-            mark.obligation.against[0] === "unknown",
-        )
-        .map((mark) => mark.site);
-  const ofStore = (site: Span): boolean => stores.some((span) => within(site, span));
+    : marks.filter((mark) => mark.rule.rule === "store");
+  const undecided = (mark: (typeof marks)[number]): boolean =>
+    mark.obligation.against.length === 1 && mark.obligation.against[0] === "unknown";
+  const stores = storeMarks.filter(undecided).map((mark) => mark.site);
+  const values = storeMarks
+    .filter((mark) => undecided(mark) || (mark.rule.rule === "store" && mark.rule.written))
+    .map((mark) => mark.site);
+  const ofStore = (site: Span): boolean => values.some((span) => within(site, span));
   const storeRecords = new Set<string>();
   if (!stopped.answers.budget.settled)
     for (const d of unstopped.answers.diagnostics) {
