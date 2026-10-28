@@ -425,8 +425,6 @@ export class Consumers {
         run: (work) => this.#solve(work),
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
         read: (value, node, at) => (this.#finishing ? this.#finishingRead(value, node, at) : null),
-        // (a typed call whose expected type the finishing read leaves open: marked at its site, TABLE r4.144)
-        undecidedIngress: (site, label) => this.#ingressMark(site, label),
       },
       rejected,
       cycling,
@@ -978,7 +976,7 @@ export class Consumers {
       this.#rule = 1;
       this.#admittedStores();
       this.#rule = 2;
-      this.admission.ingressStores();
+      for (const { site, label } of this.admission.ingressStores()) this.#ingressMark(site, label);
       this.#rule = 3;
       this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found));
       this.settled = this.#last || sameStores(this.admission.newlyRejected, this.#rejected);
@@ -1101,7 +1099,8 @@ export class Consumers {
     // (the publication first: its landing index, of the stores into written places alone, is the one F18's asks)
     this.admission.publish(true);
     this.#rule = 2;
-    this.admission.ingressStores((site) => this.#inMarkedValue(site));
+    const open = this.admission.ingressStores((site) => this.#inMarkedValue(site));
+    for (const { site, label } of open) this.#ingressMark(site, label);
     this.#rule = 1;
     this.published = true;
   }
@@ -1286,8 +1285,8 @@ export class Consumers {
   readonly #markedLiterals = new Set<PlaceId>();
 
   /**
-   * A typed call no store takes in whose expected type the finishing read leaves open after a stop (`Admission.ingressStores`):
-   * marked at its site, its type undecided, standing for its boundary (r4.100, r4.144), once.
+   * A typed call no store takes in whose expected type the finishing read leaves open after a stop (`Admission.ingressStores`
+   * returns it): marked at its site, its type undecided, standing for its boundary (r4.100, r4.144), once.
    */
   #ingressMark(site: SourceSite, label: string): void {
     const key = siteKey(site);
@@ -3600,6 +3599,8 @@ export class Consumers {
     if (
       withoutEmpty(read).length > 0 &&
       !read.some((item) => item.tag === "empty") &&
+      // (an element read a stop left unsettled is no proof of an element)
+      !read.some(unsettledItem) &&
       !kinds.some((item) => item.tag === "unknown")
     )
       return;

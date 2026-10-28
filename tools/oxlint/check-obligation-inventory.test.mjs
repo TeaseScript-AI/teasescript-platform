@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { Project } from "ts-morph";
 
-import { obligationInventoryDiagnostics, READS } from "./check-obligation-inventory.mjs";
+import {
+  HOST_READS,
+  obligationInventoryDiagnostics,
+  READS,
+} from "./check-obligation-inventory.mjs";
 import { repositoryRoot } from "./files.mjs";
 
 const ADMISSION = "src/type-inference/core/admission.ts";
@@ -33,6 +37,7 @@ function messagesWith(edits) {
     admission: ADMISSION,
     consumers: CONSUMERS,
     reads: READS,
+    hostReads: HOST_READS,
   }).map((diagnostic) => diagnostic.message);
 }
 
@@ -58,7 +63,7 @@ test("a call from an obligation-creating consumer method into an unlisted Admiss
 test("a fresh-pass derivation left in a block comment, or an entry left out of the list, fails", () => {
   const commented = messagesWith({
     [CONSUMERS]: (text) =>
-      text.replace(/\n( +)(this\.admission\.ingressStores\(\(site\)[^\n]*\);)/, "\n$1/* $2 */"),
+      text.replace(/\n( +)([^\n]*this\.admission\.ingressStores\(\(site\)[^\n]*;)/, "\n$1/* $2 */"),
   });
   assert.ok(
     commented.some((message) => message.includes("does not call ingressStores")),
@@ -87,30 +92,23 @@ test("an Admission method that creates an obligation itself must be listed", () 
   );
 });
 
-test("a call of a host member whose consumer implementation marks creates an obligation, in a new method or a read", () => {
-  const call = '    this.host.undecidedIngress?.({ file: 0, start: 0, end: 0 }, "x");\n';
-  const added = messagesWith({
+test("a host member that is no listed host read fails, whatever its consumer wiring", () => {
+  const messages = messagesWith({
     [ADMISSION]: (text) =>
-      text.replace(
-        "  public valueAt(",
-        `  public openIngress(): void {\n${call}  }\n\n  public valueAt(`,
-      ),
+      text
+        .replace(
+          "export interface AdmissionHost {\n",
+          "export interface AdmissionHost {\n  undecidedIngress?(site: SourceSite, label: string): void;\n",
+        )
+        .replace(
+          "  public valueAt(",
+          '  public openIngress(): void {\n    this.host.undecidedIngress?.({ file: 0, start: 0, end: 0 }, "x");\n  }\n\n  public valueAt(',
+        ),
   });
   assert.ok(
-    added.some((message) => message.includes("Admission.openIngress creates an obligation")),
-    added.join("\n"),
-  );
-  const read = messagesWith({
-    [ADMISSION]: (text) =>
-      text.replace(
-        "  public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {\n",
-        `  public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {\n${call}`,
-      ),
-  });
-  assert.ok(
-    read.some((message) =>
-      message.includes("Admission.admitted creates an obligation; it is no read"),
+    messages.some((message) =>
+      message.includes("AdmissionHost.undecidedIngress is no listed host read"),
     ),
-    read.join("\n"),
+    messages.join("\n"),
   );
 });

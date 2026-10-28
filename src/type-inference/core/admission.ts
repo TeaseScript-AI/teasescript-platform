@@ -852,8 +852,6 @@ export interface AdmissionHost {
    * boundaries read as every consumer does (one derivation, TABLE r4.126).
    */
   read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
-  /** After a stop, a typed call no store takes in whose expected type the finishing read leaves open: its mark. */
-  undecidedIngress?(site: SourceSite, label: string): void;
 }
 
 export class Admission {
@@ -6543,15 +6541,20 @@ export class Admission {
   /**
    * F18 (r4.57): the checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
    * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
-   * index `publish` made there, of the stores into written places alone, answers for the rest (TABLE r4.138).
+   * index `publish` made there, of the stores into written places alone, answers for the rest (TABLE r4.138). Returns
+   * the calls whose expected type a stop left open (`#f18Open`), each with its label, for the consumers to mark: no
+   * obligation is declined for a missing answer (TABLE r4.144).
    */
-  public ingressStores(skip?: (site: SourceSite) => boolean): void {
+  public ingressStores(
+    skip?: (site: SourceSite) => boolean,
+  ): readonly { readonly site: SourceSite; readonly label: string }[] {
+    const open: { site: SourceSite; label: string }[] = [];
     for (const c of this.pass.program.constraints) {
       if (skip !== undefined && "result" in c && typedIngress(c) && skip(c.site)) continue;
       const found = this.#f18Admission(c);
       if (found === null) {
         if ("result" in c && this.#f18Open.has(c.result))
-          this.host.undecidedIngress?.(c.site, `${c.kind === "load" ? "load" : "fromJson"}.result`);
+          open.push({ site: c.site, label: `${c.kind === "load" ? "load" : "fromJson"}.result` });
         continue;
       }
       this.readChecks.push(
@@ -6564,6 +6567,7 @@ export class Admission {
       );
       this.#readCheckKeys.push(null);
     }
+    return open;
   }
 
   /**
@@ -6856,7 +6860,7 @@ export const OBLIGATION_SITES = [
     published:
       "a typed call's own boundary no store takes in, its type its syntax's or its default's (F18)",
     undecided:
-      "a typed call whose default the finishing read leaves STOPPED, marked (`undecidedIngress`)",
+      "a typed call whose default the finishing read leaves STOPPED: returned, the consumers mark it (#ingressMark)",
     declined: "a typed call no type reaches: the runtime's validation alone",
   },
   {

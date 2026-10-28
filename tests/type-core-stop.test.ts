@@ -1134,6 +1134,33 @@ test("after a stop a typed call keeps its boundary through a named default, or i
 });
 
 /**
+ * An element read a stop left unsettled is no proof of an element: a selection of a typed call whose named list default
+ * the finishing read leaves open at its element owes C6's empty check as unstopped, or its mark, at a stop before
+ * admission settled and in the settled walk (TABLE r4.144's matrix).
+ */
+test("after a stop a selection of a typed call with a named list default owes its empty check", () => {
+  for (const source of [
+    "let fallback: integer[] = [1]\nsay fromJson(hostValue, default: fallback).first\nexit\n",
+    "let fallback = [1]\nsay fromJson(hostValue, default: fallback).first\nexit\n",
+  ]) {
+    const { unstopped, stopped } = unsettledAnalyses(source);
+    const check = unstopped.checks.find((found) => found.kind === "empty-check");
+    assert.ok(check !== undefined, source);
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const settled = walkEnds(source).map((allowance): Answers =>
+      withTestAllowance(allowance, () => analyseCore(request)),
+    );
+    for (const answers of [...stopped, ...settled])
+      assert.ok(
+        answers.checks.some((found) => isDeepStrictEqual(found, check)) ||
+          answers.budget.deferred.some((mark) => mark.obligation.kind === "empty-check"),
+        `${source} @${answers.budget.allowance}`,
+      );
+  }
+});
+
+/**
  * A store marked with its type undecided stands for its records within its value on both sides alike (r4.111, TABLE
  * r4.122, Codex r14): a check there that the stopped analysis keeps as the unstopped one has it is that record, so a host
  * index read below the store is no extra check, at a stop in the setup and at the last before admission settled; a
