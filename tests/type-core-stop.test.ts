@@ -819,6 +819,40 @@ test("a stop after admission settled marks a default whose element domain admits
 });
 
 /**
+ * Source 4 decides only what every store's syntax tells (r4.122): objects with other properties leave a read of one
+ * undecided, which may find it missing (its check and warning, marked); a copy of a written place is checked by
+ * admission's A4 against the type the copy inherits, from the copied value, so its store is marked, standing for that
+ * record. At a stop in the setup and at the last before admission settled, the oracle finds nothing else.
+ */
+test("a stop before admission settled leaves to the analysis what a store's syntax does not tell", () => {
+  for (const [source, fitting, violating] of [
+    [
+      'let flag: boolean = hostValue\nlet room = {n: 1}\nroom = {n: 1}\nif flag { room = {other: 0} }\nsay room.n\nsay "DONE"\nexit\n',
+      host(false),
+      host(true),
+    ],
+    [
+      'let base: integer[]? = hostValue\nlet copy = base\nsay copy.length\nsay "AFTER"\nexit\n',
+      host({ kind: "list", items: [1, 2] }),
+      host(null),
+    ],
+  ] as const) {
+    const unstopped = stopRun(source);
+    for (const allowance of [ALLOWANCE, lastUnsettled(source)])
+      assert.deepEqual(
+        stopProblems({
+          unstopped,
+          stopped: stopRun(source, allowance),
+          fitting: [fitting],
+          violating: [violating],
+        }),
+        [],
+        `${source} @${allowance}`,
+      );
+  }
+});
+
+/**
  * Before admission settled nothing it decided is read (TABLE r4.110 (3); A6: a later pass may admit a store this one
  * rejected), and what every store's syntax decides is (r4.122): a store into an inferred place whose stores the syntax
  * does not all tell (a copy of an inferred place among them) is marked at its site, its type undecided; a host value stored beside a

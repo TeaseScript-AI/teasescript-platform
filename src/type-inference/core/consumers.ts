@@ -471,6 +471,8 @@ interface CheapShape {
   }[];
   readonly children: Map<string, CheapShape>;
   readonly names: Set<string>;
+  /** The properties of the first object literal given here: an object literal with others makes it opaque. */
+  properties: ReadonlySet<string> | null;
   first: Definition | null;
   opaque: boolean;
 }
@@ -499,6 +501,7 @@ function cheapShape(): CheapShape {
     written: [],
     children: new Map(),
     names: new Set(),
+    properties: null,
     first: null,
     opaque: false,
   };
@@ -1363,9 +1366,11 @@ export class Consumers {
         this.#decidedStore(d, path, decided);
         continue;
       }
-      // (a store its syntax tells only through a typed parse or load is that ingress's, its own checks published with it
-      // unstopped: marked, standing for its records within it, TABLE r4.111)
-      if (decided !== null && this.#toldBySyntax(d.value, false)) continue;
+      // (a store its literals' syntax tells is among what decides the place. One it tells only through a typed parse or
+      // load is that ingress's, its own checks published with it unstopped; one holding a copy of a written place is
+      // checked by admission's A4 against the type the copy inherits, from the copied value: each marked, standing for
+      // its records within it, TABLE r4.111)
+      if (decided !== null && this.#toldBySyntax(d.value, false, false)) continue;
       this.#storeMark(d, path);
     }
     // (ranked as admission's own stages, C1 before the mixed elements; run after them, so C1 reads the elements they
@@ -1513,6 +1518,13 @@ export class Consumers {
         for (const shape of frontier.shapes) {
           const child = shape.children.get(step);
           if (child !== undefined) shapes.push(child);
+          // (a value of another kind has no such part: what a read finds there only the analysis tells)
+          for (const tag of shape.tags)
+            if (
+              tag !== "null" &&
+              (step === "element" ? !["list", "set", "dict"].includes(tag) : tag !== "object")
+            )
+              told = false;
         }
         for (const { term, by } of frontier.written) {
           const below = termAt(term, [step]);
@@ -1590,7 +1602,17 @@ export class Consumers {
       if (own !== undefined) {
         cheapGive(at, own, d);
         const steps = this.#literalSteps(value, own);
-        if (own === "object") for (const step of steps) at.names.add(propertyName(step));
+        if (own === "object") {
+          for (const step of steps) at.names.add(propertyName(step));
+          // (objects with other properties: a read of one may find it missing, which only the analysis tells)
+          if (at.properties === null) at.properties = steps;
+          else if (at.properties.size !== steps.size) at.opaque = true;
+          else
+            for (const step of steps) {
+              program.work.charge("checks");
+              if (!at.properties.has(step)) at.opaque = true;
+            }
+        }
         for (const step of steps) {
           const below = cheapChild(at, step);
           for (const child of this.admission.literalChildren(value, step))
@@ -1636,10 +1658,11 @@ export class Consumers {
 
   /**
    * Whether a value's syntax tells its whole type: a scalar literal, a collection or object literal whose every part
-   * does, a copy of a place with a written type, or (`typed`) a typed parse or load by its default (F18). A host value
-   * anywhere in it does not (Codex c-r3 B1c: a literal holding one is checked at its store like the host value itself).
+   * does, (`copies`) a copy of a place with a written type, or (`typed`) a typed parse or load by its default (F18). A
+   * host value anywhere in it does not (Codex c-r3 B1c: a literal holding one is checked at its store like the host value
+   * itself).
    */
-  #toldBySyntax(value: PlaceId | undefined, typed = true): boolean {
+  #toldBySyntax(value: PlaceId | undefined, typed = true, copies = true): boolean {
     if (value === undefined) return false;
     const { program } = this.pass;
     const pending = [value];
@@ -1664,7 +1687,7 @@ export class Consumers {
         pending.push(fallback);
         continue;
       }
-      const source = this.#copySource(at);
+      const source = copies ? this.#copySource(at) : null;
       if (source === null || source === "external") return false;
     }
     return true;
