@@ -92,6 +92,7 @@ interface Layer {
 
 /** A literal's kind as N3's seeds read it: `null`, a whole or fractional number, text, a truth value. */
 function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | null {
+  program.work.charge("exactQueries");
   const kind = program.places[value]?.kind;
   if (kind?.kind !== "value") return null;
   if (kind.node === "nullLiteral") return "null";
@@ -120,15 +121,16 @@ export class NarrowingRoutes {
   #arguments: ReadonlySet<Key> | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
+  /** The program's ledger. */
+  readonly #work: WorkLedger;
 
   public constructor(
     readonly pass: CorePass,
     readonly index: NarrowingIndex,
     readonly tree: StatementTree,
-  ) {}
-
-  get #work(): WorkLedger {
-    return this.pass.program.work;
+  ) {
+    pass.program.work.charge("indexSteps");
+    this.#work = pass.program.work;
   }
 
   /**
@@ -137,6 +139,7 @@ export class NarrowingRoutes {
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    */
   public *witness(key: Key, tag: ItemTag, node: FlowNode): Work<Definition | null> {
+    this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
     let memo = joinParts(key, node.id, tag);
@@ -179,8 +182,8 @@ export class NarrowingRoutes {
    * definitions and each prefix's whole stores whose writer side reaches the read, then the corridor checked whole.
    */
   *#examined(key: Key, tag: ItemTag, node: FlowNode): Work<Candidate | null> {
+    this.#work.charge("exactQueries");
     const { program, handlers, contract } = this.pass;
-    program.work.charge("exactQueries");
     if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
     if (handlers.handlerTouches(key) && this.#registered(node)) return null;
@@ -196,6 +199,7 @@ export class NarrowingRoutes {
     const at = node.span.start.offset;
     let best: Candidate | null = null;
     const consider = (lists: ReadonlyMap<TreeBlock, Candidates>): void => {
+      program.work.charge("eventSteps");
       const candidates = lists.get(body);
       const found = candidates === undefined ? null : this.#last(candidates, at);
       if (found !== null && (best === null || found.start > best.start)) best = found;
@@ -210,7 +214,8 @@ export class NarrowingRoutes {
 
   /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
   #registered(node: FlowNode): boolean {
-    this.pass.program.work.charge("eventSteps", node.loops.length + 1);
+    this.#work.charge("eventSteps");
+    this.#work.charge("eventSteps", node.loops.length);
     return this.pass.handlers.afterSomeCreation(node);
   }
 
@@ -223,9 +228,9 @@ export class NarrowingRoutes {
     key: Key,
     tag: ItemTag,
   ): boolean | { readonly key: Key; readonly tag: ItemTag; readonly node: FlowNode } {
+    this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
     const d = found.def;
-    program.work.charge("exactQueries");
     // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a single-site
     // parameter's default; never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
@@ -261,12 +266,15 @@ export class NarrowingRoutes {
     // `load(key, default: …)`: storage may lack the key on any run (the storage premise)
     if (c?.kind === "load") return c.fallback !== null && literalTag(program, c.fallback) === tag;
     if (rest.length > 0) return false;
-    // `a otherwise <literal>`: live, and selected where `a`'s own `null` is certified at that node
+    // `a otherwise <literal>`: live, and selected where `a` is the literal `null` or its own `null` is certified at that
+    // node
     if (c?.kind === "fallback") {
       const right = program.places[c.right]?.site;
       const fallback = right === undefined || right === null ? null : program.exprAt(right);
       if (literalTag(program, c.right) !== tag || fallback === null || !program.live(fallback))
         return false;
+      if (literalTag(program, c.left) === "null")
+        return d.how !== "parameter default" || !this.#argued().has(d.key);
       const read = this.#scalarRead(c.left);
       return read === null ? false : { key: read.key, tag: "null", node: read.node };
     }
@@ -277,6 +285,7 @@ export class NarrowingRoutes {
 
   /** The keys of the parameters some call binds an argument to: one walk of the transfers, made once per pass. */
   #argued(): ReadonlySet<Key> {
+    this.#work.charge("indexSteps");
     if (this.#arguments !== null) return this.#arguments;
     const { definitions, program } = this.pass;
     const argued = new Set<Key>();
@@ -288,6 +297,7 @@ export class NarrowingRoutes {
 
   /** A read of a stable path without element steps: its key and node. */
   #scalarRead(value: PlaceId): { readonly key: Key; readonly node: FlowNode } | null {
+    this.#work.charge("exactQueries");
     const program = this.pass.program;
     const site = program.places[value]?.site;
     const node = site === undefined || site === null ? null : program.exprAt(site);
@@ -304,6 +314,7 @@ export class NarrowingRoutes {
 
   /** An object literal's property's stored value, by name. */
   #property(literal: PlaceId, name: string): PlaceId | undefined {
+    this.#work.charge("exactQueries");
     const { program, definitions } = this.pass;
     let known = this.#properties.get(literal);
     if (known === undefined) {
@@ -322,6 +333,7 @@ export class NarrowingRoutes {
 
   /** Where a node's statement stands, from its callable's body down, or `null` outside the bodies. */
   #chainOf(node: FlowNode): Place[] | null {
+    this.#work.charge("eventSteps");
     const tree = this.tree;
     const body = tree.root(node.region);
     if (body === undefined) return null;
@@ -334,6 +346,7 @@ export class NarrowingRoutes {
 
   /** A statement's places from its callable's body down to it. */
   #up(statement: TreeStatement): Place[] {
+    this.#work.charge("eventSteps");
     const upward: Place[] = [];
     let at: TreeStatement | null = statement;
     for (const _ of steps(this.#work, "eventSteps", () => at !== null)) {
@@ -361,8 +374,8 @@ export class NarrowingRoutes {
     layer: Layer | null,
     calls: boolean,
   ): boolean {
+    this.#work.charge("eventSteps");
     const work = this.#work;
-    work.charge("eventSteps");
     if (countIn(work, calls ? block.calls : block.leaves, low, high) > 0) return true;
     let at = layer;
     for (const _ of steps(work, "eventSteps", () => at !== null)) {
@@ -381,6 +394,7 @@ export class NarrowingRoutes {
    * body and read after it); a loop only a `break` leaves stops the writer side.
    */
   #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
+    this.#work.charge("eventSteps");
     let level = chain.length;
     for (const _ of steps(this.#work, "eventSteps", () => level > 0)) {
       level -= 1;
@@ -395,6 +409,7 @@ export class NarrowingRoutes {
 
   /** Whether a round of a loop's body reaches the code after it: its header leaves it, and calls in it are open. */
   #leaves(owner: TreeStatement, calls: boolean): boolean {
+    this.#work.charge("eventSteps");
     return owner.loop === null || (owner.exits && !(calls && owner.called));
   }
 
@@ -411,6 +426,7 @@ export class NarrowingRoutes {
     chain: readonly Place[],
     node: FlowNode,
   ): boolean {
+    this.#work.charge("eventSteps");
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
@@ -506,6 +522,7 @@ export class NarrowingRoutes {
    * arm starts with a narrowing of the key's location that removes the kind, or is closed) and what they close.
    */
   #testLayer(key: Key, tag: ItemTag): Layer {
+    this.#work.charge("indexSteps");
     const memo = joinParts(key, tag);
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
@@ -524,11 +541,15 @@ export class NarrowingRoutes {
       copied(this.#work, "indexSteps", tests),
       location === null
         ? null
-        : (arm) =>
-            arm.entry !== null &&
-            some(this.#work, "indexSteps", this.index.atEntry(arm.entry, location), (g) =>
-              removes(g.form, tag, this.#work),
-            ),
+        : (arm) => {
+            this.#work.charge("indexSteps");
+            return (
+              arm.entry !== null &&
+              some(this.#work, "indexSteps", this.index.atEntry(arm.entry, location), (g) =>
+                removes(g.form, tag, this.#work),
+              )
+            );
+          },
     );
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);
@@ -546,6 +567,7 @@ export class NarrowingRoutes {
     seeds: readonly TreeStatement[],
     starts: ((arm: TreeBlock) => boolean) | null,
   ): Layer {
+    this.#work.charge("indexSteps");
     const work = this.#work;
     const variant = calls ? "calls" : "leaves";
     const statements = new Set<TreeStatement>();
@@ -554,23 +576,34 @@ export class NarrowingRoutes {
     const counted = new Set<TreeBlock>();
     // (the layers below, from the nearest)
     const below = (): Generator<Layer> => {
+      work.charge("eventSteps");
       let at = parent;
       return (function* () {
+        work.charge("eventSteps");
         for (const _ of steps(work, "eventSteps", () => at !== null)) {
           yield at!;
           at = at!.parent;
         }
       })();
     };
-    const closedBelow = (statement: TreeStatement): boolean =>
-      statement[variant] ||
-      some(work, "eventSteps", below(), (layer) => layer.statements.has(statement));
-    const armBelow = (arm: TreeBlock): boolean =>
-      arm[variant].length > 0 ||
-      some(work, "eventSteps", below(), (layer) => (layer.counts.get(arm.id) ?? 0) > 0);
+    const closedBelow = (statement: TreeStatement): boolean => {
+      work.charge("eventSteps");
+      return (
+        statement[variant] ||
+        some(work, "eventSteps", below(), (layer) => layer.statements.has(statement))
+      );
+    };
+    const armBelow = (arm: TreeBlock): boolean => {
+      work.charge("eventSteps");
+      return (
+        arm[variant].length > 0 ||
+        some(work, "eventSteps", below(), (layer) => (layer.counts.get(arm.id) ?? 0) > 0)
+      );
+    };
     const pending: TreeStatement[] = [];
     // an arm closed here for the first time counts for its statement, which may then close
     const close = (arm: TreeBlock): void => {
+      work.charge("indexSteps");
       if (counted.has(arm) || !arm.live || arm.owner === null || armBelow(arm)) return;
       counted.add(arm);
       arms.set(arm.owner, (arms.get(arm.owner) ?? 0) + 1);
@@ -609,6 +642,7 @@ export class NarrowingRoutes {
 
   /** The refined location of a key without element steps: its properties' texts. */
   #location(key: Key): string | null {
+    this.#work.charge("indexSteps");
     const work = this.#work;
     const path = keyPath(key);
     // (`keyPath` walks the key's text)
@@ -628,6 +662,7 @@ export class NarrowingRoutes {
 
   /** A key's own exact definitions that certify `tag` where they stand (a seed or a certified read), by callable body. */
   #ownCandidates(key: Key, tag: ItemTag): ReadonlyMap<TreeBlock, Candidates> {
+    this.#work.charge("indexSteps");
     const memo = joinParts(key, tag);
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
@@ -646,8 +681,8 @@ export class NarrowingRoutes {
 
   /** Whether a definition's own expression could certify `tag` (the seeds, loads, `otherwise` and copies). */
   #carries(d: Definition, tag: ItemTag): boolean {
-    const program = this.pass.program;
     this.#work.charge("indexSteps");
+    const program = this.pass.program;
     if (d.kind !== "whole" || d.weak || d.value === undefined) return false;
     const literal = literalTag(program, d.value);
     if (literal !== null) return literal === tag;
@@ -659,6 +694,7 @@ export class NarrowingRoutes {
 
   /** A prefix's whole stores, by callable body, their reach by the shared layer alone (checked whole when examined). */
   #wholeStores(prefix: Key): ReadonlyMap<TreeBlock, Candidates> {
+    this.#work.charge("indexSteps");
     const memo = joinParts(prefix, "*");
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
@@ -683,6 +719,7 @@ export class NarrowingRoutes {
     layer: Layer | null,
     calls: boolean,
   ): ReadonlyMap<TreeBlock, Candidates> {
+    this.#work.charge("indexSteps");
     const { program, lists } = this.pass;
     const work = program.work;
     const byBody = new Map<TreeBlock, Candidate[]>();
@@ -735,6 +772,7 @@ export class NarrowingRoutes {
 
   /** The last candidate starting before `at` whose writer side reaches `at`: a binary search and a descent. */
   #last(candidates: Candidates, at: number): Candidate | null {
+    this.#work.charge("eventSteps");
     const work = this.#work;
     const before = lowerBound(work, candidates.starts, at);
     const { reaches, size } = candidates;

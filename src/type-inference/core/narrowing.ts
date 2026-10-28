@@ -2,7 +2,7 @@ import type { Expression, TypeAnnotation } from "../../ast.js";
 import { expressionChildren } from "../../expression-children.js";
 import { dictMethod } from "../../dict-operations.js";
 import { listMethod } from "../../list-methods.js";
-import { caseValueKey } from "../../switch-cases.js";
+import { caseLiteral } from "../../switch-cases.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
@@ -52,7 +52,8 @@ export interface StablePath {
 }
 
 /** A step's text in a refined location: `.n`, `[0]`, `["key"]`, `[@12]` (an index variable's place), `[*]`. */
-function stepLabel(step: PathStep): string {
+function stepLabel(step: PathStep, work: WorkLedger): string {
+  work.charge("eventSteps");
   switch (step.kind) {
     case "property":
       return `.${step.name}`;
@@ -66,12 +67,14 @@ function stepLabel(step: PathStep): string {
 }
 
 /** Whether a step reads an element of a collection: an index, a key, or a selection (`first`, `last`, `random`). */
-function readsElement(step: PathStep): boolean {
+function readsElement(step: PathStep, work: WorkLedger): boolean {
+  work.charge("eventSteps");
   return step.kind !== "property" || selectsElement(step.name);
 }
 
 /** An expression without the parentheses around it, each one walked charged (they nest as deep as written). */
 function peel(expression: Expression, work: WorkLedger): Expression {
+  work.charge("eventSteps");
   let current = expression;
   for (const _ of steps(work, "eventSteps", () => current.kind === "parenthesizedExpression"))
     if (current.kind === "parenthesizedExpression") current = current.expression;
@@ -83,6 +86,7 @@ function peel(expression: Expression, work: WorkLedger): Expression {
  * comparison's operands, which it walks to find the `null` literal.
  */
 function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof conditionShape> {
+  work.charge("eventSteps");
   const node = peel(expression, work);
   if (node.kind === "binaryExpression" && (node.operator === "==" || node.operator === "!=")) {
     peel(node.left, work);
@@ -92,18 +96,19 @@ function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof co
 }
 
 /**
- * A literal index's or case's key (`caseValueKey`), the parentheses and sign it walks charged, and the literal's text it
- * reads and makes charged as a kept text is (TABLE r4.58).
+ * A literal index's or case's kind and key (`caseLiteral`), the parentheses and sign it walks charged, and the literal's
+ * text it reads and makes charged as a kept text is (TABLE r4.58).
  */
-function literalKey(expression: Expression, work: WorkLedger): string | undefined {
+function literalOf(expression: Expression, work: WorkLedger): ReturnType<typeof caseLiteral> {
+  work.charge("eventSteps");
   const node = peel(expression, work);
   if (node.kind === "unaryExpression" && (node.operator === "-" || node.operator === "+"))
     peel(node.operand, work);
   // (a string's parts, read up to its first interpolation)
   if (node.kind === "stringLiteral") work.charge("indexSteps", node.parts.length);
-  const key = caseValueKey(node);
-  if (key !== undefined) keepText(work, key.length);
-  return key;
+  const literal = caseLiteral(node);
+  if (literal !== undefined) keepText(work, literal.key.length);
+  return literal;
 }
 
 /**
@@ -111,6 +116,7 @@ function literalKey(expression: Expression, work: WorkLedger): string | undefine
  * texts, a tag query's tags and operators.
  */
 function childrenOf(expression: Expression, work: WorkLedger): readonly Expression[] {
+  work.charge("indexSteps");
   if (expression.kind === "stringLiteral") work.charge("indexSteps", expression.parts.length);
   else if (expression.kind === "tagQueryExpression")
     work.charge("indexSteps", expression.steps.length);
@@ -125,7 +131,7 @@ export function pathKey(path: StablePath, work: WorkLedger, length = path.steps.
   for (const _ of steps(work, "eventSteps", () => index < length)) {
     const step = path.steps[index]!;
     made.push(
-      step.kind === "property" && !readsElement(step) ? propertyStep(step.name) : "element",
+      step.kind === "property" && !readsElement(step, work) ? propertyStep(step.name) : "element",
     );
     index += 1;
   }
@@ -145,6 +151,7 @@ export function stablePath(
   trailing = false,
   root: PlaceId | null = null,
 ): StablePath | null {
+  program.work.charge("eventSteps");
   // (outermost first, each put in front: whether every step so far is an element read)
   const outermost: PathStep[] = [];
   let trailingOnly = true;
@@ -165,7 +172,7 @@ export function stablePath(
     }
     if (current.kind !== "indexExpression") return null;
     const index = peel(current.index, work);
-    const fixed = literalKey(index, work);
+    const fixed = literalOf(index, work)?.key;
     const variable = index.kind === "identifier" ? bindingOf(program, file, index) : null;
     if (fixed !== undefined && (fixed.startsWith("number:") || fixed.startsWith("string:"))) {
       outermost.push({ kind: "fixed", text: fixed });
@@ -191,6 +198,7 @@ export function stablePath(
 
 /** The binding an identifier reads: a `let`, `global`, loop variable or parameter. */
 function bindingOf(program: CoreProgram, file: number, identifier: Expression): PlaceId | null {
+  program.work.charge("eventSteps");
   const occurrence = program.placeBySite.get(
     siteKey({ file, start: identifier.span.start.offset, end: identifier.span.end.offset }),
   );
@@ -216,6 +224,7 @@ const ONLY_NULL: NarrowingForm = { kind: "null" };
 
 /** Whether an item of kind `tag` lies wholly within `kinds` (an integer is a number), each kind compared charged. */
 function within(tag: ItemTag, kinds: readonly ValueKind[], work: WorkLedger): boolean {
+  work.charge("mergeItems");
   return some(
     work,
     "mergeItems",
@@ -225,7 +234,13 @@ function within(tag: ItemTag, kinds: readonly ValueKind[], work: WorkLedger): bo
 }
 
 /** The kind an item of kind `tag` keeps under a positive test of `kind`, or `null` when they are disjoint. */
-function overlap(tag: ItemTag, kind: ValueKind, fractional: boolean): ItemTag | null {
+function overlap(
+  tag: ItemTag,
+  kind: ValueKind,
+  fractional: boolean,
+  work: WorkLedger,
+): ItemTag | null {
+  work.charge("mergeItems");
   if (tag === "unknown") return kind;
   if (fractional) return tag === "number" ? "number" : null;
   if (tag === kind) return tag;
@@ -245,8 +260,8 @@ export function narrowedItems(
   items: readonly Item[],
   scope: ItemScope,
 ): Item[] {
+  scope.work.charge("mergeItems");
   const work = scope.work;
-  work.charge("mergeItems");
   const kept: Item[] = [];
   for (const item of each(work, "mergeItems", items)) {
     if (item.tag === "empty") {
@@ -262,7 +277,7 @@ export function narrowedItems(
         break;
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
-          const tag = overlap(item.tag, kind, form.fractional === true);
+          const tag = overlap(item.tag, kind, form.fractional === true, work);
           if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
         }
         break;
@@ -296,7 +311,7 @@ export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): bo
         work,
         "eventSteps",
         form.kinds,
-        (kind) => overlap(tag, kind, form.fractional === true) === null,
+        (kind) => overlap(tag, kind, form.fractional === true, work) === null,
       );
     case "is-not":
       return within(tag, form.kinds, work);
@@ -315,6 +330,7 @@ interface TestedType {
 }
 
 function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
+  work.charge("indexSteps");
   // (each kind once, however often the type names it: a filter's visits are bounded by the value kinds)
   const kinds = new Set<ValueKind>();
   const constrained = new Set<ValueKind>();
@@ -366,7 +382,8 @@ interface Fact {
 }
 
 /** The complement arm, an `or`'s right operand, the way past a leave: the opposite outcome. */
-function opposite(fact: Fact): Fact {
+function opposite(fact: Fact, work: WorkLedger): Fact {
+  work.charge("indexSteps");
   return { ...fact, holds: !fact.holds };
 }
 
@@ -379,6 +396,7 @@ function formOf(
   fact: Fact,
   work: WorkLedger,
 ): { readonly form: NarrowingForm; readonly element: TypeAnnotation | null } {
+  work.charge("indexSteps");
   const type = fact.type;
   if (type === null) return { form: fact.holds ? ONLY_NULL : NON_NULL, element: null };
   return fact.holds
@@ -397,6 +415,7 @@ function formOf(
  * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
  */
 function testForm(expression: Expression, work: WorkLedger): Fact | null {
+  work.charge("indexSteps");
   const end = expression.span.end.offset;
   let shape = shapeOf(expression, work);
   let holds = true;
@@ -422,12 +441,13 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
  * outcome proves (§13.3's W30 and its `or` mirror). Any other compound or negated condition proves nothing.
  */
 function facts(condition: Expression, outcome: boolean, into: Fact[], work: WorkLedger): void {
+  work.charge("indexSteps");
   const pending = [condition];
   for (const _ of steps(work, "indexSteps", () => pending.length > 0)) {
     const expression = pending.pop()!;
     const test = testForm(expression, work);
     if (test !== null) {
-      into.push(outcome ? test : opposite(test));
+      into.push(outcome ? test : opposite(test, work));
       continue;
     }
     const shape = shapeOf(expression, work);
@@ -488,6 +508,7 @@ export class Laminar<T> {
     readonly work: WorkLedger,
     entries: { readonly start: number; readonly end: number; readonly item: T }[],
   ) {
+    work.charge("indexSteps");
     const order = mapped(work, "indexSteps", entries, (_, index) => index);
     sorted(
       work,
@@ -528,6 +549,7 @@ export class Laminar<T> {
 
   /** The index of the innermost interval holding `at`, or -1. */
   public innermostIndex(at: number): number {
+    this.work.charge("eventSteps");
     let low = 0;
     let high = this.starts.length;
     for (const _ of steps(this.work, "eventSteps", () => low < high)) {
@@ -546,6 +568,7 @@ export class Laminar<T> {
 
   /** The innermost interval's item holding `at`, or `null`. */
   public innermost(at: number): T | null {
+    this.work.charge("eventSteps");
     const index = this.innermostIndex(at);
     return index < 0 ? null : this.items[index]!;
   }
@@ -591,6 +614,7 @@ const INDEXES = new WeakMap<CoreProgram, NarrowingIndex>();
 export class NarrowingIndex {
   /** The program's index, made and charged on its first ask. */
   public static of(program: CoreProgram): NarrowingIndex {
+    program.work.charge("indexSteps");
     let index = INDEXES.get(program);
     if (index === undefined) {
       index = new NarrowingIndex(program, new StatementTree(program));
@@ -613,6 +637,7 @@ export class NarrowingIndex {
     readonly program: CoreProgram,
     readonly statements: StatementTree,
   ) {
+    program.work.charge("indexSteps");
     const work = program.work;
     const flow = program.flow;
     type Entry = { start: number; end: number; item: Narrowing };
@@ -640,6 +665,7 @@ export class NarrowingIndex {
       keptArray(work, path.steps);
       // the keys a G keeps, each charged as it is made (TABLE r4.58)
       const kept = (key: Key): Key => {
+        work.charge("indexSteps");
         keepText(work, key.length);
         return key;
       };
@@ -647,7 +673,7 @@ export class NarrowingIndex {
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
       const base = flatMapped(work, "indexSteps", path.steps, (step, index) =>
-        readsElement(step) ? [kept(pathKey(path, work, index))] : [],
+        readsElement(step, work) ? [kept(pathKey(path, work, index))] : [],
       );
       // the tested path and, for a positive collection test, one more element step per element type it names: each
       // element step's collection, the tested path's key and those below it, is one of its G's collections too (N2)
@@ -661,7 +687,7 @@ export class NarrowingIndex {
         this.#tested.set(path.root, at);
       }
       for (const step of each(work, "indexSteps", path.steps)) {
-        const label = stepLabel(step);
+        const label = stepLabel(step, work);
         let child: PathNode | undefined = at.children.get(label);
         if (child === undefined) {
           child = { children: new Map(), locations: new Map() };
@@ -771,6 +797,7 @@ export class NarrowingIndex {
       region: OperandSpan,
     ) => void,
   ): void {
+    this.program.work.charge("indexSteps");
     const program = this.program;
     const work = program.work;
     const logicals = sorted(
@@ -809,7 +836,7 @@ export class NarrowingIndex {
           });
           for (const [top, fact] of each(work, "indexSteps", [
             [and, test],
-            [or, opposite(test)],
+            [or, opposite(test, work)],
           ] as const))
             if (node !== null && top !== null)
               define(node, file, fact.tested, formOf(fact, work), {
@@ -842,6 +869,7 @@ export class NarrowingIndex {
 
   /** N2: the mutating method calls of collections, one sorted list per collection key. */
   #invalidate(): void {
+    this.program.work.charge("indexSteps");
     const program = this.program;
     const work = program.work;
     const found = new Map<Key, Invalidation[]>();
@@ -851,6 +879,7 @@ export class NarrowingIndex {
       at: FlowNode | null,
       site: { readonly file: number; readonly end: number },
     ): void => {
+      work.charge("indexSteps");
       if (at === null || !program.live(at)) return;
       const target = program.targetRoot(program.occurrenceOf.get(receiver) ?? receiver);
       work.charge("indexSteps", target.path.length);
@@ -874,7 +903,7 @@ export class NarrowingIndex {
         constraint.kind === "operation" &&
         constraint.contract.family === "method" &&
         typeof constraint.receiver === "number" &&
-        mutates(constraint.contract.name)
+        mutates(constraint.contract.name, work)
       )
         add(constraint.receiver, null, program.effectNode(constraint.site), constraint.site);
       // an add: a store into the collection's elements at its call
@@ -924,13 +953,14 @@ export class NarrowingIndex {
 
   /** A collection key's invalidations (N2), or `undefined` without one. */
   public invalidations(key: Key): Invalidations | undefined {
+    this.program.work.charge("eventSteps");
     return this.#invalidations.get(key);
   }
 
   /** The nearest narrowing definition of `location` whose region holds `node` (N2): a binary search and a climb. */
   public nearest(location: string, node: FlowNode): Narrowing | null {
+    this.program.work.charge("eventSteps");
     const program = this.program;
-    program.work.charge("eventSteps");
     if (!program.reached(node)) return null;
     // (an operand region lies inside an expression, so inside every branch region that holds it: it is the nearer)
     const operand =
@@ -943,6 +973,7 @@ export class NarrowingIndex {
 
   /** The branches' narrowing definitions of a refined location (the blocking tests of N3). */
   public definitionsOf(location: string): readonly Narrowing[] {
+    this.program.work.charge("eventSteps");
     return this.#byLocation.get(location)?.items ?? [];
   }
 
@@ -958,6 +989,7 @@ export class NarrowingIndex {
    * read's steps down the trie of tested paths, asking only the scopes a test defines: linear in the read's path.
    */
   public nearestAt(node: FlowNode): Narrowing | null {
+    this.program.work.charge("eventSteps");
     const program = this.program;
     const expression = node.expression;
     if (expression === undefined) return null;
@@ -967,7 +999,11 @@ export class NarrowingIndex {
     const walk = path.steps;
     // the trailing element steps start at `first`
     let first = walk.length;
-    for (const _ of steps(work, "eventSteps", () => first > 0 && readsElement(walk[first - 1]!)))
+    for (const _ of steps(
+      work,
+      "eventSteps",
+      () => first > 0 && readsElement(walk[first - 1]!, work),
+    ))
       first -= 1;
     let best: Narrowing | null = null;
     let at = this.#tested.get(path.root);
@@ -978,7 +1014,7 @@ export class NarrowingIndex {
       // (at an equal region the later, more specific scope wins: the read's own path last)
       if (g !== null && (best === null || !nearer(program, best, g))) best = g;
       if (length === walk.length) break;
-      at = at!.children.get(stepLabel(walk[length]!));
+      at = at!.children.get(stepLabel(walk[length]!, work));
       length += 1;
     }
     return best;
@@ -987,6 +1023,7 @@ export class NarrowingIndex {
 
 /** Whether `a` lies inside `b`'s region: an operand region inside a branch's, or the deeper of two of a kind. */
 function nearer(program: CoreProgram, a: Narrowing, b: Narrowing): boolean {
+  program.work.charge("eventSteps");
   if ((a.region === null) !== (b.region === null)) return a.region !== null;
   return a.region !== null && b.region !== null
     ? a.region.start > b.region.start
@@ -995,10 +1032,11 @@ function nearer(program: CoreProgram, a: Narrowing, b: Narrowing): boolean {
 
 /** The labels of a path's first `length` steps followed by `elements` element steps, each made charged. */
 function labelsOf(path: StablePath, elements: number, length: number, work: WorkLedger): string[] {
+  work.charge("eventSteps");
   const labels: string[] = [];
   let index = 0;
   for (const _ of steps(work, "eventSteps", () => index < length + elements)) {
-    labels.push(index < length ? stepLabel(path.steps[index]!) : "[*]");
+    labels.push(index < length ? stepLabel(path.steps[index]!, work) : "[*]");
     index += 1;
   }
   return labels;
@@ -1015,6 +1053,7 @@ export function locationOf(
   kept = false,
   length = path.steps.length,
 ): string {
+  work.charge("eventSteps");
   const labels = labelsOf(path, elements, length, work);
   return kept ? keptParts(work, path.root, labels) : joinParts(path.root, labels);
 }
@@ -1023,23 +1062,27 @@ export function locationOf(
 const ADDS: ReadonlySet<string> = new Set(["element", "elements", "entry"]);
 
 /** Whether a method changes the collection it is called on in place (`ListMethod.changes`, `DictMethod.changes`). */
-function mutates(name: string): boolean {
+function mutates(name: string, work: WorkLedger): boolean {
+  work.charge("indexSteps");
   return (listMethod(name)?.changes ?? dictMethod(name)?.changes) !== undefined;
 }
 
-/** A `switch` case's form (N1): `case null`, or one literal by its value; other cases (several values, a range) none. */
+/**
+ * A `switch` case's form (N1): `case null`, or one literal by its value's kind (the shared `caseLiteral`): a whole
+ * number as `is integer`, a fractional one as `is number` without `integer`, text, a truth value, a duration, a calendar
+ * duration or an angle as `is` its kind; other cases (several values, a range, `case is T`) none.
+ */
 function caseForm(
   values: readonly Expression[],
   typeTest: { readonly negated: boolean } | null,
   work: WorkLedger,
 ): NarrowingForm | null {
+  work.charge("indexSteps");
   if (typeTest !== null || values.length !== 1) return null;
-  const key = literalKey(values[0]!, work);
-  if (key === undefined) return null;
-  if (key === "null") return ONLY_NULL;
-  if (key.startsWith("string:")) return { kind: "is", kinds: ["string"] };
-  if (!key.startsWith("number:")) return null;
-  return Number.isInteger(Number(key.substring("number:".length)))
-    ? { kind: "is", kinds: ["integer"] }
-    : { kind: "is", kinds: ["number"], fractional: true };
+  const literal = literalOf(values[0]!, work);
+  if (literal === undefined) return null;
+  if (literal.of === "null") return ONLY_NULL;
+  return literal.of === "number"
+    ? { kind: "is", kinds: ["number"], fractional: true }
+    : { kind: "is", kinds: [literal.of] };
 }

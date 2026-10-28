@@ -251,6 +251,64 @@ test("a switch case narrows by `case null` and a literal's value; other cases gi
   );
 });
 
+test("a truth value, duration, calendar duration or angle case narrows as its type's test does (N1)", () => {
+  // each literal by its value (the shared case recogniser): a sign, parentheses and units change nothing
+  const families: readonly (readonly [string, ...string[]])[] = [
+    ["boolean", "true", "(false)"],
+    ["duration", "2 s", "-500 ms", "1 d"],
+    ["calendarDuration", "1 calendar day", "-2 calendar months"],
+    ["angle", "90 deg", "-1 rad"],
+  ];
+  for (const [type, ...literals] of families) {
+    const declared = `let value: ${type} | null = load("value", default: null)`;
+    const tested = at(pass(declared, `if value is ${type} { say value }`), "say value", 4);
+    assert.equal(tested, `is ${type}: holds`, type);
+    for (const literal of literals) {
+      const switched = `switch value { case ${literal} { say value } default { say 1 } }`;
+      assert.equal(at(pass(declared, switched), "say value", 4), tested, literal);
+    }
+  }
+  const truth = 'let value: boolean | null = load("value", default: null)';
+  const span = 'let value: duration | null = load("value", default: null)';
+  check(
+    [
+      [
+        "a store between",
+        [truth, "switch value { case true { value = null\n say value } default { say 1 } }"],
+        "say value",
+        4,
+        "is boolean: branch",
+      ],
+      [
+        "a call between",
+        [
+          span,
+          "function wipe { value = null }",
+          "switch value { case 2 s { wipe()\n say value } default { say 1 } }",
+        ],
+        "say value",
+        4,
+        "is duration: call",
+      ],
+      [
+        "case true, false",
+        [truth, "switch value { case true, false { say value } default { say 1 } }"],
+        "say value",
+        4,
+        "none",
+      ],
+      [
+        "case is boolean",
+        [truth, "switch value { case is boolean { say value } default { say 1 } }"],
+        "say value",
+        4,
+        "none",
+      ],
+    ],
+    at,
+  );
+});
+
 test("a narrowing's refined location is its stable path's text; a computed path, a call or a reference has none", () => {
   const box = [FLAG, "let box = {n: 1}", "if flagHost { box.n = null }"];
   const xs = "let xs = [1, null]";
@@ -1106,6 +1164,60 @@ test("N3 certifies seeds, a certified `otherwise` and scalar copies; refuses def
         7,
         "null",
         "a otherwise null",
+      ],
+      [
+        "otherwise after a literal null",
+        [c, "let n: integer? = 5", "if c { n = null otherwise null }", REPEAT],
+        REPEAT,
+        7,
+        "null",
+        "null otherwise null",
+      ],
+      [
+        "otherwise after a literal null, a union member",
+        [c, "let n: integer | string = 5", 'if c { n = null otherwise "bad" }', REPEAT],
+        REPEAT,
+        7,
+        "string",
+        'null otherwise "bad"',
+      ],
+      [
+        "otherwise after a literal null, another kind",
+        [c, "let n: integer? = 5", "if c { n = null otherwise 3 }", REPEAT],
+        REPEAT,
+        7,
+        "null",
+        "none",
+      ],
+      [
+        "otherwise after an uncertified null",
+        [
+          c,
+          "let n: integer? = 5",
+          "let values = [3]",
+          "if c { n = values.get(0, default: null) otherwise null }",
+          REPEAT,
+        ],
+        REPEAT,
+        7,
+        "null",
+        "none",
+      ],
+      [
+        "an omitted default after a literal null",
+        ["function use(n: integer? = null otherwise null) { repeat n {} }", "use()"],
+        REPEAT,
+        7,
+        "null",
+        "null otherwise null",
+      ],
+      [
+        "a supplied default after a literal null",
+        ["function use(n: integer? = null otherwise null) { repeat n {} }", "use(4)"],
+        REPEAT,
+        7,
+        "null",
+        "none",
       ],
       [
         "copy",

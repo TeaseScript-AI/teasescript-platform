@@ -16,6 +16,13 @@ export interface CompactSite {
   readonly end: number;
 }
 
+/** N10's payload of N3's error: its rule, the writer D′'s span, and the tests the read lacks, in their order. */
+export interface CompactRequiredCheck {
+  readonly rule: string;
+  readonly writer: CompactSite;
+  readonly missingTests: readonly string[];
+}
+
 export interface CompactDiagnostic {
   readonly kind: RecordDiagnostic["kind"];
   readonly class: DiagnosticClass;
@@ -24,6 +31,8 @@ export interface CompactDiagnostic {
   readonly context: ContextWord | null;
   /** The copy that brought a copied property's rejected kind (TABLE r4.75 (4)), where the diagnostic has one. */
   readonly related?: CompactSite;
+  /** N10's payload, where the diagnostic has one (the fixture's `requiredCheck`, `null` where it has none). */
+  readonly requiredCheck?: CompactRequiredCheck;
 }
 
 export interface CompactCheck {
@@ -36,8 +45,9 @@ export interface CompactCheck {
 
 /**
  * A record as the expectation set is compared with an analysis (TABLE §10.5, with the check sites of the port plan's
- * §3.1): the outcome, each diagnostic's kind, class, site and context, and each runtime check's kind, target, required
- * kinds, whether it is a boundary check, and site. This is the form of the fixture the core's cells test reads.
+ * §3.1): the outcome, each diagnostic's kind, class, site, context and N10 payload, and each runtime check's kind,
+ * target, required kinds, whether it is a boundary check, and site. This is the form of the fixture the core's cells
+ * test reads. The core's record carries no N10 payload until S10's consumers serialize one (`compactRecord`).
  */
 export interface CompactRecord {
   readonly outcome: CoreOutcome;
@@ -147,6 +157,21 @@ function site(value: unknown, where: string): CompactSite {
   };
 }
 
+/** A diagnostic's N10 payload, or `undefined` for `null` or none. */
+function requiredCheck(value: unknown, where: string): CompactRequiredCheck | undefined {
+  if (value === undefined || value === null) return undefined;
+  const fields = object(value, where);
+  const missingTests = list(fields["missingTests"], `${where}.missingTests`).map((test, index) =>
+    text(test, `${where}.missingTests[${index}]`),
+  );
+  assert.ok(missingTests.length > 0, `${where}.missingTests: at least one test`);
+  return {
+    rule: text(fields["rule"], `${where}.rule`),
+    writer: site(fields["writer"], `${where}.writer`),
+    missingTests,
+  };
+}
+
 /** One fixture line, parsed, as a compact record: every field checked, so a malformed line fails where it is. */
 export function readCompactRecord(value: unknown, where = "record"): CompactRecord {
   const fields = object(value, where);
@@ -160,6 +185,7 @@ export function readCompactRecord(value: unknown, where = "record"): CompactReco
           ? null
           : CONTEXT_WORDS.find((word) => word === diagnostic["context"]);
       assert.ok(context !== undefined, `${at}.context: a context word or null`);
+      const required = requiredCheck(diagnostic["requiredCheck"], `${at}.requiredCheck`);
       return {
         kind: member(DIAGNOSTIC_KINDS, diagnostic["kind"], `${at}.kind`),
         class: member(CLASSES, diagnostic["class"], `${at}.class`),
@@ -168,6 +194,7 @@ export function readCompactRecord(value: unknown, where = "record"): CompactReco
         ...(diagnostic["related"] === undefined
           ? {}
           : { related: site(diagnostic["related"], `${at}.related`) }),
+        ...(required === undefined ? {} : { requiredCheck: required }),
       };
     }),
     checks: list(fields["checks"], `${where}.checks`).map((entry, index) => {
@@ -197,8 +224,10 @@ function excess(more: readonly string[], fewer: readonly string[]): string[] {
 
 /**
  * How `actual` differs from `expected`: the outcome; the diagnostics as a multiset of kind, class, site and related
- * site, and each context `expected` asserts at least as often; the checks as a multiset. Every site is compared whole,
- * its start and end (TABLE §3.4, D2, r4.62). Order never matters, multiplicity does.
+ * site, and each context `expected` asserts at least as often; N10's payloads as a multiset of the diagnostic's kind and
+ * site with the rule, the writer's span and the missing tests in order, as the lead's comparator (`compare-r410.py`)
+ * compares them; the checks as a multiset. Every site is compared whole, its start and end (TABLE §3.4, D2, r4.62).
+ * Order never matters, multiplicity does.
  */
 export function recordDifferences(expected: CompactRecord, actual: CompactRecord): string[] {
   const at = (site: CompactSite): string => `${site.file}:${site.offset}-${site.end}`;
@@ -221,6 +250,21 @@ export function recordDifferences(expected: CompactRecord, actual: CompactRecord
       expected.diagnostics.filter((entry) => entry.context !== null).map(withContext),
       actual.diagnostics.map(withContext),
     ).map((entry) => `missing context ${entry}`),
+  );
+  const required = (entry: CompactDiagnostic): string[] =>
+    entry.requiredCheck === undefined
+      ? []
+      : [
+          `${entry.kind} ${span(entry)} ${entry.requiredCheck.rule} writer ` +
+            `${at(entry.requiredCheck.writer)} ${JSON.stringify(entry.requiredCheck.missingTests)}`,
+        ];
+  const wantedRequired = expected.diagnostics.flatMap(required);
+  const gotRequired = actual.diagnostics.flatMap(required);
+  differences.push(
+    ...excess(wantedRequired, gotRequired).map((entry) => `missing required check ${entry}`),
+  );
+  differences.push(
+    ...excess(gotRequired, wantedRequired).map((entry) => `extra required check ${entry}`),
   );
   const checks = expected.checks.map(check);
   const gotChecks = actual.checks.map(check);

@@ -55,6 +55,7 @@ interface EventList {
  * compared with each kind, charged.
  */
 function keptWithin(items: readonly Item[], kinds: readonly ItemTag[], work: WorkLedger): boolean {
+  work.charge("exactValues");
   if (holds(work, "exactValues", kinds, "unknown")) return true;
   return every(
     work,
@@ -69,6 +70,7 @@ function keptWithin(items: readonly Item[], kinds: readonly ItemTag[], work: Wor
 
 /** The kind set's signature: its tags, each once, sorted. */
 function kindsText(kinds: readonly ItemTag[], work: WorkLedger): string {
+  work.charge("eventSteps");
   const seen = new Set<ItemTag>();
   for (const kind of each(work, "eventSteps", kinds)) seen.add(kind);
   const tags = sorted(work, "eventSteps", copied(work, "eventSteps", seen), (a, b) =>
@@ -95,17 +97,17 @@ export class NarrowingEvents {
   readonly #prefixesOf = new Map<Narrowing, readonly Key[]>();
   /** Per loop head, its loop. */
   readonly #loops = new Map<FlowNode, FlowLoop>();
+  /** The program's ledger. */
+  readonly #work: WorkLedger;
 
   public constructor(
     readonly pass: CorePass,
     readonly index: NarrowingIndex,
   ) {
+    pass.program.work.charge("indexSteps");
+    this.#work = pass.program.work;
     for (const loop of each(pass.program.work, "indexSteps", pass.program.flow.loops))
       this.#loops.set(loop.head, loop);
-  }
-
-  get #work(): WorkLedger {
-    return this.pass.program.work;
   }
 
   /**
@@ -119,8 +121,8 @@ export class NarrowingEvents {
     node: FlowNode,
     kinds: readonly ItemTag[] | null,
   ): Work<ContextWord | null> {
+    this.#work.charge("exactQueries");
     const { program } = this.pass;
-    program.work.charge("exactQueries");
     if (!program.live(node) || !program.live(g.node)) return "dead-code"; // X1
     if (yield* this.pass.contract.refReceiver(g.key)) return "unmodelled";
     if (g.region !== null) return this.#inOperand(g, node);
@@ -157,6 +159,7 @@ export class NarrowingEvents {
    * range, a binary search each.
    */
   #inOperand(g: Narrowing, node: FlowNode): ContextWord | null {
+    this.#work.charge("eventSteps");
     const { program } = this.pass;
     const region = g.region!;
     const at = node.span?.start.offset ?? -1;
@@ -177,6 +180,7 @@ export class NarrowingEvents {
    * the order the expression completes them (a call after its arguments); a binary search in each of G's text lists.
    */
   #textEvent(g: Narrowing, file: number, from: number, to: number): ContextWord | null {
+    this.#work.charge("eventSteps");
     const work = this.#work;
     const lists: (readonly [ReadonlyMap<number, readonly number[]> | undefined, ContextWord])[] = [
       [this.#texts(g.key, true), "branch"],
@@ -207,6 +211,7 @@ export class NarrowingEvents {
    * file, sorted: the order an expression completes them in (an operand region's X6).
    */
   #texts(key: Key, below: boolean): ReadonlyMap<number, readonly number[]> {
+    this.#work.charge("eventSteps");
     const memo = below ? joinParts(key, "*") : key;
     const known = this.#text.get(memo);
     if (known !== undefined) return known;
@@ -233,6 +238,7 @@ export class NarrowingEvents {
 
   /** The dominator ranges of a loop's own code: its entry's interval without its exit's (the code after the loop). */
   #inside(loop: FlowLoop): readonly PositionRange[] {
+    this.#work.charge("eventSteps");
     const { program, lists } = this.pass;
     // (a loop entered at its head, or at its body where P7 runs the body before the head: whichever dominates)
     const entry =
@@ -251,6 +257,7 @@ export class NarrowingEvents {
 
   /** G's prefixes' keys, made (and charged) once per G. */
   #prefixes(g: Narrowing): readonly Key[] {
+    this.#work.charge("eventSteps");
     const known = this.#prefixesOf.get(g);
     if (known !== undefined) return known;
     const made = keptPrefixes(this.#work, g.key);
@@ -263,6 +270,7 @@ export class NarrowingEvents {
    * invalidations.
    */
   #events(g: Narrowing): readonly EventList[] {
+    this.#work.charge("eventSteps");
     const known = this.#eventsOf.get(g);
     if (known !== undefined) return known;
     const { definitions, lists } = this.pass;
@@ -293,6 +301,7 @@ export class NarrowingEvents {
    * variable; or a callable ordinary code may run, other than a collection's activation, holds an invalidation of it (N2).
    */
   #ownedAway(g: Narrowing): boolean {
+    this.#work.charge("ownerSteps");
     const { definitions } = this.pass;
     const work = this.#work;
     if (
@@ -307,6 +316,7 @@ export class NarrowingEvents {
 
   /** Whether a callable ordinary code may run, other than a collection's activation, holds an invalidation of it, once. */
   #invalidatedOutside(collection: Key): boolean {
+    this.#work.charge("ownerSteps");
     const known = this.#outside.get(collection);
     if (known !== undefined) return known;
     const { definitions, program } = this.pass;
@@ -325,12 +335,14 @@ export class NarrowingEvents {
 
   /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
   #registered(node: FlowNode): boolean {
-    this.pass.program.work.charge("eventSteps", node.loops.length + 1);
+    this.#work.charge("eventSteps");
+    this.#work.charge("eventSteps", node.loops.length);
     return this.pass.handlers.afterSomeCreation(node);
   }
 
   /** X7's handler-store predicate over G's dependency keys, a block holding an invalidation of a collection included. */
   #touched(g: Narrowing): boolean {
+    this.#work.charge("eventSteps");
     const { handlers } = this.pass;
     const work = this.#work;
     return (
@@ -356,6 +368,7 @@ export class NarrowingEvents {
     ranges: readonly PositionRange[],
     kinds: readonly ItemTag[] | null,
   ): Work<ContextWord | null> {
+    this.#work.charge("eventSteps");
     const work = this.#work;
     let at = Infinity;
     let word: ContextWord | null = null;
@@ -394,6 +407,7 @@ export class NarrowingEvents {
    * built once: one evaluation per (store, kind set), asked only for stores whose path text is the location.
    */
   *#subset(g: Narrowing, kinds: readonly ItemTag[]): Work<readonly number[]> {
+    this.#work.charge("eventSteps");
     const program = this.pass.program;
     const signature = joinParts(g.location, kindsText(kinds, program.work));
     const known = this.#subsets.get(signature);
@@ -414,6 +428,7 @@ export class NarrowingEvents {
 
   /** A key's live assignments outside block code by the refined location their target's path text names, once. */
   #storesOf(key: Key): ReadonlyMap<string, readonly Definition[]> {
+    this.#work.charge("indexSteps");
     const known = this.#stored.get(key);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
@@ -445,6 +460,7 @@ export class NarrowingEvents {
    * the location taken as those kinds, has kinds within them. Once per (store, kind set).
    */
   public *preserves(store: Definition, location: string, kinds: readonly ItemTag[]): Work<boolean> {
+    this.#work.charge("eventSteps");
     const memo = joinParts(store.uid, kindsText(kinds, this.#work));
     const known = this.#preserves.get(memo);
     if (known !== undefined) return known;
@@ -467,6 +483,7 @@ export class NarrowingEvents {
     location: string,
     kinds: readonly ItemTag[],
   ): Work<readonly Item[]> {
+    this.#work.charge("exactValues");
     const { program, values } = this.pass;
     const done = new Map<PlaceId, readonly Item[]>();
     const pending: { readonly place: PlaceId; parts: readonly PlaceId[] | null }[] = [
