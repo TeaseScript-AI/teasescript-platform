@@ -715,3 +715,21 @@ test("a field read of computed-key loads holds every load's leaf, as each load r
     (error) => error instanceof CandidateOutsideSlice && error.what === "this load expression",
   );
 });
+
+test("a written union of one type repeated answers as that type does (V30 §13, #1256)", () => {
+  // (a union is the alternatives it holds: a result written `object | object` is an object, so adding a number to it is
+  // the error it is for `object`, never a warning that the result might be of another type)
+  const shape = (source: string): string => {
+    const { answers } = analysed(source);
+    return JSON.stringify([answers.outcome, answers.diagnostics.map((d) => [d.class, d.code])]);
+  };
+  for (const [type, source] of [
+    ["object", "function make: TYPE { return {p: 1} }\nlet a = make()\nsay a + 1\nexit"],
+    ["integer", "function make: TYPE { return 1 }\nlet a = make()\nsay a.length\nexit"],
+  ] as const)
+    assert.equal(
+      shape(source.replace("TYPE", `${type} | ${type}`)),
+      shape(source.replace("TYPE", type)),
+      `${type} | ${type}`,
+    );
+});

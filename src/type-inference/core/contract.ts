@@ -242,6 +242,14 @@ export function typeTags(term: TypeTerm): ItemTag[] {
   }
 }
 
+/**
+ * `typeTags` once each, in written order: the items a written type stands for, where a repeated member of a union adds
+ * no alternative (V30 §13), so a read merging them pays for its kinds, never its written members (#1256).
+ */
+function typeKinds(term: TypeTerm): ItemTag[] {
+  return [...new Set(typeTags(term))];
+}
+
 /** A written type at a path: a term, a literal's own cell or property to read further, or nothing. */
 export type TypeAt =
   { readonly term: TypeTerm } | { readonly place: PlaceId; readonly rest: readonly string[] };
@@ -675,6 +683,8 @@ export class Contract {
     decidedPaths: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
+  /** The prefixes under discovery (`#prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
+  readonly #discovering = new Map<Key, PrefixFrame>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
   readonly #aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly #projectedLayers = new Map<string, SubLayer | null>();
@@ -848,7 +858,7 @@ export class Contract {
       if (at !== null) {
         const stored = yield* this.#contractAlong(place, path, 0, receiver.floor);
         const marks = marksOf(stored);
-        const tags = typeTags(at).map((tag) =>
+        const tags = typeKinds(at).map((tag) =>
           makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
         );
         return path.at(-1) === "element" && stored.some((item) => item.tag === "empty")
@@ -1959,7 +1969,7 @@ export class Contract {
     const nullDefault =
       rest.length === 0 && fallback !== undefined && (yield* this.onlyNull(fallback)).length > 0;
     return [
-      ...(term === null ? ["unknown" as const] : typeTags(term)).map((tag) =>
+      ...(term === null ? ["unknown" as const] : typeKinds(term)).map((tag) =>
         tag === "unknown" ? unknownItem(REASON.external) : makeItem(tag, null, { cert: "pos" }),
       ),
       ...(nullDefault ? [makeItem("null", null, { cert: "pos" })] : []),
@@ -2821,8 +2831,14 @@ export class Contract {
         this.#copyOnly(place) &&
         writtenOf(program.place(place).kind) === null
       ) {
-        const stores = yield* this.#needPrefix(keyOf(place, []));
+        // (a prefix under discovery whose own stores already hold more than copies has no single entry, whatever the rest
+        // bring: so answered, never discovered again from its start, so a chain of k calls of one helper discovers its
+        // parameter once, not once per link, #1257)
+        const prefix = keyOf(place, []);
+        const stores =
+          this.#discovering.get(prefix)?.other === true ? null : yield* this.#needPrefix(prefix);
         const entry =
+          stores !== null &&
           stores.list.length === 1 &&
           !stores.other &&
           stores.subs === null &&
@@ -3229,7 +3245,12 @@ export class Contract {
       defs.add(f.d);
     };
     const open = new Set<Key>([prefix]);
-    const stack: PrefixFrame[] = [frame(prefix)];
+    const stack: PrefixFrame[] = [];
+    const push = (f: PrefixFrame): void => {
+      stack.push(f);
+      if (!this.#discovering.has(f.pk)) this.#discovering.set(f.pk, f);
+    };
+    push(frame(prefix));
     while (stack.length > 0) {
       const f = stack.at(-1)!;
       if (f.inner !== undefined && f.proj !== null) {
@@ -3362,7 +3383,7 @@ export class Contract {
             continue;
           }
           open.add(root);
-          stack.push(frame(root));
+          push(frame(root));
           continue;
         }
         if (open.has(copied) || !this.#copyOnly(keyPlace(copied))) {
@@ -3377,11 +3398,12 @@ export class Contract {
           continue;
         }
         open.add(copied);
-        stack.push(frame(copied));
+        push(frame(copied));
         continue;
       }
       stack.pop();
       open.delete(f.pk);
+      if (this.#discovering.get(f.pk) === f) this.#discovering.delete(f.pk);
       const stores: PrefixStores = {
         list: f.out,
         subs: f.inherit,
@@ -4763,7 +4785,7 @@ export class Contract {
     if (selected.type.kind === "ref")
       return yield* this.indexItems(selected.type.place, after, node, exact, below);
     const at = termAt(selected.type, after);
-    return at === null ? [] : typeTags(at).map((tag) => makeItem(tag, object.token));
+    return at === null ? [] : typeKinds(at).map((tag) => makeItem(tag, object.token));
   }
 
   /**

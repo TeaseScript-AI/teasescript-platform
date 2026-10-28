@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { withMemberOracle, withoutChains } from "../src/type-inference/core/admission.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
+import type { WorkCounter } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { DefinitionIndex } from "../src/type-inference/core/definitions.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
@@ -281,6 +282,98 @@ test("a question asked by every read of one place, read k times, takes work that
     }
   } finally {
     DefinitionIndex.prototype.writerOf = original;
+  }
+  assert.deepEqual(steep, []);
+});
+
+const many = (k: number, row: (index: number) => string, by = "\n"): string =>
+  Array.from({ length: k }, (_, index) => row(index)).join(by);
+
+/**
+ * Valid scripts whose work grew with a product of two of their dimensions, each with the counter that grew: a written
+ * type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); a written result of
+ * k repeated members read k times, each read merging every written member (#1256); and a chain of k calls of one
+ * untyped helper, each link discovering the helper's parameter again (#1257).
+ */
+const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
+  {
+    name: "repeated-written-type-copies",
+    measures: "#1255: each copy's alias key names its written type, spelled once",
+    counter: "literalUnits",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `let root: (${many(k, () => "integer", " | ")})[] = [1]`,
+          many(k, (i) => `let c${i} = root`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "repeated-written-result-reads",
+    measures:
+      "#1256: a written result stands for its distinct types, whatever its repeated members",
+    counter: "mergeItems",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `function make: ${many(k, (i) => ["integer", "string", "null"][i % 3]!, " | ")} { return 1 }`,
+          many(k, (i) => `let c${i} = make()\nsay c${i}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+  {
+    name: "helper-chain",
+    measures: "#1257: the helper's parameter discovered once, never again for each link",
+    counter: "invSteps",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          "function identity(x) { return x }",
+          "let c0 = 1",
+          many(k, (i) => `let c${i + 1} = identity(c${i})`),
+          `say c${k}`,
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
+];
+
+/**
+ * Each family's total and its counter in either order under the standard gates; only the named counter, since the
+ * helper's parameter's k definitions are sorted and lifted (the TABLE's `n log n` structures), which measure 2.37 here,
+ * as they do with a written parameter.
+ */
+test("written types repeated across copies and reads, and chains of one helper, take linear work (#1255–#1257)", () => {
+  const steep: string[] = [];
+  for (const family of PRODUCTS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
+    for (const reversed of [false, true]) {
+      const [small, large] = [at64, at128].map((at) => {
+        const answers = analysed(at, reversed);
+        assert.equal(answers.outcome, "valid", at.name);
+        return answers.budget;
+      });
+      const scale =
+        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      if (doubling(small!.total, large!.total) > DOUBLING)
+        steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+      const [before, after] = [small!, large!].map(
+        (budget) => budget.counts.get(family.counter) ?? 0,
+      );
+      if (doubling(before!, after!) > COUNTER_DOUBLING)
+        steep.push(`${name} ${family.counter}: ${doubling(before!, after!).toFixed(3)}`);
+    }
   }
   assert.deepEqual(steep, []);
 });
