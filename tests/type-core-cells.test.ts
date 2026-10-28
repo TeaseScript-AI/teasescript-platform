@@ -3498,11 +3498,12 @@ test("the copied-property check grows with the program, not with its copies time
   // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes (TABLE
   // r4.131), unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
   // differs in one field (one error, or one per copy where it comes first), and k places each receiving a copy of each
-  // (one error per place, at its store).
-  // k places each receiving a copy of the first record and then its own object of one other-typed field (one error
-  // each). Beyond the bound (r4.154), linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`,
-  // `a.f_i = b_i`, the object then copied beside another type (one error, at its own property), and r5's: those
-  // cycles beside k self-grafts `a.g_i = a` (none)
+  // (one error per place, at its store). k places each receiving a copy of the first record and then its own object of
+  // one other-typed field (one error each). A ring of k whole copies fed the first record and then the other (one error
+  // per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound (r4.154),
+  // linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`, `a.f_i = b_i`, the object then
+  // copied beside another type (one error, at its own property), and r5's: those cycles beside k self-grafts
+  // `a.g_i = a` (none)
   const fields = (k: number, value: string): string =>
     Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
   const records = (k: number): string =>
@@ -3573,6 +3574,20 @@ test("the copied-property check grows with the program, not with its copies time
         `let xs = [other, ${copies(k, "good")}]\nexit`,
     ],
     [
+      "a ring of k copies fed two objects of k other-typed fields",
+      (k) =>
+        `${records(k)}let a0 = good\n` +
+        `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
+        `a0 = a${k - 1}\na${k - 1} = bad\nexit`,
+    ],
+    [
+      "a ring of k copies fed two objects of k fields of one type",
+      (k) =>
+        `${records(k)}let a0 = good\n` +
+        `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
+        `a0 = a${k - 1}\na${k - 1} = {${fields(k, "2")}}\nexit`,
+    ],
+    [
       "property cycles beside self-grafts",
       (k) =>
         `let a = {n: 1, ${fields(k, "null")}, ${fields(k, "null").replaceAll("f", "g")}}\n` +
@@ -3583,7 +3598,7 @@ test("the copied-property check grows with the program, not with its copies time
   const errors = (name: string, k: number): number =>
     name === "independent property cycles" || name === "a list"
       ? 1
-      : name === "property cycles beside self-grafts"
+      : name === "property cycles beside self-grafts" || name.endsWith("of one type")
         ? 0
         : k;
   const steep: string[] = [];

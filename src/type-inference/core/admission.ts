@@ -1099,7 +1099,7 @@ export class Admission {
   readonly #helds = new Map<PlaceId, Touch | null>();
   /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
   readonly #atCopies = new Set<Key>();
-  /** The keys where the parts of a live group's held trie meet, for each member (`#finishHeld`, read by `groups`). */
+  /** The keys where a live group's members' own parts meet, for those members (`#finishHeld`, read by `groups`). */
   readonly #groupMeetings: Key[] = [];
   /** The places with definitions, every one of them dead in this pass (`#liveOwn`). */
   readonly #deadOnly = new Set<PlaceId>();
@@ -4892,8 +4892,8 @@ export class Admission {
    * The held tries of a component of the places live stores read (A2, TABLE r4.131 and r4.154: design §2.1.2 as
    * accepted). Its members that hold each other through whole copies (a place read whole into a place) form live
    * groups, the strongly connected components of those copies: each group one trie, its members' own points and what
-   * their reads bring from outside the group, sources first, and where those meet each member is checked
-   * (`#groupMeetings`). Every other read is by reference, its source's held trie at its path where it stands. A read within the component that adds or takes steps (`a.inner = a`, `a = b.right`)
+   * their reads bring from outside the group, sources first; where those meet, each member whose own part stands there
+   * is checked (`#groupMeetings`). Every other read is by reference, its source's held trie at its path where it stands. A read within the component that adds or takes steps (`a.inner = a`, `a = b.right`)
    * closes a cycle outside that class and brings nothing definite: what reaches a place only through it is found where
    * it is read.
    */
@@ -4928,27 +4928,46 @@ export class Admission {
       () => work.charge("indexSteps"),
     )) {
       const inside = new Set(group);
-      const parts: Touch[] = [];
+      // (where parts meet in a group of several members, each holds them all, so a member whose own part stands there
+      // is checked there, `groups`: never every member, which would list each meeting once per member)
+      const meets = (at: number, found: Found): void => {
+        if (group.length < 2) return;
+        const paths: (readonly string[])[] = [];
+        touches.paths(found, [], paths);
+        for (const path of paths)
+          if (path.length > 0) this.#groupMeetings.push(keptKey(this.#work, members[at]!, path));
+      };
+      const fold = (
+        parts: readonly { readonly at: number; readonly node: Touch }[],
+      ): Touch | null => {
+        let node: Touch | null = null;
+        for (const part of parts) {
+          const merged = touches.merge(node, part.node, "copies");
+          node = merged.node;
+          meets(part.at, merged.found);
+        }
+        return node;
+      };
+      const byOrder = (a: { readonly node: Touch }, b: { readonly node: Touch }): number =>
+        b.node.size - a.node.size || a.node.id - b.node.id;
+      // (each member's own trie: its own points and reads from outside the group, a whole copy from an earlier group
+      // by reference)
+      const tries: { readonly at: number; readonly node: Touch }[] = [];
       for (const at of group) {
-        for (const part of own[at]!) parts.push(part);
+        const parts = own[at]!.map((node) => ({ at, node }));
         for (const from of copies[at]!) {
           const held = inside.has(from) ? null : this.#helds.get(members[from]!);
-          if (held !== null && held !== undefined) parts.push(held);
+          if (held !== null && held !== undefined) parts.push({ at, node: held });
         }
+        work.charge("indexSteps", parts.length + sortCost(parts.length));
+        const node = fold(parts.sort(byOrder));
+        if (node !== null) tries.push({ at, node });
       }
-      work.charge("indexSteps", parts.length + sortCost(parts.length));
-      parts.sort((a, b) => b.size - a.size || a.id - b.id);
-      // (where its parts meet, a group of several members holds them in each: its members' paths there, `groups`)
-      const met: (readonly string[])[] = [];
-      let held: Touch | null = null;
-      for (const part of parts) {
-        const merged = touches.merge(held, part, "copies");
-        held = merged.node;
-        if (group.length > 1) touches.paths(merged.found, [], met);
-      }
-      for (const path of met)
-        if (path.length > 0)
-          for (const at of group) this.#groupMeetings.push(keptKey(this.#work, members[at]!, path));
+      // (the members' tries merged largest first, the group's trie; and, for a group of several, in the other order
+      // too, so the earlier of two members meeting is heard of as well as the later)
+      work.charge("indexSteps", tries.length + sortCost(tries.length));
+      const held = fold(tries.sort(byOrder));
+      if (group.length > 1) fold([...tries].reverse());
       touches.share(held);
       for (const at of group) this.#helds.set(members[at]!, held);
     }
