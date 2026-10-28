@@ -1442,12 +1442,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const stored = await store.session(keptScope).catch(() => null);
     const found = stored === null ? null : keptSession(stored);
     if (found === null) return null;
-    const normalRoom = store === keptSessions;
+    // Only the normal room says why, and not for a session that ended, which only its events can show when its state is
+    // of another revision: the engine ends a session with an `exit` or `runtimeFailure` event.
+    const explain =
+      store === keptSessions &&
+      !found.events.some((event) => event.kind === "exit" || event.kind === "runtimeFailure");
     if (found.planJson !== JSON.stringify(plan)) {
       // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
-      const revisions = normalRoom
-        ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION)
-        : null;
+      const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
       return revisions === null
         ? null
         : { outdated: { message: `Unsupported instruction-plan version. ${revisions}` } };
@@ -1457,7 +1459,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
     } catch (error) {
       // The runtime's error says how it refuses a state of another revision.
-      const revisions = normalRoom
+      const revisions = explain
         ? revisionChange(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION)
         : null;
       if (revisions === null || !(error instanceof CheckpointError)) return null;

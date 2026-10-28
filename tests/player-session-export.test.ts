@@ -403,21 +403,31 @@ test("Start says why a kept session cannot continue only when a Player update ch
   await first.activate();
   await until(async () => (await at.kept.session(SCOPE)) !== null, "the session was not kept");
   const kept = keptSession((await at.kept.session(SCOPE))!)!;
-  /** What a reload of `shown` offers once the kept plan and state are changed as `change` does. */
+  /** What a reload of `shown` in `into` offers once its kept session `from` is changed as `change` does. */
   const reload = async (
     change: (plan: Record<string, unknown>, snapshot: Record<string, unknown>) => void,
-    { shown = plan, store = at.kept }: { shown?: InstructionPlan; store?: KeptSessionStore } = {},
+    {
+      into = at,
+      from = kept,
+      shown = plan,
+      store = into.kept,
+    }: {
+      into?: ReturnType<typeof browser>;
+      from?: typeof kept;
+      shown?: InstructionPlan;
+      store?: KeptSessionStore;
+    } = {},
   ) => {
-    const [planJson, snapshotJson] = [JSON.parse(kept.planJson), JSON.parse(kept.snapshotJson)];
+    const [planJson, snapshotJson] = [JSON.parse(from.planJson), JSON.parse(from.snapshotJson)];
     change(planJson, snapshotJson);
-    await at.kept.discard(SCOPE);
-    await at.kept.publish(SCOPE, {
-      ...kept,
+    await into.kept.discard(SCOPE);
+    await into.kept.publish(SCOPE, {
+      ...from,
       planJson: JSON.stringify(planJson),
       snapshotJson: JSON.stringify(snapshotJson),
       eventsFrom: 0,
     });
-    const host = await page(context, { ...at, kept: store }, shown);
+    const host = await page(context, { ...into, kept: store }, shown);
     return [host.activation.value, host.outdatedSession.value];
   };
   const revisions = (supported: number) =>
@@ -467,14 +477,25 @@ test("Start says why a kept session cannot continue only when a Player update ch
   };
   assert.deepEqual(await reload(older, { store: unreadable }), ["start", null]);
 
-  // Nor is a session that ended.
-  await reload(() => {});
-  first.update(activatePlayerRuntimeButton(first.session.value!)!.session);
-  assert.equal(first.session.value?.state.status, "halted");
-  await until(
-    async () => keptSession((await at.kept.session(SCOPE))!)!.snapshotJson !== kept.snapshotJson,
-    "the end was not kept",
-  );
-  const ended = await page(context, at, plan);
-  assert.deepEqual([ended.activation.value, ended.outdatedSession.value], ["start", null]);
+  // Nor is a session that ended, by `exit` or by an error, also when its plan or state is of an older revision.
+  for (const source of [
+    "exit",
+    'let zero = load("zero", default: 0)\nsay "${1 / zero}", instant\nexit',
+  ]) {
+    const ending = compilePlayerProject(source).plan!;
+    const into = browser();
+    await (await page(context, into, ending)).activate();
+    await until(async () => (await into.kept.session(SCOPE)) !== null, "the end was not kept");
+    const from = keptSession((await into.kept.session(SCOPE))!)!;
+    for (const change of [
+      () => {},
+      older,
+      (_: unknown, snapshot: Record<string, unknown>) => older(snapshot),
+    ])
+      assert.deepEqual(
+        await reload(change, { into, from, shown: ending }),
+        ["start", null],
+        source,
+      );
+  }
 });
