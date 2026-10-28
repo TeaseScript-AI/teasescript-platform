@@ -291,7 +291,8 @@ const many = (k: number, row: (index: number) => string, by = "\n"): string =>
 
 /**
  * Valid scripts whose work grew with a product of two of their dimensions, each with the counter that grew: a written
- * type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255).
+ * type of k repeated members copied k times, each copy's alias key spelling the whole type (#1255); and a written result
+ * of k repeated members read k times, each read merging every written member (#1256).
  */
 const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
   {
@@ -309,10 +310,26 @@ const PRODUCTS: readonly (WorkFamily & { readonly counter: WorkCounter })[] = [
       },
     ],
   },
+  {
+    name: "repeated-written-result-reads",
+    measures:
+      "#1256: a written result stands for its distinct types, whatever its repeated members",
+    counter: "mergeItems",
+    program: (k) => [
+      {
+        path: "main.tease",
+        source: [
+          `function make: ${many(k, (i) => ["integer", "string", "null"][i % 3]!, " | ")} { return 1 }`,
+          many(k, (i) => `let c${i} = make()\nsay c${i}`),
+          "exit",
+        ].join("\n"),
+      },
+    ],
+  },
 ];
 
 /** Each family's total and its counter in either order under the standard gates. */
-test("copies of a written type of repeated members take linear work (#1255)", () => {
+test("written types of repeated members, copied or read, take linear work (#1255, #1256)", () => {
   const steep: string[] = [];
   for (const family of PRODUCTS) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];

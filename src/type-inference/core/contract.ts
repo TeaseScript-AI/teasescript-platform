@@ -242,6 +242,14 @@ export function typeTags(term: TypeTerm): ItemTag[] {
   }
 }
 
+/**
+ * `typeTags` once each, in written order: the items a written type stands for, where a repeated member of a union adds
+ * no alternative (V30 §13), so a read merging them pays for its kinds, never its written members (#1256).
+ */
+function typeKinds(term: TypeTerm): ItemTag[] {
+  return [...new Set(typeTags(term))];
+}
+
 /** A written type at a path: a term, a literal's own cell or property to read further, or nothing. */
 export type TypeAt =
   { readonly term: TypeTerm } | { readonly place: PlaceId; readonly rest: readonly string[] };
@@ -848,7 +856,7 @@ export class Contract {
       if (at !== null) {
         const stored = yield* this.#contractAlong(place, path, 0, receiver.floor);
         const marks = marksOf(stored);
-        const tags = typeTags(at).map((tag) =>
+        const tags = typeKinds(at).map((tag) =>
           makeItem(tag, null, { ...marks, ...(marks.guarded === true ? { cert: "pos" } : {}) }),
         );
         return path.at(-1) === "element" && stored.some((item) => item.tag === "empty")
@@ -1959,7 +1967,7 @@ export class Contract {
     const nullDefault =
       rest.length === 0 && fallback !== undefined && (yield* this.onlyNull(fallback)).length > 0;
     return [
-      ...(term === null ? ["unknown" as const] : typeTags(term)).map((tag) =>
+      ...(term === null ? ["unknown" as const] : typeKinds(term)).map((tag) =>
         tag === "unknown" ? unknownItem(REASON.external) : makeItem(tag, null, { cert: "pos" }),
       ),
       ...(nullDefault ? [makeItem("null", null, { cert: "pos" })] : []),
@@ -4763,7 +4771,7 @@ export class Contract {
     if (selected.type.kind === "ref")
       return yield* this.indexItems(selected.type.place, after, node, exact, below);
     const at = termAt(selected.type, after);
-    return at === null ? [] : typeTags(at).map((tag) => makeItem(tag, object.token));
+    return at === null ? [] : typeKinds(at).map((tag) => makeItem(tag, object.token));
   }
 
   /**
