@@ -1742,6 +1742,80 @@ test("the named exception for #1216 stands at its counted stops", () => {
 });
 
 /**
+ * The per-demand fallback (S3 §5, TABLE B1, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
+ * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
+ * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
+ * read of `y` stops with its key's contract and the reason `budget`, so its check runs when the script runs, while
+ * `count`'s error stays an error.
+ */
+const chain = (reads: number, count: boolean): string =>
+  [
+    "let x = 1.5",
+    ...Array.from({ length: 30 }, (_, i) => `let y${i + 1} = ${i === 0 ? "x" : `y${i}`}`),
+    ...Array.from({ length: reads }, () => "repeat y30 {}"),
+    "y30 = 2",
+    ...(count ? ["let count = 1", "count = 0.5", "repeat count {}"] : []),
+    'say "AFTER"',
+    "exit",
+  ].join("\n") + "\n";
+
+/** Three quarters of the longest demand a source's analysis bounds, unbounded: below the chain's, above a short read's. */
+function demandAllowance(source: string): number {
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const bounded = analyseCore(request).budget.demands.filter((read) => read.bounded);
+  return Math.floor(0.75 * Math.max(...bounded.map((read) => read.units)));
+}
+
+test("a demand past its allowance moves its read's check to the runtime, an independent proof staying an error (S3 §5)", () => {
+  const source = chain(1, true);
+  const read = source.indexOf("y30 {}");
+  const count = source.indexOf("count {}");
+  const diagnostics = withTestDemandAllowance(demandAllowance(source), () =>
+    inBothOrders(() =>
+      compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).diagnostics.map(
+        (d) => `${d.severity} ${d.code} @${d.span.start.offset}`,
+      ),
+    ),
+  );
+  assert.deepEqual(diagnostics, [`warning TSV011 @${read}`, `error TSV011 @${count}`]);
+  // without the independent error: the moved check runs and stops the fraction before the next effect
+  const runnable = chain(1, false);
+  const plan = withTestDemandAllowance(demandAllowance(runnable), () =>
+    inBothOrders(() => compileSourceWithBackend(runnable, OPTIONS, CORE_BACKEND).plan),
+  );
+  assert.ok(plan !== null);
+  const failed = ran(plan, 0);
+  assert.deepEqual(failed.said, []);
+  assert.match(failed.failure ?? "", new RegExp(`^TSR043@${runnable.indexOf("y30 {}")}:`, "u"));
+});
+
+test("a stopped demand's proof is not reused by a later demand of its key, in either order (S3 §5)", () => {
+  // two reads of `y30`: the one asked first stops; the other, an independent demand, keeps its allowance and proves
+  const source = chain(2, false);
+  const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
+  assert.ok(request !== null);
+  const first = source.indexOf("repeat y30") + "repeat ".length;
+  const second = source.indexOf("repeat y30", first) + "repeat ".length;
+  const allowance = demandAllowance(source);
+  for (const reversed of [false, true]) {
+    const analyse = (): Answers => withTestDemandAllowance(allowance, () => analyseCore(request));
+    const answers: Answers = reversed
+      ? withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), analyse),
+        )
+      : analyse();
+    const at = (start: number): string[] =>
+      answers.diagnostics
+        .filter((d) => d.site.start === start)
+        .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
+    const [stopped, proved] = reversed ? [second, first] : [first, second];
+    assert.deepEqual(at(stopped), ["warning-runtime-check budget"], `reversed: ${reversed}`);
+    assert.deepEqual(at(proved), ["compile-error -"], `reversed: ${reversed}`);
+  }
+});
+
+/**
  * TABLE r4.100, S3 revision 21: a settled walk stop leaves a typed parse's nested paths undecided (admission decides
  * them lazily, never after a stop); source 4 decides them from its default literal's syntax, so the store's check stays
  * whole (#1165's class, a named exception of the oracle before: 984 and 1,180 stop points over four modes, the first
