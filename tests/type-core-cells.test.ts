@@ -5494,7 +5494,8 @@ test("#1188's witnesses give their exact records, in both orders (rule (a), cycl
  *   error and each fitting store accepted;
  * - the sources a read takes from the copies joined into a place, by the full path of their own stores (#1078): k
  *   copies of one preset, each storing its own property, each read's error at its own copy's store; copies storing one
- *   property and the object above it, both taken; a chain of preset copies joined again.
+ *   property and the object above it (the object's other type errs at its store, where it meets the copy: A2,
+ *   #1249); a chain of preset copies joined again.
  */
 test("the bounded admission repairs' witnesses give their exact records, in both orders (#1078, #1194)", () => {
   for (const [name, source, text] of BOUNDED_ADMISSION_WITNESSES) {

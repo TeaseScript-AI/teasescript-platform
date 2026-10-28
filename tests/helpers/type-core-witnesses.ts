@@ -801,7 +801,7 @@ export const BOUNDED_ADMISSION_WITNESSES: readonly (readonly [string, string, st
       "let whole=state.nest\n",
     `outcome compile-error
     D written-target error 102:107 -
-    D written-target error 249:262 - related 227:229`,
+    D written-target error 201:205 -`,
   ],
   [
     "A5: a chain of preset copies joined again",
