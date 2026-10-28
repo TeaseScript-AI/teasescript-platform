@@ -8,7 +8,7 @@ import type {
   TimerDisplay,
   DurationUnit,
 } from "../ast.js";
-import { startsCallForm } from "../language-facts.js";
+import { MISTAKEN_DURATION_UNIT_NAMES, startsCallForm } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
@@ -150,7 +150,12 @@ function timerDuration(
     return { duration: written, unit: null };
   const end = written.end.kind === "durationLiteral" ? written.end.amount : written.end.operand;
   const range = `${parser.textOf(written.start.span, end.span)}`;
-  const unit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
+  const writtenUnit = parser.textOf(written.end.unitSpan, written.end.unitSpan);
+  // A word taken for a unit has its own error, and the range is offered with the unit it was read as.
+  const unit =
+    !written.end.calendar && MISTAKEN_DURATION_UNIT_NAMES.has(writtenUnit)
+      ? written.end.unit
+      : writtenUnit;
   parser.reportSpan(
     parserDiagnosticCode.unsupportedDurationUnit,
     `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${command} (${range}) ${unit}'.`,

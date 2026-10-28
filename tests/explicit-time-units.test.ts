@@ -179,24 +179,77 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     assert.deepEqual(rest, [], source);
   }
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
-  // A word taken for a unit names the unit meant and every unit, and the form it offers compiles in its place.
+  // A word taken for a unit names the unit meant and every unit. Every word at one place, and two words at every place
+  // a unit stands, with and without a space: each quoted form compiles where it is pasted.
   const units =
     "The units of time are ms, s, min, h, d, and w, and after 'calendar' also mo and y.";
-  for (const [source, word, meant, offered] of [
-    ["wait 5 m", "m", "minutes", "5 min"],
-    ["wait 30 sec", "sec", "seconds", "30 s"],
-    ["let x = 1.5 hrs", "hrs", "hours", "1.5 h"],
-    ["wait 5mins", "mins", "minutes", "5 min"],
-  ] as const) {
+  const meant = new Map([
+    ["m", ["min", "minutes"]],
+    ["msec", ["ms", "milliseconds"]],
+    ["msecs", ["ms", "milliseconds"]],
+    ["sec", ["s", "seconds"]],
+    ["secs", ["s", "seconds"]],
+    ["mins", ["min", "minutes"]],
+    ["hr", ["h", "hours"]],
+    ["hrs", ["h", "hours"]],
+  ] as const);
+  const places = [
+    "wait #",
+    "timer #",
+    "let x = #",
+    'say "x", #',
+    'say "${#}"',
+    "let x = # + 1 s",
+    "timer(duration: #)",
+    "wait 1..#",
+  ];
+  const cases = [
+    ...[...meant.keys()].map((word) => ["wait #", "5", " ", word] as const),
+    // A range's ends are whole numbers, so its unit draws whole units.
+    ...places.flatMap((place) =>
+      (["m", "hrs"] as const).flatMap((word) => [
+        [place, "5", " ", word] as const,
+        [place, place.includes("..") ? "3" : "1.5", "", word] as const,
+      ]),
+    ),
+  ];
+  for (const [place, amount, space, word] of cases) {
+    const [unit, name] = meant.get(word)!;
+    const source = place.replace("#", `${amount}${space}${word}`);
     const why = word === "m" ? ", because it could mean minutes or months" : "";
+    const offered = `${amount} ${unit}`;
+    const errors = compileSource(`${source}\nexit`).diagnostics.map(({ code, message }) => [
+      code,
+      message,
+    ]);
     assert.deepEqual(
-      compileSource(`${source}\nexit`).diagnostics.map(({ code, message }) => [code, message]),
-      [["TSP033", `'${word}' is not a unit${why}. For ${meant}, write '${offered}'. ${units}`]],
+      errors[0],
+      ["TSP033", `'${word}' is not a unit${why}. For ${name}, write '${offered}'. ${units}`],
       source,
     );
-    const pasted = `${source.slice(0, source.lastIndexOf(offered.split(" ")[0]!))}${offered}`;
-    assert.notEqual(compileSource(`${pasted}\nexit`).plan, null, pasted);
+    const pasted = place.replace("#", offered);
+    // A range takes its unit in parentheses, which its own error offers with the unit the word was read as.
+    const range = place === "wait 1..#" ? `wait (1..${amount}) ${unit}` : null;
+    assert.deepEqual(
+      errors.slice(1),
+      range === null
+        ? []
+        : [
+            [
+              "TSP033",
+              `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${range}'.`,
+            ],
+          ],
+      source,
+    );
+    assert.notEqual(compileSource(`${range ?? pasted}\nexit`).plan, null, range ?? pasted);
   }
+  // A word that is no unit and not taken for one, and a unit, keep their meaning.
+  assert.deepEqual(
+    compileSource("wait 5 foo\nexit").diagnostics.map(({ code }) => code),
+    ["TSP002"],
+  );
+  assert.notEqual(compileSource("let m = 2\nwait 5 min\nsay 5 + m\nexit").plan, null);
   // A wait or timer keeps its unit apart, as it also takes a range there, but the amount before the unit is one rule with
   // one code and text wherever a unit stands, at compile time and at runtime.
   const consumers = [
