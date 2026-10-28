@@ -109,19 +109,20 @@ function recordFields(
     : [];
 }
 
-/** The member of a union that reads `part` by its kind (`readWhole`), or `undefined`. */
+/**
+ * The member of a union that reads `part` by its kind (`readWhole`), or `undefined`: a record's object member, unless it
+ * is a dict that fits the dict member as it is, which a union reads as it is (else its dict member).
+ */
 function memberFor(
   part: SerializableRuntimeValue,
   members: readonly TypePlan[],
 ): TypePlan | undefined {
   if (isList(part)) return members.find((member) => member.kind === "list");
   if (isSet(part)) return members.find((member) => member.kind === "set");
-  if (isRecordValue(part, true))
-    return (
-      members.find((member) => member.kind === "object") ??
-      (isDict(part) ? members.find((member) => member.kind === "dict") : undefined)
-    );
-  return undefined;
+  if (!isRecordValue(part, true)) return undefined;
+  const dict = isDict(part) ? members.find((member) => member.kind === "dict") : undefined;
+  if (dict !== undefined && matchesValueType(part, dict)) return dict;
+  return members.find((member) => member.kind === "object") ?? dict;
 }
 
 /**
@@ -138,8 +139,7 @@ function readWhole(
   type: TypePlan,
   json: boolean,
 ): SerializableRuntimeValue | typeof MISFIT {
-  const fits = matchesValueType(value, type);
-  if (fits || !json) return fits ? value : MISFIT;
+  if (!json) return matchesValueType(value, type) ? value : MISFIT;
   interface Frame {
     /** The parts to read, each with its type, and what the frame builds of their results. */
     readonly parts: readonly (readonly [SerializableRuntimeValue, TypePlan])[];
@@ -151,7 +151,10 @@ function readWhole(
     part: SerializableRuntimeValue,
     of: TypePlan,
   ): Frame | { readonly result: SerializableRuntimeValue | typeof MISFIT } => {
-    if (matchesValueType(part, of)) return { result: part };
+    // a list, set or dict is read part by part, and is itself where every part is (it fits as it is), so that no level
+    // checks the levels below it again; any other value fits as it is, or reads as its type's member of its kind
+    const collection = isList(part) || isSet(part) || isDict(part);
+    if (!collection && matchesValueType(part, of)) return { result: part };
     const member = of.kind === "union" ? memberFor(part, of.members) : of;
     if (member === undefined) return { result: MISFIT };
     if (member.kind === "object") {
@@ -188,7 +191,7 @@ function readWhole(
         results: [],
       };
     }
-    if ((member.kind === "list" || member.kind === "set") && member.element !== null) {
+    if (member.kind === "list" || member.kind === "set") {
       const items =
         member.kind === "list"
           ? isList(part)
@@ -199,20 +202,29 @@ function readWhole(
             : null;
       if (items === null) return { result: MISFIT };
       const { kind, element } = member;
+      if (element === null) return { result: part };
       return {
         parts: items.map((item) => [item, element] as const),
-        build: (read) => ({ kind, items: [...read] }),
+        build: (read) =>
+          read.every((item, index) => item === items[index]) ? part : { kind, items: [...read] },
         results: [],
       };
     }
-    if (member.kind === "dict" && member.element !== null && isDict(part)) {
+    if (member.kind === "dict" && isDict(part)) {
       const { element } = member;
+      if (element === null) return { result: part };
       return {
         parts: part.entries.map((entry) => [entry.value, element] as const),
-        build: (read) => ({
-          kind: "dict",
-          entries: part.entries.map((entry, index) => ({ key: entry.key, value: read[index]! })),
-        }),
+        build: (read) =>
+          read.every((value, index) => value === part.entries[index]!.value)
+            ? part
+            : {
+                kind: "dict",
+                entries: part.entries.map((entry, index) => ({
+                  key: entry.key,
+                  value: read[index]!,
+                })),
+              },
         results: [],
       };
     }
@@ -251,14 +263,23 @@ function keptField(
   return found === undefined ? MISFIT : readWhole(found, type, json);
 }
 
+/** The fields a field reading takes from the default, as the steps of their paths from the record (`replaceKeptTexts`). */
+interface SuppliedSteps {
+  readonly below: Map<string, SuppliedSteps>;
+  supplied: boolean;
+}
+
+/** A place on a field reading's record path below which the default supplies no field. */
+const NONE_SUPPLIED: SuppliedSteps = { below: new Map(), supplied: false };
+
 /** A place in JSON that holds a part, with the type it is read as there and its field path from a repaired record. */
 interface KeptSlot {
   readonly part: SerializableRuntimeValue;
   readonly set: (value: SerializableRuntimeValue) => void;
   /** `null`: every part of it is kept as it is. */
   readonly type: TypePlan | null;
-  /** The record's field path that a field reading names, or `null` below a field that reads whole. */
-  readonly path: readonly string[] | null;
+  /** The supplied fields below the record's field a field reading names here, or `null` below a field that reads whole. */
+  readonly at: SuppliedSteps | null;
 }
 
 /**
@@ -276,9 +297,21 @@ export function replaceKeptTexts(
 ): SerializableRuntimeValue {
   const reading = readExpected(value, type, true);
   if (reading.kind === "none") return value;
-  const supplied = new Set(
-    reading.kind === "fields" ? reading.fields.map((field) => field.path.join("\u0000")) : [],
-  );
+  // each step of a field's path once, so no place builds or compares the path above it
+  const supplied: SuppliedSteps = { below: new Map(), supplied: false };
+  if (reading.kind === "fields")
+    for (const field of reading.fields) {
+      let at = supplied;
+      for (const step of field.path) {
+        let next = at.below.get(step);
+        if (next === undefined) {
+          next = { below: new Map(), supplied: false };
+          at.below.set(step, next);
+        }
+        at = next;
+      }
+      at.supplied = true;
+    }
   let root = value;
   const pending: KeptSlot[] = [
     {
@@ -288,20 +321,17 @@ export function replaceKeptTexts(
       },
       // a field reading reads its record as the object type `readExpected` reads it by
       type: reading.kind === "fields" ? (recordType(value, type, true) ?? type) : type,
-      path: reading.kind === "fields" ? [] : null,
+      at: reading.kind === "fields" ? supplied : null,
     },
   ];
-  const below = (path: readonly string[] | null, name: string): readonly string[] | null =>
-    path === null ? null : [...path, name];
   for (let slot = pending.pop(); slot !== undefined; slot = pending.pop()) {
     const { part, type: of } = slot;
-    if (slot.path !== null && slot.path.length > 0 && supplied.has(slot.path.join("\u0000")))
-      continue;
+    if (slot.at?.supplied === true) continue;
     // a field reading recurses only into a record read as an object type (`readExpected`); any other field it reads
-    // whole (`readWhole`), whole-fit first, whatever a sibling's repair
-    const path =
-      slot.path !== null && of !== null && of.kind === "object" && isRecordValue(part, true)
-        ? slot.path
+    // whole (`readWhole`), whatever a sibling's repair
+    const at =
+      slot.at !== null && of !== null && of.kind === "object" && isRecordValue(part, true)
+        ? slot.at
         : null;
     if (typeof part === "string") {
       if (of !== null && !matchesValueType(part, of)) continue;
@@ -310,9 +340,9 @@ export function replaceKeptTexts(
       continue;
     }
     if (!isList(part) && !isDict(part)) continue;
-    // kept whole where it fits as it is (off a field reading's record path), else read by its type's member of its kind
+    // read by its type's member of its kind, as `readWhole` reads it, part by part also where it fits as it is
     let member: TypePlan | null = null;
-    if (of !== null && !(path === null && matchesValueType(part, of))) {
+    if (of !== null) {
       const found = of.kind === "union" ? memberFor(part, of.members) : of;
       if (found === undefined) continue;
       member = found;
@@ -329,7 +359,7 @@ export function replaceKeptTexts(
             items[index] = replaced;
           },
           type: element,
-          path: null,
+          at: null,
         });
       continue;
     }
@@ -349,7 +379,10 @@ export function replaceKeptTexts(
           entry.value = replaced;
         },
         type: listedType ?? (member?.kind === "dict" ? member.element : null),
-        path: listedType !== undefined ? below(path, entry.key) : null,
+        at:
+          listedType !== undefined && at !== null
+            ? (at.below.get(entry.key) ?? NONE_SUPPLIED)
+            : null,
       });
     }
   }
@@ -376,22 +409,24 @@ export function readExpected(
   const frames: {
     readonly fieldOf: (name: string) => SerializableRuntimeValue | undefined;
     readonly type: ObjectPlan;
-    readonly path: readonly string[];
     next: number;
-  }[] = [{ fieldOf: fieldsOf(value, json), type: object, path: [], next: 0 }];
+  }[] = [{ fieldOf: fieldsOf(value, json), type: object, next: 0 }];
+  // the path to the innermost frame's record, one step per nested frame, copied only into a field the default supplies
+  const steps: string[] = [];
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!;
     if (frame.next === frame.type.properties.length) {
       frames.pop();
+      steps.pop();
       continue;
     }
     const property = frame.type.properties[frame.next++]!;
-    const path = [...frame.path, property.name];
     const found = frame.fieldOf(property.name);
-    if (found !== undefined && property.type.kind === "object" && isRecordValue(found, json))
-      frames.push({ fieldOf: fieldsOf(found, json), type: property.type, path, next: 0 });
-    else if (keptField(found, property.type, json) === MISFIT)
-      fields.push({ path, found, type: property.type });
+    if (found !== undefined && property.type.kind === "object" && isRecordValue(found, json)) {
+      frames.push({ fieldOf: fieldsOf(found, json), type: property.type, next: 0 });
+      steps.push(property.name);
+    } else if (keptField(found, property.type, json) === MISFIT)
+      fields.push({ path: [...steps, property.name], found, type: property.type });
   }
   if (fields.length > 0) return { kind: "fields", fields };
   const whole = readWhole(value, type, json);
