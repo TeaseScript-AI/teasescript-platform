@@ -413,4 +413,82 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     C copy-type grid.element.rows.element.score [boolean] 64:104
     C copy-type grid.element.rows.element.score [boolean] 64:104`,
   ],
+  [
+    "a load default's contributor beside a shared record in two lists, the first fitting (Astra's PR review B1)",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=[load("one", default:good),peer]\n' +
+      'let second=[load("two", default:bad),peer]\n',
+    `outcome compile-error
+    D written-target error 144:148 -
+    B copy-type first.element [object] 75:100
+    B copy-type second.element [object] 119:143`,
+  ],
+  [
+    "the same two lists in the other order",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let second=[load("two", default:bad),peer]\n' +
+      'let first=[load("one", default:good),peer]\n',
+    `outcome compile-error
+    D written-target error 101:105 -
+    B copy-type second.element [object] 76:100
+    B copy-type first.element [object] 118:143`,
+  ],
+  [
+    "a fromJson default's contributor in two sets",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      "let first=set[fromJson(hostValue, default:good, files:false),peer]\n" +
+      "let second=set[fromJson(hostValue, default:bad, files:false),peer]\n",
+    `outcome compile-error
+    D written-target error 192:196 -
+    B copy-type first.element [object] 78:124
+    B copy-type second.element [object] 146:191`,
+  ],
+  [
+    "a load default's contributor after the shared record in two dicts",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=dict{a:peer,b:load("one", default:good)}\n' +
+      'let second=dict{a:peer,b:load("two", default:bad)}\n',
+    `outcome compile-error
+    D written-target error 140:164 -
+    B copy-type first.entry [object] 88:113
+    B copy-type second.entry [object] 140:164`,
+  ],
+  [
+    "a load default's contributor in a nested position",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      'let first=[{inner:load("one", default:good)},{inner:peer}]\n' +
+      'let second=[{inner:load("two", default:bad)},{inner:peer}]\n',
+    `outcome compile-error
+    D written-target error 168:180 -
+    B copy-type first.element [object] 82:107
+    B copy-type second.element [object] 142:166`,
+  ],
+  [
+    "a fromJson default's contributor in a nested position",
+    "let t:integer=7\n" +
+      "let peer={x:t}\n" +
+      "let good={x:1}\n" +
+      'let bad={x:"bad"}\n' +
+      "let first=[{inner:fromJson(hostValue, default:good, files:false)},{inner:peer}]\n" +
+      "let second=[{inner:fromJson(hostValue, default:bad, files:false)},{inner:peer}]\n",
+    `outcome compile-error
+    D written-target error 210:222 -
+    B copy-type first.element [object] 82:128
+    B copy-type second.element [object] 163:208`,
+  ],
 ];

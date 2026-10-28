@@ -12,15 +12,24 @@ import type { Item } from "./items.js";
 
 /** One contributor standing at a node: the place and path whose landing or contents these are. */
 export interface TouchRef {
+  /** The contributor itself: its place's number, or a literal element's own `e<uid>` (never its position). */
+  readonly owner: string;
+  /** The place whose written type and contents are asked; a literal element's asks its `value` instead. */
   readonly place: PlaceId;
   readonly path: readonly string[];
   /** A written type of the contributor's lands here; else it holds contents only. */
   readonly lands: boolean;
+  /** Its identity in every key (`refText`). */
   readonly text: string;
   /** A literal element's own contribution: its value, whose contents at the path are asked. */
   readonly value?: PlaceId;
   /** A landing alone (a rejected copy's, Sol's review r3 F1): its written type lands here, no contents are asked. */
   readonly bare?: boolean;
+}
+
+/** A ref's text: its owner, its path, and whether it lands, holds or stands bare there. */
+export function refText(work: WorkLedger, ref: Omit<TouchRef, "text">): string {
+  return `${ref.owner}:${keptText(work, ref.path)}:${ref.bare === true ? "b" : ref.lands ? "l" : "h"}`;
 }
 
 interface Branch {
@@ -417,7 +426,7 @@ export class Touches {
       (at) => {
         this.#charge();
         let out: readonly string[];
-        if (at.ref !== null) out = [at.ref.text.slice(0, at.ref.text.indexOf(":"))];
+        if (at.ref !== null) out = [at.ref.owner];
         else if (at.base !== null) out = this.#payloadTwo.get(at.base.id)!;
         else {
           const both = new Set([
@@ -695,13 +704,11 @@ export class Touches {
     });
   }
 
+  /** A ref below a path: the same contributor (its owner, value and kind kept), at its path and `rest`. */
   public shifted(ref: TouchRef, rest: readonly string[]): TouchRef {
     if (rest.length === 0) return ref;
-    const path = keptSteps(this.host.work, ref.path, rest);
-    const text = `${ref.place}:${keptText(this.host.work, path)}:${ref.lands ? "l" : "h"}`;
-    return ref.value === undefined
-      ? { place: ref.place, path, lands: ref.lands, text }
-      : { place: ref.place, path, lands: ref.lands, text, value: ref.value };
+    const below = { ...ref, path: keptSteps(this.host.work, ref.path, rest) };
+    return { ...below, text: refText(this.host.work, below) };
   }
 
   /** Whether a node holds or lands at a path: a node there standing, or an opaque one at or above it. */

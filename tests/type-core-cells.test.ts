@@ -4752,9 +4752,13 @@ test("the carrier design's witnesses give their exact records, in both orders (S
  *   (Astra's recheck r3 F1); a fed cycle whose feeder's store is rejected takes none of the rejected value (her N1);
  * - a merge place deciding by its first copy, beside its second copy in a literal that decides by that copy: the
  *   literal's check, as the meeting is hot only where the literal decides (§2.4 (d));
- * - a live nested union, whose outer list now errs where its elements disagree (TABLE r4.128 (1)).
+ * - a live nested union, whose outer list now errs where its elements disagree (TABLE r4.128 (1));
+ * - two literals each holding its own `load` or `fromJson` default at the same position beside one shared record, in
+ *   lists, sets, dicts and a nested position, in either order of the literals: each literal's contributor is its own
+ *   below that position, so the second literal's string and integer still disagree whatever the first holds (Astra's
+ *   PR review B1).
  */
-test("#1188's witnesses give their exact records, in both orders (rule (a), cycles, containment)", () => {
+test("#1188's witnesses give their exact records, in both orders (rule (a), cycles, containment, contributors)", () => {
   for (const [name, source, text] of HOT_CANDIDATE_WITNESSES) {
     const request = coreRequest([{ path: "main.tease", source: `${source}exit\n` }]);
     assert.ok(request !== null, name);

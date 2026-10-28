@@ -51,7 +51,7 @@ import { conversionCategory, dictList, measuresLength } from "./method-categorie
 import { propertyStep, stepName } from "./program.js";
 import { elementStep, type Obligation, type RequiredKind } from "./result.js";
 import { sharing } from "./sharing.js";
-import { Touches, type Touch, type TouchRef } from "./touch.js";
+import { refText, Touches, type Touch, type TouchRef } from "./touch.js";
 import type { Work } from "./solver.js";
 import { getProof } from "./values.js";
 
@@ -4026,14 +4026,8 @@ export class Admission {
   }
 
   #touchRef(place: PlaceId, path: readonly string[], lands: boolean, bare = false): TouchRef {
-    const kind = bare ? "b" : lands ? "l" : "h";
-    return {
-      place,
-      path,
-      lands,
-      text: `${place}:${keptText(this.#work, path)}:${kind}`,
-      ...(bare ? { bare } : {}),
-    };
+    const ref = { owner: `${place}`, place, path, lands, ...(bare ? { bare } : {}) };
+    return { ...ref, text: refText(this.#work, ref) };
   }
 
   /** A copy's contribution where it lands: its source's trie at its strip, landed at the copy's own path. */
@@ -4506,13 +4500,10 @@ export class Admission {
         parts.push(this.#touchCopy(from, strip, rest(at))),
       );
       for (const { at, source } of own.reads) parts.push(this.#touchRead(source, rest(at)));
-      const mine = (path: readonly string[]): TouchRef => ({
-        place: -1 - index,
-        path,
-        lands: false,
-        text: `e${d.uid}:${keptText(this.#work, path)}:h`,
-        value: d.value!,
-      });
+      const mine = (path: readonly string[]): TouchRef => {
+        const ref = { owner: `e${d.uid}`, place: -1 - index, path, lands: false, value: d.value! };
+        return { ...ref, text: refText(this.#work, ref) };
+      };
       for (const point of own.points) parts.push(touches.leaf(rest(point), [mine(rest(point))]));
       for (const prefix of own.below)
         parts.push(touches.leaf(rest(prefix), [], [mine(rest(prefix))]));

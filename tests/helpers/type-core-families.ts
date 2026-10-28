@@ -2469,6 +2469,29 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  {
+    name: "touch-literal-contributors",
+    measures:
+      "k lists of one shared record, each beside its own load or fromJson default at the same position: a contributor per literal",
+    program: (k) =>
+      main(
+        lines(
+          "let typed: integer = 7",
+          "let peer = {x: typed}",
+          "let good = {x: 1}",
+          'let bad = {x: "bad"}',
+          rows(k, (i) => {
+            const fallback = i % 4 < 2 ? "good" : "bad";
+            const value =
+              i % 2 === 0
+                ? `load("k${i}", default: ${fallback})`
+                : `fromJson(hostValue, default: ${fallback}, files: false)`;
+            return `let l${i} = [${value}, peer]`;
+          }),
+          "exit",
+        ),
+      ),
+  },
 ];
 
 /**
