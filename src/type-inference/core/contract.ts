@@ -4842,7 +4842,7 @@ export class Contract {
     if (known !== undefined) return known;
     const { program } = this.pass;
     const kept: LiteralObject[] = [];
-    // per class of alike objects, the kept one whose span ends first (every writer of its answer lies in its span)
+    // Per class, the kept option whose span ends first; class-common writers may lie outside it.
     const firsts = new Map<string, Writer | null>();
     for (const object of index.objects.get(path)?.list ?? []) {
       program.work.charge("invSteps");
