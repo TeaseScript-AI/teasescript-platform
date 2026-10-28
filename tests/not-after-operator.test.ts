@@ -125,7 +125,7 @@ test("after 'not' right after a comparison operator, the statement and the scrip
   ]);
 });
 
-test("a comparison too long to quote, or an operand with an error of its own, is named by an example", () => {
+test("a comparison too long to quote, an operand with an error of its own, or an otherwise, is named by an example", () => {
   const long =
     "let firstLongVariableName = 1\nlet secondLongVariableName = 2\nlet thirdLongName = false\n" +
     'if firstLongVariableName + secondLongVariableName < not thirdLongName {\n    say "yes", instant\n}\nexit\n';
@@ -149,6 +149,24 @@ test("a comparison too long to quote, or an operand with an error of its own, is
         "TSP012",
         "'not' cannot follow '==' directly. Write it as in 'x != a', or 'x == (not a)'.",
         "not",
+      ],
+    ],
+  );
+  // Quoted, `x otherwise false != a` would need parentheses too, which their own error names.
+  assert.deepEqual(
+    diagnostics(
+      "let x: boolean? = null\nlet a = false\nsay x otherwise false == not a, instant\nexit\n",
+    ),
+    [
+      [
+        "TSP012",
+        "'not' cannot follow '==' directly. Write it as in 'x != a', or 'x == (not a)'.",
+        "not",
+      ],
+      [
+        "TSP041",
+        "Put parentheses around what 'otherwise' belongs to: '(x otherwise false) == not a' or 'x otherwise (false == not a)'.",
+        "otherwise",
       ],
     ],
   );

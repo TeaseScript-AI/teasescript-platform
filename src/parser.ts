@@ -180,6 +180,11 @@ interface SharedParse {
    */
   readonly recoveredStrings: WeakSet<StringLiteral>;
   /**
+   * The `otherwise` expressions with an error of their own: a `??`, a fallback that starts with `not`, or arithmetic or a
+   * range next to it. An operator around one adds no second error (see `Parser.#reportOtherwiseOperand`).
+   */
+  readonly faultyOtherwise: WeakSet<Expression>;
+  /**
    * For each newline token, the index of the first newline of its run and of the token after the run, so that skipping
    * a run, or giving it back after a missing closer, costs the same at every level of nesting.
    */
@@ -326,6 +331,7 @@ export class Parser {
       closers: null,
       sayValues: new Map(),
       recoveredStrings: new WeakSet(),
+      faultyOtherwise: new WeakSet(),
       newlineRuns: newlineRuns(tokens),
       followUps: new WeakSet(),
     },
@@ -903,7 +909,10 @@ export class Parser {
         this.#reportMissingOperand("or", "Expected an expression after 'or'.", mark);
         return null;
       }
-      expression = this.#binary(expression, right, "or", operator);
+      const left = expression;
+      expression = this.#binary(left, right, "or", operator);
+      this.#reportOtherwiseOperand(expression, left);
+      this.#reportOtherwiseOperand(expression, right);
     }
     return expression;
   }
@@ -922,7 +931,10 @@ export class Parser {
         this.#reportMissingOperand("and", "Expected an expression after 'and'.", mark);
         return null;
       }
-      expression = this.#binary(expression, right, "and", operator);
+      const left = expression;
+      expression = this.#binary(left, right, "and", operator);
+      this.#reportOtherwiseOperand(expression, left);
+      this.#reportOtherwiseOperand(expression, right);
     }
     return expression;
   }
@@ -940,9 +952,11 @@ export class Parser {
         this.#reportMissingOperand("not", "Expected an expression after 'not'.", mark);
       return null;
     }
+    const operand = expression;
     for (let index = operators.length - 1; index >= 0; index -= 1) {
       expression = this.#unary(operators[index]!, expression, "not");
     }
+    if (operators.length > 0) this.#reportOtherwiseOperand(expression, operand);
     return expression;
   }
 
@@ -953,6 +967,7 @@ export class Parser {
     let expression: Expression;
     if (this.check(TokenKind.KeywordIs)) {
       expression = yield* parseChild(this.#parseTypeTestTask(left));
+      if (expression !== left) this.#reportOtherwiseOperand(expression, left);
     } else if (isComparisonKind(this.peek().kind)) {
       const operator = this.advance();
       // `===` and `!==` of other languages, which are read as `==` and `!=`.
@@ -987,6 +1002,8 @@ export class Parser {
       );
       if (right === null) return null;
       expression = this.#binary(left, right, binaryOperator(operator), operator.span);
+      this.#reportOtherwiseOperand(expression, left);
+      this.#reportOtherwiseOperand(expression, right);
     } else {
       return left;
     }
@@ -1064,7 +1081,7 @@ export class Parser {
    * Reports `not` right after a comparison operator. The message quotes the code as written in two forms that compile:
    * the opposite comparison, and the `not` in parentheses after `==` or `!=`, or before the whole comparison after `<`,
    * `<=`, `>`, or `>=`, which do not compare true and false. Two `not`s cancel out. An operand with an error of its own,
-   * as the `??` of `x ?? false == not a`, is not quoted.
+   * as the `??` of `x ?? false == not a`, is not quoted, nor an `otherwise` without parentheses, which needs them here.
    */
   #reportNotAfterComparison(
     left: Expression,
@@ -1079,7 +1096,7 @@ export class Parser {
       left,
       operators,
       value,
-      quotable,
+      quotable && !isOtherwise(left) && !isOtherwise(value),
       ["x", "a"],
       (compared, negated) => {
         if (operators.length % 2 === 0) return [`${compared} ${symbol} ${negated}`];
@@ -1093,7 +1110,7 @@ export class Parser {
 
   /**
    * Reports `not` right after `symbol`, quoting the code to write: `readings` of the source text of `left` and of the
-   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportMixedOtherwise`), and
+   * operand after the `not`s. Only a short expression is quoted, as for `otherwise` (see `#reportUnclearOtherwise`), and
    * one without errors of its own; the readings of `example` stand in for it.
    */
   #reportNotReadings(
@@ -1192,8 +1209,9 @@ export class Parser {
   }
 
   /**
-   * `a otherwise b`, left-associative, between the ranges and the comparisons. An operand that is arithmetic or a range
-   * needs parentheses, because the fallback could be meant for its nearest value or for all of it (V30 §5, §18).
+   * `a otherwise b`, left-associative, between the ranges and the comparisons. Next to any other operator it needs
+   * parentheses, because the fallback could be meant for its nearest value or for all of that operator's operand (V30 §5,
+   * §18): this reports arithmetic and ranges, and `#reportOtherwiseOperand` the operators that bind more loosely.
    */
   *#parseOtherwise(): ParseTask<Expression | null> {
     const diagnosticCount = this.diagnostics.length;
@@ -1232,24 +1250,29 @@ export class Parser {
         ),
       );
       if (right === null) return null;
+      const otherwise = this.#binary(expression, right, "otherwise", operator);
       // A `??` has its one error already (V30 §39), and so has a `not` that starts the fallback, which only
       // `#parseOperand` reads there: the parentheses follow once both are written as they should be.
-      if (word !== null && !(right.kind === "unaryExpression" && right.operator === "not"))
-        this.#reportMixedOtherwise(expression, right, operator);
-      expression = this.#binary(expression, right, "otherwise", operator);
+      if (
+        word === null ||
+        (right.kind === "unaryExpression" && right.operator === "not") ||
+        this.#reportMixedOtherwise(expression, right, operator)
+      )
+        this.shared.faultyOtherwise.add(otherwise);
+      expression = otherwise;
     }
     return expression;
   }
 
   /**
-   * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850). The
-   * message names both readings: the fallback for the nearest value, and for the whole operand. A sign before the
-   * fallback, as in `otherwise -1`, can be read only one way.
+   * Reports an operand of `otherwise` that is arithmetic or a range without parentheses (owner decision on #850), and
+   * tells whether it did. The message names both readings: the fallback for the nearest value, and for the whole
+   * operand. A sign before the fallback, as in `otherwise -1`, can be read only one way.
    */
-  #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): void {
+  #reportMixedOtherwise(left: Expression, right: Expression, operator: SourceSpan): boolean {
     const leftMixed = isArithmetic(left) || isSign(left);
     const rightMixed = isArithmetic(right);
-    if (!leftMixed && !rightMixed) return;
+    if (!leftMixed && !rightMixed) return false;
     // The values next to `otherwise`: the last one of the left operand and the first one of the right operand.
     let last = left;
     while (isArithmetic(last) || isSign(last))
@@ -1257,20 +1280,66 @@ export class Parser {
     let first = right;
     while (isArithmetic(first))
       first = first.kind === "binaryExpression" ? first.left : first.start;
-    let readings = ", as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'";
-    // Only a short expression is quoted, which also keeps a long chain from being written out for each error in it.
-    if (right.span.end.offset - left.span.start.offset <= 240) {
+    this.#reportUnclearOtherwise(operator, spanFrom(left.span, right.span), () => {
       // The source text of an operand ends with that of its last value and starts with that of its first one.
       const text = (expression: Expression) => this.textOf(expression.span, expression.span);
       const [whole, value, fallback, rest] = [text(left), text(last), text(first), text(right)];
-      const nearest = `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`;
-      const all = `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`;
+      return [
+        `${whole.slice(0, whole.length - value.length)}(${value} otherwise ${fallback})${rest.slice(fallback.length)}`,
+        `${leftMixed ? `(${whole})` : whole} otherwise ${rightMixed ? `(${rest})` : rest}`,
+      ];
+    });
+    return true;
+  }
+
+  /**
+   * Reports an `otherwise` without parentheses as an operand of `whole`: a comparison, a type test, `not`, `and`, or `or`
+   * (owner decision on #1243). As for arithmetic, the message names both readings: the fallback for the value next to the
+   * operator, and for all of the operator's operand. In a chain, the last `otherwise` before the operator is next to it,
+   * and the first one after it.
+   */
+  #reportOtherwiseOperand(whole: Expression, operand: Expression): void {
+    if (!isOtherwise(operand)) return;
+    const before = operand.span.start.offset === whole.span.start.offset;
+    let next = operand;
+    while (!before && isOtherwise(next.left)) next = next.left;
+    if (this.shared.faultyOtherwise.has(next)) return;
+    this.#reportUnclearOtherwise(next.operatorSpan, whole.span, () => {
+      // The source text of `whole` starts or ends with that of the operand, and so does that of a chain with the value
+      // at its far end.
+      const text = (expression: Expression) => this.textOf(expression.span, expression.span);
+      const [all, own] = [text(whole), text(operand)];
+      if (before) {
+        const [rest, fallback] = [all.slice(own.length), text(operand.right)];
+        return [
+          `(${own})${rest}`,
+          `${own.slice(0, own.length - fallback.length)}(${fallback}${rest})`,
+        ];
+      }
+      const [rest, value] = [all.slice(0, all.length - own.length), text(next.left)];
+      return [`${rest}(${own})`, `(${rest}${value})${own.slice(value.length)}`];
+    });
+  }
+
+  /**
+   * Reports the `otherwise` at `operator`, which needs parentheses, naming both `readings` with the code as written. Only
+   * a short expression is quoted, which also keeps a long chain from being written out for each error in it; an example
+   * stands in for a longer one.
+   */
+  #reportUnclearOtherwise(
+    operator: SourceSpan,
+    span: SourceSpan,
+    readings: () => readonly [string, string],
+  ): void {
+    let quoted = ", as in '(count otherwise 0) + 1' or 'count otherwise (0 + 1)'";
+    if (span.end.offset - span.start.offset <= 240) {
+      const [nearest, all] = readings();
       if ([nearest, all].every((reading) => reading.length <= 60 && !reading.includes("\n")))
-        readings = `: '${nearest}' or '${all}'`;
+        quoted = `: '${nearest}' or '${all}'`;
     }
     this.reportSpan(
       parserDiagnosticCode.mixedOtherwise,
-      `Put parentheses around what 'otherwise' belongs to${readings}.`,
+      `Put parentheses around what 'otherwise' belongs to${quoted}.`,
       operator,
     );
   }
@@ -2381,6 +2450,11 @@ function isArithmetic(expression: Expression): expression is BinaryExpression | 
     expression.kind === "rangeExpression" ||
     (expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator))
   );
+}
+
+/** An `otherwise` without parentheses, which a comparison, a type test, `not`, `and`, or `or` takes only in them. */
+function isOtherwise(expression: Expression): expression is BinaryExpression {
+  return expression.kind === "binaryExpression" && expression.operator === "otherwise";
 }
 
 /** A sign before a value, as in `-x`, which `otherwise` takes as its left operand only in parentheses. */

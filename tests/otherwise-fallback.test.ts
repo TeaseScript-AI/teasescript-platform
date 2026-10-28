@@ -52,8 +52,8 @@ function bump {
 }
 let missing: integer? = hide(null)
 let found: integer? = hide(4)
-say null otherwise 1 == 1
-say found otherwise 1 == 4
+say (null otherwise 1) == 1
+say (found otherwise 1) == 4
 say missing otherwise bump()
 say found otherwise bump()
 say calls
@@ -512,7 +512,7 @@ exit`;
   assert.deepEqual(sayTexts(source("null", "null")), ["pet 123"]);
 });
 
-test("otherwise beside arithmetic or a range needs parentheses, and one error names both readings", () => {
+test("otherwise beside any other operator needs parentheses, and one error names both readings", () => {
   const cases: [string, string, string][] = [];
   for (const operator of ["+", "-", "*", "/", "%"])
     cases.push(
@@ -532,12 +532,25 @@ test("otherwise beside arithmetic or a range needs parentheses, and one error na
     ["+a otherwise 2", "+(a otherwise 2)", "(+a) otherwise 2"],
     ["a otherwise 1..=3", "(a otherwise 1)..=3", "a otherwise (1..=3)"],
     ["1..a otherwise 3", "1..(a otherwise 3)", "(1..a) otherwise 3"],
+    // The operators that bind more loosely: a comparison on either side, a type test, `not`, `and`, and `or`.
+    ["a otherwise 3 == 2", "(a otherwise 3) == 2", "a otherwise (3 == 2)"],
+    ["3 <= a otherwise 2", "3 <= (a otherwise 2)", "(3 <= a) otherwise 2"],
+    ["a otherwise 3 is integer", "(a otherwise 3) is integer", "a otherwise (3 is integer)"],
+    ["not c otherwise true", "not (c otherwise true)", "(not c) otherwise true"],
+    ["c otherwise false and true", "(c otherwise false) and true", "c otherwise (false and true)"],
+    ["true or c otherwise false", "true or (c otherwise false)", "(true or c) otherwise false"],
+    ['"${a otherwise 3 != 2}"', "(a otherwise 3) != 2", "a otherwise (3 != 2)"],
     // Both sides, a chain, and the issue's own example: the error quotes what was written.
     ["2 * a otherwise 3 + 1", "2 * (a otherwise 3) + 1", "(2 * a) otherwise (3 + 1)"],
     [
       "a otherwise b otherwise 3 + 1",
       "(a otherwise b otherwise 3) + 1",
       "a otherwise b otherwise (3 + 1)",
+    ],
+    [
+      "a otherwise b otherwise 3 > 1",
+      "(a otherwise b otherwise 3) > 1",
+      "a otherwise b otherwise (3 > 1)",
     ],
     [
       'path.lastIndexOf("/") otherwise -1 + 1',
@@ -548,7 +561,7 @@ test("otherwise beside arithmetic or a range needs parentheses, and one error na
   for (const [written, nearest, all] of cases)
     assert.deepEqual(
       diagnostics(
-        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
+        `${HIDE}let a: integer? = hide(null)\nlet b: integer? = hide(null)\nlet c: boolean? = hide(null)\nlet path = "a/b"\nsay ${written}\nexit`,
       ),
       [
         [
@@ -571,27 +584,21 @@ test("otherwise beside arithmetic or a range needs parentheses, and one error na
   );
 });
 
-test("otherwise needs no parentheses beside comparisons, not, and, or, in a chain, and before a sign or a unit", () => {
+test("otherwise needs no parentheses in a chain, in an interpolation, and before a sign or a unit", () => {
   assert.deepEqual(
     sayTexts(
       `${HIDE}let path = "a/b/c"
 let count: integer? = hide(null)
 let nickname: string? = hide(null)
-let ready: boolean? = hide(null)
 let delay: duration? = hide(null)
 say path.lastIndexOf("/") otherwise -1
 say "abc".lastIndexOf("/") otherwise -1
-say nickname otherwise "pet" == "pet"
-say count otherwise "none" is string
-say not ready otherwise false
-say ready otherwise true and count otherwise 0 == 0
-say ready otherwise false or nickname otherwise "" != ""
-say delay otherwise 5 s == 5 s
+say (delay otherwise 5 s) == 5 s
 say nickname otherwise count otherwise "you"
 say "\${nickname otherwise "you"} \${count otherwise 0}"
 exit`,
     ),
-    ["3", "-1", "true", "true", "true", "true", "false", "true", "you", "you 0"],
+    ["3", "-1", "true", "you", "you 0"],
   );
 });
 
@@ -609,6 +616,9 @@ say 2 * (known otherwise 5)
 say (2 * known) otherwise 5
 say -(none otherwise 1)
 say (-known) otherwise 1
+let off: boolean? = hide(false)
+say (off otherwise true) == false
+say off otherwise (true == false)
 let total = 0
 for step in (none otherwise 1)..=3 {
     total += step
@@ -619,7 +629,7 @@ for step in none otherwise (1..=2) {
 say total
 exit`,
     ),
-    ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "36"],
+    ["7", "5", "2.5", "5", "8", "8", "-1", "-4", "true", "false", "36"],
   );
 });
 
