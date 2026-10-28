@@ -464,6 +464,7 @@ export function coreCheckResult(
     (call) => core.expected.get(call),
   );
   const known = (expression: Expression) => values.known(expression);
+  answers.shareKnown(known);
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
     if (statement.kind === "ifStatement") {
