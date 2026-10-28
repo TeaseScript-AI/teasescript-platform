@@ -76,7 +76,13 @@ import {
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../kept-sessions.js";
-import { RuntimeDebugContext } from "../../../src/index.js";
+import {
+  CheckpointError,
+  INSTRUCTION_PLAN_VERSION,
+  RUNTIME_SNAPSHOT_VERSION,
+  RuntimeDebugContext,
+} from "../../../src/index.js";
+import type { Problem } from "./ProblemCard.vue";
 import type { SavedDataHost } from "../../saved-data.js";
 import { playerBuildIdentity } from "./buildIdentity";
 import type { ScriptStorageProvider } from "../../script-storage.js";
@@ -195,6 +201,8 @@ type Activation = {
   readonly marks?: DebugHistoryMarks;
   /** The restored session Continue goes on with. */
   readonly restored?: PlayerRuntimeSession;
+  /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
+  readonly outdated?: Problem;
 };
 
 /**
@@ -1400,37 +1408,61 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (sources !== undefined) scriptSources = sources;
     await prepareKept();
   }
-  /** Shows Continue when the script keeps a session that can go on, else Start. */
+  /**
+   * Shows Continue when the script keeps a session that can go on, else Start, with the reason when a Player update
+   * changed the format of the kept session.
+   */
   async function prepareKept(): Promise<void> {
     const continued = scriptPlan === null ? null : await restoreKept(scriptPlan);
     if (disposed) return;
-    if (continued !== null) {
+    if (continued !== null && "session" in continued) {
       kept = {
         plan: true,
         count: continued.session.events.length,
         last: continued.session.events.at(-1) ?? null,
       };
       prepareRestore(continued.session, continued.marks);
-    } else if (lastStart.value !== null) prepare(lastStart.value);
+    } else if (lastStart.value !== null) prepareStart(lastStart.value, continued?.outdated);
   }
   /**
-   * The kept session, restored, when it runs `plan` and has not ended; else `null`. The photos only it uses are its
-   * session media again.
+   * The kept session, restored, when it runs `plan` and has not ended; else, in the normal room, why it cannot continue
+   * when its plan or state is of another revision than this Player's, or `null`, such as for a changed script, an ended
+   * session, or one that cannot be read. The photos only it uses are its session media again.
    */
   async function restoreKept(
     plan: InstructionPlan,
-  ): Promise<{ readonly session: PlayerRuntimeSession; readonly marks: DebugHistoryMarks } | null> {
+  ): Promise<
+    | { readonly session: PlayerRuntimeSession; readonly marks: DebugHistoryMarks }
+    | { readonly outdated: Problem }
+    | null
+  > {
     if (keptScope === null) return null;
     await storageRoute;
     const store = keptStore();
     const stored = await store.session(keptScope).catch(() => null);
     const found = stored === null ? null : keptSession(stored);
-    if (found === null || found.planJson !== JSON.stringify(plan)) return null;
+    if (found === null) return null;
+    const normalRoom = store === keptSessions;
+    if (found.planJson !== JSON.stringify(plan)) {
+      // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
+      const revisions = normalRoom
+        ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION)
+        : null;
+      return revisions === null
+        ? null
+        : { outdated: { message: `Unsupported instruction-plan version. ${revisions}` } };
+    }
     let restored: PlayerRuntimeSession;
     try {
       restored = restorePlayerRuntimeSessionAt(plan, found.snapshotJson, found.events);
-    } catch {
-      return null;
+    } catch (error) {
+      // The runtime's error says how it refuses a state of another revision.
+      const revisions = normalRoom
+        ? revisionChange(found.snapshotJson, RUNTIME_SNAPSHOT_VERSION)
+        : null;
+      if (revisions === null || !(error instanceof CheckpointError)) return null;
+      const { code, path, message } = error.info;
+      return { outdated: { code, path, message: `${message} ${revisions}` } };
     }
     if (restored.state.status === "halted" || restored.state.status === "failed") return null;
     // The debug room reads its photos like its saved ones; a normal session's come back as session media.
@@ -1972,6 +2004,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function prepare(create: PlayerSessionStart, sources?: ReadonlyMap<string, string>) {
     lastStart.value = create;
     if (sources !== undefined) scriptSources = sources;
+    prepareStart(create);
+  }
+  /** Shows Start for `create`, with `outdated`, why the kept session cannot continue, on the start page. */
+  function prepareStart(create: PlayerSessionStart, outdated?: Problem) {
     activationToken++;
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
@@ -1985,6 +2021,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           ...(debugTrace.value === null ? {} : { debugTrace: debugTrace.value }),
           ...(randomControl === null ? {} : { randomControl }),
         }),
+      ...(outdated === undefined ? {} : { outdated }),
     };
   }
   /**
@@ -2133,6 +2170,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** The prepared Start or Continue, or `null` once the session runs or while saved data is cleared or imported. */
     activation: computed(() =>
       clearing.value || importing.value ? null : (activation.value?.kind ?? null),
+    ),
+    /** Why the prepared Start shows instead of Continue: a Player update changed the kept session's format; or `null`. */
+    outdatedSession: computed(() =>
+      clearing.value || importing.value ? null : (activation.value?.outdated ?? null),
     ),
     /** Current Player notices, such as blocked audio; a notice's action runs from the player's click. */
     notices: computed(() => noticeList.value),
@@ -2403,6 +2444,26 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 }
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
+
+/**
+ * The saved and supported revisions, as the start page's Technical details say them, when the JSON of a kept plan or
+ * state is of another revision than `supported`, this Player's; else `null`.
+ */
+function revisionChange(json: string, supported: number): string | null {
+  let saved: unknown;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    saved =
+      typeof parsed === "object" && parsed !== null && "version" in parsed
+        ? parsed.version
+        : undefined;
+  } catch {
+    return null;
+  }
+  return typeof saved !== "number" || saved === supported
+    ? null
+    : `Saved revision: ${saved}. Supported revision: ${supported}.`;
+}
 
 /**
  * Replaces one script's saved data with its imported values: its own photos are added under new references first. Any

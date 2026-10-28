@@ -1362,6 +1362,62 @@ async function keptSessionScenario(cdp, origin, profile) {
     "A session that ended is not kept: the next one starts anew",
   );
 
+  // After a Player update the kept plan is of an older revision: Start, which takes focus, comes with why the session
+  // cannot continue, and the revisions under Technical details, collapsed at first. The ended first visit, whose state
+  // holds the same labels, stays kept until the second is kept at its choice.
+  const olderPlan = `return new Promise((resolve, reject) => {
+    const request = indexedDB.open('teasescript-kept-sessions');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const scope = 'development-package:kept-session';
+      const transaction = request.result.transaction(['sessions', 'plans'], 'readwrite');
+      let supported = null;
+      const session = transaction.objectStore('sessions').get(scope);
+      session.onsuccess = () => {
+        if (JSON.parse(session.result?.snapshotJson ?? 'null')?.foregroundAction == null) return;
+        const plans = transaction.objectStore('plans');
+        const plan = plans.get(scope);
+        plan.onsuccess = () => {
+          const kept = JSON.parse(plan.result.planJson);
+          supported = kept.version;
+          plans.put({ ...plan.result, planJson: JSON.stringify({ ...kept, version: kept.version - 1 }) });
+        };
+      };
+      transaction.oncomplete = () => {
+        request.result.close();
+        resolve(supported);
+      };
+      transaction.onerror = () => reject(transaction.error);
+    };
+  })`;
+  const keptBy = Date.now() + 8_000;
+  let supported;
+  while ((supported = await evaluate(cdp, olderPlan)) === null) {
+    if (Date.now() > keptBy) throw new Error("The second visit was not kept");
+    await delay(50);
+  }
+  await cdp.call("Page.reload");
+  const outdated = "[data-outdated-session]";
+  await waitFor(
+    cdp,
+    `document.querySelector('${start}')?.textContent.trim() === 'Start' && !!document.querySelector('${outdated}')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `[document.querySelector('[data-start-title]')?.textContent, ...[...document.querySelectorAll('${outdated} h2, ${outdated} [data-problem-summary]')].map((element) => element.textContent), document.activeElement === document.querySelector('${start}'), document.querySelector('${outdated} [data-problem-technical-toggle]')?.getAttribute('aria-expanded')].join(' / ')`,
+    ),
+    "Kept session fixture / This session cannot continue / The Player has been updated and can no longer open your saved session. Choose Start to begin this Tease again. / true / false",
+    "The start page says why the kept session cannot continue, and Start takes focus",
+  );
+  await physicalClick(cdp, `${outdated} [data-problem-technical-toggle]`);
+  await waitFor(
+    cdp,
+    `document.querySelector('${outdated} [data-problem-technical]')?.textContent.trim() === 'Unsupported instruction-plan version. Saved revision: ${supported - 1}. Supported revision: ${supported}.'`,
+    5_000,
+    "Technical details do not name the kept plan's revisions",
+  );
+
   // A chosen picture the script shows after its saved reference was deleted comes back with the session, although a
   // later visit reclaims the stored photo no saved value references.
   const chosen = join(profile, "kept-photo.png");
