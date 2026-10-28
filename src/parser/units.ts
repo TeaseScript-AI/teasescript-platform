@@ -7,6 +7,7 @@ import type {
   NumberLiteral,
 } from "../ast.js";
 import { angleUnit } from "../angle.js";
+import { createDiagnostic, DiagnosticSeverity } from "../diagnostics.js";
 import { calendarDurationUnit, elapsedDurationUnit, UNIT_OPERANDS } from "../duration.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
@@ -54,8 +55,9 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
         reportUnitWithoutSpace(parser, expression, start, parser.current - 2);
       } else parser.unitlessCalendars.add(expression);
     } else if (withoutCalendar !== undefined) {
-      reportCalendarUnitWithoutCalendar(parser, parser.sourceText(start, parser.current), token);
+      const amount = parser.sourceText(start, parser.current);
       result = withUnit({ calendar: true, unit: withoutCalendar }, parser.advance());
+      reportCalendarUnitWithoutCalendar(parser, amount, token, result);
     }
   }
   return reportSecondUnit(parser, result);
@@ -173,8 +175,9 @@ export function parseDurationUnit(
   }
   const calendar = calendarDurationUnit(token.lexeme);
   if (calendar === undefined) return amount;
-  reportCalendarUnitWithoutCalendar(parser, amount.raw, token);
-  return literal({ calendar: true, unit: calendar }, parser.advance());
+  const result = literal({ calendar: true, unit: calendar }, parser.advance());
+  reportCalendarUnitWithoutCalendar(parser, amount.raw, token, result);
+  return result;
 }
 
 /**
@@ -193,11 +196,56 @@ function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | u
   return unit;
 }
 
-/** A month or a year after `amount` without `calendar`; days and weeks are exact units. */
-function reportCalendarUnitWithoutCalendar(parser: Parser, amount: string, unit: Token): void {
+/**
+ * A month or a year after `amount` without `calendar`, which gives `duration`; days and weeks are exact units. The fix
+ * names the calendar unit, unless `duration` is where only an exact duration fits (see `requireExactDuration`).
+ */
+function reportCalendarUnitWithoutCalendar(
+  parser: Parser,
+  amount: string,
+  unit: Token,
+  duration: Expression,
+): void {
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     `A ${calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"} has no fixed length. Write '${amount} calendar ${unit.lexeme}'.`,
     unit,
   );
+  parser.calendarUnitErrors.set(duration, parser.diagnostics.at(-1)!);
+}
+
+/** The operators whose operands make up an exact duration's length, as in `1 h + 30 min`. */
+const LENGTH_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "otherwise"]);
+
+/**
+ * `value` is where only an exact duration fits, such as a wait's length, which `subject` names, so a month or a year
+ * without `calendar` in it does not get the calendar fix (ADR 0026 §5). As the whole value, also in parentheses or after
+ * a sign, it gets days or weeks. Inside `+`, `-`, `*`, `/`, or `otherwise`, where it may be part of a ratio such as
+ * `(1 month / 1 calendar month) * 1 s`, the fix names both choices in words.
+ */
+export function requireExactDuration(parser: Parser, value: Expression, subject: string): void {
+  const pending: { readonly node: Expression; readonly inside: boolean }[] = [
+    { node: value, inside: false },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { node, inside } = next;
+    const error = parser.calendarUnitErrors.get(node);
+    const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error);
+    if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
+      const [unit, example] = node.unit === "y" ? ["year", "365 days"] : ["month", "30 days"];
+      parser.diagnostics[index] = createDiagnostic(
+        DiagnosticSeverity.Error,
+        parserDiagnosticCode.unsupportedDurationUnit,
+        inside
+          ? `A ${unit} has no fixed length. For a length, use days or weeks. For a calendar step, write the word calendar before the unit.`
+          : `${subject} needs an exact length, and a ${unit} has none. Write the length in days or weeks, as in '${example}'.`,
+        error!.span,
+      );
+    } else if (node.kind === "parenthesizedExpression")
+      pending.push({ node: node.expression, inside });
+    else if (node.kind === "unaryExpression" && node.operator !== "not")
+      pending.push({ node: node.operand, inside });
+    else if (node.kind === "binaryExpression" && LENGTH_OPERATORS.has(node.operator))
+      pending.push({ node: node.left, inside: true }, { node: node.right, inside: true });
+  }
 }

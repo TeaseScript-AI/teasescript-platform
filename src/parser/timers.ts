@@ -13,6 +13,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
+import { requireExactDuration } from "./units.js";
 import { parseStringLiteral } from "./literals.js";
 
 // `wait` and timers: durations, the short and named timer forms, and their handlers.
@@ -55,6 +56,7 @@ export function parseWaitStatement(parser: Parser): WaitStatement | null {
     return null;
   }
   parser.recordCommand(keyword, duration.span.end.offset, false);
+  requireExactDuration(parser, duration, "A wait");
   const { duration: delay, unit } = timerDuration(parser, duration, "wait");
   return Object.freeze({
     kind: "waitStatement",
@@ -101,6 +103,7 @@ export function* parseTimerParts(parser: Parser): ParseTask<TimerParts | null> {
     return null;
   }
   let end = written.span;
+  requireExactDuration(parser, written, "A timer");
   const { duration, unit } = timerDuration(parser, written, "timer");
   let label: Expression | null = null;
   if (parser.match(TokenKind.StringStart)) {
@@ -193,6 +196,7 @@ function* parseNamedTimer(parser: Parser, command: Token): ParseTask<TimerParts 
     switch (known) {
       case "duration":
         duration = argument.value;
+        requireExactDuration(parser, duration, "A timer");
         break;
       case "display":
         display = argument.value;

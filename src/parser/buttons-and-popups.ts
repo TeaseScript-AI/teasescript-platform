@@ -19,6 +19,7 @@ import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
 import { copySpan, spanFrom } from "./tokens.js";
+import { requireExactDuration } from "./units.js";
 
 // The commands that show a button or a popup: `showButton`, `showPopup`, `openUrl`, `exportText`, and `showPermanentButton`.
 
@@ -257,7 +258,10 @@ export function* parseShowButtonParts(parser: Parser): ParseTask<ShowButtonParts
       );
     }
     if (option === "background") background = value;
-    else timeout = value;
+    else {
+      timeout = value;
+      requireExactDuration(parser, value, "A showButton timeout");
+    }
   }
   if (parser.check(TokenKind.KeywordAs) && !parser.atStorageDelimiter()) {
     parser.reportSpan(
