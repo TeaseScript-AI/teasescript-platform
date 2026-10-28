@@ -751,6 +751,14 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
     assert.equal(result.snapshot.failure?.message, message, command);
     assert.deepEqual(result.snapshot.scriptStorage, [], command);
   }
+  // A key that is true or false is most often a comparison that the load took as its key.
+  const compiled = plan(
+    "function dynamic(input) {\n  return input\n}\nlet key = dynamic(true)\nlet value = load key, default: null\nexit",
+  );
+  assert.equal(
+    run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot.failure?.message,
+    "Cannot load with key true: storage keys must be text (string). If you meant to compare the loaded value, write 'let value: string? = load(\"k\", default: null)', then 'value == null'.",
+  );
 });
 
 test("save rejects session handles and speaker references at the top level and nested with the compiler's TSV043", () => {

@@ -156,6 +156,11 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
       "TSP033",
       "A unit needs a space before it. Write '2 calendar months'.",
     ],
+    [
+      "let n = 2\nlet x = (n)calendar months",
+      "TSP033",
+      "A unit needs a space before it. Write '(n) calendar months'.",
+    ],
     ["let x = 1 h 30 min", "TSP033", "Add the parts of a duration with '+', as in '1 h + 30 min'."],
     ["let x = 5 s ms", "TSP033", "This duration already has a unit. Remove the 'ms' after it."],
     [
@@ -173,6 +178,7 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     assert.deepEqual([diagnostic?.code, diagnostic?.message], [code, message], source);
     assert.deepEqual(rest, [], source);
   }
+  assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
   // A wait or timer keeps its unit apart, as it also takes a range there, but the amount before the unit is one rule with
   // one code and text wherever a unit stands, at compile time and at runtime.
   const consumers = [
