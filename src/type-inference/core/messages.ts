@@ -34,6 +34,7 @@ import type {
   CoreDiagnostic,
   DiagnosticRule,
   NotChecked,
+  Presence,
   SiteExpectation,
   StoreRoot,
   WorkPlace,
@@ -114,8 +115,14 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;
+  // (whether the values it names are there when the script runs, unproved where it does not say, and whether its
+  // program runs at all: TABLE r4.162, r4.168)
+  const diagnosed: Diagnosed = {
+    present: diagnostic.present ?? "unproved",
+    severity: diagnostic.class === "compile-error" ? "error" : "warning",
+  };
   if (diagnostic.class === "compile-error")
-    return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects);
+    return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects, diagnosed);
   const { context, detail } = diagnostic.provenance;
   // a member's context is its receiver's: `value` in `value[0]` comes from outside the script; a selection's, its
   // collection's
@@ -123,7 +130,17 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
     rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : text;
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
-    warningFix(rule, text, kinds, diagnostic.fits, detail, context, source, diagnostic.expects),
+    warningFix(
+      rule,
+      text,
+      kinds,
+      diagnostic.fits,
+      detail,
+      context,
+      source,
+      diagnostic.expects,
+      diagnosed,
+    ),
   ];
   // a warning whose value has no word of its own (an exact value the rule still checks) has no cause; `later`'s first
   // sentence names the deciding line, and a member's missing property is its first sentence
@@ -390,38 +407,51 @@ function operandRule(rule: DiagnosticRule): string {
 // ------------------------------------------------------------------------------------------- code forms (TABLE r4.151)
 
 /**
- * What one operation of a code form takes of a subject: the subject's kinds, each of which it must take; `value`, a
- * value it holds (a list's element), whose structure must fit too; `absent`, a subject that may not be there when the
- * script runs (a value read through a dict's key).
+ * What one operation of a code form takes of a subject: the subject's kinds, each of which it must take; `held`, a
+ * value it holds (a list's element), whose structure must fit too.
  */
 interface Takes {
   readonly subject: readonly ItemTag[];
   readonly takes: readonly ItemTag[];
-  readonly value?: true;
-  readonly absent?: true;
+  readonly held: boolean;
 }
 
 /** The kinds whose structure a kind alone does not say: an object's properties, a collection's elements. */
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["object", "list", "set", "dict"]);
 
+/** A diagnostic's facts a code form reads: whether the values it names are there, and whether its program runs. */
+interface Diagnosed {
+  readonly present: Presence;
+  readonly severity: "error" | "warning";
+}
+
 /**
- * A code form a fix offers: its code, what each of its operations takes (fact 1), and the kinds its value has (fact 2),
- * with a collection's elements' kinds; `writes`, a value the fix writes itself (a fallback's), which the script never
+ * A code form a fix offers, every fact stated (TABLE r4.162): its code; what each of its operations takes (fact 1);
+ * its diagnostic's facts (`diagnosed`), and whether the values it reads are the site's own, read once where they stand
+ * (`own`), or it reads them again or elsewhere (`added`); the kinds its value has (fact 2), with a collection's
+ * elements' kinds (none for a scalar); and whether it writes a value of its own (a fallback's), which the script never
  * held.
  */
 interface CodeForm {
   readonly code: string;
   readonly takes: readonly Takes[];
+  readonly diagnosed: Diagnosed;
+  readonly reads: "own" | "added";
   readonly gives: readonly ItemTag[];
-  readonly elements?: readonly ItemTag[];
-  readonly writes?: true;
+  readonly elements: readonly ItemTag[] | "unproved";
+  readonly writes: boolean;
 }
 
 /** A site no fact describes: no value is proved to fit it. */
-const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
+const UNPROVED: SiteExpectation = {
+  takes: [],
+  binds: "whole",
+  elements: "unproved",
+  divides: "unproved",
+};
 
-/** A line of its own: a statement, whose value nothing takes. */
-const STATEMENT: SiteExpectation = { takes: null, binds: "whole" };
+/** A line of its own: a statement, whose value nothing takes or divides. */
+const STATEMENT: SiteExpectation = { takes: null, binds: "whole", elements: null, divides: false };
 
 /** The kinds `${...}` shows (V30 §8), which `join` joins. */
 const SHOWN_KINDS_ALL: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
@@ -443,8 +473,8 @@ function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["re
 
 /**
  * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on. It holds
- * where (1) each operation takes its subject: there when the script runs, every kind of it known, and one the
- * operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what
+ * where (1) each operation takes its subject: every value the form reads there when the script runs, every kind of
+ * it known, and one the operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what
  * consumes the value there: any value where nothing restricts it), a structured value only there or as a collection
  * of scalars against its elements' kinds, and a value the fix writes itself only where the value is proved not to
  * divide; and (3) it binds there: as the site's whole value, or in parentheses where an operand or a receiver binds
@@ -459,25 +489,28 @@ function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   // (a value held in a place, or landing in one that takes some type, fits by its structure too: the kinds alone prove
   // it only for a scalar, or a collection of scalars against its elements' kinds, Codex r6)
   const flat = (kinds: readonly ItemTag[]): boolean => !kinds.some((kind) => STRUCTURED.has(kind));
+  // (the values it reads are there when the script runs: proved, or a warning's own reads, which its program already
+  // performs where they stand, wrapped there in place, TABLE r4.168)
+  const there =
+    form.diagnosed.present === true ||
+    (form.diagnosed.severity === "warning" && form.reads === "own");
   if (
+    !there ||
     !ownText(form.code) ||
-    !form.takes.every(
-      ({ subject, takes, value, absent }) =>
-        absent !== true && fit(subject, takes) && (value !== true || flat(subject)),
-    )
+    !form.takes.every(({ subject, takes, held }) => fit(subject, takes) && (!held || flat(subject)))
   )
     return null;
   // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
   // the value divides, Astra on #1273; offered only where a fact proves it does not, TABLE r4.162)
-  if (form.writes === true && site.divides !== false) return null;
+  if (form.writes && site.divides !== false) return null;
   if (site.takes !== null) {
     if (!fit(form.gives, site.takes) || form.gives.includes("object")) return null;
     const collection = form.gives.some((kind) => STRUCTURED.has(kind));
     if (
       collection &&
       site.elements !== null &&
-      (site.elements === undefined ||
-        form.elements === undefined ||
+      (site.elements === "unproved" ||
+        form.elements === "unproved" ||
         !flat(form.elements) ||
         !fit(form.elements, site.elements))
     )
@@ -558,11 +591,16 @@ function declaration(root: StoreRoot | null, type: string, subject = "it"): stri
  * where the place is a variable, a parameter, or an element or dict value of one; else a separate property or
  * collection for a property's or an element's values, or a separate variable.
  */
-function storeFix(rule: StoreRule, kinds: readonly ItemTag[], text: string): string {
+function storeFix(
+  rule: StoreRule,
+  kinds: readonly ItemTag[],
+  text: string,
+  diagnosed: Diagnosed,
+): string {
   if (rule.type.includes("integer") && kinds.includes("number")) return ROUND_COUNT_FIX;
   const values = known(kinds);
   const place = known(rule.type).filter((kind) => kind !== "null");
-  const conversion = conversionFix(rule, place, values, text);
+  const conversion = conversionFix(rule, place, values, text, diagnosed);
   if (conversion !== "") return conversion;
   const nullOnly = values.length > 0 && values.every((kind) => kind === "null");
   const both = typeText([...rule.type, ...kinds]);
@@ -604,10 +642,30 @@ function conversionFix(
   place: readonly Known[],
   values: readonly Known[],
   text: string,
+  diagnosed: Diagnosed,
 ): string {
   const [type] = place;
   if (type === undefined || place.length > 1 || values.length === 0) return "";
-  const site: SiteExpectation = { takes: rule.type, binds: "whole" };
+  // (the place's written or decided type; a conversion writes no value of its own)
+  const site: SiteExpectation = {
+    takes: rule.type,
+    binds: "whole",
+    elements: "unproved",
+    divides: "unproved",
+  };
+  const converted = (code: string, subject: readonly ItemTag[], takes: readonly ItemTag[]) =>
+    codeAt(
+      {
+        code,
+        takes: [{ subject, takes, held: false }],
+        diagnosed,
+        reads: "own",
+        gives: [type],
+        elements: [],
+        writes: false,
+      },
+      site,
+    );
   if (
     (type === "duration" || type === "angle") &&
     values.every((kind) => kind === "integer" || kind === "number")
@@ -616,14 +674,10 @@ function conversionFix(
     const kind = expressionKind(text);
     const operand =
       kind === "numberLiteral" || (kind !== null && UNIT_OPERANDS.has(kind)) ? text : `(${text})`;
-    const code = codeAt(
-      {
-        code: `${operand} ${type === "duration" ? "s" : "deg"}`,
-        takes: [{ subject: values, takes: ["integer", "number"] }],
-        gives: [type],
-      },
-      site,
-    );
+    const code = converted(`${operand} ${type === "duration" ? "s" : "deg"}`, values, [
+      "integer",
+      "number",
+    ]);
     return code === null
       ? " Give the number a unit."
       : ` Give the number a unit, such as '${code}'.`;
@@ -636,14 +690,7 @@ function conversionFix(
     const literal = textLiteral(text);
     const reads =
       literal !== null && entry.takes === "value" && entry.textProblem(literal) === undefined;
-    const code = codeAt(
-      {
-        code: `${conversion}(${text})`,
-        takes: [{ subject: reads ? values : [], takes: ["string"] }],
-        gives: [type],
-      },
-      site,
-    );
+    const code = converted(`${conversion}(${text})`, reads ? values : [], ["string"]);
     return code === null
       ? ` Convert the text with the ${conversion} function.`
       : ` Convert the text with '${code}'.`;
@@ -657,8 +704,12 @@ function conversionFix(
       ? codeAt(
           {
             code: `"\${${text}}"`,
-            takes: [{ subject: values, takes: ["integer", "number", "boolean"] }],
+            takes: [{ subject: values, takes: ["integer", "number", "boolean"], held: false }],
+            diagnosed,
+            reads: "own",
             gives: ["string"],
+            elements: [],
+            writes: false,
           },
           site,
         )
@@ -683,6 +734,7 @@ function memberFix(
   text: string,
   site: SiteExpectation,
   holder: readonly ItemTag[],
+  diagnosed: Diagnosed,
 ): string {
   const kind = known(kinds).find((found) => found !== "null");
   if (kind === undefined) return "";
@@ -699,11 +751,12 @@ function memberFix(
       ? codeAt(
           {
             code,
-            takes: [
-              { subject: holder, takes, ...(rule.keyed === true ? { absent: true } : {}) },
-              ...also,
-            ],
+            takes: [{ subject: holder, takes, held: false }, ...also],
+            diagnosed,
+            reads: "own",
             gives,
+            elements: [],
+            writes: false,
           },
           site,
         )
@@ -774,7 +827,7 @@ function memberFix(
       `${receiver}.join()`,
       ["list"],
       ["string"],
-      [{ subject: elements, takes: SHOWN_KINDS_ALL }],
+      [{ subject: elements, takes: SHOWN_KINDS_ALL, held: false }],
     );
     if (code !== null) return ` Write '${code}' with parentheses.`;
     const proved =
@@ -1019,6 +1072,7 @@ function listJoinFix(
   site: SourceSite,
   expects: SiteExpectation,
   source: MessageSource,
+  diagnosed: Diagnosed,
 ): string {
   const [leftSite, rightSite] = rule.operands;
   if (rule.operator !== "+" || leftSite === undefined || rightSite === undefined) return "";
@@ -1044,7 +1098,7 @@ function listJoinFix(
   const holds: Takes = {
     subject: range ? ["integer"] : [listLeft ? b : a],
     takes: rule.elements ?? [],
-    value: true,
+    held: true,
   };
   // (the value's new code, and the code at the site: the operation with it, or that operand alone)
   const written = (code: string): string | null =>
@@ -1053,8 +1107,11 @@ function listJoinFix(
           {
             code: rule.operand ? code : listLeft ? `${list} + ${code}` : `${code} + ${list}`,
             takes: [holds],
+            diagnosed,
+            reads: "own",
             gives: ["list"],
-            ...(rule.elements === undefined ? {} : { elements: rule.elements }),
+            elements: rule.elements ?? "unproved",
+            writes: false,
           },
           expects,
         )
@@ -1070,14 +1127,37 @@ function listJoinFix(
       : ` Write '${code}' to add the numbers of the range.`;
   }
   const join = written(`[${value}]`);
-  // (an add, on a line of its own, where a statement takes any value, and the list itself then where the join stood)
+  // (an add, on a line of its own, where a statement takes any value, and the list itself then where the join stood:
+  // the list read again, before the line, TABLE r4.168)
   const itself =
     rule.elements === undefined
       ? null
-      : codeAt({ code: list, takes: [], gives: ["list"], elements: rule.elements }, expects);
+      : codeAt(
+          {
+            code: list,
+            takes: [],
+            diagnosed,
+            reads: "added",
+            gives: ["list"],
+            elements: rule.elements,
+            writes: false,
+          },
+          expects,
+        );
   const add =
     listLeft && stablePath(list) && ownText(value) && itself !== null
-      ? codeAt({ code: `${list}.add(${value})`, takes: [holds], gives: [] }, STATEMENT)
+      ? codeAt(
+          {
+            code: `${list}.add(${value})`,
+            takes: [holds],
+            diagnosed,
+            reads: "added",
+            gives: [],
+            elements: [],
+            writes: false,
+          },
+          STATEMENT,
+        )
       : null;
   if (!listLeft)
     return join === null
@@ -1100,6 +1180,7 @@ function errorSentence(
   source: MessageSource,
   site: SourceSite,
   expects: SiteExpectation | undefined,
+  diagnosed: Diagnosed,
 ): string {
   switch (rule.rule) {
     case "store":
@@ -1110,7 +1191,7 @@ function errorSentence(
           `${source.line(rule.brought)} brings ${described(kinds)} into that property. Use a separate property for a ` +
           "value of another type."
         );
-      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text)}`;
+      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, diagnosed)}`;
     case "fallback": {
       // ADR 0021 rule 7.3: a written union of the place the value lands in directly holds both
       const both = typeText([...rule.type, ...kinds]);
@@ -1130,7 +1211,7 @@ function errorSentence(
         return `'${rule.receiver}' is null here, so it has no ${noun}. Give '${rule.receiver}' a value first.`;
       if (kinds.includes("unknown"))
         return `'${rule.receiver}' has no ${noun}. Add it to the object first.`;
-      return `${capitalized(described(kinds))} has no ${noun}, so '${text}' cannot be used.${memberFix(rule, kinds, text, expects ?? UNPROVED, kinds)}`;
+      return `${capitalized(described(kinds))} has no ${noun}, so '${text}' cannot be used.${memberFix(rule, kinds, text, expects ?? UNPROVED, kinds, diagnosed)}`;
     }
     case "absent": {
       // (the properties it has, as the current checker names them: a misspelt name's fix, ADR 0021 rule 1.4)
@@ -1159,7 +1240,7 @@ function errorSentence(
         return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join.operand)}`;
       const fix =
         temporalFix(rule, kinds, source) +
-        listJoinFix(rule, kinds, site, expects ?? UNPROVED, source);
+        listJoinFix(rule, kinds, site, expects ?? UNPROVED, source, diagnosed);
       return rule.operand
         ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${fix}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.${fix}`;
@@ -1335,7 +1416,11 @@ function fallbackValue(kinds: readonly ItemTag[]): string | null {
 function checkFix(
   text: string,
   test: string,
-  fallback: { readonly value: string; readonly site: SiteExpectation } | null,
+  fallback: {
+    readonly value: string;
+    readonly site: SiteExpectation;
+    readonly diagnosed: Diagnosed;
+  } | null,
 ): string {
   const name = variable(text);
   // (a value kept in a variable shows its `let`, where its own text may stand in code)
@@ -1346,7 +1431,7 @@ function checkFix(
         ? `Keep '${text}' in a new variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
         : `Keep '${text}' in a new variable and check the variable first, as in 'if value ${test} { ... }'`;
   if (fallback === null || !ownText(text)) return `${check}.`;
-  const { value, site } = fallback;
+  const { value, site, diagnosed } = fallback;
   // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
   const code = `${operandText(text)} otherwise ${value}`;
   // (#1213's placeholder `...` is left for #1273; a value the fix writes goes through the predicate)
@@ -1355,7 +1440,10 @@ function checkFix(
       ? site.binds === "operand"
         ? `(${code})`
         : code
-      : codeAt({ code, takes: [], gives: [], writes: true }, site);
+      : codeAt(
+          { code, takes: [], diagnosed, reads: "own", gives: [], elements: [], writes: true },
+          site,
+        );
   if (fix !== null) return `${check}, or give a fallback, as in '${fix}'.`;
   return site.divides === true
     ? `${check}, or give a fallback after 'otherwise' that does not lead to a division by zero.`
@@ -1403,6 +1491,7 @@ function warningFix(
   context: ContextWord,
   source: MessageSource,
   expects: SiteExpectation | undefined,
+  diagnosed: Diagnosed,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
   if (kinds.includes("null")) {
@@ -1432,8 +1521,10 @@ function warningFix(
             site: {
               takes: null,
               binds,
-              ...(expects?.divides === undefined ? {} : { divides: expects.divides }),
+              elements: "unproved",
+              divides: expects?.divides ?? "unproved",
             },
+            diagnosed,
           },
     );
   }
@@ -1454,7 +1545,7 @@ function warningFix(
       break;
     case "store":
       if (rule.type.includes("integer") && kinds.includes("number"))
-        return storeFix(rule, kinds, text).trimStart();
+        return storeFix(rule, kinds, text, diagnosed).trimStart();
       break;
     case "operator": {
       // (the repairs of the error the values would be: a text join, a date and time conversion)
@@ -1465,7 +1556,7 @@ function warningFix(
       break;
     }
     case "member":
-      return memberWarningFix(rule, text, kinds, fits, detail);
+      return memberWarningFix(rule, text, kinds, fits, detail, diagnosed);
     default:
       break;
   }
@@ -1481,14 +1572,19 @@ function warningFix(
   if (isLiteral(text) || context === "missing") return "";
   const test = typeText(fits);
   if (test !== null) return checkFix(subject, `is ${test}`, null);
-  return errorFix(rule, text, kinds).trimStart();
+  return errorFix(rule, text, kinds, diagnosed).trimStart();
 }
 
 /** The fix of the error a value of `kinds` would be, for a warning whose value has no kind that fits. */
-function errorFix(rule: DiagnosticRule, text: string, kinds: readonly ItemTag[]): string {
+function errorFix(
+  rule: DiagnosticRule,
+  text: string,
+  kinds: readonly ItemTag[],
+  diagnosed: Diagnosed,
+): string {
   switch (rule.rule) {
     case "store":
-      return storeFix(rule, kinds, text);
+      return storeFix(rule, kinds, text, diagnosed);
     case "boolean":
       return conditionFix(text, kinds);
     case "key":
@@ -1508,6 +1604,7 @@ function memberWarningFix(
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
   detail: ContextDetail,
+  diagnosed: Diagnosed,
 ): string {
   // (the warning's own reference kind: one warning per reference kind of a union)
   const speaker =
@@ -1531,7 +1628,7 @@ function memberWarningFix(
   const test = typeText(fits.filter((kind) => !kinds.includes(kind)));
   return test !== null
     ? checkFix(rule.receiver, `is ${test}`, null)
-    : memberFix(rule, kinds, text, UNPROVED, detail.receiver?.kinds ?? []).trimStart();
+    : memberFix(rule, kinds, text, UNPROVED, detail.receiver?.kinds ?? [], diagnosed).trimStart();
 }
 
 /** A place the stop names, with its lines: `'tally' (lines 3–9)`, `the top level of 'main.tease' (lines 1–40)`. */

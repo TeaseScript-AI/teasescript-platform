@@ -61,6 +61,16 @@ const OFFERS: readonly Offer[] = [
     expression: 'd["missing"].trim',
   },
   { name: "absent property's size", setup: 'let door = {a: "hello"}', expression: "door.b.size" },
+  // (a list a fix reads by a dict's key or a list's index, there or not: TABLE r4.162, Astra on #1296)
+  ...[
+    ["dict{found: [1]}", 'd["absent"]'],
+    ["dict{found: [1]}", 'd["found"]'],
+    ["[[1]]", "d[5]"],
+    ["[[1]]", "d[0]"],
+  ].flatMap(([value, list]): Offer[] => [
+    { name: `${list} + element`, setup: `let d = ${value}`, expression: `${list} + 2` },
+    { name: `element + ${list}`, setup: `let d = ${value}`, expression: `2 + ${list}` },
+  ]),
   ...ELEMENTS.flatMap(([kind, value]): Offer[] => [
     { name: `join of ${kind}`, setup: `let items = [${value}]`, expression: "items.join" },
     {
@@ -153,35 +163,50 @@ const SITES: readonly Site[] = [
  * Values that may be null, whose warning's fix offers a fallback (ADR 0021 rule 1.9), at the sites that take their
  * other type: where they divide, also through a literal or an interpolation, and at a call, which reads it later.
  */
+const NUMBER_SITES = [
+  "integer declaration",
+  "sum",
+  "product",
+  "comparison",
+  "divisor",
+  "integer argument",
+  "count",
+];
 const NULLABLE: readonly (readonly [Offer, readonly string[]])[] = [
-  [
-    { name: "null element", setup: "let xs = [4, null]", expression: "xs[1]" },
-    ["integer declaration", "sum", "product", "comparison", "divisor", "integer argument", "count"],
-  ],
-  [
+  // (read by an index, which may be absent: a warning's own read, which its program already performs, wrapped in
+  // place, TABLE r4.168; or a variable's)
+  [{ name: "null element", setup: "let xs = [4, null]", expression: "xs[1]" }, NUMBER_SITES],
+  [{ name: "null value", setup: "let x = [4, null].random", expression: "x" }, NUMBER_SITES],
+  ...[
     { name: "null element's length", setup: 'let xs = ["ab", null]', expression: "xs[1].length" },
-    [
-      "say",
-      "integer declaration",
-      "sum",
-      "divisor",
-      "literal divisor",
-      "property divisor",
-      "interpolation divisor",
-      "integer argument",
-      "untyped argument",
-      "count",
-    ],
-  ],
+    { name: "null value's length", setup: 'let x = ["ab", null].random', expression: "x.length" },
+  ].map(
+    (offer) =>
+      [
+        offer,
+        [
+          "say",
+          "integer declaration",
+          "sum",
+          "divisor",
+          "literal divisor",
+          "property divisor",
+          "interpolation divisor",
+          "integer argument",
+          "untyped argument",
+          "count",
+        ],
+      ] as const,
+  ),
 ];
 
 /** A store's place of one written type, its start value, and values of other kinds stored into it. */
 const PLACES: readonly (readonly [string, string, readonly string[]])[] = [
-  ["duration", "1 s", ["3", "n + 1", "-3", "1.5"]],
-  ["angle", "1 deg", ["90", "n"]],
+  ["duration", "1 s", ["3", "n + 1", "-3", "1.5", 'd["found"]', 'd["absent"]', "ns[0]", "ns[5]"]],
+  ["angle", "1 deg", ["90", "n", 'd["absent"]', "ns[5]"]],
   ["date", 'toDate("2026-01-01")', ['"2026-10-28"', '"bad"', '"2026-02-30"', "s"]],
   ["time", 'toTime("10:00")', ['"10:30"', '"25:00"']],
-  ["string", '"x"', ["5", "n", "true", "n + 1"]],
+  ["string", '"x"', ["5", "n", "true", "n + 1", 'd["absent"]', "ns[5]"]],
 ];
 
 /** The places a value is stored into: a declaration, an assignment, a property, an element, an argument. */
@@ -254,7 +279,13 @@ export function pasteCases(sample = false): PasteCase[] {
       for (const value of sample ? values.slice(0, 1) : values) {
         const site = store(type, start);
         const head =
-          ["let n = 2", 'let s = "2026-10-28"', site.before]
+          [
+            "let n = 2",
+            'let s = "2026-10-28"',
+            "let d = dict{found: 2}",
+            "let ns = [2]",
+            site.before,
+          ]
             .filter((line) => line !== "")
             .join("\n") + "\n";
         const [left, right] = around(site.line);

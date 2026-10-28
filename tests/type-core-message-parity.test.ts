@@ -79,16 +79,23 @@ const ownText = (text: string): boolean => !/[\n\r]|\/\/|\/\*/.test(text);
 /** A literal beside a named value in a date and time example: a number or a quantity, `true` or `false`. */
 const quantity = (text: string): boolean => /^(\d[\w. ]*|true|false)$/.test(text);
 
+/** A fallback in words (TABLE r4.162): after 'otherwise', also one that does not divide by zero. */
+const FALLBACK_WORDS = " after 'otherwise'(?: that does not lead to a division by zero)?\\.";
+
 const PORTS: readonly Port[] = [
   // ADR 0021 rules 1.9 and 3.5: the check, of a variable, or of the subject kept in a variable first, its `let` shown
   // where its own text may stand in code (the owner's review)
+  // (a fallback's code where its predicate holds, else in words: where the value may divide, or reads what may be
+  // absent, TABLE r4.162)
   {
     from: /^Check it first: if (\S+) != null \{ \.\.\. \}, or give a fallback: \1 otherwise (.+)$/,
     to: ([, name, value]) =>
       form(
-        `Check '${name}' first, as in 'if ${name} != null { ... }', or give a fallback, as in '`,
-        code(grouped(`${name} otherwise ${value}`)),
-        "'.",
+        `Check '${name}' first, as in 'if ${name} != null { ... }', or give a fallback`,
+        oneOf(
+          form(", as in '", code(grouped(`${name} otherwise ${value}`)), "'."),
+          code(FALLBACK_WORDS),
+        ),
       ),
   },
   {
@@ -101,9 +108,15 @@ const PORTS: readonly Port[] = [
       ownText(subject)
         ? form(
             `Keep '${subject}' in a new variable, as in 'let value = ${subject}', and check it, as in 'if value != null ` +
-              "{ ... }', or give a fallback, as in '",
-            code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
-            "'.",
+              "{ ... }', or give a fallback",
+            oneOf(
+              form(
+                ", as in '",
+                code(`\\(?${grouped(subject)} otherwise ${escaped(value!)}\\)?`),
+                "'.",
+              ),
+              code(FALLBACK_WORDS),
+            ),
           )
         : exact(
             `Keep '${subject}' in a new variable and check the variable first, as in 'if value != null { ... }'.`,
@@ -1003,20 +1016,20 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let toys = [1]\nif ⟦toys⟧ { say "x" }\nexit\n', /as in '([^']*)'/],
   ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
   ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
-  // a stable path through a fixed index, a key, an index variable (TABLE §13 N1, Astra r2)
-  ["let xs = [1]\nlet caption: string = ⟦xs[0]⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
-  [
-    'let d = dict{"a": 2}\nlet caption: string = ⟦d["a"]⟧\nsay caption\nexit\n',
-    /write '([^']*)'/,
-    ["2"],
-  ],
+  // a stable path through an index variable (TABLE §13 N1, Astra r2), in a fix the predicate does not test
   [
     'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ⟦ts[i].year⟧\nexit\n',
     /as in '([^']*)'/,
     ["2026"],
   ],
-  // the null check's fallback, of a kept value and of a composed one
-  ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/],
+  // the null check's fallback, of a kept value and of a composed one; a warning's read by an index, which its program
+  // already performs there, wrapped in place (TABLE r4.168)
+  ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/, ["8"]],
+  [
+    "let xs = [4, null]\nlet v: integer = ⟦xs[1]⟧\nsay v\nexit\n",
+    /fallback, as in '([^']*)'/,
+    ["0"],
+  ],
   [
     'let x: integer? = null\nlet y: integer? = null\nif askBoolean "x" { x = 1 }\nrepeat (⟦x otherwise y⟧) {}\nexit\n',
     /fallback, as in '([^']*)'/,
@@ -1054,7 +1067,6 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let t = "hello"\nlet n: integer = ⟦t.size⟧\nsay n\nexit\n', /Use '([^']*)'/, ["5"]],
   ['let t = "hello"\nif ⟦t.size⟧ > 2 {\n  say "long"\n}\nexit\n', /Use '([^']*)'/, ["long"]],
   ['let box = {label: "hello"}\nsay ⟦box.label.size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
-  ['let items = ["hello"]\nsay ⟦items[0].size⟧\nexit\n', /Use '([^']*)'/, ["5"]],
   [
     'let t = "hello"\nfor i in 1..⟦t.size⟧ {\n  say i\n}\nexit\n',
     /Use '([^']*)'/,
@@ -1065,7 +1077,6 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let t = " hello "\nsay ⟦t.trim⟧\nexit\n', /Write '([^']*)'/, ["hello"]],
   ['let items = ["a", "b"]\nsay ⟦items.join⟧\nexit\n', /Write '([^']*)'/],
   ['let box = {items: ["a", "b"]}\nsay ⟦box.items.join⟧\nexit\n', /Write '([^']*)'/],
-  ['let lists = [["a"]]\nsay ⟦lists[0].join⟧\nexit\n', /Write '([^']*)'/],
   ["let items: integer[] = []\nsay ⟦items.join⟧\nexit\n", /Write '([^']*)'/],
   [
     'let names = ["Ann"]\nlet more = ⟦names + "Bo"⟧\nsay more.length\nexit\n',
@@ -1101,8 +1112,16 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ],
   // a fallback the fix writes (ADR 0021 rule 1.9) where the value does not divide, and a receiver's in parentheses
   // (Astra on #1273)
-  ["let xs = [4, null]\nsay ⟦xs[1]⟧ / 2\nexit\n", /fallback, as in '([^']*)'/, ["0"]],
-  ['let xs = ["ab", null]\nsay ⟦xs[1]⟧.length\nexit\n', /fallback, as in '([^']*)'/, ["0"]],
+  [
+    "function half(x: integer?) {\n  say ⟦x⟧ / 2\n}\nhalf(4)\nhalf(null)\nexit\n",
+    /fallback, as in '([^']*)'/,
+    ["2", "0"],
+  ],
+  [
+    'function size(t: string?) {\n  say ⟦t⟧.length\n}\nsize("ab")\nsize(null)\nexit\n',
+    /fallback, as in '([^']*)'/,
+    ["2", "0"],
+  ],
 ];
 
 /**
@@ -1578,6 +1597,31 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "Use the length property.",
     ],
     ['let t = "hello"\nlet v = t.size\nsay v.trim()\nexit\n', "Use the length property."],
+    // (Astra on #1296, TABLE r4.162, r4.168: an error's value read by an index or a dict's key, which may be absent,
+    // the list or the operand a list or a conversion fix reads, either way; an element as a receiver)
+    [
+      'let d = dict{found: [1]}\nsay d["absent"] + 2\nexit\n',
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      "let ls = [[1]]\nsay ls[0] + 2\nexit\n",
+      "To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    ],
+    [
+      'let d = dict{found: 2}\nlet v: duration = d["absent"]\nsay v\nexit\n',
+      "Give the number a unit.",
+    ],
+    ["let ns = [2]\nlet v: duration = ns[0]\nsay v\nexit\n", "Give the number a unit."],
+    ['let items = ["hello"]\nsay items[0].size\nexit\n', "Use the length property."],
+    ['let lists = [["a"]]\nsay lists[0].join\nexit\n', "Call the join method with parentheses."],
+    [
+      "let xs = [1]\nlet caption: string = xs[0]\nsay caption\nexit\n",
+      "To show it as text, put it in a text with '${...}'.",
+    ],
+    [
+      'let d = dict{"a": 2}\nlet caption: string = d["a"]\nsay caption\nexit\n',
+      "To show it as text, put it in a text with '${...}'.",
+    ],
     // (Codex r9: a default's or a fallback's type must also fit the value it stands beside, C10)
     [
       'let t = "hello"\nlet ys = ["x"]\nsay ys.get(9, default: t.size)\nexit\n',

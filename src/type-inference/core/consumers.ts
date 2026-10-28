@@ -95,6 +95,7 @@ import {
   type Obligation,
   type ObligationKind,
   type RequiredKind,
+  type Presence,
   type SiteExpectation,
   type StoreRoot,
   type StoreStep,
@@ -156,7 +157,12 @@ const SHOWN_KINDS: readonly ValueKind[] = VALUE_KIND_NAMES.filter(
 );
 
 /** A site no fact describes: no value is proved to fit it. */
-const UNPROVED: SiteExpectation = { takes: [], binds: "whole" };
+const UNPROVED: SiteExpectation = {
+  takes: [],
+  binds: "whole",
+  elements: "unproved",
+  divides: "unproved",
+};
 
 /** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
@@ -1381,9 +1387,12 @@ export class Consumers {
     kinds: readonly ItemTag[],
   ): void {
     // (in the finishing path only what is settled errs: a literal's own kind, a settled read, TABLE r4.99)
+    // (a finishing walk after a stop reads only what is settled: no fact a fix's form needs is proved, TABLE r4.162)
     const expects =
       (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
-        ? this.#expected(site)
+        ? this.#finishing
+          ? UNPROVED
+          : this.#expected(site)
         : undefined;
     const diagnostic: CoreDiagnostic = {
       class: "compile-error",
@@ -1393,10 +1402,68 @@ export class Consumers {
       rule,
       kinds: [...new Set(kinds)],
       ...(expects === undefined ? {} : { expects }),
+      present: this.#finishing ? "unproved" : this.#present(site, rule),
     };
     this.diagnostics.push(diagnostic);
     this.rules.set(diagnostic, this.#rule);
   }
+
+  /**
+   * Whether every value the diagnosed expression at `site` reads is there when the script runs, an operation's every
+   * operand's too (`Presence`, TABLE r4.162, Astra on #1296): not where it reads an element by its index or a dict's value
+   * by its key, there or in any value it is computed from; unproved where the site has no place.
+   */
+  #present(site: SourceSite, rule: DiagnosticRule): Presence {
+    const { program } = this.pass;
+    const sites = rule.rule === "operator" ? [site, ...rule.operands] : [site];
+    for (const at of sites) {
+      const place = program.placeBySite.get(siteKey(at));
+      if (place === undefined || runCompileTask(this.#indexedTask(place))) return "unproved";
+    }
+    return true;
+  }
+
+  /** Whether the value at `place` reads an element by its index or a dict's value by its key, once per place. */
+  *#indexedTask(place: PlaceId): CompileTask<boolean> {
+    const known = this.#indexed.get(place);
+    if (known !== undefined) return known;
+    // (a value computed from itself proves nothing)
+    this.#indexed.set(place, true);
+    const { program } = this.pass;
+    program.work.charge("checks");
+    const projection = program.projOf.get(place);
+    const op = program.opOf.get(place);
+    const inputs: PlaceId[] = projection === undefined ? [] : [projection.owner];
+    if (op !== undefined)
+      switch (op.kind) {
+        case "operation":
+          if (op.receiver !== null) inputs.push(op.receiver);
+          inputs.push(...op.arguments, ...op.named.map((named) => named.value));
+          break;
+        case "call":
+          inputs.push(...op.arguments, ...op.named.map((named) => named.value));
+          break;
+        case "get":
+          inputs.push(op.receiver, op.fallback, ...(op.key === null ? [] : [op.key]));
+          break;
+        case "fallback":
+          inputs.push(op.left, op.right);
+          break;
+        case "load":
+          if (op.fallback !== null) inputs.push(op.fallback);
+          break;
+      }
+    let found = projection?.step === "index";
+    for (const input of inputs) {
+      if (found) break;
+      found = yield* compileChild(this.#indexedTask(input));
+    }
+    this.#indexed.set(place, found);
+    return found;
+  }
+
+  /** `#indexedTask`'s answer per place. */
+  readonly #indexed = new Map<PlaceId, boolean>();
 
   /**
    * TABLE r4.151: what the place the value at `site` lands in takes, read from what consumes it
@@ -1466,7 +1533,7 @@ export class Consumers {
       ...b.filter((tag) => !a.includes(tag) && a.some((other) => fits(tag, other, true))),
     ];
     let takes: readonly ItemTag[] | null = null;
-    let elements: readonly ItemTag[] | null | undefined = null;
+    let elements: SiteExpectation["elements"] = null;
     for (const consumer of program.consumersOf.get(place) ?? []) {
       if (consumer.kind !== "read") continue;
       program.work.charge("checks");
@@ -1474,19 +1541,15 @@ export class Consumers {
       const read = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
       if (read.takes !== null) takes = takes === null ? read.takes : both(takes, read.takes);
       elements =
-        elements === undefined || read.elements === undefined
-          ? undefined
+        elements === "unproved" || read.elements === "unproved"
+          ? "unproved"
           : read.elements === null
             ? elements
             : elements === null
               ? read.elements
               : both(elements, read.elements);
     }
-    const found: SiteExpectation = {
-      takes,
-      binds: "whole",
-      ...(elements === undefined ? {} : { elements }),
-    };
+    const found: SiteExpectation = { takes, binds: "whole", elements, divides: "unproved" };
     this.#placeExpectations.set(place, found);
     return found;
   }
@@ -1505,7 +1568,7 @@ export class Consumers {
     if (cell !== undefined) {
       const site = program.place(cell.owner).site;
       const outer = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
-      return outer.divides === undefined ? UNPROVED : { ...UNPROVED, divides: outer.divides };
+      return { ...UNPROVED, divides: outer.divides };
     }
     // (a place's value is read by later statements, where a zero it holds is the script's own, TABLE r4.159)
     const placed = (found: SiteExpectation): SiteExpectation => ({ ...found, divides: false });
@@ -1526,16 +1589,21 @@ export class Consumers {
       takes,
       binds: "whole",
       elements: takes.some((tag) => tag === "list" || tag === "set" || tag === "dict")
-        ? admitted(joinSteps(path, ["element"]))
+        ? (admitted(joinSteps(path, ["element"])) ?? "unproved")
         : null,
+      divides: false,
     });
   }
 
   *#consumerTakesTask(consumer: Consumption): CompileTask<SiteExpectation> {
     const { program } = this.pass;
-    // (a value whose consumer computes its result from it divides where that result does, unproved where that is)
-    const dividing = (outer: SiteExpectation): { divides?: boolean } =>
-      outer.divides === undefined ? {} : { divides: outer.divides };
+    // (a value whose consumer computes its result from it divides where that result does, unproved where that is; a
+    // scalar the consumer takes has no elements to prove)
+    const computed = (
+      takes: readonly ItemTag[],
+      binds: SiteExpectation["binds"],
+      outer: SiteExpectation,
+    ): SiteExpectation => ({ takes, binds, elements: "unproved", divides: outer.divides });
     switch (consumer.kind) {
       case "store": {
         const target = program.targetRoot(consumer.into, true);
@@ -1563,17 +1631,15 @@ export class Consumers {
         const outer = yield* compileChild(
           this.#expectedTask(program.place(c.result).site ?? c.site),
         );
-        if (family === "interpolation")
-          return { takes: SHOWN_KINDS, binds: "whole", ...dividing(outer) };
-        if (family === "logic") return { takes: ["boolean"], binds: "operand", ...dividing(outer) };
+        if (family === "interpolation") return computed(SHOWN_KINDS, "whole", outer);
+        if (family === "logic") return computed(["boolean"], "operand", outer);
         // (a range's bounds are whole numbers, and it is a range whatever they are)
-        if (family === "range") return { takes: ["integer"], binds: "operand", ...dividing(outer) };
+        if (family === "range") return computed(["integer"], "operand", outer);
         const operator = operatorOf(c);
         const node = program.exprAt(c.site);
         // (an operation the table does not hold, or whose operands have no flow point, as a compound assignment's have
         // not: nothing proved of what it takes, Codex r8)
-        if (operator === null || node === null)
-          return { takes: [], binds: "operand", ...dividing(outer) };
+        if (operator === null || node === null) return computed([], "operand", outer);
         const operands = c.arguments.map((argument) => this.#kindsOf(argument, node));
         const rows = OPERATOR_ROWS.filter((row) => row.operator === operator);
         const domain = operandDomain(rows, operands, consumer.index).filter(
@@ -1582,7 +1648,7 @@ export class Consumers {
         // (a comparison gives true or false whatever it takes; a calculation's result is its operands', which its own
         // site takes in turn)
         if (COMPARISONS.some((found) => found === operator))
-          return { takes: domain, binds: "operand", ...dividing(outer) };
+          return computed(domain, "operand", outer);
         const results = (kind: ValueKind): ValueKind[] =>
           rows
             .filter(
@@ -1599,7 +1665,7 @@ export class Consumers {
             )
             .map((row) => row.result);
         // (a divisor, or an operand whose zero can give a zero result where that result divides)
-        const divides =
+        const divides: SiteExpectation["divides"] =
           DIVISIONS.some((found) => found === operator) && consumer.index === 1
             ? true
             : outer.divides;
@@ -1613,12 +1679,8 @@ export class Consumers {
             );
           }),
           binds: "operand",
-          ...(outer.takes === null
-            ? { elements: null }
-            : outer.elements === undefined
-              ? {}
-              : { elements: outer.elements }),
-          ...(divides === undefined ? {} : { divides }),
+          elements: outer.takes === null ? null : outer.elements,
+          divides,
         };
       }
       case "method": {
@@ -1631,13 +1693,14 @@ export class Consumers {
               : [],
           binds: "receiver",
           elements: null,
-          ...dividing(outer),
+          divides: outer.divides,
         };
       }
       case "access": {
         const step = consumer.step.step;
         // (a loop's iterable: what its variable then holds the loop's body reads, which no fact here follows)
-        if (step === "iteration") return { takes: [], binds: "receiver", divides: false };
+        if (step === "iteration")
+          return { takes: [], binds: "receiver", elements: "unproved", divides: false };
         const outer = yield* compileChild(this.#expectedTask(consumer.step.site));
         // (a member's result: a length a whole number, any other read's only where its site takes any)
         const property = typeof step === "object" ? step.property : null;
@@ -1656,7 +1719,7 @@ export class Consumers {
                 : [],
           binds: "receiver",
           elements: null,
-          ...dividing(outer),
+          divides: outer.divides,
         };
       }
       case "part": {
@@ -1664,7 +1727,7 @@ export class Consumers {
         // which no fact here proves, Codex r9; it divides where the result does)
         const site = program.place(consumer.result).site;
         const outer = site === null ? UNPROVED : yield* compileChild(this.#expectedTask(site));
-        return { takes: [], binds: "operand", ...dividing(outer) };
+        return computed([], "operand", outer);
       }
       case "use": {
         if (consumer.what !== "index")
@@ -1676,6 +1739,7 @@ export class Consumers {
                   ? ["integer"]
                   : ["string"],
             binds: "whole",
+            elements: "unproved",
             divides: false,
           };
         // (an index takes a list's whole number or a dict's text, by its receiver)
@@ -1690,6 +1754,7 @@ export class Consumers {
         return {
           takes: only("list") ? ["integer"] : only("dict") ? ["string"] : [],
           binds: "whole",
+          elements: "unproved",
           divides: false,
         };
       }
@@ -1728,8 +1793,13 @@ export class Consumers {
     };
     if (this.#finishing && leftOutWarning(diagnostic)) return false;
     // (a null value's fallback stands where its rule takes the value: whether it divides there, TABLE r4.162)
-    const expects = item.tag === "null" ? this.#expected(site) : undefined;
-    const reported = expects === undefined ? diagnostic : { ...diagnostic, expects };
+    const expects =
+      item.tag !== "null" ? undefined : this.#finishing ? UNPROVED : this.#expected(site);
+    const reported = {
+      ...diagnostic,
+      ...(expects === undefined ? {} : { expects }),
+      present: this.#finishing ? ("unproved" as const) : this.#present(site, rule),
+    };
     (this.#finishing ? this.deferred : this.diagnostics).push(reported);
     this.rules.set(reported, this.#rule);
     return true;
@@ -3844,25 +3914,6 @@ export class Consumers {
     );
   }
 
-  /**
-   * Whether the value at `place` is read through a dict's key, there or above it (`d["a"]`, `d["a"].label`): a value
-   * the dict may not have when the script runs, which no fact here rules out (TABLE r4.160).
-   */
-  #throughKey(place: PlaceId): boolean {
-    const { program } = this.pass;
-    for (
-      let projection = program.projOf.get(place);
-      projection !== undefined;
-      projection = program.projOf.get(projection.owner)
-    )
-      if (
-        projection.step === "index" &&
-        this.#kindsOf(projection.owner, projection.node).some((item) => item.tag === "dict")
-      )
-        return true;
-    return false;
-  }
-
   /** C5a, C5b, F19a: a method call's receiver, `get` and `clear` as any other; ADR 1.5's null default first. */
   #methodReceiver(site: SourceSite, node: FlowNode, receiver: PlaceId, name: string): void {
     // §3.3: a receiver that is never null and has the method (a reference's method is F19a's)
@@ -3946,9 +3997,7 @@ export class Consumers {
       this.#error(
         "member-read",
         site,
-        receiverPlace !== undefined && this.#throughKey(receiverPlace)
-          ? { ...rule, keyed: true }
-          : rule,
+        rule,
         (definite(nulls) ? nulls : lacking).map((item) => item.tag),
       );
       return;
