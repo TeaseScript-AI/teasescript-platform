@@ -26,7 +26,7 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 
 const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
-  "Storage key must be a string. To compare the loaded value, write 'load(\"k\", default: null) == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'let value: string? = load(\"k\", default: null)', then 'value == null'.";
 /** The message for a session-only `kind`, saved directly or nested in an object. */
 const unstorableMessage = (kind: string, nested: boolean) =>
   `save cannot store ${nested ? `this object: it holds ${kind}, which exists` : `${kind}: it exists`} only in the current session. ${kind === "a message handle" ? "Save a message's text with its text property, as in 'save line.text as \"status\"'." : "Save values such as text, numbers, or lists instead."}`;

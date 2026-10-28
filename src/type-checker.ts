@@ -9654,7 +9654,7 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
 
 const STORAGE_KEY_MESSAGE = "Storage key must be a string.";
 
-const LOAD_KEY_MESSAGE = `${STORAGE_KEY_MESSAGE} To compare the loaded value, write 'load("k", default: null) == null'.`;
+const LOAD_KEY_MESSAGE = `${STORAGE_KEY_MESSAGE} To compare the loaded value, write 'let value: string? = load("k", default: null)', then 'value == null'.`;
 
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {

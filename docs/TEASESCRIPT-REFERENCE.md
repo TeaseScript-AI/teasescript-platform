@@ -68,8 +68,8 @@ let name = askText "What is your name?" // waits for the answer
 say "Welcome, ${name}." // waits for its reading time
 say "How many rounds?"
 let rounds = askChoice 3, 5, 10 // one button each
-for round in 1..=rounds {
-    say "Round ${round}.", 2 s
+for roundNumber in 1..=rounds {
+    say "Round ${roundNumber}.", 2 s
     wait 1 s
 }
 save rounds as "lastRounds" // kept for later sessions (the playground forgets it)

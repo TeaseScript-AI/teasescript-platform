@@ -303,7 +303,21 @@ test("reports a declaration named after the set keyword as a protected name", ()
 
 test("a protected name where a declaration's name belongs gives its diagnostic with the fix in every form", () => {
   // `wait` and `if` are keyword tokens and `timer` a command the parser reads by name; the diagnostic is the same.
-  for (const name of ["wait", "if", "timer", "round"]) {
+  for (const name of [
+    "wait",
+    "if",
+    "timer",
+    "round",
+    "notify",
+    "askTyping",
+    "askFile",
+    "askFiles",
+    "askFolder",
+    "askVideo",
+    "askAudio",
+    "chooseFile",
+    "chooseFolder",
+  ]) {
     const forms = [
       `let ${name} = 1`,
       `global ${name} = 1`,
