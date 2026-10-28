@@ -829,6 +829,19 @@ function extensionOpeningAt(
   return null;
 }
 
+/**
+ * The first `[color=...]` or `[bg=...]` of `text` whose colour `normalizeColor` rejects, which a span of
+ * `parseMessageMarkup` shows as `inherit`: the tag as written, its name, and its colour.
+ */
+export function rejectedColorTag(
+  text: string,
+): { readonly written: string; readonly name: string; readonly color: string } | null {
+  for (const match of text.matchAll(/(?<!\\)\[(color|bg)=([^[\]\n]*)\]/gu))
+    if (normalizeColor(match[2]) === null)
+      return { written: match[0], name: match[1]!, color: match[2]! };
+  return null;
+}
+
 function extension(
   kind: ExtensionOpening["kind"],
   opener: string,

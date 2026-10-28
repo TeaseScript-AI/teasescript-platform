@@ -142,6 +142,40 @@ test("rejects invalid constant colours and presentation options at compile time"
   assert.notEqual(compileSource('say "`[color=invalid]literal[/color]`"\nexit').plan, null);
 });
 
+test("a colour error names the value, and says that a see-through CSS colour must be opaque", () => {
+  const messages = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.message,
+    ]);
+  const seeThrough = (value: string) =>
+    `A message's color must be opaque, not "${value}", which is see-through. Use an opaque colour, such as "#336699".`;
+  for (const [source, message] of [
+    [
+      'let shade = "nope"\nsay bubble(color: shade) "Kneel."',
+      'A message\'s color must be a CSS colour, such as "#336699", not "nope".',
+    ],
+    ['let shade = "transparent"\nsay bubble(color: shade) "Kneel."', seeThrough("transparent")],
+    ['speaker vera { color: "rgb(255 0 0 / 0.5)" }', seeThrough("rgb(255 0 0 / 0.5)")],
+    [
+      'let line = "[color=inherit]Kneel.[/color]"\nsay line',
+      "'[color=inherit]' does not name a CSS colour. Use a CSS colour, as in '[color=#336699]'.",
+    ],
+    [
+      'say "[bg=transparent]Kneel.[/bg]"',
+      "'[bg=transparent]' names a see-through colour, but a colour in markup must be opaque. Use an opaque colour, as in '[bg=#336699]'.",
+    ],
+  ] as const)
+    assert.deepEqual(messages(source), [["TSC008", message]], source);
+  // Each example compiles in its place, and a known null keeps the default colour.
+  for (const source of [
+    'say bubble(color: "#336699") "Kneel."',
+    'say "[bg=#336699]Kneel.[/bg]"',
+    'let c: string? = null\nsay bubble(color: c) "x"',
+  ])
+    assert.notEqual(compileSource(`${source}\nexit`).plan, null, source);
+});
+
 test("a presentation option without a value is reported instead of dropped", () => {
   for (const [source, offset] of [
     ['say prose(background:) "Text"', 21],
