@@ -741,7 +741,7 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
     ["save 7 as key", "save"],
     ["delete key", "delete"],
   ]) {
-    const message = `Cannot ${use} with key 1: storage keys must be text (string). Use "1" as the key, or convert it with toString(...).`;
+    const message = `Cannot ${use} with key 1: storage keys must be text (string). Use "1" as the key, or convert the number with the toString function.`;
     const compiled = plan(
       `function dynamic(input) {\n  return input\n}\nlet key = dynamic(1)\n${command}\nexit`,
     );

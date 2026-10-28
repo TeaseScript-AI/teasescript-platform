@@ -190,7 +190,7 @@ test("count gives how often a part occurs, counted from the start without overla
       [
         [
           "TSV043",
-          "count() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+          "count() needs text (string) or a regex for 'part', not a whole number (integer). Convert the value with the toString function.",
           "1",
         ],
       ],
@@ -329,13 +329,13 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.contains(1)\nexit',
       "TSV043",
-      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert the value with the toString function.",
       "1",
     ],
     [
       'let items = ["a"]\nsay items.join(true)\nexit',
       "TSV043",
-      "join() needs text (string) for 'separator', not true or false (boolean). Convert it with toString(...).",
+      "join() needs text (string) for 'separator', not true or false (boolean). Convert the value with the toString function.",
       "true",
     ],
     [
@@ -347,13 +347,13 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let t = "abc"\nsay t.repeat(1.5)\nexit',
       "TSV043",
-      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. Convert the number with the toInteger function, which drops the fraction.",
       "1.5",
     ],
     [
       'let t = "abc"\nsay t.substring("1")\nexit',
       "TSV043",
-      "substring() needs a whole number (integer) for 'start', not text (string). Convert it with toInteger(...).",
+      "substring() needs a whole number (integer) for 'start', not text (string). Convert the text with the toInteger function.",
       '"1"',
     ],
     [
@@ -456,7 +456,7 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
     [
       'let count = 2\nsay "x".repeat(count)\ncount = 2.5\nexit',
       "TSV043",
-      "repeat() needs a whole number (integer) for 'count', not a number. 'count' is a number because line 3 can store a non-whole number in it. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. 'count' is a number because line 3 can store a non-whole number in it. Convert the number with the toInteger function, which drops the fraction.",
       "count",
     ],
   ];
@@ -493,7 +493,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.substring(at)\nexit",
       { text: "abc", at: 0.5 },
       "TSR024",
-      "substring() needs a whole number (integer) for 'start', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "substring() needs a whole number (integer) for 'start', not a number. Convert the number with the toInteger function, which drops the fraction.",
     ],
     [
       'say text.replace(part, "x")\nexit',
@@ -505,7 +505,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.contains(part)\nexit",
       { text: "abc", part: 1 },
       "TSV043",
-      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert it with toString(...).",
+      "contains() needs text (string) or a regex for 'part', not a whole number (integer). Convert the value with the toString function.",
     ],
     [
       "say text.repeat(times)\nexit",
@@ -517,7 +517,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say text.repeat(times)\nexit",
       { text: "abc", times: 1.5 },
       "TSV043",
-      "repeat() needs a whole number (integer) for 'count', not a number. Convert it with toInteger(...), which drops the fraction.",
+      "repeat() needs a whole number (integer) for 'count', not a number. Convert the number with the toInteger function, which drops the fraction.",
     ],
     [
       "say text.padStart(size, fill)\nexit",
@@ -529,7 +529,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       'say text.padEnd(size, "-")\nexit',
       { text: "abc", size: "5" },
       "TSV043",
-      "padEnd() needs a whole number (integer) for 'length', not text (string). Convert it with toInteger(...).",
+      "padEnd() needs a whole number (integer) for 'length', not text (string). Convert the text with the toInteger function.",
     ],
     [
       "say [text].join(separator)\nexit",
@@ -541,7 +541,7 @@ test("values the compiler cannot know are checked at runtime, with messages that
       "say value.trim()\nexit",
       { value: 5 },
       "TSR016",
-      "A whole number (integer) has no method 'trim'. Convert it to text first with toString(...).",
+      "A whole number (integer) has no method 'trim'. Convert the value to text first with the toString function.",
     ],
     [
       "say value.length\nexit",

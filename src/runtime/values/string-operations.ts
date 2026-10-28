@@ -56,7 +56,7 @@ export function missingMemberMessage(
           typeof value === "boolean" ||
           isAnyDuration(value) ||
           isAngle(value)
-        ? " Convert it to text first with toString(...)."
+        ? " Convert the value to text first with the toString function."
         : "";
   return `${description} has no ${use} '${name}'.${fix}`;
 }
