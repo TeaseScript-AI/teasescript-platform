@@ -24,6 +24,7 @@ import {
   keptKeyBelow,
   keptPath,
   keptPathText,
+  keptParent,
   keptPrefixes,
   keyBelow,
   keyOf,
@@ -1892,10 +1893,16 @@ export class Admission {
         if (below.length > 0)
           tracked.add(keptKey(this.#work, d.place, joinSteps(this.#destPath(d), below)));
       }
+    // (each key's prefixes, walked up a step at a time to one whose own are in already: each prefix made once, so a
+    // literal nested k deep makes its k keys' prefixes in k steps, not k² made again per key, TABLE r4.100 (2))
+    const closed = new Set<Key>();
     for (const key of [...tracked])
-      for (const prefix of keptPrefixes(this.#work, key)) {
+      for (let at: Key | null = key; at !== null && !closed.has(at);) {
+        closed.add(at);
+        at = keptParent(this.#work, at);
+        if (at === null) break;
         work.charge("indexSteps");
-        tracked.add(prefix);
+        tracked.add(at);
       }
     work.charge(
       "checks",
@@ -5490,7 +5497,9 @@ export class Admission {
   /**
    * A4: the bindings a stored value copies, with the paths they land at and the path into each (`strip`), directly,
    * through the literals that hold them, or through the values that carry them (a projection, an operation: the path
-   * read into it), in element order; once per value.
+   * read into it), in element order; once per value. A path below the value is a chain of steps, one per field, made
+   * into an array once and only where a binding lands at it, so a literal nested k deep costs k steps, not k paths of
+   * up to k steps each (TABLE r4.100 (2)).
    */
   #copySources(value: PlaceId): readonly {
     readonly path: readonly string[];
@@ -5507,24 +5516,39 @@ export class Admission {
     const known = this.#copies.get(value);
     if (known !== undefined) return known;
     const { program, definitions } = this.pass;
+    interface Steps {
+      readonly parent: Steps | null;
+      readonly step: string;
+      made: readonly string[] | null;
+    }
+    const top: readonly string[] = [];
+    const made = (at: Steps | null): readonly string[] => {
+      if (at === null) return top;
+      if (at.made === null) {
+        const steps: string[] = [];
+        for (let node: Steps | null = at; node !== null; node = node.parent) steps.push(node.step);
+        at.made = keptArray(this.#work, steps.reverse());
+      }
+      return at.made;
+    };
     const out: {
       path: readonly string[];
       binding: PlaceId;
       strip: readonly string[];
       cellsLive: boolean;
     }[] = [];
-    const pending: [PlaceId, readonly string[], readonly string[], boolean][] = [
-      [value, [], [], true],
+    const pending: [PlaceId, Steps | null, readonly string[], boolean][] = [
+      [value, null, [], true],
     ];
     while (pending.length > 0) {
       const [current, path, strip, cellsLive] = pending.pop()!;
       program.work.charge("indexSteps");
       const binding = program.occurrenceOf.get(current);
       if (binding !== undefined) {
-        out.push({ path, binding, strip, cellsLive });
+        out.push({ path: made(path), binding, strip, cellsLive });
         continue;
       }
-      const next: [PlaceId, readonly string[], readonly string[], boolean][] = [];
+      const next: [PlaceId, Steps | null, readonly string[], boolean][] = [];
       // (its cells' tasks share one rest of the strip, charged as kept)
       let rest: readonly string[] | null = null;
       if (program.hasOf.has(current))
@@ -5534,8 +5558,9 @@ export class Admission {
             strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
           for (const [name, term] of fields)
             if (term.kind === "ref") {
-              // (one path per field, which its cells share, charged before it is made)
-              const child = strip.length === 0 ? keptSteps(this.#work, path, [name]) : path;
+              // (one step per field, which its cells share)
+              const child: Steps | null =
+                strip.length === 0 ? { parent: path, step: name, made: null } : path;
               for (const d of definitions.cellDefs.get(term.place) ?? []) {
                 rest ??= strip.length === 0 ? strip : keptSlice(this.#work, strip, 1);
                 next.push([d.value!, child, rest, cellsLive && this.pass.lists.live(d)]);

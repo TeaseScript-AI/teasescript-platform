@@ -3924,10 +3924,10 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-first-chain",
     measures: "F12, §8: a list nested k deep read through k `.first` into a written destination",
-    // 204,495 / 982,598 units at k = 64, 128 in both orders (4.9150); S6c measured 212,369 / 1,014,728 (4.8876):
-    // S8 runs fewer frames (2,180 against 10,181 at k = 128), so the literal walk's square, the same 114,212 / 642,491
-    // units, is a larger share; `main` before S6c stops at the allowance from k = 20
-    measured: 4.92,
+    // 125,852 / 493,911 units at k = 64, 128 (4.0137; reversed 494,215, 4.0161): S8 part 3 makes each key prefix of
+    // the literal's paths once (admission's `groups`) and walks no held literal's identity again (`#collectMarks`),
+    // where S8 part 2 charged 204,495 / 982,598 (4.9150); `main` before S6c stops at the allowance from k = 20
+    measured: 4.02,
     program: (k) =>
       main(
         lines(
@@ -3941,8 +3941,9 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
     name: "F12-index-chain",
     measures:
       "F12, §8: a list nested k deep around a 4-field record of host data, each field read through k index steps",
-    // 334,190 / 1,425,929 units at k = 64, 128 (4.4747; reversed 4.4756; `main` 707,530 / 4,318,378, 6.4008)
-    measured: 4.49,
+    // 252,377 / 922,560 units at k = 64, 128 (3.8340; reversed 3.8325; S8 part 2 346,019 / 1,469,854, 4.4550; `main`
+    // 707,530 / 4,318,378, 6.4008)
+    measured: 3.84,
     program: (k) =>
       main(
         lines(
@@ -3958,8 +3959,8 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
     name: "F12-member-chain",
     measures:
       "F12, §8: a record nested k deep read through its k properties into a written destination",
-    // 197,206 / 959,101 units at k = 64, 128 in both orders (4.9309; `main` 261,675 / 1,496,830, 5.80)
-    measured: 4.94,
+    // 75,901 / 293,585 units at k = 64, 128 in both orders (3.9216; `main` 261,675 / 1,496,830, 5.80)
+    measured: 3.93,
     program: (k) =>
       main(
         lines(
