@@ -588,6 +588,26 @@ const SIGNATURE_FAMILIES: readonly {
       `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let c${i} = root\nlet j${i} = toJson(c${i})`).join("\n")}\nexit\n`,
   },
   {
+    name: "toJson of the last of a chain of k copies, at 4 calls",
+    program: (k) =>
+      `let c0 = {n: 0}\n${Array.from({ length: k }, (_, i) => `let c${i + 1} = c${i}`).join("\n")}\n${Array.from({ length: 4 }, (_, i) => `let j${i} = toJson(c${k})`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of the last of a chain of 4 copies, at k calls",
+    program: (k) =>
+      `let c0 = {n: 0}\n${Array.from({ length: 4 }, (_, i) => `let c${i + 1} = c${i}`).join("\n")}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(c4)`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of the last of a chain of k copies, at k calls",
+    program: (k) =>
+      `let c0 = {n: 0}\n${Array.from({ length: k }, (_, i) => `let c${i + 1} = c${i}`).join("\n")}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(c${k})`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of each copy along a chain of k copies",
+    program: (k) =>
+      `let c0 = {n: 0}\n${Array.from({ length: k }, (_, i) => `let c${i + 1} = c${i}\nlet j${i} = toJson(c${i + 1})`).join("\n")}\nexit\n`,
+  },
+  {
     name: "toJson of one unchanged object k fields wide, at k calls",
     program: (k) =>
       `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
@@ -1306,6 +1326,44 @@ test("toJson proves an unchanged value once and sees what changed between calls"
       return at(inLine);
     });
     assert.deepEqual(verdicts[0], verdicts[1], `${name}: the guarded call in either source order`);
+  }
+  // (a copy written with a type of its own: its own proof, from its own domain, in either call order and all four modes,
+  // Codex r5 B1; a copy of that copy keeps it)
+  const fourModes = (source: string): string => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const once = (): string =>
+      JSON.stringify(
+        checkedResult(analyseCore(request), request)
+          .diagnostics.filter((d) => "rule" in d && d.rule.rule === "json")
+          .map((d) => `${d.class} ${source.slice(0, d.site.start).split("\n").length}`),
+      );
+    const modes = [false, true].flatMap((unshared) =>
+      [false, true].map((reversed) => {
+        const run = (): string =>
+          reversed
+            ? withSolverSeam({ reverseWorklist: true }, () =>
+                withConsumerOrder((list) => [...list].reverse(), once),
+              )
+            : once();
+        return unshared ? withoutSharing(run) : run();
+      }),
+    );
+    assert.equal(new Set(modes).size, 1, `${source}: ${modes.join(" | ")}`);
+    return modes[0]!;
+  };
+  for (const type of ["regex[]", "regex dict", "regex | integer"]) {
+    const typed = `let root = hostValue\nlet copy: ${type} = root\nlet again = copy\n`;
+    assert.equal(
+      fourModes(`${typed}say toJson(root)\nsay toJson(copy)\nsay toJson(again)\nexit\n`),
+      JSON.stringify(["warning-runtime-check 5", "warning-runtime-check 6"]),
+      `${type}, the source first`,
+    );
+    assert.equal(
+      fourModes(`${typed}say toJson(again)\nsay toJson(copy)\nsay toJson(root)\nexit\n`),
+      JSON.stringify(["warning-runtime-check 4", "warning-runtime-check 5"]),
+      `${type}, the copies first`,
+    );
   }
   // (copies of it, unchanged: each call its own warning)
   assert.deepEqual(
