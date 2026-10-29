@@ -119,18 +119,19 @@ if (!isMainThread) {
       current.postMessage(message);
     });
 
-  /** A generator's sources: its fixed `cases`, or each of its `shapes` at each size. */
+  /** A generator's sources: its fixed `cases`, and each of its `shapes` at each size. */
   const sourcesOf = (generator) => {
     const files = (value) =>
       typeof value === "string" ? [{ path: "main.tease", source: value }] : value;
-    if (generator.cases !== undefined)
-      return generator.cases.map(([name, value]) => ({ name, files: files(value) }));
-    return (sizesOption ?? generator.sizes ?? [4, 8]).flatMap((size) =>
-      Object.entries(generator.shapes).map(([name, shape]) => ({
+    const cases = (generator.cases ?? []).map(([name, value]) => ({ name, files: files(value) }));
+    const shapes = generator.shapes ?? {};
+    const sized = (sizesOption ?? generator.sizes ?? [4, 8]).flatMap((size) =>
+      Object.entries(shapes).map(([name, shape]) => ({
         name: `${name}@${size}`,
         files: files(shape(size)),
       })),
     );
+    return [...cases, ...sized];
   };
 
   const folder = path.join(path.dirname(fileURLToPath(import.meta.url)), area);
