@@ -8,6 +8,7 @@ import {
   DemandExhausted,
   demandAllowanceFor,
   joinSteps,
+  keptSlice,
   type BudgetLimit,
 } from "./budget.js";
 import { withFacts } from "./consumers/diagnostics.js";
@@ -317,7 +318,9 @@ export class Consumers {
     const lists = [definitions.byKey.get(at) ?? []];
     // (an add stores at its receiver's element)
     if (path.at(-1) === "element")
-      lists.push(definitions.byKey.get(keyOf(root, path.slice(0, -1))) ?? []);
+      lists.push(
+        definitions.byKey.get(keyOf(root, keptSlice(program.work, path, 0, path.length - 1))) ?? [],
+      );
     for (const list of lists)
       for (const d of list) {
         program.work.charge("checks");
