@@ -476,14 +476,12 @@ function concreteSite(
   return first === undefined ? null : first.d.site;
 }
 
-/** Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4). */
+/**
+ * Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4): G3 3b, by one walk
+ * of the path down those keys' trie (`Admission.dirty`), never a key made per prefix.
+ */
 function isClean(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
-  for (let length = 0; length <= path.length; length += 1) {
-    admission.pass.program.work.charge("checks");
-    const at = keyOf(root, path.slice(0, length));
-    if (admission.rejectedKeys.has(at) || admission.a4Keys.has(at)) return false;
-  }
-  return true;
+  return admission.dirty.along(root, path, true).length === 0;
 }
 
 /** The written type an alias's read copies at `rest` below its path (`writtenDomainKey`), `null` where none. */

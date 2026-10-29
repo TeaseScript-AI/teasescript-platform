@@ -1,14 +1,16 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinParts, keepText } from "../budget.js";
+import { joinParts, keep, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { landed, passThrough } from "./landings.js";
-import type { Inheriting, Waiting } from "./model.js";
+import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsOf, scanAt } from "./scan.js";
-import { cycleOf, join } from "./waiting.js";
-import { copySources } from "./walk.js";
+import { cycleOf, inheritedInto, join } from "./waiting.js";
+import { copySources, stopsOf } from "./walk.js";
+import { wholeOf } from "./eligibility.js";
+import { positions } from "../positions.js";
 
 // A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.
 
@@ -93,6 +95,18 @@ export function inheritedAt(
   try {
     const scan = (next: Key): Waiting => {
       const [place, path] = [keyPlace(next), keyPath(next)];
+      // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
+      const frontier = positions() ? wrappedFrontier(admission, place, path) : null;
+      if (frontier !== null)
+        return {
+          key: next,
+          steps: wrapped(admission, next, place, path, frontier, () => ownScan(next)),
+          cycle: "",
+        };
+      return ownScan(next);
+    };
+    const ownScan = (next: Key): Waiting => {
+      const [place, path] = [keyPlace(next), keyPath(next)];
       // (a place that answers through a copy above it asks that copy's place, nothing scanned)
       const through = passThrough(admission, place, path);
       if (through !== place)
@@ -159,6 +173,169 @@ export function inheritedAt(
     admission.resolving = false;
   }
   return admission.inherited.get(key)!;
+}
+
+/**
+ * G3 3a: where a key's inherited type stands past wrappers (`Contract.wrapperHop`): the read its path's last wrapper
+ * holds, with the path below it, when its first step passes one and each wrapper on the way is one for A2's scan too
+ * (`scanHop`); `null` where the first step passes none. Once per place and path (by its id), from its parent's.
+ */
+function wrappedFrontier(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+): Frontier | null {
+  if (path.length === 0 || scanHop(admission, place, path[0]!) === null) return null;
+  const { contract } = admission.pass;
+  const ids: number[] = [contract.pathIdOf(path)];
+  // (up to the nearest path known, then each one step below its parent's)
+  for (let id = ids[0]!; !admission.frontiers.has(joinParts(place, id)) && id > 0;) {
+    id = contract.pathParent(id);
+    ids.push(id);
+  }
+  for (let index = ids.length - 1; index >= 0; index -= 1) {
+    const id = ids[index]!;
+    const memoKey = joinParts(place, id);
+    if (admission.frontiers.has(memoKey)) continue;
+    keepText(admission.work, memoKey.length);
+    if (id === 0) {
+      admission.frontiers.set(memoKey, { place, read: null, rest: 0 });
+      continue;
+    }
+    const above = admission.frontiers.get(joinParts(place, contract.pathParent(id)))!;
+    const step = path[contract.pathDepth(id) - 1]!;
+    const hop = above.rest === 0 ? scanHop(admission, above.place, step) : null;
+    admission.frontiers.set(
+      memoKey,
+      hop === null
+        ? { place: above.place, read: above.read, rest: contract.pathStep(above.rest, step) }
+        : { place: hop.binding, read: hop.read, rest: 0 },
+    );
+  }
+  return admission.frontiers.get(joinParts(place, ids[0]!))!;
+}
+
+/**
+ * G3 3a: a wrapper's step as A2's scan reads it (`scanAt`, `earliestDecider`), or `null`: the binding is a wrapper at
+ * the step (`Contract.wrapperHop`) whose declaration is its key's one eligible store, no other definition's class, and
+ * its literal's stops at the step are the read's own (a written stop where its binding is written or inherits one, and
+ * its value), none at the literal's root or below the read. So the scan of a key `place|step·rest` finds the read's
+ * written type at the rest first, before its value, and else decides by values: its inherited type is the read's
+ * binding's at the rest (`inheritedInto`), optional where the declaration's value there holds `null`. Once per place and
+ * step.
+ */
+function scanHop(
+  admission: Admission,
+  place: PlaceId,
+  step: string,
+): { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null {
+  const memoKey = joinParts(place, step);
+  const known = admission.scanHops.get(memoKey);
+  if (known !== undefined) return known;
+  keepText(admission.work, memoKey.length);
+  const { program, contract } = admission.pass;
+  program.work.charge("checks");
+  let found: {
+    readonly binding: PlaceId;
+    readonly read: PlaceId;
+    readonly decl: Definition;
+  } | null = null;
+  const hop = contract.wrapperHop(place, step);
+  const binding = hop === null ? undefined : program.occurrenceOf.get(hop.read);
+  if (hop !== null && binding !== undefined) {
+    const root = keyOf(place, []);
+    const eligible = wholeOf(admission, root, false);
+    const stops = stopsOf(admission, hop.literal, hop.decl.node);
+    const own = (list: readonly Stop[] | undefined): boolean =>
+      list === undefined ||
+      list.every(
+        (stop) =>
+          stop.value === hop.read && stop.strip.length === 0 && stop.via === null && !stop.deep,
+      );
+    const beside = stopSteps(admission, stops);
+    if (
+      eligible.length === 1 &&
+      eligible[0] === hop.decl &&
+      !admission.members.has(hop.decl) &&
+      !admission.pass.definitions.deadArguments.has(root) &&
+      passThrough(admission, place, [step]) === place &&
+      own(stops.written.get(step)) &&
+      own(stops.values.get(step)) &&
+      !beside.root &&
+      !beside.deeper.has(step)
+    )
+      found = { binding, read: hop.read, decl: hop.decl };
+  }
+  admission.scanHops.set(memoKey, found);
+  return found;
+}
+
+/**
+ * A walk's written and value stops by their paths' first steps (`scanHop`): whether one stands at the root, and the
+ * first steps of the paths of two steps or more. Once per walk.
+ */
+function stopSteps(
+  admission: Admission,
+  stops: Stops,
+): { readonly root: boolean; readonly deeper: ReadonlySet<string> } {
+  const known = admission.stopSteps.get(stops);
+  if (known !== undefined) return known;
+  let root = false;
+  const deeper = new Set<string>();
+  for (const map of [stops.written, stops.values])
+    for (const text of map.keys()) {
+      admission.pass.program.work.charge("checks");
+      if (text === "") root = true;
+      else if (text.includes(".")) deeper.add(text.slice(0, text.indexOf(".")));
+    }
+  keep(admission.work, 1 + deeper.size);
+  const found = { root, deeper };
+  admission.stopSteps.set(stops, found);
+  return found;
+}
+
+/**
+ * G3 3a: a key's scan past wrappers (`inheritedAt`): its frontier's written type at the rest (the read's binding's own,
+ * or what it inherits there, `inheritedInto`, into the key's decision), optional where the key's declaration's value at
+ * the path holds `null`; each wrapper's scan on the way gives what the one below it does, its value's kinds the same at
+ * every one of them, which the value side's position through the same wrappers proves (`Values.valuePosition`). Where it
+ * does not, the key's own scan (`own`).
+ */
+function* wrapped(
+  admission: Admission,
+  key: Key,
+  place: PlaceId,
+  path: readonly string[],
+  frontier: Frontier,
+  own: () => Waiting,
+): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
+  const { program, values, contract } = admission.pass;
+  const decl = scanHop(admission, place, path[0]!)!.decl;
+  const value = admission.run(values.valuePosition(decl.value!, decl.node, path));
+  const at = value.proof;
+  if (
+    at === null ||
+    !at.hopped ||
+    at.read !== frontier.read ||
+    at.rest !== frontier.rest ||
+    frontier.read === null
+  ) {
+    const steps = own().steps;
+    return steps === null ? null : yield* steps;
+  }
+  const rest = contract.pathSteps(frontier.rest);
+  const written = writtenOf(program.place(frontier.place).kind);
+  const copied =
+    written !== null
+      ? permittedAt(written, rest)
+      : admission.inheriting.has(frontier.place)
+        ? yield* inheritedInto(admission, frontier.place, rest, key)
+        : null;
+  if (copied === null) return null;
+  return {
+    copied,
+    nullable: typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
+  };
 }
 
 /** A computation run outside a resolution: each inherited type it waits on resolved by `inheritedAt` first. */

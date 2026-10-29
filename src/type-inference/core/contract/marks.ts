@@ -32,6 +32,76 @@ function common<T>(
     : [...b.keys()].filter((key) => a.has(key));
 }
 
+/**
+ * Whether a holder marks no path, whatever the path (`marksAt`): no holder it reaches through its references, itself
+ * included, has a guarded path or a read of its own. Once per holder and pass, the references' components found on an
+ * explicit stack (a holder's references are made with it, and `collectMarks` adds the rest before the first ask).
+ */
+export function marksNothing(contract: Contract, holder: Holder | null): boolean {
+  if (holder === null) return true;
+  collectMarks(contract);
+  const known = contract.quiet.get(holder);
+  if (known !== undefined) return known;
+  const work = contract.pass.program.work;
+  const index = new Map<Holder, number>();
+  const low = new Map<Holder, number>();
+  const open: Holder[] = [];
+  const frames: { readonly holder: Holder; readonly to: Holder[]; at: number; quiet: boolean }[] =
+    [];
+  const enter = (each: Holder): void => {
+    work.charge("invSteps");
+    index.set(each, index.size);
+    low.set(each, index.size - 1);
+    open.push(each);
+    frames.push({
+      holder: each,
+      to: [...each.refsAt.values()].flatMap((list) => list.map((reference) => reference.to)),
+      at: 0,
+      quiet: each.guarded.size === 0 && each.reads.length === 0,
+    });
+  };
+  enter(holder);
+  while (frames.length > 0) {
+    const frame = frames.at(-1)!;
+    if (frame.at < frame.to.length) {
+      const to = frame.to[frame.at++]!;
+      work.charge("invSteps");
+      const done = contract.quiet.get(to);
+      if (done !== undefined) frame.quiet &&= done;
+      else if (!index.has(to)) enter(to);
+      else if (open.includes(to))
+        low.set(frame.holder, Math.min(low.get(frame.holder)!, index.get(to)!));
+      continue;
+    }
+    frames.pop();
+    const parent = frames.at(-1);
+    if (low.get(frame.holder) === index.get(frame.holder)) {
+      // a component: quiet where every member is and every reference out of it reaches only quiet ones
+      const members: Holder[] = [];
+      let quiet = frame.quiet;
+      for (let member = open.pop()!; ; member = open.pop()!) {
+        members.push(member);
+        if (member === frame.holder) break;
+      }
+      for (const member of members) quiet &&= contract.pendingQuiet.get(member) ?? true;
+      contract.keep(members.length);
+      for (const member of members) {
+        contract.pendingQuiet.delete(member);
+        contract.quiet.set(member, quiet);
+      }
+      if (parent !== undefined) parent.quiet &&= quiet;
+    } else {
+      // (a member of a component still open: its own findings wait for the component's root)
+      contract.pendingQuiet.set(frame.holder, frame.quiet);
+      if (parent !== undefined) {
+        low.set(parent.holder, Math.min(low.get(parent.holder)!, low.get(frame.holder)!));
+        parent.quiet &&= frame.quiet;
+      }
+    }
+  }
+  return contract.quiet.get(holder)!;
+}
+
 export function newHolder(contract: Contract, id: string): Holder {
   contract.keepText(id.length);
   contract.facts.markNodes += 1;
@@ -362,6 +432,8 @@ export function marksAt(
 ): boolean {
   if (holder === null) return false;
   collectMarks(contract);
+  // G3 3b: a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
+  if (marksNothing(contract, holder)) return false;
   const work = contract.pass.program.work;
   const tested = contract.pass.guards.testedSteps();
   const stack: {
@@ -556,7 +628,7 @@ function ownFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | nu
     // (its first step: the path's ancestor one step deep)
     let first = where;
     while (contract.pathParents[first]! > 0) first = contract.pathParents[first]!;
-    const step = contract.pathLast[first]!;
+    const step = contract.pathLastSteps[first]!;
     if (own.has(step)) return;
     contract.keepText(step.length);
     own.add(step);

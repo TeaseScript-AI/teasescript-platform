@@ -1,11 +1,13 @@
 import type { ForStatement } from "../../ast.js";
 import type { PlaceId, SourceSite } from "../graph.js";
 import {
+  keep,
   keepText,
   keptArray,
   keptSlice,
   keptText,
   pathTextLength,
+  type WorkCounter,
   type WorkLedger,
 } from "./budget.js";
 import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
@@ -76,10 +78,112 @@ export function prefixesOf(key: Key): Key[] {
   return prefixes;
 }
 
+/** A node of a `KeyTrie`: a key's step below its parent's, and the key ending there, if one does. */
+interface TrieNode {
+  readonly children: Map<string, TrieNode>;
+  key: Key | null;
+}
+
+/**
+ * G3 3b: a set of keys as a trie of their steps per place, so a key's prefixes among them are found by one walk down
+ * the key's own steps as far as the trie holds them (each step a visit, charged to `counter`), never by a key made per
+ * prefix of its path: a long key of a place keyed only near its root is asked in a step or two. Built on its first
+ * question, the program's (`WorkLedger.shared`).
+ */
+export class KeyTrie {
+  #roots: Map<PlaceId, TrieNode> | null = null;
+
+  public constructor(
+    readonly work: WorkLedger,
+    readonly counter: WorkCounter,
+    readonly keys: () => Iterable<Key>,
+  ) {}
+
+  /** The keys of the set at or above `key`, the nearest first; `self`: the key itself too. */
+  public above(key: Key, self: boolean): Key[] {
+    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    let node = roots.get(keyPlace(key));
+    const found: Key[] = [];
+    if (node === undefined) return found;
+    const steps = key.slice(key.indexOf("|") + 1);
+    this.work.charge(this.counter);
+    if (node.key !== null && (self || steps !== "")) found.push(node.key);
+    for (let at = 0; at < steps.length && node !== undefined;) {
+      const dot = steps.indexOf(".", at);
+      const end = dot < 0 ? steps.length : dot;
+      node = node.children.get(steps.slice(at, end));
+      at = end + 1;
+      if (node === undefined) break;
+      this.work.charge(this.counter);
+      if (node.key !== null && (self || end < steps.length)) found.push(node.key);
+    }
+    return found.reverse();
+  }
+
+  /**
+   * The keys of the set along a place's path of `steps` (the path's own key too where `self`), the shortest first, each
+   * with its depth: one walk down the steps as far as the trie holds them.
+   */
+  public along(
+    place: PlaceId,
+    steps: readonly string[],
+    self: boolean,
+  ): { readonly key: Key; readonly depth: number }[] {
+    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    let node = roots.get(place);
+    const found: { key: Key; depth: number }[] = [];
+    if (node === undefined) return found;
+    this.work.charge(this.counter);
+    if (node.key !== null && (self || steps.length > 0)) found.push({ key: node.key, depth: 0 });
+    for (let depth = 1; depth <= steps.length; depth += 1) {
+      node = node.children.get(steps[depth - 1]!);
+      if (node === undefined) break;
+      this.work.charge(this.counter);
+      if (node.key !== null && (self || depth < steps.length)) found.push({ key: node.key, depth });
+    }
+    return found;
+  }
+
+  /** Whether a key of the set stands at or above `key`. */
+  public any(key: Key, self: boolean): boolean {
+    return this.above(key, self).length > 0;
+  }
+
+  #build(): Map<PlaceId, TrieNode> {
+    const roots = new Map<PlaceId, TrieNode>();
+    for (const key of this.keys()) {
+      this.work.charge("indexSteps");
+      const place = keyPlace(key);
+      let node: TrieNode | undefined = roots.get(place);
+      if (node === undefined) roots.set(place, (node = { children: new Map(), key: null }));
+      for (const step of keyPath(key)) {
+        this.work.charge("indexSteps");
+        let child: TrieNode | undefined = node.children.get(step);
+        if (child === undefined) {
+          keep(this.work, 2);
+          node.children.set(step, (child = { children: new Map(), key: null }));
+        }
+        node = child;
+      }
+      node.key = key;
+    }
+    return roots;
+  }
+}
+
 /** `keyOf`, its text charged before it is made (`keepText`, TABLE r4.58). */
 export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[]): Key {
   keepText(work, String(place).length + 1 + pathTextLength(path));
   return keyOf(place, path);
+}
+
+/** The number of steps of a key's path (`keyPath(key).length`), made nothing. */
+function keyDepth(key: Key): number {
+  const bar = key.indexOf("|");
+  if (bar === key.length - 1) return 0;
+  let depth = 1;
+  for (let at = key.indexOf(".", bar + 1); at >= 0; at = key.indexOf(".", at + 1)) depth += 1;
+  return depth;
 }
 
 /** `keyPath`, its steps charged by the key's text before they are made (`keepText`). */
@@ -243,6 +347,9 @@ export class DefinitionIndex {
   readonly #keysBelow = new Map<Key, Key[]>();
   readonly #foreignAt = new Set<Key>();
   readonly #foreignBelow = new Set<Key>();
+  /** G3 3b: the keys with a definition or a loop's exit definition, and those another callable stores, as tries. */
+  readonly stored: KeyTrie;
+  readonly foreign: KeyTrie;
   /** The sites of each asked holder's own writers (`hasWriter`), gathered on its first question. */
   readonly #writerSites = new Map<Key, ReadonlySet<string>>();
   /** Each parameter's default (`defaultOf`), kept as `#parameterDefaults` makes it. */
@@ -258,6 +365,11 @@ export class DefinitionIndex {
 
   public constructor(readonly program: CoreProgram) {
     const work = program.work;
+    this.stored = new KeyTrie(work, "rdWalk", () => [
+      ...this.byKey.keys(),
+      ...this.loopAdds.keys(),
+    ]);
+    this.foreign = new KeyTrie(work, "ownerSteps", () => this.#foreignAt);
     const parameterDefaults = new Map<
       PlaceId,
       { readonly value: PlaceId; readonly site: SourceSite }
@@ -750,11 +862,8 @@ export class DefinitionIndex {
   /** Whether some callable other than the key's declaring one stores the key, a prefix or a key below it (X6). */
   public ownedAway(key: Key): boolean {
     if (this.#foreignBelow.has(key)) return true;
-    for (const prefix of prefixesOf(key)) {
-      this.program.work.charge("ownerSteps");
-      if (this.#foreignAt.has(prefix)) return true;
-    }
-    return false;
+    // (G3 3b: the foreign stores at a prefix, by one walk of the key's steps)
+    return this.foreign.any(key, false);
   }
 
   /** The writer of a whole store or an add (F28): its kind and the site its diagnostics sit at. */
@@ -1016,15 +1125,11 @@ export class DefinitionLists {
   public reachingDef(key: Key, node: FlowNode, before = false): Reaching | null {
     const program = this.#program;
     program.work.charge("rdQueries");
-    const place = keyPlace(key);
-    const path = keyPath(key);
-    let best: Reaching | null = null;
-    for (let length = path.length; length >= 0; length -= 1) {
-      const d = this.#nearest(
-        this.definitionsOf(keyOf(place, path.slice(0, length))),
-        node,
-        before,
-      );
+    // (G3 3b: the key and its prefixes with definitions, the longest first, by one walk of its steps; a prefix with
+    // none has no nearest definition)
+    let best: { def: Definition; length: number } | null = null;
+    for (const prefix of this.index.stored.above(key, true)) {
+      const d = this.#nearest(this.definitionsOf(prefix), node, before);
       if (
         d !== null &&
         (best === null ||
@@ -1032,9 +1137,9 @@ export class DefinitionLists {
           (d.node === best.def.node &&
             DefinitionLists.#sourceOrder(d) > DefinitionLists.#sourceOrder(best.def)))
       )
-        best = { def: d, rest: path.slice(length) };
+        best = { def: d, length: keyDepth(prefix) };
     }
-    return best;
+    return best === null ? null : { def: best.def, rest: keyPath(key).slice(best.length) };
   }
 
   /**
@@ -1104,7 +1209,9 @@ export class DefinitionLists {
     };
     if (this.index.ownedAway(key)) see(this.index.sitePositions, "call");
     see(this.#eventList(key), "branch");
-    for (const prefix of prefixesOf(key)) see(this.definitionsOf(prefix).eventPositions, "branch");
+    // (G3 3b: the prefixes with definitions, by one walk of the key's steps; a prefix with none has no event)
+    for (const prefix of this.index.stored.above(key, false))
+      see(this.definitionsOf(prefix).eventPositions, "branch");
     return word;
   }
 
@@ -1117,8 +1224,9 @@ export class DefinitionLists {
     readonly calls: readonly number[];
   } {
     const stores = [...this.#eventList(key)];
-    // (one by one: a prefix's events grow with the source, past one call's arguments, Astra r6 N1)
-    for (const prefix of prefixesOf(key))
+    // (one by one: a prefix's events grow with the source, past one call's arguments, Astra r6 N1; G3 3b: the prefixes
+    // with definitions alone)
+    for (const prefix of this.index.stored.above(key, false))
       for (const position of this.definitionsOf(prefix).eventPositions) stores.push(position);
     this.#program.work.charge("eventSteps", sortCost(stores.length));
     stores.sort((a, b) => a - b);

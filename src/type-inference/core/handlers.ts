@@ -1,10 +1,4 @@
-import {
-  keptPrefixes,
-  prefixesOf,
-  sortCost,
-  type DefinitionIndex,
-  type Key,
-} from "./definitions.js";
+import { KeyTrie, keptPrefixes, sortCost, type DefinitionIndex, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { CoreProgram } from "./program.js";
 
@@ -37,6 +31,8 @@ export class HandlerIndex {
   /** The keys above one: a prefix of a handler store's key. */
   readonly #handlerAbove = new Set<Key>();
   readonly #facts = new Map<Callable, Registrations>();
+  /** G3 3b: `#handlerKeys` as a trie (`handlerTouches`). */
+  readonly #handled: KeyTrie;
 
   public constructor(
     readonly program: CoreProgram,
@@ -44,6 +40,7 @@ export class HandlerIndex {
   ) {
     const work = program.work;
     const flow = program.flow;
+    this.#handled = new KeyTrie(work, "eventSteps", () => this.#handlerKeys);
     for (const [key, list] of definitions.byKey)
       for (const d of list) {
         work.charge("indexSteps");
@@ -140,12 +137,10 @@ export class HandlerIndex {
 
   /** Whether the key, a prefix or a key below it has a store in block code (F24): a lookup per step of its path. */
   public handlerTouches(key: Key): boolean {
-    const prefixes = prefixesOf(key);
-    this.program.work.charge("eventSteps", prefixes.length + 1);
+    this.program.work.charge("eventSteps");
+    // (G3 3b: a handler store at a prefix, by one walk of the key's steps)
     return (
-      this.#handlerKeys.has(key) ||
-      this.#handlerAbove.has(key) ||
-      prefixes.some((prefix) => this.#handlerKeys.has(prefix))
+      this.#handlerKeys.has(key) || this.#handlerAbove.has(key) || this.#handled.any(key, false)
     );
   }
 

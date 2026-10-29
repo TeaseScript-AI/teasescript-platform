@@ -77,10 +77,37 @@ function ownsAny(node: IndexNode): boolean {
   );
 }
 
+/** The id of the path one `step` below the path `parent` (`pathAt`): a position's path (`positions.ts`). */
+export function pathStep(contract: Contract, parent: number, step: string): number {
+  return pathAt(contract, parent, step);
+}
+
+/** A path id's last step (the empty path's: none). */
+export function pathLast(contract: Contract, id: number): string {
+  return contract.pathLastSteps[id]!;
+}
+
+/** A path id's depth: its steps' count. */
+export function pathDepth(contract: Contract, id: number): number {
+  return contract.pathDepths[id]!;
+}
+
+/** The id of a path's parent, one step up (the empty path's: -1). */
+export function pathParent(contract: Contract, id: number): number {
+  return contract.pathParents[id]!;
+}
+
+/** A path id's steps, made fresh and charged (`stepsOf`). */
+export function pathSteps(contract: Contract, id: number): string[] {
+  const steps = stepsOf(contract, id);
+  contract.keep(steps.length);
+  return steps;
+}
+
 /** The id of the path one `step` below the path `parent`, made (and charged, its step and slot) when first asked. */
 export function pathAt(contract: Contract, parent: number, step: string): number {
-  let steps = contract.pathSteps[parent];
-  if (steps === undefined) contract.pathSteps[parent] = steps = new Map();
+  let steps = contract.pathChildren[parent];
+  if (steps === undefined) contract.pathChildren[parent] = steps = new Map();
   const known = steps.get(step);
   if (known !== undefined) return known;
   contract.keepText(step.length);
@@ -88,20 +115,20 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   const id = contract.pathParents.length;
   contract.pathParents.push(parent);
   contract.pathDepths.push(contract.pathDepths[parent]! + 1);
-  contract.pathLast.push(step);
+  contract.pathLastSteps.push(step);
   steps.set(step, id);
   return id;
 }
 
 /** The id of a path one `step` below the path `parent` if one has been made, else -1 (no index holds it). */
 export function pathBelow(contract: Contract, parent: number, step: string): number {
-  return parent < 0 ? -1 : (contract.pathSteps[parent]?.get(step) ?? -1);
+  return parent < 0 ? -1 : (contract.pathChildren[parent]?.get(step) ?? -1);
 }
 
 /** A path's steps, made fresh (the caller charges what it keeps). */
 export function stepsOf(contract: Contract, id: number): string[] {
   const steps: string[] = [];
-  for (let at = id; at > 0; at = contract.pathParents[at]!) steps.push(contract.pathLast[at]!);
+  for (let at = id; at > 0; at = contract.pathParents[at]!) steps.push(contract.pathLastSteps[at]!);
   return steps.reverse();
 }
 
@@ -196,7 +223,7 @@ export function nodeAt(contract: Contract, index: LiteralIndex, id: number): Ind
   for (let at = way.length - 1; at >= 0; at -= 1) {
     contract.pass.program.work.charge("invSteps");
     contract.keep(1);
-    node = node?.children.get(contract.pathLast[way[at]!]!) ?? null;
+    node = node?.children.get(contract.pathLastSteps[way[at]!]!) ?? null;
     index.byId.set(way[at]!, node);
   }
   return node;

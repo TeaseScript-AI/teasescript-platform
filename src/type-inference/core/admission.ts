@@ -36,6 +36,7 @@ import type {
   CopyForest,
   Decided,
   Decision,
+  Frontier,
   HeldOwn,
   IngressStop,
   Inheritance,
@@ -60,6 +61,7 @@ import { joinSteps, keptSteps, stepText, type WorkLedger } from "./budget.js";
 import { carried, keepsOwn, type CarrierRole, type Dispatch } from "./carriers.js";
 import { heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
+  KeyTrie,
   keptKey,
   keyOf,
   SELECTED_TEXT,
@@ -173,6 +175,36 @@ export class Admission {
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly stops = new Map<PlaceId, Stops>();
+  /** G3 3a: per place and path id, where it lands past wrappers (`landedFrontier`); per place and step, its wrapper's. */
+  readonly landedFrontiers = new Map<string, { readonly place: PlaceId; readonly rest: number }>();
+  readonly landingHops = new Map<string, PlaceId | null>();
+  /** Per place, its landings by first step (`landingSteps`); per walk, its stops by first step (`stopSteps`). */
+  readonly landingSteps = new Map<
+    PlaceId,
+    {
+      readonly whole: boolean;
+      readonly copies: ReadonlyMap<string, readonly InheritedCopy[]>;
+      readonly deeper: ReadonlySet<string>;
+    }
+  >();
+  readonly stopSteps = new WeakMap<
+    Stops,
+    { readonly root: boolean; readonly deeper: ReadonlySet<string> }
+  >();
+  /** G3 3a: per place and path id, its frontier past wrappers (`wrappedFrontier`); per place and step, its wrapper's step. */
+  readonly frontiers = new Map<string, Frontier>();
+  readonly scanHops = new Map<
+    string,
+    { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null
+  >();
+  /** Per walk, the deepest path its stops stand at (`earliestDecider`). */
+  readonly stopDepths = new WeakMap<
+    Stops,
+    { readonly written: number; readonly values: number; readonly literals: number }
+  >();
+  /** The keys `isClean` and `inputsOf` ask along a path (`dirty`, `stored`). */
+  #dirty: KeyTrie | null = null;
+  #stored: KeyTrie | null = null;
   readonly everyStop = new Map<PlaceId, Stops>();
   /**
    * A representative store's later equivalent ones (`grouped`), each recorded once per pass with its representative
@@ -366,6 +398,28 @@ export class Admission {
     for (const { path, term } of this.a4Copies)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
     for (const { path } of this.a4Inherits) this.reach += path.length;
+  }
+
+  /**
+   * G3 3b: the keys a store was rejected at (A6) or a copy of a written binding lands at (A4), which `isClean` asks
+   * along a path; and the keys whole stores or adds (or dead arguments) reach, `inputsOf`'s prefixes: as tries, each
+   * walked down a decision's path as far as it holds it.
+   */
+  public get dirty(): KeyTrie {
+    return (this.#dirty ??= new KeyTrie(this.work, "checks", () => [
+      ...this.rejectedKeys,
+      ...this.a4Keys,
+    ]));
+  }
+
+  public get stored(): KeyTrie {
+    const { definitions } = this.pass;
+    return (this.#stored ??= new KeyTrie(this.work, "checks", () => [
+      ...[...definitions.byKey]
+        .filter(([, list]) => list.some((d) => d.kind === "whole" || d.kind === "add"))
+        .map(([key]) => key),
+      ...definitions.deadArguments.keys(),
+    ]));
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */

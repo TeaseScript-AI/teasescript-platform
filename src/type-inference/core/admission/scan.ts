@@ -11,7 +11,16 @@ import { getProof } from "../values.js";
 import { addRest } from "./classes.js";
 import { eligibleOf } from "./eligibility.js";
 import { deciding } from "./kinds.js";
-import type { Candidate, EvaluationKey, Inheriting, Inputs, Stop, Via, ViaChain } from "./model.js";
+import type {
+  Candidate,
+  EvaluationKey,
+  Inheriting,
+  Inputs,
+  Stop,
+  Stops,
+  Via,
+  ViaChain,
+} from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { inheritedInto } from "./waiting.js";
 import { compareKeys, stopsOf, viaSignature } from "./walk.js";
@@ -40,16 +49,11 @@ export function inputsOf(
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
   );
+  // (G3 3b: the keys whole stores, adds or dead arguments reach along the path, shortest first, by one walk of its
+  // steps down their trie: never a key made per prefix of the path)
   const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
-  for (let length = 0; length < path.length; length += 1) {
-    program.work.charge("checks");
-    const prefix = keyOf(root, path.slice(0, length));
-    if (
-      (definitions.byKey.get(prefix) ?? []).some((d) => d.kind === "whole" || d.kind === "add") ||
-      definitions.deadArguments.has(prefix)
-    )
-      prefixes.push({ key: prefix, rest: path.slice(length) });
-  }
+  for (const { key, depth } of admission.stored.along(root, path, false))
+    prefixes.push({ key, rest: path.slice(depth) });
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
 }
 
@@ -189,7 +193,9 @@ export function* earliestDecider(
   // the earliest copy whose written type reaches the rest of the path
   let copy: { readonly key: EvaluationKey; readonly term: TypeTerm; readonly stop: Stop } | null =
     null;
-  for (let length = 0; length <= at.length; length += 1) {
+  // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`)
+  const depths = stopDepths(admission, stops);
+  for (let length = 0; length <= Math.min(at.length, depths.written); length += 1) {
     program.work.charge("checks");
     const written = snapshots(admission, stops.written.get(pathText(at.slice(0, length))), false);
     for (const stop of written ?? []) {
@@ -214,7 +220,7 @@ export function* earliestDecider(
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
   // (a value a projection selects stands for its parts below the path, never at it; of the values of one class the
   // first alone, the others answering as it does, Astra's review B2)
-  for (let length = 0; length <= at.length; length += 1) {
+  for (let length = 0; length <= Math.min(at.length, depths.values); length += 1) {
     const list = snapshots(
       admission,
       stops.values.get(pathText(at.slice(0, length))),
@@ -223,7 +229,10 @@ export function* earliestDecider(
     );
     if (list !== undefined) lists.push({ list, length });
   }
-  const literals = snapshots(admission, stops.literals.get(pathText(at)), true);
+  const literals =
+    at.length > depths.literals
+      ? undefined
+      : snapshots(admission, stops.literals.get(pathText(at)), true);
   if (literals !== undefined) lists.push({ list: literals, length: at.length });
   const positions = lists.map(() => 0);
   const throughs = new Map<string, WeakMap<ViaChain, boolean>>();
@@ -262,6 +271,39 @@ export function* earliestDecider(
     if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
     if (through(admission, next.via, at, tags, holds)) return { term: null, site: siteOf(next) };
   }
+}
+
+/** The depth of a path text (`pathText`): its steps' count, none for the empty path. */
+function textDepth(text: string): number {
+  if (text === "") return 0;
+  let depth = 1;
+  for (let at = text.indexOf("."); at >= 0; at = text.indexOf(".", at + 1)) depth += 1;
+  return depth;
+}
+
+/** The deepest path a walk's stops stand at, per kind of stop, once per walk (`earliestDecider`'s loops). */
+function stopDepths(
+  admission: Admission,
+  stops: Stops,
+): { readonly written: number; readonly values: number; readonly literals: number } {
+  let known = admission.stopDepths.get(stops);
+  if (known === undefined) {
+    const deepest = (map: ReadonlyMap<string, readonly Stop[]>): number => {
+      let depth = 0;
+      for (const text of map.keys()) {
+        admission.pass.program.work.charge("checks");
+        depth = Math.max(depth, textDepth(text));
+      }
+      return depth;
+    };
+    known = {
+      written: deepest(stops.written),
+      values: deepest(stops.values),
+      literals: deepest(stops.literals),
+    };
+    admission.stopDepths.set(stops, known);
+  }
+  return known;
 }
 
 /**
