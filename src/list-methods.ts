@@ -356,10 +356,10 @@ function setHasNo(name: string): string {
   return `A set has no ${name}(). Copy it into a list with toList() first.`;
 }
 
-/** Why a list or set of `kind` has no method `name`, from the compiler and the runtime (`TSR016`). */
 /** What `sort()` orders, as the runtime's check and the analysis state it. */
 export const SORT_RULE = "sort() sorts numbers, text, durations, angles, or date and time values";
 
+/** Why a list or set of `kind` has no method `name`, from the compiler and the runtime (`TSR016`). */
 export function missingListMethodMessage(kind: ListKind, name: string): string {
   const method = listMethod(name);
   if (kind === "set" && method?.notOnSet !== undefined) return method.notOnSet;

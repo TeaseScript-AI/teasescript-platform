@@ -91,6 +91,8 @@ export interface MessageSource {
    * where a check before it still holds at the use (`evaluation`); else `null`.
    */
   readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
+  /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
+  readonly target: (site: SourceSite) => boolean;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -98,8 +100,6 @@ export interface MessageSource {
    * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).
    * `codeAt`'s "no other diagnostic" fact.
    */
-  /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
-  readonly target: (site: SourceSite) => boolean;
   readonly alone: (
     self: CheckedDiagnostic,
     held: SourceSite,
