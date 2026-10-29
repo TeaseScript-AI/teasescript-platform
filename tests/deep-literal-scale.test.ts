@@ -189,7 +189,7 @@ test("8,192 and 10,000 nested defaults around a host value stop within the allow
 
 /**
  * A read 3,000 and 4,097 index steps deep of a one-element list (`value[0][0]…`): each step is read by a generator inside
- * the one before, and the native stack overflowed (`RangeError`) at about 2,550 levels. The core's read-depth guard
+ * the one before, and the native stack overflowed (`RangeError`) at about 2,450 levels. The core's read-depth guard
  * stops it cleanly; on the candidate route and in the core, in a child with the same heap, it must end with a result.
  */
 test("a read 3,000 and 4,097 index steps deep stops cleanly, never overflowing the native stack", () => {
