@@ -1955,8 +1955,19 @@ export class Contract {
           return yield* this.#contractIteration(projection.owner, []);
         if (measuresLength(projection.step))
           return yield* this.#contractLength(projection.owner, projection.step, []);
-        if (!selectsElement(projection.step))
-          return yield* this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
+        if (!selectsElement(projection.step)) {
+          // G3 (TABLE r4.164): a property or index read's contract once per occurrence, its owner's one step down,
+          // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
+          const at = program.places[value]?.site ?? null;
+          const step: Demand = {
+            key: joinParts("cpv", value),
+            kind: "contract",
+            file: at?.file ?? -1,
+            offset: at?.start ?? -1,
+            make: () => this.contractOfValueAt(projection.owner, [stepName(projection.step)]),
+          };
+          return yield step;
+        }
         // S6c: a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
         // `.first` reads each link once whole, never each link 2^k times
         const site = program.places[value]?.site ?? null;

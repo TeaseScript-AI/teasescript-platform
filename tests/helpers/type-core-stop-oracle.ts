@@ -338,7 +338,7 @@ export const NAMED_EXCEPTIONS: readonly NamedException[] = [
     mechanism:
       "a settled walk stop reads `state.ticks` by its key's finished contract, whose external item lost the ingress the value read keeps, so the count's consumer checks it as host data no ingress store brought: a redundant runtime check",
     issue: "#1216",
-    count: 532,
-    settled: 133,
+    count: 296,
+    settled: 99,
   },
 ];

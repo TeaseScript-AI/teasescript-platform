@@ -440,8 +440,8 @@ export function solveDemands(
 }
 
 /**
- * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `lit|`, `op|`, `dk|`, `dn|`, `vdk|`,
- * `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
+ * The computation that demands `key` (`c|`, `s|`, `rc|`, `cv|`, `def|`, `cop|`, `cpv|`, `lit|`, `op|`, `dk|`, `dn|`,
+ * `vdk|`, `vdn|`, `lp|`, `cr|`, `ce|`, `vg|`, `gv|`, `n5|`, `n5-loop|`, as the parts write them).
  */
 function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const [kind, ...parts] = key.split("|");
@@ -458,6 +458,7 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     case "cv":
       return contract.valueReceiver(Number(parts[0]));
     case "cop":
+    case "cpv":
       return contract.contractOfValue(Number(parts[0]));
     case "def": {
       const uid = Number(parts[0]);
