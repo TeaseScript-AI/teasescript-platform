@@ -1021,6 +1021,8 @@ export class Contract {
   /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
   readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
   #stoppedCount = 0;
+  /** The property and index reads whose occurrence answers were made since the last stop (`contractOfValue`, `stop`). */
+  readonly #occurrences: PlaceId[] = [];
 
   public constructor(readonly pass: CorePass) {}
 
@@ -1029,13 +1031,16 @@ export class Contract {
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
    * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
-   * so no result read the key before its stop, in any order.
+   * so no result read the key before its stop, in any order. A property or index read's occurrence answer kept before
+   * the stop is forgotten, so its next read reaches `contractOf` again (TABLE r4.186).
    */
   public stop(place: PlaceId, path: readonly string[]): void {
     const paths = this.#stopped.get(place);
     if (paths === undefined) this.#stopped.set(place, [path]);
     else paths.push(path);
     this.#stoppedCount += 1;
+    for (const value of this.#occurrences) this.pass.solver.forget(joinParts("cpv", value));
+    this.#occurrences.length = 0;
   }
 
   /** The keys whose decision stopped (`stop`), the set the next pass starts with. */
@@ -1958,13 +1963,17 @@ export class Contract {
         if (!selectsElement(projection.step)) {
           // G3 (TABLE r4.164): a property or index read's contract once per occurrence, its owner's one step down,
           // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
+          // (and once per stop: `stop` forgets it)
           const at = program.places[value]?.site ?? null;
           const step: Demand = {
             key: joinParts("cpv", value),
             kind: "contract",
             file: at?.file ?? -1,
             offset: at?.start ?? -1,
-            make: () => this.contractOfValueAt(projection.owner, [stepName(projection.step)]),
+            make: () => {
+              this.#occurrences.push(value);
+              return this.contractOfValueAt(projection.owner, [stepName(projection.step)]);
+            },
           };
           return yield step;
         }

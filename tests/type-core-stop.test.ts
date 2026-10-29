@@ -6,17 +6,21 @@ import { compileSourceWithBackend } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
+import { analyseCore, type Answers, type CorePass } from "../src/type-inference/core/answers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
 import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { Contract } from "../src/type-inference/core/contract.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { withSolverSeam, type Proof, type ProofDemand } from "../src/type-inference/core/solver.js";
+import { REASON, type Item } from "../src/type-inference/core/items.js";
+import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import {
   NAMED_EXCEPTIONS,
   stopIdentity,
@@ -2330,4 +2334,166 @@ test("a decision stopping in the restarted pass stops the analysis: #1194's copi
   assert.equal(budget.settled, false);
   assert.ok(budget.deferred.some((mark) => mark.rule.rule === "store"));
   assert.deepEqual(stopProblems({ unstopped, stopped, fitting: [], violating: [] }), []);
+});
+
+/** A test of the stopped-key family in the four modes: the solver's and consumers' orders, sharing on and off. */
+const STOP_MODES: readonly (readonly [string, <T>(make: () => T) => T])[] = (() => {
+  const reversed = <T>(make: () => T): T =>
+    withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), make),
+    );
+  return [
+    ["forward", (make) => make()],
+    ["reversed", reversed],
+    ["forward, unshared", (make) => withoutSharing(make)],
+    ["reversed, unshared", (make) => withoutSharing(() => reversed(make))],
+  ];
+})();
+
+const tagged = (items: readonly Item[]): string[] =>
+  items.map((item) => `${item.tag}/${item.reasons}`);
+const stoppedItems = (items: readonly Item[]): boolean =>
+  items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
+
+/**
+ * TABLE r4.186 at a property or index read's occurrence (G3 3a): its answer kept before a key's decision stops is not
+ * read after it (`Contract.stop` forgets it), so a read of the key, or of one below it, answers `budget` from the stop
+ * on, as in a pass that starts with the key stopped. Each chain is read, its key stopped at every depth of its reads'
+ * paths, and read again, in both read orders, directly and through a selection and an operation, and a proof read of
+ * its deepest occurrence after the stop holds the stop too. (Selections' and operations' own occurrence answers are
+ * `main`'s, #1403.)
+ */
+test("a property or index read's occurrence answers its key's stop at every depth from the stop on (r4.186)", () => {
+  const shapes = [
+    {
+      source: "let tree = [{q: [{q: 1}]}]\nlet copy = tree[0].q[0].q\nsay copy\nexit\n",
+      reads: ["tree[0]", "tree[0].q", "tree[0].q[0]", "tree[0].q[0].q"],
+    },
+    {
+      source: "let seed: integer = 1\nlet box = {q: {n: seed}}\nsay box.q.n\nexit\n",
+      reads: ["box.q", "box.q.n"],
+    },
+    {
+      source: "let pair = [{n: [1]}]\nsay pair.first.n[0]\nexit\n",
+      reads: ["pair.first.n", "pair.first.n[0]"],
+    },
+    {
+      source: "let v: integer? = null\nlet a = {n: {m: v}}\nsay (a.n otherwise {m: 2}).m\nexit\n",
+      reads: ["a.n", "(a.n otherwise {m: 2}).m"],
+    },
+  ];
+  type Budget = Proof & { readonly stopped: boolean };
+  for (const { source, reads } of shapes) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const at = (pass: CorePass): PlaceId[] =>
+      reads.map((text) => {
+        const found = pass.program.places.find(
+          (place) =>
+            place.site !== null &&
+            source.slice(place.site.start, place.site.end) === text &&
+            pass.program.projOf.has(place.id),
+        );
+        assert.ok(found !== undefined, text);
+        return found.id;
+      });
+    const shape = narrowingPass(request);
+    const roots = at(shape).map((value) => shape.program.targetRoot(value));
+    const binding = roots[0]!.root;
+    // (the binding itself and every prefix of its reads' paths)
+    const stops = new Map<string, readonly string[]>();
+    for (const { root, path } of roots)
+      if (root === binding)
+        for (let depth = 0; depth <= path.length; depth += 1)
+          stops.set(path.slice(0, depth).join("."), path.slice(0, depth));
+    for (const path of stops.values())
+      for (const [mode, inMode] of STOP_MODES)
+        for (const order of ["source", "deepest first"])
+          inMode(() => {
+            const where = `${source.split("\n")[1]} @${path.join(".") || "-"}, ${mode}, ${order}`;
+            const own = (list: readonly PlaceId[]) =>
+              order === "source" ? list : [...list].reverse();
+            const pass = narrowingPass(request);
+            const values = at(pass);
+            const read = (value: PlaceId) => pass.solver.run(pass.contract.contractOfValue(value));
+            for (const value of own(values)) assert.ok(!stoppedItems(read(value)), where);
+            pass.contract.stop(binding, path);
+            const after = new Map(own([...values].reverse()).map((value) => [value, read(value)]));
+            const fresh = narrowingPass(request);
+            fresh.contract.stop(binding, path);
+            for (const [i, value] of at(fresh).entries()) {
+              const expected = fresh.solver.run(fresh.contract.contractOfValue(value));
+              assert.deepEqual(
+                tagged(after.get(values[i]!)!),
+                tagged(expected),
+                `${reads[i]}: ${where}`,
+              );
+              const { root, path: below } = roots[i]!;
+              if (root === binding && path.every((step, depth) => below[depth] === step))
+                assert.ok(stoppedItems(expected), `${reads[i]}: ${where}`);
+            }
+            const deepest = values.at(-1)!;
+            const proof: ProofDemand<Budget> = {
+              key: "stop-proof",
+              kind: "contract",
+              file: 0,
+              offset: 0,
+              proves: true,
+              *make() {
+                const items = yield* pass.contract.contractOfValue(deepest);
+                const stopped = stoppedItems(items);
+                return { items, proof: { stopped, signature: () => String(stopped) } };
+              },
+            };
+            assert.equal(
+              pass.solver.run(pass.solver.proven(proof)).proof?.stopped,
+              stoppedItems(after.get(deepest)!),
+              where,
+            );
+          });
+  }
+});
+
+/**
+ * Astra r1's B1 witness: through its consumers the decision of `tree`'s element stops at a small demand allowance, and
+ * every read of an occurrence of the stopped key after it, `tree[0]`, `tree[0].q` and `tree[0].q[0]` among them, answers
+ * `budget` (observed by wrapping `contractOfValue`, for this analysis only, without a charge), with the one restart.
+ */
+test("after a decision stops through its consumers, every read of an occurrence of its key answers the stop (B1)", () => {
+  const source = "let tree = [{q: [{q: 1}]}]\nlet copy = tree[0].q[0].q\nsay copy\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const original = Contract.prototype.contractOfValue;
+  const seen: string[] = [];
+  const stale: string[] = [];
+  Contract.prototype.contractOfValue = function* (this: Contract, value: PlaceId) {
+    const items = yield* original.call(this, value);
+    const { program } = this.pass;
+    const { root, path } = program.targetRoot(value);
+    const site = program.places[value]!.site!;
+    if (
+      this.stoppedKeys().some(
+        (key) => key.place === root && key.path.every((step, i) => path[i] === step),
+      )
+    ) {
+      seen.push(source.slice(site.start, site.end));
+      if (!stoppedItems(items)) stale.push(source.slice(site.start, site.end));
+    }
+    return items;
+  };
+  try {
+    for (const [mode, inMode] of STOP_MODES) {
+      seen.length = 0;
+      stale.length = 0;
+      const answers: Answers = inMode(() =>
+        withTestDemandAllowance(25, () => analyseCore(request)),
+      );
+      assert.equal(answers.budget.counts.get("stopPasses"), 1, mode);
+      for (const text of ["tree[0]", "tree[0].q", "tree[0].q[0]"])
+        assert.ok(seen.includes(text), `${text}: ${mode}`);
+      assert.deepEqual(stale, [], mode);
+    }
+  } finally {
+    Contract.prototype.contractOfValue = original;
+  }
 });

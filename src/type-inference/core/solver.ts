@@ -395,6 +395,13 @@ export class Solver {
     return this.#memo.get(key);
   }
 
+  /** A finished demand's answer, and its proof, forgotten between two runs: its next read computes it again. */
+  public forget(key: string): void {
+    if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
+    this.#memo.delete(key);
+    this.#proofs.delete(key);
+  }
+
   /**
    * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
    * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
