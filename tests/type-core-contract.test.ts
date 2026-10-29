@@ -454,7 +454,7 @@ test("two equal literals share a class whatever absent properties were asked of 
  * whichever place enters the cycle first: its own entries, a copy of a member with more than one store an entry of that
  * member's key, a member with one store (a copy of another) replaced by its source's entry, and none of them cut. Asked
  * in fresh passes in three orders: the members in source order, reversed, and a copy outside the cycle first; each
- * entry's source, path, writer, holder, guard, ingress and the stores that brought it compared, and whether the stores
+ * entry's source, path, writer, holder, guard and the stores that brought it compared, whether it holds ingress, and whether the stores
  * hold layers, hold more than copies, and are cut.
  */
 const RINGS: readonly [string, string][] = [
@@ -539,13 +539,14 @@ test("each member of a cycle of whole copies has one answer whichever place ente
 
 /**
  * TABLE r4.185 (G5 5a's case 5): a stop whose own entries merge into one (two copies of one member, two copies reaching
- * one member, a plain and a guarded copy of one member, a copy of a parameter no call reaches) was replaced by its entry
- * where `main`'s walk reached it and cut where it was open, so `main`'s answer hung on which place entered the cycle
- * first; the cut is now the open stop's everywhere. What it publishes may differ from `main`'s only in the order of the
- * items in an answer and of the kinds in an admitted type: in all four modes, its records and route are one, the rest
- * is one with those orders set aside, and both are `main`'s: the hashes of the record with the route and of the
- * publication with those orders set aside, and its outcome, diagnostics, checks and deciders, are a regression oracle
- * taken from `main` at `ab3ec62bf` for these sources only (a change that changes `main`'s records of them updates it).
+ * one member, a plain and a guarded copy of one member, of one holding an operation's result too, a copy of a parameter
+ * no call reaches) was replaced by its entry where `main`'s walk reached it and cut where it was open, so `main`'s answer
+ * hung on which place entered the cycle first; the cut is now the open stop's everywhere. What it publishes may differ
+ * from `main`'s only in the order of the items in an answer and of the kinds in a decided admitted type: in all four
+ * modes, its records and route are one, the rest (`publishedUpToOrder`) is one with those orders set aside, and both are
+ * `main`'s: the hashes of the record with the route and of the publication with those orders set aside, and its
+ * outcome, diagnostics, checks and decided types with their deciders, are a regression oracle taken from `main` at
+ * `ab3ec62bf` for these sources only (a change that changes `main`'s records of them updates it).
  */
 const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
   [
@@ -554,12 +555,13 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
       "a0 = a2\na1 = wobj\nexit\n",
     {
       record: "a60f85b0b9218ce8",
-      upToOrder: "30b0f486b71e9e8b",
+      upToOrder: "8ec84600facd682a",
       compact: [
         "valid",
         "bad object by 10",
         "bad.p0 string by 15",
         "bad.p1 string by 24",
+        "wobj.element unknown by -",
         "wobj.p0 unknown by 54",
         "a0 null|object by 66",
         "a0.p0 integer|string by 66",
@@ -579,7 +581,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
       "if a1 != null {\n  a0 = a1\n}\na5 = a0\na1 = host\nexit\n",
     {
       record: "62c12ad619ffc257",
-      upToOrder: "28f8eb08dd243453",
+      upToOrder: "e56cd6479164593a",
       compact: [
         "warning-runtime-check",
         "warning-runtime-check TSV041 121-123",
@@ -594,11 +596,17 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
         "check copy-type a5.element 131",
         "check copy-type a1 139",
         "good list by 11",
+        "good.element integer by 12",
         "a5 list by 45",
+        "a5.element integer by 45",
         "a4 list by 59",
+        "a4.element integer by 59",
         "a3 list by 71",
+        "a3.element integer by 71",
         "a1 list by 83",
+        "a1.element integer by 83",
         "a0 list by 95",
+        "a0.element integer by 95",
       ],
     },
   ],
@@ -608,7 +616,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
       'a0 = b\na2 = bad\nsay "${a0.p0}"\nsay "${a1.p0}"\nsay "${a2.p0}"\nexit\n',
     {
       record: "b3c551d0d8ea4c78",
-      upToOrder: "a1e319754482cc32",
+      upToOrder: "63c49cbe0b0205e9",
       compact: [
         "compile-error",
         "compile-error TSV041 115-118",
@@ -629,27 +637,40 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
   ],
   [
     "a copy of a parameter no call reaches",
-    'let good = {p0: 1}\nlet bad = {p0: "x"}\nfunction f(x) {\n  let a0 = x\n  let a1 = a0\n  let a2 = a1\n  a0 = a2\n' +
-      '  a0 = good\n  a2 = bad\n  say "${a0.p0}"\n  say "${a1.p0}"\n  say "${a2.p0}"\n}\nexit\n',
+    'let bad = {p0: "x"}\nfunction f(x) {\n  let a = x\n  let b = a\n  a = b\n  b = bad\n  say "${a.p0}"\n}\nexit\n',
     {
-      record: "dbfc4abb5860fc78",
-      upToOrder: "25a1d8d36f9b2856",
+      record: "a7705fbc2e47a592",
+      upToOrder: "e721593c76151fe3",
+      compact: [
+        "valid",
+        "bad object by 10",
+        "bad.p0 string by 15",
+        "a object by 66",
+        "a.p0 string by 66",
+        "b object by 58",
+        "b.p0 string by 58",
+      ],
+    },
+  ],
+  [
+    "a plain and a guarded copy of a member holding an operation's result",
+    "let seed = [hostValue + 1]\nlet a = seed\nlet b = a\nlet c = b\nif b != null {\n  c = b\n}\na = c\nb = [1]\nexit\n",
+    {
+      record: "1431f9c1bc0be5cd",
+      upToOrder: "876b13d37a5a263b",
       compact: [
         "warning-runtime-check",
-        "warning-runtime-check TSV041 93-95",
-        "warning-runtime-check TSV041 103-105",
-        "check copy-type a2.p0 93",
-        "check copy-type a0.p0 103",
-        "good object by 11",
-        "good.p0 integer by 16",
-        "bad object by 29",
-        "bad.p0 string by 34",
-        "a0 object by 103",
-        "a0.p0 integer by 113",
-        "a1 object by 79",
-        "a1.p0 integer|string by -",
-        "a2 object by 93",
-        "a2.p0 string by 125",
+        "warning-runtime-check TSV043 12-21",
+        "check operand hostValue 12",
+        "check copy-type seed.element 12",
+        "seed list by 11",
+        "seed.element integer|number by -",
+        "a list by 35",
+        "a.element integer|number by -",
+        "b list by 48",
+        "b.element integer|number by 96",
+        "c list by 58",
+        "c.element integer|number by -",
       ],
     },
   ],
@@ -690,15 +711,17 @@ test("a stop whose own entries merge into one publishes main's records, its answ
               (check) => `check ${check.kind} ${check.target} ${check.site.start}`,
             ),
             ...bindings.flatMap((place) =>
-              ["", ...[...answers.placeProperties(place.id, [])].sort()].flatMap((property) => {
-                const type = answers.place(place.id, property === "" ? [] : [property]).admitted;
-                const label = `${place.kind.kind === "binding" ? place.kind.name : place.id}${property === "" ? "" : `.${property}`}`;
-                return type.by === "decided"
-                  ? [
-                      `${label} ${[...type.kinds].sort().join("|")} by ${type.decider?.start ?? "-"}`,
-                    ]
-                  : [];
-              }),
+              ["", "element", ...[...answers.placeProperties(place.id, [])].sort()].flatMap(
+                (property) => {
+                  const type = answers.place(place.id, property === "" ? [] : [property]).admitted;
+                  const label = `${place.kind.kind === "binding" ? place.kind.name : place.id}${property === "" ? "" : `.${property}`}`;
+                  return type.by === "decided"
+                    ? [
+                        `${label} ${[...type.kinds].sort().join("|")} by ${type.decider?.start ?? "-"}`,
+                      ]
+                    : [];
+                },
+              ),
             ),
           ];
           return {

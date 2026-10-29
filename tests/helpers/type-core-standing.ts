@@ -71,9 +71,10 @@ export function publishedAnswers(
 
 /**
  * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
- * order of the items in an answer and of the kinds in an admitted type. Every binding's admitted type and decider site
- * at its root and at each known property one level down, and every occurrence's answer (each item with its writer,
- * context and ingress leaves), route, place and obligations.
+ * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and decider
+ * site at its root, its element and each known property two levels down; every occurrence's answer (each item with all
+ * its marks, writer, context and ingress leaves), route, place and obligations, with its element's and its properties'
+ * answers where it holds a collection or an object.
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   const itemText = (item: Item): string =>
@@ -84,10 +85,11 @@ export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[
       item.writer === null ? "" : writerKey(item.writer),
       item.context ?? "",
       item.word ?? "",
-      `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}`,
+      `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}${item.loose === true ? "l" : ""}${item.extOnly === true ? "e" : ""}`,
       item.fan ?? "",
       item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join("+"),
     ].join("|");
+  const items = (list: readonly Item[]): string[] => list.map(itemText).sort();
   const admitted = (place: PlaceId, path: readonly string[]): AdmittedType => {
     const type = answers.place(place, path).admitted;
     return type.by === "decided"
@@ -97,22 +99,37 @@ export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[
           decider: type.decider,
           inherited: type.inherited,
         }
-      : type.by === "written"
-        ? { by: type.by, kinds: [...type.kinds].sort() }
-        : type;
+      : type;
   };
-  const places = bindings.map((place) => [
-    place,
-    admitted(place, []),
-    [...answers.placeProperties(place, [])]
-      .sort()
-      .map((name) => [name, admitted(place, [propertyStep(name)])]),
-  ]);
+  const places = bindings.map((place) => {
+    const below: [string, AdmittedType][] = [];
+    for (const first of [...answers.placeProperties(place, [])].sort()) {
+      const one = [propertyStep(first)];
+      below.push([first, admitted(place, one)]);
+      for (const second of [...answers.placeProperties(place, one)].sort())
+        below.push([`${first}.${second}`, admitted(place, [...one, propertyStep(second)])]);
+    }
+    return [place, admitted(place, []), admitted(place, ["element"]), below];
+  });
   const occurrences = answers.graph.nodes.flatMap((node) => {
     const at = answers.at(node);
-    return at === null
-      ? []
-      : [[node.id, at.route, at.place, at.items.map(itemText).sort(), at.obligations]];
+    if (at === null) return [];
+    const tags = new Set(at.items.map((item) => item.tag));
+    return [
+      [
+        node.id,
+        at.route,
+        at.place,
+        items(at.items),
+        at.obligations,
+        tags.has("list") || tags.has("set") || tags.has("dict")
+          ? items(answers.project(node, "element"))
+          : null,
+        tags.has("object")
+          ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
+          : null,
+      ],
+    ];
   });
   return JSON.stringify({ places, occurrences });
 }
