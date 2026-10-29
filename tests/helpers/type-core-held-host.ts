@@ -536,6 +536,8 @@ export function heldUnstopped(
  * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a case's decisions, each one unit
  * below a decision's work in its unstopped analysis (a decision stop, and with a program stop a combined one), the
  * three largest; judged against the unstopped run at the same demand allowance.
+ *
+ * @public (the whole family's driver outside CI reads it, with the family)
  */
 export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
