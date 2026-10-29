@@ -253,10 +253,11 @@ interface JsonProof {
 }
 
 /**
- * The proofs of each walk (the owner's review P1): one per read class on the value side (`Contract.readClass`: reads of
- * one class answer alike at every path below them, by their snapshot, their guards there and below and their narrowing,
- * k whole copies of one source one class), so `toJson` of one unchanged value at k calls walks its content once and
- * looks it up k times; a store, a guard, a narrowing or a call between them is another class, proved again.
+ * The proofs of each walk (the owner's review P1): one per read class (`Contract.readClass`, on the value side and the
+ * contract's: reads of one class answer alike at every path below them, by their binding, its written type among its
+ * facts, their snapshot, their guards there and below and their narrowing; k whole copies of an unwritten binding of
+ * one source one class, a chain of them resolved once), so `toJson` of one unchanged value at k calls walks its content
+ * once and looks it up k times; a store, a guard, a narrowing or a call between them is another class, proved again.
  */
 const JSON_PROOFS = new WeakMap<Consumers, Map<string, JsonProof | null>>();
 
@@ -280,8 +281,12 @@ export function jsonArgument(
     walk.skip(value);
     return;
   }
-  // (a read of a class proved before is looked up; any other value is proved where it stands)
-  const cls = walk.pass.contract.readClass(value, true);
+  // (a read of a class proved before is looked up, its class on both sides: its answer's and its contract's, which
+  // `domainItems` reads; any other value is proved where it stands)
+  const { contract } = walk.pass;
+  const exact = contract.readClass(value, true);
+  const kinds = contract.readClass(value, false);
+  const cls = exact === null || kinds === null ? null : `${exact}|${kinds}`;
   let proofs = JSON_PROOFS.get(walk);
   if (proofs === undefined) JSON_PROOFS.set(walk, (proofs = new Map()));
   const key = cls === null ? null : `${walk.asksNothing() ? "n" : ""}${cls}`;
