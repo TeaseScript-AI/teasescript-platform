@@ -117,13 +117,14 @@ function resolve(
 }
 
 /**
- * A destination's steps (`StoreStep`) by one walk down its path, asking no contract (Astra's B1 and Codex r2's blocker on
- * #1434: a contract question per prefix decodes and formats each whole prefix again): a property by its name, an
- * element step by the collection the written type there holds, its place's own or the copy's that the first prefix a
- * copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or A3 settled
- * the prefix by, else a list, as `storeSteps` names a container whose contract holds no dict or set. Each prefix's key
- * is made once, one step longer than the one before, only while no written type names the steps. No prefix is stopped:
- * a destination lies above its stop, and no other stop lies at or above it (`outermost`).
+ * A destination's steps (`StoreStep`) by one walk down its path, asking no contract (Astra's B1 and Codex r2's
+ * blocker on #1434: a contract question per prefix decodes and formats each whole prefix again): a property by its
+ * name, an element step by the collection the written type there holds, its place's own or the copy's that the first
+ * prefix a copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or
+ * A3 settled the prefix by, else labelled a list, conservatively, where this pass retains no collection name for it
+ * (its contract may hold a set or a dict there, Codex r3: the label names no type and changes no message). Each
+ * prefix's key is made once, one step longer than the one before, only while no written type names the steps. No
+ * prefix is stopped: a destination lies above its stop, and no other stop lies at or above it (`outermost`).
  */
 function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): StoreStep[] {
   const work = walk.pass.program.work;
