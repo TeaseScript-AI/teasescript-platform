@@ -3,6 +3,7 @@ import type { Admission } from "../admission.js";
 import {
   joinParts,
   joinSteps,
+  keep,
   keepText,
   keptParts,
   keptSplit,
@@ -625,28 +626,59 @@ function landingHop(admission: Admission, place: PlaceId, step: string): PlaceId
     !wholes.has(place) &&
     passThrough(admission, place, [step]) === place
   ) {
-    const along = copiesOf(admission, place).filter(
-      (copy) => copy.path.length === 0 || copy.path[0] === step,
-    );
-    const below = `${step}.`;
-    const deeper = (texts: Iterable<string> | undefined): boolean => {
-      for (const text of texts ?? []) {
-        program.work.charge("indexSteps");
-        if (text.startsWith(below)) return true;
-      }
-      return false;
-    };
+    const steps = landingSteps(admission, place, seeds, owned);
+    const along = steps.copies.get(step) ?? [];
     if (
+      !steps.whole &&
       along.length === 1 &&
       along[0]!.path.length === 1 &&
       along[0]!.strip.length === 0 &&
       along[0]!.from === binding &&
-      !deeper(seeds.get(place)?.keys()) &&
-      !deeper(owned.get(place))
+      !steps.deeper.has(step)
     )
       found = binding;
   }
   admission.landingHops.set(memoKey, found);
+  return found;
+}
+
+/**
+ * A place's landings by their paths' first steps (`landingHop`): whether a copy lands at its root, the copies by their
+ * paths' first steps, and the first steps of the paths of two steps or more its written copies and its own copies land
+ * at. Once per place.
+ */
+function landingSteps(
+  admission: Admission,
+  place: PlaceId,
+  seeds: Inheritance["seeds"],
+  owned: Inheritance["owned"],
+): {
+  readonly whole: boolean;
+  readonly copies: ReadonlyMap<string, readonly InheritedCopy[]>;
+  readonly deeper: ReadonlySet<string>;
+} {
+  const known = admission.landingSteps.get(place);
+  if (known !== undefined) return known;
+  const work = admission.pass.program.work;
+  let whole = false;
+  const copies = new Map<string, InheritedCopy[]>();
+  for (const copy of copiesOf(admission, place)) {
+    work.charge("indexSteps");
+    if (copy.path.length === 0) whole = true;
+    else {
+      const list = copies.get(copy.path[0]!);
+      if (list === undefined) copies.set(copy.path[0]!, [copy]);
+      else list.push(copy);
+    }
+  }
+  const deeper = new Set<string>();
+  for (const text of [...(seeds.get(place)?.keys() ?? []), ...(owned.get(place) ?? [])]) {
+    work.charge("indexSteps");
+    if (text.includes(".")) deeper.add(text.slice(0, text.indexOf(".")));
+  }
+  keep(admission.work, 1 + copies.size + deeper.size);
+  const found = { whole, copies, deeper };
+  admission.landingSteps.set(place, found);
   return found;
 }
 
