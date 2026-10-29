@@ -251,7 +251,7 @@ const CONSUMERS: Readonly<Record<string, Consumer>> = {
   },
   fallback: {
     // (a fallback's left is read in requirement mode: its kinds give the requirement its right meets, C10)
-    lines: (read) => [`let v = ${read} otherwise 1`, "say v"],
+    lines: (read) => [`let w = ${read} otherwise 1`, "say w"],
     slice: false,
     needs: (value) => ["number", "string", "boolean"].includes(typeof value) || value === null,
     says: (value) => [String(value ?? 1)],
