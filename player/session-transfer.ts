@@ -290,7 +290,7 @@ export function restoreSessionTransfer(
     );
   }
   // A kept session goes on only with the plan it ran (`restoreKept`).
-  if (JSON.stringify(restored.plan) !== JSON.stringify(plan))
+  if (serializeValidatedRuntimeJson(restored.plan) !== serializeValidatedRuntimeJson(plan))
     throw new StorageTransferError(
       "This session comes from another version of this script or of the Player, so it cannot continue here. Continue it where it was exported.",
     );

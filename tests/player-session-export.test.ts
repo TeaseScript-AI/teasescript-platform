@@ -268,6 +268,30 @@ test("a session exported in one browser continues in another after the import, a
   assert.equal(said(reloaded.session.value).at(-1), "Thanks, nothing.");
 });
 
+test("a session whose plan and saved value hold a list nested 2,048 deep is kept, exported, imported, and continued", async (context) => {
+  stubBrowser(context);
+  // Native JSON runs out of stack on this plan and on the event of the save; the engine's writer does not.
+  const plan = compilePlayerProject(
+    `let deep = ${"[".repeat(2048)}1${"]".repeat(2048)}\nsave deep as "deep"\nlet name = askText "Your name?"\nsay "Hi \${name}", instant\nexit`,
+  ).plan!;
+  const first = browser();
+  const exporting = await page(context, first, plan);
+  await exporting.activate();
+  await until(async () => (await first.kept.session(SCOPE)) !== null, "the session was not kept");
+  const file = await sessionTransferFile((await exporting.exportSession()).transfer, false);
+  const read = await readPlayerTransferFile(new Uint8Array(await file.arrayBuffer()));
+  assert.ok(read.kind === "session");
+
+  const second = browser();
+  const importing = await page(context, second, plan);
+  await importing.importSession(await importing.reviewSessionImport(read.session));
+  assert.ok(second.entries.has("deep"));
+  const reloaded = await page(context, second, plan);
+  assert.equal(reloaded.activation.value, "continue");
+  await reloaded.activate();
+  assert.equal(playerRuntimeForeground(reloaded.session.value!)?.kind, "ask-text");
+});
+
 /** A store of kept sessions whose discard, or whose photo writes, fail while `failing` says so. */
 function failingKept(failing: { discard: boolean; media: boolean }): KeptSessionStore {
   const kept = memoryKeptSessionStore();
