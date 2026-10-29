@@ -7,11 +7,12 @@ import {
   BudgetExhausted,
   DemandExhausted,
   demandAllowanceFor,
+  joinSteps,
   type BudgetLimit,
 } from "./budget.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
-import { freshStores, ingressMark } from "./consumers/fresh.js";
+import { freshStores, ingressMark, storeMark } from "./consumers/fresh.js";
 import { mixed, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
@@ -27,7 +28,7 @@ import { receivers } from "./consumers/receivers.js";
 import { admittedStores } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
-import type { Definition, Key } from "./definitions.js";
+import { keyOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
@@ -302,6 +303,28 @@ export class Consumers {
           stopped,
         });
     }
+  }
+
+  /**
+   * The stores and transfers at a key whose decision stopped (S3 §5): the stop stands for their obligations, as a stop
+   * before admission settled does for every store into an inferred place (TABLE r4.100, r4.111), so each is marked at its
+   * site, its type undecided, its value checked when the script runs (C9); a key below it is asked on its own (Codex
+   * r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores).
+   */
+  public stoppedStores(root: PlaceId, path: readonly string[]): void {
+    const { program, definitions } = this.pass;
+    const at = keyOf(root, path);
+    const lists = [definitions.byKey.get(at) ?? []];
+    // (an add stores at its receiver's element)
+    if (path.at(-1) === "element")
+      lists.push(definitions.byKey.get(keyOf(root, path.slice(0, -1))) ?? []);
+    for (const list of lists)
+      for (const d of list) {
+        program.work.charge("checks");
+        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
+        const stored = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
+        if (keyOf(d.place, stored) === at) storeMark(this, d, stored);
+      }
   }
 
   /**

@@ -1088,6 +1088,120 @@ test("a stop before a store below an own selection takes its target settles noth
 });
 
 /**
+ * S3 §5 with #1275 (Codex r10's B1 on #1310): a store at a key whose decision stopped is an obligation the stop stands
+ * for (`Consumers.#stoppedStores`), whichever pass stopped it: a pass that both stops a decision and gives new store
+ * targets starts again with the key stopped, and the store keeps a mark there, through demand-only completion and a
+ * settled program stop alike. Each own selection's invalid store beside a property's and a variable's, in both
+ * orders with the sharing on and off, at half of each decision's demand: the completed analysis keeps each error as an
+ * error or as a warning or a stop's mark with a check at its site, and adds none (against the unbounded analysis); and
+ * where a pass started again, a program stop halfway through the analysis and at its end changes nothing the stop oracle
+ * does not excuse (against the completed analysis at that demand allowance, as above). The generated family (every
+ * decision's demand at several fractions, an add, a k = 64 joined list, work stops across the restarted pass) runs
+ * outside CI.
+ */
+test("a store at a stopped decision's key keeps an obligation, whichever pass stopped it (S3 §5, #1275)", () => {
+  const options = { globals: ["hostValue", "hostOther"] };
+  const sources = [
+    ...["first", "last", "random"].map((own) => `let box = {${own}: {n: 1}}\nbox.${own}.n = "bad"`),
+    'let box = {inner: {n: 1}}\nbox.inner.n = "bad"',
+    'let n = 1\nn = "bad"',
+  ].map((body) => `${body}\nsay "DONE"\nexit\n`);
+  const modes: readonly (readonly [string, <T>(make: () => T) => T])[] = [
+    ["forward", (make) => make()],
+    [
+      "reversed",
+      (make) =>
+        withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), make),
+        ),
+    ],
+    ["forward, unshared", (make) => withoutSharing(make)],
+    [
+      "reversed, unshared",
+      (make) =>
+        withoutSharing(() =>
+          withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), make),
+          ),
+        ),
+    ],
+  ];
+  let combined = 0;
+  for (const source of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], options.globals);
+    assert.ok(request !== null);
+    for (const [name, inMode] of modes) {
+      const runAt = (demand: number | null, work: number | null): StopRun => {
+        const allowed = <T>(make: () => T): T =>
+          inMode(() => {
+            const demanded = () =>
+              demand === null ? make() : withTestDemandAllowance(demand, make);
+            return work === null ? demanded() : withTestAllowance(work, demanded);
+          });
+        const both = () => ({
+          result: compileSourceWithBackend(source, options, CORE_BACKEND),
+          answers: analyseCore(request),
+        });
+        return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
+      };
+      const unbounded = runAt(null, null);
+      const errors = unbounded.answers.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => d.site.start);
+      assert.ok(errors.length > 0, source);
+      const demands = new Set(
+        unbounded.answers.budget.decisions
+          .filter((d) => d.units >= 2)
+          .map((d) => Math.floor(d.units / 2)),
+      );
+      for (const demand of demands) {
+        const where = `${name} @${demand}: ${source}`;
+        const capped = runAt(demand, null);
+        const { budget } = capped.answers;
+        const kept = capped.answers.diagnostics
+          .filter((d) => d.class === "compile-error")
+          .map((d) => d.site.start);
+        const marked = [
+          ...capped.answers.diagnostics.filter((d) => d.class === "warning-runtime-check"),
+          ...budget.deferred,
+        ].map((d) => d.site.start);
+        const checked = capped.answers.checks.map((check) => check.site.start);
+        assert.deepEqual(
+          errors.filter(
+            (at) => !kept.includes(at) && !(marked.includes(at) && checked.includes(at)),
+          ),
+          [],
+          `${where}: an error neither kept nor checked`,
+        );
+        assert.deepEqual(
+          kept.filter((at) => !errors.includes(at)),
+          [],
+          `${where}: an error the unbounded analysis lacks`,
+        );
+        const stopPasses = budget.counts.get("stopPasses") ?? 0;
+        if (stopPasses === 0 || budget.exhausted !== null) continue;
+        if ((budget.counts.get("rejectPasses") ?? 0) > 0) combined += 1;
+        // (a program stop halfway through the analysis and at its end)
+        const total = budget.total;
+        for (const work of [Math.floor(total / 2), total - 1])
+          assert.deepEqual(
+            stopProblems({
+              unstopped: capped,
+              stopped: runAt(demand, work),
+              fitting: [],
+              violating: [],
+            }),
+            [],
+            `${where} #${work}`,
+          );
+      }
+    }
+  }
+  // (a decision stop and new store targets in one pass: Codex r10's B1 shape)
+  assert.ok(combined > 0);
+});
+
+/**
  * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
  * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
  * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value,

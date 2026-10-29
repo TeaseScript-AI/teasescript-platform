@@ -2509,17 +2509,27 @@ test("admission decides from the start value, keeps written copies, rejects ever
       `${f}let box = {n: 1}\nbox.n = f(true)\nrepeat box.n {}\nexit`,
       (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
     ],
+    // (in both orders since G3 2c, the decision of `xs` stops at its allowance in the first pass, its deepest paths'
+    // decisions costing depth × copies, G6's in #1319's design-round list; the stop stands for its store's obligation,
+    // checked when the script runs, #1275)
     [
       "a deep literal's element of another type",
       `let xs = [${nest(300, "1")}, ${nest(300, '"bad"')}]\nexit`,
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+      (at) => [
+        "compile-error",
+        `copy-type xs [unknown] @${at("[")}`,
+        `written-target compile-error @${at('"bad"')}`,
+        `written-target warning-runtime-check @${at("[")}`,
+      ],
     ],
     [
       "a deep literal's element copying a written union",
       `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
-      // (in both orders since G3 2c: reversed, its deepest paths' decisions cost depth × copies past their allowance,
-      // G6's in #1319's design-round list, until the decisions above the copy read the literal's transfers)
-      () => ["valid"],
+      (at) => [
+        "warning-runtime-check",
+        `copy-type xs [unknown] @${at("[")}`,
+        `written-target warning-runtime-check @${at("[")}`,
+      ],
     ],
     [
       "a default's other kind beside the receiving union",

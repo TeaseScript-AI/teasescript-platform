@@ -79,7 +79,7 @@ export function stands(walk: Consumers, d: Definition): boolean {
 }
 
 /** A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once. */
-function storeMark(walk: Consumers, d: Definition, path: readonly string[]): void {
+export function storeMark(walk: Consumers, d: Definition, path: readonly string[]): void {
   if (walk.marked.has(d.uid)) return;
   walk.marked.add(d.uid);
   const { program } = walk.pass;

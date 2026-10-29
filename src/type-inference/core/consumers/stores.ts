@@ -46,7 +46,8 @@ const writerRank = (writer: Writer | null): number =>
  * of the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external
  * data (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
  * (TABLE r4.180); a decision stopping in that next pass stops the analysis there, as the work allowance does, so a
- * pass's work at most doubles (TABLE r4.183).
+ * pass's work at most doubles (TABLE r4.183). A stopped decision stands for its stores' obligations
+ * (`stoppedStores`), whichever pass stopped it.
  */
 function decide(walk: Consumers, root: PlaceId, path: readonly string[]): Decision | null {
   const ledger = walk.pass.program.work;
@@ -55,6 +56,7 @@ function decide(walk: Consumers, root: PlaceId, path: readonly string[]): Decisi
   // (a key whose decision stopped, in this pass or before it, or a key below one: undecided, no decision runs)
   if (walk.admission.decisionStopped(root, path)) {
     walk.decisions.push({ place: root, path, units: 0, allowance, stopped: true });
+    walk.stoppedStores(root, path);
     return null;
   }
   // (its work is the decision's, not a consumer read's)
@@ -68,6 +70,7 @@ function decide(walk: Consumers, root: PlaceId, path: readonly string[]): Decisi
     stopped = true;
     walk.decisionStopped = true;
     walk.admission.stopDecision(root, path);
+    walk.stoppedStores(root, path);
     // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4, TABLE r4.183)
     if (walk.restarted) throw new BudgetExhausted("work");
     return null;
