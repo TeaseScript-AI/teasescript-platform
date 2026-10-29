@@ -307,7 +307,8 @@ export function computedTargetFiles(
   const sources = referenceSources(validator, expression, scope);
   // Each `let` once, after those its value reads; one that reads itself, which only code with errors does, counts as
   // any reference of the project.
-  const work = sources.lets.map((site) => ({ site, sources: null as ReferenceSources | null }));
+  const work: { readonly site: LetStatement; sources: ReferenceSources | null }[] =
+    sources.lets.map((site) => ({ site, sources: null }));
   const open = new Set<LetStatement>();
   while (work.length > 0) {
     const item = work.at(-1)!;
@@ -407,10 +408,7 @@ function referenceSources(
       case "identifier": {
         const binding = scope.lookup(node.name);
         if (binding?.kind === "global" && binding.project === undefined) sources.any = true;
-        else if (
-          binding?.site?.kind === "letStatement" &&
-          !validator.writtenLets.has(binding.site)
-        )
+        else if (binding?.site?.kind === "letStatement" && !validator.writtenLets.has(binding.site))
           sources.lets.push(binding.site);
         else sources.project = true;
         break;

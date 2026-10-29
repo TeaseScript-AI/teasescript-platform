@@ -268,7 +268,9 @@ export class Reachability {
    * {@link #blockRuns}). The runtime checks the `end` then (TSR066). The `end` that closes a file's top level is the
    * ending check's (TSV052).
    */
-  public pendingCallDiagnostics(targets: () => ReadonlyMap<number, ComputedTarget>): Diagnostic[][] {
+  public pendingCallDiagnostics(
+    targets: () => ReadonlyMap<number, ComputedTarget>,
+  ): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
     if (
@@ -358,10 +360,7 @@ export class Reachability {
       }
     });
     const firstGate = code + 2 * stays.nodeCount;
-    const unknown: BlockStarts = {
-      unsafe: true,
-      leavers: SEVERAL_LEAVERS,
-    };
+    const unknown: BlockStarts = { unsafe: true, leavers: SEVERAL_LEAVERS };
     const solved = solveForward<BlockState, string>(
       {
         nodeCount: firstGate + gates.length,
@@ -462,7 +461,8 @@ export class Reachability {
     const instruction = this.plan.instructions[node];
     if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
       return state;
-    if (instruction.mode === "call") return { kind: "calls", none: null, hidden: null, waiting: true };
+    if (instruction.mode === "call")
+      return { kind: "calls", none: null, hidden: null, waiting: true };
     // A goto keeps the calls that wait; with none, the file it starts has none either.
     if (edge === "transfer")
       return {
@@ -472,7 +472,12 @@ export class Reachability {
         waiting: state.waiting,
       };
     const waitsForNone = state.none !== null || state.hidden !== null;
-    return { kind: "calls", none: null, hidden: waitsForNone ? node : null, waiting: state.waiting };
+    return {
+      kind: "calls",
+      none: null,
+      hidden: waitsForNone ? node : null,
+      waiting: state.waiting,
+    };
   }
 
   /**
@@ -565,7 +570,9 @@ export class Reachability {
             const definition = this.#flow.functionOf(index);
             if (definition?.handler !== null && definition?.handler !== undefined)
               blockReturns.push(index);
-            else for (const resume of resumes.get(definition?.id ?? -1) ?? []) all[index]!.push(resume);
+            else
+              for (const resume of resumes.get(definition?.id ?? -1) ?? [])
+                all[index]!.push(resume);
             break;
           }
           default:
@@ -737,7 +744,8 @@ export class Reachability {
       {
         nodeCount: count + ways.hubs.length,
         successors: (node) => {
-          if (node >= count) return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+          if (node >= count)
+            return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
           const instruction = this.plan.instructions[node]!;
           const out: { node: number; edge: string }[] = [];
           for (const { node: next, edge } of this.#ways(node)) {
@@ -748,7 +756,10 @@ export class Reachability {
               if (entry !== undefined && endings[entry]?.returns !== true) continue;
             }
             const target = next ?? ways.targets.get(node)?.node;
-            if (target !== undefined && (next !== null || ways.targets.get(node)?.edge === "transfer"))
+            if (
+              target !== undefined &&
+              (next !== null || ways.targets.get(node)?.edge === "transfer")
+            )
               out.push({ node: target, edge });
           }
           return out;
@@ -850,10 +861,10 @@ export class Reachability {
     const count = this.plan.instructions.length;
     if (node >= count)
       return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
-    const out = handlers
+    const out: { node: number; edge: string }[] = handlers
       ? this.#successors(node)
       : this.#ways(node).flatMap(({ node: next, edge }) =>
-          next === null ? [] : [{ node: next, edge: edge as string }],
+          next === null ? [] : [{ node: next, edge }],
         );
     const computed = ways.targets.get(node);
     if (computed !== undefined) out.push(computed);
@@ -1033,7 +1044,9 @@ export class Reachability {
    * is an error (TSV057, for one file with the name pass's text), and one that may lead to such a file is a warning
    * (TSV074), which the runtime checks (TSR069). Like the name pass, this also reports a `goto` that never runs.
    */
-  public computedGotoDiagnostics(targets: () => ReadonlyMap<number, ComputedTarget>): Diagnostic[][] {
+  public computedGotoDiagnostics(
+    targets: () => ReadonlyMap<number, ComputedTarget>,
+  ): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     // By the list of files, which targets share: a file of declarations only among them, and whether all are.
     const found = new Map<
@@ -1538,7 +1551,11 @@ function joinBlockStates(left: BlockState, right: BlockState): BlockState {
       kind: "gate",
       created: left.created || right.created,
       run:
-        left.run === null ? right.run : right.run === null ? left.run : joinRuns(left.run, right.run),
+        left.run === null
+          ? right.run
+          : right.run === null
+            ? left.run
+            : joinRuns(left.run, right.run),
     };
   throw new Error("A node of the block analysis has states of two kinds.");
 }
@@ -1556,10 +1573,7 @@ function joinStarts(left: BlockStarts | null, right: BlockStarts | null): BlockS
     ? right
     : right === null
       ? left
-      : {
-          unsafe: left.unsafe || right.unsafe,
-          leavers: joinLeavers(left.leavers, right.leavers),
-        };
+      : { unsafe: left.unsafe || right.unsafe, leavers: joinLeavers(left.leavers, right.leavers) };
 }
 
 function sameStarts(left: BlockStarts | null, right: BlockStarts | null): boolean {

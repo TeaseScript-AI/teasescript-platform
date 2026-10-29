@@ -542,7 +542,10 @@ function checkFlow(
     const endings = reachability.endingDiagnostics();
     // Where computed targets may lead, found once for the checks that need it.
     let referenced: readonly number[] | null | undefined;
-    const references = () => (referenced === undefined ? (referenced = referencedFiles(plan, checked.names, hostValues)) : referenced);
+    const references = () =>
+      referenced === undefined
+        ? (referenced = referencedFiles(plan, checked.names, hostValues))
+        : referenced;
     let found: ReadonlyMap<number, ComputedTarget> | undefined;
     const targets = () => (found ??= computedTargets(plan, trace, checked, references));
     const returns = reachability.pendingCallDiagnostics(targets);
