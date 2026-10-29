@@ -621,12 +621,14 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
     (setsProperty(rule) || rule.member.endsWith("()")) &&
     holder.length > 0 &&
     holder.every((kind) => kind === "speaker");
+  // (the elements a call reads have their own origins, which the receiver's name does not carry)
   if (
     !(context === "unknown" && !detail.outside) &&
     context !== "later" &&
     !missing &&
     !speaker &&
-    !literal
+    !literal &&
+    rule.rule !== "elements"
   )
     // a word that came with a value from another line speaks of that value's origin, never of this line's names
     sentences.push(
@@ -878,7 +880,7 @@ function argumentFixOf(
       ? " Write a regex such as /[0-9]+/ instead, or make one from the text with the toRegex function."
       : "";
   return argumentFix(
-    { name: rule.parameter, kind: takes },
+    { name: rule.parameter, kind: takes === "integer" ? "count" : takes },
     kind === "string" || kind === "integer" || kind === "number" || kind === "boolean"
       ? kind
       : null,
@@ -2591,6 +2593,8 @@ function warningFix(
   diagnosed: Diagnosed,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
+  // (the elements a call reads: no test of the call's value fixes them, and the run stops at the call)
+  if (rule.rule === "elements") return "";
   if (kinds.includes("null")) {
     // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
     // change would be lost)

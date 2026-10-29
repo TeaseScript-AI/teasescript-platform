@@ -12,7 +12,6 @@ import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
 import { keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
-import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
@@ -20,7 +19,7 @@ import { propertyNames } from "../property-names.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { hasMethod } from "./kinds.js";
-import { keyLabel, ownSpan, quietKinds, receiverKinds } from "./names.js";
+import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds } from "./names.js";
 import { consume } from "./operands.js";
 import { obligation, warning } from "./warnings.js";
 
@@ -28,13 +27,13 @@ import { obligation, warning } from "./warnings.js";
 
 type Takes = Extract<DiagnosticRule, { rule: "argument" }>["takes"];
 
-/** What a text method's parameter takes, by its kind (`TextParameter`); a position or a count is a whole number's. */
+/** What a text method's parameter takes, by its kind (`TextParameter`): a position or a count is a whole number. */
 const TEXT_TAKES: Readonly<Record<TextParameterKind, Takes | null>> = {
   text: "text",
   regex: "regex",
   textOrRegex: "textOrRegex",
-  position: null,
-  count: null,
+  position: "integer",
+  count: "integer",
 };
 
 /**
@@ -55,6 +54,7 @@ const KINDS: Readonly<Record<Takes, readonly ValueKind[]>> = {
   text: ["string"],
   regex: ["regex"],
   textOrRegex: ["string", "regex"],
+  integer: ["integer"],
   list: ["list"],
   collection: ["list", "set"],
 };
@@ -171,9 +171,14 @@ export function methodElements(
   const { name } = c.contract;
   if (c.receiver === null || (name !== "join" && name !== "sort")) return;
   const receiver: PlaceId = c.receiver;
-  // (the elements of a receiver the core cannot know are the runtime's: its member check owns the call)
+  // (the elements of a receiver the core cannot know are the runtime's, its member check owning the call, but where its
+  // contract admits a list: then the elements that admits, `domainItems`)
   const kinds = receiverKinds(walk, receiver, node);
-  if (!kinds.some((item) => item.tag === "list")) return;
+  if (
+    !kinds.some((item) => item.tag === "list") &&
+    !(quietKinds(walk, receiver)?.includes("list") ?? false)
+  )
+    return;
   const fits = name === "join" ? shows : orders;
   const quiet = quietKinds(walk, receiver, ["element"]);
   if (quiet !== null && quiet.every(fits) && (name === "join" || families(quiet).length <= 1)) {
@@ -181,7 +186,7 @@ export function methodElements(
     return;
   }
   walk.pass.program.work.charge("checks");
-  const items = withoutEmpty(walk.valueItems(receiver, node, ["element"]));
+  const items = domainItems(walk, receiver, node, ["element"]);
   const unfit = items.filter((item) =>
     item.tag === "unknown" ? isOpaque(item) || isExternal(item) : !fits(item.tag),
   );
@@ -261,12 +266,12 @@ export function jsonArgument(
     return;
   }
   const at = ownSpan(walk, value, c.site);
-  const root = withoutEmpty(walk.valueItems(value, node, []));
+  const root = domainItems(walk, value, node, []);
   const pending: (readonly string[])[] = [[]];
   for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
     if (path.length > READ_DEPTH_LIMIT) continue;
     program.work.charge("checks");
-    const items = path.length === 0 ? root : withoutEmpty(walk.valueItems(value, node, path));
+    const items = path.length === 0 ? root : domainItems(walk, value, node, path);
     const bad = items.filter((item) => !writable(item.tag));
     if (bad.length > 0) {
       // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
@@ -308,10 +313,9 @@ export function jsonArgument(
     // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order; each path
     // charged as it is made, one step longer than its owner's)
     const below: (readonly string[])[] = [];
-    if (items.some((item) => item.tag === "list" || item.tag === "set"))
+    // (a dict's values are its `element`, as a list's)
+    if (items.some((item) => item.tag === "list" || item.tag === "set" || item.tag === "dict"))
       below.push(keptSteps(program.work, path, ["element"]));
-    if (items.some((item) => item.tag === "dict"))
-      below.push(keptSteps(program.work, path, ["entry"]));
     if (items.some((item) => item.tag === "object"))
       for (const name of walk.asksNothing()
         ? []

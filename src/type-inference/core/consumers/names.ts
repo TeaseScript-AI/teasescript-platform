@@ -1,12 +1,12 @@
 import type { Expression } from "../../../ast.js";
 import type { PlaceId, SourceSite } from "../../graph.js";
-import { stepText } from "../budget.js";
+import { joinSteps, stepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { heldReference, REFERENCE } from "../contract.js";
-import { keptKey, keptKeyBelow, type Key } from "../definitions.js";
+import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import type { Item, ItemTag } from "../items.js";
+import { makeItem, type Item, type ItemTag } from "../items.js";
 import { dictList } from "../method-categories.js";
 import { propertyName, siteKey, stepName } from "../program.js";
 import { elementStep } from "../result.js";
@@ -142,6 +142,39 @@ function anonymousChain(walk: Consumers, value: PlaceId): boolean {
     at = projection.owner;
   }
   return false;
+}
+
+/**
+ * What a content-specific check reads of `value` at `rest` (Sol r1 B2, the owner's review F2; ADR 0021 1.8, 1.10): its
+ * answer's items, and where they hold what the core cannot know, the kinds its contract admits there instead, else the
+ * admitted type of the place it reads (a written host collection, a copy of one, a typed load or parse), each possible: a domain constrains what the value may hold
+ * and proves nothing of it, a collection it admits may be empty, so a misfit there owes the use's check, never an error.
+ */
+export function domainItems(
+  walk: Consumers,
+  value: PlaceId,
+  node: FlowNode | null,
+  rest: readonly string[],
+): Item[] {
+  const items = withoutEmpty(walk.valueItems(value, node, rest));
+  if (!items.some((item) => item.tag === "unknown")) return items;
+  const domain = quietKinds(walk, value, rest) ?? admittedKinds(walk, value, rest);
+  return domain === null
+    ? items
+    : [
+        ...items.filter((item) => item.tag !== "unknown"),
+        ...domain.map((tag) => makeItem(tag, null, { cert: "pos" })),
+      ];
+}
+
+/** The admitted type at `rest` of the place a read reads (a copy's of a written type, A4), `null` with an unknown. */
+function admittedKinds(walk: Consumers, value: PlaceId, rest: readonly string[]): ItemTag[] | null {
+  const key = readKey(walk, value);
+  if (key === null) return null;
+  const tags = walk.admission
+    .admitted(keyPlace(key), joinSteps(keyPath(key), rest))
+    .filter((tag) => tag !== "empty");
+  return tags.length === 0 || tags.includes("unknown") ? null : tags;
 }
 
 /** §3.3, the quiet path: a value's contract kinds, asked before any read is evaluated; `null` with an unknown. */

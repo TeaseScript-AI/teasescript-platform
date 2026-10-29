@@ -171,7 +171,7 @@ export type DiagnosticRule =
       readonly callee: string;
       readonly parameter: string;
       readonly domain: readonly ItemTag[];
-      readonly takes: "text" | "regex" | "textOrRegex" | "list" | "collection";
+      readonly takes: "text" | "regex" | "textOrRegex" | "integer" | "list" | "collection";
     }
   /**
    * C13 (Astra's G1): the elements of `receiver` that `callee` reads, `join` each one `${...}` shows, `sort` of one

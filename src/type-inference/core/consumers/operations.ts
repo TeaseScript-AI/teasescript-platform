@@ -1,3 +1,4 @@
+import { dictMethod } from "../../../dict-operations.js";
 import { lazyDefaultOperation } from "../../../lazy-defaults.js";
 import type { ValueKind } from "../../../value-kinds.js";
 import type { Constraint, SourceSite } from "../../graph.js";
@@ -179,9 +180,10 @@ function operation(
         name === "removeAt" ? "removeAt" : `the count of ${name}`,
         name,
       );
-    if (name === "remove") {
-      // C12: a dict's key is text; where the receiver may also be a list or a set (or unknown), whose `remove` takes
-      // any value, only a check, as an index use owes one
+    if (c.arguments.length > 0 && dictMethod(name)?.parameters[0]?.name === "key") {
+      // C12: a dict method's key is text (`contains`, `remove`; `get`'s is its own constraint's); where the receiver may
+      // also be a list, a set or text (or unknown), whose method takes another value, only a check, as an index use
+      // owes one
       const kinds = kindsOf(walk, c.receiver, node);
       if (kinds.some((item) => item.tag === "dict"))
         consume(
@@ -190,7 +192,7 @@ function operation(
           node,
           c.site,
           TEXT,
-          "a dict key at remove",
+          `a dict key at ${name}`,
           { rule: "key" },
           ["string"],
           "operator",
