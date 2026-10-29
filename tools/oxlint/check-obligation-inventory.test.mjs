@@ -516,6 +516,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           `export function probeParameter({ diagnostics }: Consumers): void {\n  diagnostics.push(${PUSHED});\n}\n` +
           "interface ProbeView {\n  admission: Admission;\n}\n" +
           "export function probeOutsideRead(view: ProbeView): void {\n  const read = view.admission.routeSelf;\n  void read;\n}\n" +
+          "export function probeOutsideCall(view: ProbeView): void {\n  view.admission.routeSelf();\n}\n" +
           "export function probeOutsideBinding({ probeOpaque }: Admission): void {\n  probeOpaque();\n}\n",
       ],
     ),
@@ -549,6 +550,10 @@ test("a creating consumer's direct calls must be listed; every other form of a g
   // (the quoted, destructured, aliased and parameter forms of a recording array, and the read alone)
   assert.equal(count(messages, UNPROVED_AT("Consumers.diagnostics")), 5, messages.join("\n"));
   expectStart(messages, UNPROVED_AT("Admission.routeSelf"));
+  expectStart(
+    messages,
+    "Unproved: Admission.routeSelf is called outside every consumer derivation",
+  );
   expectStart(messages, UNPROVED_AT("Admission.freshAliased"));
   expectStart(messages, "The fresh pass does not call freshDecoy");
   expectStart(messages, "The fresh pass does not call freshAliased", false);

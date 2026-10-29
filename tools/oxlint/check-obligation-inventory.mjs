@@ -22,8 +22,8 @@ import { Project, ts } from "ts-morph";
  *   derivation;
  * - a call from a consumer derivation that creates an obligation (one that records a diagnostic or a check, or calls
  *   one that does, directly) into an `Admission` derivation that is neither an inventory entry nor a read `READS` lists
- *   with why it creates none; a call of an `Admission` member that is no derivation; a recording outside every consumer
- *   derivation;
+ *   with why it creates none; a call of an `Admission` member that is no derivation; outside admission and every
+ *   consumer derivation, a call of a derivation that is no listed read, and a recording;
  * - an inventory entry whose `runs` names other than one derivation across admission and the consumers, or one the
  *   fresh pass does not call directly; a fresh pass that is not one derivation;
  * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
@@ -97,13 +97,14 @@ export const HOST_READS = new Map([
 ]);
 
 /**
- * The members read, not called, outside admission's own code, by the forms the inventory recognises (TABLE r4.182):
- * [member, form, file, why it creates no obligation]. A form is `length` (its `.length`), `for-of` (iterated), `spread`
- * (spread into an array), `operand` (an operand of arithmetic or a comparison), `variable` (a variable's whole initializer),
- * `argument` (a call's argument), `property` (an object literal's property value), or `.<method>` (a call of the
- * value's own method). `readChecks` and the recording arrays are listed here too: any other form of them is unproved.
+ * The members read outside admission's own code, by the forms the inventory recognises (TABLE r4.182): [member, form,
+ * file, why it creates no obligation]. A form is `length` (its `.length`), `for-of` (iterated), `spread` (spread into
+ * an array), `operand` (an operand of arithmetic or a comparison), `variable` (a variable's whole initializer),
+ * `argument` (a call's argument), `property` (an object literal's property value), `.<method>` (a call of the value's
+ * own method), or `call` (a direct call of the derivation outside every consumer derivation). `readChecks` and the
+ * recording arrays are listed here too: any other form of them is unproved.
  */
-export const LISTED_READS = [
+const LISTED_READS = [
   ["readChecks", "length", "admission.ts", "how many read checks a unit made: a count"],
   ["readChecks", "length", "consumers.ts", "how many read checks a unit made: a count"],
   ["readChecks", "for-of", "answers.ts", "the published read checks, read after the walk"],
@@ -140,6 +141,13 @@ export const LISTED_READS = [
   ["deferred", "argument", "answers.ts", "the deferred checks, read after the walk"],
   ["deferred", ".map", "answers.ts", "the deferred checks, read after the walk"],
   ["deferred", "property", "answers.ts", "the deferred checks, published after the walk"],
+  [
+    "deciderAt",
+    "call",
+    "answers.ts",
+    "the site that decided an answer, read where the answer asks it",
+  ],
+  ["inheritsWritten", "call", "answers.ts", "whether a copy decides an answer, read with it"],
 ];
 
 export function checkObligationInventory(root) {
@@ -615,9 +623,10 @@ export function obligationInventoryDiagnostics(program, root, files) {
           const callee = ts.isCallExpression(node.parent) && node.parent.expression === node;
           if (callee && (isBoundaryCheck(declaration) || isErrorParameter(declaration)))
             creations.push([node.parent, admission.around(node)]);
-          else if (callee)
-            admissionCalls.push([node.parent, admission.of(declaration), consumer.around(node)]);
-          else
+          else if (callee) {
+            if (!inAdmissionCode(node))
+              admissionCalls.push([node.parent, admission.of(declaration), consumer.around(node)]);
+          } else
             unproved(
               node,
               declaration,
@@ -711,8 +720,14 @@ export function obligationInventoryDiagnostics(program, root, files) {
   const asked = new Set(readsAsked);
   for (const [call, derivation, around] of admissionCalls) {
     const from = around === undefined ? undefined : consumer.of(around);
-    if (from === undefined || !creating.has(from)) continue;
     const name = nameOf(derivation);
+    // (outside admission and every consumer derivation, only a listed read is called, Codex r4)
+    if (from === undefined && !files.reads.has(name) && !listed(name, "call", call.getSourceFile()))
+      report(
+        call,
+        `Unproved: Admission.${name} is called outside every consumer derivation: call it from one the inventory can weigh.`,
+      );
+    if (from === undefined || !creating.has(from)) continue;
     asked.add(name);
     if (!entries.has(name) && !files.reads.has(name))
       report(
