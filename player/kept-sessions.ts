@@ -135,11 +135,11 @@ export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaI
 }
 
 /**
- * The captured-media references in session data, such as photos a session shows or holds in variables: the references in
- * its JSON, written one field of a record and one element of a list at a time rather than as one text, by the engine's
- * writer, which also writes values nested deeper than native JSON can. JSON decides everything else, as for the whole: a
- * value it leaves out has none, and one it cannot write, such as a cycle, throws. A text is searched as it is, since a
- * reference has no character JSON escapes.
+ * The captured-media references in session data, plain data such as photos a session shows or holds in variables: the
+ * references in its JSON, written one field of a record and one element of a list at a time rather than as one text, by
+ * the engine's writer, which also writes values nested deeper than native JSON can. JSON decides everything else, as for
+ * the whole: a value it leaves out has none, and one it cannot write, such as a cycle, throws. A text is searched as it
+ * is, since a reference has no character JSON escapes.
  */
 export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
   const found = new Set<string>();
@@ -204,11 +204,25 @@ function writtenEntries(
 
 /** Stored values when they are valid script storage; they come from storage, so they are checked on every read. */
 function loadedEntries(values: unknown): readonly RuntimeScriptStorageEntrySnapshot[] {
-  if (validateScriptStorageEntries(values, "values") !== null)
+  let read = values;
+  // IndexedDB keeps them as JSON text (`storedData`); a room kept before kept them as data.
+  if (typeof values === "string")
+    try {
+      read = JSON.parse(values);
+    } catch {
+      read = undefined;
+    }
+  if (validateScriptStorageEntries(read, "values") !== null)
     throw new Error("The debug room's saved data is unreadable.");
   // EVIDENCE: validation: validateScriptStorageEntries accepted the stored values above.
-  return values as readonly RuntimeScriptStorageEntrySnapshot[];
+  return read as readonly RuntimeScriptStorageEntrySnapshot[];
 }
+
+/**
+ * Runtime data as IndexedDB keeps it: the engine's JSON text, since the browser's structured clone, like native JSON, runs
+ * out of stack on a value nested a few thousand deep.
+ */
+const storedData = (value: unknown): string => serializeValidatedRuntimeJson(value);
 
 /** A store in this page's memory, for a browser without IndexedDB; a reload ends its sessions. */
 export function memoryKeptSessionStore(): KeptSessionStore {
@@ -428,14 +442,23 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
             got(
               transaction.objectStore(PLANS).get(scope),
               (plan: Record<string, unknown> | undefined) =>
-                got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (events) =>
+                got(transaction.objectStore(EVENTS).getAll(eventsFrom(scope, 0)), (records) => {
+                  // Each event is JSON text (`storedData`), or data in a session kept before; text that is not JSON
+                  // is no event.
+                  const events: unknown[] = [];
+                  for (const record of records)
+                    try {
+                      events.push(typeof record === "string" ? JSON.parse(record) : record);
+                    } catch {
+                      events.push(undefined);
+                    }
                   done({
                     planJson: plan?.["planJson"],
                     snapshotJson: session["snapshotJson"],
                     marks: session["marks"],
                     events,
-                  }),
-                ),
+                  });
+                }),
             );
           },
         ),
@@ -443,8 +466,9 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
     // The plan never changes while the session runs, so it is written only when it is given, which the session's first
     // step does, and goes with the session: a later step reads and writes only the snapshot, marks, event count, and new
     // events, and its plan is there whenever its session is.
-    publish: (scope, update) =>
-      transact<void>(
+    publish: async (scope, update) => {
+      const written = update.events.map(storedData);
+      return transact<void>(
         database,
         [SESSIONS, PLANS, EVENTS],
         "readwrite",
@@ -459,7 +483,7 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
               return fail(eventGap());
             const events = transaction.objectStore(EVENTS);
             events.delete(eventsFrom(scope, update.eventsFrom));
-            update.events.forEach((event, index) =>
+            written.forEach((event, index) =>
               events.put(event, [scope, update.eventsFrom + index]),
             );
             sessions.put({
@@ -470,7 +494,8 @@ function indexedDbStore(database: IDBDatabase): KeptSessionStore {
             });
           });
         },
-      ),
+      );
+    },
     media: {
       get: (namespace, reference) =>
         transact(database, [MEDIA], "readonly", (transaction, done) =>
@@ -530,7 +555,7 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       got(rooms.get(scope), (room: { values?: unknown } | undefined) => {
         if (room === undefined) return fail(missingRoom());
         try {
-          rooms.put({ scope, values: change(loadedEntries(room.values)) });
+          rooms.put({ scope, values: storedData(change(loadedEntries(room.values))) });
         } catch (error) {
           fail(error instanceof Error ? error : new Error(String(error)));
         }
@@ -549,6 +574,7 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
       ),
     create(scope, entries, photos) {
       checkedEntries(entries);
+      const values = storedData(entries);
       // The photos' bytes are read before the transaction starts, which commits once no request of it is pending.
       return Promise.all(photos.map(storableCapturedMedia)).then((stored) =>
         transact<void>(
@@ -561,7 +587,7 @@ function indexedDbRoomStore(database: IDBDatabase): KeptRoomStore {
             transaction.objectStore(PLANS).delete(scope);
             transaction.objectStore(EVENTS).delete(scopeRange(scope));
             transaction.objectStore(MEDIA).delete(scopeRange(scope));
-            transaction.objectStore(ROOMS).add({ scope, values: [...entries] });
+            transaction.objectStore(ROOMS).add({ scope, values });
             for (const photo of stored)
               transaction.objectStore(MEDIA).add({ ...photo, namespace: scope });
           },
