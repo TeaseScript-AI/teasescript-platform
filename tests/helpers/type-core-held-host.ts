@@ -143,7 +143,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
   }),
   result: (depth) => ({
     lines: [
-      "function build(n) {",
+      "function build(seed) {",
       `  return ${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}`,
       "}",
       "let r = build(1)",
