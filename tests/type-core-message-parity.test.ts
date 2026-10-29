@@ -275,7 +275,9 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^To keep both, declare a union type, as in '(.+)'\.$/,
-    // (TSV044: on the literal's variable, else the type alone, the owner's review)
+    // (TSV044: on the literal's variable, else the type alone, the owner's review; a list join's, of which the fixture
+    // holds none: the current checker's placeholder on an operand's variable, the new checker's the declaration the join
+    // starts, else the type in words, #1268, #1272; pasted, the current checker rejects that declaration, #1412)
     to: ([, fix], { declared }) =>
       exact(
         fix!.startsWith("let values: ")
@@ -1414,7 +1416,7 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
     if (!diagnosed) failures.push(`${name}: no error at the expression`);
     for (const form of forms) {
       pasted += 1;
-      const failure = pasteFailure(form.source);
+      const failure = pasteFailure(form.source, form.declaration);
       if (failure !== null) failures.push(`${name}: '${form.code}': ${failure}`);
     }
   }

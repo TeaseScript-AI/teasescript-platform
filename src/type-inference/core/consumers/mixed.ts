@@ -3,7 +3,6 @@ import { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, keptArray } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { propertyStep } from "../program.js";
-import type { StoreRoot } from "../result.js";
 import { error } from "./diagnostics.js";
 import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
@@ -208,8 +207,8 @@ export function mixed(
 /**
  * ADR 0021 1.3, V30 §4 and §16: a list's `+` whose right operand's elements are of another type than the left's
  * (`Admission.joinElements`, #1272): an error at the join, a `+=`'s at its right operand, as the current checker gives
- * it. Its fix declares the first of the operands `named` that is a variable or a parameter (a `+=`'s target only), as
- * that checker's does where that operand's type governs the error (Codex r2 and r5 on #1310); `values` otherwise.
+ * it. Its fix declares the variable whose start value the joined list is, with its own start value (#1268, TABLE
+ * r4.146), and names the type in words elsewhere (`mixedJoinFix`).
  */
 export function mixedJoin(
   walk: Consumers,
@@ -217,13 +216,15 @@ export function mixedJoin(
 ): void {
   const { program } = walk.pass;
   const { c } = found;
-  const [left, right] = [c.arguments[0]!, c.arguments[1]!];
+  const right = c.arguments[1]!;
   const place = program.place(c.result).kind;
   const compound = place.kind === "value" && place.node === "compound";
-  const rootOf = (operand: PlaceId): StoreRoot | null => {
-    const binding = program.occurrenceOf.get(operand);
-    return binding === undefined ? null : storeRoot(walk, binding);
-  };
+  const start = (walk.pass.definitions.byValue.get(found.value) ?? []).find(
+    (d) =>
+      d.kind === "whole" &&
+      d.path.length === 0 &&
+      (d.how === "initializer" || d.how === "parameter default"),
+  );
   error(
     walk,
     "written-target",
@@ -233,11 +234,7 @@ export function mixedJoin(
       collection: "list",
       path: found.path,
       type: found.earliest,
-      root:
-        found.named
-          .filter((operand) => !compound || operand === left)
-          .map(rootOf)
-          .find((root) => root !== null) ?? null,
+      root: start === undefined ? null : storeRoot(walk, start.place),
       operator: compound ? "+=" : "+",
       levels: found.levels,
     },

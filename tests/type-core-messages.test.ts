@@ -475,46 +475,50 @@ test("a list's '+' mixes element types as a literal does, with the current check
     );
   };
   const mix = (operator: string, kinds: string, fix: string): string =>
-    `'${operator}' would mix ${kinds}. A list holds one type. To keep both, ${fix}.`;
+    `'${operator}' would mix ${kinds}. A list holds one type. To allow both, ${fix}.`;
   const integerString = "a whole number (integer) and text (string)";
-  const union = (head: string, type = "(integer | string)[]"): string =>
-    `declare a union type, as in '${head}: ${type} = ...'`;
+  // (the declaration whose start value the joined list is, with its own start value; else the type in words: #1268)
+  const declared = (code: string): string => `declare the list as '${code}'`;
+  const typed = (type = "(integer | string)[]"): string =>
+    `declare the list with the type '${type}'`;
   for (const [source, expected] of [
     [
       'let xs = [1]\nlet more = xs + ["x"]\nsay more.length\nexit',
-      `TSV044 [24,34) ${mix("+", integerString, union("let xs"))}`,
+      `TSV044 [24,34) ${mix("+", integerString, declared('let more: (integer | string)[] = xs + ["x"]'))}`,
     ],
-    [
-      'say ([1] + ["x"]).length\nexit',
-      `TSV044 [5,16) ${mix("+", integerString, union("let values"))}`,
-    ],
+    ['say ([1] + ["x"]).length\nexit', `TSV044 [5,16) ${mix("+", integerString, typed())}`],
     [
       'let xs = [1]\nlet ys = ["x"]\nlet both = xs + ys\nsay both.length\nexit',
-      `TSV044 [39,46) ${mix("+", integerString, union("let xs"))}`,
+      `TSV044 [39,46) ${mix("+", integerString, declared("let both: (integer | string)[] = xs + ys"))}`,
     ],
-    [
-      'let xs = [1]\nxs += ["x"]\nexit',
-      `TSV044 [19,24) ${mix("+=", integerString, union("let xs"))}`,
-    ],
+    ['let xs = [1]\nxs += ["x"]\nexit', `TSV044 [19,24) ${mix("+=", integerString, typed())}`],
     [
       'let box = {items: [1]}\nbox.items = box.items + ["x"]\nexit',
-      `TSV044 [35,52) ${mix("+", integerString, union("let values"))}`,
+      `TSV044 [35,52) ${mix("+", integerString, typed())}`,
     ],
     [
       'let xs = [1]\nlet both = xs + ["x"]\nsay both[1] + 1\nexit',
-      `TSV044 [24,34) ${mix("+", integerString, union("let xs"))}`,
+      `TSV044 [24,34) ${mix("+", integerString, declared('let both: (integer | string)[] = xs + ["x"]'))}`,
     ],
     [
       'let left = {items: [true]}\nlet right = {items: ["x"]}\nlet both = left.items + right.items\nsay both.length\nexit',
-      `TSV044 [65,89) ${mix("+", "true or false (boolean) and text (string)", union("let values", "(boolean | string)[]"))}`,
+      `TSV044 [65,89) ${mix("+", "true or false (boolean) and text (string)", declared("let both: (boolean | string)[] = left.items + right.items"))}`,
     ],
     [
       'function f(xs = [1]) {\n  return xs + ["x"]\n}\nsay f().length\nexit',
-      `TSV044 [32,42) ${mix("+", integerString, "declare the parameter as 'xs: (integer | string)[] = ...'")}`,
+      `TSV044 [32,42) ${mix("+", integerString, typed())}`,
+    ],
+    [
+      'function f(xs = [1] + ["x"]) {\n  say xs.length\n}\nf()\nexit',
+      `TSV044 [16,27) ${mix("+", integerString, "declare the parameter as 'xs: (integer | string)[] = [1] + [\"x\"]'")}`,
+    ],
+    [
+      'global gs = [1] + ["x"]\nexit',
+      `TSV044 [12,23) ${mix("+", integerString, declared('global gs: (integer | string)[] = [1] + ["x"]'))}`,
     ],
     [
       'let xs = [[1]]\nlet more = xs + [["x"]]\nsay more.length\nexit',
-      `TSV044 [26,38) ${mix("+", "a list (integer[]) and a list (string[])", union("let xs", "(integer | string)[][]"))}`,
+      `TSV044 [26,38) ${mix("+", "a list (integer[]) and a list (string[])", declared('let more: (integer | string)[][] = xs + [["x"]]'))}`,
     ],
     [
       'let c = [{n: 1}] + [{n: "x"}]\nsay c.length\nexit',
@@ -525,40 +529,40 @@ test("a list's '+' mixes element types as a literal does, with the current check
     // read with its left neighbours in source order (Codex r1 on #1310)
     [
       'let both = [1, hostValue] + ["x"] + [2]\nexit',
-      `TSV044 [11,33) ${mix("+", integerString, union("let values"))}`,
+      `TSV044 [11,33) ${mix("+", integerString, declared('let both: (integer | string)[] = [1, hostValue] + ["x"] + [2]'))}`,
     ],
     [
       'let xs = [1] + ([2] + ["x"])\nexit',
-      `TSV044 [16,27) ${mix("+", integerString, union("let values"))}`,
+      `TSV044 [16,27) ${mix("+", integerString, declared('let xs: (integer | string)[] = [1] + ([2] + ["x"])'))}`,
     ],
     // whole numbers beside numbers in one operand are numbers (Codex r2 on #1310); a join in a right operand is decided
-    // on its own, its fix naming its own operand (Astra on #1310)
+    // on its own
     [
       'let both = [1, 1.5] + ["x"]\nexit',
-      `TSV044 [11,27) ${mix("+", "a number and text (string)", union("let values", "(number | string)[]"))}`,
+      `TSV044 [11,27) ${mix("+", "a number and text (string)", declared('let both: (number | string)[] = [1, 1.5] + ["x"]'))}`,
     ],
     [
       'let ys = [1]\nlet both = [1] + (ys + ["x"])\nexit',
-      `TSV044 [31,41) ${mix("+", integerString, union("let ys"))}`,
+      `TSV044 [31,41) ${mix("+", integerString, declared('let both: (integer | string)[] = [1] + (ys + ["x"])'))}`,
     ],
     // null elements decide nothing, but each side's sentence and the union the fix writes hold them (Codex r3 on #1310)
     [
       'let xs = [1, null]\nlet both = xs + ["x"]\nexit',
-      `TSV044 [30,40) ${mix("+", "a whole number (integer) or null and text (string)", union("let xs", "(integer | string | null)[]"))}`,
+      `TSV044 [30,40) ${mix("+", "a whole number (integer) or null and text (string)", declared('let both: (integer | string | null)[] = xs + ["x"]'))}`,
     ],
     [
       'let xs = [1]\nlet both = xs + ["x", null]\nexit',
-      `TSV044 [24,40) ${mix("+", "a whole number (integer) and text (string) or null", union("let xs", "(integer | string | null)[]"))}`,
+      `TSV044 [24,40) ${mix("+", "a whole number (integer) and text (string) or null", declared('let both: (integer | string | null)[] = xs + ["x", null]'))}`,
     ],
     // a function's written result decides as a variable's written type does (Codex r5 on #1310)
     [
       'function make: (integer | boolean)[] {\n  return [1]\n}\nlet both = make() + ["x"]\nexit',
-      `TSV044 [65,79) ${mix("+", "a whole number (integer) or true or false (boolean) and text (string)", union("let values", "(integer | boolean | string)[]"))}`,
+      `TSV044 [65,79) ${mix("+", "a whole number (integer) or true or false (boolean) and text (string)", declared('let both: (integer | boolean | string)[] = make() + ["x"]'))}`,
     ],
     // a run of joins has one element type, whole numbers beside numbers numbers
     [
       'say ([1] + [1.5] + ["x"]).length\nexit',
-      `TSV044 [5,24) ${mix("+", "a number and text (string)", union("let values", "(number | string)[]"))}`,
+      `TSV044 [5,24) ${mix("+", "a number and text (string)", typed("(number | string)[]"))}`,
     ],
     ["let xs = [1]\nlet b = [1.5]\nsay (xs + b).length\nexit", null],
     ['let xs = []\nlet more = xs + ["x"]\nsay more.length\nexit', null],
@@ -781,13 +785,13 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
 });
 
 /**
- * #1272 (TABLE r4.146, Codex r2–r5 on #1310): the type a join's fix declares holds every value the joined lists bring,
- * at every list level, so pasted on the variable it names it takes the error away and adds nothing. Every pair of
- * element kinds (whole numbers, numbers, text, truth values, objects, `null` beside a number and beside text, on
- * either side); nested lists, optional at one level or more; a number only external data gives; a later `null` in a run;
- * and the variable's own later stores (Codex r5 on #1310).
+ * #1272 (TABLE r4.146, Codex r2–r5 on #1310): the declaration a join's fix offers, the variable the join starts with the
+ * type (#1268), holds every value the joined lists bring, at every list level, so pasted in place of the source's own it
+ * takes the error away and adds nothing. Every pair of element kinds, either order (whole numbers, numbers, text, truth
+ * values, objects, `null` beside a number and beside text); nested lists, optional at one level or more; a number only
+ * external data gives; a later `null` in a run; and the variable's own later stores of a kind it holds.
  */
-test("a list join's fix, pasted on the variable it names, holds every element the join brings (#1272)", () => {
+test("a list join's fix, pasted as the declaration it offers, holds every element the join brings (#1272)", () => {
   const reported = (source: string): string[] => {
     const request = coreRequest(main(source));
     assert.ok(request !== null, source);
@@ -807,9 +811,9 @@ test("a list join's fix, pasted on the variable it names, holds every element th
     'let xs = [[[1]], [null], null]\nlet both = xs + [[["x"]]]\nexit\n',
     'let xs = [1, hostValue / 2]\nlet both = xs + ["x"]\nexit\n',
     'let xs = [1]\nlet both = xs + ["x"] + [null]\nexit\n',
-    // the variable's later stores stay valid: a written union's, and a number beside whole numbers (Codex r5)
-    'let xs: (integer | boolean)[] = [1]\nlet both = xs + ["x"]\nxs.add(true)\nexit\n',
-    'let xs = [1]\nlet both = xs + ["x"]\nxs.add(1.5)\nexit\n',
+    // (a number stored later is among what the variable holds, Codex r5)
+    'let xs = [1]\nlet both = xs + ["x"]\nboth.add(1.5)\nexit\n',
+    'let xs = [1]\nlet both = xs + ["x"]\nboth[0] = 2.5\nexit\n',
   );
   let mixed = 0;
   for (const source of sources) {
@@ -817,9 +821,10 @@ test("a list join's fix, pasted on the variable it names, holds every element th
     const error = found.filter((line) => line.startsWith("TSV044"));
     if (error.length === 0) continue;
     mixed += 1;
-    const fix = /as in 'let xs: (.+) = \.\.\.'\.$/.exec(error.join("\n"));
+    const fix = /declare the list as '(let both: [^=]+ = (.+))'\.$/.exec(error.join("\n"));
     assert.ok(error.length === 1 && fix !== null, `${source}: ${found.join(" | ")}`);
-    const pasted = source.replace(/let xs(: [^=]+)? = /, `let xs: ${fix[1]} = `);
+    const pasted = source.replace(`let both = ${fix[2]!}`, fix[1]!);
+    assert.notEqual(pasted, source, fix[1]);
     // (external data is checked where it comes in, against the type the fix declares, ADR 0021 1.7)
     assert.deepEqual(
       reported(pasted).filter((line) => !line.startsWith("TSV041") || !line.includes("hostValue")),

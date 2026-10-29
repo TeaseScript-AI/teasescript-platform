@@ -1649,7 +1649,7 @@ function mixedSentence(
     );
   }
   const first = `${mixes} ${nested(rule.type)} and ${nested(kinds)}. ${holds}`;
-  if (rule.operator !== undefined) return `${first}${mixedJoinFix(rule)}`;
+  if (rule.operator !== undefined) return `${first}${mixedJoinFix(rule, source, diagnosed)}`;
   const both = path.length === 0 ? typeText([...rule.type, ...kinds]) : null;
   if (both === null) return `${first} Use values of one type in it.`;
   const written = collectionText(collection, both);
@@ -1664,13 +1664,18 @@ function mixedSentence(
 }
 
 /**
- * A list `+` that mixes types (#1272): the current checker's fix, a written union declared on the operand's variable or
- * parameter, written from what the join's elements hold at each list level (`levels`): every kind, `null` and numbers
- * among them, so the declared type holds every value the joined lists bring (Codex r2–r4 on #1310); one union inside the
- * lists, an optional list where a level holds `null` beside lists (V30 §13). Values of one type in words where no
- * written type holds them.
+ * A list `+` that mixes types (#1272): a written union the joined list's elements need, from what they hold at each list
+ * level (`levels`): every kind, `null` and numbers among them, so the type holds every value the joined lists bring
+ * (Codex r2–r4 on #1310); one union inside the lists, an optional list where a level holds `null` beside lists (V30
+ * §13). Where the joined list is a variable's start value, that declaration with the type and its own start value, where
+ * `codeAt` proves it there (`declaration`, #1268, TABLE r4.146); else the type in words (a form at its position, r4.171);
+ * values of one type in words where no written type holds them.
  */
-function mixedJoinFix(rule: Extract<DiagnosticRule, { rule: "mixed" }>): string {
+function mixedJoinFix(
+  rule: Extract<DiagnosticRule, { rule: "mixed" }>,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string {
   const levels = rule.levels ?? null;
   const words = " Use values of one type in both lists.";
   if (levels === null || levels.length === 0) return words;
@@ -1684,12 +1689,10 @@ function mixedJoinFix(rule: Extract<DiagnosticRule, { rule: "mixed" }>): string 
     written = `${element(written)}[]${kinds.includes("null") ? "?" : ""}`;
   }
   written = `${element(written)}[]`;
-  const root = rule.root;
-  if (root?.kind === "parameter")
-    return ` To keep both, declare the parameter as '${root.name}: ${written}${root.start === null ? "" : ` = ${root.start}`}'.`;
-  const head =
-    root?.kind === "let" || root?.kind === "global" ? `${root.kind} ${root.name}` : "let values";
-  return ` To keep both, declare a union type, as in '${head}: ${written} = ...'.`;
+  const declared = declaration(rule.root, written, source, diagnosed, "the list");
+  const type = typeAt(written, diagnosed);
+  if (declared === null && type === null) return words;
+  return ` To allow both, ${declared ?? `declare the list with the type '${type}'`}.`;
 }
 
 /**

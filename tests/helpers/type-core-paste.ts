@@ -1,7 +1,9 @@
-import { compileProject } from "../../src/compiler.js";
+import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
 import { createFreshRuntimeSession } from "../../src/index.js";
+import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
+import { LEGACY_BACKEND } from "../../src/type-inference/legacy-rounds.js";
 import { coreRequest } from "./type-core-analysis.js";
 
 /*
@@ -10,8 +12,11 @@ import { coreRequest } from "./type-core-analysis.js";
  * receiver or list needs, the element and value kinds varied) at one site (`SITES`: a declaration, typed or not, a
  * store, an operand per operator class, an argument, a condition, an interpolation, an element, a receiver, a count, a
  * loop's iterable, a range's bound, a side of `otherwise`, a default, a variable or a parameter without a type, as its
- * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs.
- * The parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
+ * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs; a declaration
+ * form under the new core alone where the current checker's recorded difference from the accepted text is its only
+ * rejection (#1412: a list join whose written destination admits every operand), as the checker whose message offers it
+ * decides (the lead's ruling on #1310). The parity test runs a sample of it; the whole family is the step's evidence,
+ * run outside CI.
  */
 
 /** An erroneous expression a fix offers code for, with the lines before it that make it so. */
@@ -126,6 +131,33 @@ const OFFERS: readonly Offer[] = [
   { name: "list + range", setup: "let xs = [1]", expression: "xs + (1..3)" },
   { name: "range + list", setup: "let xs = [1]", expression: "(1..3) + xs" },
 ];
+
+/**
+ * The sites that read the value as text (`trim`, `+= "x"`), where a list errs whatever its type: the compound on the
+ * current checker, and on the new core once #1413 is repaired.
+ */
+const TEXT_READS = ["untyped variable's trim", "untyped compound"];
+
+/**
+ * A list join that mixes element types, both orders, on lists of each element kind (#1272): its fix declares the
+ * variable whose start value the join is, as the source writes it with the type (#1268). At every site but
+ * `TEXT_READS`.
+ */
+const JOINS: readonly Offer[] = ELEMENTS.flatMap(([kind, value]): Offer[] => {
+  const other = kind === "text" ? "1" : '"x"';
+  return [
+    {
+      name: `list of ${kind} + [${other}]`,
+      setup: `let xs = [${value}]`,
+      expression: `xs + [${other}]`,
+    },
+    {
+      name: `[${other}] + list of ${kind}`,
+      setup: `let xs = [${value}]`,
+      expression: `[${other}] + xs`,
+    },
+  ];
+});
 
 /** The sites: where the expression's value lands. */
 const SITES: readonly Site[] = [
@@ -355,6 +387,16 @@ export function pasteCases(sample = false): PasteCase[] {
       const sites = SITES.filter((site) => names.includes(site.name));
       return [offer, sample ? [sites[index % sites.length]!] : sites] as const;
     }),
+    // (the sample at the declaration its fix declares)
+    ...JOINS.map(
+      (offer) =>
+        [
+          offer,
+          SITES.filter((site) =>
+            sample ? site.name === "declaration" : !TEXT_READS.includes(site.name),
+          ),
+        ] as const,
+    ),
   ];
   for (const [offer, sites] of offers) {
     for (const site of sites) {
@@ -407,10 +449,11 @@ export function pasteCases(sample = false): PasteCase[] {
   return cases;
 }
 
-/** A pasted form: the code a fix offered, and the source with it pasted at its position. */
+/** A pasted form: the code a fix offered, and the source with it pasted at its position; whether it is a declaration. */
 export interface Pasted {
   readonly code: string;
   readonly source: string;
+  readonly declaration?: true;
 }
 
 /** A code form in a fix sentence, by the words that offer it; a statement's `on a line of its own`. */
@@ -420,9 +463,20 @@ const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?
 const FALLBACK = /give a fallback, as in '([^']+)'/;
 
 /**
+ * The declaration a list join's fix offers whole (#1268, TABLE r4.146): its head, the name it declares, and its text
+ * from the `=` on, which stand in the source's own declaration, with any type it writes.
+ */
+const DECLARATION =
+  /declare (?:the list|the parameter) as '(((?:let |global )?[A-Za-z_]\w*): [^=']+?( = [^']*)?)'/;
+
+/** Text matched as itself in a regular expression. */
+const literally = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
  * The code forms the core's errors in `source` offer at or inside `[start, end)`, each pasted at its position: in place
  * of the diagnosed expression, or as a line of its own before the case's line, the list it changes in place of the
- * expression; a warning's fallback in place of its subject; whether the expression gets any diagnostic.
+ * expression; a declaration in place of the source's own; a warning's fallback in place of its subject; whether the
+ * expression gets any diagnostic.
  */
 export function pastedForms(
   source: string,
@@ -462,6 +516,15 @@ export function pastedForms(
       continue;
     }
     const fixes = message.slice(message.indexOf(". ") + 2);
+    // (a declaration in place of the source's own: unchanged, and failing, where its own text is not there)
+    const declared = DECLARATION.exec(fixes);
+    if (declared !== null) {
+      const [, code, head, start = ""] = declared;
+      // (its written type up to its `=`, or a parameter's up to the list's next `,` or `)`)
+      const typed = start === "" ? "(?:: [^=,)\\n]+)?" : "(?:: [^=\\n]+?)?";
+      const own = new RegExp(`(?<![\\w.])${literally(head!)}${typed}${literally(start)}(?![\\w])`);
+      forms.push({ code: code!, source: source.replace(own, code!), declaration: true });
+    }
     for (const [, code, statement] of fixes.matchAll(CODE)) {
       if (statement === undefined) {
         forms.push({
@@ -488,11 +551,33 @@ export function pastedForms(
 }
 
 /**
- * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
- * where it compiles and runs.
+ * The current checker without its recorded difference from the accepted text (#1412): a list join's error where the
+ * join's written destination admits every operand, as the new core proves where it is quiet.
  */
-export function pasteFailure(source: string): string | null {
-  const compiled = compileProject([{ path: "main.tease", source }]);
+const RECORDED: TypeAnalysisBackend = {
+  name: "legacy",
+  analyze(request) {
+    const outcome = LEGACY_BACKEND.analyze(request);
+    const diagnostics = outcome.checked.diagnostics.map((file) =>
+      file.filter(
+        (diagnostic) =>
+          diagnostic.code !== "TSV044" || !/^'\+=?' would mix /.test(diagnostic.message),
+      ),
+    );
+    return { checked: { ...outcome.checked, diagnostics }, facts: () => outcome.facts() };
+  },
+};
+
+/**
+ * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
+ * where it compiles and runs. A `declaration`'s compile errors leave out the current checker's recorded difference
+ * (#1412), which the new core decides.
+ */
+export function pasteFailure(source: string, declaration = false): string | null {
+  const files = [{ path: "main.tease", source }];
+  const compiled = declaration
+    ? compileProjectWithBackend(files, {}, RECORDED)
+    : compileProject(files);
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0)
     return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");

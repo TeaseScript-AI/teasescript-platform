@@ -700,7 +700,7 @@ export class Admission {
       readonly path: readonly string[];
       readonly earliest: readonly ItemTag[];
       readonly kinds: readonly ItemTag[];
-      readonly named: readonly PlaceId[];
+      readonly value: PlaceId;
       readonly levels: readonly (readonly ItemTag[])[] | null;
     }) => void,
     undecided?: (value: PlaceId) => void,

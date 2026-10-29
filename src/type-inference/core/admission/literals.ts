@@ -581,12 +581,9 @@ function conflictGroups(admission: Admission, list: readonly Definition[]): stri
  * at the paths of its own structure, a join's at its list levels as a variable holding it is (`pathsBelow`); a join's
  * paths are its operands', the smaller one's added to the larger one's, so a chain of k joins, on either side, costs
  * its operands' structures once. `error` hears of each with the join, the path, the decided kinds there and the
- * operand's, the operands a fix may name and the type it writes: `named`, the operands a fix may declare, in order:
- * alone in its tree, the join's left one where its elements decided the path, then its right one, whose elements
- * offend; beside other errors of its tree, only a left one that decided every one of them, whose union holds them all
- * (Codex r5 on #1310); `levels`, what the tree's elements hold at each list level down to the path, its `null`s and
- * numbers kept. `undecided`, before admission settled (`Consumers.#freshStores`): a join an operand of which is read
- * through a decision.
+ * operand's, the tree's value, whose declaration a fix may give the type (#1268), and the type it writes: `levels`, what
+ * the tree's elements hold at each list level down to the path, its `null`s and numbers kept. `undecided`, before
+ * admission settled (`Consumers.#freshStores`): a join an operand of which is read through a decision.
  */
 export function joinElements(
   admission: Admission,
@@ -596,7 +593,7 @@ export function joinElements(
     readonly path: readonly string[];
     readonly earliest: readonly ItemTag[];
     readonly kinds: readonly ItemTag[];
-    readonly named: readonly PlaceId[];
+    readonly value: PlaceId;
     readonly levels: readonly (readonly ItemTag[])[] | null;
   }) => void,
   undecided?: (value: PlaceId) => void,
@@ -822,7 +819,6 @@ export function joinElements(
     // came first: no conflict is proved from it (Astra r2's B1a on #1310)
     interface Decider {
       readonly decided: JoinDecided | "open";
-      readonly operand: PlaceId;
       readonly position: number;
     }
     interface Entry {
@@ -833,8 +829,8 @@ export function joinElements(
     }
     interface Held {
       readonly entries: Map<string, Entry>;
-      /** The paths an operand leaves open, each with that operand: open there and below. */
-      readonly opens: Map<string, PlaceId>;
+      /** The paths an operand leaves open: open there and below. */
+      readonly opens: Set<string>;
       /** Its list levels: where a variable holding it is compared (`pathsBelow`). */
       readonly levels: Set<string>;
       head: {
@@ -849,7 +845,7 @@ export function joinElements(
     const leaf = (operand: PlaceId): Held | null => {
       const { node, position } = positions.get(operand)!;
       if (!isList(operand, node)) return null;
-      const held: Held = { entries: new Map(), opens: new Map(), levels: new Set(), head: null };
+      const held: Held = { entries: new Map(), opens: new Set(), levels: new Set(), head: null };
       const paths: (readonly string[])[] = [[]];
       for (const path of pathsBelow(admission, operand, []))
         if (path.length > 1 && path[0] === "element")
@@ -860,11 +856,11 @@ export function joinElements(
         const ruled = decidedAt(operand, node, path);
         held.entries.set(at, {
           path,
-          first: ruled === null ? null : { decided: ruled, operand, position },
+          first: ruled === null ? null : { decided: ruled, position },
           kinds: new Set(ruled === null || ruled === "open" ? [] : ruled.own),
           nulls: nullAt(operand, node, path),
         });
-        if (ruled === "open") held.opens.set(at, operand);
+        if (ruled === "open") held.opens.add(at);
         if (path.every((step) => step === "element")) held.levels.add(at);
         if (path.length === 0 && ruled !== null) held.head = { operand, node, position };
       }
@@ -879,7 +875,7 @@ export function joinElements(
         const entry = held.entries.get(at);
         above =
           entry !== undefined ? (entry.first?.decided ?? null) : decidedAt(operand, node, level);
-        if (entry === undefined && above === "open") held.opens.set(at, operand);
+        if (entry === undefined && above === "open") held.opens.add(at);
       }
       return held;
     };
@@ -892,19 +888,14 @@ export function joinElements(
       held: Held,
       path: readonly string[],
       at: string,
-    ): {
-      readonly decided: JoinDecided | "open";
-      readonly decider: PlaceId;
-      readonly nulls: boolean;
-    } | null => {
+    ): { readonly decided: JoinDecided | "open"; readonly nulls: boolean } | null => {
       // (open at the path or above it: each prefix's text one step longer than the last)
       if (held.opens.size > 0)
         for (let depth = 0, text = ""; depth <= path.length; depth += 1) {
           program.work.charge("checks");
           if (depth > 0) text = depth === 1 ? path[0]! : stepText(text, path[depth - 1]!);
           keepText(admission.work, text.length);
-          const opener = held.opens.get(text);
-          if (opener !== undefined) return { decided: "open", decider: opener, nulls: false };
+          if (held.opens.has(text)) return { decided: "open", nulls: false };
         }
       const entry = held.entries.get(at);
       let first = entry?.first ?? null;
@@ -925,21 +916,20 @@ export function joinElements(
         }
         if (found !== null) {
           const { decided: ruled } = found;
-          first = { decided: ruled, operand: head.operand, position: head.position };
+          first = { decided: ruled, position: head.position };
           if (ruled !== "open") kinds = new Set([...kinds, ...ruled.own]);
           nulls ||= found.nulls;
         }
       }
       if (first === null) return null;
-      const { decided: ruled, operand: decider } = first;
+      const { decided: ruled } = first;
       if (ruled === "open" || ruled.typed || [...kinds].every((kind) => ruled.own.includes(kind)))
-        return { decided: ruled, decider, nulls };
+        return { decided: ruled, nulls };
       // (a value's kinds, as `decidedAt` reads them: whole numbers beside numbers are numbers, ADR 0021 1.3; several
       // families each fit as itself)
       const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
       return {
         decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
-        decider,
         nulls,
       };
     };
@@ -961,7 +951,7 @@ export function joinElements(
         for (const kind of entry.kinds) known.kinds.add(kind);
         known.nulls ||= entry.nulls;
       }
-      for (const [at, opener] of from.opens) into.opens.set(at, opener);
+      for (const at of from.opens) into.opens.add(at);
       for (const at of from.levels) into.levels.add(at);
       if (from.head !== null && (into.head === null || from.head.position < into.head.position))
         into.head = from.head;
@@ -975,8 +965,6 @@ export function joinElements(
       held.delete(value);
       return found;
     };
-    const errors: (Omit<Parameters<typeof error>[0], "named"> & { readonly decider: PlaceId })[] =
-      [];
     for (const c of tree.toReversed()) {
       const [left, right] = [c.arguments[0]!, c.arguments[1]!];
       const ours = take(left);
@@ -1009,7 +997,7 @@ export function joinElements(
               ))
           )
             continue;
-          errors.push({
+          error({
             c,
             path,
             earliest:
@@ -1017,7 +1005,7 @@ export function joinElements(
                 ? [...ruled.decided.own, "null"]
                 : ruled.decided.own,
             kinds: own.nulls || own.decided.nullable === true ? [...kinds, "null"] : kinds,
-            decider: ruled.decider,
+            value: root.result,
             levels: levelsAt(path),
           });
           admission.rejections += 1;
@@ -1030,22 +1018,6 @@ export function joinElements(
         c.result,
         theirs === null || rejected ? ours : ours === null ? theirs : joined(ours, theirs),
       );
-    }
-    // (each error's fix, once the tree's errors are known)
-    const shared = errors.every((each) => each.decider === errors[0]?.decider);
-    for (const { decider, ...found } of errors) {
-      const [left, right] = [found.c.arguments[0]!, found.c.arguments[1]!];
-      error({
-        ...found,
-        named:
-          errors.length === 1
-            ? left === decider
-              ? [left, right]
-              : [right]
-            : shared && left === decider
-              ? [left]
-              : [],
-      });
     }
   }
 }
