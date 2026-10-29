@@ -1,6 +1,6 @@
 import { lazyDefaultOperation } from "../../../lazy-defaults.js";
 import type { ValueKind } from "../../../value-kinds.js";
-import type { SourceSite } from "../../graph.js";
+import type { Constraint, SourceSite } from "../../graph.js";
 import { isExternal, isOpaque } from "../admission.js";
 import { joinParts, joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
@@ -51,7 +51,8 @@ export function operations(walk: Consumers): void {
   walk.enter(0);
   for (const c of finals) {
     if (!walk.runs(c.site)) continue;
-    const node = program.exprAt(c.site);
+    // (a compound assignment's operation is its statement's, which has no expression of its own: Astra's G2)
+    const node = program.exprAt(c.site) ?? compoundNode(walk, c);
     if (node === null) continue;
     walk.reading = node;
     if (c.kind === "get") {
@@ -140,6 +141,17 @@ export function operations(walk: Consumers): void {
     }
     if (c.kind === "project") projection(walk, c, node);
   }
+}
+
+/**
+ * The node of a compound assignment's operation (`x += y`, the collector's `compound` value): its statement's, where the
+ * binary form's operation is its expression's, so both forms meet one operand consumer (C4, F16); `null` for any other.
+ */
+function compoundNode(walk: Consumers, c: Constraint): FlowNode | null {
+  if (c.kind !== "operation") return null;
+  const place = walk.pass.program.places[c.result]?.kind;
+  if (place?.kind !== "value" || place.node !== "compound") return null;
+  return walk.pass.program.flow.statementAt(c.site) ?? null;
 }
 
 function operation(
