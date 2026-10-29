@@ -10,6 +10,7 @@ import { run } from "../src/runtime/engine.js";
 import {
   createCapturedSerializableList,
   createCapturedSerializableObject,
+  createCapturedSerializableSet,
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
@@ -826,13 +827,14 @@ test("every parameter of the text, list, set and dict contracts that takes some 
 });
 
 /**
- * The derived oracle follows every admitted argument check (Sol r1 B5): each text, list and set method's parameter that
- * takes some kinds, given host data on the candidate route, and the elements `join` shows and `sort` orders; every run
- * of the plan under each host value is the run the oracle derives from the record and the source, and each discharge
- * of an argument by the call's own check is violable: a host value stops the run at the call (removing the check
- * would show here).
+ * The derived oracle follows every admitted argument check and the runtime's dispatch (Sol r1 B5, r2): each text, list
+ * and set method's parameter that takes some kinds, given host data on the candidate route; the elements `join` shows
+ * and `sort` orders; and every admitted method of text, lists, sets and dicts on a receiver the script cannot know,
+ * under host values of each kind the runtime dispatches differently. Every run of the plan is the run the oracle derives
+ * from the record and the source, and each discharge of an argument or a member by the call's own check is violable: a
+ * host value stops the run at the call (removing the check would show here).
  */
-test("every admitted argument check runs as the derived oracle predicts, and each such discharge stops a run at its call", (t) => {
+test("every admitted argument check and method dispatch runs as the derived oracle predicts, and each such discharge stops a run at its call", (t) => {
   const programs = [
     ...contractParameters()
       .filter((parameter) => !parameter.receiver.startsWith("dict"))
@@ -841,9 +843,36 @@ test("every admitted argument check runs as the derived oracle predicts, and eac
     'let xs = [hostValue otherwise [1]]\nsay xs.join()\nsay "after"\nexit\n',
     'let xs = [hostValue]\nxs.sort()\nsay "after"\nexit\n',
   ];
+  // (each admitted method on a receiver the script cannot know, under host values of every kind that dispatches it
+  // differently: text, a list, an empty list, a set, a dict, a number, null; the member check's discharge too)
+  const dispatched = [
+    ...new Set([
+      ...Object.keys(TEXT_METHODS),
+      ...Object.keys(LIST_METHODS).filter(
+        (name) => listMethod(name)!.changes === undefined || name === "sort",
+      ),
+      ...Object.keys(DICT_METHODS).filter((name) => dictMethod(name)!.changes === undefined),
+    ]),
+  ].map((name) => {
+    const parameter = contractParameters().find((found) => found.name === name);
+    const call =
+      parameter === undefined
+        ? `r.${name}()`
+        : contractCall({ ...parameter, receiver: "r", position: -1 }, "");
+    return `let r = hostValue\nlet result = ${name === "get" ? `r.get("a", default: 0)` : call}\nsay "after"\nexit\n`;
+  });
+  const receivers: readonly SerializableRuntimeValue[] = [
+    "abc",
+    2,
+    null,
+    createCapturedSerializableList([1, 2]),
+    createCapturedSerializableList([]),
+    createCapturedSerializableSet([1, 2]),
+    { kind: "dict", entries: [{ key: "a", value: 1 }] },
+  ];
   const differing: string[] = [];
   let [planned, outside, discharges] = [0, 0, 0];
-  for (const source of programs) {
+  for (const source of [...programs, ...dispatched]) {
     let result: ReturnType<typeof compileSourceWithBackend>;
     try {
       result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
@@ -873,7 +902,10 @@ test("every admitted argument check runs as the derived oracle predicts, and eac
       continue;
     }
     const failures: (string | null)[] = [];
-    for (const inputs of assignments(["hostValue"])) {
+    const inputsOf = dispatched.includes(source)
+      ? receivers.map((hostValue) => ({ hostValue }))
+      : assignments(["hostValue"]);
+    for (const inputs of inputsOf) {
       const ran = runGlobals(result.plan, inputs);
       let predicted: PredictedRun | string;
       try {
@@ -889,14 +921,28 @@ test("every admitted argument check runs as the derived oracle predicts, and eac
       failures.push(ran.failure);
     }
     for (const discharge of derived.discharges)
-      if (discharge.by === "native" && discharge.what === "argument") {
+      if (
+        discharge.by === "native" &&
+        (discharge.what === "argument" || discharge.what === "member")
+      ) {
         discharges += 1;
-        if (!failures.some((failure) => failure?.split("@")[1] === discharge.site))
-          differing.push(`${source}: the call's own check at ${discharge.site} stops no run`);
+        // (a method's member check stops the run at the call, which starts where the member does)
+        const at =
+          discharge.what === "member" ? `${discharge.site.split(":")[0]}:` : discharge.site;
+        if (
+          !failures.some((failure) =>
+            discharge.what === "member"
+              ? failure?.split("@")[1]?.startsWith(at) === true
+              : failure?.split("@")[1] === at,
+          )
+        )
+          differing.push(
+            `${source}: the ${discharge.what} check at ${discharge.site} stops no run`,
+          );
       }
   }
   t.diagnostic(
-    `${planned} programs with a plan (${outside} outside the slice), ${discharges} argument discharges`,
+    `${planned} programs with a plan (${outside} outside the slice), ${discharges} argument and member discharges`,
   );
   assert.deepEqual(differing, []);
 });
@@ -912,6 +958,11 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
     ["let n: integer = hostValue\nfor i in 3..1 {}\nexit\n", "warning", "TSV046"],
     ['repeat toInteger("-2", default: 0) {}\nexit\n', "compile-error", "TSV011"],
     ['say toInteger("bad", default: 0)\nexit\n', "compile-error", "TSV043"],
+    [
+      'let a: integer = hostValue\nsay toInteger("bad", default: 0)\nfor i in 3..1 {}\nexit\n',
+      "compile-error",
+      "TSV043",
+    ],
   ];
   const failures: string[] = [];
   for (const [source, wanted, code] of cases) {
@@ -944,6 +995,9 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
       let codes: string[];
       try {
         made = withTestAllowance(allowance, () => compactAnalysis(request));
+        withTestAllowance(allowance, () =>
+          publishedAnswers(analyseCore(request), bindings, request),
+        );
         codes = withTestAllowance(allowance, () =>
           compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND),
         ).diagnostics.map((d) => d.code);
@@ -967,12 +1021,22 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
 /**
  * A content check over the contents a written type admits (the owner's review F2; ADR 0021 1.8, 1.10): where a value
  * comes from outside the script (host data, a load, a parse) into a written collection type, directly or through a copy,
- * an object holding it, an element of an outer list or a replacement of an empty one, the elements `join` shows, `sort`
+ * an object holding it, an element of an outer list, a replacement of an empty one, or into a decided one (Sol r2 N3), the elements `join` shows, `sort`
  * orders, `toJson` writes and a choice's list gives are its written element type's: one that does not fit owes the check
  * at the use, a warning (a list may be empty, so never an error), and one that fits is quiet; the incoming check is no
  * substitute. A known empty list is quiet. (A narrowing `is` test's element type narrows an element read, `v[0]`, not
  * the element path these checks read: `narrowing.ts`'s, outside this family.)
  */
+/** A list literal of each written type the content family uses, which decides that type unwritten. */
+const LITERALS: Readonly<Record<string, string>> = {
+  "object[]": "[{n: 1}]",
+  "string[]": '["a"]',
+  "boolean[]": "[true]",
+  "integer[]": "[1]",
+  "regex[]": "[/a/]",
+  "integer[][]": "[[1]]",
+};
+
 test("a content check reads the written element type of a value from outside the script: a misfit owes the use's check", (t) => {
   const consumers: readonly {
     readonly name: string;
@@ -1053,6 +1117,10 @@ test("a content check reads the written element type of a value from outside the
     {
       name: "a replaced empty list",
       source: (type, use) => [`let xs: ${type} = []\nxs = hostValue\n${use("xs")}\n`, "xs"],
+    },
+    {
+      name: "a decided list replaced by host data",
+      source: (type, use) => [`let xs = ${LITERALS[type]}\nxs = hostValue\n${use("xs")}\n`, "xs"],
     },
     {
       name: "a load",

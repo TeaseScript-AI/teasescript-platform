@@ -6,9 +6,10 @@ import {
   numberFromText,
 } from "../../src/conversions.js";
 import { escapeMarkup } from "../../src/message-markup.js";
-import { listMethod, listProperty } from "../../src/list-methods.js";
+import { dictMethod } from "../../src/dict-operations.js";
+import { hasListMethod, listMethod, listProperty } from "../../src/list-methods.js";
 import { parse } from "../../src/parser.js";
-import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
+import { isDictKey, VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import {
   DEFAULT_TEMPORAL_CONTEXT,
   formatIsoDate,
@@ -26,8 +27,13 @@ import {
 } from "../../src/temporal.js";
 import { binaryFromBase64, binaryFromDataUrl } from "../../src/runtime/host-data/stored-files.js";
 import { RuntimeFault } from "../../src/runtime/errors.js";
+import type { RuntimeErrorCode } from "../../src/diagnostic-codes.js";
 import { jsonText } from "../../src/runtime/values/json-base64.js";
-import { readCollection, sortOrder } from "../../src/runtime/values/collection-operations.js";
+import {
+  readCollection,
+  readDict,
+  sortOrder,
+} from "../../src/runtime/values/collection-operations.js";
 import { callStringMethod } from "../../src/runtime/values/string-operations.js";
 import {
   isDict,
@@ -37,7 +43,11 @@ import {
   isTemporal,
 } from "../../src/runtime/values/value-predicates.js";
 import { joinedText } from "../../src/runtime/values/value-text.js";
-import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+import type {
+  SerializableRuntimeList,
+  SerializableRuntimeSet,
+  SerializableRuntimeValue,
+} from "../../src/runtime/values/serializable-values.js";
 import type { CompactRecord } from "./type-core-records.js";
 
 /*
@@ -1650,53 +1660,88 @@ export function evaluate(
           return checkedFallback(expression, fallback);
         };
         if (callee.kind === "propertyAccessExpression") {
-          if (callee.property.name !== "get") {
-            // a method of the slice (S9b) as the runtime calls it: text's (`callStringMethod`), a list's or a set's
-            // that changes nothing (`readCollection`), and `sort`, which orders its list in place; the runtime's own
-            // check of an argument or an element fails at the call (TSV043 stands for a check that passes), and a
-            // receiver of another kind has no such method (TSR016, the call's member check)
-            const method = callee.property.name;
-            const from = new Set([
-              ...receiver!.from,
-              ...positional.flatMap((operand) => [...operand.from]),
-            ]);
-            const target = receiver!.v;
-            const values = positional.map((operand) => operand.v);
-            const { span } = expression;
-            const called = (make: () => SerializableRuntimeValue | undefined): Value => {
-              let made: SerializableRuntimeValue | undefined;
-              try {
-                made = make();
-              } catch (error) {
-                if (!(error instanceof RuntimeFault)) throw error;
-                fail(error.code, error.span.start.offset, error.span.end.offset, from, false);
-                return { v: null, from };
-              }
-              fail("TSV043", span.start.offset, span.end.offset, from, true);
-              return made === undefined ? useDefault() : { v: made, from };
-            };
-            if (typeof target === "string")
-              return called(() => callStringMethod(target, method, values, span));
-            if (target !== null && (isRuntimeList(target) || isSet(target))) {
-              if (method === "sort" && isRuntimeList(target))
-                return called(() => {
-                  const items = [...target.items];
-                  const order = sortOrder(items, span);
-                  target.items.splice(0, items.length, ...order.map((index) => items[index]!));
-                  return null;
-                });
-              if (listMethod(method)?.changes !== undefined)
-                throw new Underivable(`the method ${method}, which changes its receiver`);
-              return called(() =>
-                readCollection(target, method, values, {}, false, span, (item) =>
-                  joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
-                ),
-              );
+          const method = callee.property.name;
+          const from = new Set([
+            ...receiver!.from,
+            ...positional.flatMap((operand) => [...operand.from]),
+          ]);
+          const target = receiver!.v;
+          const values = positional.map((operand) => operand.v);
+          const { span } = expression;
+          // (the runtime's own check of the call fails at its site; one that passes is TSV043's and the member's)
+          const called = (make: () => SerializableRuntimeValue | undefined): Value => {
+            let made: SerializableRuntimeValue | undefined;
+            try {
+              made = make();
+            } catch (error) {
+              if (!(error instanceof RuntimeFault)) throw error;
+              fail(error.code, error.span.start.offset, error.span.end.offset, from, false);
+              return { v: null, from };
             }
-            if (target !== null && (isDict(target) || isRange(target) || isTemporal(target)))
-              throw new Underivable(`the method ${method} of a ${target.kind}`);
-            fail("TSR016", span.start.offset, span.end.offset, from, false);
-            return { v: null, from };
+            fail("TSV043", span.start.offset, span.end.offset, from, true);
+            fail("TSR016", span.start.offset, span.end.offset, from, true);
+            return made === undefined ? useDefault() : { v: made, from };
+          };
+          const fault = (code: RuntimeErrorCode, at: Expression["span"] = span): never => {
+            throw new RuntimeFault(code, "", at);
+          };
+          // a method of the slice (S9b) dispatched as the runtime dispatches it, by the receiver's kind: text's
+          // (`callStringMethod`); a dict's, its key text (TSR062 at the key), `contains` and `get` read (`readDict`); a
+          // list's or a set's that its kind has, with as many arguments as it takes (TSR028), that changes nothing
+          // (`readCollection`), or `sort`, which orders its list in place; any other receiver, or a method its kind
+          // does not have, fails the call's member check (TSR016)
+          if (typeof target === "string" && method !== "get")
+            return called(() => callStringMethod(target, method, values, span));
+          if (target !== null && isTemporal(target))
+            throw new Underivable(`the method ${method} of a ${target.kind}`);
+          if (target !== null && isDict(target)) {
+            const contract = dictMethod(method);
+            if (contract?.changes !== undefined)
+              throw new Underivable(`the method ${method}, which changes its receiver`);
+            return called(() => {
+              if (contract === undefined) return fault("TSR016");
+              if (values.length !== contract.parameters.length) return fault("TSR028");
+              const key = values[0]!;
+              if (!isDictKey(key)) return fault("TSR062", expression.arguments[0]!.value.span);
+              return readDict(target, method === "get" ? "get" : "contains", key);
+            });
+          }
+          if (method !== "get") {
+            if (target !== null && isRange(target) && method === "toList")
+              throw new Underivable("a range's toList");
+            const kind =
+              target !== null && isRuntimeList(target)
+                ? "list"
+                : target !== null && isSet(target)
+                  ? "set"
+                  : null;
+            const contract = listMethod(method);
+            if (contract?.changes !== undefined && method !== "sort" && kind !== null)
+              throw new Underivable(`the method ${method}, which changes its receiver`);
+            return called(() => {
+              if (kind === null || contract === undefined || !hasListMethod(kind, method))
+                return fault("TSR016");
+              const required = contract.parameters.filter(
+                (parameter) => !("optional" in parameter && parameter.optional === true),
+              ).length;
+              if (values.length < required || values.length > contract.parameters.length)
+                return fault("TSR028");
+              if (method === "sort" && isRuntimeList(target)) {
+                const items = [...target.items];
+                const order = sortOrder(items, span);
+                target.items.splice(0, items.length, ...order.map((index) => items[index]!));
+                return null;
+              }
+              return readCollection(
+                target as SerializableRuntimeList | SerializableRuntimeSet,
+                method,
+                values,
+                {},
+                false,
+                span,
+                (item) => joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
+              );
+            });
           }
           const index = positional[0]!;
           const list = receiver!;
