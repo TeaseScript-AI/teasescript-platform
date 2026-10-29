@@ -30,6 +30,7 @@ export const READS = new Map([
   ["cellSited", "C9's site for an item a store brings: a site, read"],
   ["compareLanded", "the member-answer oracle's comparison, a test seam inert outside it"],
   ["contributionSited", "C1's site for an item an add brings: a site, read"],
+  ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
   ["groups", "the places and paths `decide` decides: its inputs"],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
   ["literalChildren", "a literal's children at a step: syntax"],
@@ -41,6 +42,10 @@ export const READS = new Map([
   ["retained", "the decision admission retained before a stop: a decision's answer"],
   ["siteAt", "the site of an error for a store's contribution: a site, read"],
   ["sourceOrder", "a definition's place in source order"],
+  [
+    "stopDecision",
+    "takes back what a decision stopped at its demand allowance made of its key: each read of the key owes its own check",
+  ],
   ["storesAt", "the stores reaching a key: `decide`'s inputs"],
   ["takeBackReadChecks", "takes the running unit's read checks back at a stop: creates none"],
   ["typedByDefault", "whether an ingress is typed by its default alone (F18): a test"],

@@ -116,6 +116,19 @@ export function keyOfText(place: PlaceId, text: string): Key {
   return `${place}|${text}`;
 }
 
+/**
+ * The key one step above `key`, its last step and the dot before it gone (`place|` above a first step), its text charged
+ * before it is made; `null` at a place's own key.
+ */
+export function keptParent(work: WorkLedger, key: Key): Key | null {
+  if (key.endsWith("|")) return null;
+  const bar = key.indexOf("|");
+  const dot = key.lastIndexOf(".");
+  const end = dot > bar ? dot : bar + 1;
+  keepText(work, end);
+  return key.slice(0, end);
+}
+
 /** `prefixesOf`, each prefix's text charged before it is made (`keepText`). */
 export function keptPrefixes(work: WorkLedger, key: Key): Key[] {
   const steps = keptPath(work, key);

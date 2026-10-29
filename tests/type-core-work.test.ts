@@ -95,6 +95,28 @@ test("every sampled family's work grows with its program, not with a product of 
 });
 
 /**
+ * S3 §5, revision 14: an admission decision is a demand with the program's nodes' allowance, since a key's stores come
+ * from every call site. W5's `shown` places, each a function's own, read a record that every chapter's call stores
+ * (their callables' allowances it crossed 4.08 and 8.08 times, reversed): at k = 64 and 128 in either order no decision
+ * stops, and the work stays linear.
+ */
+test("W5's decisions stop at no demand allowance, in either order, and its work stays linear", () => {
+  const w5 = WORK_FAMILIES.find((family) => family.name === "W5")!;
+  const [at64, at128] = [sized(w5, 64), sized(w5, 128)];
+  for (const reversed of [false, true]) {
+    const [small, large] = [analysed(at64, reversed).budget, analysed(at128, reversed).budget];
+    for (const budget of [small, large])
+      assert.deepEqual(
+        budget.decisions.filter((d) => d.stopped),
+        [],
+        `reversed: ${reversed}`,
+      );
+    const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+    assert.ok((2 * (large.total / small.total)) / scale <= DOUBLING, `reversed: ${reversed}`);
+  }
+});
+
+/**
  * W34 (TABLE §13.3, r4.33–r4.38), W44 and W45 (r4.46 (3)): every variant in the source order and with the consumers'
  * and the solver's orders reversed, its total and each counter of at least 200 units per doubling of the source. A counter is the raw count of
  * one structure's steps, so a copy walked per field or a mark set made per copy shows in its own counter where the
@@ -775,6 +797,11 @@ test("each product a repair removed grows with the program in either order (#119
  * root: the per-path questions, a design round), never k³ (each copy and each label reading every level from the root,
  * 7.45 per doubling before). The walk is uncharged work (`writtenTypeSteps` counts it), gated at its measured doubling.
  */
+/**
+ * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
+ * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
+ * (TABLE r4.180, r4.183) walks the type again.
+ */
 test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
   const measured = (k: number): { steps: number; nodes: number } => {
     const source = [
@@ -787,10 +814,9 @@ test("copies of a deep written type walk the type once, not once per copy (#1194
     assert.ok(request !== null, `${k} levels: its file parses and resolves`);
     const before = writtenTypeSteps();
     const answers = analyseCore(request);
-    return {
-      steps: writtenTypeSteps() - before,
-      nodes: answers.budget.counts.get("syntaxNodes") ?? 0,
-    };
+    const { counts } = answers.budget;
+    const passes = 1 + (counts.get("rejectPasses") ?? 0) + (counts.get("stopPasses") ?? 0);
+    return { steps: (writtenTypeSteps() - before) / passes, nodes: counts.get("syntaxNodes") ?? 0 };
   };
   const [small, large] = [measured(32), measured(64)];
   const doubling = (2 * (large.steps / small.steps)) / (large.nodes / small.nodes);

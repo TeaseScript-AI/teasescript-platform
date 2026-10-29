@@ -9,7 +9,7 @@ import { conditionShape } from "../narrowing-shapes.js";
 import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
 import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
-import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
+import { mergeItems, REASON, type Item, type ItemScope, type ItemTag } from "./items.js";
 import { selectsElement } from "./method-categories.js";
 import { propertyStep, siteKey, type CoreProgram } from "./program.js";
 import {
@@ -269,17 +269,24 @@ export function narrowedItems(
       kept.push(item);
       continue;
     }
+    // (an unknown a stop left, `budget`, that the test proves of a kind is known by the test itself: the stop's reason and
+    // word go; any other keeps its own, host data its external origin, TABLE r4.183)
+    const proof =
+      item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
+        ? { reasons: item.reasons & ~REASON.budget, context: null }
+        : {};
     switch (form.kind) {
       case "non-null":
         if (item.tag !== "null") kept.push(item);
         break;
       case "null":
-        if (item.tag === "null" || item.tag === "unknown") kept.push({ ...item, tag: "null" });
+        if (item.tag === "null" || item.tag === "unknown")
+          kept.push({ ...item, ...proof, tag: "null" });
         break;
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
           const tag = overlap(item.tag, kind, form.fractional === true, work);
-          if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
+          if (tag !== null) kept.push(tag === item.tag ? item : { ...item, ...proof, tag });
         }
         break;
       case "is-not":

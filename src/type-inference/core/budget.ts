@@ -80,10 +80,12 @@ export type WorkCounter =
   | "mergeItems"
   | "sigItems"
   | "operatorSteps"
-  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6)
+  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6),
+  // and those after a pass in which a decision stopped (TABLE r4.180)
   | "checks"
   | "checksSkipped"
   | "rejectPasses"
+  | "stopPasses"
   // admission's copies (S6-CARRIERS §4): alias keys, signatures and groups; the eligibility index; the quiet proofs of a
   // class; the member visits a proof that is not quiet makes; the structure levels
   | "aliasSteps"
@@ -230,6 +232,17 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
  * analysis catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when
  * the script runs (`nesting`).
  */
+/**
+ * A demand that crossed its allowance (S3 §5, TABLE B1): the solver gives it up between two steps of its computations,
+ * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
+ */
+export class DemandExhausted extends Error {
+  public constructor() {
+    super("A demand exceeded its allowance.");
+    this.name = "DemandExhausted";
+  }
+}
+
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
     super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
@@ -250,6 +263,9 @@ export class WorkLedger {
   /** Work counted as finishing work, the analysis not stopped (`finishing`'s callback). */
   #apart = false;
   #finishing = 0;
+  /** Units charged while building an index the program shares (`shared`), outermost builds only. */
+  #shared = 0;
+  #sharing = false;
   readonly #spent: number[] = [0];
   #spender = 0;
 
@@ -287,6 +303,28 @@ export class WorkLedger {
   /** The work after the stop: the finishing path's. */
   public get finishing(): number {
     return this.#finishing;
+  }
+
+  /**
+   * Runs `callback`, the first build of an index every later read of the program shares (the narrowing index): its
+   * units count to the analysis as any, but to no demand's allowance, as the read that happened to ask first did not
+   * make them its own work (S3 §5).
+   */
+  public shared<T>(callback: () => T): T {
+    if (this.#sharing) return callback();
+    const before = this.#total;
+    this.#sharing = true;
+    try {
+      return callback();
+    } finally {
+      this.#sharing = false;
+      this.#shared += this.#total - before;
+    }
+  }
+
+  /** The analysis's units outside `shared` builds: what a demand's allowance measures (S3 §5). */
+  public get own(): number {
+    return this.#total - this.#shared;
   }
 
   /**
@@ -337,6 +375,26 @@ export function checkReadDepth(depth: number): void {
 
 /** The allowance a test imposes on every analysis started inside `withTestAllowance`, or `null`. */
 let testAllowance: number | null = null;
+let testDemandAllowance: number | null = null;
+
+/**
+ * A demand's allowance (S3 §5, TABLE B1): 256 × the nodes of the reading site's callable, or a test's
+ * (`withTestDemandAllowance`).
+ */
+export function demandAllowanceFor(callableNodes: number): number {
+  return testDemandAllowance ?? WORK_PER_NODE * callableNodes;
+}
+
+/** Test-only: runs `callback` with `allowance` as every demand's allowance (`demandAllowanceFor`). */
+export function withTestDemandAllowance<T>(allowance: number, callback: () => T): T {
+  if (testDemandAllowance !== null) throw new Error("A test demand allowance is already active.");
+  testDemandAllowance = allowance;
+  try {
+    return callback();
+  } finally {
+    testDemandAllowance = null;
+  }
+}
 
 /** The ledger of an analysis of a program with `syntaxNodes` parsed nodes: its allowance, or a test's. */
 export function ledgerFor(syntaxNodes: number): WorkLedger {

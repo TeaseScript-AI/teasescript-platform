@@ -164,10 +164,11 @@ export class GuardIndex {
 
   /**
    * Stage 3b's narrowing definitions and invalidations (§13), built on their first read and charged then: an analysis,
-   * or a finishing pass after a stop, that reads none pays for none (TABLE r4.117).
+   * or a finishing pass after a stop, that reads none pays for none (TABLE r4.117); the program's, shared by every later
+   * read, so no demand's own work (S3 §5).
    */
   public get narrowing(): NarrowingIndex {
-    return (this.#narrowing ??= NarrowingIndex.of(this.program));
+    return (this.#narrowing ??= this.program.work.shared(() => NarrowingIndex.of(this.program)));
   }
 
   /** Stage 3b's statements with N3's shared layer (`narrowing`'s). */

@@ -1,5 +1,6 @@
 import {
   checkReadDepth,
+  DemandExhausted,
   joinParts,
   keepText,
   READ_DEPTH_LIMIT,
@@ -230,12 +231,27 @@ export class Solver {
   readonly #units: DemandWork[] = [];
   #counter = 0;
   #running = false;
+  /** The ledger's total past which the running demand stops (`demand`), or `null`. */
+  #limit: number | null = null;
   /** The read chain the running frame's generators are inside: the levels of native calls a resumption runs through. */
   #readDepth = 0;
 
   public constructor(scope: ItemScope) {
     this.#scope = scope;
     this.#work = scope.work;
+  }
+
+  /**
+   * Runs `work` as one demand with `allowance` units (S3 §5): past them it stops between two steps with
+   * `DemandExhausted`, what it was the first to finish memoised, the rest, provisional answers included, forgotten.
+   */
+  public demand<T>(work: Work<T>, allowance: number): T {
+    this.#limit = this.#work.own + allowance;
+    try {
+      return this.run(work);
+    } finally {
+      this.#limit = null;
+    }
   }
 
   /** Runs a computation to its end and returns its result: a top-level demand, never memoised itself. */
@@ -334,6 +350,8 @@ export class Solver {
     const frames = this.#frames;
     frames.push(base);
     for (;;) {
+      // (between two steps every computation stands whole: a demand past its allowance stops here)
+      if (this.#limit !== null && this.#work.own > this.#limit) throw new DemandExhausted();
       const solving = this.#solving.at(-1);
       if (solving !== undefined && solving.depth === frames.length) {
         this.#step(solving);

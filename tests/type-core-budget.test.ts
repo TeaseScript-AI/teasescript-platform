@@ -362,6 +362,41 @@ test("the finishing path is bounded after a stop in the setup, in admission's pa
 });
 
 /**
+ * TABLE r4.100 (2), r4.126 (Astra r4's shape): after a stop at the first unit a list literal nested k deep finishes in
+ * work linear in k. The fresh pass's copy sources made each path below the literal again at every depth, k² steps
+ * (8,022 finishing units for 140 nodes); each path is now a step from its owner's, made into an array only where a copy
+ * lands. Linear, not `16 × nodes`: the program's own index, built after a stop at the first unit, costs about 21 units
+ * per node of this shape.
+ */
+/**
+ * A deeply nested list literal, and a typed parse's or load's nested default read as deep: before admission settled the
+ * syntax decides nothing (TABLE r4.135), so no read's key is made for it (Astra r1 B2 on #1165: 2.8 to 3.2 per doubling).
+ */
+test("a stop at the first unit finishes a deeply nested literal and a read as deep of a typed default in linear work", () => {
+  const nested = (k: number) => `${"{branch: ".repeat(k)}7${"}".repeat(k)}`;
+  const shapes: Record<string, (k: number) => string> = {
+    list: (k) => `let xs = ${"[".repeat(k)}1${"]".repeat(k)}\nsay "DONE"`,
+    parse: (k) =>
+      `let layers = fromJson("{}", default: ${nested(k)})\nsay layers${".branch".repeat(k)}`,
+    load: (k) =>
+      `let layers = load("state", default: ${nested(k)})\nsay layers${".branch".repeat(k)}`,
+  };
+  for (const [shape, make] of Object.entries(shapes)) {
+    const finishing = (k: number) => {
+      const { budget } = analysed(requestOf(main(`${make(k)}\nexit`)), false, 1);
+      assert.equal(budget.exhausted, "work");
+      return { units: budget.finishing, nodes: budget.counts.get("syntaxNodes")! };
+    };
+    const [small, large] = [finishing(64), finishing(128)];
+    const doubling = (2 * (large.units / small.units)) / (large.nodes / small.nodes);
+    assert.ok(
+      doubling <= 2.15,
+      `${shape}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)} per doubling`,
+    );
+  }
+});
+
+/**
  * PLAN §6b's recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
  * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
  * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.

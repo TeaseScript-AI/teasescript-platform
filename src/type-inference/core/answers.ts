@@ -23,6 +23,7 @@ import {
   writtenOf,
   type ContractFacts,
   type GatherSite,
+  type StoppedKey,
 } from "./contract.js";
 import {
   DefinitionIndex,
@@ -84,10 +85,14 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
-/** One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6). */
+/**
+ * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
+ * `stopped` stopped from its start (TABLE r4.180).
+ */
 function createPass(
   program: CoreProgram,
   rejected: ReadonlyMap<number, unknown> = new Map(),
+  stopped: readonly StoppedKey[] = [],
 ): CorePass {
   const definitions = new DefinitionIndex(program);
   const parts: {
@@ -121,6 +126,7 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  for (const key of stopped) contract.stop(key.place, key.path);
   return pass;
 }
 
@@ -206,6 +212,8 @@ export interface BudgetAnswer {
   readonly settled: boolean;
   /** Each consumer read's demand: the work it was the first to compute, against its demand allowance (S3 §5). */
   readonly demands: readonly ReadWork[];
+  /** Each admission decision's demand, likewise (S3 §5, revision 14). */
+  readonly decisions: readonly DecisionWork[];
   /** The finished demands with their work. */
   readonly finished: readonly DemandWork[];
   /** Facts of the indexes for the identity and mark controls (not work). */
@@ -218,6 +226,19 @@ export interface ReadWork {
   readonly node: number;
   readonly units: number;
   readonly allowance: number;
+  /** Whether the allowance bounded it: a consumer's own read; admission's, for a store's check, has the program's. */
+  readonly bounded: boolean;
+  /** Whether it stopped at its allowance (S3 §5). */
+  readonly stopped: boolean;
+}
+
+/** One admission decision for one key as a demand (S3 §5): its work, against its allowance, and whether it stopped. */
+export interface DecisionWork {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+  readonly units: number;
+  readonly allowance: number;
+  readonly stopped: boolean;
 }
 
 /** A value's answer at a path below it (`Answers.valueAt`). */
@@ -285,20 +306,30 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
+  let stops: readonly StoppedKey[] = [];
   if (stopped !== undefined) program.work.stop(stopped);
   else
     try {
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities
+      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
+      // the next, from the same rejected set, starts with every stopped key stopped, once per rejected set; a decision
+      // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
-      for (let last = false; ;) {
-        const pass = createPass(program, rejected);
-        const consumers = new Consumers(pass, rejected, cycling, last);
+      for (let last = false, restarted = false; ;) {
+        const pass = createPass(program, rejected, stops);
+        const consumers = new Consumers(pass, rejected, cycling, last, false, restarted);
         analysed = { pass, consumers };
         consumers.check();
         if (consumers.stopped !== null) break;
+        if (pass.contract.stoppedCount > stops.length) {
+          program.work.charge("stopPasses");
+          stops = pass.contract.stoppedKeys();
+          restarted = true;
+          continue;
+        }
+        restarted = false;
         const now = consumers.admission.newlyRejected;
         if (last || sameSet(now, rejected)) break;
         program.work.charge("rejectPasses");
@@ -365,7 +396,7 @@ function finished(
   const { pass, consumers } =
     standing ??
     (() => {
-      const pass = createPass(program, rejected);
+      const pass = createPass(program, rejected, analysed?.pass.contract.stoppedKeys());
       return { pass, consumers: new Consumers(pass, rejected, new Set(), true, true) };
     })();
   const phase = analysed?.consumers.stopPhase() ?? "setup";
@@ -856,6 +887,7 @@ class CoreAnswers implements Answers {
       stoppedIn,
       settled: exhausted === null || consumers.settled,
       demands: consumers.reads,
+      decisions: consumers.decisions,
       finished: pass.solver.demandWork(),
       facts: { ...pass.contract.facts },
     };
@@ -1153,6 +1185,18 @@ class CoreAnswers implements Answers {
     if (this.#stopped && !this.#consumers.settled) return { by: "undecided" };
     const { admission } = this.#consumers;
     const kinds = admission.admitted(id, path);
+    // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
+    // store's syntax decides answers, as the finishing read's source 4, TABLE r4.122)
+    if (kinds.length === 0 && this.#stopped) {
+      const decided = this.#consumers.cheapDecided(id, path);
+      if (decided !== null)
+        return {
+          by: "decided",
+          kinds: decided.kinds,
+          decider: decided.decider.site,
+          inherited: decided.inherited,
+        };
+    }
     // (the decider's site is found where it is read: A3's settled paths have no scan to keep it from)
     return kinds.length === 0
       ? { by: "undecided" }
@@ -1204,6 +1248,17 @@ class CoreAnswers implements Answers {
   }
 
   #propertyNames(start: PropertyNamesTask): ReadonlySet<string> {
+    // (a key whose decision stopped names nothing, as every read of it holds nothing but `unknown`, S3 §5)
+    const { contract } = this.#pass;
+    if (contract.anyStopped) {
+      const read = "value" in start ? this.#readPlace(start.value) : null;
+      if (
+        "value" in start
+          ? read !== null && contract.stopped(read.root, joinSteps(read.path, start.path))
+          : "key" in start && contract.keyStopped(start.key)
+      )
+        return new Set();
+    }
     // (after a stop before admission settled only what a value's own syntax names: a literal's or a written
     // destination's properties)
     if (this.#stopped && !this.#consumers.settled) {

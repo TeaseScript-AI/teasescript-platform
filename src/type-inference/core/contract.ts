@@ -29,6 +29,7 @@ import {
   keptKeyBelow,
   keyBelow,
   keyOf,
+  keptPath,
   keyPath,
   keyPlace,
   recordPath,
@@ -772,6 +773,12 @@ export interface ContractFacts {
   decidedPaths: number;
 }
 
+/** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
+export interface StoppedKey {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+}
+
 export class Contract {
   readonly facts: ContractFacts = {
     prefixEntries: 0,
@@ -903,7 +910,57 @@ export class Contract {
   /** The value-side literal reads that passed an element step over a copy, by literal, path and node (F12). */
   readonly #overCopy = new Set<string>();
 
+  /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
+  readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
+  #stoppedCount = 0;
+
   public constructor(readonly pass: CorePass) {}
+
+  /**
+   * TABLE B1, S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
+   * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
+   * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
+   * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
+   * so no result read the key before its stop, in any order.
+   */
+  public stop(place: PlaceId, path: readonly string[]): void {
+    const paths = this.#stopped.get(place);
+    if (paths === undefined) this.#stopped.set(place, [path]);
+    else paths.push(path);
+    this.#stoppedCount += 1;
+  }
+
+  /** The keys whose decision stopped (`stop`), the set the next pass starts with. */
+  public stoppedKeys(): readonly StoppedKey[] {
+    return [...this.#stopped].flatMap(([place, paths]) => paths.map((path) => ({ place, path })));
+  }
+
+  /** How many decisions stopped (`stop`). */
+  public get stoppedCount(): number {
+    return this.#stoppedCount;
+  }
+
+  /** Whether any decision stopped (`stop`). */
+  public get anyStopped(): boolean {
+    return this.#stopped.size > 0;
+  }
+
+  /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`). */
+  public stopped(place: PlaceId, path: readonly string[]): boolean {
+    const paths = this.#stopped.get(place);
+    if (paths === undefined) return false;
+    this.#work.charge("checks");
+    return paths.some((at) => at.length <= path.length && at.every((step, i) => path[i] === step));
+  }
+
+  /** `stopped` for a key. */
+  public keyStopped(key: Key): boolean {
+    return (
+      this.anyStopped &&
+      this.#stopped.has(keyPlace(key)) &&
+      this.stopped(keyPlace(key), keptPath(this.#work, key))
+    );
+  }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
   get #work(): WorkLedger {
@@ -919,6 +976,7 @@ export class Contract {
 
   /** The contract of a key (§3.2): a demand, once per key and pass. */
   public *contractOf(key: Key): Work<readonly Item[]> {
+    if (this.keyStopped(key)) return STOPPED;
     const site = this.pass.program.places[keyPlace(key)]?.site ?? null;
     return yield {
       key: joinParts("c", key),
@@ -4190,14 +4248,21 @@ export class Contract {
   /**
    * Every contribution, once per pass before the first query: each live stored read of a key with a tested key below
    * it into its source's holder (stores, adds, arguments, returns, literal cells, alias bindings); each literal's reads
-   * as references from the literal's holder under their path, and its guarded reads' paths.
+   * as references from the literal's holder under their path, and its guarded reads' paths. A literal another literal
+   * holds is among that literal's: its reads stand in the outer literal's index at their paths below it, so its own
+   * would repeat them, and its identity would walk its whole depth again at every level (TABLE r4.100 (2)).
    */
   #collectMarks(): void {
     if (this.#collected) return;
     this.#collected = true;
     const { program, definitions, lists, guards } = this.pass;
     const stores = new Set([...definitions.storeDefs, ...definitions.transferDefs]);
-    for (const [, cells] of definitions.cellDefs) for (const d of cells) stores.add(d);
+    const held = new Set<PlaceId>();
+    for (const [, cells] of definitions.cellDefs)
+      for (const d of cells) {
+        stores.add(d);
+        if (d.value !== undefined) held.add(d.value);
+      }
     for (const d of stores) {
       program.work.charge("invSteps");
       if (d.value === undefined || !lists.live(d)) continue;
@@ -4211,6 +4276,7 @@ export class Contract {
     }
     for (const value of program.hasOf.keys()) {
       program.work.charge("invSteps");
+      if (held.has(value)) continue;
       const holder = this.identityOf(value).holder;
       if (holder === null) continue;
       for (const [path, list] of this.literalIndex(value).reads)
