@@ -236,10 +236,7 @@ export function* contractOfValue(contract: Contract, value: PlaceId): Work<reado
           kind: "contract",
           file: at?.file ?? -1,
           offset: at?.start ?? -1,
-          make: () => {
-            contract.occurrences.push(value);
-            return contract.contractOfValueAt(projection.owner, [stepName(projection.step)]);
-          },
+          make: () => contract.contractOfValueAt(projection.owner, [stepName(projection.step)]),
         };
         return yield step;
       }

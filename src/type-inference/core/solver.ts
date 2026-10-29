@@ -35,9 +35,10 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * unfinished, reset with them to none (`null`) at each start from bottom, compared by its semantic signature where its
  * items are (a changed proof under unchanged items reruns its readers; a new object or run with the same signature does
  * not), chosen on as they are (a `ProofDecision`, whose held choice may change the proof alone), and kept with them,
- * its slot charged before either is published. A stop forgets the unfinished proofs with the unfinished demands; a new
- * pass has a new solver, so nothing of an earlier pass's proofs is read (A6, S8's fresh finishing pass). A reader takes
- * a proof only through `proven`, which yields its demand.
+ * its slot charged before either is published. A stop forgets the unfinished proofs with the unfinished demands, and a
+ * key's decision stopping the finished ones that read the key, with their answers (`forget`); a new pass has a new
+ * solver, so nothing of an earlier pass's proofs is read (A6, S8's fresh finishing pass). A reader takes a proof only
+ * through `proven`, which yields its demand.
  */
 
 /** What a demand asks, which orders the members of one component at one site (S3 §1). */
@@ -277,6 +278,11 @@ class PositionHeap {
 }
 
 /** A run's result: its items, and a proof demand's proof (else `null`). */
+/** The demand a frame runs, its first run or a member's run again; `null` for a top-level computation. */
+function demandOf(frame: Frame | undefined): string | null {
+  return frame?.node?.demand.key ?? frame?.rerun?.member.demand.key ?? null;
+}
+
 function resultOf(result: readonly Item[] | Proven<Proof>): {
   readonly items: readonly Item[];
   readonly proof: Proof | null;
@@ -288,6 +294,8 @@ export class Solver {
   readonly #memo = new Map<string, readonly Item[]>();
   /** The finished proof demands' proofs, kept with their answers in `#memo`. */
   readonly #proofs = new Map<string, Proof>();
+  /** Each demand's readers: the demands whose runs read it (`#read`), for `forget`. */
+  readonly #readers = new Map<string, Set<string>>();
   readonly #active = new Map<string, DemandNode>();
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
@@ -395,11 +403,29 @@ export class Solver {
     return this.#memo.get(key);
   }
 
-  /** A finished demand's answer, and its proof, forgotten between two runs: its next read computes it again. */
-  public forget(key: string): void {
+  /** The demand whose run is reading (a first run's or a member's again), `null` outside one. */
+  public get reading(): string | null {
+    return this.#running ? demandOf(this.#frames.at(-1)) : null;
+  }
+
+  /**
+   * The answers of `keys`, and of every demand that read one of them, directly or through others, forgotten with their
+   * proofs between two runs (a key's decision stopped: `Contract.stop`): the next read of each computes it again.
+   */
+  public forget(keys: readonly string[]): void {
     if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
-    this.#memo.delete(key);
-    this.#proofs.delete(key);
+    const todo = [...keys];
+    const seen = new Set(todo);
+    for (let key = todo.pop(); key !== undefined; key = todo.pop()) {
+      this.#memo.delete(key);
+      this.#proofs.delete(key);
+      for (const reader of this.#readers.get(key) ?? [])
+        if (!seen.has(reader)) {
+          seen.add(reader);
+          todo.push(reader);
+        }
+      this.#readers.delete(key);
+    }
   }
 
   /**
@@ -479,6 +505,13 @@ export class Solver {
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
   #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
+    // (its reader kept for `forget`: no work, the read is charged as a yield)
+    const reader = demandOf(frame);
+    if (reader !== null) {
+      const readers = this.#readers.get(demand.key);
+      if (readers === undefined) this.#readers.set(demand.key, new Set([reader]));
+      else readers.add(reader);
+    }
     const finished = this.#memo.get(demand.key);
     if (finished !== undefined) {
       frame.pending = finished;

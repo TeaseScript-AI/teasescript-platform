@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { joinParts, keep, textUnits, type WorkLedger } from "./budget.js";
+import { keep, textUnits, type WorkLedger } from "./budget.js";
 import {
   aliasWriter,
   boundClass,
@@ -93,7 +93,15 @@ import {
   landsIn,
   onlyNull,
 } from "./contract/value-kinds.js";
-import { keptPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
+import {
+  keyOf,
+  keptPath,
+  keyPath,
+  keyPlace,
+  sortCost,
+  type Definition,
+  type Key,
+} from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
 import type { ValueConstraint } from "./program.js";
@@ -293,8 +301,8 @@ export class Contract {
   /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
   readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
   #stoppedCount = 0;
-  /** The property and index reads whose occurrence answers were made since the last stop (`contractOfValue`, `stop`). */
-  readonly occurrences: PlaceId[] = [];
+  /** The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`). */
+  readonly #askers = new Map<PlaceId, Map<string, Set<Key>>>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -303,16 +311,35 @@ export class Contract {
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
    * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
-   * so no result read the key before its stop, in any order. A property or index read's occurrence answer kept before
-   * the stop is forgotten, so its next read reaches `contractOf` again (TABLE r4.186).
+   * so no result read the key before its stop, in any order. An answer the solver kept before the stop read the key if
+   * its run asked whether the key, or one below it, stopped (`stopped`, `keyStopped`): the solver forgets those answers
+   * and every answer that read one of them (`Solver.forget`), so each next read of them reaches the stop (TABLE r4.186,
+   * #1403); an answer that never asked is kept.
    */
   public stop(place: PlaceId, path: readonly string[]): void {
     const paths = this.#stopped.get(place);
     if (paths === undefined) this.#stopped.set(place, [path]);
     else paths.push(path);
     this.#stoppedCount += 1;
-    for (const value of this.occurrences) this.pass.solver.forget(joinParts("cpv", value));
-    this.occurrences.length = 0;
+    const below = (key: Key): boolean => {
+      const steps = keyPath(key);
+      return path.length <= steps.length && path.every((step, i) => steps[i] === step);
+    };
+    const askers = [...(this.#askers.get(place) ?? [])];
+    this.pass.solver.forget(
+      askers.filter(([, keys]) => [...keys].some(below)).map(([demand]) => demand),
+    );
+  }
+
+  /** The running demand asked whether `key` stopped: kept for `stop` (no work: the read it answers is charged). */
+  #asked(place: PlaceId, key: () => Key): void {
+    const demand = this.pass.solver.reading;
+    if (demand === null) return;
+    let byDemand = this.#askers.get(place);
+    if (byDemand === undefined) this.#askers.set(place, (byDemand = new Map()));
+    const keys = byDemand.get(demand);
+    if (keys === undefined) byDemand.set(demand, new Set([key()]));
+    else keys.add(key());
   }
 
   /** The keys whose decision stopped (`stop`), the set the next pass starts with. */
@@ -330,21 +357,28 @@ export class Contract {
     return this.#stopped.size > 0;
   }
 
-  /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`). */
+  /** Whether the decision of `place` at `path`, or at a key above it, stopped (`stop`); the running demand asked. */
   public stopped(place: PlaceId, path: readonly string[]): boolean {
-    const paths = this.#stopped.get(place);
-    if (paths === undefined) return false;
-    this.work.charge("checks");
-    return paths.some((at) => at.length <= path.length && at.every((step, i) => path[i] === step));
+    this.#asked(place, () => keyOf(place, path));
+    return this.#stoppedAt(place, path);
   }
 
   /** `stopped` for a key. */
   public keyStopped(key: Key): boolean {
+    const place = keyPlace(key);
+    this.#asked(place, () => key);
     return (
       this.anyStopped &&
-      this.#stopped.has(keyPlace(key)) &&
-      this.stopped(keyPlace(key), keptPath(this.work, key))
+      this.#stopped.has(place) &&
+      this.#stoppedAt(place, keptPath(this.work, key))
     );
+  }
+
+  #stoppedAt(place: PlaceId, path: readonly string[]): boolean {
+    const paths = this.#stopped.get(place);
+    if (paths === undefined) return false;
+    this.work.charge("checks");
+    return paths.some((at) => at.length <= path.length && at.every((step, i) => path[i] === step));
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */

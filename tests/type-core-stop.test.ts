@@ -2459,8 +2459,7 @@ const stoppedItems = (items: readonly Item[]): boolean =>
  * read after it (`Contract.stop` forgets it), so a read of the key, or of one below it, answers `budget` from the stop
  * on, as in a pass that starts with the key stopped. Each chain is read, its key stopped at every depth of its reads'
  * paths, and read again, in both read orders, directly and through a selection and an operation, and a proof read of
- * its deepest occurrence after the stop holds the stop too. (Selections' and operations' own occurrence answers are
- * `main`'s, #1403.)
+ * its deepest occurrence after the stop holds the stop too.
  */
 test("a property or index read's occurrence answers its key's stop at every depth from the stop on (r4.186)", () => {
   const shapes = [
@@ -2550,6 +2549,91 @@ test("a property or index read's occurrence answers its key's stop at every dept
               where,
             );
           });
+  }
+});
+
+/**
+ * TABLE r4.186 through every answer the solver keeps (#1403): an answer kept before a key's decision stops may have
+ * read the key at an occurrence (a selection, an operation, a literal's read) or through a copy's contract, a call's
+ * result, a receiver, a narrowed read or a default's decision, so `Contract.stop` has the solver forget them all. In
+ * each shape every value is read in one pass, on the contract side and on the value side, a key is stopped (each
+ * binding and every prefix of its reads' paths), and every value is read again, in both read orders and the four
+ * modes: each answers as in a pass that starts with the key stopped. A second stop in a pass that started with
+ * another key stopped (the restarted pass) answers as a pass that starts with both. Between them the shapes reach
+ * every memo that kept such an answer on `main`: forgetting all but one of them fails this test.
+ */
+test("every answer kept before a key's decision stops answers the stop from the stop on (r4.186, #1403)", () => {
+  const shapes = [
+    "let box = [[{n: 1}]]\nsay box.first.first.n\nexit\n",
+    "let v: integer? = null\nlet a = {n: v}\nsay a.n otherwise 2\nexit\n",
+    "let a = {n: 1}\nsay [a][0].n\nexit\n",
+    "let v: integer? = null\nlet a = {n: {m: v}}\nsay (a.n otherwise {m: 2}).m\nexit\n",
+    "let box = [[{n: 1}]]\nlet copy = box\nsay copy.first.first.n\nexit\n",
+    "let xs = [1.5]\nlet removed = xs.removeAt(0)\nrepeat removed {}\nexit\n",
+    'let handle = timer async hidden 1 s { say "done", instant }\nlet observed: integer = handle.stop()\nexit\n',
+    "let box = {value: 2.0}\nif box != null {\nlet saved = box.value\nlet whole: integer = saved\n}\nexit\n",
+    'let textHost = askText "text"\nlet d = 0\nlet result = fromJson(textHost, default: d)\nsay result\nexit\n',
+  ];
+  type Stop = { readonly place: PlaceId; readonly path: readonly string[] };
+  for (const source of shapes) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { program } = narrowingPass(request);
+    const values = program.places
+      .filter((place) => place.kind.kind === "value" || place.kind.kind === "target")
+      .map((place) => place.id);
+    const text = (value: PlaceId): string => {
+      const site = program.places[value]!.site!;
+      return source.slice(site.start, site.end);
+    };
+    const stops = new Map<string, Stop>();
+    for (const place of program.places)
+      if (place.kind.kind === "binding") stops.set(`${place.id}`, { place: place.id, path: [] });
+    for (const value of values) {
+      const { root, path } = program.targetRoot(value);
+      if (stops.has(`${root}`))
+        for (let depth = 1; depth <= path.length; depth += 1)
+          stops.set(`${root}|${path.slice(0, depth).join(".")}`, {
+            place: root,
+            path: path.slice(0, depth),
+          });
+    }
+    const named = (stop: Stop | null) =>
+      stop === null ? "-" : `${program.places[stop.place]!.label}@${stop.path.join(".") || "-"}`;
+    // (a stop alone, and a stop after another binding's, which the pass started with)
+    const cases = [...stops.values()].flatMap((stop) => [
+      { first: null, stop },
+      ...[...stops.values()]
+        .filter((first) => first.place !== stop.place && first.path.length === 0)
+        .map((first) => ({ first, stop })),
+    ]);
+    for (const { first, stop } of cases)
+      for (const lane of ["contract", "value"] as const)
+        for (const [mode, inMode] of STOP_MODES)
+          for (const order of ["source", "reversed"])
+            inMode(() => {
+              const keys = `${named(first)}, ${named(stop)}`;
+              const where = `${source.split("\n").at(-3)} @${keys}, ${lane}, ${mode}, ${order}`;
+              const read = (pass: CorePass, value: PlaceId) =>
+                tagged(
+                  pass.solver.run(
+                    lane === "contract"
+                      ? pass.contract.contractOfValue(value)
+                      : pass.values.valueItems(value, null, []),
+                  ),
+                );
+              const own = order === "source" ? values : [...values].reverse();
+              const pass = narrowingPass(request);
+              if (first !== null) pass.contract.stop(first.place, first.path);
+              for (const value of own) read(pass, value);
+              pass.contract.stop(stop.place, stop.path);
+              const after = new Map(own.map((value) => [value, read(pass, value)]));
+              const fresh = narrowingPass(request);
+              if (first !== null) fresh.contract.stop(first.place, first.path);
+              fresh.contract.stop(stop.place, stop.path);
+              for (const value of values)
+                assert.deepEqual(after.get(value), read(fresh, value), `${text(value)}: ${where}`);
+            });
   }
 });
 
