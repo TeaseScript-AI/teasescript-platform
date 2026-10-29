@@ -1,7 +1,7 @@
 // #1268, Astra r4, builder generators (R/astra-m4-i1268-review-r4-evidence/builder/generators/paste-1273.mjs): the
 // family run's cases (nullable and present subjects in every use, the others and the errors), and the fixed programs
-// both its runs compiled after pasting each offered form. Its fixture run's own inputs, the repository's type-core
-// fixture (tests/fixtures/type-core/cells.jsonl), are not copied.
+// both its runs compiled after pasting each offered form. The rows its fixture run read from the repository's type-core
+// fixture (tests/fixtures/type-core/cells.jsonl) are not copied; the programs it pasted from them are.
 const lines = (...parts) => parts.filter((part) => part !== "").join("\n") + "\nexit\n";
 // subjects that may be null (a variable, a list element, a property, a call, a dict value) and their non-null controls
 const NULLABLE = [
@@ -200,7 +200,7 @@ const generated = familyCases()
 export const checks = ["publication"];
 
 // The fixed programs its family run (pasted/) and its fixture run (fixture-pasted/) compiled after pasting each offered
-// form, as their results record them.
+// form, as their results record them; the five that equal a fixture row are named after it.
 const captured = [
   ["pasted/1", "let ns = [1, null]\nlet n = ns[1]\nif n != null { say n + 1 }\nexit\n"],
   ["pasted/2", "let ns = [1, null]\nlet n = ns[1]\nsay (n otherwise 0) + 1\nexit\n"],
@@ -4491,6 +4491,26 @@ const captured = [
     "fixture-pasted/3320",
     'let key = "k"\nlet result = load(key, default: null)\nsay result\nif result is integer { repeat result {} }\nsay "after"\nexit\n',
   ],
+  [
+    "fixture-pasted/cp9-cells/3b/forms/not-null/held",
+    'let flagHost = askBoolean "flag"\nlet n = 1\nif flagHost { n = null }\nif n != null { repeat n {} }\nexit\n',
+  ],
+  [
+    "fixture-pasted/cp9-cells/r8/written-union/assignment/guarded",
+    'let flagHost = askBoolean "flag"\nlet strict: integer = 0\nlet n: integer | string = 1\nif flagHost { n = "bad" }\nif n is integer { strict = n }\nexit\n',
+  ],
+  [
+    "fixture-pasted/cp9-cells/r8/written-union/parameter-binding/guarded",
+    'let flagHost = askBoolean "flag"\nfunction use(value: integer) {}\nlet n: integer | string = 1\nif flagHost { n = "bad" }\nif n is integer { use(n) }\nexit\n',
+  ],
+  [
+    "fixture-pasted/cp9-cells/3b/ad1/e1a/tested",
+    'let values = [3]\nlet index = askInteger "Index?"\nlet count = values.get(index, default: null)\nif count != null { repeat count {} }\nexit\n',
+  ],
+  [
+    "fixture-pasted/cp9-cells/3b/ad1/e1b/tested",
+    'let index = askInteger "Index?"\nlet values = [3]\nlet count: integer | string = values.get(index, default: "bad")\nif count is integer { repeat count {} }\nexit\n',
+  ],
 ];
 export const cases = [...generated, ...captured];
 
@@ -4517,8 +4537,8 @@ export const recorded = {
       "R/astra-m4-i1268-review-r4-evidence/builder/generators/queue-evidence.sh:18",
     ],
   ],
-  sources: 1428,
-  sha256: "f9b106411846209d05580b1470d74a322b22dc51aa86c5119b6f5fb243ebb792",
+  sources: 1433,
+  sha256: "7f19cb3872f49a455371483c97c852d052786e61f7222f52b00dcf155b7f9b00",
   dropped: [
     [
       "feb4e51f6becf4644cc1349d7d876d97b69b97023f1189b31cd65c9401f1bef2",

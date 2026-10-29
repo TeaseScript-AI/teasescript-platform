@@ -56,8 +56,10 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
 - without an input that no longer resolves on `main` for a reason its origin did not test (a removed feature,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
-  (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged) and other runs'
-  case files (the 3a budget check's). The module's first comment names what its run also read.
+  (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
+  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's). A program the
+  driver derived from a fixture row (a pasted fix) stays, even one equal to another row. The module's first comment
+  names what its run also read.
 
 ## Kept outside the repository
 
