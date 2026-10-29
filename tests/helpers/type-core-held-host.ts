@@ -545,8 +545,9 @@ export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
   const units = [
     ...new Set(mode.run(() => analyseCore(request)).budget.decisions.map((d) => d.units)),
   ].sort((a, b) => b - a);
-  const tried = units.filter((unit) => unit > 1).map((unit) => unit - 1);
-  for (let unit = Math.floor((units.at(-1) ?? 0) / 2); unit >= 1; unit = Math.floor(unit / 2))
+  const worked = units.filter((unit) => unit > 1);
+  const tried = worked.map((unit) => unit - 1);
+  for (let unit = Math.floor((worked.at(-1) ?? 0) / 2); unit >= 1; unit = Math.floor(unit / 2))
     tried.push(unit);
   const stopping: number[] = [];
   for (const demand of new Set(tried)) {
