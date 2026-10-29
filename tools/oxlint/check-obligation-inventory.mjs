@@ -39,7 +39,8 @@ import { Project, ts } from "ts-morph";
  * A listed host read or read is trusted by its reason (TABLE r4.152 (3)). A reference the syntax does not name (an
  * inherited member reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an
  * aggregate or a copy) is outside this check, a review matter against r4.182, as r4.165 states it for the question
- * sources.
+ * sources. Known miss (#1401): instantiation expressions can hide named value references; interface computed keys can
+ * be reported as values.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
