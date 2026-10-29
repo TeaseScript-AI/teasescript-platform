@@ -249,6 +249,43 @@ export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[
   return JSON.stringify({ places, occurrences: occurrences(answers, (items) => items.sort()) });
 }
 
+/**
+ * A program's outcome, diagnostics and checks, and every expression occurrence's answer (its offset, route, place,
+ * obligations and items whole, each with its ingress leaves), in their order.
+ */
+export function everyAnswer(answers: Answers): string {
+  const occurrences = answers.graph.nodes.flatMap((node) => {
+    const at = node.kind === "expression" ? answers.at(node) : null;
+    if (at === null) return [];
+    const items = at.items.map((item) => ({
+      ...item,
+      ingress: item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey),
+    }));
+    return [[node.span?.start.offset, at.route, at.place, at.obligations, items]];
+  });
+  const { outcome, diagnostics, checks } = answers;
+  return JSON.stringify({ outcome, diagnostics, checks, occurrences });
+}
+
+/**
+ * Every occurrence's items with their writers and their ingress leaves sorted (#1196: each ingress names its own leaf,
+ * whatever order the leaves are found in), one line per node.
+ */
+export function ingressAnswers(answers: Answers): string {
+  const itemText = ({ ingress, writer, ...rest }: Item): string =>
+    JSON.stringify({
+      ...rest,
+      writer: writer === null ? null : writerKey(writer),
+      leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey).sort(),
+    });
+  return answers.graph.nodes
+    .flatMap((node) => {
+      const answer = answers.at(node);
+      return answer === null ? [] : [`${node.id} ${answer.items.map(itemText).join(" ")}`];
+    })
+    .join("\n");
+}
+
 /** The candidate route's part: its plan and diagnostics of `files`, or the construct it rejects them at (`text`). */
 export function publishedRoute(
   files: readonly SourceFile[],
@@ -302,12 +339,14 @@ export interface StopSet {
   readonly restarts: number;
   readonly outcome: Answers["outcome"];
   readonly exhausted: Answers["budget"]["exhausted"];
+  /** The published record at that allowance: its diagnostics and checks, serialized. */
+  readonly record: string;
 }
 
 /**
  * Which decisions stop and when, per source and mode (#1405's stop-set comparison): `files` analysed in `mode` at the
- * test demand `allowance`, or at the natural one (`null`), with each pass's start, decision and decision stop traced;
- * `null` when the files do not parse or resolve.
+ * test demand `allowance`, or at the natural one (`null`), with each pass's start, decision and decision stop traced,
+ * and the record it publishes there; `null` when the files do not parse or resolve.
  *
  * @public (the generator corpus's runner reads it from a built tree, not by an import)
  */
@@ -358,6 +397,12 @@ export function stopSet(
       restarts: answers.budget.counts.get("stopPasses") ?? 0,
       outcome: answers.outcome,
       exhausted: answers.budget.exhausted,
+      record: JSON.stringify(
+        coreRecord(
+          coreResult(answers),
+          request.files.map((file) => file.path),
+        ),
+      ),
     };
   } finally {
     Consumers.prototype.check = check;

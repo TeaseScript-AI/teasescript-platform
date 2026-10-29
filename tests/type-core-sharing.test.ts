@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
+import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
@@ -30,7 +30,12 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
-import { inOrder, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import {
+  ingressAnswers,
+  inOrder,
+  publishedAnswers,
+  publishedRoute,
+} from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
@@ -430,21 +435,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
  * leaves, is the same with the sharing on and off, in both orders, over #1196's controls and #1210's programs.
  */
 test("every occurrence over host data names each ingress's leaf with the sharing on and off, in both orders (#1196)", () => {
-  const itemText = ({ ingress, writer, ...rest }: Item): string =>
-    JSON.stringify({
-      ...rest,
-      writer: writer === null ? null : writerKey(writer),
-      leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey).sort(),
-    });
-  const occurrences = (request: CoreAnalysisRequest): string => {
-    const answers = analyseCore(request);
-    return answers.graph.nodes
-      .flatMap((node) => {
-        const answer = answers.at(node);
-        return answer === null ? [] : [`${node.id} ${answer.items.map(itemText).join(" ")}`];
-      })
-      .join("\n");
-  };
+  const occurrences = (request: CoreAnalysisRequest): string =>
+    ingressAnswers(analyseCore(request));
   const differing: string[] = [];
   for (const { name, files } of [
     ...DIRECT_INGRESS_PROGRAMS,
