@@ -4,6 +4,8 @@ import test from "node:test";
 import type { Expression } from "../src/ast.js";
 import { parse, Parser, type ParseResult, type StatementRange } from "../src/parser.js";
 import { DiagnosticLog } from "../src/parser/diagnostic-log.js";
+import { lex } from "../src/lexer.js";
+import { readScriptHeader } from "../src/script-header.js";
 
 test("deep malformed nesting reports the missing closer at EOF with structured recovery", () => {
   const collections = Array.from({ length: 2_000 }, (_, index) =>
@@ -310,4 +312,42 @@ test("the errors in a value that a say parses ahead over are reported once, with
     ["TSP041"],
   );
   assert.ok(parsed.diagnostics[0]!.message.includes(readings));
+});
+
+test("an error deep in a value that a say parses ahead over costs the same at any depth", () => {
+  // One error at the bottom: each expression around it may look it up, which must not grow with the nesting.
+  const lookups = (depth: number) => {
+    let source = "wait 1 month";
+    for (let level = 0; level < depth; level += 1)
+      source = `say bubble(color: toString((timer async 1 s {\n${source}\n}).elapsed)) "x"`;
+    const get = DiagnosticLog.prototype.get;
+    let reads = 0;
+    DiagnosticLog.prototype.get = function (this: DiagnosticLog, ...index) {
+      reads += 1;
+      return get.apply(this, index);
+    };
+    try {
+      parse(`${source}\nexit\n`);
+    } finally {
+      DiagnosticLog.prototype.get = get;
+    }
+    return reads;
+  };
+  assert.ok(lookups(12) <= lookups(6), "lookups grow with the nesting");
+  // An error in every level, each with a fix that waits for the declaration: a part with more than one error keeps none,
+  // since the declaration proves a fix only as its one error.
+  const keptOffers = (depth: number) => {
+    let value = '"red"';
+    for (let level = 0; level < depth; level += 1)
+      value = `say bubble(color: toString(${value})) "x", 1 m`;
+    const source = `let value = ${value}\nexit\n`;
+    const parser = new Parser(readScriptHeader(lex(source)).programTokens);
+    parser.shared.source = source;
+    parser.parseProgram();
+    let offers = 0;
+    for (const parts of parser.shared.parsedParts.values())
+      for (const part of parts) offers += part.fixOffers.length;
+    return offers;
+  };
+  assert.ok(keptOffers(12) <= 2.5 * keptOffers(6), "kept fix offers grow faster than the nesting");
 });

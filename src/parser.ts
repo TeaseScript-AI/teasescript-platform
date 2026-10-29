@@ -782,10 +782,14 @@ export class Parser {
       result,
       end: this.current,
       diagnostics: this.diagnostics.segment(diagnosticCount),
-      // The part's statements settle their own offers, and leave only those for the statement around it.
-      fixOffers: this.#fixOffers
-        .slice(fixOfferCount)
-        .map((offer) => ({ ...offer, index: offer.index - diagnosticCount })),
+      // The part's statements settle their own offers and leave those for the statement around it, which proves them
+      // only as its one error: a part with more keeps none.
+      fixOffers:
+        this.diagnostics.length - diagnosticCount > 1
+          ? []
+          : this.#fixOffers
+              .slice(fixOfferCount)
+              .map((offer) => ({ ...offer, index: offer.index - diagnosticCount })),
       unclosedLiterals: this.unclosedLiterals - unclosedLiterals,
       regexStarts: { list: this.regexStarts, from: regexStartCount, to: this.regexStarts.length },
       ranges: { list: this.statementRanges, from: rangeCount, to: this.statementRanges.length },
@@ -1548,13 +1552,15 @@ export class Parser {
    * a long chain from being written out.
    */
   #offerOtherwiseReadings(expression: Expression, index: number): void {
-    const error = this.diagnostics.get(index);
     if (
       this.shared.source === null ||
-      error.code !== parserDiagnosticCode.mixedOtherwise ||
       expression.span.end.offset - expression.span.start.offset > 240
     )
       return;
+    // Looked up after the length: the error may lie deep in a part taken over (see `parseOnce`), and every expression
+    // around it asks again.
+    const error = this.diagnostics.get(index);
+    if (error.code !== parserDiagnosticCode.mixedOtherwise) return;
     // The chain of `otherwise` with the error's operator, an operand of the operators that bind more loosely.
     const at = error.span.start.offset;
     let chain = expression;
