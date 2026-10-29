@@ -172,11 +172,11 @@ export function methodElements(
   if (c.receiver === null || (name !== "join" && name !== "sort")) return;
   const receiver: PlaceId = c.receiver;
   // (the elements of a receiver the core cannot know are the runtime's, its member check owning the call, but where its
-  // contract admits a list: then the elements that admits, `domainItems`)
+  // type admits a list: then the elements that admits, `domainItems`)
   const kinds = receiverKinds(walk, receiver, node);
   if (
     !kinds.some((item) => item.tag === "list") &&
-    !(quietKinds(walk, receiver)?.includes("list") ?? false)
+    !domainItems(walk, receiver, node, []).some((item) => item.tag === "list")
   )
     return;
   const fits = name === "join" ? shows : orders;
