@@ -15,7 +15,7 @@ import { defaultOf, writtenOf } from "./terms.js";
 
 // The classes the value side keys a value by (S6c): a read's, a bound binding's, a literal's, from their parts.
 
-export const NO_CLASS: ValueClass = { cls: null, writers: null, mixed: 0 };
+export const NO_CLASS: ValueClass = { cls: null, writers: () => [], mixed: 0 };
 
 export const NO_KEPT_CLASS: KeptClass = { cls: null, mixed: 0, own: [], parts: [] };
 

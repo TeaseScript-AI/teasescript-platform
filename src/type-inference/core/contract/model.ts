@@ -262,10 +262,13 @@ export interface ChoiceGroup {
   readonly mixed: number;
 }
 
-/** A value's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`). */
+/**
+ * A member's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`), as
+ * `roleMinima` reads them: the writers only where another member of its class compares them (#1357).
+ */
 export interface ValueClass {
   readonly cls: string | null;
-  readonly writers: readonly (Writer | null)[] | null;
+  readonly writers: () => readonly (Writer | null)[];
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
   readonly mixed: number;
 }

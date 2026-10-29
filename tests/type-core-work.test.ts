@@ -390,8 +390,9 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * properties, the list's touch trie walking the object again for each (#1307); k `load(…) otherwise {…}` beside a wide
  * object, directly or each in an object, each member read again at each property (#1304); k named bindings of
  * loads, of host reads or of alike objects beside one, each binding read again at each (#1313); and a run of k joined
- * lists ending in a list of another type, the class of each join naming the joins below it in full (#1357). A read of
- * host data compiles with its runtime check.
+ * lists ending in a list of another type, the class of each join naming the joins below it in full, also with each
+ * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them (#1357).
+ * A read of host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -772,6 +773,26 @@ const PRODUCTS: readonly (WorkFamily & {
         ].join("\n"),
       },
     ],
+  },
+  {
+    name: "join-prefixes-each-in-an-object",
+    measures: "#1357: a member alone in its class read without its roles' writers",
+    counter: "literalUnits",
+    program: (k) => {
+      let joined = "xs";
+      for (let i = 0; i < k; i += 1) joined = `({n: ${joined} + [${i}]}).n`;
+      return [
+        {
+          path: "main.tease",
+          source: [
+            "let xs: (integer | string)[] = [0]",
+            `let s = ${joined} + ["x"]`,
+            "say s.length",
+            "exit",
+          ].join("\n"),
+        },
+      ];
+    },
   },
 ];
 
