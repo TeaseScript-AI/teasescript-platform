@@ -10,13 +10,15 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--out differences.jsonl]
+  [--allowances natural,16,256] [--shard i/N] [--timeout 60] [--memory 2048] [--out differences.jsonl]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
 publishes (`publication`) and, for a generator whose `checks` include `"stops"`, which decisions stop and when at each
-demand allowance (`stopSet`). It prints one JSON line per generator and a total (sources, unparsed, modes, runs,
-differences) and exits 1 when any run differs. Run large sizes as one capped job per area or shard on a worker.
+demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap is counted as
+stalled, and the runner goes on with the next. It prints one JSON line per generator and a total (sources, unparsed,
+stalled, modes, runs, differences), and exits 1 when any run differs or any source stalls. Run large sizes as one
+capped job per area or shard on a worker.
 
 ## A generator
 
