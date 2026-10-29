@@ -304,8 +304,6 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
-      /** A store's: whether the values its root's declaration reads are there, which a fix's declaration holds. */
-      readonly declared?: Presence;
     }
   | WrittenTypeError
   | {
@@ -326,8 +324,6 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
-      /** A store's: whether the values its root's declaration reads are there, which a fix's declaration holds. */
-      readonly declared?: Presence;
       /**
        * The value's other known kinds that the site's other diagnostics of the rule report, each a problem of its own:
        * beside them a fix of this kind alone, such as a fallback for null, leaves the use invalid (#1268).

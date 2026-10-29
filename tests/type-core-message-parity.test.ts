@@ -865,7 +865,7 @@ const INTENDED: readonly Intended[] = [
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 25,
+    count: 17,
   },
   {
     rule:
@@ -1202,15 +1202,31 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     'let x: integer? = null\nlet y: integer? = null\nif askBoolean "x" { x = 1 }\nrepeat (⟦x otherwise y⟧) {}\nexit\n',
     /fallback, as in '([^']*)'/,
   ],
-  // the declarations a union or null widens (ADR 0021 rules 1.1, 1.2, 1.3, 1.7, 7.3), each start value as written: a
-  // literal (Astra on #1273), a global's `default:`, a parameter, a list literal, a warning's call, a fallback
+  // the declarations a union or null widens (ADR 0021 rules 1.1, 1.2, 1.3, 1.7, 7.3), each start value as written, the
+  // author's own, which the declaration adds no read of (TABLE r4.160, r4.168): a literal (Astra on #1273), a call, a
+  // global's `default:`, a parameter's default, a list literal, a fallback
   ['⟦let mood = 1⟧\nmood = "happy"\nsay mood\nexit\n', /as '([^']*)'/, ["happy"]],
+  [
+    'function make { return 1 }\n⟦let mood = make()⟧\nmood = "happy"\nsay mood\nexit\n',
+    /as '([^']*)'/,
+    ["happy"],
+  ],
   ['⟦global g = 1, default: 2⟧\ng = "x"\nsay g\nexit\n', /as '([^']*)'/, ["x"]],
   ['⟦let d = dict{a: 1}⟧\nd["b"] = "x"\nsay d["b"]\nexit\n', /as '([^']*)'/, ["x"]],
   ['⟦let a = [1, "x"]⟧\nsay a.length\nexit\n', /as '([^']*)'/, ["2"]],
   ['function use(⟦n: integer⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
+  ['function use(⟦n: integer = [1][0]⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
   ["let n = null\n⟦let whole: integer = n⟧\nexit\n", /as '([^']*)'/],
   ['let source = ["s"]\n⟦let copy = source.removeAt(0)⟧\ncopy = 2\nexit\n', /as '([^']*)'/],
+  [
+    '⟦let result: integer = load("count", default: ["bad"].last)⟧\nsay result\nexit\n',
+    /as '([^']*)'/,
+  ],
+  [
+    'let y: integer? = null\n⟦let x: integer = y otherwise "a"⟧\nsay x\nexit\n',
+    /as '([^']*)'/,
+    ["a"],
+  ],
   // #1241 (TABLE r4.151): each code form a fix offers, pasted whole at the site its diagnostic sits on, where its
   // predicate holds: a number given a unit, also an operation's value; text converted; a member the type has, on a
   // receiver written plainly, nested, as an element and as a dict value, also as a range's bound; a join's elements
@@ -1776,20 +1792,8 @@ const WORDED: readonly (readonly [string, string])[] = [
     "let groups: integer[][] = [[], [21]]\nlet x = groups.random.last\nexit\n",
     "Keep 'groups.random' in a new variable and check its length first.",
   ],
-  // after an error, a declaration's start value that reads by an index or a key or calls (TABLE r4.168), and a shown
-  // object's property of a call's
-  [
-    'function make { return 1 }\nlet mood⟦⟧ = make()\nmood = "happy"\nsay mood\nexit\n',
-    "To allow both, declare it with the type 'integer | string'.",
-  ],
-  [
-    'function use(n⟦: integer⟧ = [1][0]) { say n }\nuse("x")\nexit\n',
-    "To allow both, declare the parameter 'n' with the type 'integer | string'.",
-  ],
-  [
-    'let result⟦: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
-    "declare 'result' with the type 'integer | string'.",
-  ],
+  // after an error, a form that reads a call's or an index read's result into another operation (TABLE r4.168): a
+  // shown object's property, a date and time conversion
   [
     'function make { return {a: 1, b: 2} }\nsay "${make()}"\nexit\n',
     "Show one of its properties instead.",
@@ -1797,11 +1801,6 @@ const WORDED: readonly (readonly [string, string])[] = [
   [
     'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ts[i].year\nexit\n',
     "Convert 'ts[i]' with the toDateTime method first.",
-  ],
-  // (a value the walk does not prove non-null, as a fallback's own side, TABLE r4.162)
-  [
-    'let y: integer? = null\nlet x⟦: integer⟧ = y otherwise "a"\nsay x\nexit\n',
-    "To allow both, declare it with the type 'integer | string'.",
   ],
   // a start value over lines (Astra on #1273's sibling)
   [

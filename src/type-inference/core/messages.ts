@@ -485,7 +485,6 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   if (diagnostic.kind === "written-type")
     return writtenTypeMessage(diagnostic, source, {
       present: "unproved",
-      declared: "unproved",
       severity: "error",
       alone,
     });
@@ -494,7 +493,6 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   const { rule, kinds } = diagnostic;
   const diagnosed: Diagnosed = {
     present: diagnostic.present ?? "unproved",
-    declared: diagnostic.declared ?? "unproved",
     severity: diagnostic.class === "compile-error" ? "error" : "warning",
     alone,
   };
@@ -806,13 +804,11 @@ interface Takes {
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["object", "list", "set", "dict"]);
 
 /**
- * A diagnostic's facts a code form reads: whether the values it names are there, and those its store's root's
- * declaration reads (`declared`, which a declaration's form holds); whether its program runs; and whether an author's
- * text lies clear of the analysis's other diagnostics (`alone`, `MessageSource.alone`).
+ * A diagnostic's facts a code form reads: whether the values it names are there, and whether its program runs; and
+ * whether an author's text lies clear of the analysis's other diagnostics (`alone`, `MessageSource.alone`).
  */
 interface Diagnosed {
   readonly present: Presence;
-  readonly declared: Presence;
   readonly severity: "error" | "warning";
   readonly alone: (held: SourceSite, rulesOut: ((kind: ItemTag) => boolean) | null) => boolean;
 }
@@ -820,12 +816,12 @@ interface Diagnosed {
 /**
  * A code form a fix offers, every fact stated (TABLE r4.162): its code; what each of its operations takes (fact 1);
  * its diagnostic's facts (`diagnosed`), and whether the values it reads are the site's own, read once where they stand
- * (`own`), it reads them again or elsewhere (`added`), or it reads none (`none`, a type, a literal of its own); the
- * author's texts it holds (`holds`: the diagnosed value, a statement, a declaration), each clear of the analysis's
- * other diagnostics but one at the diagnosed site of only the types it rules out (`rulesOut`: a check's test, the
- * types a value it writes in place of the diagnosed one lacks, `unlike`); the kinds its value has (fact 2), with a
- * collection's elements' kinds (none for a scalar); and whether it writes a value of its own (a fallback's), which the
- * script never held.
+ * (`own`), it reads them again or elsewhere (`added`), or it adds none (`none`: a type, a literal of its own, a
+ * declaration restated with its start value as written); the author's texts it holds (`holds`: the diagnosed value, a
+ * statement, a declaration), each clear of the analysis's other diagnostics but one at the diagnosed site of only the
+ * types it rules out (`rulesOut`: a check's test, the types a value it writes in place of the diagnosed one lacks,
+ * `unlike`); the kinds its value has (fact 2), with a collection's elements' kinds (none for a scalar); and whether it
+ * writes a value of its own (a fallback's), which the script never held.
  */
 interface CodeForm {
   readonly code: string;
@@ -1049,9 +1045,9 @@ function typeAt(type: string, diagnosed: Diagnosed): string | null {
 /**
  * How a fix declares a store's root with the type `type` at the root (`declareAs` of the current checker): its whole
  * declaration as the source writes it, with that type, where `codeAt` proves it in the declaration's place (#1268,
- * TABLE r4.146): a statement or a parameter, its text clear of the other diagnostics, the values it reads there
- * (`declared`); else the declaration and the type in words. `subject`, the root as the sentence names it; `null` where
- * the type is no form (`typeAt`) or the root no declaration.
+ * TABLE r4.146): a statement or a parameter, its text clear of the other diagnostics, its start value the author's
+ * own, read where it stands; else the declaration and the type in words. `subject`, the root as the sentence names
+ * it; `null` where the type is no form (`typeAt`) or the root no declaration.
  */
 function declaration(
   root: StoreRoot | null,
@@ -1075,9 +1071,10 @@ function declaration(
           {
             code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
             takes: [],
-            // (the values it reads are its declaration's own, where they stand)
-            diagnosed: { ...diagnosed, present: diagnosed.declared },
-            reads: "own",
+            diagnosed,
+            // (it restates the author's own declaration, its start value as written, and adds no read: TABLE r4.160,
+            // r4.168)
+            reads: "none",
             holds: [root.site],
             rulesOut: null,
             gives: [],

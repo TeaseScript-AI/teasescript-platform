@@ -1,6 +1,6 @@
 import type { Expression } from "../../ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
-import { expressionParts, statementExpressions } from "../../expression-children.js";
+import { expressionParts } from "../../expression-children.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
@@ -1917,12 +1917,10 @@ export class Consumers {
         (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
           ? this.#expected(site)
           : undefined;
-      const declared = this.#declared(rule);
       return {
         ...diagnostic,
         ...(expects === undefined ? {} : { expects }),
         present: this.#present(site, rule),
-        ...(declared === undefined ? {} : { declared }),
       };
     }
     if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
@@ -1933,63 +1931,14 @@ export class Consumers {
         diagnostic.kinds.includes("null") || rule.rule === "operator"
           ? this.#expected(site)
           : undefined;
-      const declared = this.#declared(rule);
       return {
         ...diagnostic,
         ...(expects === undefined ? {} : { expects }),
         present: this.#present(site, rule),
-        ...(declared === undefined ? {} : { declared }),
       };
     }
     return diagnostic;
   }
-
-  /**
-   * Whether every value the declaration of a store's root reads is there when the script runs, which a fix's
-   * declaration holds (#1268, TABLE r4.168): a `let`'s or a `global`'s values, a parameter's default, by `#present`'s
-   * walk of their parts, the value itself a kind `PRESENT_KINDS` lists (it may be null: the declaration stores it);
-   * unproved where the declaration is not found; none for a rule without a declared root.
-   */
-  #declared(rule: DiagnosticRule): Presence | undefined {
-    const root =
-      rule.rule === "store" || rule.rule === "fallback" || rule.rule === "mixed" ? rule.root : null;
-    const site = root?.site ?? null;
-    if (site === null) return undefined;
-    const { program } = this.pass;
-    const values: Expression[] = [];
-    if (root?.kind === "parameter") {
-      // (the parameters by their sites, once)
-      if (this.#parameters === null) {
-        this.#parameters = new Map();
-        for (const { kind, site: at } of program.places)
-          if (kind.kind === "parameter" && at !== null)
-            this.#parameters.set(siteKey(at), { fn: kind.fn, index: kind.index });
-      }
-      const parameter = this.#parameters.get(siteKey(site));
-      const declared =
-        parameter === undefined
-          ? undefined
-          : program.functionRegion(parameter.fn)?.declaration.parameters[parameter.index];
-      if (declared === undefined) return "unproved";
-      if (declared.defaultValue !== null) values.push(declared.defaultValue);
-    } else {
-      const node = program.flow.statementAt(site);
-      const statement = node !== undefined && "statement" in node ? node.statement : undefined;
-      if (statement === undefined) return "unproved";
-      values.push(...statementExpressions(statement));
-    }
-    return values.some(
-      (value) =>
-        !PRESENT_KINDS.has(value.kind) ||
-        (value.kind === "propertyAccessExpression" && this.#mayBeAbsent(value, site)) ||
-        expressionParts(value).some((part) => this.#readsAbsent(part, site)),
-    )
-      ? "unproved"
-      : true;
-  }
-
-  /** `#declared`'s parameters by their sites. */
-  #parameters: Map<string, { readonly fn: number; readonly index: number }> | null = null;
 
   /**
    * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
