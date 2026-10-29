@@ -4,7 +4,7 @@ import {
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
@@ -402,6 +402,9 @@ export function phaseEnds(
   return ends;
 }
 
+/** The cases the candidate route declined at some compile: judged at the analysis from then on. */
+const declined = new WeakSet<HeldCase>();
+
 /** A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. */
 function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
@@ -412,13 +415,18 @@ function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: numbe
     mode.run(() =>
       allowance === undefined ? capped(make) : withTestAllowance(allowance, () => capped(make)),
     );
-  const both = () => ({
-    // (outside the slice the analysis alone is judged)
-    result: c.slice
-      ? compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND)
-      : { diagnostics: [], plan: null },
-    answers: analyseCore(request),
-  });
+  // (outside the slice the analysis alone is judged: a case the candidate route declines in some mode or stop too)
+  const compiled = () => {
+    if (!c.slice || declined.has(c)) return { diagnostics: [], plan: null };
+    try {
+      return compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND);
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      declined.add(c);
+      return { diagnostics: [], plan: null };
+    }
+  };
+  const both = () => ({ result: compiled(), answers: analyseCore(request) });
   return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
 }
 
@@ -482,7 +490,7 @@ export function heldProblems(
 ): string[] {
   const stopped = heldRun(c, mode, allowance, demand);
   const problems = ownership(unstopped.answers, stopped.answers);
-  if (!c.slice) return problems;
+  if (!c.slice || declined.has(c)) return problems;
   problems.push(
     ...stopProblems({
       unstopped,
@@ -521,7 +529,7 @@ export function heldUnstopped(
   demand?: number,
 ): { run: StopRun; problems: string[] } {
   const run = heldRun(c, mode, undefined, demand);
-  return { run, problems: c.slice ? runProblems(c, run) : [] };
+  return { run, problems: c.slice && !declined.has(c) ? runProblems(c, run) : [] };
 }
 
 /**
