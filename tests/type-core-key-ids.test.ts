@@ -543,9 +543,12 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
   site("keyIdOf", () => keyIdOf(contract, 8, steps));
   site("keyIdOfText", () => keyIdOfText(contract, keyOf(9, steps)));
   site("keyOfId", () => keyOfId(contract, deepest));
-  const other = keyIdOf(contract, 10, steps);
-  site("stepsOfId", () => stepsOfId(contract, other));
-  site("stepsOfId span", () => stepsOfId(contract, keyIdOf(contract, 11, steps), n >> 1));
+  const [whole, walked] = [keyIdOf(contract, 10, steps), keyIdOf(contract, 11, [...steps, "x"])];
+  site("stepsOfId", () => stepsOfId(contract, whole));
+  // (a span of a path whose whole steps are kept, and of one walked: the same path below another place shares them)
+  const sliced = keyIdOf(contract, 12, steps);
+  site("stepsOfId span, kept", () => stepsOfId(contract, sliced, n >> 1));
+  site("stepsOfId span, walked", () => stepsOfId(contract, walked, n >> 1));
   site("memberStepIn", () => memberStepIn(contract, deepest, n >> 1));
   const apart = keyIdBelow(contract, rootId(7), "t");
   site("compareKeyIds", () => compareKeyIds(contract, deepest, apart));
@@ -559,7 +562,7 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
 
 test("what each cursor conversion walks and makes grows no faster than what it charges, both linear in the path (the uncharged-work probe)", () => {
   // (past `SHORT`'s free code units and elements, which make a short path's charge affine)
-  const [small, large] = [sites(256), sites(512)];
+  const [small, large] = [sites(512), sites(1024)];
   const problems: string[] = [];
   for (const [name, at] of small) {
     const twice = large.get(name)!;
