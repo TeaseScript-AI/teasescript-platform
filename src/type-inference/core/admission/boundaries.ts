@@ -343,7 +343,7 @@ function boundaryCheck(
 
 /**
  * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled
- * (TABLE r4.126, r4.138): where the fresh pass runs it (`Consumers.#freshStores`, or its walk, which finishes every
+ * (TABLE r4.126, r4.138): where the fresh pass runs it (`freshStores`, or its walk, which finishes every
  * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A C1 obligation
  * comes from a decision (`decide`), which the consumers check. The lint check `check-obligation-inventory` reads the
  * syntax tree: every method here that creates one, and every `Admission` method a consumer method that creates one
@@ -354,9 +354,9 @@ function boundaryCheck(
 export const OBLIGATION_SITES = [
   {
     method: "decide",
-    runs: "#admittedStores",
+    runs: "admittedStores",
     published: "C1 against a written type at a store's path (A1)",
-    undecided: "a store into an inferred place, marked (#storeMark)",
+    undecided: "a store into an inferred place, marked (storeMark)",
     declined: "an unrestricted destination; a multi-site argument decides nothing (F21)",
   },
   {
@@ -365,7 +365,7 @@ export const OBLIGATION_SITES = [
     published:
       "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3, A8)",
     undecided:
-      "a named element, one source identity's too (its test comes first): every definition holding its literal, or the literal, marked (#markHolder)",
+      "a named element, one source identity's too (its test comes first): every definition holding its literal, or the literal, marked (markHolder)",
     declined:
       "elements of one source identity, in a settled pass; a literal landing in a written place, which C1 checks",
   },
@@ -389,14 +389,14 @@ export const OBLIGATION_SITES = [
     published:
       "a typed call's own boundary no store takes in, its type its syntax's or its default's (F18)",
     undecided:
-      "a typed call whose default the finishing read leaves STOPPED: returned, the consumers mark it (#ingressMark)",
+      "a typed call whose default the finishing read leaves STOPPED: returned, the consumers mark it (ingressMark)",
     declined: "a typed call no type reaches: the runtime's validation alone",
   },
   {
     method: "publish",
     runs: "publish",
     published: "an ingress store's boundary against a written destination (C9, S6-CARRIERS §3.3)",
-    undecided: "an ingress store into an inferred place, marked (#storeMark)",
+    undecided: "an ingress store into an inferred place, marked (storeMark)",
     declined: "an unrestricted destination (V30 §13)",
   },
 ] as const;

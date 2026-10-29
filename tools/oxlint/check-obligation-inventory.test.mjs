@@ -28,14 +28,14 @@ const BOUNDARY_EXPORT = [
   ],
 ];
 const CONSUMERS = "src/type-inference/core/consumers.ts";
-const FRESH = CONSUMERS;
-const FRESH_START = "  #freshStores(): void {\n";
-const SELF = "this";
-const FRESH_LABEL = "Consumers.#freshStores";
-const FRESH_TO_ADMISSION = "./admission";
-const FRESH_IMPORTS = "";
+const FRESH = "src/type-inference/core/consumers/fresh.ts";
+const FRESH_START = "export function freshStores(walk: Consumers): void {\n";
+const SELF = "walk";
+const FRESH_LABEL = "Consumers.freshStores";
+const FRESH_TO_ADMISSION = "../admission";
+const FRESH_IMPORTS = 'import type { Admission } from "../admission.js";\n';
 // where a member is inserted into the Consumers class
-const CONSUMER_MEMBERS = "  #freshStores(): void {\n";
+const CONSUMER_MEMBERS = "  public check(): void {\n";
 // A part of admission's the split layout adds in memory, beside the files the layout already has.
 const PART = "src/type-inference/core/admission/probe.ts";
 const PART_HEAD = 'import type { Admission } from "../admission.js";\n';
