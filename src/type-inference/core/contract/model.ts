@@ -282,7 +282,7 @@ export interface KeptClass {
   readonly mixed: number;
   /** Its own role's writer: a read's alias's, a literal's own place's; none for any other value. */
   readonly own: readonly (Writer | null)[];
-  /** The values its other roles rest on, in their order (`classParts`). */
+  /** The values its other roles rest on, in their order, as its writers' walk reads them (`roleParts`). */
   readonly parts: readonly PlaceId[];
 }
 

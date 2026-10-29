@@ -255,7 +255,7 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
           ),
           mixed: source.mixed,
           own: [definitions.writerOf(d)],
-          parts: [d.value!],
+          parts: roleParts(contract, [d.value!], exact),
         };
   contract.keep(3);
   memo.set(value, bound);
@@ -302,7 +302,8 @@ export function classWriters(
 
 /**
  * A kept class's roles' writers (`classWriters`, `boundClass`): its own, then each part's in turn, read from the parts'
- * kept classes on an explicit walk; `null` for no class.
+ * kept classes on an explicit walk; `null` for no class. The walk meets a part only where it gives a writer or
+ * branches (`roleParts`), so it costs what it returns.
  */
 export function writersOf(
   contract: Contract,
@@ -361,10 +362,38 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass 
     }
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
-    contract.keep(1 + joined.own.length + joined.parts.length);
-    memo.set(top, joined.cls === null ? joined : { ...joined, cls: classId(contract, joined.cls) });
+    const kept: KeptClass =
+      joined.cls === null
+        ? joined
+        : {
+            ...joined,
+            cls: classId(contract, joined.cls),
+            parts: roleParts(contract, joined.parts, exact),
+          };
+    contract.keep(1 + kept.own.length + kept.parts.length);
+    memo.set(top, kept);
   }
   return memo.get(value)!;
+}
+
+/**
+ * The parts a kept class's walk reads (`writersOf`), in order: each part that holds a role, where a part with no writer
+ * of its own and only one such part stands for that part. A walk then never enters an operand without writers, such as
+ * a call's result, nor follows a chain of single operands (#1357, Codex r1 on #1417).
+ */
+function roleParts(
+  contract: Contract,
+  parts: readonly PlaceId[],
+  exact: boolean,
+): readonly PlaceId[] {
+  const memo = contract.valueClasses[exact ? 1 : 0]!;
+  const out: PlaceId[] = [];
+  for (const part of parts) {
+    const kept = memo.get(part)!;
+    if (kept.own.length > 0 || kept.parts.length > 1) out.push(part);
+    else if (kept.parts.length === 1) out.push(kept.parts[0]!);
+  }
+  return out;
 }
 
 /**
