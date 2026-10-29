@@ -245,6 +245,20 @@ function writable(tag: ItemTag): boolean {
   return tag === "empty" || tag === "unknown" || VALUE_KINDS[tag].json !== null;
 }
 
+/** What `toJson`'s walk found: the first path in it that holds a kind it cannot write, there, and the root's kinds. */
+interface JsonProof {
+  readonly path: readonly string[];
+  readonly items: readonly Item[];
+  readonly root: readonly Item[];
+}
+
+/**
+ * The proofs of each walk (the owner's review P1): one per read's snapshot (`Contract.readSnapshot`: two reads with
+ * equal snapshots read equal answers at every path below them), so `toJson` of one unchanged value at k calls walks its
+ * content once and looks it up k times; a store, a guard or a call between them is another snapshot, proved again.
+ */
+const JSON_PROOFS = new WeakMap<Consumers, Map<string, JsonProof | null>>();
+
 /**
  * C13, Astra's G1: what `toJson` writes, each value its argument holds at every depth, a list's and a set's elements, a
  * dict's values and an object's properties (V30 §13): the ordered predicate over the known kinds at each path, the first
@@ -265,51 +279,67 @@ export function jsonArgument(
     walk.skip(value);
     return;
   }
+  // (a read proved before with the same snapshot is looked up; any other value is proved where it stands)
+  const snapshot = walk.pass.contract.readSnapshot(value);
+  let proofs = JSON_PROOFS.get(walk);
+  if (proofs === undefined) JSON_PROOFS.set(walk, (proofs = new Map()));
+  const key = snapshot === null ? null : `${walk.asksNothing() ? "n" : ""}${snapshot}`;
+  program.work.charge("checks");
+  let proof = key === null ? undefined : proofs.get(key);
+  if (proof === undefined) {
+    proof = jsonProof(walk, value, node);
+    if (key !== null) proofs.set(key, proof);
+  }
+  if (proof === null) return;
+  const { path, items, root } = proof;
   const at = ownSpan(walk, value, c.site);
+  const bad = items.filter((item) => !writable(item.tag));
+  // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
+  const holders = path.length === 0 ? [] : [...new Set(root.map((item) => item.tag))];
+  const rule: DiagnosticRule = {
+    rule: "json",
+    holder: holders.length === 1 && holders[0] !== "unknown" ? holders[0]! : null,
+    nested: path.length > 0,
+  };
+  if (bad.length === items.length && items.every((item) => item.cert === "def")) {
+    error(
+      walk,
+      "operator",
+      at,
+      rule,
+      items.map((item) => item.tag),
+    );
+    return;
+  }
+  const text = program.textAt(at);
+  for (const { item } of offendingKinds(bad))
+    warning(
+      walk,
+      "operator",
+      at,
+      item,
+      obligation(
+        "operand",
+        at,
+        text,
+        VALUE_KIND_NAMES.filter(writable).map(requiredKind),
+        `check that toJson can write ${text} when it runs`,
+      ),
+      rule,
+      items.filter((found) => writable(found.tag)),
+    );
+}
+
+/** `toJson`'s walk of a value at `node` (`jsonArgument`): its first offending path, or `null` where it writes all. */
+function jsonProof(walk: Consumers, value: PlaceId, node: FlowNode): JsonProof | null {
+  const { program } = walk.pass;
   const root = domainItems(walk, value, node, []);
   const pending: (readonly string[])[] = [[]];
   for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
     if (path.length > READ_DEPTH_LIMIT) continue;
     program.work.charge("checks");
     const items = path.length === 0 ? root : domainItems(walk, value, node, path);
-    const bad = items.filter((item) => !writable(item.tag));
-    if (bad.length > 0) {
-      // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
-      const holders = path.length === 0 ? [] : [...new Set(root.map((item) => item.tag))];
-      const rule: DiagnosticRule = {
-        rule: "json",
-        holder: holders.length === 1 && holders[0] !== "unknown" ? holders[0]! : null,
-        nested: path.length > 0,
-      };
-      if (bad.length === items.length && items.every((item) => item.cert === "def"))
-        error(
-          walk,
-          "operator",
-          at,
-          rule,
-          items.map((item) => item.tag),
-        );
-      else {
-        const text = program.textAt(at);
-        for (const { item } of offendingKinds(bad))
-          warning(
-            walk,
-            "operator",
-            at,
-            item,
-            obligation(
-              "operand",
-              at,
-              text,
-              VALUE_KIND_NAMES.filter(writable).map(requiredKind),
-              `check that toJson can write ${text} when it runs`,
-            ),
-            rule,
-            items.filter((found) => writable(found.tag)),
-          );
-      }
-      return;
-    }
+    if (items.some((item) => !writable(item.tag))) return { path, items, root };
     // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order; each path
     // charged as it is made, one step longer than its owner's)
     const below: (readonly string[])[] = [];
@@ -323,6 +353,7 @@ export function jsonArgument(
         below.push(keptSteps(program.work, path, [propertyStep(name)]));
     for (let index = below.length - 1; index >= 0; index -= 1) pending.push(below[index]!);
   }
+  return null;
 }
 
 /** The kinds whose content `toJson` writes below them. */
