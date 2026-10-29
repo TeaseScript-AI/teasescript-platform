@@ -2,7 +2,10 @@ import { compileSourceWithBackend } from "../../src/compiler.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../../src/type-inference/core/consumers.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
@@ -13,13 +16,16 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
 /*
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
- * stand for, each carrying its obligation). A generated family over the holder (a list's element, an object's property,
- * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
- * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll`), its depth, the consumer
- * (an interpolation, a `say`, a repeat count, an arithmetic operand, a written store) and the stores around the read
- * (none, a replacement before it, one after it), each run with the values its own predicate sorts (`needs` and the
- * holder's literal), never the checker's; judged at every settled stop in four modes (`heldProblems`). CI runs anchors
- * of it; the whole family is a worker run outside CI.
+ * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's
+ * property, a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's
+ * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll`, the copy
+ * graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing read's other sources
+ * (a typed parse, a written type). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count,
+ * an arithmetic operand, a fallback's left in requirement mode, a written store); the stores around the read (none, a
+ * replacement before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance that stops
+ * a decision, `heldDemands`). Each case runs with independent host globals whose values its own predicate sorts
+ * (`needs` and the holder's literal), never the checker's, and is judged at every settled stop in four modes
+ * (`heldProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
  */
 
 /** A holder at a depth: the lines that store the host data, the read's text, and what its literal requires of the data. */
@@ -151,6 +157,49 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     read: `r${fields(depth)}`,
     integer: false,
   }),
+  // the copy graph's topology: a ring of copies, two places copying each other, a ring with a tail of copies
+  ring: (depth) => ({
+    lines: [
+      ...Array.from({ length: depth + 1 }, (_, i) => `let c${i} = {f: hostValue}`),
+      ...Array.from({ length: depth + 1 }, (_, i) => `c${i} = c${(i + 1) % (depth + 1)}`),
+    ],
+    read: "c0.f",
+    integer: false,
+  }),
+  twoWay: (depth) => ({
+    lines: [
+      `let a = ${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}`,
+      "let b = a",
+      "a = b",
+    ],
+    read: `a${fields(depth)}`,
+    integer: false,
+  }),
+  ringTail: (depth) => ({
+    lines: [
+      "let r0 = {f: hostValue}",
+      "let r1 = r0",
+      "r0 = r1",
+      ...Array.from({ length: depth }, (_, i) => `let t${i + 1} = ${i === 0 ? "r1" : `t${i}`}`),
+    ],
+    read: `t${depth}.f`,
+    integer: false,
+  }),
+  // the finishing read's other sources: a typed parse (F18) and a written type, which the completion leaves alone
+  typed: (depth) => ({
+    lines: [
+      `let root = fromJson(hostValue, default: ${nest(depth, "2", (text, i) => `{f${i}: ${text}}`)})`,
+    ],
+    read: `root${fields(depth)}`,
+    integer: true,
+  }),
+  written: (depth) => ({
+    lines: [
+      `let xs: ${"integer" + "[]".repeat(depth)} = ${nest(depth - 1, "[hostValue, 4]", (text) => `[${text}]`)}`,
+    ],
+    read: `xs${"[0]".repeat(depth)}`,
+    integer: true,
+  }),
   addAll: (depth) => ({
     lines: [
       `let xs = ${nest(depth - 1, "[4]", (text) => `[${text}]`)}`,
@@ -197,6 +246,13 @@ const CONSUMERS: Readonly<Record<string, Consumer>> = {
     needs: (value) => typeof value === "number",
     says: (value) => [String(Number(value) + 1)],
   },
+  fallback: {
+    // (a fallback's left is read in requirement mode: its kinds give the requirement its right meets, C10)
+    lines: (read) => [`let v = ${read} otherwise 1`, "say v"],
+    slice: false,
+    needs: (value) => ["number", "string", "boolean"].includes(typeof value) || value === null,
+    says: (value) => [String(value ?? 1)],
+  },
   written: {
     lines: (read) => [`let n: integer = ${read}`, "say n"],
     slice: true,
@@ -217,11 +273,22 @@ export interface HeldCase {
   readonly source: string;
   /** Whether the candidate route compiles it (else it is judged at the analysis). */
   readonly slice: boolean;
-  /** Each value with what a run says where the value fits (`null`: it is rejected before the consumer's effect). */
+  /**
+   * Each run's host globals, the read's one holding a value and the other a fitting one apart from it (a host object for
+   * a host property), with what the run says where the value fits (`null`: rejected before the consumer's effect).
+   */
   readonly values: readonly {
-    readonly value: SerializableRuntimeValue;
+    readonly globals: Globals;
     readonly says: readonly string[] | null;
   }[];
+}
+
+/** A host object as the runtime takes it, its `n` the value. */
+function hostObject(value: SerializableRuntimeValue): SerializableRuntimeValue {
+  return {
+    kind: "object",
+    properties: [{ name: "n", value }],
+  } as unknown as SerializableRuntimeValue;
 }
 
 /**
@@ -234,9 +301,11 @@ export function heldFamily(few = false): HeldCase[] {
     for (const depth of few ? [1] : [1, 2, 4])
       for (const [consumerName, consumer] of Object.entries(CONSUMERS)) {
         if (few && consumerName !== "repeat" && consumerName !== "interpolation") continue;
-        // (a property store's warning gives its fix in words in a stop's unchecked region, TABLE r4.162, which the whole
-        // diagnostics the oracle compares see: judged in the whole family, outside CI)
-        if (few && holderName === "field" && consumerName === "repeat") continue;
+        // (two classes the oracle reports, outside this family's rule, judged in the whole family outside CI: a property
+        // store's warning gives its fix in words in a stop's unchecked region, #1449; a ring's domain holds every
+        // member's host store, the unstopped read the reaching one's, #1448)
+        if (few && consumerName === "repeat" && (holderName === "field" || holderName === "ring"))
+          continue;
         const held = holder(depth);
         const root = held.read.split(/[.[]/)[0]!;
         const declared = held.lines.find((line) => line.startsWith(`let ${root} = `)) ?? "";
@@ -254,19 +323,24 @@ export function heldFamily(few = false): HeldCase[] {
             'say "AFTER"',
             "exit",
           ];
-          // (a host property's object is judged at the analysis: the runs' globals are plain values; an add, a function
-          // and a loop are outside the candidate route)
+          // (an add, a function, a loop and a typed parse of host text are judged at the analysis: outside the candidate
+          // route, or a value the predicate does not model)
           const slice =
             consumer.slice &&
-            !["member", "add", "addAll", "parameter", "default", "loop", "result"].includes(
+            !["add", "addAll", "parameter", "default", "loop", "result", "typed"].includes(
               holderName,
             );
+          // (the read's global holds the value; the other one, independent of it, a value every holder takes)
+          const read = variant === "overwritten" ? "hostOther" : "hostValue";
+          const other = read === "hostValue" ? "hostOther" : "hostValue";
+          const host =
+            holderName === "member" ? hostObject : (value: SerializableRuntimeValue) => value;
           cases.push({
             name: `${holderName}-${depth}-${consumerName}-${variant}`,
             source: `${lines.join("\n")}\n`,
             slice,
             values: (consumerName === "say" ? SAID : VALUES).map((value) => ({
-              value,
+              globals: { [read]: host(value), [other]: host(3) },
               says:
                 consumer.needs(value) && (!held.integer || whole(value))
                   ? ["BEFORE", ...consumer.says(value), "AFTER"]
@@ -329,11 +403,15 @@ export function phaseEnds(
 }
 
 /** A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode. */
-function heldRun(c: HeldCase, mode: HeldMode, allowance?: number): StopRun {
+function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?: number): StopRun {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS);
   if (request === null) throw new Error(`The case does not resolve: ${c.name}`);
+  const capped = <T>(make: () => T): T =>
+    demand === undefined ? make() : withTestDemandAllowance(demand, make);
   const allowed = <T>(make: () => T): T =>
-    mode.run(() => (allowance === undefined ? make() : withTestAllowance(allowance, make)));
+    mode.run(() =>
+      allowance === undefined ? capped(make) : withTestAllowance(allowance, () => capped(make)),
+    );
   const both = () => ({
     // (outside the slice the analysis alone is judged)
     result: c.slice
@@ -349,13 +427,16 @@ export function heldStops(
   c: HeldCase,
   mode: HeldMode,
   step = 1,
+  demand?: number,
 ): { allowance: number; phase: string }[] {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
-  const total = mode.run(() => analyseCore(request)).budget.total;
+  const capped = <T>(make: () => T): T =>
+    demand === undefined ? make() : withTestDemandAllowance(demand, make);
+  const total = mode.run(() => capped(() => analyseCore(request))).budget.total;
   const stops: { allowance: number; phase: string }[] = [];
   for (const [phase, [low, high]] of phaseEnds(total, (allowance) => {
     const { stoppedIn, settled } = mode.run(() =>
-      withTestAllowance(allowance, () => analyseCore(request)),
+      withTestAllowance(allowance, () => capped(() => analyseCore(request))),
     ).budget;
     return settled ? stoppedIn : null;
   }))
@@ -397,20 +478,17 @@ export function heldProblems(
   mode: HeldMode,
   allowance: number,
   unstopped: StopRun = heldRun(c, mode),
+  demand?: number,
 ): string[] {
-  const stopped = heldRun(c, mode, allowance);
+  const stopped = heldRun(c, mode, allowance, demand);
   const problems = ownership(unstopped.answers, stopped.answers);
   if (!c.slice) return problems;
-  const globals = (value: SerializableRuntimeValue): Globals => ({
-    hostValue: value,
-    hostOther: value,
-  });
   problems.push(
     ...stopProblems({
       unstopped,
       stopped,
-      fitting: c.values.filter((each) => each.says !== null).map((each) => globals(each.value)),
-      violating: c.values.filter((each) => each.says === null).map((each) => globals(each.value)),
+      fitting: c.values.filter((each) => each.says !== null).map((each) => each.globals),
+      violating: c.values.filter((each) => each.says === null).map((each) => each.globals),
     }),
   );
   return [...problems, ...runProblems(c, stopped)];
@@ -421,8 +499,9 @@ function runProblems(c: HeldCase, run: StopRun): string[] {
   const plan = run.result.plan;
   if (plan === null) return ["no plan"];
   const problems: string[] = [];
-  for (const { value, says } of c.values) {
-    const ran = runGlobals(plan, { hostValue: value, hostOther: value });
+  for (const { globals, says } of c.values) {
+    const ran = runGlobals(plan, globals);
+    const value = globals;
     const said = ran.said.map((each) => each.text);
     if (says !== null && JSON.stringify(said) !== JSON.stringify(says))
       problems.push(
@@ -436,7 +515,26 @@ function runProblems(c: HeldCase, run: StopRun): string[] {
 }
 
 /** The unstopped run `heldProblems` compares a case's stops with, in a mode, and its own runs against the predicate. */
-export function heldUnstopped(c: HeldCase, mode: HeldMode): { run: StopRun; problems: string[] } {
-  const run = heldRun(c, mode);
+export function heldUnstopped(
+  c: HeldCase,
+  mode: HeldMode,
+  demand?: number,
+): { run: StopRun; problems: string[] } {
+  const run = heldRun(c, mode, undefined, demand);
   return { run, problems: c.slice ? runProblems(c, run) : [] };
+}
+
+/**
+ * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a case's decisions, each one unit
+ * below a decision's work in its unstopped analysis (a decision stop, and with a program stop a combined one), the
+ * three largest; judged against the unstopped run at the same demand allowance.
+ */
+export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
+  const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
+  const units = new Set(mode.run(() => analyseCore(request)).budget.decisions.map((d) => d.units));
+  return [...units]
+    .filter((unit) => unit > 1)
+    .sort((a, b) => b - a)
+    .slice(0, 3)
+    .map((unit) => unit - 1);
 }

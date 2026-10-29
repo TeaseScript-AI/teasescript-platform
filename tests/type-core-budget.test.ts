@@ -23,6 +23,7 @@ import { operationItems } from "../src/type-inference/core/operator-table.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
+import { phaseEnds } from "./helpers/type-core-held-host.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -436,5 +437,51 @@ test("a linked record list stops at the allowance with its count checked when it
       ["warning-runtime-check", "work", [], 1, ["chain", "last", "top level"]],
     );
     assert.ok(stop.deferred.includes("integer-check last(chain(3)) budget"));
+  }
+});
+
+/**
+ * #1445 (Codex r1's B1): a ring of k copies of host objects, each read by a count. After a settled program stop the
+ * finishing read's host data treats the ring as one component, made once and shared (`heldHost`), so the work is
+ * linear in k, not a walk of the ring per read. The test measures the first settled walk stop at k = 16 and 32, in both
+ * orders. Per doubling of the syntax nodes, the finishing units stay within 2.15 and each counter of 64 units or more
+ * within 2.35.
+ */
+test("a settled stop finishes a ring of copies' host data in linear work", () => {
+  const rows = (k: number, line: (i: number) => string) =>
+    Array.from({ length: k }, (_, i) => line(i)).join("\n");
+  const ring = (k: number) =>
+    `${rows(k, (i) => `let c${i} = {f: hostValue}`)}\n${rows(k, (i) => `c${i} = c${(i + 1) % k}`)}\n${rows(k, (i) => `repeat c${i}.f {}`)}\nexit`;
+  for (const reversed of [false, true]) {
+    const measured = (k: number) => {
+      const request = requestOf(main(ring(k)));
+      const full = analysed(request, reversed);
+      const walk = phaseEnds(full.budget.total, (allowance) => {
+        const { stoppedIn, settled } = analysed(request, reversed, allowance).budget;
+        return settled ? stoppedIn : null;
+      }).get("walk");
+      assert.ok(walk !== undefined, `${k}`);
+      const { budget } = analysed(request, reversed, walk[0]);
+      return {
+        units: budget.finishing,
+        nodes: budget.counts.get("syntaxNodes")!,
+        counts: budget.counts,
+      };
+    };
+    const [small, large] = [measured(16), measured(32)];
+    const nodes = large.nodes / small.nodes;
+    const doubling = (2 * (large.units / small.units)) / nodes;
+    assert.ok(
+      doubling <= 2.15,
+      `${reversed}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`,
+    );
+    for (const [counter, count] of small.counts) {
+      if (count < 64) continue;
+      const grown = (2 * ((large.counts.get(counter) ?? 0) / count)) / nodes;
+      assert.ok(
+        grown <= 2.35,
+        `${reversed} ${counter}: ${count} -> ${large.counts.get(counter)}: ${grown.toFixed(3)}`,
+      );
+    }
   }
 });

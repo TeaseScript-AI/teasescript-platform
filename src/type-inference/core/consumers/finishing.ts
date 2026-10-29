@@ -530,48 +530,65 @@ function readFrontier(walk: Consumers, value: PlaceId, depth: number): HostFront
   return found;
 }
 
-/** The host data a frontier and the copies it holds hold, each frontier once (one on a cycle answered where it is met). */
+/**
+ * The host data a frontier and the copies it holds hold, each frontier once: a cycle of copies is one component whose
+ * members share one answer, made once every member is met, so no incomplete answer is kept.
+ */
 function heldHost(walk: Consumers, start: HostFrontier): IngressNode | undefined {
   const { program } = walk.pass;
   const { held } = frontiersOf(walk);
-  const ingress = program.scope.ingress;
-  const open = new Set<HostFrontier>();
-  const frames: {
-    readonly at: HostFrontier;
-    next: number;
-    node: IngressNode | undefined;
-    cyclic: boolean;
-  }[] = [];
-  let answer: IngressNode | undefined;
   const known = held.get(start);
   if (known !== undefined) return known ?? undefined;
-  open.add(start);
-  frames.push({ at: start, next: 0, node: start.host, cyclic: false });
+  const ingress = program.scope.ingress;
+  // (Tarjan's components, iteratively: a cycle of copies holds one answer, made once its members are all met)
+  const order = new Map<HostFrontier, { readonly index: number; low: number }>();
+  const open: HostFrontier[] = [];
+  const onOpen = new Set<HostFrontier>();
+  const frames: { readonly at: HostFrontier; next: number }[] = [];
+  const enter = (at: HostFrontier): void => {
+    order.set(at, { index: order.size, low: order.size });
+    open.push(at);
+    onOpen.add(at);
+    frames.push({ at, next: 0 });
+  };
+  enter(start);
   while (frames.length > 0) {
     const frame = frames.at(-1)!;
+    const own = order.get(frame.at)!;
     program.work.charge("checks");
     if (frame.next < frame.at.copies.length) {
       const copy = frame.at.copies[frame.next++]!;
-      const done = held.get(copy);
-      if (done !== undefined) frame.node = ingress.union(frame.node, done ?? undefined);
-      else if (open.has(copy)) frame.cyclic = true;
-      else {
-        open.add(copy);
-        frames.push({ at: copy, next: 0, node: copy.host, cyclic: false });
-      }
+      if (held.has(copy)) continue;
+      const met = order.get(copy);
+      if (met === undefined) enter(copy);
+      else if (onOpen.has(copy)) own.low = Math.min(own.low, met.index);
       continue;
     }
     frames.pop();
-    open.delete(frame.at);
-    if (!frame.cyclic) held.set(frame.at, frame.node ?? null);
     const parent = frames.at(-1);
-    if (parent === undefined) answer = frame.node;
-    else {
-      parent.node = ingress.union(parent.node, frame.node);
-      parent.cyclic ||= frame.cyclic;
+    if (parent !== undefined) {
+      const above = order.get(parent.at)!;
+      above.low = Math.min(above.low, own.low);
     }
+    if (own.low !== own.index) continue;
+    // (a component's members: its host data, and the answers of the components its copies reach, all made before it)
+    const members: HostFrontier[] = [];
+    for (let member = open.pop(); member !== undefined; member = open.pop()) {
+      onOpen.delete(member);
+      members.push(member);
+      if (member === frame.at) break;
+    }
+    let node: IngressNode | undefined;
+    for (const member of members) {
+      node = ingress.union(node, member.host);
+      for (const copy of member.copies) {
+        program.work.charge("checks");
+        node = ingress.union(node, held.get(copy) ?? undefined);
+      }
+    }
+    for (const member of members) held.set(member, node ?? null);
   }
-  return answer;
+  return held.get(start) ?? undefined;
 }
 
 /**
