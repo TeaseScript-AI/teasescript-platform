@@ -46,11 +46,14 @@ const FORMS: readonly (readonly [string, RegExp])[] = [
 
 /** The constructions outside the helpers, by file, member and form: how many, and why they need no charge. */
 const LISTED: Readonly<Record<string, readonly [number, string]>> = {
-  "admission.ts #collect spread": [
+  "admission/structure.ts collect spread": [
     1,
     "the list of the paths collected, each made by a kept helper",
   ],
-  "admission.ts literalElements spread": [1, "a list of paths, each made by a kept helper"],
+  "admission/literals.ts literalElements spread": [
+    1,
+    "a list of paths, each made by a kept helper",
+  ],
   // the candidate's lowering, after the analysis (no ledger): what it keeps is the analysis's own paths again, or cut
   "backend.ts outsideAnswers spread": [
     2,
@@ -245,7 +248,7 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * `keepText`, or the ledger's `charge` by its length). For constructions stored as they are made, it checks a path's
  * slice anywhere in the stored argument, and a plain twin or a template of a path as the argument's own value (inside
  * an array or an object there too). It misses a text or a copy kept under another name, returned by a call it does not
- * follow (`#aliasKey`, `frame(root)`, an array built by `push`), handed to a member that keeps it (`#add`), or kept in
+ * follow (`aliasKey`, `frame(root)`, an array built by `push`), handed to a member that keeps it (`#add`), or kept in
  * an object after it was made. It follows a call's result only through a local it is bound to: a call stored as it is
  * made (`memo.set(1, this.produce(path))`, `pending.push(makeAnswer(path))`) is not followed, and a member returning a
  * plain twin's array (`return joinSteps(path, ["x"])`) is no returning member. Conservatively, a member returning
@@ -266,23 +269,23 @@ const KEPT_CALLEE = /^(?:kept\w*|#kept)$/;
 
 /** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
 const STORED: Readonly<Record<string, readonly [number, string]>> = {
-  "admission.ts #contributions slice": [
+  "admission/ingress.ts contributions slice": [
     1,
     "a store's contributions at a path, returned and read once by its caller, not kept",
   ],
-  "admission.ts decide at": [
+  "admission/decision.ts decide at": [
     1,
     "a candidate's path, its decision read once by the consumer and then dropped",
   ],
-  "admission.ts #inputs prefix": [
+  "admission/scan.ts inputsOf prefix": [
     1,
     "a decision's prefix key, returned and read once by the decision, not kept",
   ],
-  "admission.ts #inputs slice": [
+  "admission/scan.ts inputsOf slice": [
     1,
     "a decision's prefixes, returned and read once by the decision, not kept",
   ],
-  "admission.ts #ownLeaves memoKey": [1, "a definition's id and a flag"],
+  "admission/ingress.ts ownLeaves memoKey": [1, "a definition's id and a flag"],
   "property-names.ts propertyNames at": [
     1,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
