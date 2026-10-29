@@ -29,7 +29,7 @@ import { receivers } from "./consumers/receivers.js";
 import { admittedStores, decide } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
-import { keyOf, type Definition, type Key } from "./definitions.js";
+import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
@@ -319,11 +319,14 @@ export class Consumers {
    * The stores and transfers at a key whose decision stopped (S3 §5): the stop stands for their obligations, as a stop
    * before admission settled does for every store into an inferred place (TABLE r4.100, r4.111), so each is marked at its
    * site, its type undecided, its value checked when the script runs (C9); a key below it is asked on its own (Codex
-   * r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores).
+   * r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores). Each key once a pass (Codex
+   * r11's N2: every receiver asking it again scanned its stores again).
    */
   public stoppedStores(root: PlaceId, path: readonly string[]): void {
     const { program, definitions } = this.pass;
-    const at = keyOf(root, path);
+    const at = keptKey(program.work, root, path);
+    if (this.#stoppedKeys.has(at)) return;
+    this.#stoppedKeys.add(at);
     const lists = [definitions.byKey.get(at) ?? []];
     // (an add stores at its receiver's element)
     if (path.at(-1) === "element")
@@ -338,6 +341,8 @@ export class Consumers {
         if (keyOf(d.place, stored) === at) storeMark(this, d, stored);
       }
   }
+
+  readonly #stoppedKeys = new Set<Key>();
 
   /**
    * S3 §5: a demand's allowance, 256 × the nodes of the reading site's function, or of the whole program at a file's top
