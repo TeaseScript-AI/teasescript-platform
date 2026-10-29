@@ -128,6 +128,13 @@ algorithm, such as a plan-size baseline, may detect regression without making th
 performance, or compatibility requirement; identify that scope explicitly. The baseline may be reviewed and updated when
 an intentional implementation change legitimately changes it.
 
+Type-core tests compare analyses through the projections in `tests/helpers/type-core-oracles.ts`: the diagnostics'
+identity a stop keeps, what a program publishes in the four modes (both orders, sharing on and off), and which
+decisions stop and when. A test that needs another projection adds it there instead of keeping a private copy.
+Generators that reviewers and builders used as evidence, and that are not CI gates, live in `tests/families/<area>/`
+outside CI. Before a type-core review round, the builder runs the affected areas against the base and head builds
+(`tests/families/README.md`) and reports the counts.
+
 ## Test layers
 
 The testing strategy uses complementary layers:
