@@ -192,7 +192,16 @@ export type DiagnosticRule =
    * TSV029 (V30 §19, TABLE r4.93): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
    * or an element of a list or set option (`element`).
    */
-  | { readonly rule: "choice"; readonly part: "value" | "option" | "element" }
+  | {
+      readonly rule: "choice";
+      readonly part: "value" | "option" | "element";
+      /**
+       * A choice object the options hold: the property its button returns (`value`, else `text`), and whether the object
+       * is an element of the option (`within`); the sentence names that property, never its holder.
+       */
+      readonly member?: "value" | "text";
+      readonly within?: boolean;
+    }
   /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
   | { readonly rule: "iterable"; readonly entries: boolean }
   /** C5a–c, F19a, ADR 1.5: a member of `receiver` (`.n`, `.add()`, `[...]`) at a read, a call or a store. */

@@ -51,8 +51,9 @@ test("the core gives the expected record for every record of the cells it comple
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 shapes (r4.81 (1))": 32,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
+    "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_323);
+  assert.equal(asserted.length, 1_320);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -658,7 +659,7 @@ const CONTROLS: readonly (readonly [string, string, string, string])[] = [
     "§19 an external value beside a choice object without one",
     'let r: string = askChoice [{text: "A", value: hostValue}, {text: "B"}]',
     "warning-runtime-check",
-    "unknown",
+    "unknown unknown",
   ],
   [
     "F25 an unknown receiver's reverse",
@@ -754,17 +755,21 @@ test("external data in a choice's options or in a literal is warned at its own e
     sited(
       'let chosen: integer = askChoice [{text: "A", value: hostValue}, {text: "B", value: 2}]\nexit',
     ),
-    ["warning-runtime-check", "written-target@52", "copy-type@52"],
+    ["warning-runtime-check", "written-target@52", "operator@52", "copy-type@52", "operand@52"],
   );
   assert.deepEqual(sited('let chosen: integer = askChoice {text: "A", value: hostValue}\nexit'), [
     "warning-runtime-check",
     "written-target@51",
+    "operator@51",
     "copy-type@51",
+    "operand@51",
   ]);
   assert.deepEqual(sited("let chosen: integer = askChoice [{text: hostValue}]\nexit"), [
     "warning-runtime-check",
     "written-target@40",
+    "operator@40",
     "copy-type@40",
+    "operand@40",
   ]);
   // an external option read through a projection sits at its own expression (Astra B6-r2), in a choice and a literal
   assert.deepEqual(sited("let chosen: integer = askChoice [hostValue.field, 2]\nexit"), [
@@ -790,9 +795,11 @@ test("external data in a choice's options or in a literal is warned at its own e
       "member-read@39",
       "written-target@63",
       "member-read@63",
+      "operator@63",
       "null-check@39",
       "copy-type@63",
       "null-check@63",
+      "operand@63",
     ],
   );
   // (an object as a button's value is TSV029's error at the value, and the answer holds no object to read: TABLE r4.93)
@@ -826,8 +833,10 @@ test("external data in a choice's options or in a literal is warned at its own e
     "warning-runtime-check",
     "written-target@39",
     "member-read@39",
+    "operator@39",
     "copy-type@39",
     "null-check@39",
+    "operand@39",
   ]);
   // r4.43 (3): options held in a variable follow the copy reading: the store into the written place; the literal's
   // host element is checked against its whole numbers where it is stored (the owner's F1)
@@ -901,8 +910,18 @@ test("a choice's option reached through index and property projections is select
     sites('(askChoice [{text: "A", value: {text: hostValue.field}}][0]).text'),
     rejected(33),
   );
-  assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), at(52));
-  assert.deepEqual(sites('askChoice {option: {text: "A", value: hostValue.field}}.option'), at(60));
+  // (a held choice object's value from outside the script: C13's warning at the option, the sentence review of #1437)
+  const held = (offset: number): string[] => [
+    "warning-runtime-check",
+    "operator@32",
+    `written-target@${offset}`,
+    `copy-type@${offset}`,
+  ];
+  assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), held(52));
+  assert.deepEqual(
+    sites('askChoice {option: {text: "A", value: hostValue.field}}.option'),
+    held(60),
+  );
   // a choice as another choice's option (Astra B6-r4), beside its literal analogue; a returned choice object as the
   // outer choice's button itself, never selected again (TABLE r4.93), so a text-only one has no length
   assert.deepEqual(sites("askChoice [(askChoice [hostValue.field, 1]), 2]"), at(45));
@@ -1135,6 +1154,9 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         "warning-runtime-check",
         `written-target warning-runtime-check @${at("hostValue")}`,
         `copy-type result [integer] @${at("hostValue")}`,
+        // (a choice value from outside the script: C13's warning and its check, the sentence review of #1437)
+        `operator warning-runtime-check @${at("hostValue")}`,
+        `operand hostValue [integer, number, string, boolean, duration, calendarDuration, angle, date, time, datetime, absoluteDateTime, null] @${at("hostValue")}`,
       ],
     ],
     // each alternative its own: the first object's value, the second's text, never the first's text
@@ -1185,6 +1207,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         `written-target warning-runtime-check @${at("askChoice")}`,
         `copy-type r [string] @${at("askChoice")}`,
         `null-check pick.result [non-null] @${at("pick(flag)")}`,
+        `operator warning-runtime-check @${at("pick(flag)")}`,
+        `operand pick(flag).maybe [integer, number, string, boolean, duration, calendarDuration, angle, date, time, datetime, absoluteDateTime, null] @${at("pick(flag)")}`,
       ],
     ],
     // choice objects held in a variable, a container or a parameter: each record its own `value` or `text`, never
@@ -1397,6 +1421,8 @@ test("a choice object's value is selected by its key, and a dict's values and ke
         "warning-runtime-check",
         `written-target warning-runtime-check @${at("hostValue")}`,
         `copy-type n [integer] @${at("hostValue")}`,
+        `operator warning-runtime-check @${at("dict")}`,
+        `operand dict{a: {text: "A", value: hostValue}}.values [integer, number, string, boolean, duration, calendarDuration, angle, date, time, datetime, absoluteDateTime, null] @${at("dict")}`,
       ],
     ],
     // F19a: a receiver that may be a reference has the runtime's members, before a dict's list (review r2)
@@ -5098,14 +5124,45 @@ test("a choice list's earliest evaluated ingress names C1's site, in both elemen
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     const site = { file: "main.tease", offset: start, end: start + "hostValue".length };
+    // (each button's value from outside the script: C13's warning and its check at it, the sentence review of #1437)
+    const buttons = [source.indexOf("hostValue"), source.lastIndexOf("hostValue")].map(
+      (offset) => ({ file: "main.tease", offset, end: offset + "hostValue".length }),
+    );
+    const values = [
+      "integer",
+      "number",
+      "string",
+      "boolean",
+      "duration",
+      "calendarDuration",
+      "angle",
+      "date",
+      "time",
+      "datetime",
+      "absoluteDateTime",
+      "null",
+    ];
     const expected: CompactRecord = {
       outcome: "warning-runtime-check",
       diagnostics: [
         { kind: "written-target", class: "warning-runtime-check", site, context: null },
+        ...buttons.map((at) => ({
+          kind: "operator" as const,
+          class: "warning-runtime-check" as const,
+          site: at,
+          context: null,
+        })),
       ],
       checks: [
         { kind: "copy-type", target: "out", against: ["string"], boundary: false, site },
         { kind: "copy-type", target: "out", against: ["string"], boundary: true, site },
+        ...buttons.map((at) => ({
+          kind: "operand" as const,
+          target: "hostValue",
+          against: values,
+          boundary: false,
+          site: at,
+        })),
       ],
     };
     const forward = compactAnalysis(request);

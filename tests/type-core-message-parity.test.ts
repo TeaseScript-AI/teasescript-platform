@@ -906,12 +906,22 @@ const INTENDED: readonly Intended[] = [
           form?.test(pair.message) === true || words[index]?.test(pair.message) === true,
       );
     },
-    // (the fix in words where its code is not; one more since S9b's compound operations, G2: a compound assignment's
-    // target is the place it stores into, which no kept value replaces)
+    // (the fix in words where its code is not)
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 18,
+    count: 17,
+  },
+  {
+    rule:
+      "S9b's G2 (the sentence review of #1437): a compound assignment's target that is no variable is checked where " +
+      "it stands, in words, never kept in a new variable, which would take the change instead",
+    matches: ({ message, named }) =>
+      !/^[A-Za-z_]\w*$/.test(named.subject) &&
+      new RegExp(`Check that '${escaped(named.subject)}' is [^.']+ first\\.`).test(message),
+    replacement: ({ named }) =>
+      new RegExp(`Check that '${escaped(named.subject)}' is [^.']+ first\\.`),
+    count: 1,
   },
   {
     rule:

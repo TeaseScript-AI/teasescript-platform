@@ -422,29 +422,40 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
   const choice = (options: string): string => `let out = askChoice ${options}\nsay "AFTER"\n`;
   const boundary = (against: string, span: string): string =>
     `outcome valid\nB copy-type out [${against}] ${span}`;
+  // (a button's value from outside the script owes C13's warning and its check at the value, `at`, beside the boundary:
+  // the sentence review of #1437)
+  const valued = (against: string, span: string, value = "hostValue", at = span): string =>
+    `outcome warning-runtime-check\nD operator warning ${at} unknown\n` +
+    `C operand ${value} [integer|number|string|boolean|duration|calendarDuration|angle|date|time|datetime|` +
+    `absoluteDateTime|null] ${at}\nB copy-type out [${against}] ${span}`;
   return [
     ["choice-list", choice("[1, hostValue]"), boundary("integer", "24:33")],
     [
       "choice-object",
       choice('{text: "one", value: 1}, {text: "two", value: hostValue}'),
-      boundary("integer", "66:75"),
+      valued("integer", "66:75"),
     ],
     [
       "choice-object-list",
       choice('[{text: "one", value: 1}, {text: "two", value: hostValue}]'),
-      boundary("integer", "67:76"),
+      valued("integer", "67:76"),
     ],
-    ["choice-text-list", choice('[{text: "one"}, {text: hostValue}]'), boundary("string", "43:52")],
+    ["choice-text-list", choice('[{text: "one"}, {text: hostValue}]'), valued("string", "43:52")],
     ["choice-object-extra", choice('[{text: "one", value: 1, extra: hostValue}]'), "outcome valid"],
     [
       "choice-mixed-extra",
       choice('[{text: "one", value: 1, extra: hostValue}, {text: "two", value: hostValue}]'),
-      boundary("integer", "85:94"),
+      valued("integer", "85:94"),
     ],
     [
       "choice-dict-values",
       choice('dict{a: {text: "one", value: 1}, b: {text: "two", value: hostValue}}.values'),
-      boundary("integer", "77:86"),
+      valued(
+        "integer",
+        "77:86",
+        'dict{a: {text: "one", value: 1}, b: {text: "two", value: hostValue}}.values',
+        "20:95",
+      ),
     ],
     [
       "an otherwise of an otherwise",

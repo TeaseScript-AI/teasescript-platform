@@ -117,6 +117,14 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "exact-path.ts #stopAt spread": [2, "the spans per prefix of a path, no path"],
   "items.ts union composite": [2, "two item ids"],
   // a diagnostic's sentences (#1195), made for the author after the analysis, never kept by it
+  "messages.ts choiceSubject step": [
+    1,
+    "a choice object and the property its button returns, named in a sentence",
+  ],
+  "messages.ts coreMessage step": [
+    1,
+    "a choice object and the property its button returns, named in a sentence",
+  ],
   "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
   "messages.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
   "messages.ts mixedSentence join": [1, "an object's property names in a sentence, joined"],

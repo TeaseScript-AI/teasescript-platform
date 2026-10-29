@@ -602,9 +602,19 @@ function checkedOf(
   // (each in the analysis's site order, before the first diagnostic of a later site: a record's lists are in source
   // order, r4.86 (1))
   const found = staticDiagnostics(answers, index, known).sort((a, b) => siteOrder(a.site, b.site));
+  // (a known calendar offset is one problem with one diagnostic, the runtime's sentence: the analysis's own warning of
+  // the operation at that site, a hedge beside it, goes, decision 6)
+  const at = (site: SourceSite): string => `${site.file}:${site.start}:${site.end}`;
+  const offsets = new Set(
+    found.filter((d) => d.rule.rule === "calendar-offset").map((d) => at(d.site)),
+  );
+  const analysed = answers.diagnostics.filter(
+    (d) =>
+      !(d.class === "warning-runtime-check" && d.kind === "operator" && offsets.has(at(d.site))),
+  );
   const diagnostics: CheckedDiagnostic[] = [];
   let next = 0;
-  for (const diagnostic of answers.diagnostics) {
+  for (const diagnostic of analysed) {
     while (next < found.length && siteOrder(found[next]!.site, diagnostic.site) < 0)
       diagnostics.push(found[next++]!);
     diagnostics.push(diagnostic);

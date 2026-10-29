@@ -1,6 +1,6 @@
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../../value-kinds.js";
 import type { ChoiceObjectEvidence, PlaceId } from "../../graph.js";
-import { requiredKind } from "../admission.js";
+import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { error } from "../consumers/diagnostics.js";
@@ -35,8 +35,9 @@ const isMissing = (item: Item): boolean =>
  * object's `value`, or its `text` without one; a value option or element itself; a choice object the options hold
  * without writing it, its `value` or its `text` as the answer reads it (`choiceItems`). The C13 rule decides each over
  * its known kinds: every one a choice value, quiet; none and all definite, an error; else a warning whose check is the
- * runtime's own check of the buttons (TSR052) when the choice opens. A labelled option's buttons return the label. The
- * answer's value side takes only choice values (`choiceItems`), so no record of a button is composed.
+ * runtime's own check of the buttons (TSR052) when the choice opens, a value the script cannot know among them (C13, as
+ * an argument's), the known misfit alone beside one. A labelled option's buttons return the label. The answer's value
+ * side takes only choice values (`choiceItems`), so no record of a button is composed.
  */
 export function choiceValues(
   walk: Consumers,
@@ -45,14 +46,14 @@ export function choiceValues(
 ): void {
   const options = c.evidence?.kind === "choice" ? c.evidence.options : [];
   const { program } = walk.pass;
-  // the C13 rule over the value's known kinds; an unknown one is checked where the answer lands (C1, C9) and by the
-  // runtime's own check of the buttons, so it owes no second warning here
+  // the C13 rule over the value's kinds, a button's value the script cannot know a possible misfit
   const check = (
     value: PlaceId | null,
     need: readonly ItemTag[],
     part: Extract<DiagnosticRule, { rule: "choice" }>["part"],
     rest: readonly string[] = [],
     possible = false,
+    member: { readonly member: "value" | "text"; readonly within: boolean } | null = null,
   ): void => {
     if (value === null) return;
     const quiet = quietKinds(walk, value, rest);
@@ -62,11 +63,24 @@ export function choiceValues(
     }
     program.work.charge("checks");
     const items = domainItems(walk, value, node, rest);
-    const bad = items.filter((item) => item.tag !== "unknown" && !need.includes(item.tag));
+    // (C13: a value a button returns that the script cannot know warns, as an argument's does; beside a known misfit,
+    // the known one alone, one warning a site; an option or an element the runtime checks as it opens the choice)
+    const misfits = items.filter((item) =>
+      item.tag === "unknown"
+        ? part === "value" && (isOpaque(item) || isExternal(item))
+        : !need.includes(item.tag),
+    );
+    const bad = misfits.some((item) => item.tag !== "unknown")
+      ? misfits.filter((item) => item.tag !== "unknown")
+      : misfits;
     if (bad.length === 0) return;
     const at = ownSpan(walk, value, c.site);
-    const rule: DiagnosticRule = { rule: "choice", part };
-    if (!possible && bad.length === items.length && items.every((item) => item.cert === "def")) {
+    const rule: DiagnosticRule = { rule: "choice", part, ...(member ?? {}) };
+    if (
+      !possible &&
+      bad.length === items.length &&
+      items.every((item) => item.cert === "def" && item.tag !== "unknown")
+    ) {
       error(
         walk,
         "operator",
@@ -102,9 +116,20 @@ export function choiceValues(
   // lacks the `value`, possible where some has one
   const held = (value: PlaceId, at: readonly string[]): void => {
     const stored = walk.pass.contract.choiceKeysStored();
-    check(value, CHOICE_VALUES, "value", joinSteps(at, [stored.value ? "value" : SELECTED_VALUE]));
+    const within = at.length > 0;
+    check(
+      value,
+      CHOICE_VALUES,
+      "value",
+      joinSteps(at, [stored.value ? "value" : SELECTED_VALUE]),
+      false,
+      { member: "value", within },
+    );
     if (!stored.text) {
-      check(value, CHOICE_VALUES, "value", joinSteps(at, [SELECTED_TEXT]));
+      check(value, CHOICE_VALUES, "value", joinSteps(at, [SELECTED_TEXT]), false, {
+        member: "text",
+        within,
+      });
       return;
     }
     const values = withoutEmpty(walk.valueItems(value, node, joinSteps(at, ["value"])));
@@ -115,6 +140,7 @@ export function choiceValues(
         "value",
         joinSteps(at, ["text"]),
         values.some((item) => !isMissing(item)),
+        { member: "text", within },
       );
   };
   c.arguments.forEach((argument, index) => {

@@ -20,11 +20,11 @@ export const CHOICE_VALUE_RULE =
 
 /** What an option of `askChoice` is. */
 export const CHOICE_OPTION_RULE =
-  "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set";
+  "A choice option must be a choice value, a choice object { value?, text, background? }, a list, or a set";
 
 /** What an element of a list or set option is. */
 export const CHOICE_ELEMENT_RULE =
-  "A choice list element must be a value or a choice object { value?, text, background? }";
+  "A choice list element must be a choice value or a choice object { value?, text, background? }";
 
 export const EMPTY_CHOICE_MESSAGE =
   "A choice needs at least one button, but its option lists are empty.";

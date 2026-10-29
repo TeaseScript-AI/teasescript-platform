@@ -97,10 +97,17 @@ export function consume(
     );
   const nullItem = bad.find((item) => item.tag === "null");
   if (nullItem !== undefined) owe(nullItem, "null-check");
+  // (C13's arguments, keys and iterables: beside a known misfit, an unknown owes no second warning at the site, its
+  // check the same one)
+  const offending = bad.filter((item) => item.tag !== "null");
+  const knownMisfits = offending.filter((item) => item.tag !== "unknown");
+  const warned =
+    knownMisfits.length > 0 &&
+    (rule.rule === "argument" || rule.rule === "key" || rule.rule === "iterable")
+      ? knownMisfits
+      : offending;
   if (owedBy !== null) owe(owedBy, obligationKind);
-  else
-    for (const { item } of offendingKinds(bad.filter((item) => item.tag !== "null")))
-      owe(item, obligationKind);
+  else for (const { item } of offendingKinds(warned)) owe(item, obligationKind);
   // C9: the operand's external data brings its boundary checks
   walk.admission.boundariesAt(
     items,

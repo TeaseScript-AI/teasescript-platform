@@ -31,6 +31,12 @@ decision, 2026-10-27). A sentence that authors read uses no implementation terms
 "store", unless they help the author fix the problem, and says "type", never "kind" (owner decision, 2026-10-27).
 Where a whole number is required, a value of type `number` is "a number that can have decimals", and the message names
 the line that brings them; elsewhere "a number" stays the general word (owner decision, 2026-10-27).
+A suggested fix never contains a placeholder such as `default: ...`, and what cannot be written in full is said in
+words (owner decision, 2026-10-28, #1268). A warning of a check the run makes states the rule, then what the value may be
+and what follows, as in `contains() needs text (string) or a regex for 'part', but 'v' may be a whole number (integer)
+here. If it is, the Tease stops with an error at this line.` (`may hold` and `If it does` for what a value holds), then
+its fix. One check warns once at its site, naming the most specific type the value may have (owner review of #1437,
+2026-10-29).
 
 ## Owners
 

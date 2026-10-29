@@ -63,6 +63,14 @@ export function heldBack(record: FixtureRecord): string | null {
   // it until its maintainer adds it.
   if (record.name === "cp9-cells/r46/m3/astra-m3/conversion/default")
     return "a known-value error the record lacks (decision 3 on #1072)";
+  // A button's value from outside the script owes C13's warning and its check at the choice, as an argument's does (the
+  // sentence review of #1437, ruling 4): the record lacks them until its maintainer adds them.
+  if (
+    record.name === "cp9-cells/s4/choice-external/inferred" ||
+    record.name === "cp9-cells/s4/choice-external/written" ||
+    record.name === "cp9-cells/s4/choice-value/external-written"
+  )
+    return "C13's warning of a choice value from outside the script the record lacks (#1437)";
   // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b; C13's
   // released as S9b's checks give them (#1072)
   if (record.owner === "adapter" && !RELEASED_ADAPTER_RECORDS.has(record.name))

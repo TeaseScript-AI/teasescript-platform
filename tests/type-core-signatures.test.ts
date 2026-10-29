@@ -222,7 +222,7 @@ const CONSUMERS: readonly Consumer[] = [
       const start = source.lastIndexOf("askChoice w") + "askChoice ".length;
       return [start, start + 1];
     },
-    unknown: false,
+    unknown: true,
   },
   {
     name: "a held choice object's value",
@@ -235,7 +235,7 @@ const CONSUMERS: readonly Consumer[] = [
       const start = source.lastIndexOf("askChoice w") + "askChoice ".length;
       return [start, start + 1];
     },
-    unknown: false,
+    unknown: true,
   },
   {
     name: "a held choice object's text as an element of a choice's list",
@@ -248,7 +248,7 @@ const CONSUMERS: readonly Consumer[] = [
       const start = source.lastIndexOf("askChoice [w") + "askChoice [".length;
       return [start, start + 1];
     },
-    unknown: false,
+    unknown: true,
   },
   {
     name: "a choice object's value",
@@ -258,7 +258,7 @@ const CONSUMERS: readonly Consumer[] = [
     misfit: "{n: 1}",
     kind: "operator",
     at: "operand",
-    unknown: false,
+    unknown: true,
   },
   {
     name: "an element of a choice's list",
