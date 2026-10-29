@@ -564,58 +564,63 @@ export function builtSerializableDictIndex(
 interface SetMembership {
   readonly keys: string[];
   readonly members: Set<string>;
-  /** The list, set, object, and dict items under each of their keys: more than one only where hashes collide. */
-  readonly composites: Map<string, SerializableRuntimeValue[]>;
+  /** The items under each hashed key: more than one only where hashes collide. */
+  readonly hashed: Map<string, SerializableRuntimeValue[]>;
 }
 
 /**
- * A value's key among a set's members: its `valueKey` when it holds no other values, otherwise a hash of that key, so
- * that the keys kept by the sets of a value nested n deep take memory in proportion to n, not n². Equal values have equal
- * keys; a list, set, object, or dict member with the same key is equal only when its whole key (`whole`) is.
+ * A value's key among a set's members: its `valueKey`, or a hash of it when that is longer than `EXACT_KEY_LENGTH`, so
+ * that a member's key takes the same memory whatever its size, and the sets of a value nested n deep keep keys in
+ * proportion to n, not n². Equal values have equal keys; an item under a hashed key is equal only when its whole key
+ * (`whole`) is.
  */
 interface MemberKey {
   readonly key: string;
   readonly whole: string | null;
 }
 
+/** Keys up to this long are kept as they are: about twice a hashed key, `#` and up to 16 digits. */
+const EXACT_KEY_LENGTH = 32;
+
 const setMemberships = new WeakMap<SerializableRuntimeSet, SetMembership>();
 
 function membership(set: SerializableRuntimeSet): SetMembership {
   const known = setMemberships.get(set);
   if (known !== undefined && known.keys.length === set.items.length) return known;
-  const built: SetMembership = { keys: [], members: new Set(), composites: new Map() };
+  const built: SetMembership = { keys: [], members: new Set(), hashed: new Map() };
   for (const item of set.items) remember(built, memberKey(item), item);
   setMemberships.set(set, built);
   return built;
 }
 
 function memberKey(value: SerializableRuntimeValue): MemberKey {
-  const leaf = leafKey(value);
-  if (leaf !== undefined) return { key: leaf, whole: null };
   const whole = valueKey(value);
-  return { key: `#${textHash(whole)}`, whole };
+  // No `valueKey` starts with `#`.
+  return whole.length <= EXACT_KEY_LENGTH
+    ? { key: whole, whole: null }
+    : { key: `#${textHash(whole)}`, whole };
 }
 
 function remember(known: SetMembership, member: MemberKey, item: SerializableRuntimeValue): void {
   known.keys.push(member.key);
   known.members.add(member.key);
   if (member.whole === null) return;
-  const items = known.composites.get(member.key);
-  if (items === undefined) known.composites.set(member.key, [item]);
+  const items = known.hashed.get(member.key);
+  if (items === undefined) known.hashed.set(member.key, [item]);
   else items.push(item);
 }
 
-/** The set's item equal (`==`) to the value `member` keys, if it is a list, set, object, or dict. */
-function equalComposite(
+/** The set's item equal (`==`) to the value `member` keys, where that key is hashed. */
+function equalHashedItem(
   known: SetMembership,
   member: MemberKey,
 ): SerializableRuntimeValue | undefined {
-  return known.composites.get(member.key)?.find((item) => valueKey(item) === member.whole);
+  return known.hashed.get(member.key)?.find((item) => valueKey(item) === member.whole);
 }
 
 function hasMember(known: SetMembership, member: MemberKey): boolean {
   if (!known.members.has(member.key)) return false;
-  return member.whole === null || equalComposite(known, member) !== undefined;
+  return member.whole === null || equalHashedItem(known, member) !== undefined;
 }
 
 /** A 53-bit hash of a text (cyrb53), the same in every host. */
@@ -679,13 +684,13 @@ export function removeSerializableSetValue(
     index = known.keys.indexOf(member.key);
     known.members.delete(member.key);
   } else {
-    const item = equalComposite(known, member);
+    const item = equalHashedItem(known, member);
     if (item === undefined) return false;
     index = set.items.indexOf(item);
-    const items = known.composites.get(member.key)!;
+    const items = known.hashed.get(member.key)!;
     items.splice(items.indexOf(item), 1);
     if (items.length === 0) {
-      known.composites.delete(member.key);
+      known.hashed.delete(member.key);
       known.members.delete(member.key);
     }
   }
