@@ -861,6 +861,8 @@ test("every admitted argument check and method dispatch runs as the derived orac
         : contractCall({ ...parameter, receiver: "r", position: -1 }, "");
     return `let r = hostValue\nlet result = ${name === "get" ? `r.get("a", default: 0)` : call}\nsay "after"\nexit\n`;
   });
+  // (a key of another kind than text: a dict's own check at the key, TSR062)
+  dispatched.push('let r = hostValue\nlet result = r.contains(1)\nsay "after"\nexit\n');
   const receivers: readonly SerializableRuntimeValue[] = [
     "abc",
     2,
