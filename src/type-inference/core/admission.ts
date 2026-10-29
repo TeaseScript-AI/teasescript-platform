@@ -178,6 +178,19 @@ export class Admission {
   /** G3 3a: per place and path id, where it lands past wrappers (`landedFrontier`); per place and step, its wrapper's. */
   readonly landedFrontiers = new Map<string, { readonly place: PlaceId; readonly rest: number }>();
   readonly landingHops = new Map<string, PlaceId | null>();
+  /** Per place, its landings by first step (`landingSteps`); per walk, its stops by first step (`stopSteps`). */
+  readonly landingSteps = new Map<
+    PlaceId,
+    {
+      readonly whole: boolean;
+      readonly copies: ReadonlyMap<string, readonly InheritedCopy[]>;
+      readonly deeper: ReadonlySet<string>;
+    }
+  >();
+  readonly stopSteps = new WeakMap<
+    Stops,
+    { readonly root: boolean; readonly deeper: ReadonlySet<string> }
+  >();
   /** G3 3a: per place and path id, its frontier past wrappers (`wrappedFrontier`); per place and step, its wrapper's step. */
   readonly frontiers = new Map<string, Frontier>();
   readonly scanHops = new Map<

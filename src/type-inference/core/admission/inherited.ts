@@ -1,10 +1,10 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinParts, keepText } from "../budget.js";
+import { joinParts, keep, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { landed, passThrough } from "./landings.js";
-import type { Frontier, Inheriting, Stop, Waiting } from "./model.js";
+import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
 import { permittedAt, unrestricted } from "./permitted.js";
 import { inputsOf, scanAt } from "./scan.js";
 import { cycleOf, inheritedInto, join } from "./waiting.js";
@@ -248,14 +248,7 @@ function scanHop(
       list.every(
         (stop) => stop.value === hop.read && stop.strip.length === 0 && stop.via === null && !stop.deep,
       );
-    const below = `${step}.`;
-    const elsewhere = (map: ReadonlyMap<string, readonly Stop[]>): boolean => {
-      for (const text of map.keys()) {
-        program.work.charge("checks");
-        if (text === "" || text.startsWith(below)) return true;
-      }
-      return false;
-    };
+    const beside = stopSteps(admission, stops);
     if (
       eligible.length === 1 &&
       eligible[0] === hop.decl &&
@@ -264,12 +257,36 @@ function scanHop(
       passThrough(admission, place, [step]) === place &&
       own(stops.written.get(step)) &&
       own(stops.values.get(step)) &&
-      !elsewhere(stops.written) &&
-      !elsewhere(stops.values)
+      !beside.root &&
+      !beside.deeper.has(step)
     )
       found = { binding, read: hop.read, decl: hop.decl };
   }
   admission.scanHops.set(memoKey, found);
+  return found;
+}
+
+/**
+ * A walk's written and value stops by their paths' first steps (`scanHop`): whether one stands at the root, and the
+ * first steps of the paths of two steps or more. Once per walk.
+ */
+function stopSteps(
+  admission: Admission,
+  stops: Stops,
+): { readonly root: boolean; readonly deeper: ReadonlySet<string> } {
+  const known = admission.stopSteps.get(stops);
+  if (known !== undefined) return known;
+  let root = false;
+  const deeper = new Set<string>();
+  for (const map of [stops.written, stops.values])
+    for (const text of map.keys()) {
+      admission.pass.program.work.charge("checks");
+      if (text === "") root = true;
+      else if (text.includes(".")) deeper.add(text.slice(0, text.indexOf(".")));
+    }
+  keep(admission.work, 1 + deeper.size);
+  const found = { root, deeper };
+  admission.stopSteps.set(stops, found);
   return found;
 }
 
