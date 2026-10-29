@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { ANGLE_UNIT_NAMES, CALENDAR_DURATION_UNIT_NAMES } from "../src/language-facts.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -737,4 +738,56 @@ test("a calendar unit follows a name, a call, or parentheses like an exact unit"
     const failure = runValidSource(`${DYNAMIC}${source}\nexit`).snapshot.failure;
     assert.deepEqual([failure?.code, failure?.message], [code, message], source);
   }
+});
+
+test("a calendar or angle unit with capitals is read as the unit, and its error names the unit in lowercase", () => {
+  const messages = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map(({ message }) => message);
+  const capitals = (word: string) => `'${word}' is not a unit. Units are written in lowercase.`;
+  const spellings = (name: string) => [
+    ...new Set([name[0]!.toUpperCase() + name.slice(1), name.toUpperCase()]),
+  ];
+  // After 'calendar', every calendar unit name: the unit in lowercase is shown where the statement has no other error, and
+  // an error that the unit in lowercase would still give, as in a wait, is its own.
+  for (const name of CALENDAR_DURATION_UNIT_NAMES.keys())
+    for (const word of spellings(name)) {
+      const source = `let d = 2 calendar ${word}`;
+      assert.deepEqual(messages(source), [`${capitals(word)} Write '${name}'.`], source);
+      assert.deepEqual(messages(source.replace(word, name)), [], source);
+    }
+  assert.deepEqual(messages("wait 2 calendar Months"), [`${capitals("Months")} Write 'months'.`]);
+  assert.deepEqual(
+    compileSource("wait 2 calendar months\nexit").diagnostics.map(({ code }) => code),
+    ["TSV043"],
+  );
+  assert.deepEqual(messages("let d = [2 calendar Months, 1"), [
+    capitals("Months"),
+    "Expected ']' after the list literal.",
+  ]);
+  // Every angle unit name after a number, at places that take an angle, and after a name, which keeps the words.
+  for (const [name, unit] of ANGLE_UNIT_NAMES)
+    for (const word of spellings(name))
+      for (const [amount, place] of [
+        ["90", "let a = #"],
+        ["90", "say sin(#)"],
+        ["n", "let a = #"],
+      ] as const) {
+        const source = `let n = 90\n${place.replace("#", `${amount} ${word}`)}`;
+        const named = amount === "n";
+        assert.deepEqual(
+          messages(source),
+          [
+            `${capitals(word)} For ${unit === "deg" ? "degrees" : "radians"}, ${named ? `use the unit ${unit}` : `write '${amount} ${unit}'`}. The units of an angle are deg and rad.`,
+          ],
+          source,
+        );
+        assert.deepEqual(messages(source.replace(word, unit)), [], source);
+      }
+  // A name that is such a word stays the text after a say mode or skip word, as a name that is a unit does.
+  for (const word of ["Months", "MO", "DEG", "Rad"])
+    assert.deepEqual(
+      messages(`let ${word} = "x"\nsay skippable ${word}\nsay bubble ${word}`),
+      [],
+      word,
+    );
 });

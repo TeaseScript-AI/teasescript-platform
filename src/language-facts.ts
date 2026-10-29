@@ -667,13 +667,20 @@ const MISTAKEN_DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[
  * exact unit or such a word with capitals, as `S` or `Min`, or `undefined`.
  */
 export function mistakenDurationUnit(word: string): (typeof DURATION_UNITS)[number] | undefined {
-  const lower = word.toLowerCase();
   return (
     MISTAKEN_DURATION_UNIT_NAMES.get(word) ??
-    (lower === word
-      ? undefined
-      : (DURATION_UNIT_NAMES.get(lower) ?? MISTAKEN_DURATION_UNIT_NAMES.get(lower)))
+    capitalizedUnit(word, DURATION_UNIT_NAMES) ??
+    capitalizedUnit(word, MISTAKEN_DURATION_UNIT_NAMES)
   );
+}
+
+/** The unit of `names` that `word` names with capitals, as `S` or `Months`, which no unit is written with. */
+export function capitalizedUnit<Unit>(
+  word: string,
+  names: ReadonlyMap<string, Unit>,
+): Unit | undefined {
+  const lower = word.toLowerCase();
+  return lower === word ? undefined : names.get(lower);
 }
 
 /** Each name of a unit after `calendar`, short or long, and the unit it names. */

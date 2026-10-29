@@ -432,11 +432,17 @@ export class Parser {
   public readonly unitlessCalendars = new WeakSet<Expression>();
   /**
    * The error of each month or year without `calendar`, and of each calendar duration without a space before its unit
-   * (`spaced`), which its place rewords (see `adviseDuration`): `calendar` is its code where a calendar duration fits.
+   * (`spaced`), which its place rewords (see `adviseDuration`): `calendar` is its code where a calendar duration fits,
+   * and `capitals` the sentences on a unit written with capitals, which come first.
    */
   public readonly calendarUnitErrors = new WeakMap<
     Expression,
-    { readonly diagnostic: Diagnostic; readonly calendar: string; readonly spaced: boolean }
+    {
+      readonly diagnostic: Diagnostic;
+      readonly calendar: string;
+      readonly spaced: boolean;
+      readonly capitals: string;
+    }
   >();
   /** The code that the error of a number with a word taken for a unit offers where its place proves it (`adviseDuration`). */
   public readonly mistakenUnitFixes = new WeakMap<Expression, () => void>();

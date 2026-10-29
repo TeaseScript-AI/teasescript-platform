@@ -621,6 +621,7 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
     readonly name: string;
     readonly spaced?: true;
     readonly whole?: false;
+    readonly capitals?: string;
   }[] = [
     { form: "1 month", written: "1 month", calendar: "1 calendar month", name: "month" },
     { form: "n months", written: "n months", calendar: "n calendar months", name: "month" },
@@ -660,6 +661,21 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
       spaced: true,
       whole: false,
     },
+    // A month or a year with capitals, whose error first names the unit in lowercase.
+    {
+      form: "5 Months",
+      written: "5 Months",
+      calendar: "5 calendar months",
+      name: "month",
+      capitals: "Months",
+    },
+    {
+      form: "(2 YEARS)",
+      written: "2 YEARS",
+      calendar: "2 calendar years",
+      name: "year",
+      capitals: "YEARS",
+    },
   ];
   const places: readonly (readonly [string, "calendar" | "words" | string])[] = [
     // Places that take any duration: the calendar unit compiles there.
@@ -697,7 +713,7 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
   ];
   const space = "A unit needs a space before it.";
   for (const [place, advice] of places)
-    for (const { form, written, calendar, name, spaced, whole } of forms) {
+    for (const { form, written, calendar, name, spaced, whole, capitals } of forms) {
       const source = place.replace("#", form);
       const exact = advice !== "calendar" && advice !== "words";
       // A calendar amount must be whole, and a negative length is wrong whatever its unit, so no code form compiles:
@@ -713,7 +729,7 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
             : name === "year"
               ? "365 days"
               : "30 days";
-      const expected = exact
+      const advised = exact
         ? `${advice} needs an exact length, and a ${name} has none. ${name.startsWith("calendar") ? "Leave out 'calendar' and put a space before the unit." : `Write the length in days or weeks${offered === null ? "" : `, as in '${offered}'`}.`}`
         : spaced
           ? offered === null
@@ -724,6 +740,10 @@ test("a month or a year without 'calendar', or a calendar unit without a space, 
             : unproved
               ? `A ${name} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`
               : `A ${name} has no fixed length. Write '${offered}'.`;
+      const expected =
+        capitals === undefined
+          ? advised
+          : `'${capitals}' is not a unit. Units are written in lowercase. ${advised}`;
       assert.deepEqual(diagnostics(`${header}${source}\nexit`), [["TSP033", expected]], source);
       if (offered !== null) {
         const pasted = `${header}${source.replace(written, offered)}\nexit`;
