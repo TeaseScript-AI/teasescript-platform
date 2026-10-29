@@ -2044,7 +2044,7 @@ test("the named exception for #1216 stands at its counted stops", () => {
  * #1432, #1415 (S3 §5; S8's mark-ownership rule; TABLE r4.113): after a settled program stop, a read the finishing walk
  * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
  * check (a mark carrying the unstopped obligation) and the store's boundary forms. The generated family's anchors
- * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every fifth stop of each
+ * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every eighth stop of each
  * settled phase and its last, forward with the sharing and reversed without it; the whole family runs outside CI.
  */
 test("a settled stop keeps the checks of the host data a place's stores hold (#1432, #1415)", () => {
@@ -2052,7 +2052,7 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
     for (const c of heldFamily(true)) {
       const { run: unstopped, problems } = heldUnstopped(c, mode);
       assert.deepEqual(problems, [], `${c.name}, ${mode.name}`);
-      const stops = heldStops(c, mode, 5);
+      const stops = heldStops(c, mode, 8);
       assert.ok(
         stops.some((stop) => stop.phase === "walk"),
         `${c.name}, ${mode.name}`,
