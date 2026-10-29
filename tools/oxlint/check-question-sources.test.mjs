@@ -204,6 +204,47 @@ const IDENTITY = [
     {},
     [`${CONSUMERS}: finishedItems is named only in`],
   ],
+  // (aliases, Codex r2 B1: a renamed import binds to nothing proved; each specifier by its own local name)
+  [
+    "the facade's function an alias of another function of its class",
+    SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead, read as finishedItems } from "./consumers/finishing.js";',
+    ),
+    `${SPLIT_PART}\nexport function read(walk: Consumers, value: number): number {\n  void walk;\n  return value;\n}\n`,
+    {},
+    [`${CONSUMERS}: finishedItems is named only in`],
+  ],
+  [
+    "the facade's function an alias of the finishing read",
+    SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead, finishingRead as finishedItems } from "./consumers/finishing.js";',
+    ),
+    SPLIT_PART,
+    {},
+    [`${CONSUMERS}: finishedItems is named only in`],
+  ],
+  [
+    "an alias beside a genuine unaliased import",
+    SPLIT_CLASS,
+    SPLIT_PART,
+    {
+      [part("escaped")]:
+        'import { finishingRead, finishingRead as escaped } from "./finishing.js";\nexport const leaked = escaped;\n',
+    },
+    [`${part("escaped")}: finishingRead is named only in`],
+  ],
+  [
+    "an alias of the guarded name for another function",
+    SPLIT_CLASS,
+    `${SPLIT_PART}\nexport function read(walk: Consumers, value: number): number {\n  void walk;\n  return value;\n}\n`,
+    {
+      [part("renamed")]:
+        'import { read as finishedItems } from "./finishing.js";\nexport const items = finishedItems;\n',
+    },
+    [`${part("renamed")}: finishedItems is named only in`],
+  ],
   [
     "the facade's function bound to nothing (not imported)",
     SPLIT_CLASS.replace(

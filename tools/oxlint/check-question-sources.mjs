@@ -16,15 +16,15 @@ import { ts } from "ts-morph";
  * A class's members, for this check, are its own and the functions whose first parameter's type binds to the class: a
  * method whose body moved to a function in the class's folder (#1071). Names compare without `#`, so a member and the
  * function it moved to are one name. Identity is read lexically, in one place (`bindingOf`): a name binds to the one
- * top-level declaration of its file, or of the source file a relative import names. A guarded class is the one class
- * of its name in the sources, a nested one included; a second is reported. A public method that only forwards to the
- * function of its name (`return f(this, …)` or `f(this, …);`, its own parameters in order, none with an initializer,
- * no decorator or other modifier), the callee bound to that function of its class, is that function: its call names
- * no reference. Neither does an import whose local name binds to the guarded declaration, whose uses are checked. What
- * binds to nothing proved (an import from outside the sources, a type parameter of the class's name, a global) gives
- * no owner and no exemption, and is reported where it names a guarded name. A site this check allows is one
- * declaration: two members of one class and name there, but such a forwarder and its function or a getter and its
- * setter, are reported, so no other declaration takes the site's place.
+ * top-level declaration of its file, or of the source file a relative import names; a renamed import binds to nothing.
+ * A guarded class is the one class of its name in the sources, a nested one included; a second is reported. A public
+ * method that only forwards to the function of its name (`return f(this, …)` or `f(this, …);`, its own parameters in
+ * order, none with an initializer, no decorator or other modifier), the callee bound to that function of its class, is
+ * that function: its call names no reference. Neither does an import whose own local name binds to the guarded
+ * declaration, its uses checked. What binds to nothing proved (an import from outside the sources, a type parameter of
+ * the class's name, a global) gives no owner and no exemption, and is reported where it names a guarded name. A site
+ * this check allows is one declaration: two members of one class and name there, but such a forwarder and its function
+ * or a getter and its setter, are reported, so no other declaration takes the site's place.
  */
 const CORE = "src/type-inference/core";
 
@@ -152,7 +152,9 @@ export function questionSourceDiagnostics(sources, readers) {
     const own = entry.top.get(name);
     if (own !== undefined) return own.length === 1 ? own[0] : null;
     const imported = entry.imports.get(name);
-    const target = imported === undefined ? null : moduleFile(file, imported.module);
+    // (a renamed import is unproved: the name it is known by is not the declaration's)
+    if (imported === undefined || imported.imported !== name) return null;
+    const target = moduleFile(file, imported.module);
     return target === null ? null : bindingOf(target, imported.imported, seen);
   };
   // the guarded classes, each the one class of its name in the sources (a nested one counts): a second is reported
@@ -202,6 +204,16 @@ export function questionSourceDiagnostics(sources, readers) {
       : ts.isClassLike(declaration.parent)
         ? classOwner(declaration.parent)
         : null;
+  // the one proof an exemption rests on: `name` binds in `file` to a function `owner` owns (`bindingOf` binds a name
+  // only to a declaration of that very name, a renamed import to none)
+  const provedAs = (file, name, owner) => {
+    const declaration = bindingOf(file, name);
+    return (
+      declaration !== null &&
+      ts.isFunctionDeclaration(declaration) &&
+      ownerOf(declaration) === owner
+    );
+  };
   // the member a node lies in, the innermost, with its owner (a class's member, or a function the class owns)
   const memberOf = (node, sourceFile) => {
     let member = node;
@@ -276,11 +288,9 @@ export function questionSourceDiagnostics(sources, readers) {
           )
       )
         continue;
-      const target = bindingOf(file, call.expression.text);
       if (
-        target !== null &&
-        ts.isFunctionDeclaration(target) &&
-        ownerOf(target) === ownerOf(declaration)
+        ownerOf(declaration) !== null &&
+        provedAs(file, call.expression.text, ownerOf(declaration))
       )
         forwarders.set(declaration, call.expression);
     }
@@ -323,13 +333,14 @@ export function questionSourceDiagnostics(sources, readers) {
       if (name !== null && OWNERS.has(name)) {
         const { member, owner, name: memberName } = memberOf(node, sourceFile);
         const guarded = OWNERS.get(name);
-        // (its own declaration names no reference; nor a forwarder's call of its function, nor an import whose local
-        // name binds to the guarded declaration, whose uses are checked: an aliased import's local name binds to none)
+        // (its own declaration names no reference; nor a forwarder's call of its function, nor an unrenamed import
+        // whose own local name binds to the guarded declaration, whose uses are checked)
         if (member.name === node && owner === guarded.declaredIn);
         else if (forwarders.get(member) === node && owner === guarded.declaredIn);
         else if (
           ts.isImportSpecifier(node.parent) &&
-          ownerOf(bindingOf(file, text) ?? node.parent) === guarded.declaredIn
+          node.parent.name.text === text &&
+          provedAs(file, text, guarded.declaredIn)
         );
         else if (
           owner === guarded.owner &&
