@@ -249,7 +249,7 @@ test("the access stops an object without the property before the next effect and
  * property only where its reader takes a missing key from the default. JSON's reader does at every level; a stored
  * value's in its root object, never in an element of a collection, which it keeps as it is when it fits. Each source is
  * read and stored, with the script's storage or the JSON holding an element or an object without the property, in the
- * four modes, planned by the candidate and run.
+ * four modes, each mode's plan run.
  */
 const READERS: readonly (readonly [
   name: string,
@@ -365,20 +365,27 @@ test("a load's or parse's default proves a property only where its reader fills 
           : diagnostics.length > 0 || checks.length > 0
       )
         wrong.push(`${c.name}: ${JSON.stringify({ diagnostics, checks })}`);
-      const { plan } = publishedRoute([{ path: "main.tease", source }], globals);
-      assert.ok(plan !== null && plan !== "outside", `${c.name}: the candidate plans it`);
-      const result = runGlobals(
-        plan,
-        { hostValue: 0, hostText: "json" in read ? read.json : "{}" },
-        "stored" in read ? [{ key: "seed", value: structuredClone(read.stored) }] : undefined,
-      );
-      const said = result.said.map(({ text }) => text);
       const expected =
         absent === "possible"
           ? { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }
           : { failure: null, said: ["BEFORE", use === "read" ? "1" : "STORED", "AFTER"] };
-      if (!isDeepStrictEqual({ failure: result.failure, said }, expected))
-        wrong.push(`${c.name}, run: ${result.failure} ${JSON.stringify(said)}`);
+      // (each mode's own plan, as each mode's own decision)
+      for (const mode of MODES) {
+        const { plan } = inMode(mode, () =>
+          publishedRoute([{ path: "main.tease", source }], globals),
+        );
+        assert.ok(plan !== null && plan !== "outside", `${c.name}: the candidate plans it`);
+        const result = runGlobals(
+          plan,
+          { hostValue: 0, hostText: "json" in read ? read.json : "{}" },
+          "stored" in read ? [{ key: "seed", value: structuredClone(read.stored) }] : undefined,
+        );
+        const said = result.said.map(({ text }) => text);
+        if (!isDeepStrictEqual({ failure: result.failure, said }, expected))
+          wrong.push(
+            `${c.name}, ${JSON.stringify(mode)}: ${result.failure} ${JSON.stringify(said)}`,
+          );
+      }
     }
   assert.deepEqual(wrong, []);
 });
