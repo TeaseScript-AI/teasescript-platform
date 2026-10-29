@@ -51,6 +51,15 @@ Data, indexed here and not imported: run each from its own folder on the desktop
   `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
   the stops area: it runs before a builder's first review there.
 
+Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, one README per area), reported by the
+#1416 builder:
+
+- `stops/astra-1405/lifecycle.mjs` no longer loads on any tree. Its hook patches private methods of `Consumers`, which
+  the consumers split (#1367) removed, so it needs a port to the split layout.
+- Sol's runner's `ownership-maps` helper fails on both trees, and its classifier does not read it.
+- The made-units probe (`stops/uncharged-making/`) attributes code to source lines. Across trees whose line numbers
+  differ, compare per site by a stable key (function name and step), not by line.
+
 ## Inventory
 
 Default outputs retain complete driver construction; archived inputs that no longer resolve are omitted unless
