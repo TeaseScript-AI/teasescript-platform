@@ -473,6 +473,31 @@ test("a block runs later, so its end and its call of a file only warn and are ch
     }),
     ["failure TSR066"],
   );
+  // Two copies of a button may stay where the file that shows it starts again while the first stays: one copy may be
+  // pressed while the other's block waits, and run where that one's end returns to.
+  for (const [main, others] of [
+    [
+      'call "scene.tease"\ncall "scene.tease"\nexit',
+      {
+        "scene.tease":
+          'let skip = showPermanentButton "Skip", persist: true { end }\nwait 2 s\nend',
+      },
+    ],
+    [
+      'let skip = showPermanentButton "Skip" {\n    say "skipping"\n    end\n}\ncall "g.tease"\nexit',
+      {
+        "g.tease": 'let again = askBoolean "Again?"\nif again { call "h.tease" }\nwait 1 s\nend',
+        "h.tease": 'call "main.tease"\nend',
+      },
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileProject(project(main, others))
+        .diagnostics.filter((diagnostic) => diagnostic.code === "TSV071")
+        .map((diagnostic) => diagnostic.path),
+      [Object.keys(others).length === 1 ? "scene.tease" : "main.tease"],
+      main,
+    );
   // One with a length written out whose handle is not kept is due only once the called file waited.
   assert.deepEqual(said(project('timer async 1 s { end }\ncall "scene.tease"\nexit', scene)), [
     "scene",
@@ -727,12 +752,12 @@ test("an end warns or fails only where the ways into its file decide it, for eve
   // it. Every project also holds what made the checks project-wide: a `script(...)` of any path, a load of an object,
   // and a called file whose block may leave the code it interrupts.
   const placements = [
-    "top",
-    "scene button",
-    "scene timer",
-    "scene media",
-    "caller button",
-    "caller timer",
+    ["top", "button"],
+    ["scene", "button"],
+    ["scene", "timer"],
+    ["scene", "media"],
+    ["caller", "button"],
+    ["caller", "timer"],
   ] as const;
   const entries = ["call", "goto", "both"] as const;
   const targets = {
@@ -755,11 +780,10 @@ test("an end warns or fails only where the ways into its file decide it, for eve
     "other.tease": 'say "other"\nexit',
   };
   let members = 0;
-  for (const placement of placements)
+  for (const [where, blockKind] of placements)
     for (const entry of entries)
       for (const count of [1, 2] as const)
         for (const [kind, { prelude, target }] of Object.entries(targets)) {
-          const [where, blockKind] = placement.split(" ") as [string, "button" | "timer" | "media"];
           const caller =
             where === "caller" ? `${block(blockKind, ends(count, "data.count > 0"))}\n` : "";
           const transfer =
@@ -783,20 +807,23 @@ test("an end warns or fails only where the ways into its file decide it, for eve
           // level fails for certain when the goto names the file, also when a call reaches it too; a computed target
           // hides that. A block of the file may run while no call waits, so its end warns. A block of the calling file
           // runs only while the called file runs, or never, as a goto leaves the entry that created it.
-          const scenes = where === "scene" ? count : where === "top" ? count : 1;
+          const scenes = where === "top" ? count : 1;
           const named = kind === "literal" || kind === "tagged";
           const expected: string[] = [];
           if (entry !== "call" && where !== "scene")
             for (let index = 0; index < scenes; index += 1)
               expected.push(`scene.tease ${named ? "TSV070" : "TSV071"}`);
-          if (entry !== "call" && where === "scene")
+          // A loaded reference may name any file: the declarations of lib.tease, far.tease, which ends, or main.tease,
+          // which then starts again, and with it a second copy of a block that its call leads to.
+          const copies = kind === "load" && entry !== "goto";
+          if (where === "scene" && (entry !== "call" || copies))
             for (let index = 0; index < count; index += 1) expected.push("scene.tease TSV071");
-          // A loaded reference may name any file: the declarations of lib.tease, the running main.tease, or far.tease,
-          // which ends.
+          if (where === "caller" && copies)
+            for (let index = 0; index < count; index += 1) expected.push("main.tease TSV071");
           if (kind === "load" && entry !== "call")
             expected.push("main.tease TSV074", "far.tease TSV071");
-          if (kind === "load" && entry !== "goto") expected.push("main.tease TSV073");
-          const label = `${placement}, ${entry}, ${count} end(s), ${kind}`;
+          if (copies) expected.push("main.tease TSV073");
+          const label = `${where} ${where === "top" ? "" : blockKind}, ${entry}, ${count} end(s), ${kind}`;
           assert.deepEqual(
             compileProject(project(main, { ...noise, "scene.tease": scene }))
               .diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`)

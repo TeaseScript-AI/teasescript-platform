@@ -121,6 +121,7 @@ export class Reachability {
         readonly ways: ComputedWays;
         stays?: Staying;
         staying?: StayingBlocks;
+        again?: Uint8Array;
       }
     | undefined;
 
@@ -426,7 +427,7 @@ export class Reachability {
               if (starts === null) return null;
               const alone =
                 starts.leavers === null ||
-                (starts.leavers === block && this.#single(creator, block, staying));
+                (starts.leavers === block && this.#single(creator, ways));
               return {
                 kind: "calls",
                 none: null,
@@ -483,23 +484,90 @@ export class Reachability {
   }
 
   /**
-   * Whether at most one copy of the block `block` that the instruction `creator` creates stays at a time, so that no
-   * copy starts where another left: a button's, which takes no click while its block waits to run or runs, that of a
-   * timer that does not repeat, and that of a media that plays once and whose handle the script does not keep, which
-   * could seek it back, where no way on which the block stays leads back to its creation.
+   * Whether at most one copy of a block that the instruction `creator` creates stays at a time, so that no copy starts
+   * where another left: a button's, which takes no click while its block waits to run or runs, that of a timer that does
+   * not repeat, and that of a media that plays once and whose handle the script does not keep, which could seek it back,
+   * where the instruction runs at most once in a session (see {@link #runsAgain}).
    */
-  #single(creator: number, block: number, staying: StayingBlocks): boolean {
+  #single(creator: number, ways: ComputedWays): boolean {
     const instruction = this.plan.instructions[creator]!;
-    if (!(
-      instruction.kind === "showPermanentButton" ||
-      (instruction.kind === "startTimer" && !instruction.repeat) ||
-      (instruction.kind === "playMedia" &&
-        instruction.repeat.kind === "once" &&
-        instruction.destinationTemporary === null)
-    ))
-      return false;
-    const before = staying.leavers(creator, false);
-    return before !== block && before !== SEVERAL_LEAVERS;
+    return (
+      (instruction.kind === "showPermanentButton" ||
+        (instruction.kind === "startTimer" && !instruction.repeat) ||
+        (instruction.kind === "playMedia" &&
+          instruction.repeat.kind === "once" &&
+          instruction.destinationTemporary === null)) &&
+      this.#runsAgain(ways)[creator] === 0
+    );
+  }
+
+  /**
+   * For each instruction, whether it may run more than once in a session: where a way within its function, block, or
+   * file entry leads from it back to it, as in a loop or after a `goto` back to a label, and where what it is in may
+   * start more than once: a function that two calls that can run call, or one that may run more than once; a file that
+   * two transfers that can run, or one that may run more than once, may start, and `main.tease` once any may; a block;
+   * and a label that a `goto` outside the file's top level, such as a block's, leads to. Found once for `ways`, without
+   * native recursion.
+   */
+  #runsAgain(ways: ComputedWays): Uint8Array {
+    const facts = this.#transfers?.ways === ways ? this.#transfers : undefined;
+    if (facts?.again !== undefined) return facts.again;
+    const count = this.plan.instructions.length;
+    // The ways within a function, block, or file entry, as a label `goto` takes them.
+    const within = (index: number): number[] =>
+      this.#ways(index).flatMap(({ node, edge }) =>
+        node === null || edge === "transfer" || edge === "computed" || edge === "call"
+          ? []
+          : [node],
+      );
+    const again = onCycles(count, within);
+    const fileAt = new Map(this.plan.files.map((file, index) => [file.entryInstruction, index]));
+    // The starts of each function and file entry, which make it start more than once from two on.
+    const starts = new Map<number, number>([[this.plan.files[0]!.entryInstruction, 1]]);
+    const begins = (entry: number): boolean => {
+      const started = (starts.get(entry) ?? 0) + 1;
+      starts.set(entry, started);
+      return started === 2;
+    };
+    // The function and file entries that an instruction may start.
+    const startsOf = (index: number): number[] => {
+      const instruction = this.plan.instructions[index]!;
+      if (instruction.kind === "callFunction") {
+        const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
+        return entry === undefined ? [] : [entry];
+      }
+      if (instruction.kind !== "transfer") return [];
+      const target = ways.targets.get(index)?.node;
+      if (target !== undefined) return target < count ? [target] : [...ways.hubs[target - count]!];
+      return this.#ways(index).flatMap(({ node, edge }) =>
+        edge === "transfer" && node !== null && fileAt.has(node) ? [node] : [],
+      );
+    };
+    const work: number[] = [];
+    const mark = (index: number): void => {
+      if (again[index] === 2) return;
+      again[index] = 2;
+      work.push(index);
+    };
+    for (const definition of this.plan.functions)
+      if (definition.handler !== null) mark(definition.entryInstruction);
+    this.plan.instructions.forEach((instruction, index) => {
+      if (this.#reached[index] === 0) return;
+      if (instruction.kind === "goto" && this.#flow.functionOf(index) !== null)
+        mark(instruction.target);
+      for (const entry of startsOf(index)) if (begins(entry)) mark(entry);
+    });
+    // On a way within a region, a cycle runs again without what follows it doing so.
+    this.plan.instructions.forEach((_, index) => {
+      if (again[index] === 1 && this.#reached[index] === 1)
+        for (const entry of startsOf(index)) mark(entry);
+    });
+    for (let index = work.pop(); index !== undefined; index = work.pop()) {
+      for (const next of within(index)) mark(next);
+      if (this.#reached[index] === 1) for (const entry of startsOf(index)) mark(entry);
+    }
+    if (facts !== undefined) facts.again = again;
+    return again;
   }
 
   /**
@@ -604,9 +672,8 @@ export class Reachability {
 
   /**
    * Which blocks stay at each place (see {@link #staying}), as far as the checks need: `leavers`, those that may leave the
-   * code they interrupt (see {@link #leavingBlocks}), `null` for none, the one block's function, or `SEVERAL_LEAVERS`;
-   * with `created`, also those that the instruction creates where it may wait, as a media that is waited for may run its
-   * blocks then. `anywhere`, whether one that may start at any boundary stays (see {@link #startsAnywhere}), and
+   * code they interrupt (see {@link #leavingBlocks}), `null` for none, the one block's function, or `SEVERAL_LEAVERS`,
+   * also those that the instruction creates where it may wait, as a media that is waited for may run its blocks then. `anywhere`, whether one that may start at any boundary stays (see {@link #startsAnywhere}), and
    * `leavesAnywhere`, whether one that does both. Once such a block stays where a block returns, which may be anywhere,
    * every place has several.
    */
@@ -662,10 +729,10 @@ export class Reachability {
         : joinStays(state.kept, state.outliving);
     };
     return {
-      leavers: (index, created = true) => {
+      leavers: (index) => {
         if (everywhere) return SEVERAL_LEAVERS;
         let leavers = at(index).leavers;
-        if (created && !NEVER_WAITS.has(this.plan.instructions[index]!.kind))
+        if (!NEVER_WAITS.has(this.plan.instructions[index]!.kind))
           for (const block of this.#flow.handlersOf(index))
             if (leaving.has(block)) leavers = joinLeavers(leavers, block);
         return leavers;
@@ -1693,7 +1760,7 @@ interface BlocksStaying {
 
 /** Which blocks stay at each instruction (see `Reachability.#blocksStayingAt`). */
 interface StayingBlocks {
-  leavers(index: number, created?: boolean): number | null;
+  leavers(index: number): number | null;
   anywhere(index: number): boolean;
   leavesAnywhere(index: number): boolean;
 }
@@ -1881,6 +1948,53 @@ function writtenPath(value: ExpressionPlan): LiteralExpressionPlan["value"] | un
     value.arguments[0]!.value.kind === "literal"
     ? value.arguments[0]!.value.value
     : undefined;
+}
+
+/**
+ * For each node of a graph, `1` where a way of `successors` leads from it back to it, else `0`: the nodes of its strongly
+ * connected components of more than one node, and those with a way to themselves. Without native recursion.
+ */
+function onCycles(nodeCount: number, successors: (node: number) => readonly number[]): Uint8Array {
+  const cyclic = new Uint8Array(nodeCount);
+  const order = new Int32Array(nodeCount).fill(-1);
+  const low = new Int32Array(nodeCount);
+  const open = new Uint8Array(nodeCount);
+  const component: number[] = [];
+  let next = 0;
+  for (let root = 0; root < nodeCount; root += 1) {
+    if (order[root] !== -1) continue;
+    const frames: { readonly node: number; readonly edges: readonly number[]; at: number }[] = [];
+    const enter = (node: number): void => {
+      order[node] = next;
+      low[node] = next;
+      next += 1;
+      component.push(node);
+      open[node] = 1;
+      frames.push({ node, edges: successors(node), at: 0 });
+    };
+    enter(root);
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      if (frame.at < frame.edges.length) {
+        const to = frame.edges[frame.at]!;
+        frame.at += 1;
+        if (to === frame.node) cyclic[to] = 1;
+        if (order[to] === -1) enter(to);
+        else if (open[to] === 1) low[frame.node] = Math.min(low[frame.node]!, order[to]!);
+        continue;
+      }
+      frames.pop();
+      const parent = frames.at(-1);
+      if (parent !== undefined) low[parent.node] = Math.min(low[parent.node]!, low[frame.node]!);
+      if (low[frame.node] !== order[frame.node]) continue;
+      const members = component.splice(component.lastIndexOf(frame.node));
+      for (const member of members) {
+        open[member] = 0;
+        if (members.length > 1) cyclic[member] = 1;
+      }
+    }
+  }
+  return cyclic;
 }
 
 /** For each index, how many of the entries before it are set; one more count at the end, for all of them. */
