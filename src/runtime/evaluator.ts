@@ -1872,21 +1872,34 @@ function conversionFailure(
   argument: ExpressionPlan | undefined,
   program: InstructionPlan,
 ): string {
-  const label = (argument === undefined ? null : planLabel(argument, program)) ?? "value";
+  // The code of a fix names the argument as the source writes it, a name or a member, and replaces the call: a comparison
+  // in parentheses, as it may stand next to another operator, as in `toBoolean(n) == true`. Without a name, the fix is
+  // in words.
+  const label = argument === undefined ? null : planLabel(argument, program);
   const fallback = " Give a fallback with 'default:' if the value may not convert.";
   const shown = describeShownValue(value);
   // `toBoolean` keeps 1, 0, and other texts invalid: an explicit comparison says what the script means.
   if (conversion.result === "boolean" && typeof value !== "string")
     return typeof value === "number"
-      ? `${name}(...) converts ${conversion.converts}, not the number ${shown}. Compare the number instead, such as '${label} != 0'.`
+      ? `${name}(...) converts ${conversion.converts}, not the number ${shown}. ${label === null ? "Compare the number with 0 instead." : `Compare the number instead, such as '(${label} != 0)'.`}`
       : `${name}(...) converts ${conversion.converts}, not ${shown}.${fallback}`;
   const failed = cannotConvert(name, conversion, value);
   if (typeof value === "string" && conversion.result === "boolean")
-    return `${failed} Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`;
+    return `${failed} ${label === null ? "Compare the text using '==' instead." : `Compare the text instead, such as '(${label} == ${quotedText(messageText(value))})'.`}`;
   if (conversion.kinds === "shown" && (isList(value) || isSet(value) || isDict(value))) {
     const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
-    if (items.every(isVisibleScalar))
-      return `${failed} Use ${isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()"} to combine its ${isDict(value) ? "values" : "elements"} as text.`;
+    if (items.every(isVisibleScalar)) {
+      const join = isSet(value) ? ".toList().join()" : isDict(value) ? ".values.join()" : ".join()";
+      return `${failed} ${
+        label !== null
+          ? `Use '${label}${join}' to combine its ${isDict(value) ? "values" : "elements"} as text.`
+          : isSet(value)
+            ? "Copy the set into a list with toList(), then call join() on that list to combine its elements as text."
+            : isDict(value)
+              ? "Call join() on the values of the dict to combine them as text."
+              : "Call join() on the list to combine its elements as text."
+      }`;
+    }
   }
   return `${failed}${fallback}`;
 }

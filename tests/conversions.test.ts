@@ -248,13 +248,13 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "say toBoolean(value)\nexit",
       { value: "yes" },
       "TSR058",
-      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'value == "yes"\'.',
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'(value == "yes")\'.',
     ],
     [
       "say toBoolean(value)\nexit",
       { value: 1 },
       "TSR058",
-      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as 'value != 0'.",
+      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as '(value != 0)'.",
     ],
     [
       "say toNumber(value)\nexit",
@@ -304,7 +304,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
     [list.snapshot.failure?.code, list.snapshot.failure?.message],
     [
       "TSR058",
-      "toString(...) cannot convert a list to text (string). Use .join() to combine its elements as text.",
+      "toString(...) cannot convert a list to text (string). Call join() on the list to combine its elements as text.",
     ],
   );
 });
@@ -326,7 +326,7 @@ test("text the compiler can see fails as the runtime fails on it, with the runti
     assert.equal(failure.message.slice(0, message.length), message, name);
     assert.match(
       failure.message.slice(message.length),
-      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as 'value == "x"'\.)$/u,
+      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as '\(value == "x"\)'\.)$/u,
       name,
     );
   }
@@ -361,4 +361,47 @@ test("conversions are checkpoint and resume equivalent", () => {
       "exit",
     ].join("\n"),
   );
+});
+
+test("a conversion that the runtime refuses shows its fix with the argument as the source writes it, and otherwise in words", () => {
+  const dynamic = "function dynamic(value) {\n    return value\n}\n";
+  const values =
+    'let items = dynamic([1, 2])\nlet tags = dynamic(set["a"])\nlet prices = dynamic(dict{"tea": 2})\n' +
+    'let n = dynamic(1)\nlet t = dynamic("yes")\nlet p = { items: dynamic([3]) }\n';
+  const failed = (source: string) =>
+    runValidSource(`${dynamic}${values}say ${source}\nexit`).snapshot.failure?.message;
+  // A name or a member: the code replaces the call, and runs, also next to another operator.
+  for (const [call, fix] of [
+    ["toString(items)", "items.join()"],
+    ["toString(p.items)", "p.items.join()"],
+    ["toString(tags)", "tags.toList().join()"],
+    ["toString(prices)", "prices.values.join()"],
+    ["toBoolean(n)", "(n != 0)"],
+    ["toBoolean(t)", '(t == "yes")'],
+  ] as const) {
+    const text = fix.includes("join");
+    for (const site of text
+      ? ["#", '# + "!"', '"${#}"']
+      : ["#", "# == true", "false == #", "# and true"]) {
+      const source = site.replace("#", call);
+      assert.ok(failed(source)?.includes(`'${fix}'`), `${source}: ${failed(source)}`);
+      const pasted = runValidSource(`${dynamic}${values}say ${site.replace("#", fix)}\nexit`);
+      assert.equal(pasted.snapshot.failure, null, `${site}: ${fix}`);
+    }
+  }
+  // Another argument, such as a call: the fix in words.
+  for (const [call, fix] of [
+    ["toString(dynamic([1]))", "Call join() on the list to combine its elements as text."],
+    [
+      'toString(dynamic(set["a"]))',
+      "Copy the set into a list with toList(), then call join() on that list to combine its elements as text.",
+    ],
+    [
+      'toString(dynamic(dict{"tea": 2}))',
+      "Call join() on the values of the dict to combine them as text.",
+    ],
+    ["toBoolean(dynamic(1))", "Compare the number with 0 instead."],
+    ['toBoolean(dynamic("yes"))', "Compare the text using '==' instead."],
+  ] as const)
+    assert.ok(failed(call)?.endsWith(` ${fix}`), `${call}: ${failed(call)}`);
 });

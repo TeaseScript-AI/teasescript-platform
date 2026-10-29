@@ -56,7 +56,7 @@ test("runs escapeMarkup through the protected Platform Standard Library prelude"
     ],
     [
       "[1]",
-      "escapeMarkup(...) takes text (string), not a list. Use .join() to combine its elements as text.",
+      "escapeMarkup(...) takes text (string), not a list. Call join() on the list to combine its elements as text.",
     ],
     // `.join()` cannot join a list of lists.
     ["[[1]]", "escapeMarkup(...) takes text (string), not a list."],

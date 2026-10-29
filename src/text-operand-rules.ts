@@ -56,5 +56,7 @@ export function escapeMarkupFix(kind: ValueKind | undefined, elementsShown: bool
   if (kind === undefined) return "";
   if (kind !== "null" && VALUE_KINDS[kind].shown !== null)
     return " Convert the value with the toString function first.";
-  return kind === "list" && elementsShown ? " Use .join() to combine its elements as text." : "";
+  return kind === "list" && elementsShown
+    ? " Call join() on the list to combine its elements as text."
+    : "";
 }
