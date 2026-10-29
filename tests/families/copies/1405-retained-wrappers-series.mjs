@@ -45,8 +45,8 @@ export const globals = ["hostValue", "hostOther"];
 export const recorded = {
   commands: [
     [
-      'q 3G g3fam "timeout 120m node $S $tree/dist g3families:1,2,4,8,16 $O/g3fam.jsonl"',
-      "D/1405/3627aa0f4/probe/queue-stopsets.sh:10",
+      "node $P/series.mjs $tree/dist $O/series-$label.jsonl 64,128 $F, F the ten families of line 10 (deep-wrapper-reads, nested-selection-variable, nested-choice-variable, nested-selection-literal, nested-choice-literal, typed-empty, typed-empty-copy, typed-literal, typed-literal-copy-read, typed-unwritten-literal)",
+      "D/1405/3627aa0f4/probe/run-evidence.sh:11",
     ],
   ],
   sources: 20,

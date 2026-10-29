@@ -1,4 +1,4 @@
-// random-selection control; unintended collision input excluded; Astra review, r2
+// random-selection control and the collision-applied witness (an intended TSV001); Astra review, r2
 // (R/astra-m4-s8d-review-r2-evidence/check-extra.mjs).
 const generated = [
   [
