@@ -35,8 +35,8 @@ A suggested fix never contains a placeholder such as `default: ...`, and what ca
 words (owner decision, 2026-10-28, #1268). A warning of a check the run makes states the rule, then what the value may be
 and what follows, as in `contains() needs text (string) or a regex for 'part', but 'v' may be a whole number (integer)
 here. If it is, the Tease stops with an error at this line.` (`may hold` and `If it does` for what a value holds), then
-its fix. One check warns once at its site, naming the most specific type the value may have (owner review of #1437,
-2026-10-29).
+its fix. For arguments, keys, iterables, and button values, a generic unknown-type warning is omitted when the same
+check already warns about a rejected known type (owner review of #1437, 2026-10-29).
 
 ## Owners
 
