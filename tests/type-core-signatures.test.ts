@@ -1352,16 +1352,17 @@ test("toJson proves an unchanged value once and sees what changed between calls"
     assert.equal(new Set(modes).size, 1, `${source}: ${modes.join(" | ")}`);
     return modes[0]!;
   };
+  // (the source a read of a binding that copies host data, so a read class of its own, which an alias would share)
   for (const type of ["regex[]", "regex dict", "regex | integer"]) {
-    const typed = `let root = hostValue\nlet copy: ${type} = root\nlet again = copy\n`;
+    const typed = `let host = hostValue\nlet root = host\nlet copy: ${type} = root\nlet again = copy\n`;
     assert.equal(
       fourModes(`${typed}say toJson(root)\nsay toJson(copy)\nsay toJson(again)\nexit\n`),
-      JSON.stringify(["warning-runtime-check 5", "warning-runtime-check 6"]),
+      JSON.stringify(["warning-runtime-check 6", "warning-runtime-check 7"]),
       `${type}, the source first`,
     );
     assert.equal(
       fourModes(`${typed}say toJson(again)\nsay toJson(copy)\nsay toJson(root)\nexit\n`),
-      JSON.stringify(["warning-runtime-check 4", "warning-runtime-check 5"]),
+      JSON.stringify(["warning-runtime-check 5", "warning-runtime-check 6"]),
       `${type}, the copies first`,
     );
   }
