@@ -33,7 +33,7 @@ runtime_root=$(cd -- "$runtime_root" && pwd)
 
 for required in \
   RUNTIME-MANIFEST.json CACHE-SEED-ID PACKAGE-INVENTORY.json \
-  runtime/node-v24.18.0-linux-x64/bin/node runtime/node-v26.5.0-linux-x64/bin/node \
+  runtime/node-v26.13.0-linux-x64/bin/node \
   dependencies/tiktoken-cp313-linux-x86_64/tokenizer/o200k_base.tiktoken \
   dependencies/ts-morph/packages/ts-morph-28.0.0.tgz; do
   [[ -e "$runtime_root/$required" ]] || {

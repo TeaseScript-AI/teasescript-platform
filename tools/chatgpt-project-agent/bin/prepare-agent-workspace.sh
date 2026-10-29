@@ -6,12 +6,12 @@ usage() {
 Usage: prepare-agent-workspace.sh \
   --artifact FILE --artifact-sha256 SHA256 --expected-head SHA \
   [--expected-merge-base SHA] [--expected-repository OWNER/REPO] \
-  --output DIRECTORY [--node 24|26] [--with-ts-morph] [--with-tiktoken] \
+  --output DIRECTORY [--with-ts-morph] [--with-tiktoken] \
   [--debug-verify-bootstrap] [--check]
 
 Normal ChatGPT project-agent entrypoint. Verify a downloaded source artifact,
 create the exact clean checkout, install the locked dependency graph offline,
-prepare Node 24/26 runners, and install and verify mandatory ts-morph and
+prepare the Node runner, and install and verify mandatory ts-morph and
 TikToken. The two --with-* flags remain accepted as compatibility no-ops.
 USAGE
 }
@@ -22,7 +22,6 @@ repository=TeaseScript-AI/teasescript-platform
 head=
 merge_base=
 output=
-node_major=24
 run_check=0
 debug_verify=0
 
@@ -34,7 +33,6 @@ while (($#)); do
     --expected-head) (($# >= 2)) || { usage >&2; exit 2; }; head=$2; shift 2 ;;
     --expected-merge-base) (($# >= 2)) || { usage >&2; exit 2; }; merge_base=$2; shift 2 ;;
     --output) (($# >= 2)) || { usage >&2; exit 2; }; output=$2; shift 2 ;;
-    --node) (($# >= 2)) || { usage >&2; exit 2; }; node_major=$2; shift 2 ;;
     --with-ts-morph|--with-tiktoken) shift ;;
     --debug-verify-bootstrap) debug_verify=1; shift ;;
     --check) run_check=1; shift ;;
@@ -62,7 +60,7 @@ prepare=(
 printf 'prepare-agent-workspace: INFO: verifying and exposing exact source checkout\n' >&2
 "${prepare[@]}"
 
-setup=("$script_dir/setup-workspace.sh" --node "$node_major")
+setup=("$script_dir/setup-workspace.sh")
 ((debug_verify == 0)) || setup+=(--debug-verify-bootstrap)
 ((run_check == 0)) || setup+=(--check)
 setup+=("$output")
