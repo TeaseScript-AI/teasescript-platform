@@ -1,8 +1,8 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Consumers } from "../consumers.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptSlice } from "../budget.js";
-import { KeyTrie, keyOf, type Definition } from "../definitions.js";
+import { keep, keptSlice, type WorkLedger } from "../budget.js";
+import { keptKey, sortCost, type Definition } from "../definitions.js";
 import { STOPPED } from "../items.js";
 import { targetName } from "../result.js";
 import { unrestricted } from "../admission/permitted.js";
@@ -18,25 +18,26 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * context: against its destination's complete type where that is known without new solving (`storeRequirement`: the
  * written type, or the one a copy decides it by), that type carried into the plan whole (`requirements`); else marked
  * with its type undecided (`storeMark`). A store at or below a stopped key is that key's own (#1275), a sibling's path no
- * store of the stop's. Found by one walk down each stopped path that no other stop lies above, through the stored keys'
- * trie (`Admission.stored`), each destination resolved once a pass whatever number of stops lie below it. Run after the
- * pass's decisions, in every pass that carries a stop: a restarted pass rebuilds it from the stopped set (TABLE r4.180),
- * the fresh pass from the written types alone (`freshStores`).
+ * store of the stop's. Found by one walk down each stopped path that no other stop lies above (`outermost`), through the
+ * stored keys' trie (`Admission.stored`), each destination resolved once a pass whatever number of stops lie below it.
+ * Run after the pass's decisions, in every pass that carries a stop: a restarted pass rebuilds it from the stopped set
+ * (TABLE r4.180), the fresh pass from the written types alone (`freshStores`).
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;
   if (!contract.anyStopped) return;
-  const stops = contract.stoppedKeys();
-  const stopped = new KeyTrie(program.work, "checks", () =>
-    stops.map(({ place, path }) => keyOf(place, path)),
-  );
+  const work = program.work;
+  // (shortest first, so each meets every stop above it among those placed before it)
+  const stops = [...contract.stoppedKeys()].sort((a, b) => a.path.length - b.path.length);
+  work.charge("checks", stops.length + sortCost(stops.length));
+  const placed = new Map<PlaceId, StopNode>();
   for (const { place, path } of stops) {
-    // (the nearest stop on the path, its own key the deepest: one above it stands for the stores above both)
-    if (stopped.along(place, path, true)[0]!.depth < path.length) continue;
+    // (a stop below another stands under the other's stores)
+    if (!outermost(work, placed, place, path)) continue;
     for (const { key, depth } of walk.admission.stored.along(place, path, false)) {
       if (!walk.enclosed.has(key)) {
         walk.enclosed.add(key);
-        resolve(walk, place, keptSlice(program.work, path, 0, depth), [
+        resolve(walk, place, keptSlice(work, path, 0, depth), [
           ...(definitions.byKey.get(key) ?? []).filter((d) => d.kind === "whole"),
           ...(definitions.deadArguments.get(key) ?? []),
         ]);
@@ -47,12 +48,45 @@ export function enclosingStores(walk: Consumers): void {
         resolve(
           walk,
           place,
-          keptSlice(program.work, path, 0, depth + 1),
+          keptSlice(work, path, 0, depth + 1),
           (definitions.byKey.get(key) ?? []).filter((d) => d.kind === "add"),
         );
       }
     }
   }
+}
+
+/** A step of the stopped paths placed so far (`outermost`): the steps below it, and whether a stop's path ends there. */
+interface StopNode {
+  readonly below: Map<string, StopNode>;
+  stop: boolean;
+}
+
+/**
+ * Places a stop's path among those placed before it (none longer): `false` where one of them lies at or above it, found
+ * by walking its steps as far as it reaches such a stop, so a stop below another costs the steps to that one alone.
+ */
+function outermost(
+  work: WorkLedger,
+  placed: Map<PlaceId, StopNode>,
+  place: PlaceId,
+  path: readonly string[],
+): boolean {
+  let node = placed.get(place);
+  if (node === undefined) placed.set(place, (node = { below: new Map(), stop: false }));
+  for (const step of path) {
+    work.charge("checks");
+    if (node.stop) return false;
+    let next = node.below.get(step);
+    if (next === undefined) {
+      keep(work, 2);
+      node.below.set(step, (next = { below: new Map(), stop: false }));
+    }
+    node = next;
+  }
+  if (node.stop) return false;
+  node.stop = true;
+  return true;
 }
 
 /** The stores into `place` at `path` above a stop: their destination's complete type, or each one's mark. */
@@ -67,7 +101,8 @@ function resolve(
   const requirement = walk.admission.storeRequirement(place, path);
   // (an unrestricted written part, or a copy's, admits every value: no store owes it anything)
   if (requirement !== null && unrestricted(requirement)) return;
-  if (requirement !== null) walk.requirements.set(keyOf(place, path), requirement);
+  if (requirement !== null)
+    walk.requirements.set(keptKey(walk.pass.program.work, place, path), requirement);
   for (const d of stores)
     if (d.value === undefined) continue;
     else if (requirement === null) storeMark(walk, d, path);
