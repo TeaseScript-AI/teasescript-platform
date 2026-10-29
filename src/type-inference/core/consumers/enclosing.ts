@@ -4,10 +4,9 @@ import { typeTags, writtenOf } from "../contract.js";
 import { keep, keptSlice, type WorkLedger } from "../budget.js";
 import { keptKey, sortCost, type Definition } from "../definitions.js";
 import { STOPPED } from "../items.js";
-import { targetName } from "../result.js";
 import { unrestricted } from "../admission/permitted.js";
-import { storeMark } from "./fresh.js";
-import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
+import { markNames, storeMark, type MarkNames } from "./fresh.js";
+import { storeWarning } from "./warnings.js";
 
 // The stores above a stopped decision (S3 §5, #1416): each one's obligation kept whole, or its value marked.
 
@@ -104,41 +103,35 @@ function resolve(
   if (requirement !== null && unrestricted(requirement)) return;
   if (requirement !== null)
     walk.requirements.set(keptKey(walk.pass.program.work, place, path), requirement);
+  // (what the marks name, the destination's, made once for all its stores: Codex r1's N1 on #1434)
+  let names: MarkNames | undefined;
+  const named = (): MarkNames =>
+    (names ??= markNames(walk, place, path, writtenOf(walk.pass.program.place(place).kind)));
   for (const d of stores)
     // (a store this pass rejected has its error, which stands: A6)
     if (d.value === undefined || walk.admission.refused.has(d.uid)) continue;
-    else if (requirement === null) storeMark(walk, d, path);
-    else requiredMark(walk, d, path, requirement);
+    else if (requirement === null) storeMark(walk, d, path, named);
+    else requiredMark(walk, d, requirement, named);
 }
 
 /** A store above a stop checked when the script runs against its destination's complete type, once. */
 function requiredMark(
   walk: Consumers,
   d: Definition,
-  path: readonly string[],
   requirement: TypeTerm,
+  names: () => MarkNames,
 ): void {
   if (walk.required.has(d.uid)) return;
   walk.required.add(d.uid);
-  const { program } = walk.pass;
-  const written = writtenOf(program.place(d.place).kind);
+  const { label, into, root, steps } = names();
   const tags = [...new Set(typeTags(requirement))];
   storeWarning(
     walk,
     d.site,
-    targetName(program.place(d.place).label, path),
+    label,
     STOPPED[0]!,
     tags,
-    {
-      rule: "store",
-      into: placeText(walk, d.place, path),
-      type: tags,
-      written: true,
-      decider: null,
-      brought: null,
-      root: storeRoot(walk, d.place),
-      steps: storeSteps(walk, d.place, path, written),
-    },
+    { rule: "store", into, type: tags, written: true, decider: null, brought: null, root, steps },
     [],
   );
 }
