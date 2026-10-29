@@ -131,8 +131,6 @@ test("goto and call go where a reference in a variable, list, or dict names", ()
           "ends/calm.tease": 'say "calm end"\nexit',
         },
       ),
-      // The goto's file is known only when it runs, so the compiler cannot tell that no end follows it.
-      { warnings: ["TSV071", "TSV071", "TSV071"] },
     ),
     ["a", "b", "hall", "calm end", "exit"],
   );

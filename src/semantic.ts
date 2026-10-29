@@ -76,10 +76,12 @@ import {
 } from "./semantic/scope.js";
 import { validateStartValue } from "./semantic/start-values.js";
 import {
+  computedTargetFiles,
   reportUnreadableFiles,
   taggedCandidates,
   validateScriptReference,
   validateTransferTarget,
+  type TargetFiles,
 } from "./semantic/transfers.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
@@ -119,6 +121,11 @@ export interface FileSemanticResult {
   readonly taggedPicks: ReadonlyMap<Statement, readonly string[]>;
   /** How each `call` of a file names it, for the check of the running file that follows the plan. */
   readonly fileCalls: ReadonlyMap<Statement, FileCallTarget>;
+  /**
+   * The files that each computed target of a `goto` or `call` other than a tagged pick may name, by its statement (see
+   * `computedTargetFiles`).
+   */
+  targetFiles(): ReadonlyMap<Statement, TargetFiles>;
   /**
    * The files that the script references of the whole project may name, by its `script(...)` calls and
    * `findScripts(...)` lists, or `null` for any file (see `ProjectNames.referencedScripts`).
@@ -194,6 +201,7 @@ export function validateProjectSemantics(
       unreadableNamed: validators[index]?.unreadableNamed ?? new Set<string>(),
       taggedPicks: validators[index]?.taggedPicks ?? new Map<Statement, readonly string[]>(),
       fileCalls: validators[index]?.fileCalls ?? new Map<Statement, FileCallTarget>(),
+      targetFiles: () => validators[index]?.targetFiles() ?? new Map<Statement, TargetFiles>(),
       referencedScripts: project.referencedScripts,
       computedMedia: project.computedMedia,
       captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
@@ -650,6 +658,7 @@ export class SemanticValidator {
         }
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
           scope.bindings.get(statement.name.name)!.site = statement;
+          this.letScopes.set(statement, scope);
         }
         return;
       }
@@ -876,13 +885,16 @@ export class SemanticValidator {
                 query: expression,
                 span: target.span,
               });
-          } else if (statement.kind === "callFileStatement" && !this.fileCalls.has(statement))
-            this.fileCalls.set(statement, {
-              form: "computed",
-              paths: null,
-              query: null,
-              span: target.span,
-            });
+          } else {
+            this.#computedTargets.set(statement, { expression: target.expression, scope });
+            if (statement.kind === "callFileStatement" && !this.fileCalls.has(statement))
+              this.fileCalls.set(statement, {
+                form: "computed",
+                paths: null,
+                query: null,
+                span: target.span,
+              });
+          }
           return;
         }
         if (!validateTransferTarget(this, target, statement.kind)) return;
@@ -923,6 +935,24 @@ export class SemanticValidator {
 
   /** How each `call` of a file names it (see `FileSemanticResult.fileCalls`). */
   readonly fileCalls = new Map<Statement, FileCallTarget>();
+
+  /** The scope in which each `let` of the file reads the names of its first value. */
+  readonly letScopes = new Map<LetStatement, SemanticScope>();
+
+  /** Each computed target of a `goto` or `call` other than a tagged pick, with the scope it reads its names in. */
+  readonly #computedTargets = new Map<
+    Statement,
+    { readonly expression: Expression; readonly scope: SemanticScope }
+  >();
+
+  /** The files each computed target of the file may name (see `computedTargetFiles`), once the project is checked. */
+  public targetFiles(): ReadonlyMap<Statement, TargetFiles> {
+    const memo = new Map<LetStatement, TargetFiles>();
+    const files = new Map<Statement, TargetFiles>();
+    for (const [statement, { expression, scope }] of this.#computedTargets)
+      files.set(statement, computedTargetFiles(this, expression, scope, memo));
+    return files;
+  }
 
   #validateFunction(declaration: FunctionDeclaration): void {
     this.#globalFunction = declaration.global ? declaration : null;

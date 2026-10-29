@@ -1,4 +1,11 @@
-import type { Block, FileTarget, InteractionExpression, Program, Statement } from "./ast.js";
+import type {
+  Block,
+  FileTarget,
+  InteractionExpression,
+  Program,
+  Statement,
+  TagQueryExpression,
+} from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { knownPresentationDiagnostics } from "./authored-presentation.js";
 import { dayWaitWarnings } from "./day-waits.js";
@@ -40,6 +47,7 @@ import {
   knownReferenceFile,
   Reachability,
   unusedUnreadableMessage,
+  type ComputedTarget,
   type ConstantTest,
   type FileCall,
 } from "./reachability.js";
@@ -49,6 +57,7 @@ import {
   type SemanticValidationOptions,
 } from "./semantic.js";
 import { stopsTypeCheck } from "./semantic/diagnostics.js";
+import { unwrapParentheses } from "./semantic/expressions.js";
 import { speakerFlowDiagnostics, type SpeakerFlowInput } from "./speaker-flow.js";
 import type {
   CoreRuntimeChecks,
@@ -532,17 +541,16 @@ function checkFlow(
     const statementFlow = reachability.statementFlow();
     const endings = reachability.endingDiagnostics();
     // Where computed targets may lead, found once for the checks that need it.
-    let found:
-      | { picks: ReadonlyMap<number, readonly number[]>; referenced: readonly number[] | null }
-      | undefined;
-    const targets = () =>
-      (found ??= {
-        picks: taggedPicks(plan, trace, checked.names),
-        referenced: referencedFiles(plan, checked.names, hostValues),
-      });
+    let referenced: readonly number[] | null | undefined;
+    const references = () => (referenced === undefined ? (referenced = referencedFiles(plan, checked.names, hostValues)) : referenced);
+    let found: ReadonlyMap<number, ComputedTarget> | undefined;
+    const targets = () => (found ??= computedTargets(plan, trace, checked, references));
     const returns = reachability.pendingCallDiagnostics(targets);
-    const calls = reachability.runningFileDiagnostics(fileCalls(plan, trace, checked, targets));
-    const gotos = reachability.computedGotoDiagnostics(() => targets().referenced);
+    const calls = reachability.runningFileDiagnostics(
+      fileCalls(plan, trace, checked, targets),
+      targets,
+    );
+    const gotos = reachability.computedGotoDiagnostics(targets);
     const transfers = files.map((_, index) => [
       ...returns[index]!,
       ...calls[index]!,
@@ -571,7 +579,7 @@ function checkFlow(
       unreadable,
       // The files that a computed target which can run may start, `null` for any.
       unstarted.referencesRun
-        ? targets().referenced === null
+        ? references() === null
           ? null
           : checked.names[0]!.referencedScripts
         : new Set(),
@@ -696,32 +704,88 @@ function mayHoldScript(type: TypePlan | null): boolean {
 }
 
 /**
- * The files that each tagged pick of the plan may start, by its transfer instruction (see `FileSemanticResult`). Picks
- * that share their list of paths share one list of files.
+ * Where each computed target of the plan may lead, by its transfer instruction (see `ComputedTarget`). A tagged pick may
+ * start the files the name pass finds it may match, without those whose tags the known values of its bounds and tag
+ * lists rule out (V30 §41), and each of them for certain when those values decide every one. Any other computed target
+ * may start the files that its references may name (see `computedTargetFiles`), or those any reference of the project
+ * may name, `referenced`. Targets that may start the same files share one list of them.
  */
-function taggedPicks(
+function computedTargets(
   plan: InstructionPlan,
   trace: LoweringTrace,
-  names: readonly FileSemanticResult[],
-): ReadonlyMap<number, readonly number[]> {
-  const files = new Map(plan.files.map((file, index) => [file.path, index]));
-  const shared = new Map<readonly string[], readonly number[]>();
-  const picks = new Map<number, readonly number[]>();
-  for (const result of names)
+  checked: CheckedProject,
+  referenced: () => readonly number[] | null,
+): ReadonlyMap<number, ComputedTarget> {
+  const indices = new Map(plan.files.map((file, index) => [file.path, index]));
+  const lists = new Map<string, readonly number[]>();
+  const shared = (files: readonly number[]): readonly number[] => {
+    const key = files.join();
+    const list = lists.get(key);
+    if (list !== undefined) return list;
+    lists.set(key, files);
+    return files;
+  };
+  const tags: (ReadonlyMap<string, number | null> | undefined)[] = [];
+  const tagsOf = (file: number): ReadonlyMap<string, number | null> =>
+    (tags[file] ??= new Map((plan.files[file]!.tags ?? []).map((tag) => [tag.name, tag.value])));
+  // By the name pass's list of files, then by what decides the matches.
+  const picked = new Map<readonly string[], Map<string, ComputedTarget>>();
+  const filesOf = new Map<readonly string[], readonly number[]>();
+  const planFiles = (paths: readonly string[]): readonly number[] => {
+    let files = filesOf.get(paths);
+    if (files === undefined) {
+      files = shared(
+        paths
+          .flatMap((path) => {
+            const file = indices.get(path);
+            return file === undefined ? [] : [file];
+          })
+          .sort((left, right) => left - right),
+      );
+      filesOf.set(paths, files);
+    }
+    return files;
+  };
+  const targets = new Map<number, ComputedTarget>();
+  for (const result of checked.names) {
     for (const [statement, paths] of result.taggedPicks) {
       const index = transferOf(plan, trace, statement);
-      if (index === undefined) continue;
-      let indices = shared.get(paths);
-      if (indices === undefined) {
-        indices = paths.flatMap((path) => {
-          const file = files.get(path);
-          return file === undefined ? [] : [file];
-        });
-        shared.set(paths, indices);
+      const query = taggedQuery(statement);
+      if (index === undefined || query === null) continue;
+      const { key, matches } = matchesTags(query.steps, checked.known);
+      const byFacts = picked.get(paths) ?? new Map<string, ComputedTarget>();
+      picked.set(paths, byFacts);
+      let target = byFacts.get(key);
+      if (target === undefined) {
+        const found = planFiles(paths).map((file) => [file, matches(tagsOf(file))] as const);
+        target = {
+          files: shared(found.flatMap(([file, match]) => (match === false ? [] : [file]))),
+          certain: found.every(([, match]) => match !== null),
+          tagged: true,
+        };
+        byFacts.set(key, target);
       }
-      picks.set(index, indices);
+      targets.set(index, target);
     }
-  return picks;
+    for (const [statement, paths] of result.targetFiles()) {
+      const index = transferOf(plan, trace, statement);
+      if (index === undefined) continue;
+      targets.set(index, {
+        files: paths === "project" ? referenced() : paths === null ? null : planFiles(paths),
+        certain: false,
+        tagged: false,
+      });
+    }
+  }
+  return targets;
+}
+
+/** The tagged pick that a `goto tagged` or `call tagged` statement names, or `null` for another statement. */
+function taggedQuery(statement: Statement): TagQueryExpression | null {
+  if (statement.kind !== "gotoStatement" && statement.kind !== "callFileStatement") return null;
+  if (statement.target.kind !== "scriptTarget") return null;
+  const target = unwrapParentheses(statement.target.expression);
+  return target.kind === "tagQueryExpression" ? target : null;
 }
 
 /** The transfer instruction of a `goto` or `call` statement: it comes last, after its target's tag tests and lists. */
@@ -741,14 +805,14 @@ function transferOf(
  * The `call`s of files by their transfer instruction, for the check of the running file (see
  * `Reachability.runningFileDiagnostics`). A file written out or a glob can start each file it names; a tagged pick each
  * file that the name pass finds it may match, as the known values of its bounds and tag lists decide (V30 §41); any
- * other computed target may start each file that a reference may name, which only the run decides, unless the
- * references can name only one file: the target then names that file, as a path does.
+ * other computed target may start each file that its references may name (see `computedTargets`), which only the run
+ * decides, unless they can name only one file: the target then names that file, as a path does.
  */
 function fileCalls(
   plan: InstructionPlan,
   trace: LoweringTrace,
   checked: CheckedProject,
-  targets: () => { readonly referenced: readonly number[] | null },
+  targets: () => ReadonlyMap<number, ComputedTarget>,
 ): ReadonlyMap<number, FileCall> {
   const calls = new Map<number, FileCall>();
   const indices = new Map(plan.files.map((file, index) => [file.path, index]));
@@ -761,7 +825,7 @@ function fileCalls(
       const index = transferOf(plan, trace, statement);
       if (index === undefined) continue;
       let files: readonly number[] | null | undefined =
-        target.paths === null ? targets().referenced : shared.get(target.paths);
+        target.paths === null ? (targets().get(index)?.files ?? null) : shared.get(target.paths);
       if (files === undefined) {
         files = target.paths!.flatMap((path) => {
           const file = indices.get(path);
@@ -784,7 +848,8 @@ function fileCalls(
             ? () => null
             : query === null
               ? () => true
-              : (file) => (matches ??= matchesTags(query.steps, checked.known))(tagsOf(file)),
+              : (file) =>
+                  (matches ??= matchesTags(query.steps, checked.known).matches)(tagsOf(file)),
         span: target.span,
       });
     }

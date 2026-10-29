@@ -731,13 +731,21 @@ test("a computed target may start only the files that a reference of the project
       'call "a.tease"\nlet next = load "next", default: script("rooms/hall.tease")\ngoto (next)',
       {},
     ],
-    ['call "a.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)', { globals: ["host"] }],
+    ['call "a.tease"\ngoto (host)', { globals: ["host"] }],
   ] as const)
     assert.deepEqual(
       warnings(project(main, called), options),
       ["a.tease TSV071", "b.tease TSV071", "c.tease TSV071"],
       main,
     );
+  // Only where the target reads one (#1146): a host value that it does not read leaves it to the file it names.
+  assert.deepEqual(
+    warnings(
+      project('call "a.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)', called),
+      { globals: ["host"] },
+    ),
+    ["b.tease TSV065", "c.tease TSV065"],
+  );
 });
 
 test("an object that a load gives may hold a reference to any file", () => {
@@ -762,7 +770,8 @@ test("an object that a load gives may hold a reference to any file", () => {
     ),
     ["scene", "failure TSR066"],
   );
-  // Also an object in a list, and an object whose type lists other properties.
+  // Only where the target reads it (#1146): such a load elsewhere, also of an object in a list or of an object whose
+  // type lists other properties, leaves a target that reads none to the files it names.
   for (const load of [
     'let items: object[] = load "items", default: []',
     'let data = load "data", default: { count: 0 }',
@@ -774,7 +783,7 @@ test("an object that a load gives may hold a reference to any file", () => {
           "done.tease": "exit",
         }),
       ).diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`),
-      ["scene.tease TSV071"],
+      [],
       load,
     );
 });

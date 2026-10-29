@@ -188,22 +188,37 @@ export function mayMatchTags(
 }
 
 /**
- * Whether a candidate with these tags matches a query's steps when the script runs: `true` or `false` where its tag
- * tests and the values that `known` gives its bounds and tag lists decide it, else `null`. A comparison is false for a
- * candidate without a number for its tag, whatever its bound: a bound that is no number fails the query before it
- * matches any candidate. Each bound and tag list is read once, for all candidates.
+ * Whether a candidate with these tags matches a query's steps when the script runs, `matches`: `true` or `false` where
+ * its tag tests and the values that `known` gives its bounds and tag lists decide it, else `null`. A comparison is false
+ * for a candidate without a number for its tag, whatever its bound: a bound that is no number fails the query before it
+ * matches any candidate. Each bound and tag list is read once, for all candidates. Two queries with the same `key`
+ * match the same candidates.
  */
 export function matchesTags(
   steps: readonly TagQueryStep[],
   known: (expression: Expression) => KnownValue | undefined,
-): (tags: ReadonlyMap<string, number | null>) => boolean | null {
+): {
+  readonly key: string;
+  readonly matches: (tags: ReadonlyMap<string, number | null>) => boolean | null;
+} {
   const facts = new Map<TagQueryStep, number | readonly string[] | null>();
   for (const step of steps)
     if (step.kind === "tagCompare") {
       const bound = known(step.bound);
       facts.set(step, typeof bound === "number" && Number.isFinite(bound) ? bound : null);
     } else if (step.kind === "tagList") facts.set(step, knownTagNames(known(step.value)));
-  return (tags) =>
+  const key = JSON.stringify(
+    steps.map((step) =>
+      step.kind === "tag"
+        ? [step.name]
+        : step.kind === "tagCompare"
+          ? [step.name, step.operator, facts.get(step)]
+          : step.kind === "tagList"
+            ? [step.option, facts.get(step)]
+            : step.kind,
+    ),
+  );
+  const matches = (tags: ReadonlyMap<string, number | null>): boolean | null =>
     evaluateTagSteps(steps, (step) => {
       if (step.kind === "tag") return tags.has(step.name);
       const fact = facts.get(step);
@@ -215,6 +230,7 @@ export function matchesTags(
       if (step.kind !== "tagList") return null;
       return Array.isArray(fact) ? passesTagList(step.option, fact, tags) : null;
     });
+  return { key, matches };
 }
 
 /** The names of a list or set of tag names, as the runtime reads them, or `null` for any other value. */

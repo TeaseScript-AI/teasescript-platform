@@ -77,14 +77,26 @@ const ONWARD_EDGES: ReadonlySet<string> = new Set<FlowEdge["kind"]>([
 ]);
 
 /**
- * The ways of computed targets (see `Reachability.#computedWays`): each target's way into its hub, a node after the
- * instructions, and each hub's ways into the entries of its files.
+ * Where a computed target of a `goto` or `call` may lead (see `computedTargets` in `compiler.ts`): the files it may
+ * start, by index, `null` for any file; whether it may start each of them whenever it runs, as a tagged pick whose tags
+ * decide its matches does, rather than possibly only some; and whether it is a tagged pick, rather than a reference.
+ */
+export interface ComputedTarget {
+  readonly files: readonly number[] | null;
+  readonly certain: boolean;
+  readonly tagged: boolean;
+}
+
+/** A computed target that nothing is known of: a reference that may name any file. */
+const ANY_TARGET: ComputedTarget = { files: null, certain: false, tagged: false };
+
+/**
+ * The ways of computed targets (see `Reachability.#computedWays`): each target's way into its file or hub, a node after
+ * the instructions, and each hub's ways into the entries of its files.
  */
 interface ComputedWays {
   readonly targets: ReadonlyMap<number, { readonly node: number; readonly edge: string }>;
   readonly hubs: readonly (readonly number[])[];
-  /** The hub into the files that any script reference may name, when a target leads there. */
-  readonly references: number | undefined;
 }
 
 /** Which instructions of a plan can run, and how that reads back as the source's statements. */
@@ -100,6 +112,15 @@ export class Reachability {
    */
   readonly #local: Uint8Array;
   readonly #localBefore: Int32Array;
+  /** The ways of the computed targets, and where blocks stay, found once for the targets the checks share. */
+  #transfers:
+    | {
+        readonly targets: ReadonlyMap<number, ComputedTarget>;
+        readonly ways: ComputedWays;
+        stays?: Staying;
+        staying?: StayingBlocks;
+      }
+    | undefined;
 
   public constructor(
     private readonly programs: readonly Program[],
@@ -239,21 +260,15 @@ export class Reachability {
    * An `end` returns to the file that called the running one (V30 §30), and fails without one. The ways from the start
    * of the session follow which file calls are waiting: a `call` makes one wait, and a `goto` keeps those that wait.
    * The `end` is an error (TSV070) only where it fails whenever some code runs (V30 §13): where every way to it has none
-   * waiting, or where code that every way reaches with none waiting certainly goes on to it (see {@link #provenEnds}),
-   * also when another way reaches it through a call. Where a way the compiler follows reaches it with none waiting but
-   * neither holds, because code before it may leave first, it is a warning (TSV071), and so it is where only a way the
-   * compiler cannot follow leads there with none waiting: a computed target, which may start a file that `targets`
-   * gives, the files its `picks` give for a tagged pick, by instruction, else those that any reference in the project
-   * may name, `referenced`, where `null` is every file; and a timer, media, or button block, which runs later, while the
-   * file that started it or a file it called runs, or after it. The runtime checks the `end` then (TSR066). The `end`
-   * that closes a file's top level is the ending check's (TSV052).
+   * waiting, or where code that every way reaches with none waiting certainly goes on to it or to another `end` (see
+   * {@link #provenEnds}), also when another way reaches it through a call. Where a way the compiler follows reaches it
+   * with none waiting but neither holds, because code before it may leave first, it is a warning (TSV071), and so it is
+   * where only a way the compiler cannot follow leads there with none waiting: a computed target whose files `targets`
+   * does not decide (see {@link #computedWays}), and a timer, media, or button block that may run while none waits (see
+   * {@link #blockRuns}). The runtime checks the `end` then (TSR066). The `end` that closes a file's top level is the
+   * ending check's (TSV052).
    */
-  public pendingCallDiagnostics(
-    targets: () => {
-      readonly picks: ReadonlyMap<number, readonly number[]>;
-      readonly referenced: readonly number[] | null;
-    },
-  ): Diagnostic[][] {
+  public pendingCallDiagnostics(targets: () => ReadonlyMap<number, ComputedTarget>): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     const closing = new Set(this.plan.files.map((file) => file.rootEndInstruction - 1));
     if (
@@ -263,50 +278,8 @@ export class Reachability {
     )
       return diagnostics;
     const count = this.plan.instructions.length;
-    const { picks, referenced } = targets();
-    const ways = this.#computedWays(picks, referenced);
-    const states = solveForward<CallsWaiting, string>(
-      {
-        nodeCount: count + ways.hubs.length,
-        successors: (node) => this.#computedSuccessors(ways, node),
-        join: (left, right) => ({
-          none: left.none ?? right.none,
-          hidden: left.hidden ?? right.hidden,
-          waiting: left.waiting || right.waiting,
-        }),
-        equals: (left, right) =>
-          left.none === right.none &&
-          left.hidden === right.hidden &&
-          left.waiting === right.waiting,
-        transfer: (node, edge, state) => {
-          const waitsForNone = state.none !== null || state.hidden !== null;
-          // A block runs later: a non-persistent timer's or button's while the file that started it, or one it called,
-          // runs, so with the calls that wait there; a persistent one's or a media block also after that file ended.
-          if (edge === "handler")
-            return waitsForNone || this.#outlivesItsFile(node)
-              ? { none: null, hidden: node, waiting: true }
-              : state;
-          const instruction = this.plan.instructions[node];
-          if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
-            return state;
-          if (instruction.mode === "call") return { none: null, hidden: null, waiting: true };
-          // A goto keeps the calls that wait; with none, the file it starts has none either.
-          if (edge === "transfer")
-            return {
-              none: state.none === null ? null : node,
-              hidden: state.hidden,
-              waiting: state.waiting,
-            };
-          return { none: null, hidden: waitsForNone ? node : null, waiting: state.waiting };
-        },
-      },
-      [
-        [
-          this.plan.files[0]!.startInstruction,
-          { none: SESSION_START, hidden: null, waiting: false },
-        ],
-      ],
-    );
+    const ways = this.#waysOf(targets());
+    const { states, interrupted } = this.#blockRuns(ways);
     let proven: ReadonlyMap<number, number> | undefined;
     for (let index = 0; index < count; index += 1) {
       const state = states[index];
@@ -322,7 +295,7 @@ export class Reachability {
           ? undefined
           : withoutCall(state)
             ? state.none
-            : (proven ??= this.#provenEnds(states, ways.targets)).get(index);
+            : (proven ??= this.#provenEnds(states, ways, interrupted)).get(index);
       const way = certain ?? state.none;
       diagnostics[file]!.push(
         createDiagnostic(
@@ -347,29 +320,398 @@ export class Reachability {
   }
 
   /**
+   * Which file calls wait where code runs, from the start of the session (see {@link pendingCallDiagnostics}), with
+   * where each timer, media, or button block starts. A block starts at a boundary between instructions once it is due:
+   * a button's once pressed, which the player can only while code waits, and a timer whose length is written out and
+   * whose handle the script does not keep once that time has passed, which it only does while code waits; any other
+   * timer, and a media block, may be due at any boundary (see {@link #startsAnywhere}). While a block runs, others wait
+   * for it, so a block also starts where one that may start anywhere returns to, and where one that may leave the code
+   * it interrupts (see {@link #leavingBlocks}) leaves to. While a called file runs, a call waits. A block starts only while
+   * it stays, on the ways from its creation that {@link #staying} follows. Its `end` ends the file running where it
+   * starts, so it has a call to return to when one waits at every such place and no other block that may leave stays
+   * there, nor another copy of it (see {@link #single}). The block's code then runs with calls waiting, and else as code
+   * that may have none, by the instruction that created it (`hidden`). `interrupted` tells where a block that may leave
+   * the code it interrupts may start.
+   */
+  #blockRuns(ways: ComputedWays): {
+    readonly states: readonly (CallsWaiting | null)[];
+    readonly interrupted: (index: number) => boolean;
+  } {
+    const count = this.plan.instructions.length;
+    const code = count + ways.hubs.length;
+    const { stays, staying, interrupted } = this.#blocksStaying(ways);
+    // The nodes: the code, where the blocks start that each place leads to as one that stays on, by whether they
+    // outlive their file entry, and each block where an instruction creates it.
+    const runs = (outlives: boolean): number => code + (outlives ? stays.nodeCount : 0);
+    const gates: { readonly creator: number; readonly entry: number; readonly block: number }[] =
+      [];
+    const gatesAt = new Map<number, number[]>();
+    this.plan.instructions.forEach((_, index) => {
+      if (this.#reached[index] === 0) return;
+      for (const block of this.#flow.handlersOf(index)) {
+        const definition = this.#flow.functionById(block);
+        if (definition === undefined) continue;
+        const list = gatesAt.get(index) ?? [];
+        list.push(gates.length);
+        gatesAt.set(index, list);
+        gates.push({ creator: index, entry: definition.entryInstruction, block });
+      }
+    });
+    const firstGate = code + 2 * stays.nodeCount;
+    const unknown: BlockStarts = {
+      unsafe: true,
+      leavers: SEVERAL_LEAVERS,
+    };
+    const solved = solveForward<BlockState, string>(
+      {
+        nodeCount: firstGate + gates.length,
+        successors: (node) => {
+          if (node < code) {
+            const out = this.#computedSuccessors(ways, node, false);
+            if (node < count)
+              out.push(
+                { node: runs(false) + node, edge: "run" },
+                { node: runs(true) + node, edge: "run" },
+              );
+            for (const gate of gatesAt.get(node) ?? [])
+              out.push({ node: firstGate + gate, edge: "created" });
+            return out;
+          }
+          if (node < firstGate) {
+            const outlives = node >= runs(true);
+            const at = node - runs(outlives);
+            const out = [
+              ...stays.staysBefore[at]!,
+              ...(outlives ? stays.outlivesBefore[at]! : []),
+            ].map((previous) => ({ node: runs(outlives) + previous, edge: "back" }));
+            for (const gate of gatesAt.get(at) ?? [])
+              if (this.#outlivesItsFile(at) === outlives)
+                out.push({ node: firstGate + gate, edge: "runs" });
+            return out;
+          }
+          return [{ node: gates[node - firstGate]!.entry, edge: "block" }];
+        },
+        join: joinBlockStates,
+        equals: sameBlockStates,
+        transfer: (node, edge, state) => {
+          switch (edge) {
+            case "run": {
+              if (state.kind !== "calls") return null;
+              const none = state.none !== null || state.hidden !== null;
+              const leavers = staying.leavers(node);
+              const anywhere = staying.anywhere(node);
+              const waits = !NEVER_WAITS.has(this.plan.instructions[node]!.kind);
+              // While a called file runs, a call waits.
+              const call = this.#calls(node);
+              return {
+                kind: "runs",
+                anywhere: { unsafe: none, leavers },
+                due:
+                  waits || anywhere || call
+                    ? { unsafe: none && (waits || anywhere), leavers }
+                    : null,
+              };
+            }
+            case "back":
+              return state;
+            case "created":
+              return { kind: "gate", created: true, run: null };
+            case "runs":
+              return state.kind === "runs" ? { kind: "gate", created: false, run: state } : null;
+            case "block": {
+              if (state.kind !== "gate" || !state.created || state.run === null) return null;
+              const { creator, block } = gates[node - firstGate]!;
+              const starts = this.#startsAnywhere(creator) ? state.run.anywhere : state.run.due;
+              if (starts === null) return null;
+              const alone =
+                starts.leavers === null ||
+                (starts.leavers === block && this.#single(creator, block, staying));
+              return {
+                kind: "calls",
+                none: null,
+                hidden: starts.unsafe || !alone ? creator : null,
+                waiting: true,
+              };
+            }
+          }
+          return state.kind === "calls" ? this.#waitingAfter(node, edge, state) : null;
+        },
+      },
+      [
+        [
+          this.plan.files[0]!.startInstruction,
+          { kind: "calls", none: SESSION_START, hidden: null, waiting: false },
+        ],
+        // Once a block returns, the code it interrupted goes on, wherever that was.
+        ...stays.blockReturns.flatMap((index) =>
+          [false, true].map(
+            (outlives) =>
+              [runs(outlives) + index, { kind: "runs", anywhere: unknown, due: unknown }] as const,
+          ),
+        ),
+      ],
+    );
+    const states = solved
+      .slice(0, code)
+      .map((state) => (state !== null && state.kind === "calls" ? state : null));
+    return { states, interrupted };
+  }
+
+  /** The calls that wait after `node` along `edge`, from those that wait at it (see {@link pendingCallDiagnostics}). */
+  #waitingAfter(node: number, edge: string, state: CallsWaiting): CallsWaiting {
+    const instruction = this.plan.instructions[node];
+    if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
+      return state;
+    if (instruction.mode === "call") return { kind: "calls", none: null, hidden: null, waiting: true };
+    // A goto keeps the calls that wait; with none, the file it starts has none either.
+    if (edge === "transfer")
+      return {
+        kind: "calls",
+        none: state.none === null ? null : node,
+        hidden: state.hidden,
+        waiting: state.waiting,
+      };
+    const waitsForNone = state.none !== null || state.hidden !== null;
+    return { kind: "calls", none: null, hidden: waitsForNone ? node : null, waiting: state.waiting };
+  }
+
+  /**
+   * Whether at most one copy of the block `block` that the instruction `creator` creates stays at a time, so that no
+   * copy starts where another left: a button's, which takes no click while its block waits to run or runs, or that of a
+   * timer that does not repeat, where no way on which the block stays leads back to its creation. A media block may run
+   * again on the next pass.
+   */
+  #single(creator: number, block: number, staying: StayingBlocks): boolean {
+    const instruction = this.plan.instructions[creator]!;
+    if (
+      instruction.kind !== "showPermanentButton" &&
+      (instruction.kind !== "startTimer" || instruction.repeat)
+    )
+      return false;
+    const before = staying.leavers(creator, false);
+    return before !== block && before !== SEVERAL_LEAVERS;
+  }
+
+  /**
+   * Whether the blocks that the instruction at `index` creates may be due at any boundary between instructions, rather
+   * than only once code waited: a media's, which a seek of its handle may make due, and a timer's, unless its length is
+   * written out and more than zero and the script does not keep its handle, which could set what remains to zero.
+   */
+  #startsAnywhere(index: number): boolean {
+    const instruction = this.plan.instructions[index]!;
+    if (instruction.kind === "showPermanentButton") return false;
+    return !(
+      instruction.kind === "startTimer" &&
+      instruction.destinationTemporary === null &&
+      instruction.duration.kind === "duration" &&
+      instruction.duration.milliseconds > 0
+    );
+  }
+
+  /** Whether the instruction at `index` calls a file, which runs with that call waiting. */
+  #calls(index: number): boolean {
+    const instruction = this.plan.instructions[index]!;
+    return instruction.kind === "transfer" && instruction.mode === "call";
+  }
+
+  /**
+   * The ways on which a block stays once an instruction created it, which it then may run at (see {@link #blockRuns}),
+   * over the instructions, the hubs of computed targets, and one node, `ended`, for what follows an `end`. A
+   * non-persistent timer or button belongs to the file entry that created it, which a `goto` or the entry's `end`
+   * leaves (V30 §27, §28), so it stays on the ways on in that entry: past a file call to what follows it, which the
+   * called file's `end` returns to, and from a function's return to what follows each call of it. A block that
+   * outlives its file entry (see {@link #outlivesItsFile}) also stays on a `goto`, into the files of a computed `goto`,
+   * and from an `end` to what follows each file call. A block returns to wherever it interrupted the code, so its
+   * returns, `blockReturns`, lead anywhere.
+   */
+  #staying(ways: ComputedWays): Staying {
+    const count = this.plan.instructions.length;
+    const ended = count + ways.hubs.length;
+    const nodeCount = ended + 1;
+    // For each node, the ways on which every block stays, and those on which only one that outlives its file does.
+    const all: number[][] = Array.from({ length: nodeCount }, () => []);
+    const outliving: number[][] = Array.from({ length: nodeCount }, () => []);
+    const resumes = new Map<number, number[]>();
+    const blockReturns: number[] = [];
+    this.plan.instructions.forEach((instruction, index) => {
+      if (instruction.kind === "callFunction") {
+        const list = resumes.get(instruction.functionId) ?? [];
+        list.push(instruction.returnInstruction);
+        resumes.set(instruction.functionId, list);
+      } else if (instruction.kind === "transfer" && instruction.mode === "call")
+        outliving[ended]!.push(index + 1);
+    });
+    for (let index = 0; index < count; index += 1) {
+      const instruction = this.plan.instructions[index]!;
+      const call = instruction.kind === "transfer" && instruction.mode === "call";
+      for (const { node, edge } of this.#ways(index))
+        switch (edge) {
+          case "transfer":
+          case "computed":
+            if (!call) {
+              const target = node ?? ways.targets.get(index)?.node;
+              if (target !== undefined) outliving[index]!.push(target);
+            }
+            break;
+          case "goto":
+            outliving[index]!.push(node!);
+            break;
+          case "end":
+            outliving[index]!.push(ended);
+            break;
+          case "exit":
+            break;
+          case "return": {
+            const definition = this.#flow.functionOf(index);
+            if (definition?.handler !== null && definition?.handler !== undefined)
+              blockReturns.push(index);
+            else for (const resume of resumes.get(definition?.id ?? -1) ?? []) all[index]!.push(resume);
+            break;
+          }
+          default:
+            if (node !== null) all[index]!.push(node);
+        }
+    }
+    ways.hubs.forEach((entries, hub) => outliving[count + hub]!.push(...entries));
+    const before = (lists: readonly number[][]): number[][] => {
+      const result: number[][] = Array.from({ length: nodeCount }, () => []);
+      lists.forEach((list, node) => {
+        for (const next of list) result[next]!.push(node);
+      });
+      return result;
+    };
+    return {
+      nodeCount,
+      stays: all,
+      outlives: outliving,
+      staysBefore: before(all),
+      outlivesBefore: before(outliving),
+      blockReturns,
+    };
+  }
+
+  /**
+   * Which blocks stay at each place (see {@link #staying}), as far as the checks need: `leavers`, those that may leave the
+   * code they interrupt (see {@link #leavingBlocks}), `null` for none, the one block's function, or `SEVERAL_LEAVERS`;
+   * with `created`, also those that the instruction creates where it may wait, as a media that is waited for may run its
+   * blocks then. `anywhere`, whether one that may start at any boundary stays (see {@link #startsAnywhere}), and
+   * `leavesAnywhere`, whether one that does both. Once such a block stays where a block returns, which may be anywhere,
+   * every place has several.
+   */
+  #blocksStayingAt(stays: Staying): StayingBlocks {
+    const leaving = this.#leavingBlocks();
+    const seeds: (readonly [number, BlocksStaying])[] = [];
+    this.plan.instructions.forEach((_, index) => {
+      if (this.#reached[index] === 0) return;
+      const outlives = this.#outlivesItsFile(index);
+      const anywhere = this.#startsAnywhere(index);
+      for (const block of this.#flow.handlersOf(index)) {
+        const leaves = leaving.has(block);
+        if (!leaves && !anywhere) continue;
+        const blocks: Stay = {
+          leavers: leaves ? block : null,
+          anywhere,
+          leavesAnywhere: leaves && anywhere,
+        };
+        const seed: BlocksStaying = outlives
+          ? { kept: NO_STAY, outliving: blocks }
+          : { kept: blocks, outliving: NO_STAY };
+        for (const next of stays.stays[index]!) seeds.push([next, seed]);
+        if (outlives) for (const next of stays.outlives[index]!) seeds.push([next, seed]);
+      }
+    });
+    const states = solveForward<BlocksStaying, string>(
+      {
+        nodeCount: stays.nodeCount,
+        successors: (node) => [
+          ...stays.stays[node]!.map((next) => ({ node: next, edge: "stays" })),
+          ...stays.outlives[node]!.map((next) => ({ node: next, edge: "outlives" })),
+        ],
+        join: (left, right) => ({
+          kept: joinStays(left.kept, right.kept),
+          outliving: joinStays(left.outliving, right.outliving),
+        }),
+        equals: (left, right) =>
+          sameStays(left.kept, right.kept) && sameStays(left.outliving, right.outliving),
+        transfer: (_, edge, state) =>
+          edge === "stays"
+            ? state
+            : state.outliving === NO_STAY
+              ? null
+              : { kept: NO_STAY, outliving: state.outliving },
+      },
+      seeds,
+    );
+    const everywhere = stays.blockReturns.some((index) => states[index] !== null);
+    const at = (index: number): Stay => {
+      const state = states[index];
+      return state === null || state === undefined
+        ? NO_STAY
+        : joinStays(state.kept, state.outliving);
+    };
+    return {
+      leavers: (index, created = true) => {
+        if (everywhere) return SEVERAL_LEAVERS;
+        let leavers = at(index).leavers;
+        if (created && !NEVER_WAITS.has(this.plan.instructions[index]!.kind))
+          for (const block of this.#flow.handlersOf(index))
+            if (leaving.has(block)) leavers = joinLeavers(leavers, block);
+        return leavers;
+      },
+      anywhere: (index) => everywhere || at(index).anywhere,
+      leavesAnywhere: (index) => everywhere || at(index).leavesAnywhere,
+    };
+  }
+
+  /**
+   * The timer, media, and button blocks, by function, whose own code may leave the code they interrupt: by a `goto`, an
+   * `end`, or an `exit`, also in a function they call. A file they call returns into them.
+   */
+  #leavingBlocks(): ReadonlySet<number> {
+    const leaves = solveBackward<true, string>({
+      nodeCount: this.plan.instructions.length,
+      successors: (index) => {
+        const instruction = this.plan.instructions[index]!;
+        if (
+          instruction.kind === "end" ||
+          instruction.kind === "exit" ||
+          instruction.kind === "goto" ||
+          (instruction.kind === "transfer" && instruction.mode === "goto")
+        )
+          return [{ node: null, edge: "leaves" }];
+        const call = instruction.kind === "transfer";
+        return this.#ways(index).filter(
+          ({ edge }) => !(call && (edge === "transfer" || edge === "computed")),
+        );
+      },
+      join: () => true,
+      equals: () => true,
+      transfer: (_, edge, state) => (edge === "leaves" ? true : state),
+    });
+    const blocks = new Set<number>();
+    for (const definition of this.plan.functions)
+      if (definition.handler !== null && leaves[definition.entryInstruction] === true)
+        blocks.add(definition.id);
+    return blocks;
+  }
+
+  /**
    * The `end`s that code which every way reaches with no call waiting certainly goes on to (see {@link #endings}), as
    * the `goto` in `if pick { call "scene.tease" } else { goto "scene.tease" }` when `scene.tease` is `say "scene"` and
-   * `end`: whenever that code runs, the run fails at the `end`, unless it never goes on, as at an answer that never
-   * comes. Each `end` maps to the way that its message names: such a `goto` that leads to it, else the way by which that
-   * code runs. A timer, media, or button block may run before any instruction while that code waits, so when a block
-   * that can run may leave the code it interrupts, no `end` is found.
+   * `end`, or when it ends at one of several `end`s: whenever that code runs, the run fails at one of them, unless it
+   * never goes on, as at an answer that never comes. Each `end` that such code may go on to maps to the way that its
+   * message names: such a `goto`, else the way by which that code runs; a `goto` first, then the earliest. A block that
+   * may leave the code it interrupts may run where `interrupted` tells, so code before such a place goes on to no `end`
+   * for certain.
    */
   #provenEnds(
     states: readonly (CallsWaiting | null)[],
-    computed: ReadonlyMap<number, { readonly node: number; readonly edge: string }>,
+    ways: ComputedWays,
+    interrupted: (index: number) => boolean,
   ): ReadonlyMap<number, number> {
     const proven = new Map<number, number>();
-    const endings = this.#endings(computed);
-    for (let index = 0; index < this.plan.instructions.length; index += 1) {
-      if (this.#reached[index] === 0) continue;
-      for (const handler of this.#flow.handlersOf(index)) {
-        const definition = this.#flow.functionById(handler);
-        const ending = definition === undefined ? null : endings[definition.entryInstruction];
-        if (ending !== null && ending !== undefined && (ending.leaves || ending.end !== null))
-          return proven;
-      }
-    }
-    const byGoto = new Set<number>();
+    const endings = this.#endings(ways, interrupted);
+    const seeds: (readonly [number, number])[] = [];
     endings.forEach((ending, index) => {
       const state = states[index];
       if (
@@ -377,42 +719,81 @@ export class Reachability {
         ending.leaves ||
         ending.returns ||
         ending.end === null ||
-        ending.end === SEVERAL ||
         state === null ||
         state === undefined ||
-        !withoutCall(state) ||
-        byGoto.has(ending.end)
+        !withoutCall(state)
       )
         return;
-      const instruction = this.plan.instructions[index]!;
-      if (instruction.kind === "transfer" && instruction.mode === "goto") {
-        proven.set(ending.end, index);
-        byGoto.add(ending.end);
-      } else if (!proven.has(ending.end)) proven.set(ending.end, state.none!);
+      const instruction = this.plan.instructions[index];
+      seeds.push([
+        index,
+        instruction?.kind === "transfer" && instruction.mode === "goto" ? index : state.none!,
+      ]);
+    });
+    if (seeds.length === 0) return proven;
+    // From that code along the ways it goes on, as `#endings` follows them, to the ends it may reach.
+    const count = this.plan.instructions.length;
+    const reached = solveForward<number, string>(
+      {
+        nodeCount: count + ways.hubs.length,
+        successors: (node) => {
+          if (node >= count) return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+          const instruction = this.plan.instructions[node]!;
+          const out: { node: number; edge: string }[] = [];
+          for (const { node: next, edge } of this.#ways(node)) {
+            if (instruction.kind === "transfer" && instruction.mode === "call" && edge !== "resume")
+              continue;
+            if (edge === "resume" && instruction.kind === "callFunction") {
+              const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
+              if (entry !== undefined && endings[entry]?.returns !== true) continue;
+            }
+            const target = next ?? ways.targets.get(node)?.node;
+            if (target !== undefined && (next !== null || ways.targets.get(node)?.edge === "transfer"))
+              out.push({ node: target, edge });
+          }
+          return out;
+        },
+        join: (left, right) =>
+          left === SESSION_START ? right : right === SESSION_START ? left : Math.min(left, right),
+        equals: (left, right) => left === right,
+        transfer: (_, __, state) => state,
+      },
+      seeds,
+    );
+    this.plan.instructions.forEach((instruction, index) => {
+      const way = reached[index];
+      if (instruction.kind === "end" && way !== null && way !== undefined) proven.set(index, way);
     });
     return proven;
   }
 
   /**
    * How the code from each instruction on can stop (see {@link Ending}), by the ways of {@link #ways}, where a computed
-   * target that names its file, by `computed`, goes on in that file: a `goto` of a file goes on in it, a file `call`
+   * target that `ways` leads into its files for certain goes on in them: a `goto` of a file goes on in it, a file `call`
    * comes back unless the called file may leave, and a function call does what the function does, then goes on after
    * the call where the function may return. A first solve, in which every function may return, tells where one may. A
-   * block that an instruction creates runs later, so it is no way on from there.
+   * block that an instruction creates runs later, so it is no way on from there, but one that may leave the code it
+   * interrupts may run where `interrupted` tells, which may then leave.
    */
-  #endings(
-    computed: ReadonlyMap<number, { readonly node: number; readonly edge: string }>,
-  ): (Ending | null)[] {
+  #endings(ways: ComputedWays, interrupted: (index: number) => boolean): (Ending | null)[] {
+    const count = this.plan.instructions.length;
     let first: readonly (Ending | null)[] | null = null;
     const solve = (): (Ending | null)[] =>
       solveBackward<Ending, string>({
-        nodeCount: this.plan.instructions.length,
-        successors: (index) =>
-          this.#ways(index).map(({ node, edge }) => {
-            if (node !== null || edge === "end" || edge === "return") return { node, edge };
-            const target = computed.get(index);
-            return target?.edge === "transfer" ? target : { node: null, edge: "leaves" };
-          }),
+        nodeCount: count + ways.hubs.length,
+        successors: (index) => {
+          if (index >= count)
+            return ways.hubs[index - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+          const out: { node: number | null; edge: string }[] = this.#ways(index).map(
+            ({ node, edge }) => {
+              if (node !== null || edge === "end" || edge === "return") return { node, edge };
+              const target = ways.targets.get(index);
+              return target?.edge === "transfer" ? target : { node: null, edge: "leaves" };
+            },
+          );
+          if (interrupted(index)) out.push({ node: null, edge: "leaves" });
+          return out;
+        },
         join: (left, right) => ({
           end:
             left.end === null || left.end === right.end
@@ -426,7 +807,6 @@ export class Reachability {
         equals: (left, right) =>
           left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
         transfer: (index, edge, state) => {
-          const instruction = this.plan.instructions[index]!;
           switch (edge) {
             case "end":
               return { end: index, leaves: false, returns: false };
@@ -438,14 +818,17 @@ export class Reachability {
             case "call":
               return state?.returns === true ? { ...state, returns: false } : state;
             case "resume": {
+              const instruction = this.plan.instructions[index]!;
               if (first === null || instruction.kind !== "callFunction") return state;
               const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
               return entry === undefined || first[entry]?.returns === true ? state : null;
             }
-            case "transfer":
+            case "transfer": {
+              const instruction = this.plan.instructions[index]!;
               if (instruction.kind !== "transfer" || instruction.mode === "goto") return state;
               // The called file's `end` comes back after the call.
               return state?.leaves === true ? LEAVING : null;
+            }
             default:
               return state;
           }
@@ -455,81 +838,208 @@ export class Reachability {
     return solve();
   }
 
-  /** The ways on from `node` in the graph of `ways`: its own, from a computed target into its hub, and from a hub. */
+  /**
+   * The ways on from `node` in the graph of `ways`: its own, from a computed target into its file or hub, and from a hub;
+   * with `handlers`, also into the blocks that an instruction creates.
+   */
   #computedSuccessors(
     ways: ComputedWays,
     node: number,
-  ): { readonly node: number; readonly edge: string }[] {
+    handlers = true,
+  ): { node: number; edge: string }[] {
     const count = this.plan.instructions.length;
     if (node >= count)
       return ways.hubs[node - count]!.map((entry) => ({ node: entry, edge: "hub" }));
-    const out = this.#successors(node);
+    const out = handlers
+      ? this.#successors(node)
+      : this.#ways(node).flatMap(({ node: next, edge }) =>
+          next === null ? [] : [{ node: next, edge: edge as string }],
+        );
     const computed = ways.targets.get(node);
     if (computed !== undefined) out.push(computed);
     return out;
   }
 
+  /** The ways of the computed targets `targets` (see {@link #computedWays}), found once. */
+  #waysOf(targets: ReadonlyMap<number, ComputedTarget>): ComputedWays {
+    if (this.#transfers?.targets !== targets)
+      this.#transfers = { targets, ways: this.#computedWays(targets) };
+    return this.#transfers.ways;
+  }
+
+  /**
+   * Where blocks stay (see {@link #staying}), which of them stay at each place (see {@link #blocksStayingAt}), and where
+   * a block that may leave the code it interrupts may start, `interrupted`: where one that may start anywhere stays, and
+   * where code may wait, a block that may start anywhere may return to, or a file is called, while one stays. Found once
+   * for `ways`.
+   */
+  #blocksStaying(ways: ComputedWays): {
+    readonly stays: Staying;
+    readonly staying: StayingBlocks;
+    readonly interrupted: (index: number) => boolean;
+  } {
+    const facts = this.#transfers?.ways === ways ? this.#transfers : undefined;
+    const stays = facts?.stays ?? this.#staying(ways);
+    const staying = facts?.staying ?? this.#blocksStayingAt(stays);
+    if (facts !== undefined) {
+      facts.stays = stays;
+      facts.staying = staying;
+    }
+    return {
+      stays,
+      staying,
+      interrupted: (index) =>
+        staying.leavesAnywhere(index) ||
+        ((!NEVER_WAITS.has(this.plan.instructions[index]!.kind) ||
+          staying.anywhere(index) ||
+          this.#calls(index)) &&
+          staying.leavers(index) !== null),
+    };
+  }
+
+  /**
+   * The file call that the code from each instruction on certainly makes in the file that runs it (see {@link Ending},
+   * whose `end` is that call here): one of `certain`, the calls that certainly start their one file, before the code
+   * leaves that file, by an `end`, `exit`, or `goto`, or returns from its function. A function call does what the function
+   * does, then goes on after the call where the function may return; another file call comes back unless the called file
+   * may leave (see {@link #endings}). A block that may leave the code it interrupts may run where it waits.
+   */
+  #certainCalls(
+    certain: ReadonlySet<number>,
+    targets: () => ReadonlyMap<number, ComputedTarget>,
+  ): (Ending | null)[] {
+    const ways = this.#waysOf(targets());
+    const { interrupted } = this.#blocksStaying(ways);
+    const endings = this.#endings(ways, interrupted);
+    let first: readonly (Ending | null)[] | null = null;
+    const solve = (): (Ending | null)[] =>
+      solveBackward<Ending, string>({
+        nodeCount: this.plan.instructions.length,
+        successors: (index) => {
+          if (certain.has(index)) return [{ node: null, edge: "calls" }];
+          const instruction = this.plan.instructions[index]!;
+          if (
+            instruction.kind === "end" ||
+            instruction.kind === "exit" ||
+            instruction.kind === "goto" ||
+            (instruction.kind === "transfer" && instruction.mode === "goto")
+          )
+            return [{ node: null, edge: "leaves" }];
+          const out: { node: number | null; edge: string }[] = [];
+          for (const way of this.#ways(index)) {
+            if (instruction.kind !== "transfer" || way.edge === "resume") out.push(way);
+            // The called file comes back unless it may leave.
+            else if (
+              way.node === null
+                ? ways.targets.get(index)?.edge !== "transfer" ||
+                  endings[ways.targets.get(index)!.node]?.leaves !== false
+                : endings[way.node]?.leaves === true
+            )
+              out.push({ node: null, edge: "leaves" });
+          }
+          if (interrupted(index)) out.push({ node: null, edge: "leaves" });
+          return out;
+        },
+        join: (left, right) => ({
+          end:
+            left.end === null || left.end === right.end
+              ? right.end
+              : right.end === null
+                ? left.end
+                : SEVERAL,
+          leaves: left.leaves || right.leaves,
+          returns: left.returns || right.returns,
+        }),
+        equals: (left, right) =>
+          left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
+        transfer: (index, edge, state) => {
+          switch (edge) {
+            case "calls":
+              return { end: index, leaves: false, returns: false };
+            case "return":
+              return RETURNS;
+            case "leaves":
+              return LEAVING;
+            case "call":
+              return state?.returns === true ? { ...state, returns: false } : state;
+            case "resume": {
+              const instruction = this.plan.instructions[index]!;
+              if (first === null || instruction.kind !== "callFunction") return state;
+              const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
+              return entry === undefined || first[entry]?.returns === true ? state : null;
+            }
+            default:
+              return state;
+          }
+        },
+      });
+    first = solve();
+    return solve();
+  }
+
   /**
    * The way of each computed target for the checks of waiting calls and of the files that start (see
    * {@link pendingCallDiagnostics}, {@link unstartedFileWarnings}). A `script(...)` of a path written out names its file,
-   * which the check follows like a file target. Any other target leads to a node of its own after the instructions, a
-   * hub, with a way into each file it may start: those of its tagged pick, or those any reference may name. Targets that
-   * may start the same files share one, by the list of files `picks` shares, so the ways grow with the files, not with
-   * the targets times the files. A reference that can name only one file leads through a hub too: the check does not read
-   * the tests that decide its ways, nor whether the target names an existing file, so an error there could reject code
-   * that cannot fail.
+   * which the checks follow like a file target. Any other target leads to a node of its own after the instructions, a
+   * hub, with a way into each file that `targets` gives it, any file without one. The checks follow a target that may
+   * start each of its files like a glob, by a `transfer` way, and any other by a `computed` way, which they cannot
+   * follow: they do not read the tests that decide which file it names, nor whether it names an existing one, so an
+   * error there could reject code that cannot fail. Targets that may start the same files share one hub, by the list of
+   * files that `targets` shares, so the ways grow with the files, not with the targets times the files.
    */
-  #computedWays(
-    picks: ReadonlyMap<number, readonly number[]>,
-    referenced: readonly number[] | null,
-  ): ComputedWays {
+  #computedWays(computed: ReadonlyMap<number, ComputedTarget>): ComputedWays {
     const count = this.plan.instructions.length;
     const files = new Map(this.plan.files.map((file, index) => [file.path, index]));
     const targets = new Map<number, { readonly node: number; readonly edge: string }>();
     const hubs: (readonly number[])[] = [];
-    // By the list of files, which `picks` shares; `null` for the files any other reference may name.
-    const hubOf = new Map<readonly number[] | null, number>();
-    const hub = (picked: readonly number[] | null): number => {
-      let node = hubOf.get(picked);
+    // By whether the target may start each file, then by its list of files, `null` for every file.
+    const hubOf = [
+      new Map<readonly number[] | null, number>(),
+      new Map<readonly number[] | null, number>(),
+    ] as const;
+    const hub = ({ files: picked, certain }: ComputedTarget): number => {
+      const known = hubOf[certain ? 1 : 0];
+      let node = known.get(picked);
       if (node === undefined) {
         node = count + hubs.length;
         hubs.push(
-          (picked ?? referenced ?? this.plan.files.map((_, file) => file)).map(
+          (picked ?? this.plan.files.map((_, file) => file)).map(
             (file) => this.plan.files[file]!.entryInstruction,
           ),
         );
-        hubOf.set(picked, node);
+        known.set(picked, node);
       }
       return node;
     };
     this.plan.instructions.forEach((instruction, index) => {
       if (instruction.kind !== "transfer" || !("value" in instruction.destination)) return;
-      const value = instruction.destination.value;
-      const path = writtenPath(value);
+      const path = writtenPath(instruction.destination.value);
       if (path !== undefined) {
         const file = typeof path === "string" ? files.get(path) : undefined;
         if (file !== undefined)
           targets.set(index, { node: this.plan.files[file]!.entryInstruction, edge: "transfer" });
         return;
       }
-      const node = hub((value.kind === "tagQuery" ? picks.get(index) : undefined) ?? null);
-      targets.set(index, { node, edge: "computed" });
+      const target = computed.get(index) ?? ANY_TARGET;
+      targets.set(index, { node: hub(target), edge: target.certain ? "transfer" : "computed" });
     });
-    return { targets, hubs, references: hubOf.get(null) };
+    return { targets, hubs };
   }
 
   /**
    * A `goto` to a file of declarations only ends nowhere, so it fails (V30 §29). The name pass reports one whose
    * `script(...)` names its file in text written out, and a tagged pick never picks such a file. For any other computed
-   * target, the files that the references of the project may name decide, which `referenced` gives, `null` for every
-   * file: a `goto` whose one such file runs nothing is an error (TSV057, with the name pass's text), and one that may
-   * lead to such a file is a warning (TSV074), which the runtime checks (TSR069). Like the name pass, this also reports
-   * a `goto` that never runs.
+   * target, the files that `targets` gives it decide, any file without one: a `goto` whose every such file runs nothing
+   * is an error (TSV057, for one file with the name pass's text), and one that may lead to such a file is a warning
+   * (TSV074), which the runtime checks (TSR069). Like the name pass, this also reports a `goto` that never runs.
    */
-  public computedGotoDiagnostics(referenced: () => readonly number[] | null): Diagnostic[][] {
+  public computedGotoDiagnostics(targets: () => ReadonlyMap<number, ComputedTarget>): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
-    // The same for every such goto, so found once: a file of declarations only it may lead to, and whether it must.
-    let found: { readonly file: number | undefined; readonly known: boolean } | undefined;
+    // By the list of files, which targets share: a file of declarations only among them, and whether all are.
+    const found = new Map<
+      readonly number[] | null,
+      { readonly file: number | undefined; readonly all: boolean }
+    >();
     this.plan.instructions.forEach((instruction, index) => {
       if (
         instruction.kind !== "transfer" ||
@@ -539,25 +1049,28 @@ export class Reachability {
         return;
       const value = instruction.destination.value;
       if (value.kind === "tagQuery" || writtenPath(value) !== undefined) return;
-      if (found === undefined) {
-        const files = referenced();
-        const known = knownReferenceFile(files);
-        found = {
-          file: (known !== undefined ? [known] : (files ?? [...this.plan.files.keys()])).find(
-            (file) => runsNothing(this.plan, file),
-          ),
-          known: known !== undefined,
+      const files = (targets().get(index) ?? ANY_TARGET).files;
+      let empty = found.get(files);
+      if (empty === undefined) {
+        const candidates = files ?? [...this.plan.files.keys()];
+        const nothing = candidates.filter((file) => runsNothing(this.plan, file));
+        empty = {
+          file: nothing[0],
+          all: files !== null && nothing.length > 0 && nothing.length === candidates.length,
         };
+        found.set(files, empty);
       }
-      if (found.file === undefined) return;
-      const path = this.plan.files[found.file]!.path;
+      if (empty.file === undefined) return;
+      const path = this.plan.files[empty.file]!.path;
       const span = planLocationToSourceSpan(value.span);
       diagnostics[this.#flow.fileOf(index)]!.push(
-        found.known
+        empty.all
           ? createDiagnostic(
               DiagnosticSeverity.Error,
               "TSV057",
-              declarationsOnlyMessage(path),
+              files!.length === 1
+                ? declarationsOnlyMessage(path)
+                : `Every file that this 'goto' can lead to, such as '${path}', holds declarations only and runs nothing, so going there would end nowhere. Make the 'goto' lead to a file that runs something.`,
               span,
             )
           : createDiagnostic(
@@ -576,13 +1089,18 @@ export class Reachability {
    * code, its top level and its functions, runs in that file, so a call there that can start the file is an error, also
    * where it cannot run itself, as a call of the file it stands in is an error anywhere. A global function runs in every
    * file whose code calls it where it can run, also through other global functions, but whether its call runs while
-   * such a file runs depends on the run: on its tests and defaults, and on the blocks that may end a wait first. So only
-   * the run decides there, as it does for a tagged pick or reference that the compiler cannot decide, and for code that
-   * a timer, media, or button block runs, which runs later, while the file that started it or a file it called runs, or
-   * after it. A call that may start a file its code runs in then is a warning (TSV073), and the runtime checks every call
-   * (TSR069). `calls` holds each call by its transfer instruction.
+   * such a file runs depends on the run: on its tests and defaults, and on the blocks that may end a wait first. It is an
+   * error only where a file's own code that can run calls a global function from which every way certainly makes that
+   * call, of that file alone (see {@link #certainCalls}). Else only the run decides, as it does for a tagged pick or
+   * reference that the compiler cannot decide, and for code that a timer, media, or button block runs, which runs later,
+   * while the file that started it or a file it called runs, or after it. A call that may start a file its code runs in
+   * then is a warning (TSV073), and the runtime checks every call (TSR069). `calls` holds each call by its transfer
+   * instruction, and `targets` where computed targets may lead.
    */
-  public runningFileDiagnostics(calls: ReadonlyMap<number, FileCall>): Diagnostic[][] {
+  public runningFileDiagnostics(
+    calls: ReadonlyMap<number, FileCall>,
+    targets: () => ReadonlyMap<number, ComputedTarget>,
+  ): Diagnostic[][] {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     if (calls.size === 0) return diagnostics;
     // A function or block by its id, a file's top level by `-1 - file`.
@@ -623,6 +1141,30 @@ export class Reachability {
         if (fact >= 0) runs(callee, fact);
         else runsLater(callee, -1 - fact);
     }
+    // The calls of a global function that every way through a file that runs certainly makes, which start that file.
+    let always: ReadonlySet<number> | undefined;
+    const alwaysMade = (): ReadonlySet<number> => {
+      const certain = new Set<number>();
+      for (const [index, call] of calls)
+        if (call.files?.length === 1 && call.starts(call.files[0]!) === true) certain.add(index);
+      const reaches = this.#certainCalls(certain, targets);
+      const found = new Set<number>();
+      this.plan.files.forEach(({ entryInstruction }, file) => {
+        const reach = reaches[entryInstruction];
+        if (
+          this.#reached[entryInstruction] === 1 &&
+          reach !== null &&
+          reach !== undefined &&
+          !reach.leaves &&
+          !reach.returns &&
+          reach.end !== null &&
+          reach.end !== SEVERAL &&
+          calls.get(reach.end)?.files?.[0] === file
+        )
+          found.add(reach.end);
+      });
+      return found;
+    };
     for (const [index, call] of calls) {
       const node = region(index);
       const files = running.get(node) ?? new Set<number>();
@@ -630,6 +1172,7 @@ export class Reachability {
       const global =
         definition?.global === true && definition.handler === null ? definition.name : null;
       let certain: number | undefined;
+      let made = false;
       let guarded: number | undefined;
       let possible: number | undefined;
       for (const file of call.files ?? [...files].sort((left, right) => left - right)) {
@@ -637,6 +1180,12 @@ export class Reachability {
         const starts = call.starts(file);
         if (starts === true && global === null) {
           certain = file;
+          break;
+        }
+        // The one file it starts, which runs this call on every way through it.
+        if (starts === true && (always ??= alwaysMade()).has(index)) {
+          certain = file;
+          made = true;
           break;
         }
         // In a global function, which is the only code with a certain target left here.
@@ -658,7 +1207,9 @@ export class Reachability {
           ? createDiagnostic(
               DiagnosticSeverity.Error,
               "TSV072",
-              calledFileMessage(path(certain), call.form),
+              made
+                ? `This call starts '${path(certain)}' while it is already running, because '${path(certain)}' always runs global function '${global!}' up to here. ${calledFileFix(path(certain), call.form, global)}`
+                : calledFileMessage(path(certain), call.form),
               call.span,
             )
           : createDiagnostic(
@@ -716,21 +1267,19 @@ export class Reachability {
    * names, and by any other target into each file that `targets` gives it (see {@link #computedWays}). The warning
    * stands on the file's first statement that runs where it stands; a file of declarations only runs nothing, so it gets
    * none. A file the host could not load is not in the plan, so when `unreadable` asks, `referencesRun` tells whether a
-   * target that leads into the files any script reference may name can run, which may start such a file too.
+   * computed target other than a tagged pick or a `script(...)` of a path written out can run, which may start such a
+   * file too.
    */
   public unstartedFileWarnings(
-    targets: () => {
-      readonly picks: ReadonlyMap<number, readonly number[]>;
-      readonly referenced: readonly number[] | null;
-    },
+    targets: () => ReadonlyMap<number, ComputedTarget>,
     unreadable: boolean,
   ): { readonly files: Diagnostic[][]; readonly referencesRun: boolean } {
     const diagnostics = this.plan.files.map((): Diagnostic[] => []);
     if (this.plan.files.length < 2 && !unreadable)
       return { files: diagnostics, referencesRun: false };
     const count = this.plan.instructions.length;
-    const { picks, referenced } = targets();
-    const ways = this.#computedWays(picks, referenced);
+    const computed = targets();
+    const ways = this.#waysOf(computed);
     const states = solveForward<true, string>(
       {
         nodeCount: count + ways.hubs.length,
@@ -763,10 +1312,12 @@ export class Reachability {
         ),
       );
     });
-    return {
-      files: diagnostics,
-      referencesRun: ways.references !== undefined && states[ways.references] !== null,
-    };
+    // A reference other than a `script(...)` of a path written out leads through a hub.
+    let referencesRun = false;
+    for (const [index, way] of ways.targets)
+      if (way.node >= count && computed.get(index)?.tagged !== true && states[index] !== null)
+        referencesRun = true;
+    return { files: diagnostics, referencesRun };
   }
 
   /** Whether an `exit` can run, which the project needs (TSV053, ADR 0022 §4.1). */
@@ -938,13 +1489,221 @@ export class Reachability {
  * whether a way reaches the code with a call waiting.
  */
 interface CallsWaiting {
+  readonly kind: "calls";
   readonly none: number | null;
   readonly hidden: number | null;
   readonly waiting: boolean;
 }
 
+/**
+ * Where a block starts, as far as its `end` needs (see `Reachability.#blockRuns`): whether such a place may have no
+ * call waiting, `unsafe`, and which blocks that may leave the code they interrupt stay there (see `StayingBlocks`).
+ */
+interface BlockStarts {
+  readonly unsafe: boolean;
+  readonly leavers: number | null;
+}
+
+/**
+ * Where the blocks that an instruction creates start, once they stay: one that may start at any boundary, `anywhere`,
+ * and one that starts once due, `due`, `null` where it never does.
+ */
+interface BlockRuns {
+  readonly kind: "runs";
+  readonly anywhere: BlockStarts;
+  readonly due: BlockStarts | null;
+}
+
+/** For a block where an instruction creates it: whether the instruction runs, and where the block starts then. */
+interface BlockGate {
+  readonly kind: "gate";
+  readonly created: boolean;
+  readonly run: BlockRuns | null;
+}
+
+/** The facts of the analysis of `Reachability.#blockRuns`, by its nodes. */
+type BlockState = CallsWaiting | BlockRuns | BlockGate;
+
+function joinBlockStates(left: BlockState, right: BlockState): BlockState {
+  if (left.kind === "calls" && right.kind === "calls")
+    return {
+      kind: "calls",
+      none: left.none ?? right.none,
+      hidden: left.hidden ?? right.hidden,
+      waiting: left.waiting || right.waiting,
+    };
+  if (left.kind === "runs" && right.kind === "runs") return joinRuns(left, right);
+  if (left.kind === "gate" && right.kind === "gate")
+    return {
+      kind: "gate",
+      created: left.created || right.created,
+      run:
+        left.run === null ? right.run : right.run === null ? left.run : joinRuns(left.run, right.run),
+    };
+  throw new Error("A node of the block analysis has states of two kinds.");
+}
+
+function joinRuns(left: BlockRuns, right: BlockRuns): BlockRuns {
+  return {
+    kind: "runs",
+    anywhere: joinStarts(left.anywhere, right.anywhere)!,
+    due: joinStarts(left.due, right.due),
+  };
+}
+
+function joinStarts(left: BlockStarts | null, right: BlockStarts | null): BlockStarts | null {
+  return left === null
+    ? right
+    : right === null
+      ? left
+      : {
+          unsafe: left.unsafe || right.unsafe,
+          leavers: joinLeavers(left.leavers, right.leavers),
+        };
+}
+
+function sameStarts(left: BlockStarts | null, right: BlockStarts | null): boolean {
+  return left === null || right === null
+    ? left === right
+    : left.unsafe === right.unsafe && left.leavers === right.leavers;
+}
+
+function sameBlockStates(left: BlockState, right: BlockState): boolean {
+  switch (left.kind) {
+    case "calls":
+      return (
+        right.kind === "calls" &&
+        left.none === right.none &&
+        left.hidden === right.hidden &&
+        left.waiting === right.waiting
+      );
+    case "runs":
+      return (
+        right.kind === "runs" &&
+        sameStarts(left.anywhere, right.anywhere) &&
+        sameStarts(left.due, right.due)
+      );
+    case "gate":
+      return (
+        right.kind === "gate" &&
+        left.created === right.created &&
+        (left.run === null || right.run === null
+          ? left.run === right.run
+          : sameBlockStates(left.run, right.run))
+      );
+  }
+}
+
+/**
+ * Blocks that stay at a place, as far as the checks need (see `Reachability.#blocksStayingAt`): those that may leave the
+ * code they interrupt, `leavers`, whether one that may start at any boundary stays, `anywhere`, and one that does both,
+ * `leavesAnywhere`.
+ */
+interface Stay {
+  readonly leavers: number | null;
+  readonly anywhere: boolean;
+  readonly leavesAnywhere: boolean;
+}
+
+const NO_STAY: Stay = { leavers: null, anywhere: false, leavesAnywhere: false };
+
+function joinStays(left: Stay, right: Stay): Stay {
+  if (left === NO_STAY) return right;
+  if (right === NO_STAY) return left;
+  return {
+    leavers: joinLeavers(left.leavers, right.leavers),
+    anywhere: left.anywhere || right.anywhere,
+    leavesAnywhere: left.leavesAnywhere || right.leavesAnywhere,
+  };
+}
+
+function sameStays(left: Stay, right: Stay): boolean {
+  return (
+    left.leavers === right.leavers &&
+    left.anywhere === right.anywhere &&
+    left.leavesAnywhere === right.leavesAnywhere
+  );
+}
+
+/** The blocks that stay at a place: those that belong to a file entry, `kept`, and those that outlive it. */
+interface BlocksStaying {
+  readonly kept: Stay;
+  readonly outliving: Stay;
+}
+
+/** Which blocks stay at each instruction (see `Reachability.#blocksStayingAt`). */
+interface StayingBlocks {
+  leavers(index: number, created?: boolean): number | null;
+  anywhere(index: number): boolean;
+  leavesAnywhere(index: number): boolean;
+}
+
+/** More than one block, or more than one copy of a block, that may leave the code it interrupts. */
+const SEVERAL_LEAVERS = -1;
+
+function joinLeavers(left: number | null, right: number | null): number | null {
+  return left === null ? right : right === null || left === right ? left : SEVERAL_LEAVERS;
+}
+
+/**
+ * The ways on which a block stays (see `Reachability.#staying`), by node: those of every block, `stays`, and those of
+ * a block that outlives its file entry only, `outlives`, each also backwards; and the returns of blocks.
+ */
+interface Staying {
+  readonly nodeCount: number;
+  readonly stays: readonly (readonly number[])[];
+  readonly outlives: readonly (readonly number[])[];
+  readonly staysBefore: readonly (readonly number[])[];
+  readonly outlivesBefore: readonly (readonly number[])[];
+  readonly blockReturns: readonly number[];
+}
+
 /** The start of the session, which runs `main.tease` with no call waiting. */
 const SESSION_START = -1;
+
+/**
+ * The instructions that never make execution wait, so that no timer, media, or button block starts at them unless
+ * another block left the code it interrupted there. Any other may.
+ */
+const NEVER_WAITS: ReadonlySet<InstructionPlan["instructions"][number]["kind"]> = new Set([
+  "declareGlobal",
+  "declareSpeaker",
+  "setDefaultSpeaker",
+  "copyPlayerProfile",
+  "enterScope",
+  "leaveScope",
+  "declareBinding",
+  "prepareReference",
+  "validateAssignmentTarget",
+  "assign",
+  "validateCallReceiver",
+  "evaluate",
+  "jumpIfFalse",
+  "jump",
+  "loopStart",
+  "loopControl",
+  "storeTemporary",
+  "prepareSaySpeaker",
+  "prepareSayContextualSpeaker",
+  "prepareSayText",
+  "prepareInteractionSpeaker",
+  "clearTemporary",
+  "clearTemporaries",
+  "callFunction",
+  "bindSuppliedParameter",
+  "beginFunctionDefaults",
+  "prepareParameterDefault",
+  "bindDefaultParameter",
+  "enterFunctionBody",
+  "returnValue",
+  "returnVoid",
+  "startTimer",
+  "showPermanentButton",
+  "goto",
+  "transfer",
+  "end",
+  "exit",
+]);
 
 /** Whether every way to code reaches it with no call waiting, also the ways that the compiler cannot follow. */
 function withoutCall(state: CallsWaiting): boolean {
