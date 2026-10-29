@@ -1,9 +1,12 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Consumers } from "../consumers.js";
-import { typeTags, writtenOf } from "../contract.js";
+import { termAt, typeTags, writtenOf } from "../contract.js";
 import { keep, keptSlice, type WorkLedger } from "../budget.js";
-import { keptKey, sortCost, type Definition } from "../definitions.js";
+import { keptKey, keptKeyBelow, sortCost, type Definition, type Key } from "../definitions.js";
+import { withoutEmpty } from "../exact-path.js";
 import { STOPPED } from "../items.js";
+import { propertyName } from "../program.js";
+import type { StoreStep } from "../result.js";
 import { unrestricted } from "../admission/permitted.js";
 import { markNames, storeMark, type MarkNames } from "./fresh.js";
 import { storeWarning } from "./warnings.js";
@@ -106,12 +109,51 @@ function resolve(
   // (what the marks name, the destination's, made once for all its stores: Codex r1's N1 on #1434)
   let names: MarkNames | undefined;
   const named = (): MarkNames =>
-    (names ??= markNames(walk, place, path, writtenOf(walk.pass.program.place(place).kind)));
+    (names ??= markNames(walk, place, path, stepsOf(walk, place, path)));
   for (const d of stores)
     // (a store this pass rejected has its error, which stands: A6)
     if (d.value === undefined || walk.admission.refused.has(d.uid)) continue;
     else if (requirement === null) storeMark(walk, d, path, named);
     else requiredMark(walk, d, requirement, named);
+}
+
+/**
+ * A destination's steps (`StoreStep`) by one walk down its path: a property by its name, an element step by the
+ * collection the written type there holds, its place's own or the copy's that the first prefix a copy decides retained
+ * (A4: the copied type is the place's below it), else by the kinds this pass decided or settled its prefix by (A3), else
+ * by its prefix's contract; each prefix's key made only while no written type names the steps, one step longer than the one before, so
+ * no step makes its prefix again (Astra's B1 on #1434).
+ */
+function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): StoreStep[] {
+  const work = walk.pass.program.work;
+  let term = writtenOf(walk.pass.program.place(place).kind);
+  let key: Key | null = null;
+  const steps: StoreStep[] = [];
+  for (let index = 0; index < path.length; index += 1) {
+    const step = path[index]!;
+    work.charge("checks");
+    if (term === null) {
+      key = key === null ? keptKey(work, place, keptSlice(work, path, 0, index)) : key;
+      term = walk.admission.copiedAt(key);
+    }
+    const above = term;
+    if (step === "entry") steps.push({ collection: "dict" });
+    else if (step !== "element") steps.push({ property: propertyName(step) });
+    else {
+      const kinds =
+        above !== null
+          ? typeTags(above)
+          : (walk.admission.kindsAt(key!) ??
+            withoutEmpty(walk.run(walk.pass.contract.contractOf(key!))).map((item) => item.tag));
+      steps.push({
+        collection: kinds.includes("dict") ? "dict" : kinds.includes("set") ? "set" : "list",
+      });
+    }
+    term = above === null ? null : termAt(above, [step]);
+    // (the next prefix's key from this one, while no written type names the steps below)
+    key = term === null && key !== null ? keptKeyBelow(work, key, [step]) : null;
+  }
+  return steps;
 }
 
 /** A store above a stop checked when the script runs against its destination's complete type, once. */

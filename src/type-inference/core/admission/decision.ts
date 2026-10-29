@@ -66,6 +66,7 @@ const NOTHING = {
   site: null,
   published: false,
   copied: null,
+  settled: null,
 } as const;
 
 /**
@@ -122,7 +123,21 @@ export function storeRequirement(
   const written = writtenOf(admission.pass.program.place(place).kind);
   const term = written === null ? null : permittedAt(written, path);
   if (term !== null) return term;
-  return admission.decisions.get(keptKey(admission.work, place, path))?.copied ?? null;
+  return copiedAt(admission, keptKey(admission.work, place, path));
+}
+
+/** The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`. */
+export function copiedAt(admission: Admission, key: Key): TypeTerm | null {
+  return admission.decisions.get(key)?.copied ?? null;
+}
+
+/** The kinds this pass's decision of a key decided it by, or A3 settled it by (`Decided.settled`), or `null`. */
+export function kindsAt(admission: Admission, key: Key): readonly ItemTag[] | null {
+  return (
+    admission.decided.get(key) ??
+    admission.decisions.get(key)?.settled?.map((item) => item.tag) ??
+    null
+  );
 }
 
 /**
@@ -308,7 +323,7 @@ function decision(
       family(kinds.map((item) => item.tag))
     ) {
       work.charge("checksSkipped");
-      return { ...NOTHING, ...none };
+      return { ...NOTHING, ...none, settled: kinds };
     }
   }
   const writtenTags = term === null ? null : typeTags(term);
@@ -391,6 +406,7 @@ function decision(
     site: deciderSite,
     published,
     copied,
+    settled: null,
   };
 }
 

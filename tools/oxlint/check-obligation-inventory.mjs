@@ -75,9 +75,17 @@ export const READS = new Map([
   ["cellSited", "C9's site for an item a store brings: a site, read"],
   ["compareLanded", "the member-answer oracle's comparison, a test seam inert outside it"],
   ["contributionSited", "C1's site for an item an add brings: a site, read"],
+  [
+    "copiedAt",
+    "the written type a copy decides a key by: a decision's answer, recorded by `decide`",
+  ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
   ["groups", "the places and paths `decide` decides: its inputs"],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
+  [
+    "kindsAt",
+    "the kinds a key's decision decided or settled it by: a decision's answer, recorded by `decide`",
+  ],
   ["literalChildren", "a literal's children at a step: syntax"],
   ["namedExternalSite", "where a store's named external data enters: a site, read"],
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],

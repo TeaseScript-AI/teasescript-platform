@@ -10,7 +10,9 @@ import {
 } from "./admission/boundaries.js";
 import {
   compareLanded,
+  copiedAt,
   decide,
+  kindsAt,
   decisionStopped,
   stopDecision,
   storeRequirement,
@@ -579,6 +581,14 @@ export class Admission {
 
   public storeRequirement(place: PlaceId, path: readonly string[]): TypeTerm | null {
     return storeRequirement(this, place, path);
+  }
+
+  public copiedAt(key: Key): TypeTerm | null {
+    return copiedAt(this, key);
+  }
+
+  public kindsAt(key: Key): readonly ItemTag[] | null {
+    return kindsAt(this, key);
   }
 
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {

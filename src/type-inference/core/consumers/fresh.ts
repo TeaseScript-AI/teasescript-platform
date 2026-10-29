@@ -1,4 +1,4 @@
-import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
+import type { PlaceId, SourceSite } from "../../graph.js";
 import { joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { termAt, writtenOf } from "../contract.js";
@@ -86,18 +86,18 @@ export interface MarkNames {
   readonly steps: readonly StoreStep[];
 }
 
-/** A destination's `MarkNames`, the steps by the written type `written` where it reaches them (`storeSteps`). */
+/** A destination's `MarkNames`, its steps given or the contract's above each element step (`storeSteps`). */
 export function markNames(
   walk: Consumers,
   place: PlaceId,
   path: readonly string[],
-  written: TypeTerm | null = null,
+  steps: readonly StoreStep[] = storeSteps(walk, place, path),
 ): MarkNames {
   return {
     label: targetName(walk.pass.program.place(place).label, path),
     into: placeText(walk, place, path),
     root: storeRoot(walk, place),
-    steps: storeSteps(walk, place, path, written),
+    steps,
   };
 }
 
