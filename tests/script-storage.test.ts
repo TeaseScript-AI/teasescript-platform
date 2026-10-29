@@ -757,7 +757,7 @@ test("dynamic non-string keys fail with TSR054 and the command's message", () =>
   );
   assert.equal(
     run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot.failure?.message,
-    "Cannot load with key true: storage keys must be text (string). If you meant to compare the loaded value, write 'let value: string? = load(\"k\", default: null)', then 'value == null'.",
+    "Cannot load with key true: storage keys must be text (string). If you meant to compare the loaded value, load the value into a variable first and compare the variable.",
   );
 });
 
