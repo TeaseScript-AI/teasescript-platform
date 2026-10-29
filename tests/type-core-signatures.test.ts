@@ -1266,6 +1266,47 @@ test("toJson proves an unchanged value once and sees what changed between calls"
     ),
     ["warning-runtime-check 2", "compile-error 4"],
   );
+  // (a guard below the value around one call, the other plain, in either source order: each call its own class, so
+  // its own verdict: the plain call the error, the guarded one the same whichever comes first, alike in all four modes,
+  // Codex r4 B1)
+  for (const [name, guard] of [
+    ["a null test", (body: string) => `if root.f0 != null { ${body} }`],
+    ["a type test", (body: string) => `if root.f0 is regex { ${body} }`],
+    ["a short-circuit", (body: string) => `if root.f0 != null and true { ${body} }`],
+  ] as const) {
+    const verdicts = [true, false].map((guardedFirst) => {
+      const inside = guard("let a = toJson(root)");
+      const plain = "let b = toJson(root)";
+      const source = `let root = {f0: /a/}\n${guardedFirst ? `${inside}\n${plain}` : `${plain}\n${inside}`}\nexit\n`;
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const once = (): string =>
+        JSON.stringify(
+          checkedResult(analyseCore(request), request)
+            .diagnostics.filter((d) => "rule" in d && d.rule.rule === "json")
+            .map((d) => `${d.class} ${source.slice(0, d.site.start).split("\n").length}`),
+        );
+      const modes = [false, true].flatMap((unshared) =>
+        [false, true].map((reversed) => {
+          const run = (): string =>
+            reversed
+              ? withSolverSeam({ reverseWorklist: true }, () =>
+                  withConsumerOrder((list) => [...list].reverse(), once),
+                )
+              : once();
+          return unshared ? withoutSharing(run) : run();
+        }),
+      );
+      assert.equal(new Set(modes).size, 1, `${name}: ${modes.join(" | ")}`);
+      const found: string[] = JSON.parse(modes[0]!);
+      const [inLine, plainLine] = guardedFirst ? [2, 3] : [3, 2];
+      const at = (line: number): string[] =>
+        found.filter((entry) => entry.endsWith(` ${line}`)).map((entry) => entry.split(" ")[0]!);
+      assert.deepEqual(at(plainLine), ["compile-error"], `${name}: the plain call`);
+      return at(inLine);
+    });
+    assert.deepEqual(verdicts[0], verdicts[1], `${name}: the guarded call in either source order`);
+  }
   // (copies of it, unchanged: each call its own warning)
   assert.deepEqual(
     sites(
