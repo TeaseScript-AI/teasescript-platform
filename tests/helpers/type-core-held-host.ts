@@ -14,17 +14,20 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
  * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5, TABLE
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
  * stand for, each carrying its obligation). A generated family over the holder (a list's element, an object's property,
- * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, an add,
- * an `addAll`), its depth, the consumer (an interpolation, a `say`, a repeat count, an arithmetic operand, a written
- * store) and the stores around the read (none, a replacement before it, one after it), each run with the values its own
- * predicate sorts (`needs` and the holder's literal), never the checker's; judged at every settled stop in four modes
- * (`heldProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
+ * a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's store, a
+ * parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll`), its depth, the consumer
+ * (an interpolation, a `say`, a repeat count, an arithmetic operand, a written store) and the stores around the read
+ * (none, a replacement before it, one after it), each run with the values its own predicate sorts (`needs` and the
+ * holder's literal), never the checker's; judged at every settled stop in four modes (`heldProblems`). CI runs anchors
+ * of it; the whole family is a worker run outside CI.
  */
 
 /** A holder at a depth: the lines that store the host data, the read's text, and what its literal requires of the data. */
 interface Holder {
   readonly lines: readonly string[];
   readonly read: string;
+  /** The lines the consumer's own stand in (a function's body, a loop's), where the read is there. */
+  readonly around?: (body: readonly string[]) => readonly string[];
   /** The type the literal around the host data gives it (a list's other element, a receiver's), or none. */
   readonly integer: boolean;
 }
@@ -105,6 +108,48 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     ],
     read: `xs${"[0]".repeat(depth - 1)}[1]`,
     integer: true,
+  }),
+  parameter: (depth) => ({
+    lines: [],
+    read: `v${fields(depth)}`,
+    around: (body) => [
+      "function show(v) {",
+      ...body.map((line) => `  ${line}`),
+      "}",
+      `show(${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)})`,
+    ],
+    integer: false,
+  }),
+  default: (depth) => ({
+    lines: [],
+    read: `v${fields(depth)}`,
+    around: (body) => [
+      `function show(v = ${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}) {`,
+      ...body.map((line) => `  ${line}`),
+      "}",
+      "show()",
+    ],
+    integer: false,
+  }),
+  loop: (depth) => ({
+    lines: [],
+    read: `e${fields(depth)}`,
+    around: (body) => [
+      `for e in [${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}] {`,
+      ...body.map((line) => `  ${line}`),
+      "}",
+    ],
+    integer: false,
+  }),
+  result: (depth) => ({
+    lines: [
+      "function build(n) {",
+      `  return ${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}`,
+      "}",
+      "let r = build(1)",
+    ],
+    read: `r${fields(depth)}`,
+    integer: false,
   }),
   addAll: (depth) => ({
     lines: [
@@ -194,7 +239,7 @@ export function heldFamily(few = false): HeldCase[] {
         if (few && holderName === "field" && consumerName === "repeat") continue;
         const held = holder(depth);
         const root = held.read.split(/[.[]/)[0]!;
-        const declared = held.lines.find((line) => line.startsWith(`let ${root} = `))!;
+        const declared = held.lines.find((line) => line.startsWith(`let ${root} = `)) ?? "";
         // (a replacement only of a declaration holding the host data: one of a store below it would drop the data)
         const variants =
           depth === 1 && !few && declared.includes("hostValue") ? VARIANTS : ["plain"];
@@ -204,14 +249,18 @@ export function heldFamily(few = false): HeldCase[] {
             ...held.lines,
             ...(variant === "overwritten" ? [replacement] : []),
             'say "BEFORE"',
-            ...consumer.lines(held.read),
+            ...(held.around ?? ((body) => body))(consumer.lines(held.read)),
             ...(variant === "laterStore" ? [replacement] : []),
             'say "AFTER"',
             "exit",
           ];
-          // (a host property's object is judged at the analysis: the runs' globals are plain values; an add is outside
-          // the candidate route)
-          const slice = consumer.slice && !["member", "add", "addAll"].includes(holderName);
+          // (a host property's object is judged at the analysis: the runs' globals are plain values; an add, a function
+          // and a loop are outside the candidate route)
+          const slice =
+            consumer.slice &&
+            !["member", "add", "addAll", "parameter", "default", "loop", "result"].includes(
+              holderName,
+            );
           cases.push({
             name: `${holderName}-${depth}-${consumerName}-${variant}`,
             source: `${lines.join("\n")}\n`,

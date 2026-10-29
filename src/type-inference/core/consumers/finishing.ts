@@ -489,7 +489,10 @@ function stepFrontier(
   return at;
 }
 
-/** A read's frontier: its binding's at its target path, a projection's its owner's one step below; `NOTHING` else. */
+/**
+ * A read's frontier: its binding's at its target path, a call's its function's result's, a projection's its owner's one
+ * step below; `NOTHING` else.
+ */
 function readFrontier(walk: Consumers, value: PlaceId, depth: number): HostFrontier {
   const { program } = walk.pass;
   const reads = frontiersOf(walk).reads;
@@ -506,9 +509,16 @@ function readFrontier(walk: Consumers, value: PlaceId, depth: number): HostFront
   let found = reads.get(at);
   if (found === undefined) {
     program.work.charge("checks");
+    // (a binding's read at its target path; a call's result its function's result place)
     const binding = program.occurrenceOf.get(at);
     const target = binding === undefined ? null : program.targetRoot(binding);
-    found = target === null ? NOTHING : locate(walk, target.root, target.path, depth);
+    const result = walk.resultOfCall.get(at);
+    found =
+      target !== null
+        ? locate(walk, target.root, target.path, depth)
+        : result !== undefined
+          ? locate(walk, result, [], depth)
+          : NOTHING;
     reads.set(at, found);
   }
   for (const next of chain.reverse()) {
