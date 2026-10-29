@@ -397,6 +397,8 @@ export class Parser {
     Expression,
     { readonly diagnostic: Diagnostic; readonly calendar: string; readonly spaced: boolean }
   >();
+  /** The code that the error of a number with a word taken for a unit offers where its place proves it (`adviseDuration`). */
+  public readonly mistakenUnitFixes = new WeakMap<Expression, () => void>();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   public readonly shared: SharedParse;
 

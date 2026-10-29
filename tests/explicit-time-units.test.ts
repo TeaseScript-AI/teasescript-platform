@@ -181,9 +181,10 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
   // A word taken for a unit names the unit meant and every unit, also a unit or such a word with capitals. Every word at
   // one place, and four words at every place a unit stands, after a number with and without a space and after a name.
-  // Every amount that a unit follows, at two places. A number with the unit is shown only where it compiles pasted in
-  // place of the number and the word; where the statement has another error, as after a range, the fix is in words.
-  // Whether another amount, such as a name, takes the unit only the type checker knows, so it gets words.
+  // Every amount that a unit follows, at two places. A number with the unit is shown only where its place takes an exact
+  // duration, and it compiles pasted in place of the number and the word there; where the place is not known to take one,
+  // such as an operand or a written type without 'duration', or the statement has another error, as after a range, the
+  // fix is in words. Whether another amount, such as a name, takes the unit only the type checker knows, so it gets words.
   const units =
     "The units of time are ms, s, min, h, d, and w. After 'calendar', the units are d, w, mo, and y.";
   const names =
@@ -206,24 +207,35 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     ["Sec", ["s", "seconds"]],
     ["M", ["min", "minutes"]],
   ] as const);
-  // Each place, and the other errors of its statement: none, or the range's and another one.
+  // Each place, the other errors of its statement (none, or the range's and another one), and whether it takes an exact
+  // duration.
   const places = [
-    ["wait #", []],
-    ["timer #", []],
-    ["let x = #", []],
-    ['say "x", #', []],
-    ['say "${#}"', []],
-    ["let x = # + 1 s", []],
-    ["timer(duration: #)", []],
+    ["wait #", [], true],
+    ["timer #", [], true],
+    ["let x = #", [], true],
+    ['say "x", #', [], true],
+    ['say "${#}"', [], true],
+    ["timer(duration: #)", [], true],
+    ["let d: duration = #", [], true],
+    ["let d: duration | calendarDuration = #", [], true],
+    ["let x = -#", [], true],
+    ["let x = # + 1 s", [], false],
+    ["let x = # + 1", [], false],
+    ["let value: integer = #", [], false],
+    ["let value: number = #", [], false],
+    ["let d: calendarDuration = #", [], false],
+    ["say f(#)", [], false],
+    ["wait -#", [], false],
     [
       "wait 1..#",
       [
         "A unit after a range belongs to its end alone. Put the range in parentheses, with the unit after the closing parenthesis.",
       ],
+      true,
     ],
-    ["let x = [#, 1 s", ["Expected ']' after the list literal."]],
+    ["let x = [#, 1 s", ["Expected ']' after the list literal."], true],
     // The head of a media cue, which is no statement on its own, where the fix still compiles.
-    ['playAudio "a.mp3" {\n  beforeEnd # {\n    say "cue"\n  }\n}', []],
+    ['playAudio "a.mp3" {\n  beforeEnd # {\n    say "cue"\n  }\n}', [], true],
   ] as const;
   const cases = [
     ...[...meant.keys()].map((word) => [places[0], "5", " ", word] as const),
@@ -234,19 +246,19 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
         [place, "n", " ", word] as const,
       ]),
     ),
-    ...[places[0], places[5]].flatMap((place) =>
+    ...[places[0], places[2]].flatMap((place) =>
       ["(n)", "p.delay", "f(1)", "xs[0]", "(n + 1)"].map(
         (amount) => [place, amount, " ", "mins"] as const,
       ),
     ),
   ];
-  for (const [[place, others], amount, space, word] of cases) {
+  for (const [[place, others, exact], amount, space, word] of cases) {
     const [unit, name] = meant.get(word)!;
     const source = place.replace("#", `${amount}${space}${word}`);
     const why = word.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
     const lowercase = word === word.toLowerCase() ? "" : " Units are written in lowercase.";
     const offered = `${amount} ${unit}`;
-    const shown = others.length === 0 && /^[\d.]+$/u.test(amount);
+    const shown = exact && others.length === 0 && /^[\d.]+$/u.test(amount);
     const fix = shown ? `write '${offered}'` : `use the unit ${unit}`;
     assert.deepEqual(
       compileSource(`${names}${source}\nexit`).diagnostics.map(({ message }) => message),
@@ -258,18 +270,21 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
       assert.notEqual(compileSource(`${names}${pasted}\nexit`).plan, null, pasted);
     }
   }
-  // A name with the unit can fail, by the name's value or the place, so the words are needed there.
-  for (const source of [
-    'let n = "five"\nwait n #',
-    "let n = 2 s\nwait n #",
-    "let n = 2\nlet value: integer = n #",
-  ]) {
+  // A name with the unit can fail by its value, and a number by its place, so the words are needed there.
+  for (const [source, word, unit, name] of [
+    ['let n = "five"\nwait n #', "mins", "min", "minutes"],
+    ["let n = 2 s\nwait n #", "mins", "min", "minutes"],
+    ["let n = 2\nlet value: integer = n #", "mins", "min", "minutes"],
+    ["let value: integer = 5 #", "SEC", "s", "seconds"],
+    ["let value: number = 5 #", "HRS", "h", "hours"],
+    ["let value = 5 # + 1", "M", "min", "minutes"],
+  ] as const) {
     assert.match(
-      compileSource(`${source.replace("#", "mins")}\nexit`).diagnostics[0]!.message,
-      /For minutes, use the unit min\./u,
+      compileSource(`${source.replace("#", word)}\nexit`).diagnostics[0]!.message,
+      new RegExp(`For ${name}, use the unit ${unit}\\.`, "u"),
       source,
     );
-    assert.equal(compileSource(`${source.replace("#", "min")}\nexit`).plan, null, source);
+    assert.equal(compileSource(`${source.replace("#", unit)}\nexit`).plan, null, source);
   }
   // After a say mode or skip word, a name that is such a word is the text, as a name that is a unit is.
   for (const word of ["hr", "S", "mins"])
