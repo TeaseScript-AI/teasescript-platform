@@ -358,6 +358,23 @@ export function* expectedOf(
   if (written === null) return null;
   const term = termAt(written, rest);
   const fallback = c.kind === "load" ? (c.fallback ?? undefined) : defaultOf(c);
+  // V30 §13 (JSON): below a written `object` the value keeps every key, and has each one its default names, of the
+  // default's type, where its reader takes a missing or misfitting key from the default: JSON's at every level, a stored
+  // value's in its root object and the objects nested in it, never in an element of a collection, which a stored value
+  // keeps as it is when it fits (`matchesValueType`). There the default answers (#1436; the lead's ruling on r2's B1)
+  if (
+    term === null &&
+    fallback !== undefined &&
+    (c.kind !== "load" || !rest.includes("element")) &&
+    belowObject(written, rest)
+  ) {
+    const named = withoutEmpty(yield* contract.defaultKinds(fallback, rest));
+    if (
+      named.length > 0 &&
+      !named.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0)
+    )
+      return [...named, ...emptyAt(rest)];
+  }
   const nullDefault =
     rest.length === 0 && fallback !== undefined && (yield* contract.onlyNull(fallback)).length > 0;
   return [
@@ -367,6 +384,17 @@ export function* expectedOf(
     ...(nullDefault ? [makeItem("null", null, { cert: "pos" })] : []),
     ...emptyAt(rest),
   ];
+}
+
+/** Whether a level of `written` above `rest`'s end admits any object (`object`, `object?`), which keeps every key. */
+function belowObject(written: TypeTerm, rest: readonly string[]): boolean {
+  let at: TypeTerm | null = written;
+  for (const step of rest) {
+    if (typeKinds(at).includes("object")) return true;
+    at = termAt(at, [step]);
+    if (at === null) return false;
+  }
+  return false;
 }
 
 /** The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`), on the default's contract. */

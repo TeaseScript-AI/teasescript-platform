@@ -10,13 +10,14 @@ import { inMode, MODES, type Mode, publishedRoute } from "./helpers/type-core-or
 import { runGlobals } from "./helpers/type-core-route.js";
 
 /*
- * #1436 (ADR 0021 1.4, 1.8, 1.10): an object's type, written or tested, says nothing of its properties. A read or store of
- * a property the object may lack owes its member warning and check at the access, an object literal's own property
- * proves itself, and a property no source has is an error. The family crosses where the receiver comes from, how it
- * reaches the access and the property's name (a plain one, and names a collection's steps also use), for a read and a
- * store. Each source's decision is judged in the four modes. The candidate's plan of each source it takes runs with an
- * empty host object, where the access stops with TSR017 after the first `say` and before the next, and with each present
- * value, which the read says unchanged (`null` included). The host input stays unchanged.
+ * #1436 (ADR 0021 1.4, 1.8, 1.10): an object's type, written or tested, says nothing of its properties. A read or store
+ * of a property the object may lack owes its member warning and check at the access. An object literal's own property
+ * proves itself, and so does one a typed load's or parse's default names below a written `object` (V30 §13). A property
+ * no source has is an error. The family crosses where the receiver comes from, how it reaches the access and the
+ * property's name (a plain one, and names a collection's steps also use), for a read and a store. Each source's
+ * decision is judged in the four modes. The candidate's plan of each source it takes runs with an empty host object,
+ * where the access stops with TSR017 after the first `say` and before the next, and with each present value, which the
+ * read says unchanged (`null` included). The host input stays unchanged.
  */
 
 interface Origin {
@@ -25,8 +26,10 @@ interface Origin {
   readonly declare: (name: string) => string;
   /** Where the source runs: the candidate takes no type test, so those sources are judged by their decision alone. */
   readonly guarded?: true;
-  /** What a read of a literal's property says, where the host's object does not decide it. */
+  /** What a read of a literal's or a default's property says, where the host's object does not decide it. */
   readonly says?: string;
+  /** Whether a run reads the property of a default that lacks it, whatever the host gives. */
+  readonly defaulted?: true;
 }
 
 const ORIGINS: Readonly<Record<string, Origin>> = {
@@ -44,9 +47,26 @@ const ORIGINS: Readonly<Record<string, Origin>> = {
     declare: () => "let seed = hostValue\n",
   },
   "host data": { absent: "possible", declare: () => "let seed = hostValue\n" },
-  "a written object a load gives": {
+  // (no value is stored and the JSON is `{}`, so each run takes the default, V30 §13: it names the property or not)
+  "a written object a load gives, its default without the property": {
     absent: "possible",
-    declare: () => 'let seed: object = load("seed", default: {})\n',
+    declare: () => 'let seed: object = load("seed", default: {other: 1})\n',
+    defaulted: true,
+  },
+  "a written object a load gives, its default with the property": {
+    absent: "never",
+    declare: (name) => `let seed: object = load("seed", default: {${name}: "kept"})\n`,
+    says: "kept",
+  },
+  "a written object a parse gives, its default without the property": {
+    absent: "possible",
+    declare: () => 'let seed: object = fromJson("{}", default: {other: 1})\n',
+    defaulted: true,
+  },
+  "a written object a parse gives, its default with the property": {
+    absent: "never",
+    declare: (name) => `let seed: object = fromJson("{}", default: {${name}: "kept"})\n`,
+    says: "kept",
   },
   "a literal with the property, null": {
     absent: "never",
@@ -130,8 +150,8 @@ const FAMILY: readonly Case[] = (() => {
 })();
 
 /** The decision at the access: the diagnostics there as (class, kind, obligation kind), the checks there by kind. */
-function decision(c: Case) {
-  const request = coreRequest([{ path: "main.tease", source: c.source }]);
+function decision(c: Omit<Case, "origin" | "property" | "use">, globals = ["hostValue"]) {
+  const request = coreRequest([{ path: "main.tease", source: c.source }], globals);
   assert.ok(request !== null, `${c.name}: parses and resolves`);
   const answers = analyseCore(request);
   const checked = checkedResult(answers, request);
@@ -189,7 +209,6 @@ test("the access stops an object without the property before the next effect and
       continue;
     }
     assert.ok(plan !== null && plan !== "outside", `${c.name}: the candidate plans it`);
-    const loads = c.source.includes("load(");
     for (const [shown, value] of [["(absent)", undefined] as const, ...present]) {
       const host: SerializableRuntimeValue = {
         kind: "object",
@@ -201,8 +220,8 @@ test("the access stops an object without the property before the next effect and
       const said = result.said.map(({ text }) => text);
       if (!isDeepStrictEqual(host, input))
         wrong.push(`${c.name}, ${shown}: the host input changed`);
-      // (the literal's property, and the load's default `{}`, whatever the host gives)
-      const lacks = c.origin.absent === "possible" && (value === undefined || loads);
+      const lacks =
+        c.origin.absent === "possible" && (value === undefined || c.origin.defaulted === true);
       const expected = lacks
         ? { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }
         : {
@@ -223,4 +242,106 @@ test("the access stops an object without the property before the next effect and
   }
   assert.deepEqual(wrong, []);
   assert.ok(ran > 0);
+});
+
+/**
+ * The lead's ruling on Codex r2's B1 (#1436): a typed load's or parse's default proves a property only where its reader
+ * takes a missing key from the default. JSON's reader does at every level; a stored value's in its root object, never in
+ * an element of a collection, which it keeps as it is when it fits. Each source is read and stored, with the script's
+ * storage or the JSON holding an element or an object without the property, in the four modes and run.
+ */
+const READERS: readonly (readonly [
+  name: string,
+  declare: string,
+  receiver: string,
+  absent: "possible" | "never",
+  read: { readonly stored: SerializableRuntimeValue } | { readonly json: string },
+])[] = [
+  [
+    "a stored list's element",
+    'let seed: object[] = load("seed", default: [{n: 1}])',
+    "seed[0]",
+    "possible",
+    { stored: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+  ],
+  [
+    "an element of a stored object's list",
+    'let seed: object = load("seed", default: {items: [{n: 1}]})',
+    "seed.items[0]",
+    "possible",
+    {
+      stored: {
+        kind: "object",
+        properties: [
+          { name: "items", value: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+        ],
+      },
+    },
+  ],
+  [
+    "a stored root object",
+    'let seed: object = load("seed", default: {n: 1})',
+    "seed",
+    "never",
+    { stored: { kind: "object", properties: [] } },
+  ],
+  [
+    "a JSON list's element",
+    "let seed: object[] = fromJson(hostText, default: [{n: 1}])",
+    "seed[0]",
+    "never",
+    { json: "[{}]" },
+  ],
+  [
+    "an element of a JSON object's list",
+    "let seed: object = fromJson(hostText, default: {items: [{n: 1}]})",
+    "seed.items[0]",
+    "never",
+    { json: '{"items": [{}]}' },
+  ],
+];
+
+test("a typed load's or parse's default proves a property only where its reader fills it from the default (#1436)", () => {
+  const wrong: string[] = [];
+  const globals = ["hostValue", "hostText"];
+  for (const [name, declare, receiver, absent, read] of READERS)
+    for (const use of ["read", "store"] as const) {
+      const access = `${receiver}.n`;
+      const source =
+        `${declare}\nsay "BEFORE"\n` +
+        (use === "read"
+          ? `let observed = ${access}\nsay observed\n`
+          : `${access} = 2\nsay "STORED"\n`) +
+        'say "AFTER"\nexit\n';
+      const start = source.indexOf(access);
+      const c = { name: `${name}, a ${use}`, source, start, end: start + access.length };
+      const [first, ...others] = MODES.map((mode: Mode) =>
+        inMode(mode, () => decision(c, globals)),
+      );
+      if (others.some((other) => other.record !== first!.record))
+        wrong.push(`${c.name}: the modes differ`);
+      const { diagnostics, checks } = first!;
+      const owed = isDeepStrictEqual(checks, ["null-check"]);
+      if (
+        absent === "possible"
+          ? !owed || diagnostics.length !== 1
+          : diagnostics.length > 0 || checks.length > 0
+      )
+        wrong.push(`${c.name}: ${JSON.stringify({ diagnostics, checks })}`);
+      const { plan } = publishedRoute([{ path: "main.tease", source }], globals);
+      assert.ok(plan !== null && plan !== "outside", `${c.name}: the candidate plans it`);
+      const result = runGlobals(
+        plan,
+        { hostValue: 0, hostText: "json" in read ? read.json : "{}" },
+        "stored" in read ? [{ key: "seed", value: structuredClone(read.stored) }] : undefined,
+      );
+      const said = result.said.map(({ text }) => text);
+      const expected =
+        absent === "possible"
+          ? { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }
+          : { failure: null, said: ["BEFORE", use === "read" ? "1" : "STORED", "AFTER"] };
+      if (!isDeepStrictEqual({ failure: result.failure, said }, expected))
+        wrong.push(`${c.name}, run: ${result.failure} ${JSON.stringify(said)}`);
+    }
+  assert.deepEqual(wrong, []);
 });
