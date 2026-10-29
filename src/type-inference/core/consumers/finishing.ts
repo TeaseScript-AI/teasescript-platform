@@ -261,11 +261,14 @@ interface StoreNode {
  * decision's frontier is, `cheapFrontier`): the values there whose literal cells or carriers' operands a step enters
  * (admission's store walk, `expand`), the node of the place's stored paths there, the frontiers of what the copies
  * standing there copy, and the host data standing there or above it. One holding nothing but one copy's is that copy's,
- * so a chain of copies read deep is made once per link.
+ * so a chain of copies read deep is made once per link, unless its place has a decision that stopped: then the frontier
+ * keeps its place and path, so a step below that decision reads the stop alone (r4.186).
  */
 interface HostFrontier {
   readonly tasks: Expansion[];
   readonly node: StoreNode | null;
+  /** Its place and path where the place has a decision that stopped, else `null`. */
+  readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
   readonly copies: HostFrontier[];
   host: IngressNode | undefined;
   readonly steps: Map<string, HostFrontier>;
@@ -277,25 +280,40 @@ interface HostFrontiers {
   readonly roots: Map<PlaceId, HostFrontier>;
   readonly reads: Map<PlaceId, HostFrontier>;
   readonly held: Map<HostFrontier, IngressNode | null>;
+  /** The places with a decision that stopped (`Contract.stop`). */
+  readonly stopped: ReadonlySet<PlaceId>;
 }
 
 const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
 
-/** Whether a frontier holds nothing of its own beside its copies' frontiers: no value a step enters, no store below. */
+/**
+ * Whether a frontier holds nothing of its own beside its copies' frontiers: no value a step enters, no store below, no
+ * decision of its place that stopped.
+ */
 function holdsOnlyCopies(at: HostFrontier): boolean {
-  return at.tasks.length === 0 && at.host === undefined && (at.node?.children.size ?? 0) === 0;
+  return (
+    at.tasks.length === 0 &&
+    at.host === undefined &&
+    (at.node?.children.size ?? 0) === 0 &&
+    at.at === null
+  );
 }
 
 const NOTHING: HostFrontier = {
   tasks: [],
   node: null,
+  at: null,
   copies: [],
   host: undefined,
   steps: new Map(),
 };
 
-function frontier(node: StoreNode | null, host: IngressNode | undefined): HostFrontier {
-  return { tasks: [], node, copies: [], host, steps: new Map() };
+function frontier(
+  node: StoreNode | null,
+  host: IngressNode | undefined,
+  at: HostFrontier["at"] = null,
+): HostFrontier {
+  return { tasks: [], node, at, copies: [], host, steps: new Map() };
 }
 
 /** The walk's frontiers, its places' stored paths made once from the definitions (each store, add and transfer). */
@@ -328,7 +346,8 @@ function frontiersOf(walk: Consumers): HostFrontiers {
         d.kind === "add" ? keptSteps(program.work, path, ["element"]) : path,
       ).stores.push({ d, elements: d.kind === "add" && d.how === "elements" });
     }
-  found = { places, roots: new Map(), reads: new Map(), held: new Map() };
+  const stopped = new Set(walk.pass.contract.stoppedKeys().map((key) => key.place));
+  found = { places, roots: new Map(), reads: new Map(), held: new Map(), stopped };
   hostFrontiers.set(walk, found);
   return found;
 }
@@ -416,7 +435,11 @@ function locate(
   const frontiers = frontiersOf(walk);
   let at = frontiers.roots.get(place);
   if (at === undefined) {
-    at = frontier(frontiers.places.get(place) ?? null, undefined);
+    at = frontier(
+      frontiers.places.get(place) ?? null,
+      undefined,
+      frontiers.stopped.has(place) ? { place, path: [] } : null,
+    );
     frontiers.roots.set(place, at);
     enterStores(walk, at, depth);
     if (holdsOnlyCopies(at) && at.copies.length === 1) frontiers.roots.set(place, at.copies[0]!);
@@ -435,7 +458,16 @@ function stepFrontier(
   if (from === NOTHING || depth > NESTING_LIMIT) return NOTHING;
   const known = from.steps.get(step);
   if (known !== undefined) return known;
-  const at = frontier(from.node?.children.get(step) ?? null, from.host);
+  // (below a decision of the place that stopped, the stop alone)
+  const below =
+    from.at === null
+      ? null
+      : { place: from.at.place, path: keptSteps(walk.pass.program.work, from.at.path, [step]) };
+  if (below !== null && walk.admission.decisionStopped(below.place, below.path)) {
+    from.steps.set(step, NOTHING);
+    return NOTHING;
+  }
+  const at = frontier(from.node?.children.get(step) ?? null, from.host, below);
   from.steps.set(step, at);
   const cells: Expansion[] = [];
   for (const task of from.tasks)
@@ -446,8 +478,8 @@ function stepFrontier(
   enterValues(walk, at, cells, depth);
   enterStores(walk, at, depth);
   for (const copy of from.copies) {
-    const below = stepFrontier(walk, copy, step, depth + 1);
-    if (below !== NOTHING) at.copies.push(below);
+    const copied = stepFrontier(walk, copy, step, depth + 1);
+    if (copied !== NOTHING) at.copies.push(copied);
   }
   if (holdsOnlyCopies(at) && at.copies.length <= 1) {
     const same = at.copies[0] ?? NOTHING;
