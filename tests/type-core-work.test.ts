@@ -391,8 +391,10 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * object, directly or each in an object, each member read again at each property (#1304); k named bindings of
  * loads, of host reads or of alike objects beside one, each binding read again at each (#1313); and a run of k joined
  * lists ending in a list of another type, the class of each join naming the joins below it in full, also with each
- * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them (#1357).
- * A read of host data compiles with its runtime check.
+ * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them; and
+ * two peers of one short class around a wide operand without writers or a deep one with a single writer, read in k
+ * lists, each list's writer walk entering the operand again (#1357). A read of host data compiles with its runtime
+ * check.
  */
 const PRODUCTS: readonly (WorkFamily & {
   readonly counter: WorkCounter;
@@ -788,6 +790,37 @@ const PRODUCTS: readonly (WorkFamily & {
             "let xs: (integer | string)[] = [0]",
             `let s = ${joined} + ["x"]`,
             "say s.length",
+            "exit",
+          ].join("\n"),
+        },
+      ];
+    },
+  },
+  {
+    name: "peers-over-operands-without-writers",
+    measures:
+      "#1357: a peer's writer walk entering only the parts that hold a role (Codex r1 on #1417)",
+    counter: "invSteps",
+    outcome: "warning-runtime-check",
+    program: (k) => {
+      const wide = `{v: max(${many(k, () => "f()", ", ")})}`;
+      const deep = `{v: ${"max(".repeat(k)}x${", f())".repeat(k)}}`;
+      return [
+        {
+          path: "main.tease",
+          source: [
+            "function f { return 1 }",
+            "let x = 1",
+            `let wideLeft = ${wide}`,
+            `let wideRight = ${wide}`,
+            `let deepLeft = ${deep}`,
+            `let deepRight = ${deep}`,
+            many(
+              k,
+              (i) =>
+                `let xs${i} = [wideLeft, wideRight]\nlet ys${i} = [deepLeft, deepRight]\n` +
+                `let n${i}: integer = xs${i}[0].v + ys${i}[0].v`,
+            ),
             "exit",
           ].join("\n"),
         },
