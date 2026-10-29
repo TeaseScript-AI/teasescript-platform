@@ -20,7 +20,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { plannedStores, runGlobals } from "./helpers/type-core-route.js";
-import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
+import { inMode, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -191,18 +191,11 @@ function runsOf(c: WrittenCase, plan: InstructionPlan | null | "outside") {
  * source-order modes planned it.
  */
 function observeModes(c: WrittenCase) {
-  const inMode = (reverse: boolean, shared: boolean) => {
-    const run = () => observe(c, c.executable || !reverse);
-    const mode = () => (shared ? run() : withoutSharing(run));
-    return reverse
-      ? withSolverSeam({ reverseWorklist: true }, () =>
-          withConsumerOrder((list) => [...list].reverse(), mode),
-        )
-      : mode();
-  };
+  const observeIn = (reversed: boolean, shared: boolean) =>
+    inMode({ reversed, unshared: !shared }, () => observe(c, c.executable || !reversed));
   // (each order's modes, the sharing on and off)
-  const forward = [inMode(false, true), inMode(false, false)];
-  const reversed = [inMode(true, true), inMode(true, false)];
+  const forward = [observeIn(false, true), observeIn(false, false)];
+  const reversed = [observeIn(true, true), observeIn(true, false)];
   const orders = [
     ["source order", forward],
     ["reversed", reversed],

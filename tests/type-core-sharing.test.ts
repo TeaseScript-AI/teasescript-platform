@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -32,7 +30,7 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
-import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
+import { inOrder, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
@@ -367,16 +365,6 @@ function prepared(program: Program): Prepared {
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
   return { program, request, bindings };
-}
-
-/** A computation in the source order, or in the reversed consumer and solver orders. */
-function inOrder<T>(reversed: boolean, callback: () => T): T {
-  return reversed
-    ? withConsumerOrder(
-        (list) => [...list].reverse(),
-        () => withSolverSeam({ reverseWorklist: true }, callback),
-      )
-    : callback();
 }
 
 /**

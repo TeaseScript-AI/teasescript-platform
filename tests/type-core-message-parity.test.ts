@@ -18,6 +18,7 @@ import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
 import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
+import { sentences } from "./helpers/type-core-oracles.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
 type Compared = Exclude<CoreDiagnostic, { readonly kind: "budget" }>;
@@ -626,8 +627,6 @@ const PORTS: readonly Port[] = [
 /** The review's test for a sentence that names a fix (`message-review-2026-10-27/compare.mjs`): every one is ported. */
 const FIX =
   /^(Round|Use|Put|Compare|Check|Declare|Write|Add|Select|Its |Remove|Call|Store|Give|Copy|Index|To |Convert|Move|Pass|Show|Turn|Test|Assign|Make|Keep|Start|Set|Load|Save|Wrap|Split|Read|Divide|Combine|Subtract|Join|Did you mean)|\bas in\b|\bsuch as\b|\bdeclare it\b/;
-
-const sentences = (text: string): string[] => text.split(/(?<=[.?])\s+(?=[A-Z'"])/);
 
 /** A message's fix sentences: each after its first sentence that names a fix, as the review found them. */
 function fixes(message: string): string[] {

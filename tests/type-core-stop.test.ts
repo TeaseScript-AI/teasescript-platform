@@ -21,9 +21,9 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { keptErrors, stopIdentity } from "./helpers/type-core-oracles.js";
 import {
   NAMED_EXCEPTIONS,
-  stopIdentity,
   stopProblems,
   type Globals,
   type StopRun,
@@ -1443,26 +1443,11 @@ test("a stop's unchecked region gives words for a fix's code in it, never code i
 });
 
 /**
- * An error as a stop keeps it: the diagnostic and its message's first sentence, without the facts its fix's code forms
- * read (`expects`, `present`). A stop proves nothing of a fix's code, so the fix after that sentence may be words
- * (TABLE r4.162).
- */
-const kept = (answers: Answers, source: string) => {
-  const text = messageSource([source], answers.diagnostics);
-  return answers.diagnostics
-    .filter((d) => d.class === "compile-error")
-    .map((d) => ({
-      ...stopIdentity(d),
-      message: coreMessage(d, text).split(/(?<=[.?])\s+(?=[A-Z'"])/)[0],
-    }));
-};
-
-/**
  * Before admission settled, a written store's literal parts take their collections from the written type and their
  * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
  * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument
  * (TABLE r4.122 (d)). At a stop in the setup and at the last before admission settled, each error, its site, its rule's
- * steps and its first sentence equal the unstopped ones (`kept`; the analysis: a written set or dict is outside the
+ * steps and its first sentence equal the unstopped ones (`keptErrors`; the analysis: a written set or dict is outside the
  * candidate route).
  */
 test("a stop before admission settled keeps a written store's errors whole, their collections and sites", () => {
@@ -1475,7 +1460,7 @@ test("a stop before admission settled keeps a written store's errors whole, thei
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);
-    const errors = (answers: Answers) => kept(answers, source);
+    const errors = (answers: Answers) => keptErrors(answers, source);
     const unstopped = errors(analyseCore(request));
     assert.equal(unstopped.length, 1, source);
     for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
@@ -1527,7 +1512,7 @@ test("a stop before admission settled reads a dict literal's values as its synta
   }
   {
     const source = 'let v = dict{a: 1}.get(hostOther, default: "wrong")\nsay v\nexit\n';
-    const errors = (answers: Answers) => kept(answers, source);
+    const errors = (answers: Answers) => keptErrors(answers, source);
     const { unstopped, stopped } = unsettledAnalyses(source);
     assert.equal(errors(unstopped).length, 1);
     for (const answers of stopped) assert.deepEqual(errors(answers), errors(unstopped));
@@ -1904,7 +1889,7 @@ test("a stop before admission settled checks a written store by admission's own 
   ]) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null);
-    const errors = (answers: Answers) => kept(answers, source);
+    const errors = (answers: Answers) => keptErrors(answers, source);
     const unstopped = analyseCore(request);
     const want = errors(unstopped);
     assert.ok(want.length > 0, source);
