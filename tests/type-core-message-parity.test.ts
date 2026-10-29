@@ -17,7 +17,7 @@ import type { CoreDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
-import { readFixture } from "./helpers/type-core-fixture.js";
+import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-fixture.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
 type Compared = Exclude<CoreDiagnostic, { readonly kind: "budget" }>;
@@ -720,12 +720,13 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
   return (subject ? 2 : 0) + (kinds ? 1 : 0) - (unnamedNull ? 1 : 0);
 }
 
-/** The pairs of the records' diagnostics: the expectation set's, or others of the same shape. */
-function pairs(
-  records: readonly {
-    readonly name: string;
-    readonly files: readonly SourceFile[];
-  }[] = readFixture(),
+/**
+ * The pairs of the records' diagnostics: the expectation set's, or others of the same shape. `each` sees the analysis
+ * of each record that parses and resolves: every diagnostic, before the consumer reports some, and their source.
+ */
+function pairs<Analysed extends { readonly name: string; readonly files: readonly SourceFile[] }>(
+  records: readonly Analysed[],
+  each?: (record: Analysed, diagnostics: readonly CoreDiagnostic[], source: MessageSource) => void,
 ): Pair[] {
   const found: Pair[] = [];
   for (const record of records) {
@@ -737,6 +738,7 @@ function pairs(
       files.map((file) => file.source),
       answers.diagnostics,
     );
+    each?.(record, answers.diagnostics, source);
     const core = new Map<string, { diagnostic: Compared; message: string; named: Named }[]>();
     for (const diagnostic of reportedDiagnostics(answers)) {
       if (diagnostic.kind === "budget") continue;
@@ -775,9 +777,31 @@ function pairs(
   return found;
 }
 
-/** The pairs, made once for the tests below. */
-let made: Pair[] | null = null;
-const allPairs = (): Pair[] => (made ??= pairs());
+/** The expectation set's records, their pairs, and the sentences of the records on the positive list. */
+interface Analysis {
+  readonly records: readonly FixtureRecord[];
+  readonly pairs: Pair[];
+  /** Each record `heldBack` keeps that parses and resolves: every diagnostic's sentence. */
+  readonly sentences: ReadonlyMap<FixtureRecord, readonly string[]>;
+}
+
+function analysis(): Analysis {
+  const records = readFixture();
+  const sentences = new Map<FixtureRecord, string[]>();
+  const found = pairs(records, (record, diagnostics, source) => {
+    if (heldBack(record) === null)
+      sentences.set(
+        record,
+        diagnostics.map((diagnostic) => coreMessage(diagnostic, source)),
+      );
+  });
+  return { records, pairs: found, sentences };
+}
+
+/** The expectation set's analysis, made once for the tests below. */
+let made: Analysis | null = null;
+const analysed = (): Analysis => (made ??= analysis());
+const allPairs = (): Pair[] => analysed().pairs;
 
 const ROUND = "Round the number with the floor, round or ceil function first.";
 
@@ -1014,6 +1038,29 @@ test("the comparison rejects a fix changed in a kept or an intended pair (negati
     }
   }
   assert.ok(checked > 700, `${checked} fixes changed`);
+});
+
+test("every sentence of the set's records keeps the form: code in single quotes, no semicolon, the word never shown (D1)", (t) => {
+  const { records, sentences } = analysed();
+  let count = 0;
+  for (const record of records) {
+    if (heldBack(record) !== null) continue;
+    const texts = sentences.get(record);
+    assert.ok(texts !== undefined, `${record.name}: the files parse and resolve`);
+    for (const text of texts) {
+      count += 1;
+      // (code is quoted whole, so outside the quotes no semicolon, backquote or double quote stands)
+      assert.ok(!/[;`"]/.test(text.replace(/'[^']*'/g, "")), `${record.name}: ${text}`);
+      assert.ok(!/dead-code|deferred-parameter|unmodelled/.test(text), `${record.name}: ${text}`);
+      // (#1195 rule 2: no implementation terms, "type" never "kind")
+      assert.ok(
+        !/\b(compiler|follows?|kinds?)\b/.test(text.replace(/'[^']*'/g, "")),
+        `${record.name}: ${text}`,
+      );
+      assert.ok(text.endsWith("."), `${record.name}: ${text}`);
+    }
+  }
+  t.diagnostic(`${count} sentences of the positive list`);
 });
 
 /**
