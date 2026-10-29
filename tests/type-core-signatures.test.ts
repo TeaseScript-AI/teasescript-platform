@@ -844,7 +844,8 @@ test("every admitted argument check and method dispatch runs as the derived orac
     'let xs = [hostValue]\nxs.sort()\nsay "after"\nexit\n',
   ];
   // (each admitted method on a receiver the script cannot know, under host values of every kind that dispatches it
-  // differently: text, a list, an empty list, a set, a dict, a number, null; the member check's discharge too)
+  // differently: text, a list, an empty list, a set, a dict, a number, null, each date and time kind; the member
+  // check's discharge too)
   const dispatched = [
     ...new Set([
       ...Object.keys(TEXT_METHODS),
@@ -871,6 +872,19 @@ test("every admitted argument check and method dispatch runs as the derived orac
     createCapturedSerializableList([]),
     createCapturedSerializableSet([1, 2]),
     { kind: "dict", entries: [{ key: "a", value: 1 }] },
+    { kind: "date", year: 2026, month: 10, day: 29 },
+    { kind: "time", hour: 12, minute: 0, second: 0, millisecond: 0 },
+    {
+      kind: "datetime",
+      year: 2026,
+      month: 10,
+      day: 29,
+      hour: 12,
+      minute: 0,
+      second: 0,
+      millisecond: 0,
+    },
+    { kind: "absoluteDateTime", epochMilliseconds: 0 },
   ];
   const differing: string[] = [];
   let [planned, outside, discharges] = [0, 0, 0];

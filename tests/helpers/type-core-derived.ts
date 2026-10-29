@@ -8,6 +8,7 @@ import {
 import { escapeMarkup } from "../../src/message-markup.js";
 import { dictMethod } from "../../src/dict-operations.js";
 import { hasListMethod, listMethod, listProperty } from "../../src/list-methods.js";
+import { hasTemporalMethod } from "../../src/temporal-builtins.js";
 import { parse } from "../../src/parser.js";
 import { isDictKey, VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import {
@@ -1682,14 +1683,18 @@ export function evaluate(
             throw new RuntimeFault(code, "", at);
           };
           // a method of the slice (S9b) dispatched as the runtime dispatches it, by the receiver's kind: text's
-          // (`callStringMethod`); a dict's, its key text (TSR062 at the key), `contains` and `get` read (`readDict`); a
+          // (`callStringMethod`); a date or time value's only where it has one (`hasTemporalMethod`); a dict's, its key text (TSR062 at the key), `contains` and `get` read (`readDict`); a
           // list's or a set's that its kind has, with as many arguments as it takes (TSR028), that changes nothing
           // (`readCollection`), or `sort`, which orders its list in place; any other receiver, or a method its kind
           // does not have, fails the call's member check (TSR016)
           if (typeof target === "string" && method !== "get")
             return called(() => callStringMethod(target, method, values, span));
-          if (target !== null && isTemporal(target))
-            throw new Underivable(`the method ${method} of a ${target.kind}`);
+          if (target !== null && isTemporal(target)) {
+            // (a temporal value's own methods are outside the slice's evaluation; one it lacks fails the member check)
+            if (hasTemporalMethod(target.kind, method))
+              throw new Underivable(`the method ${method} of a ${target.kind}`);
+            return called(() => fault("TSR016"));
+          }
           if (target !== null && isDict(target)) {
             const contract = dictMethod(method);
             if (contract?.changes !== undefined)
