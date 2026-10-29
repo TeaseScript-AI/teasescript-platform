@@ -572,6 +572,11 @@ const SIGNATURE_FAMILIES: readonly {
     program: (k) => `let xs = [1, 2]\n${"for e in xs {}\n".repeat(k)}exit\n`,
   },
   {
+    name: "k content checks of written host lists",
+    program: (k) =>
+      `${Array.from({ length: k }, (_, i) => `let x${i}: object[] = hostValue\nsay x${i}.join()\nsay toJson(x${i})`).join("\n")}\nexit\n`,
+  },
+  {
     name: "k choices of written choice objects",
     program: (k) =>
       `${Array.from({ length: k }, (_, i) => `let c${i} = askChoice [{text: "a", value: ${i}}, {text: "b", value: "${i}"}]`).join("\n")}\nexit\n`,
