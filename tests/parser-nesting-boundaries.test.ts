@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { Expression } from "../src/ast.js";
 import { parse, Parser, type ParseResult, type StatementRange } from "../src/parser.js";
+import { DiagnosticLog } from "../src/parser/diagnostic-log.js";
 
 test("deep malformed nesting reports the missing closer at EOF with structured recovery", () => {
   const collections = Array.from({ length: 2_000 }, (_, index) =>
@@ -263,7 +264,30 @@ test("a value that a say parses ahead over is read once, however deeply such val
 
 test("the errors in a value that a say parses ahead over are reported once, with their fixes", () => {
   const readings = "'(a otherwise 1) + 2' uses 1 when 'a' is null.";
+  // The diagnostics each parser adds itself: a part taken over joins its log as one segment, not as a copy.
+  const added = (source: string) => {
+    const push = DiagnosticLog.prototype.push;
+    let pushes = 0;
+    DiagnosticLog.prototype.push = function (this: DiagnosticLog, ...diagnostic) {
+      pushes += 1;
+      return push.apply(this, diagnostic);
+    };
+    try {
+      parse(source);
+    } finally {
+      DiagnosticLog.prototype.push = push;
+    }
+    return pushes;
+  };
   for (const [name, site, container] of NESTINGS) {
+    // Copying each part's errors into every part around it adds them once per enclosing level.
+    const ratio =
+      added(nested(site, container, 12, true).source) /
+      added(nested(site, container, 6, true).source);
+    assert.ok(
+      ratio < 2.5,
+      `${name}: ${ratio.toFixed(2)} times the errors added for twice the levels`,
+    );
     const { source, statements } = nested(site, container, 4, true);
     const parsed = parse(source);
     assert.deepEqual(

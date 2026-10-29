@@ -22,6 +22,7 @@ import type {
   UnaryExpression,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
+import { DiagnosticLog, type DiagnosticSegment } from "./parser/diagnostic-log.js";
 import {
   COMMANDS,
   commandFacts,
@@ -256,11 +257,11 @@ interface ParsedPart {
   /** What the parse of `form` returned. */
   readonly result: unknown;
   readonly end: number;
-  readonly diagnostics: readonly Diagnostic[];
+  readonly diagnostics: DiagnosticSegment;
   /** The literals without their closing delimiter that its parse failed to read (see `Parser.unclosedLiterals`). */
   readonly unclosedLiterals: number;
   /** The offsets of the `/` where its parse expected a value (see `Parser.regexStarts`). */
-  readonly regexStarts: readonly number[];
+  readonly regexStarts: Segment<number>;
   /** The statement and command ranges its parse recorded. */
   readonly ranges: RangeSegment;
   /** The fixes offered for its errors that wait for the statement around it, by their index among `diagnostics`. */
@@ -281,10 +282,23 @@ function sameStorageDelimiters(
  * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a part lists its
  * segment rather than a copy of its ranges, so a part nested in others is not copied into each of them.
  */
-interface RangeSegment {
-  readonly list: readonly (StatementRange | CommandRange | RangeSegment)[];
+interface Segment<T> {
+  readonly list: readonly (T | Segment<T>)[];
   readonly from: number;
   readonly to: number;
+}
+type RangeSegment = Segment<StatementRange | CommandRange>;
+/** The regex offsets of `starts`, with those of each part taken over, read once without recursion. */
+function regexOffsets(starts: readonly (number | Segment<number>)[]): number[] {
+  const offsets: number[] = [];
+  const pending: Segment<number>[] = [{ list: starts, from: 0, to: starts.length }];
+  for (let segment = pending.pop(); segment !== undefined; segment = pending.pop())
+    for (let index = segment.from; index < segment.to; index += 1) {
+      const entry = segment.list[index]!;
+      if (typeof entry === "number") offsets.push(entry);
+      else pending.push(entry);
+    }
+  return offsets;
 }
 const OPENING_TOKENS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftParenthesis,
@@ -345,7 +359,7 @@ function parseSource(source: string, offers: boolean): ParseResult {
     }
     const program = parser.parseProgram();
     if (parser.shared.source !== null) budget = parser.shared.proofBudget;
-    const added = parser.regexStarts.filter((offset) => !regexStarts.has(offset));
+    const added = regexOffsets(parser.regexStarts).filter((offset) => !regexStarts.has(offset));
     // A parse that proves a fix does not lex again: its fix is then not proved.
     if (offers && added.length > 0 && parser.diagnostics.length > 0) {
       for (const offset of added) regexStarts.add(offset);
@@ -358,7 +372,9 @@ function parseSource(source: string, offers: boolean): ParseResult {
       header: header.header,
       diagnostics: Object.freeze([
         ...header.diagnostics,
-        ...parser.diagnostics.filter((diagnostic) => !parser.shared.followUps.has(diagnostic)),
+        ...parser.diagnostics
+          .toArray()
+          .filter((diagnostic) => !parser.shared.followUps.has(diagnostic)),
       ]),
       statementRanges: Object.freeze(statements),
       commandRanges: Object.freeze(commands),
@@ -368,7 +384,7 @@ function parseSource(source: string, offers: boolean): ParseResult {
 
 /** The public members serve `parse` and the modules in `parser/`, and are internal to the parser. */
 export class Parser {
-  public readonly diagnostics: Diagnostic[] = [];
+  public readonly diagnostics = new DiagnosticLog();
   /** The fixes offered for errors of the statement being read, which wait for it to end (see `offerFix`). */
   readonly #fixOffers: FixOffer[] = [];
   /** Whether this parser reads ahead for another, which keeps what it reads for the parse that counts (see `parseOnce`). */
@@ -382,7 +398,7 @@ export class Parser {
    * The offsets of each `/` where this parse expected a value, which a regex literal starts there; like its diagnostics,
    * a speculative parser keeps its own.
    */
-  public readonly regexStarts: number[] = [];
+  public readonly regexStarts: (number | Segment<number>)[] = [];
   /**
    * The strings and regexes without their closing delimiter that this parse failed to read; the lexer reports them.
    * Like its diagnostics, a speculative parser counts its own.
@@ -736,12 +752,11 @@ export class Parser {
     );
     if (known !== undefined) {
       const diagnosticCount = this.diagnostics.length;
-      // A part such as a block may hold many, more than a spread passes as arguments.
-      for (const diagnostic of known.diagnostics) this.diagnostics.push(diagnostic);
+      this.diagnostics.pushSegment(known.diagnostics);
       for (const offer of known.fixOffers)
         this.#fixOffers.push({ ...offer, index: diagnosticCount + offer.index });
       this.unclosedLiterals += known.unclosedLiterals;
-      for (const offset of known.regexStarts) this.regexStarts.push(offset);
+      if (known.regexStarts.to > known.regexStarts.from) this.regexStarts.push(known.regexStarts);
       this.statementRanges.push(known.ranges);
       this.current = known.end;
       this.recoveredAtStatementBoundary = known.recovered;
@@ -766,13 +781,13 @@ export class Parser {
       ...context,
       result,
       end: this.current,
-      diagnostics: this.diagnostics.slice(diagnosticCount),
+      diagnostics: this.diagnostics.segment(diagnosticCount),
       // The part's statements settle their own offers, and leave only those for the statement around it.
       fixOffers: this.#fixOffers
         .slice(fixOfferCount)
         .map((offer) => ({ ...offer, index: offer.index - diagnosticCount })),
       unclosedLiterals: this.unclosedLiterals - unclosedLiterals,
-      regexStarts: this.regexStarts.slice(regexStartCount),
+      regexStarts: { list: this.regexStarts, from: regexStartCount, to: this.regexStarts.length },
       ranges: { list: this.statementRanges, from: rangeCount, to: this.statementRanges.length },
       recovered: this.recoveredAtStatementBoundary,
     };
@@ -1533,7 +1548,7 @@ export class Parser {
    * a long chain from being written out.
    */
   #offerOtherwiseReadings(expression: Expression, index: number): void {
-    const error = this.diagnostics[index]!;
+    const error = this.diagnostics.get(index);
     if (
       this.shared.source === null ||
       error.code !== parserDiagnosticCode.mixedOtherwise ||
@@ -1634,7 +1649,7 @@ export class Parser {
    */
   public offerFix(index: number, quoted: string, pastes: readonly FixPaste[]): void {
     if (this.shared.source !== null)
-      this.#fixOffers.push({ index, error: this.diagnostics[index]!, quoted, pastes });
+      this.#fixOffers.push({ index, error: this.diagnostics.get(index), quoted, pastes });
   }
 
   /**
@@ -1655,7 +1670,7 @@ export class Parser {
     for (const offer of offers.splice(first)) {
       if (
         !alone ||
-        this.diagnostics[offer.index] !== offer.error ||
+        this.diagnostics.get(offer.index) !== offer.error ||
         offer.pastes.some(({ start, end }) => start < from || end > to)
       )
         continue;
@@ -1673,7 +1688,7 @@ export class Parser {
         );
       });
       if (proved)
-        this.diagnostics[offer.index] = Object.freeze({ ...offer.error, message: offer.quoted });
+        this.diagnostics.set(offer.index, Object.freeze({ ...offer.error, message: offer.quoted }));
       else if (!outermost) retried.push(offer);
     }
     for (const offer of retried) offers.push(offer);

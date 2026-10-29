@@ -442,7 +442,7 @@ function adviseDuration(
         example === null
           ? "Leave out 'calendar' and put a space before the unit."
           : `Write the length in days or weeks${proved ? `, as in '${example}'` : ""}.`;
-      parser.diagnostics[index] = createDiagnostic(
+      const advice = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
         place !== "calendar"
@@ -456,8 +456,9 @@ function adviseDuration(
               : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`,
         error!.diagnostic.span,
       );
+      parser.diagnostics.set(index, advice);
       // A command that takes the value as an argument knows its place, and its advice comes after.
-      parser.calendarUnitErrors.set(node, { ...error!, diagnostic: parser.diagnostics[index]! });
+      parser.calendarUnitErrors.set(node, { ...error!, diagnostic: advice });
     } else if (node.kind === "parenthesizedExpression")
       pending.push({ node: node.expression, signed });
     else if (node.kind === "unaryExpression" && node.operator !== "not")
