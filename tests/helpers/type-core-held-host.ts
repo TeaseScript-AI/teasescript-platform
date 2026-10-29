@@ -533,18 +533,28 @@ export function heldUnstopped(
 }
 
 /**
- * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a case's decisions, each one unit
- * below a decision's work in its unstopped analysis (a decision stop, and with a program stop a combined one), the
- * three largest; judged against the unstopped run at the same demand allowance.
+ * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a decision of a case, alone (a
+ * decision stop) and with a program stop (a combined one), each judged against the unstopped run at the same demand
+ * allowance. Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
+ * below the smallest; kept only where a decision then stops, up to three. A case with none has no such rows.
  *
  * @public (the whole family's driver outside CI reads it, with the family)
  */
 export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
-  const units = new Set(mode.run(() => analyseCore(request)).budget.decisions.map((d) => d.units));
-  return [...units]
-    .filter((unit) => unit > 1)
-    .sort((a, b) => b - a)
-    .slice(0, 3)
-    .map((unit) => unit - 1);
+  const units = [
+    ...new Set(mode.run(() => analyseCore(request)).budget.decisions.map((d) => d.units)),
+  ].sort((a, b) => b - a);
+  const tried = units.filter((unit) => unit > 1).map((unit) => unit - 1);
+  for (let unit = Math.floor((units.at(-1) ?? 0) / 2); unit >= 1; unit = Math.floor(unit / 2))
+    tried.push(unit);
+  const stopping: number[] = [];
+  for (const demand of new Set(tried)) {
+    if (stopping.length === 3) break;
+    const { decisions } = mode.run(() =>
+      withTestDemandAllowance(demand, () => analyseCore(request)),
+    ).budget;
+    if (decisions.some((d) => d.stopped)) stopping.push(demand);
+  }
+  return stopping;
 }
