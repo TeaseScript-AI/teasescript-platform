@@ -408,7 +408,7 @@ export function temporalBinary(
       if (isCalendar(duration))
         throw fault(
           "TSR009",
-          "An absolute date and time has no calendar. Convert the value with toDateTime() first and back with toAbsoluteDateTime() after.",
+          "An absolute date and time has no calendar. Convert the value with toDateTime() first and the result back with toAbsoluteDateTime().",
           span,
         );
       return absoluteDateTime(
@@ -421,7 +421,7 @@ export function temporalBinary(
         "TSR009",
         value.kind === "date"
           ? `A date moves only by calendar units, such as '1 calendar day', not by ${formatDuration(duration)}.`
-          : "A date and time has no time zone, so it cannot move by elapsed time. Convert the value with toAbsoluteDateTime() first and back with toDateTime() after, or use calendar units to keep the clock time.",
+          : "A date and time has no time zone, so it cannot move by elapsed time. Convert the value with toAbsoluteDateTime() first and the result back with toDateTime(), or use calendar units to keep the clock time.",
         span,
       );
     if (duration.milliseconds !== 0)

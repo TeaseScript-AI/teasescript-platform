@@ -1884,7 +1884,7 @@ function conversionFailure(
       : `${name}(...) converts ${conversion.converts}, not ${shown}.${fallback}`;
   const failed = cannotConvert(name, conversion, value);
   if (typeof value === "string" && conversion.result === "boolean")
-    return `${failed} ${label === null ? "Compare the text with '==' instead." : `Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`}`;
+    return `${failed} ${label === null ? "Compare the text using '==' instead." : `Compare the text instead, such as '${label} == ${quotedText(messageText(value))}'.`}`;
   if (conversion.kinds === "shown" && (isList(value) || isSet(value) || isDict(value))) {
     const items = isDict(value) ? value.entries.map((entry) => entry.value) : value.items;
     if (items.every(isVisibleScalar)) {
@@ -1893,7 +1893,7 @@ function conversionFailure(
         label !== null
           ? `Use '${label}${join}' to combine its ${isDict(value) ? "values" : "elements"} as text.`
           : isSet(value)
-            ? "Call toList() and then join() on the set to combine its elements as text."
+            ? "Copy the set into a list with toList(), then call join() on that list to combine its elements as text."
             : isDict(value)
               ? "Call join() on the values of the dict to combine them as text."
               : "Call join() on the list to combine its elements as text."

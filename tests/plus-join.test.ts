@@ -472,7 +472,7 @@ test("a fix that the runtime gives for '+' says it in words, as it knows the val
   // A date and time that moves by elapsed time, and an absolute one that moves by calendar units.
   assert.deepEqual(failure(`${DYNAMIC}say dynamic(toDateTime("2026-09-07T16:45")) + 3 h\nexit`), [
     "TSR009",
-    "A date and time has no time zone, so it cannot move by elapsed time. Convert the value with toAbsoluteDateTime() first and back with toDateTime() after, or use calendar units to keep the clock time.",
+    "A date and time has no time zone, so it cannot move by elapsed time. Convert the value with toAbsoluteDateTime() first and the result back with toDateTime(), or use calendar units to keep the clock time.",
   ]);
   assert.deepEqual(
     failure(
@@ -480,7 +480,7 @@ test("a fix that the runtime gives for '+' says it in words, as it knows the val
     ),
     [
       "TSR009",
-      "An absolute date and time has no calendar. Convert the value with toDateTime() first and back with toAbsoluteDateTime() after.",
+      "An absolute date and time has no calendar. Convert the value with toDateTime() first and the result back with toAbsoluteDateTime().",
     ],
   );
 });

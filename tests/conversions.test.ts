@@ -388,14 +388,14 @@ test("a conversion that the runtime refuses shows its fix with the argument as t
     ["toString(dynamic([1]))", "Call join() on the list to combine its elements as text."],
     [
       'toString(dynamic(set["a"]))',
-      "Call toList() and then join() on the set to combine its elements as text.",
+      "Copy the set into a list with toList(), then call join() on that list to combine its elements as text.",
     ],
     [
       'toString(dynamic(dict{"tea": 2}))',
       "Call join() on the values of the dict to combine them as text.",
     ],
     ["toBoolean(dynamic(1))", "Compare the number with 0 instead."],
-    ['toBoolean(dynamic("yes"))', "Compare the text with '==' instead."],
+    ['toBoolean(dynamic("yes"))', "Compare the text using '==' instead."],
   ] as const)
     assert.ok(failed(call)?.endsWith(` ${fix}`), `${call}: ${failed(call)}`);
 });
