@@ -436,7 +436,7 @@ export function argumentTypeMessage(
 export function argumentFix(parameter: TextParameter, kind: ArgumentKind): string {
   if (parameter.kind === "regex")
     return kind === "string"
-      ? " Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...)."
+      ? " Write a regex such as '/[0-9]+/' instead, or make one from the text with the toRegex function."
       : "";
   if (takesText(parameter))
     return kind !== null && kind !== "string"

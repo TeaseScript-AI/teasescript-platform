@@ -588,7 +588,7 @@ test("the regex operations check their arguments", () => {
   assert.deepEqual(diagnostics('let all = "a".findAll("a")\nexit'), [
     [
       "TSV043",
-      "findAll() needs a regex for 'pattern', not text (string). Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...).",
+      "findAll() needs a regex for 'pattern', not text (string). Write a regex such as '/[0-9]+/' instead, or make one from the text with the toRegex function.",
       '"a"',
     ],
   ]);
@@ -718,7 +718,7 @@ test("the regex methods and a regex's members are checked", () => {
   assert.deepEqual(diagnostics('let ok = "a".matches("a")\nexit'), [
     [
       "TSV043",
-      "matches() needs a regex for 'pattern', not text (string). Write a regex such as /[0-9]+/, or make one from text with toRegex(text, default: ...).",
+      "matches() needs a regex for 'pattern', not text (string). Write a regex such as '/[0-9]+/' instead, or make one from the text with the toRegex function.",
       '"a"',
     ],
   ]);

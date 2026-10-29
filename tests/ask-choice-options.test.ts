@@ -529,7 +529,7 @@ test("choice options known only at runtime are checked before the choice opens",
     // `dynamic` hides the element's type, so one list may hold text and a list.
     [
       'function dynamic(value) {\n    return value\n}\nlet o = [dynamic("a"), ["b"]]\nlet x = askChoice o\nexit',
-      "not a list or set.",
+      "A choice list element must be a choice value or a choice object { value?, text, background? }, not a list or set.",
     ],
     ['let o = { text: "A", value: "a" }\nlet x = askChoice k: o\nexit', "Keep one."],
     [
@@ -551,7 +551,7 @@ test("choice options known only at runtime are checked before the choice opens",
     ],
     [
       "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(1..2)]\nlet x = askChoice o\nexit",
-      "a list, or a set.",
+      "A choice option must be a choice value, a choice object { value?, text, background? }, a list, or a set.",
     ],
   ] as const;
   for (const [source, ending] of cases) {

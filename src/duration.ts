@@ -293,6 +293,19 @@ export function formatDuration(duration: number | AnyDuration): string {
 }
 
 /**
+ * Why a date (`date`) or a local date and time (`datetime`) cannot move by `duration`, a calendar duration with an exact
+ * offset (ADR 0026 §5): the compiler's error where it knows the offset, and the runtime's (`TSR009`).
+ */
+export function localCalendarOffsetMessage(
+  target: "date" | "datetime",
+  duration: StoredCalendarDuration,
+): string {
+  return target === "date"
+    ? `A date moves only by calendar units, not by ${formatDuration(duration)}. A date has no clock time, so leave out the ${formatDuration(duration.milliseconds)}.`
+    : `A date and time moves only by calendar units, not by ${formatDuration(duration)}. Convert it with toAbsoluteDateTime() for elapsed time.`;
+}
+
+/**
  * An exact length as `formatDuration` shows it, but below a millisecond with three significant digits, such as
  * `4.66e-10 milliseconds`, so that a positive length too short for the clock never shows as 0.
  */

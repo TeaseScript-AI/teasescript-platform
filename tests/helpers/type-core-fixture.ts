@@ -36,6 +36,16 @@ function texts(value: unknown, where: string): string[] {
   });
 }
 
+/** The adapters' records S9b's checks give, released from the adapters' hold (`heldBack`). */
+const RELEASED_ADAPTER_RECORDS: ReadonlySet<string> = new Set([
+  "cp9-cells/C13/bad-iterable",
+  "cp9-cells/C13/bad-pair-iterable",
+  "cp9-cells/C13/join-argument",
+  "cp9-cells/C13/string-argument",
+  "cp9-cells/C13/sort-receiver",
+  "cp9-cells/C13/pass",
+]);
+
 /**
  * Why a record is held back from the positive list, named by its cell or by its name, or `null` for an asserted record:
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
@@ -48,8 +58,23 @@ export function heldBack(record: FixtureRecord): string | null {
   // S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)): a named default's call-site answer and a copy of a written type as
   // `fromJson`'s and `load`'s receiving context, which the core's rule takes with S9b
   if (record.name.startsWith("cp9-cells/s9b/f18-held/")) return "S9b's F18 shapes (r4.81 (1))";
-  // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
-  if (record.owner === "adapter") return "the adapters' records (S9b)";
+  // Known text the conversion cannot convert is a compile error of its own (V30 §13, #1105), which the core's record
+  // holds since the checks that owe the runtime nothing publish there (the lead's decision 3 on #1072): the record lacks
+  // it until its maintainer adds it.
+  if (record.name === "cp9-cells/r46/m3/astra-m3/conversion/default")
+    return "a known-value error the record lacks (decision 3 on #1072)";
+  // A button's value from outside the script owes C13's warning and its check at the choice, as an argument's does (the
+  // sentence review of #1437, ruling 4): the record lacks them until its maintainer adds them.
+  if (
+    record.name === "cp9-cells/s4/choice-external/inferred" ||
+    record.name === "cp9-cells/s4/choice-external/written" ||
+    record.name === "cp9-cells/s4/choice-value/external-written"
+  )
+    return "C13's warning of a choice value from outside the script the record lacks (#1437)";
+  // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b; C13's
+  // released as S9b's checks give them (#1072)
+  if (record.owner === "adapter" && !RELEASED_ADAPTER_RECORDS.has(record.name))
+    return "the adapters' records (S9b)";
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and
   // with them S0(c)'s class of expectations that rest on the null and written-union deviation and TABLE r4.52 AD-1's
   // re-derived records (each cites one of these cells), enter with S10

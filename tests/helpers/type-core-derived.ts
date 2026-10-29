@@ -6,9 +6,11 @@ import {
   numberFromText,
 } from "../../src/conversions.js";
 import { escapeMarkup } from "../../src/message-markup.js";
-import { listProperty } from "../../src/list-methods.js";
+import { dictMethod } from "../../src/dict-operations.js";
+import { hasListMethod, listMethod, listProperty } from "../../src/list-methods.js";
+import { hasTemporalMethod } from "../../src/temporal-builtins.js";
 import { parse } from "../../src/parser.js";
-import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
+import { isDictKey, VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import {
   DEFAULT_TEMPORAL_CONTEXT,
   formatIsoDate,
@@ -25,6 +27,23 @@ import {
   presentTime,
 } from "../../src/temporal.js";
 import { binaryFromBase64, binaryFromDataUrl } from "../../src/runtime/host-data/stored-files.js";
+import { RuntimeFault } from "../../src/runtime/errors.js";
+import type { RuntimeErrorCode } from "../../src/diagnostic-codes.js";
+import { jsonText } from "../../src/runtime/values/json-base64.js";
+import {
+  readCollection,
+  readDict,
+  sortOrder,
+} from "../../src/runtime/values/collection-operations.js";
+import { callStringMethod } from "../../src/runtime/values/string-operations.js";
+import {
+  isDict,
+  isList as isRuntimeList,
+  isRange,
+  isSet,
+  isTemporal,
+} from "../../src/runtime/values/value-predicates.js";
+import { joinedText } from "../../src/runtime/values/value-text.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { CompactRecord } from "./type-core-records.js";
 
@@ -68,7 +87,14 @@ export type Discharge =
   | {
       readonly by: "native";
       readonly what:
-        "integer-use" | "representable" | "member" | "empty" | "fallback" | "typed-ingress";
+        | "integer-use"
+        | "representable"
+        | "member"
+        | "empty"
+        | "fallback"
+        | "typed-ingress"
+        | "iteration"
+        | "argument";
       /** The obligation's site, `start:end`: the use, or the ingress. */
       readonly site: string;
     };
@@ -133,7 +159,7 @@ export function syntaxOf(source: string): Syntax {
 /** Every statement of a program, nested blocks included, in source order. */
 function allStatements(statements: readonly Statement[]): Statement[] {
   return statements.flatMap((statement) => {
-    if (statement.kind === "repeatStatement")
+    if (statement.kind === "repeatStatement" || statement.kind === "forStatement")
       return [statement, ...allStatements(statement.body.statements)];
     if (statement.kind === "ifStatement") {
       return [
@@ -1017,6 +1043,26 @@ export function derive(
         throw new Underivable(`an empty obligation at ${at} without an element selection`);
       native("empty", site(read));
     } else if (
+      (check.kind === "operand" || check.kind === "null-check") &&
+      statements.some(
+        (statement) => statement.kind === "forStatement" && site(unwrap(statement.iterable)) === at,
+      )
+    ) {
+      // C13 (S9b): a `for` loop's iterable, which the loop's own check of its source takes (TSR044)
+      native("iteration", at);
+    } else if (check.kind === "operand") {
+      // C13 (S9b): a method's argument or what `toJson` writes, which the call's own check takes at the call, or the
+      // elements `join` or `sort` reads, whose obligation is the whole call's
+      const call = all.find(
+        (expression) =>
+          expression.kind === "callExpression" &&
+          (site(expression) === at ||
+            expression.arguments.some((argument) => site(unwrap(argument.value)) === at)),
+      );
+      if (call === undefined)
+        throw new Underivable(`an operand obligation at ${at} without a call`);
+      native("argument", site(call));
+    } else if (
       check.kind === "null-check" &&
       check.against.length === 1 &&
       check.against[0] === "non-null"
@@ -1111,6 +1157,8 @@ function expressions(statements: readonly Statement[]): Expression[] {
     } else if (statement.kind === "repeatStatement") walk(statement.count);
     else if (statement.kind === "ifStatement") walk(statement.condition);
     else if (statement.kind === "sayStatement") walk(statement.value);
+    else if (statement.kind === "expressionStatement") walk(statement.expression);
+    else if (statement.kind === "forStatement") walk(statement.iterable);
   }
   return out;
 }
@@ -1490,6 +1538,26 @@ export function evaluate(
           from: new Set(items.flatMap((item) => [...item.from])),
         };
       }
+      case "regexLiteral":
+        return {
+          v: { kind: "regex", source: expression.source, flags: expression.flags },
+          from: new Set(),
+        };
+      case "rangeExpression": {
+        // (a range of whole-number bounds; any other is the runtime's to reject)
+        const [start, end] = [value(expression.start), value(expression.end)];
+        if (!Number.isInteger(start.v) || !Number.isInteger(end.v))
+          throw new Underivable("a range of other bounds");
+        return {
+          v: {
+            kind: "range",
+            start: Number(start.v),
+            end: Number(end.v),
+            inclusive: expression.inclusive,
+          },
+          from: new Set([...start.from, ...end.from]),
+        };
+      }
       case "objectLiteral": {
         const properties = expression.properties.map((property) => ({
           name: property.name.name,
@@ -1589,8 +1657,89 @@ export function evaluate(
           return checkedFallback(expression, fallback);
         };
         if (callee.kind === "propertyAccessExpression") {
-          if (callee.property.name !== "get")
-            throw new Underivable(`the method ${callee.property.name}`);
+          const method = callee.property.name;
+          const from = new Set([
+            ...receiver!.from,
+            ...positional.flatMap((operand) => [...operand.from]),
+          ]);
+          const target = receiver!.v;
+          const values = positional.map((operand) => operand.v);
+          const { span } = expression;
+          // (the runtime's own check of the call fails at its site; one that passes is TSV043's and the member's)
+          const called = (make: () => SerializableRuntimeValue | undefined): Value => {
+            let made: SerializableRuntimeValue | undefined;
+            try {
+              made = make();
+            } catch (error) {
+              if (!(error instanceof RuntimeFault)) throw error;
+              fail(error.code, error.span.start.offset, error.span.end.offset, from, false);
+              return { v: null, from };
+            }
+            fail("TSV043", span.start.offset, span.end.offset, from, true);
+            fail("TSR016", span.start.offset, span.end.offset, from, true);
+            return made === undefined ? useDefault() : { v: made, from };
+          };
+          const fault = (code: RuntimeErrorCode, at: Expression["span"] = span): never => {
+            throw new RuntimeFault(code, "", at);
+          };
+          // a method of the slice (S9b) dispatched as the runtime dispatches it, by the receiver's kind: text's
+          // (`callStringMethod`); a date or time value's only where it has one (`hasTemporalMethod`); a dict's, its key text (TSR062 at the key), `contains` and `get` read (`readDict`); a
+          // list's or a set's that its kind has, with as many arguments as it takes (TSR028), that changes nothing
+          // (`readCollection`), or `sort`, which orders its list in place; any other receiver, or a method its kind
+          // does not have, fails the call's member check (TSR016)
+          if (typeof target === "string" && method !== "get")
+            return called(() => callStringMethod(target, method, values, span));
+          if (target !== null && isTemporal(target)) {
+            // (a temporal value's own methods are outside the slice's evaluation; one it lacks fails the member check)
+            if (hasTemporalMethod(target.kind, method))
+              throw new Underivable(`the method ${method} of a ${target.kind}`);
+            return called(() => fault("TSR016"));
+          }
+          if (target !== null && isDict(target)) {
+            const contract = dictMethod(method);
+            if (contract?.changes !== undefined)
+              throw new Underivable(`the method ${method}, which changes its receiver`);
+            return called(() => {
+              if (contract === undefined) return fault("TSR016");
+              if (values.length !== contract.parameters.length) return fault("TSR028");
+              const key = values[0]!;
+              if (!isDictKey(key)) return fault("TSR062", expression.arguments[0]!.value.span);
+              return readDict(target, method === "get" ? "get" : "contains", key);
+            });
+          }
+          if (method !== "get") {
+            if (target !== null && isRange(target) && method === "toList")
+              throw new Underivable("a range's toList");
+            const collection =
+              target !== null && (isRuntimeList(target) || isSet(target)) ? target : null;
+            const kind = collection === null ? null : collection.kind;
+            const contract = listMethod(method);
+            if (contract?.changes !== undefined && method !== "sort" && kind !== null)
+              throw new Underivable(`the method ${method}, which changes its receiver`);
+            return called(() => {
+              if (
+                collection === null ||
+                kind === null ||
+                contract === undefined ||
+                !hasListMethod(kind, method)
+              )
+                return fault("TSR016");
+              const required = contract.parameters.filter(
+                (parameter) => !("optional" in parameter && parameter.optional === true),
+              ).length;
+              if (values.length < required || values.length > contract.parameters.length)
+                return fault("TSR028");
+              if (method === "sort") {
+                const items = [...collection.items];
+                const order = sortOrder(items, span);
+                collection.items.splice(0, items.length, ...order.map((index) => items[index]!));
+                return null;
+              }
+              return readCollection(collection, method, values, {}, false, span, (item) =>
+                joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
+              );
+            });
+          }
           const index = positional[0]!;
           const list = receiver!;
           const isList = typeof list.v === "object" && list.v !== null && list.v.kind === "list";
@@ -1616,6 +1765,23 @@ export function evaluate(
         const name = callee.name;
         const input = positional[0] ?? named("value") ?? named("text");
         if (input === undefined) throw new Underivable(`the argument of ${name}`);
+        if (name === "toJson") {
+          // (the runtime's own writing, and its own check of what it writes, TSV043 at the call)
+          let written: string | null = null;
+          try {
+            written = jsonText(input.v, () => [], expression.span);
+          } catch (error) {
+            if (!(error instanceof RuntimeFault)) throw error;
+          }
+          fail(
+            "TSV043",
+            expression.span.start.offset,
+            expression.span.end.offset,
+            input.from,
+            written !== null,
+          );
+          return { v: written, from: input.from };
+        }
         if (name === "fromJson") {
           if (typeof input.v !== "string") return useDefault();
           let parsed: SerializableRuntimeValue;
@@ -1866,7 +2032,50 @@ export function evaluate(
               ? [statement.elseBlock]
               : statement.elseBlock.statements,
           );
-      } else if (statement.kind === "sayStatement") {
+      } else if (statement.kind === "forStatement") {
+        // (the loop's own check of its source, TSR044, then each element, key or entry as the loop visits them)
+        const source = value(statement.iterable);
+        const iterated = source.v;
+        const pair = statement.valueVariable !== null;
+        const kind = typeof iterated === "object" && iterated !== null ? iterated.kind : null;
+        const iterable = pair
+          ? kind === "dict"
+          : kind === "list" || kind === "set" || kind === "dict" || kind === "range";
+        fail(
+          "TSR044",
+          unwrap(statement.iterable).span.start.offset,
+          unwrap(statement.iterable).span.end.offset,
+          source.from,
+          iterable,
+        );
+        if (!iterable || typeof iterated !== "object" || iterated === null) continue;
+        const visits: [SerializableRuntimeValue, SerializableRuntimeValue | null][] =
+          iterated.kind === "list" || iterated.kind === "set"
+            ? iterated.items.map((item) => [item, null])
+            : iterated.kind === "dict"
+              ? iterated.entries.map((entry) => [entry.key, entry.value])
+              : iterated.kind === "range"
+                ? Array.from(
+                    {
+                      length: Math.max(
+                        0,
+                        iterated.end - iterated.start + (iterated.inclusive ? 1 : 0),
+                      ),
+                    },
+                    (_, at) => [iterated.start + at, null],
+                  )
+                : [];
+        for (const [element, entry] of visits) {
+          env.set(statement.variable.name, { v: structuredClone(element), from: source.from });
+          if (pair)
+            env.set(statement.valueVariable!.name, {
+              v: structuredClone(entry),
+              from: source.from,
+            });
+          run(statement.body.statements);
+        }
+      } else if (statement.kind === "expressionStatement") value(statement.expression);
+      else if (statement.kind === "sayStatement") {
         const text = value(statement.value);
         said.push({
           text:

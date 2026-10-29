@@ -1,7 +1,10 @@
 import type { RuntimeErrorCode } from "../../diagnostic-codes.js";
 import {
   buttonBackgroundMessage,
+  CHOICE_ELEMENT_RULE,
+  CHOICE_OPTION_RULE,
   CHOICE_TEXT_MESSAGE,
+  CHOICE_VALUE_RULE,
   CHOICE_VALUES_MESSAGE,
   choicePropertyMessage,
   EMPTY_CHOICE_MESSAGE,
@@ -62,11 +65,7 @@ export function expandChoiceOptions(
     }
     for (const element of option.items) {
       if (isList(element) || isSet(element))
-        throw fault(
-          "TSR052",
-          "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
-          span,
-        );
+        throw fault("TSR052", `${CHOICE_ELEMENT_RULE}, not a list or set.`, span);
       add(element, value);
     }
   });
@@ -94,12 +93,7 @@ function choiceButton(
   span: SourceSpan,
 ): InteractionChoiceOption {
   if (!isObject(option)) {
-    if (!isVisibleScalar(option))
-      throw fault(
-        "TSR052",
-        "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
-        span,
-      );
+    if (!isVisibleScalar(option)) throw fault("TSR052", `${CHOICE_OPTION_RULE}.`, span);
     return { text: visibleText(option, span, context), value: value ?? choiceValue(option, span) };
   }
   const extra = option.properties.find((property) => !isChoiceObjectProperty(property.name));
@@ -110,11 +104,7 @@ function choiceButton(
   const ownValue = getSerializableProperty(option, "value");
   if (ownValue !== undefined && value !== null) throw fault("TSR052", CHOICE_VALUES_MESSAGE, span);
   if (ownValue !== undefined && !isVisibleScalar(ownValue))
-    throw fault(
-      "TSR052",
-      "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value.",
-      span,
-    );
+    throw fault("TSR052", `${CHOICE_VALUE_RULE}.`, span);
   const background = getSerializableProperty(option, "background");
   return {
     text,

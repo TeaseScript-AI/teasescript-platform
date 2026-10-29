@@ -10,14 +10,29 @@ import {
 import type { SourceSpan } from "../../source.js";
 import type { SourceSite } from "../graph.js";
 import { angleUnit } from "../../angle.js";
-import { CONVERSIONS, conversionTo } from "../../conversions.js";
+import { CHOICE_ELEMENT_RULE, CHOICE_OPTION_RULE, CHOICE_VALUE_RULE } from "../../choice-rules.js";
+import { choiceValueFix } from "../../choice-values.js";
+import {
+  CONVERSIONS,
+  conversionTo,
+  unwritableJsonMessage,
+  WRITABLE_JSON_FIX,
+} from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
-import { elapsedDurationUnit, UNIT_OPERANDS } from "../../duration.js";
+import { elapsedDurationUnit, localCalendarOffsetMessage, UNIT_OPERANDS } from "../../duration.js";
 import { expressionParts, statementExpressions } from "../../expression-children.js";
-import { listDraw, listMethod } from "../../list-methods.js";
-import { FOR_SOURCE_RULE, REPEAT_COUNT_RULE, ROUND_COUNT_FIX } from "../../loop-rules.js";
+import { listDraw, listMethod, SORT_RULE } from "../../list-methods.js";
+import {
+  FOR_SOURCE_RULE,
+  REPEAT_COUNT_RULE,
+  repeatCountFix,
+  repeatCountMessage,
+  ROUND_COUNT_FIX,
+} from "../../loop-rules.js";
+import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
 import { LIST_INDEX_RULE, logicalOperandRule } from "../../operand-rules.js";
 import { misspelledPropertyHint, nameList } from "../../object-properties.js";
+import { JOIN_FIX, JOIN_RULE } from "../../shown-text-rules.js";
 import { PERSON_FIELDS, PLAYER } from "../../speaker-terms.js";
 import {
   CALENDAR_DURATION_PARTS,
@@ -26,6 +41,7 @@ import {
   TEMPORAL_FIELDS,
 } from "../../temporal-builtins.js";
 import {
+  argumentFix,
   isTextMember,
   isTextMethod,
   TEXT_METHODS,
@@ -38,13 +54,14 @@ import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
   BudgetStop,
+  CheckedDiagnostic,
   ContextDetail,
   CoreCode,
-  CoreDiagnostic,
   DiagnosticRule,
   NotChecked,
   Presence,
   SiteExpectation,
+  StaticRule,
   StoreRoot,
   WorkPlace,
   WrittenTypeError,
@@ -74,6 +91,8 @@ export interface MessageSource {
    * where a check before it still holds at the use (`evaluation`); else `null`.
    */
   readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
+  /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
+  readonly target: (site: SourceSite) => boolean;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -82,7 +101,7 @@ export interface MessageSource {
    * `codeAt`'s "no other diagnostic" fact.
    */
   readonly alone: (
-    self: CoreDiagnostic,
+    self: CheckedDiagnostic,
     held: SourceSite,
     rulesOut: ((kind: ItemTag) => boolean) | null,
   ) => boolean;
@@ -112,6 +131,20 @@ interface LineStatements {
 /** Whether a span holds a site. */
 const holds = ({ start, end }: SourceSpan, site: SourceSite): boolean =>
   start.offset <= site.start && site.end <= end.offset;
+
+/**
+ * Whether a site is an assignment's target or a receiver on its path: the place the store changes, which a check or a
+ * fallback may not replace (an index or a key the target reads is a value of its own).
+ */
+function inTarget(statement: Statement, site: SourceSite): boolean {
+  if (statement.kind !== "assignmentStatement") return false;
+  for (let at: Expression = statement.target; ;) {
+    if (at.span.start.offset === site.start && at.span.end.offset === site.end) return true;
+    if (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") at = at.object;
+    else if (at.kind === "parenthesizedExpression") at = at.expression;
+    else return false;
+  }
+}
 
 /** A site's key among a statement's nodes. */
 const spanKey = (start: number, end: number): string => `${start}:${end}`;
@@ -281,7 +314,7 @@ function acts(node: Expression): boolean {
  */
 export function messageSource(
   sources: readonly string[],
-  diagnostics: readonly CoreDiagnostic[],
+  diagnostics: readonly CheckedDiagnostic[],
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -336,7 +369,7 @@ export function messageSource(
   // unchecked code, where the checks it moved to the runtime stand unreported (Astra r3); a stop's own warning, which
   // claims no region, nothing. Each file's in start order, with the furthest end among those before each.
   type Covered = {
-    readonly diagnostic: CoreDiagnostic;
+    readonly diagnostic: CheckedDiagnostic;
     readonly start: number;
     readonly end: number;
   };
@@ -423,6 +456,10 @@ export function messageSource(
   };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
+    target: (site) =>
+      statementsOf(site.file)
+        .get(line(site) - 1)
+        ?.statements.some((statement) => inTarget(statement, site)) === true,
     line,
     column: (site) => site.start - linesOf(site.file)[lineIndex(site)]!,
     statement,
@@ -447,6 +484,7 @@ export function messageSource(
             other.site.end === self.site.end &&
             other.kind !== "written-type" &&
             other.kind !== "budget" &&
+            other.kind !== "static" &&
             other.kinds.length > 0 &&
             other.kinds.every(rulesOut));
         if (!ruledOut) return false;
@@ -470,13 +508,59 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
       return "TSV012";
     case "mixed":
       return "TSV044";
+    case "choice":
+      return "TSV029";
+    case "elements":
+      return rule.callee === "join" ? "TSV042" : "TSV043";
     default:
       return "TSV043";
   }
 }
 
+/**
+ * The code of a check that owes the runtime nothing (`StaticRule`): the code its kept sentence has under the current
+ * checker and the runtime.
+ */
+export function staticCode(rule: StaticRule): CoreCode {
+  switch (rule.rule) {
+    case "repeat-count":
+      return "TSV011";
+    case "conversion":
+      return "TSV043";
+    case "empty-range":
+      return "TSV046";
+    case "calendar-offset":
+      return "TSV043";
+  }
+}
+
+/** The message of a check that owes the runtime nothing: its rule's sentence, the one the runtime's check gives. */
+function staticMessage(rule: StaticRule): string {
+  switch (rule.rule) {
+    case "repeat-count":
+      return repeatCountMessage("this", describeShownValue(rule.value), repeatCountFix(rule.value));
+    case "conversion": {
+      const conversion = CONVERSIONS[rule.conversion];
+      if (conversion.takes !== "value") throw new Error(`${rule.conversion} converts no value.`);
+      return cannotConvert(rule.conversion, conversion, rule.text);
+    }
+    case "calendar-offset":
+      return localCalendarOffsetMessage(rule.target, rule.duration);
+    case "empty-range": {
+      // (the current checker's sentence, V30 §6)
+      const { start, end, inclusive } = rule;
+      const operator = inclusive ? "..=" : "..";
+      const reason =
+        start === end
+          ? `'${start}${operator}${end}' excludes its end. Write '${start}..=${end}' for the single number ${start}.`
+          : `a range never counts down. Write '${end}${operator}${start}' to count up.`;
+      return `This range contains no numbers, so ${rule.use === "loop" ? "the loop never runs" : "toList() returns []"}: ${reason}`;
+    }
+  }
+}
+
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
-export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): string {
+export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource): string {
   // (whether the values it names and its store's declaration reads are there when the script runs, unproved where it
   // does not say; whether its program runs at all; and whether an author's text a form holds lies clear of the other
   // diagnostics: TABLE r4.162, r4.168)
@@ -489,6 +573,7 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
       alone,
     });
   if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
+  if (diagnostic.kind === "static") return staticMessage(diagnostic.rule);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;
   const diagnosed: Diagnosed = {
@@ -502,7 +587,13 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
   // a member's context is its receiver's: `value` in `value[0]` comes from outside the script; a selection's, its
   // collection's
   const name =
-    rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : text;
+    rule.rule === "member" || rule.rule === "elements"
+      ? rule.receiver
+      : rule.rule === "selection"
+        ? rule.collection
+        : rule.rule === "choice" && rule.member !== undefined && rule.within !== true
+          ? `${text}.${rule.member}`
+          : text;
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
     warningFix(
@@ -533,12 +624,14 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
     (setsProperty(rule) || rule.member.endsWith("()")) &&
     holder.length > 0 &&
     holder.every((kind) => kind === "speaker");
+  // (the elements a call reads have their own origins, which the receiver's name does not carry)
   if (
     !(context === "unknown" && !detail.outside) &&
     context !== "later" &&
     !missing &&
     !speaker &&
-    !literal
+    !literal &&
+    rule.rule !== "elements"
   )
     // a word that came with a value from another line speaks of that value's origin, never of this line's names
     sentences.push(
@@ -755,6 +848,56 @@ const SHOWN_RULE =
   "It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and " +
   "regexes, and selects one element of a list.";
 
+const SORT_ONE_TYPE = "sort() sorts elements of one type";
+
+/**
+ * C13: the conversion that turns an argument of one known kind into what its method takes (the text methods' own fix,
+ * `argumentFix`), or a set or a range into a list.
+ */
+function argumentFixOf(
+  rule: Extract<DiagnosticRule, { rule: "argument" }>,
+  kinds: readonly ItemTag[],
+  text: string,
+): string {
+  const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
+  const { takes } = rule;
+  if (kind === undefined) return "";
+  if (takes === "list" || takes === "collection")
+    return kind === "range" || (kind === "set" && takes === "list") ? ` ${listCopyFix(text)}` : "";
+  return argumentFix(
+    { name: rule.parameter, kind: takes === "integer" ? "count" : takes },
+    kind === "string" || kind === "integer" || kind === "number" || kind === "boolean"
+      ? kind
+      : null,
+  );
+}
+
+/** A range or a set where a list is needed, copied into one in words (#1268: no code that does not compile there). */
+function listCopyFix(text: string): string {
+  return `Copy '${text}' into a list with the toList method first.`;
+}
+
+/**
+ * Whom a TSV029 sentence names: the operand, or the property a choice object it holds returns (`'w.value'`, the text
+ * of an element of `'ws'`), never the object.
+ */
+function choiceSubject(rule: Extract<DiagnosticRule, { rule: "choice" }>, text: string): string {
+  if (rule.member === undefined) return `'${text}'`;
+  return rule.within === true
+    ? `the ${rule.member} of an element of '${text}'`
+    : `'${text}.${rule.member}'`;
+}
+
+/** The ordered types a sort may mix, in words: `both numbers and text`, `numbers, text, and durations`. */
+function mixedTypes(families: readonly ItemTag[]): string {
+  const words = named(families).map((kind) =>
+    kind === "string" ? "text" : kind === "null" ? "null" : VALUE_KINDS[kind].plural,
+  );
+  return words.length === 2
+    ? `both ${words[0]!} and ${words[1]!}`
+    : `${words.slice(0, -1).join(", ")}, and ${words.at(-1)!}`;
+}
+
 /** The rule an operand's kinds break: the first part of its consumer's sentence; `text`, the operand as written. */
 function operandRule(rule: DiagnosticRule, text: string): string {
   switch (rule.rule) {
@@ -778,6 +921,16 @@ function operandRule(rule: DiagnosticRule, text: string): string {
       return rule.entries
         ? "A 'for' loop with a key and a value goes through a dict"
         : FOR_SOURCE_RULE;
+    case "argument":
+      return `${rule.callee}() needs ${described(rule.domain)} for '${rule.parameter}'`;
+    case "elements":
+      return rule.callee === "join" ? JOIN_RULE : SORT_RULE;
+    case "choice":
+      return rule.part === "value"
+        ? CHOICE_VALUE_RULE
+        : rule.part === "option"
+          ? CHOICE_OPTION_RULE
+          : CHOICE_ELEMENT_RULE;
     // (the operand in its own '${…}', which is no placeholder, #1268)
     case "shown":
       return rule.element
@@ -2038,6 +2191,24 @@ function errorSentence(
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${conditionFix(rule, text, kinds, site, diagnosed)}`;
     case "key":
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${keyFix(text, kinds, site, diagnosed)}`;
+    case "argument":
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${argumentFixOf(rule, kinds, text)}`;
+    case "elements":
+      return rule.families.length > 1
+        ? `${SORT_ONE_TYPE}, but '${rule.receiver}' holds ${mixedTypes(rule.families)}.`
+        : `${operandRule(rule, text)}, but '${rule.receiver}' holds ${plural(kinds)}.${rule.callee === "join" ? ` ${JOIN_FIX}` : ""}`;
+    case "json": {
+      // (the runtime's own sentence: one message for the compile-time and the runtime check, V30 §13)
+      const kind = known(kinds)[0];
+      if (kind === undefined) return `toJson(...) cannot write '${text}'. ${WRITABLE_JSON_FIX}`;
+      const holder =
+        rule.holder === null || rule.holder === "empty" || rule.holder === "unknown"
+          ? null
+          : rule.holder;
+      return rule.nested ? unwritableJsonMessage(kind, holder) : unwritableJsonMessage(kind);
+    }
+    case "choice":
+      return `${operandRule(rule, text)}, but ${choiceSubject(rule, text)} is ${described(kinds)}.${choiceFix(rule, kinds, text)}`;
     default:
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.`;
   }
@@ -2182,6 +2353,14 @@ function warningSentence(
       return rule.operand
         ? `${operandRule(rule, text)}, but '${text}' ${may}`
         : `'${rule.operator}' may not take the values in '${text}' here. If it does not, ${STOPS}`;
+    case "json":
+      return `'${text}' may ${rule.nested ? "hold" : "be"} ${described(kinds)} here, which toJson(...) cannot write. If it ${rule.nested ? "does" : "is"}, ${STOPS}`;
+    case "choice":
+      return `${operandRule(rule, text)}, but ${choiceSubject(rule, text)} ${may}`;
+    case "elements":
+      return rule.families.length > 1
+        ? `${SORT_ONE_TYPE}, but '${rule.receiver}' may hold ${mixedTypes(rule.families)} here. If it does, ${STOPS}`
+        : `${operandRule(rule, text)}, but '${rule.receiver}' may hold ${known(kinds).length > 0 ? plural(kinds) : "values of another type"} here. If it does, ${STOPS}`;
     case "absent":
     case "mixed":
       throw new Error(`The rule '${rule.rule}' gives errors only.`);
@@ -2281,6 +2460,8 @@ function guarded(
   if (statement === null) return null;
   const text = source.text(statement);
   if (!kept) return { statement, read, text };
+  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace: G2)
+  if (source.target(read)) return null;
   // (its only text in the statement)
   const from = read.start - statement.start;
   return text.indexOf(subject) !== from || text.includes(subject, from + 1)
@@ -2398,6 +2579,7 @@ function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
     case "fallback":
       return rule.type.filter((kind) => kind !== "null");
     case "operator":
+    case "argument":
       return rule.domain;
     default:
       return [];
@@ -2422,14 +2604,29 @@ function warningFix(
   diagnosed: Diagnosed,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
+  // (the elements a call reads, and what toJson writes below its argument: no test of the value read fixes them; join's
+  // elements of a known type are selected from)
+  if (rule.rule === "elements")
+    return rule.callee === "join" && known(kinds).length > 0 && !kinds.includes("unknown")
+      ? JOIN_FIX
+      : "";
+  if (rule.rule === "json" && rule.nested) return WRITABLE_JSON_FIX;
+  // (a store's place that is no variable, a compound assignment's target among them, is checked where it stands, in
+  // words: a new variable would take the change instead, G2)
+  const inPlace = (test: Test): string | null =>
+    source.target(site) && variable(subject) === null
+      ? `Check that '${subject}' ${test.words} first.`
+      : null;
   if (kinds.includes("null")) {
-    // (no fallback for a value a store or a method changes in place: the change would be lost)
+    // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
+    // change would be lost)
     const changed =
-      rule.rule === "member" &&
-      (rule.use === "store" ||
-        (rule.use === "call" &&
-          (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
-            dictMethod(rule.member.slice(1, -2))?.changes !== undefined)));
+      source.target(site) ||
+      (rule.rule === "member" &&
+        (rule.use === "store" ||
+          (rule.use === "call" &&
+            (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
+              dictMethod(rule.member.slice(1, -2))?.changes !== undefined))));
     // (another diagnostic in the value's text is another problem of it at this use, beside which a fallback for null
     // alone leaves the use invalid, as `besides` says of one at its own site: V30 §18's words of the same type)
     const fallback = changed
@@ -2450,6 +2647,8 @@ function warningFix(
     // (beside another type the use does not take, a null check alone leaves the use invalid: the type test of the
     // value's types the use takes rules out both, else the check in words, #1268 after Codex r4)
     const test = besides.every((kind) => fits.includes(kind)) ? NOT_NULL : typeTest(fits);
+    const placed = inPlace(test ?? NOT_NULL);
+    if (placed !== null) return placed;
     return checkFix(
       subject,
       test ?? NOT_NULL,
@@ -2513,18 +2712,22 @@ function warningFix(
     default:
       break;
   }
+  // (a button's value from outside the script: a test of the types the other buttons' values hold is narrower than the
+  // rule, and a kept option does not narrow its property)
+  if (rule.rule === "choice" && kinds.includes("unknown")) return "";
   // (a value of a type the script cannot know: tested where a test can name the type; a literal is known, and a
   // property an object may lack fails at its read, before any test)
   if (kinds.includes("unknown") && fits.length === 0) {
     const test = typeTest(ruleKinds(rule));
     return test === null || isLiteral(text) || context === "missing"
       ? ""
-      : checkFix(subject, test, null, { source, site, diagnosed });
+      : (inPlace(test) ?? checkFix(subject, test, null, { source, site, diagnosed }));
   }
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
   if (isLiteral(text) || context === "missing") return "";
   const test = typeTest(fits);
-  if (test !== null) return checkFix(subject, test, null, { source, site, diagnosed });
+  if (test !== null)
+    return inPlace(test) ?? checkFix(subject, test, null, { source, site, diagnosed });
   return errorFix(rule, text, kinds, site, source, diagnosed).trimStart();
 }
 
@@ -2544,9 +2747,32 @@ function errorFix(
       return conditionFix(rule, text, kinds, site, diagnosed);
     case "key":
       return keyFix(text, kinds, site, diagnosed);
+    case "argument":
+      return argumentFixOf(rule, kinds, text);
+    case "elements":
+      return rule.callee === "join" ? ` ${JOIN_FIX}` : "";
+    case "json":
+      return ` ${WRITABLE_JSON_FIX}`;
+    case "choice":
+      return choiceFix(rule, kinds, text);
     default:
       return "";
   }
+}
+
+/**
+ * A TSV029 fix of one known kind: a value no button returns is picked from the answer (the buttons return text or
+ * numbers, `choiceValueFix`), a range option is copied into a list.
+ */
+function choiceFix(
+  rule: Extract<DiagnosticRule, { rule: "choice" }>,
+  kinds: readonly ItemTag[],
+  text: string,
+): string {
+  const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
+  if (kind === undefined) return "";
+  if (rule.part === "value") return ` ${choiceValueFix(kind)}`;
+  return rule.part === "option" && kind === "range" ? ` ${listCopyFix(text)}` : "";
 }
 
 /**

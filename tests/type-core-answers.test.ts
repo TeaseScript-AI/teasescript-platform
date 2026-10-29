@@ -76,17 +76,10 @@ test("the properties of a projected value and of a call's result are known", () 
     ["say {length: {value: 2}}.length", "{length: {value: 2}}.length"],
     ["for item in [{value: 2}] { say item }", "item"],
     ["say ([{value: 2}] + [{value: 2}])[0]", "([{value: 2}] + [{value: 2}])[0]"],
-    // removals' elements and a choice's option value (review r4)
+    // removals' elements (review r4)
     ["let xs = [{value: 2}]\nsay xs.removeFirst()", "xs.removeFirst()"],
     ["let xs = [{value: 2}]\nsay xs.removeAt(0)", "xs.removeAt(0)"],
     ['let d = dict {key: {value: 2}}\nsay d.remove("key")', 'd.remove("key")'],
-    [
-      'say askChoice [{text: "A", value: {value: 2}}]',
-      'askChoice [{text: "A", value: {value: 2}}]',
-    ],
-    // a whole choice object, written and bound (review r5)
-    ['say askChoice {text: "A", value: {value: 2}}', 'askChoice {text: "A", value: {value: 2}}'],
-    ['let option = {text: "A", value: {value: 2}}\nsay askChoice option', "askChoice option"],
     // a dict's values (TABLE r4.46 (2))
     ["let d = dict {k: {value: 2}}\nsay d.values.first", "d.values.first"],
   ] as const) {
@@ -101,6 +94,25 @@ test("the properties of a projected value and of a call's result are known", () 
 });
 
 test("a value that holds no object has no properties, and a deep chain of operations is walked", () => {
+  // a choice's answer, which no button gives as an object (TSV029, TABLE r4.93): of an option's value, a whole choice
+  // object, written and bound (reviews r4, r5); no value is composed at a property its object's names give (the names
+  // are the carriers' walk, `carriers.ts`)
+  for (const [source, text] of [
+    [
+      'say askChoice [{text: "A", value: {value: 2}}]',
+      'askChoice [{text: "A", value: {value: 2}}]',
+    ],
+    ['say askChoice {text: "A", value: {value: 2}}', 'askChoice {text: "A", value: {value: 2}}'],
+    ['let option = {text: "A", value: {value: 2}}\nsay askChoice option', "askChoice option"],
+  ] as const) {
+    const held = analysed(source);
+    const properties = held.answers.properties(held.node(text));
+    assert.deepEqual(
+      [...properties].flatMap(([, items]) => items),
+      [],
+      text,
+    );
+  }
   // a dict's keys, a list's removed value (review r4)
   for (const [source, text] of [
     ["for item in dict {key: {value: 2}} { say item }", "item"],
@@ -892,7 +904,8 @@ test("a written union of one type repeated answers as that type does (V30 §13, 
 
 test("each option's nested choice selects what its own objects hold (#1233, review r4)", () => {
   // (the two options' nested lists hold the same kinds at each property, but the second's selected `text` may be a
-  // text: the store into `n` warns of it with its check, never counted with the first option as one)
+  // text: the store into `n` would warn of it with its check, never counted with the first option as one; an object as
+  // the outer choice's button value is TSV029's error since S9b, so the answer holds no list to choose from, TABLE r4.93)
   const { answers } = analysed(
     [
       'let options = [{text: "a", value: {choices: [{value: 1, text: "x"}, {text: null}]}}, {text: "b", value: {choices: [{value: 1, text: null}, {text: "x"}]}}]',
@@ -909,6 +922,6 @@ test("each option's nested choice selects what its own objects hold (#1233, revi
       answers.diagnostics.map((d) => [d.class, d.code]),
       answers.checks.map((c) => c.kind),
     ],
-    ["warning-runtime-check", [["warning-runtime-check", "TSV041"]], ["copy-type"]],
+    ["compile-error", [["compile-error", "TSV029"]], []],
   );
 });

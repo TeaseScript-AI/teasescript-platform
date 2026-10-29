@@ -11,10 +11,15 @@ import {
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
+import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
-import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
+import {
+  type CoreAnalysisRequest,
+  CoreProgram,
+  propertyStep,
+} from "../../src/type-inference/core/program.js";
 import { type CoreDiagnostic, coreRecord } from "../../src/type-inference/core/result.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
@@ -131,49 +136,56 @@ function compareSites(a: readonly number[], b: readonly number[]): number {
 }
 
 /**
- * One analysis's part: its answers (the outcome, diagnostics and checks) and every binding's admitted types at its root
- * and its element (`text`); the record alone, its answers and the same serialized (`record`); and whether each of its
- * lists is in source order of its sites (r4.86 (1)).
+ * One analysis's part: its answers (the outcome and diagnostics with the checks that owe the runtime nothing,
+ * `checkedResult`, and the checks) and every binding's admitted types at its root and its element (`text`); the record
+ * alone, its answers and the same serialized (`record`); and whether each of its lists is in source order of its sites
+ * (r4.86 (1)).
  */
 export function publishedAnswers(
   answers: Answers,
   bindings: readonly PlaceId[],
-  paths: readonly string[],
+  request: CoreAnalysisRequest,
 ): { readonly text: string; readonly record: string; readonly sited: boolean } {
-  const admitted = bindings.map((place) => [
-    place,
-    answers.place(place, []).admitted,
-    answers.place(place, ["element"]).admitted,
-  ]);
-  const record = {
-    outcome: answers.outcome,
-    diagnostics: answers.diagnostics,
-    checks: answers.checks,
-  };
-  const serialized = coreRecord(coreResult(answers), paths);
-  const sitesOf = (
-    list: readonly {
-      readonly site: { readonly file: number; readonly start: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [site.file, site.start, site.end]);
-  const recordSites = (
-    list: readonly {
-      readonly site: { readonly file: string; readonly offset: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
-  const sited = [
-    sitesOf(answers.diagnostics),
-    sitesOf(answers.checks),
-    recordSites(serialized.diagnostics),
-    recordSites(serialized.runtimeChecks),
-  ].every((sites) =>
-    sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
-  );
-  return {
-    text: JSON.stringify({ ...record, admitted }),
-    record: JSON.stringify({ record, serialized }),
-    sited,
-  };
+  // (every question past the finished analysis's allowance stops there, as the backend's do: `asked`)
+  return asked(answers, (answers) => {
+    const admitted = bindings.map((place) => [
+      place,
+      answers.place(place, []).admitted,
+      answers.place(place, ["element"]).admitted,
+    ]);
+    // (with the checks that owe the runtime nothing, as the compiler reads them)
+    const checked = checkedResult(answers, request);
+    const paths = request.files.map((file) => file.path);
+    const record = {
+      outcome: checked.outcome,
+      diagnostics: checked.diagnostics,
+      checks: answers.checks,
+    };
+    const serialized = coreRecord(checked, paths);
+    const sitesOf = (
+      list: readonly {
+        readonly site: { readonly file: number; readonly start: number; readonly end: number };
+      }[],
+    ) => list.map(({ site }) => [site.file, site.start, site.end]);
+    const recordSites = (
+      list: readonly {
+        readonly site: { readonly file: string; readonly offset: number; readonly end: number };
+      }[],
+    ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
+    const sited = [
+      sitesOf(checked.diagnostics),
+      sitesOf(answers.checks),
+      recordSites(serialized.diagnostics),
+      recordSites(serialized.runtimeChecks),
+    ].every((sites) =>
+      sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
+    );
+    return {
+      text: JSON.stringify({ ...record, admitted }),
+      record: JSON.stringify({ record, serialized }),
+      sited,
+    };
+  });
 }
 
 /** An item with all its marks, writer, context and ingress leaves. */
@@ -318,10 +330,9 @@ export function publication(
   const bindings = new CoreProgram(request).places
     .filter(({ kind }) => kind.kind === "binding")
     .map((place) => place.id);
-  const paths = request.files.map((file) => file.path);
   return inMode(mode, () => {
     const answers = analyseCore(request);
-    const published = publishedAnswers(answers, bindings, paths);
+    const published = publishedAnswers(answers, bindings, request);
     const route = publishedRoute(files, globals);
     return JSON.stringify([
       published.text,

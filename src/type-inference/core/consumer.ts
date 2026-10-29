@@ -11,10 +11,10 @@ import type {
   PropertyAccessExpression,
   Statement,
 } from "../../ast.js";
-import { messageColorDiagnostics } from "../../authored-presentation.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
-import { isRepeatCount, repeatCountFix, repeatCountMessage } from "../../loop-rules.js";
+import { isRepeatCount } from "../../loop-rules.js";
+import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
   type TypeCheckPlan,
@@ -28,13 +28,19 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "../../source.js";
-import { KnownValues } from "../../static-evaluation.js";
+import { isStaticDuration, KnownValues, type KnownValue } from "../../static-evaluation.js";
+import { isCalendar } from "../../duration.js";
 import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
 import { typePlan } from "../../type-plans.js";
+import {
+  expressionParts,
+  handlerBlocks,
+  nestedStatements,
+  statementExpressions,
+} from "../../expression-children.js";
 import { lazyDefaultArgument } from "../../lazy-defaults.js";
-import { cannotConvert } from "../../runtime/values/value-types.js";
 import { VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type {
   CoreRuntimeChecks,
@@ -44,24 +50,32 @@ import type {
   TypeCheckResult,
 } from "../backend.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
-import { closedType, type Answers } from "./answers.js";
-import { joinSteps } from "./budget.js";
+import { closedType, coreResult, type Answers } from "./answers.js";
+import { BudgetExhausted, joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
 import { REASON, type ItemTag } from "./items.js";
 import { propertyName, propertyStep, type CoreAnalysisRequest } from "./program.js";
-import { coreMessage, messageSource, type MessageSource } from "./messages.js";
-import type { CoreDiagnostic, Obligation, RequiredKind } from "./result.js";
+import { coreMessage, messageSource, staticCode, type MessageSource } from "./messages.js";
+import {
+  outcomeOf,
+  type CheckedDiagnostic,
+  type CoreDiagnostic,
+  type CoreResult,
+  type Obligation,
+  type RequiredKind,
+  type StaticDiagnostic,
+  type StaticRule,
+} from "./result.js";
 
 /*
  * The consumer of the coarse core (the port plan's S5, completed in S9b): one walk over the source with the core's
  * answers, which makes what the compiler consumes, `TypeCheckResult`, and the facts the analysis settled on. Here for
  * the slice `CORE_BACKEND` accepts (`backend.ts`): the core's C1 and C2 diagnostics with their codes, the runtime checks
  * their obligations and C9's boundary checks owe, the ways and the code that never runs from the flow graph's literal
- * facts (P7), the known values, and the kept checks the slice reaches (a `say`'s markup colours, a known repeat
- * count, a known value a conversion cannot convert). The slice has no form, speaker property or storage key, so those
- * outputs are empty.
+ * facts (P7), the known values, and the checks that owe the runtime nothing (`staticDiagnostics`). The slice has no
+ * form, speaker property or storage key, so those outputs are empty.
  */
 
 /** The store statement of the slice that brings an expression into its place. */
@@ -118,6 +132,8 @@ export class SliceIndex {
   /** The expressions a store brings whole into its place: its value, and the elements of a list literal there. */
   readonly #whole = new Set<Expression>();
   readonly #role = new Map<Expression, "count" | "index">();
+  /** The iterables of the `for` loops. */
+  readonly #iterables = new Set<Expression>();
 
   /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
   public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
@@ -159,6 +175,10 @@ export class SliceIndex {
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
                 pending.push({ expression: statement.target.object, store: null, whole: false });
+              } else if (statement.target.kind === "indexExpression") {
+                // an element store reads its receiver and its index
+                pending.push({ expression: statement.target.index, store: null, whole: false });
+                pending.push({ expression: statement.target.object, store: null, whole: false });
               }
               break;
             case "ifStatement":
@@ -177,6 +197,34 @@ export class SliceIndex {
               this.shown.push(statement.value);
               pending.push({ expression: statement.value, store: null, whole: false });
               break;
+            case "forStatement":
+              this.#iterables.add(statement.iterable);
+              statements(statement.body.statements);
+              pending.push({ expression: statement.iterable, store: null, whole: false });
+              break;
+            default: {
+              // any other statement (outside the candidate's slice, `backend.ts`): its blocks and its own expressions
+              // in source order, so the checks that read every expression find them (a record of any program)
+              const nested = [
+                ...nestedStatements(statement),
+                ...(statement.kind === "functionDeclaration" ? statement.body.statements : []),
+                ...handlerBlocks(statement).flatMap((block) => block.statements),
+              ];
+              statements(nested.sort((a, b) => a.span.start.offset - b.span.start.offset));
+              const own = [
+                ...(statement.kind === "globalStatement" && statement.assignment === null
+                  ? [statement.initial]
+                  : []),
+                ...(statement.kind === "functionDeclaration"
+                  ? statement.parameters.flatMap((parameter) =>
+                      parameter.defaultValue === null ? [] : [parameter.defaultValue],
+                    )
+                  : []),
+                ...statementExpressions(statement),
+              ];
+              for (let at = own.length - 1; at >= 0; at -= 1)
+                pending.push({ expression: own[at]!, store: null, whole: false });
+            }
           }
           continue;
         }
@@ -237,8 +285,9 @@ export class SliceIndex {
             });
             break;
           case "binaryExpression":
-            // `otherwise`, the slice's one operator
-            for (const held of operands(expression.right)) this.#fallbackOf.set(held, expression);
+            // `otherwise`, the slice's one operator with a fallback
+            if (expression.operator === "otherwise")
+              for (const held of operands(expression.right)) this.#fallbackOf.set(held, expression);
             pending.push({ expression: expression.right, store, whole: false, parent: expression });
             pending.push({ expression: expression.left, store, whole: false, parent: expression });
             break;
@@ -263,6 +312,14 @@ export class SliceIndex {
               });
             if (method !== null)
               pending.push({ expression: method.object, store, whole: false, parent: expression });
+            break;
+          }
+          default: {
+            // any other expression (outside the slice): its parts, then the statements of the handlers it registers
+            for (const block of handlerBlocks(expression)) statements(block.statements);
+            const parts = expressionParts(expression);
+            for (let at = parts.length - 1; at >= 0; at -= 1)
+              pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
             break;
           }
           case "loadExpression":
@@ -315,6 +372,11 @@ export class SliceIndex {
   /** Whether a store brings `expression` whole into its place (not as an operand of an index read). */
   public storedWhole(expression: Expression): boolean {
     return this.#whole.has(expression);
+  }
+
+  /** Whether `expression` is a `for` loop's iterable. */
+  public iterates(expression: Expression): boolean {
+    return this.#iterables.has(expression);
   }
 
   /** Whether `expression` is a `repeat` count or an index. */
@@ -379,8 +441,8 @@ export class SliceIndex {
 }
 
 /**
- * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's and a `repeat`'s its
- * count's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
+ * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's, a `repeat`'s its
+ * count's and a `for`'s its iterable's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
  * expression inside them).
  */
 export function nodeOf(
@@ -392,6 +454,8 @@ export function nodeOf(
   for (;;)
     if (current.kind === "ifStatement") current = current.condition;
     else if (current.kind === "repeatStatement") current = current.count;
+    else if (current.kind === "forStatement") current = current.iterable;
+    else if (current.kind === "expressionStatement") current = current.expression;
     else if (current.kind === "parenthesizedExpression") current = current.expression;
     else break;
   const site = index.site(current);
@@ -432,7 +496,7 @@ function declarationOf(
  * checked (budget)" at the editor's information level, TABLE r4.54), its sentences (`messages.ts`, D1) and its site's
  * span (D2).
  */
-function diagnosticOf(diagnostic: CoreDiagnostic, source: MessageSource): Diagnostic {
+function diagnosticOf(diagnostic: CheckedDiagnostic, source: MessageSource): Diagnostic {
   return createDiagnostic(
     diagnostic.class === "compile-error"
       ? DiagnosticSeverity.Error
@@ -461,33 +525,17 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
+  const { checks, core } = runtimeChecks(answers, index, request);
+  const known = knownValues(answers, index, (call) => core.expected.get(call));
+  const result = checkedOf(answers, index, known);
   const source = messageSource(
     request.files.map((file) => file.source),
-    answers.diagnostics,
+    result.diagnostics,
   );
-  const sited = new Set<string>();
-  const shown = new Set(reportedDiagnostics(answers));
-  for (const diagnostic of answers.diagnostics) {
-    if (diagnostic.kind === "operator")
-      throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
-    if (diagnostic.kind !== "budget")
-      sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
+  const shown = new Set(reportedDiagnostics(answers, result.diagnostics));
+  for (const diagnostic of result.diagnostics)
     if (shown.has(diagnostic))
       diagnostics[diagnostic.site.file]!.push(diagnosticOf(diagnostic, source));
-  }
-  const { checks, core } = runtimeChecks(answers, index, request);
-  // a `fromJson` reads its JSON as the plan's expected type, so its known value is the one the run gets
-  const values = new KnownValues(
-    (identifier) => {
-      const initializer = answers.initializers.get(
-        siteKey(index.fileOf(identifier), identifier.span),
-      );
-      return initializer === undefined ? undefined : index.expressionAt(initializer);
-    },
-    (call) => core.expected.get(call),
-  );
-  const known = (expression: Expression) => values.known(expression);
-  answers.shareKnown(known);
   const paths = new Map<Statement, readonly boolean[]>();
   for (const statement of index.statements)
     if (statement.kind === "ifStatement") {
@@ -498,27 +546,7 @@ export function coreCheckResult(
       // P7: whether the body runs, and whether it may run not at all
       const rounds = literalRounds(statement.count);
       paths.set(statement, rounds === null ? [true, true] : [rounds !== "none", rounds === "none"]);
-      // the kept check of a known count's value (`loop-rules.ts`), where the core finds the count's kinds fine
-      let count: Expression = statement.count;
-      while (count.kind === "parenthesizedExpression") count = count.expression;
-      if (!sited.has(siteKey(index.fileOf(statement), count.span))) {
-        const value = known(statement.count);
-        if (typeof value === "number" && !isRepeatCount(value))
-          diagnostics[index.fileOf(statement)]!.push(
-            createDiagnostic(
-              DiagnosticSeverity.Error,
-              "TSV011",
-              repeatCountMessage("this", String(value), repeatCountFix(value)),
-              statement.count.span,
-            ),
-          );
-      }
-    } else if (statement.kind === "sayStatement")
-      diagnostics[index.fileOf(statement)]!.push(...messageColorDiagnostics(statement.value));
-  for (const call of index.calls) {
-    const error = knownConversionError(answers, index, call);
-    if (error !== null) diagnostics[index.fileOf(call)]!.push(error);
-  }
+    }
   // by site, so a file's order does not follow the core's consumer order (a receiver's and a member's warnings start alike)
   for (const list of diagnostics)
     list.sort(
@@ -542,6 +570,221 @@ export function coreCheckResult(
 }
 
 /**
+ * The known values of a program (S3 §2, group V): the one constant service, handed to the answers so that a view's
+ * known value is the consumer's (TABLE r4.81 (3)); a `fromJson` reads its JSON as `expected` gives its type, so its known
+ * value is the one the run gets.
+ */
+function knownValues(
+  answers: Answers,
+  index: SliceIndex,
+  expected: (call: CallExpression) => TypePlan | undefined,
+): (expression: Expression) => KnownValue | undefined {
+  const values = new KnownValues((identifier) => {
+    const initializer = answers.initializers.get(
+      siteKey(index.fileOf(identifier), identifier.span),
+    );
+    return initializer === undefined ? undefined : index.expressionAt(initializer);
+  }, expected);
+  const known = (expression: Expression) => values.known(expression);
+  answers.shareKnown(known);
+  return known;
+}
+
+/**
+ * The core's result with the checks that owe the runtime nothing (`StaticDiagnostic`, the lead's decision 3 on #1072):
+ * the one list of diagnostics its record (`coreRecord`) and the compiler's diagnostics are both made from.
+ */
+function checkedOf(
+  answers: Answers,
+  index: SliceIndex,
+  known: (expression: Expression) => KnownValue | undefined,
+): CoreResult {
+  // (each in the analysis's site order, before the first diagnostic of a later site: a record's lists are in source
+  // order, r4.86 (1))
+  const found = staticDiagnostics(answers, index, known).sort((a, b) => siteOrder(a.site, b.site));
+  // (a known calendar offset is one problem with one diagnostic, the runtime's sentence: the analysis's own warning of
+  // the operation at that site, a hedge beside it, goes, decision 6)
+  const at = (site: SourceSite): string => `${site.file}:${site.start}:${site.end}`;
+  const offsets = new Set(
+    found.filter((d) => d.rule.rule === "calendar-offset").map((d) => at(d.site)),
+  );
+  const analysed = answers.diagnostics.filter(
+    (d) =>
+      !(d.class === "warning-runtime-check" && d.kind === "operator" && offsets.has(at(d.site))),
+  );
+  const diagnostics: CheckedDiagnostic[] = [];
+  let next = 0;
+  for (const diagnostic of analysed) {
+    while (next < found.length && siteOrder(found[next]!.site, diagnostic.site) < 0)
+      diagnostics.push(found[next++]!);
+    diagnostics.push(diagnostic);
+  }
+  diagnostics.push(...found.slice(next));
+  return { outcome: outcomeOf(diagnostics), diagnostics, checks: coreResult(answers).checks };
+}
+
+/** Two sites in source order: by file, start and end. */
+function siteOrder(a: SourceSite, b: SourceSite): number {
+  return a.file - b.file || a.start - b.start || a.end - b.end;
+}
+
+/**
+ * What `ask` makes of a finished analysis's answers, its questions spending the analysis's allowance (TABLE §8): one past
+ * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
+ * `STOPPED` (D4 a′). The backend's outcome and the test-only checked result (`checkedResult`) both ask so.
+ */
+export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
+  try {
+    return ask(answers);
+  } catch (error) {
+    if (!(error instanceof BudgetExhausted)) throw error;
+    return ask(answers.stoppedAt(error.limit));
+  }
+}
+
+/**
+ * Test-only: the core's result for a request, with its checks that owe the runtime nothing, as the compiler reads it
+ * (`checkedOf`, `asked`), also for a program outside the candidate's slice: a typed parse the slice does not follow
+ * there reads its JSON without its expected type.
+ */
+export function checkedResult(answers: Answers, request: CoreAnalysisRequest): CoreResult {
+  const index = new SliceIndex(request.files.map((file) => file.program));
+  return asked(answers, (answers) => {
+    let contracts: Contracts | null = null;
+    const expected = (call: CallExpression): TypePlan | undefined => {
+      contracts ??= new Contracts(answers, index, declarations(answers, index));
+      try {
+        return contracts.expected(call) ?? undefined;
+      } catch (error) {
+        if (error instanceof OutsideContract) return undefined;
+        throw error;
+      }
+    };
+    return checkedOf(answers, index, knownValues(answers, index, expected));
+  });
+}
+
+/**
+ * The checks of known values that owe the runtime nothing (S3 §2, group V), each where the core finds its value's kinds
+ * fine (no diagnostic of the analysis at its site): a `repeat` count's known value outside its domain (`loop-rules.ts`),
+ * a conversion of known text it cannot convert (V30 §13, #1105), and a written range that holds no number (V30 §6, an
+ * ordinary warning).
+ */
+function staticDiagnostics(
+  answers: Answers,
+  index: SliceIndex,
+  known: (expression: Expression) => KnownValue | undefined,
+): StaticDiagnostic[] {
+  const sited = new Set<string>();
+  for (const diagnostic of answers.diagnostics)
+    if (diagnostic.kind !== "budget")
+      sited.add(`${diagnostic.site.file}:${diagnostic.site.start}:${diagnostic.site.end}`);
+  const found: StaticDiagnostic[] = [];
+  const report = (site: SourceSite, rule: StaticRule): void => {
+    found.push({ class: "compile-error", kind: "static", code: staticCode(rule), site, rule });
+  };
+  for (const statement of index.statements)
+    if (statement.kind === "repeatStatement") {
+      const count = unwrap(statement.count);
+      if (sited.has(siteKey(index.fileOf(statement), count.span))) continue;
+      const value = known(statement.count);
+      if (typeof value === "number" && !isRepeatCount(value))
+        report(index.site(statement.count), { rule: "repeat-count", value });
+    }
+  for (const call of index.calls) {
+    const conversion = knownConversionError(answers, index, call);
+    if (conversion !== null) report(index.site(conversion.value), conversion.rule);
+  }
+  // V30 §6: a written range that holds no number, an ordinary warning where a loop or `toList()` reads it
+  const empty = (range: Expression, use: "loop" | "list"): void => {
+    const bounds = literalRange(range);
+    if (
+      bounds === undefined ||
+      ![bounds.startText, bounds.endText].every((text) => /^-?\d+$/.test(text)) ||
+      (bounds.inclusive ? bounds.end >= bounds.start : bounds.end > bounds.start)
+    )
+      return;
+    found.push({
+      class: "warning",
+      kind: "static",
+      code: "TSV046",
+      site: index.site(range),
+      rule: {
+        rule: "empty-range",
+        use,
+        start: bounds.startText,
+        end: bounds.endText,
+        inclusive: bounds.inclusive,
+      },
+    });
+  };
+  // ADR 0026 §5, decision 6 on #1072: a date or a local date and time moved by a known calendar duration with an exact
+  // offset, beside the operation's own check (F16), the binary form at its operation and the compound one at its statement
+  const offset = (target: readonly ItemTag[], operand: Expression, site: SourceSite): void => {
+    const kinds = target.filter((tag) => tag !== "empty");
+    const moved =
+      kinds.length > 0 && kinds.every((tag) => tag === "date")
+        ? "date"
+        : kinds.length > 0 && kinds.every((tag) => tag === "datetime")
+          ? "datetime"
+          : null;
+    const value = known(operand);
+    if (
+      moved === null ||
+      !isStaticDuration(value) ||
+      !isCalendar(value) ||
+      value.milliseconds === 0
+    )
+      return;
+    report(site, { rule: "calendar-offset", target: moved, duration: value });
+  };
+  for (const expression of index.expressions)
+    if (
+      expression.kind === "binaryExpression" &&
+      (expression.operator === "+" || expression.operator === "-")
+    )
+      offset(
+        (answers.at(nodeOf(answers, index, expression.left))?.items ?? []).map((item) => item.tag),
+        expression.right,
+        index.site(expression),
+      );
+  for (const statement of index.statements)
+    if (statement.kind === "assignmentStatement" && statement.operator !== "=") {
+      // (the target's current value, read before the operand as the compound operation reads it, `collector.ts`: a
+      // variable's read, or its root's value below its properties and elements)
+      const file = index.fileOf(statement);
+      const steps: string[] = [];
+      let root: Expression = statement.target;
+      for (;;)
+        if (root.kind === "propertyAccessExpression") {
+          steps.unshift(propertyStep(root.property.name));
+          root = root.object;
+        } else if (root.kind === "indexExpression") {
+          steps.unshift("element");
+          root = root.object;
+        } else if (root.kind === "parenthesizedExpression") root = root.expression;
+        else break;
+      const read = answers.graph.expressionAt({
+        file,
+        start: root.span.start.offset,
+        end: root.span.end.offset,
+      });
+      if (read !== undefined)
+        offset(
+          answers.valueAt(read, steps).items.map((item) => item.tag),
+          statement.value,
+          index.site(statement),
+        );
+    }
+  for (const statement of index.statements)
+    if (statement.kind === "forStatement") empty(statement.iterable, "loop");
+  for (const call of index.calls)
+    if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name === "toList")
+      empty(call.callee.object, "list");
+  return found;
+}
+
+/**
  * V30 §13: a conversion of a value the compiler knows and the conversion cannot convert is a compile error, also with a
  * `default:` (#1105). The value is the argument's known value through its view, never the call's, which the default
  * would give. A value of a type the conversion does not take, and the parts of `toDateTime(date, time)`, are the
@@ -551,7 +794,7 @@ function knownConversionError(
   answers: Answers,
   index: SliceIndex,
   call: CallExpression,
-): Diagnostic | null {
+): { readonly value: Expression; readonly rule: StaticRule } | null {
   if (call.callee.kind !== "identifier" || !isConversion(call.callee.name)) return null;
   const name = call.callee.name;
   const conversion: Conversion = CONVERSIONS[name];
@@ -567,12 +810,7 @@ function knownConversionError(
   const value = positional[0]!.value;
   const text = answers.view(nodeOf(answers, index, value)).known;
   return typeof text === "string" && conversion.textProblem(text) !== undefined
-    ? createDiagnostic(
-        DiagnosticSeverity.Error,
-        "TSV043",
-        cannotConvert(name, conversion, text),
-        value.span,
-      )
+    ? { value, rule: { rule: "conversion", conversion: name, text } }
     : null;
 }
 
@@ -687,6 +925,9 @@ function runtimeChecks(
     const store = index.storeOf(expression);
     if (store === undefined) {
       if (obligation.boundary && typed.has(expression)) continue;
+      // (a loop variable's check has no place in the plan yet: its loop stays outside the slice)
+      for (let at: Expression | undefined = expression; at !== undefined; at = index.parentOf(at))
+        if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
     if (checks.has(store)) continue;
@@ -1385,10 +1626,18 @@ function unionOf(plans: readonly TypePlan[]): TypePlan {
  * never runs (TSV065) reports; an error there stays (ADR 0021 rule 1.8). An expression the flow graph has no node for
  * runs with its statement.
  */
-export function reportedDiagnostics(answers: Answers): CoreDiagnostic[] {
+export function reportedDiagnostics(answers: Answers): CoreDiagnostic[];
+export function reportedDiagnostics(
+  answers: Answers,
+  diagnostics: readonly CheckedDiagnostic[],
+): CheckedDiagnostic[];
+export function reportedDiagnostics(
+  answers: Answers,
+  diagnostics: readonly CheckedDiagnostic[] = answers.diagnostics,
+): CheckedDiagnostic[] {
   const { graph } = answers;
   let reached: Set<FlowNode> | null = null;
-  return answers.diagnostics.filter((diagnostic) => {
+  return diagnostics.filter((diagnostic) => {
     if (diagnostic.class === "compile-error") return true;
     // the nodes a way over live edges reaches from their region's entry, once
     if (reached === null) {

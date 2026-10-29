@@ -215,13 +215,15 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
     const tags = admission.admitted(d.place, path);
     // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
     // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
-    // TABLE r4.126)
+    // TABLE r4.126; never below a decision that stopped at its demand allowance, which decides nothing in the unstopped
+    // analysis either, so a settled stop keeps its boundaries: Astra r1's B2 on #1437)
     const destination = admission.destPath(d);
     if (
       tags.length === 0 &&
       admission.pass.program.work.stopped !== null &&
       d.value !== undefined &&
-      path.length >= destination.length
+      path.length >= destination.length &&
+      !admission.decisionStopped(d.place, path)
     ) {
       const read = admission.host.read?.(d.value, d.node, path.slice(destination.length)) ?? [];
       const kinds = [

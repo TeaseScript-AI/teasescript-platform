@@ -4,6 +4,7 @@ import {
   exactDuration,
   formatDuration,
   isCalendar,
+  localCalendarOffsetMessage,
   negateDuration,
   type AnyDuration,
 } from "../../duration.js";
@@ -427,9 +428,7 @@ export function temporalBinary(
     if (duration.milliseconds !== 0)
       throw fault(
         "TSR009",
-        value.kind === "date"
-          ? `A date moves only by calendar units, not by ${formatDuration(duration)}. A date has no clock time, so leave out the ${formatDuration(duration.milliseconds)}.`
-          : `A date and time moves only by calendar units, not by ${formatDuration(duration)}. Convert it with toAbsoluteDateTime() for elapsed time.`,
+        localCalendarOffsetMessage(value.kind === "date" ? "date" : "datetime", duration),
         span,
       );
     const date = addCalendarParts(value, duration.months, duration.days);

@@ -155,8 +155,8 @@ test("a choice of written records is answered within the native stack", () => {
 });
 
 test("a choice record whose value holds host values is answered within the native stack", () => {
-  // `selectedAt`
-  assert.deepEqual(spreadCase("property"), ["warning-runtime-check", 1, 2]);
+  // `selectedAt`; a list as a button's value is TSV029's error since S9b, and the answer holds no list (TABLE r4.93)
+  assert.deepEqual(spreadCase("property"), ["compile-error", 1, 0]);
 });
 
 test("a choice of choices of many options is classed within the native stack", () => {
@@ -165,6 +165,7 @@ test("a choice of choices of many options is classed within the native stack", (
 });
 
 test("a choice of a call of many arguments is classed within the native stack", () => {
-  // `Contract.classOf`'s operation key (review r6 B1)
-  assert.deepEqual(spreadCase("operationClass"), ["warning-runtime-check", 1, 2]);
+  // `Contract.classOf`'s operation key (review r6 B1); the value, a call the analysis does not model, owes C13's warning
+  // and its check (the sentence review of #1437)
+  assert.deepEqual(spreadCase("operationClass"), ["warning-runtime-check", 2, 3]);
 });

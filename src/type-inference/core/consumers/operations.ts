@@ -1,6 +1,7 @@
+import { dictMethod } from "../../../dict-operations.js";
 import { lazyDefaultOperation } from "../../../lazy-defaults.js";
 import type { ValueKind } from "../../../value-kinds.js";
-import type { SourceSite } from "../../graph.js";
+import type { Constraint, SourceSite } from "../../graph.js";
 import { isExternal, isOpaque } from "../admission.js";
 import { joinParts, joinSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
@@ -13,7 +14,9 @@ import { builtinResult, conversionCategory } from "../method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "../operator-table.js";
 import type { ValueConstraint } from "../program.js";
 import type { DiagnosticRule, RequiredKind } from "../result.js";
+import { choiceValues } from "../checks/interactions.js";
 import { error } from "./diagnostics.js";
+import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
 import { fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
@@ -49,7 +52,8 @@ export function operations(walk: Consumers): void {
   walk.enter(0);
   for (const c of finals) {
     if (!walk.runs(c.site)) continue;
-    const node = program.exprAt(c.site);
+    // (a compound assignment's operation is its statement's, which has no expression of its own: Astra's G2)
+    const node = program.exprAt(c.site) ?? compoundNode(walk, c);
     if (node === null) continue;
     walk.reading = node;
     if (c.kind === "get") {
@@ -140,12 +144,25 @@ export function operations(walk: Consumers): void {
   }
 }
 
+/**
+ * The node of a compound assignment's operation (`x += y`, the collector's `compound` value): its statement's, where the
+ * binary form's operation is its expression's, so both forms meet one operand consumer (C4, F16); `null` for any other.
+ */
+function compoundNode(walk: Consumers, c: Constraint): FlowNode | null {
+  if (c.kind !== "operation") return null;
+  const place = walk.pass.program.places[c.result]?.kind;
+  if (place?.kind !== "value" || place.node !== "compound") return null;
+  return walk.pass.program.flow.statementAt(c.site) ?? null;
+}
+
 function operation(
   walk: Consumers,
   c: Extract<ValueConstraint, { kind: "operation" }>,
   node: FlowNode,
 ): void {
   const { family, name } = c.contract;
+  // TSV029: what a choice's buttons return
+  if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
     // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
     if (
@@ -163,9 +180,10 @@ function operation(
         name === "removeAt" ? "removeAt" : `the count of ${name}`,
         name,
       );
-    if (name === "remove") {
-      // C12: a dict's key is text; where the receiver may also be a list or a set (or unknown), whose `remove` takes
-      // any value, only a check, as an index use owes one
+    if (c.arguments.length > 0 && dictMethod(name)?.parameters[0]?.name === "key") {
+      // C12: a dict method's key is text (`contains`, `remove`; `get`'s is its own constraint's); where the receiver may
+      // also be a list, a set or text (or unknown), whose method takes another value, only a check, as an index use
+      // owes one
       const kinds = kindsOf(walk, c.receiver, node);
       if (kinds.some((item) => item.tag === "dict"))
         consume(
@@ -174,7 +192,7 @@ function operation(
           node,
           c.site,
           TEXT,
-          "a dict key at remove",
+          `a dict key at ${name}`,
           { rule: "key" },
           ["string"],
           "operator",
@@ -187,6 +205,11 @@ function operation(
     if (name === "removeFirst" || name === "removeLast")
       selection(walk, c.receiver, node, c.site, `.${name}()`);
     methodReceiver(walk, c.site, node, c.receiver, name);
+    // C13: what the method's contract takes of its arguments and its elements
+    if (family === "method") {
+      methodArguments(walk, c, node);
+      methodElements(walk, c, node);
+    }
     return;
   }
   // C3
@@ -253,6 +276,8 @@ function operation(
       selection(walk, value, node, c.site, "${...}");
     return;
   }
+  // C13, Astra's G1: what `toJson` writes
+  if (family === "conversion") jsonArgument(walk, c, node);
   const operator = operatorOf(c);
   if (operator !== null) operatorUse(walk, c, operator, node);
 }

@@ -22,19 +22,24 @@ import {
 } from "../src/runtime/snapshot/checkpoint.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
-import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import {
+  createCapturedSerializableList,
+  type SerializableRuntimeValue,
+} from "../src/runtime/values/serializable-values.js";
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import {
+  checkedResult,
   coreCheckResult,
   nodeOf,
   reportedDiagnostics,
   SliceIndex,
 } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -42,6 +47,7 @@ import { analyzeTypes } from "../src/type-inference/index.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { toMonacoMarkers } from "../src/editor/monaco-mapping.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   companions,
@@ -212,6 +218,9 @@ const STORE_CODES: readonly (string | null)[] = ["TSR058"];
  */
 const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
   "integer-use": ["TSR024", "TSR043"],
+  // (C13, S9b: a loop's own check of its source, a call's of its argument)
+  iteration: ["TSR044"],
+  argument: ["TSV043", "TSV042", "TSR024"],
   empty: ["TSR018", "TSR019"],
   member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
   fallback: ["TSR058"],
@@ -238,7 +247,9 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
 const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
   "written-target": ["TSV041", "TSV044"],
   "integer-use": ["TSV011", "TSV043"],
-  "member-read": ["TSV043"],
+  // (C13: a `for` loop's iterable, a method's argument; the elements a `join` or a `sort` reads are a member's)
+  operator: ["TSV012", "TSV043"],
+  "member-read": ["TSV042", "TSV043"],
 };
 
 type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];
@@ -1529,12 +1540,28 @@ test("a store into an object's own first, last or random sets that property and 
   for (const source of [
     "let a = {first: 1, n: 2}\nif a.n > 1 {\n  a.first = 3\n}\nexit\n",
     "let a = {last: 1}\nfunction f {\n  a.last = 4\n}\nf()\nexit\n",
-    "let a = {random: 1}\na.random += 2\nexit\n",
   ]) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     assert.deepEqual(analyseCore(request).diagnostics, [], source);
   }
+  // a compound store reads the own property first, as its binary form does (F11's own selection, opaque: Astra's G2)
+  const operands = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return compactAnalysis(request)
+      .checks.filter((check) => check.kind === "operand")
+      .map((check) => `${check.target} [${check.against.join(", ")}] @${check.site.offset}`);
+  };
+  assert.deepEqual(operands("let a = {random: 1}\na.random += 2\nexit\n"), [
+    "a.random [integer, number] @20",
+  ]);
+  assert.deepEqual(
+    operands("let a = {random: 1}\na.random += 2\nexit\n"),
+    operands("let a = {random: 1}\na.random = a.random + 2\nexit\n").map((check) =>
+      check.replace("@31", "@20"),
+    ),
+  );
   const wrong = candidate('let a = {first: 1}\na.first = "bad"\nexit\n');
   assert.deepEqual(sited(wrong), ["error TSV041@29"]);
   assert.match(
@@ -2075,9 +2102,11 @@ test("every carrier kind leaves an obligation for the external data it gives a p
               continue;
             }
             const [result, { checks }] = compiled;
+            // (the checked store, a loop body's after its indentation)
+            const statement = holder + /^ */.exec(source.slice(holder))![0].length;
             assert.deepEqual(
               checks,
-              [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
+              [`${statement}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
               name,
             );
             const plan = result.plan!;
@@ -2617,7 +2646,7 @@ test("a checkpoint after a passed check resumes with the same state, and the lat
 test("a program outside the slice throws at its first construct outside it", () => {
   for (const [source, offset] of [
     // a statement outside the slice
-    ["let total = 0\nfor value in [1, 2] {\n  total = value\n}\nexit\n", 14],
+    ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
     // a possible null, whose required check comes with narrowing (S10)
@@ -2688,6 +2717,185 @@ test("the candidate's side outputs follow the flow graph's literal facts and the
   assert.deepEqual(sited(large), ["error TSV011@32"]);
   assert.match(large.diagnostics[0]!.message, /Use a smaller count\.$/);
   assert.deepEqual(sited(candidate('say "[color=bad]x[/color]"\nexit\n')), ["error TSC008@4"]);
+});
+
+/**
+ * The lead's decision 3 on #1072 (Astra's G3): a check that owes the runtime nothing is a diagnostic of its own kind,
+ * published in the core's record with its site alone and no obligation, its sentence composed from its rule, and read
+ * alike by the record and the compiler: the record's every diagnostic is the compiler's, at the same span and severity,
+ * with the sentence `coreMessage` gives it; a warning with a runtime check beside it keeps its obligation and its check.
+ */
+test("a check that owes the runtime nothing is published in the record and by the compiler alike, with no obligation (decision 3 on #1072)", () => {
+  const source =
+    'let n = toInteger("-2", default: 0)\nlet m: integer = hostValue\nrepeat n {}\nsay toNumber("1,5", default: m)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const { record, compiled } = inBothOrdersAs(
+    () => ({
+      record: coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]),
+      compiled: candidate(source),
+    }),
+    ({ record, compiled }) => ({
+      record,
+      compiled: compiled.diagnostics.map((d) => [
+        d.severity,
+        d.code,
+        d.span.start.offset,
+        d.span.end.offset,
+      ]),
+    }),
+  )[1];
+  const at = (text: string, from = 0): readonly [number, number] => {
+    const start = source.indexOf(text, from);
+    return [start, start + text.length];
+  };
+  assert.equal(record.outcome, "compile-error");
+  assert.deepEqual(
+    record.diagnostics.map((d) => [d.class, d.kind, d.site.offset, d.site.end, "obligation" in d]),
+    [
+      // (the analysis's own diagnostics first, then the checks that owe nothing, each in its source order)
+      ["warning-runtime-check", "written-target", ...at("hostValue"), true],
+      ["compile-error", "static", ...at("n", source.indexOf("repeat")), false],
+      ["compile-error", "static", ...at('"1,5"'), false],
+    ],
+  );
+  // the warning's check and the boundary's, nothing for the checks that owe nothing
+  assert.deepEqual(
+    record.runtimeChecks.map((check) => [
+      check.kind,
+      check.target,
+      check.boundary === true,
+      check.site.offset,
+    ]),
+    [
+      ["copy-type", "m", false, source.indexOf("hostValue")],
+      ["copy-type", "m", true, source.indexOf("hostValue")],
+    ],
+  );
+  // the compiler reports each at the record's span and severity
+  assert.deepEqual(compiled, [
+    ["warning", "TSV041", ...at("hostValue")],
+    ["error", "TSV011", ...at("n", source.indexOf("repeat"))],
+    ["error", "TSV043", ...at('"1,5"')],
+  ]);
+  const messages = candidate(source).diagnostics.map((d) => d.message);
+  assert.equal(
+    messages[1],
+    "A repeat count must be a whole number (integer) of at least 0, but this is -2. Check that it is at least 0 first.",
+  );
+  assert.match(
+    messages[2]!,
+    /^toNumber\(\.\.\.\) cannot convert text \(string\) "1,5" to a number/,
+  );
+});
+
+/**
+ * The seam's ordinary warning (decision 3 on #1072): a check that owes the runtime nothing but warns, here V30 §6's
+ * written range that holds no number, is a warning in the record and the compiler alike, the outcome `warning` alone and
+ * a runtime check's warning beside it the worse; it owes no check, so the plan's checks are the other warning's, and the
+ * editor marks it a warning as any other.
+ */
+test("an ordinary warning owes no check: its record, its compile, its plan and its editor marker (decision 3 on #1072)", () => {
+  const alone = "for i in 3..1 {\n  say i\n}\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source: alone }]);
+  assert.ok(request !== null);
+  const record = coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]);
+  assert.deepEqual(record, {
+    outcome: "warning",
+    diagnostics: [
+      { class: "warning", kind: "static", site: { file: "main.tease", offset: 9, end: 13 } },
+    ],
+    runtimeChecks: [],
+  });
+  const beside = `${alone.replace("exit\n", "")}let m: integer = hostValue\nsay "after"\nexit\n`;
+  const besideRequest = coreRequest([{ path: "main.tease", source: beside }]);
+  assert.ok(besideRequest !== null);
+  const both = coreRecord(checkedResult(analyseCore(besideRequest), besideRequest), ["main.tease"]);
+  assert.equal(both.outcome, "warning-runtime-check");
+  assert.deepEqual(
+    both.runtimeChecks.map((check) => `${check.kind} ${check.target}`),
+    ["copy-type m", "copy-type m"],
+  );
+  const compiled = inBothOrders(() => candidate(beside));
+  assert.deepEqual(sited(compiled), [
+    "warning TSV046@9",
+    `warning TSV041@${beside.indexOf("hostValue")}`,
+  ]);
+  assert.equal(
+    compiled.diagnostics[0]!.message,
+    "This range contains no numbers, so the loop never runs: a range never counts down. Write '1..3' to count up.",
+  );
+  assert.deepEqual(checksOf(compiled.plan!), [
+    `${beside.indexOf("let m")}:${beside.indexOf("\nsay")} integer`,
+  ]);
+  assert.deepEqual(runWith(compiled.plan!, 2), {
+    status: "halted",
+    says: ["after"],
+    failure: null,
+  });
+  assert.deepEqual(
+    toMonacoMarkers(compiled.diagnostics, { Error: 8, Warning: 4, Info: 2 }).map(
+      (marker) => `${marker.code} ${marker.severity}`,
+    ),
+    ["TSV046 4", "TSV041 4"],
+  );
+});
+
+/**
+ * C13's iterable (TABLE r4.81 (2)): an operand of the loop at its iterable, against the domain it tests, a list, set,
+ * dict or range, a pair loop's a dict: an error where no run can go through it; else a warning whose operand check is
+ * the runtime's own check of the loop's source (TSR044), at the iterable before the body runs, so the plan holds none.
+ */
+test("a for loop's iterable is an operand of the loop: an error, or a warning the loop's own check discharges at the iterable (C13)", () => {
+  for (const [source, operand] of [
+    ["for n in 1 {}\nexit\n", "1"],
+    ["for k, v in [1] {}\nexit\n", "[1]"],
+    ['let xs = ["a"]\nfor k, v in xs {}\nexit\n', "xs"],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(sited(result), [`error TSV012@${source.indexOf(operand, 5)}`], source);
+  }
+  for (const [source, against] of [
+    ['for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["list", "set", "dict", "range"]],
+    ['for k, v in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["dict"]],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const record = inBothOrders(() => compactAnalysis(request));
+    const at = source.indexOf("hostValue");
+    assert.deepEqual(
+      record.diagnostics.map((d) => [d.kind, d.class, d.site.offset]),
+      [["operator", "warning-runtime-check", at]],
+    );
+    assert.deepEqual(
+      record.checks.filter((check) => !check.boundary).map((check) => [check.kind, check.against]),
+      [["operand", against]],
+    );
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`warning TSV012@${at}`]);
+    // (the loop's own check: a value it cannot go through stops the run at the iterable, before the body)
+    assert.deepEqual(runWith(result.plan!, 1), {
+      status: "failed",
+      says: [],
+      failure: `TSR044@${at}:${at + "hostValue".length}`,
+    });
+  }
+  const list = createCapturedSerializableList([1, 2]);
+  const loop = inBothOrders(() =>
+    candidate('for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n'),
+  );
+  assert.deepEqual(runWith(loop.plan!, list), {
+    status: "halted",
+    says: ["in", "in", "after"],
+    failure: null,
+  });
+  // the controls: what a loop goes through is quiet
+  for (const source of [
+    'let xs = [1, 2]\nfor n in xs {\n  say "in"\n}\nexit\n',
+    "let xs: integer[] = [1]\nfor n in xs {}\nexit\n",
+  ])
+    assert.deepEqual(sited(inBothOrders(() => candidate(source))), [], source);
 });
 
 /**

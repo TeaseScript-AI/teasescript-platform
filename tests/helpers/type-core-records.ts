@@ -91,10 +91,12 @@ export function compactRecord(record: CoreRecord): CompactRecord {
 const OUTCOMES: Readonly<Record<CoreOutcome, true>> = {
   valid: true,
   "warning-runtime-check": true,
+  warning: true,
   "compile-error": true,
 };
 const CLASSES: Readonly<Record<DiagnosticClass, true>> = {
   "warning-runtime-check": true,
+  warning: true,
   "compile-error": true,
   "not-checked-budget": true,
 };
@@ -105,6 +107,7 @@ const DIAGNOSTIC_KINDS: Readonly<Record<RecordDiagnostic["kind"], true>> = {
   operator: true,
   "written-type": true,
   budget: true,
+  static: true,
 };
 const OBLIGATION_KINDS: Readonly<Record<ObligationKind, true>> = {
   "copy-type": true,

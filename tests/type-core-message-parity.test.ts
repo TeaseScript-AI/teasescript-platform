@@ -7,13 +7,13 @@ import { parse } from "../src/parser.js";
 import { someNode } from "../src/project-globals.js";
 import { compareProjectPaths } from "../src/project-paths.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
+import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
 import {
   coreMessage,
   messageSource,
   type MessageSource,
 } from "../src/type-inference/core/messages.js";
-import type { CoreDiagnostic } from "../src/type-inference/core/result.js";
+import type { CheckedDiagnostic } from "../src/type-inference/core/result.js";
 import { VALUE_KINDS } from "../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { pasteCases, pastedForms, pasteFailure } from "./helpers/type-core-paste.js";
@@ -21,7 +21,7 @@ import { heldBack, readFixture, type FixtureRecord } from "./helpers/type-core-f
 import { sentences } from "./helpers/type-core-oracles.js";
 
 /** A diagnostic a rule found: a stop's own warning and marks (`budget`) name no fix and are never compared. */
-type Compared = Exclude<CoreDiagnostic, { readonly kind: "budget" }>;
+type Compared = Exclude<CheckedDiagnostic, { readonly kind: "budget" }>;
 
 /*
  * The new checker keeps every fix the current checker gives (#1195): on every record of the expectation set, the two
@@ -195,6 +195,11 @@ const PORTS: readonly Port[] = [
   {
     from: /^Keep it in a variable and check it first, as in: if value (!= null|is .+) \{ \.\.\. \}$/,
     to: ([, test], { subject, statement }) => exact(`${checkForm(subject, test!, statement)}.`),
+  },
+  // C13 (S9b): a method argument's conversion, in the words of its contract's own fix (`argumentFix`)
+  {
+    from: /^Convert the (value|number|text) with the (toString|toInteger) function(, which drops the fraction)?\.$/,
+    to: (found) => exact(found[0]),
   },
   // #1195's decided texts; a condition's advice always, its example only of a stable path (Astra r3)
   {
@@ -637,7 +642,7 @@ function fixes(message: string): string[] {
 
 /** What a diagnostic names, in the source's own text. */
 function namedBy(diagnostic: Compared, source: MessageSource): Named {
-  if (diagnostic.kind === "written-type")
+  if (diagnostic.kind === "written-type" || diagnostic.kind === "static")
     return {
       subject: source.text(diagnostic.site),
       member: "",
@@ -704,6 +709,7 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
     message.includes(`${named.subject} otherwise`);
   const kinds =
     diagnostic.kind !== "written-type" &&
+    diagnostic.kind !== "static" &&
     diagnostic.kinds.length > 0 &&
     diagnostic.kinds.every(
       (kind) =>
@@ -716,6 +722,7 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
   // (a null the current message never names answers another of its diagnostics)
   const unnamedNull =
     diagnostic.kind !== "written-type" &&
+    diagnostic.kind !== "static" &&
     diagnostic.kinds.includes("null") &&
     !/\bnull\b/.test(message);
   return (subject ? 2 : 0) + (kinds ? 1 : 0) - (unnamedNull ? 1 : 0);
@@ -727,7 +734,11 @@ function correspondence(message: string, diagnostic: Compared, named: Named): nu
  */
 function pairs<Analysed extends { readonly name: string; readonly files: readonly SourceFile[] }>(
   records: readonly Analysed[],
-  each?: (record: Analysed, diagnostics: readonly CoreDiagnostic[], source: MessageSource) => void,
+  each?: (
+    record: Analysed,
+    diagnostics: readonly CheckedDiagnostic[],
+    source: MessageSource,
+  ) => void,
 ): Pair[] {
   const found: Pair[] = [];
   for (const record of records) {
@@ -735,13 +746,15 @@ function pairs<Analysed extends { readonly name: string; readonly files: readonl
     const request = coreRequest(files);
     if (request === null) continue;
     const answers = analyseCore(request);
+    // (with the checks that owe the runtime nothing, as the compiler reports them: decision 3 on #1072)
+    const { diagnostics } = checkedResult(answers, request);
     const source = messageSource(
       files.map((file) => file.source),
-      answers.diagnostics,
+      diagnostics,
     );
-    each?.(record, answers.diagnostics, source);
+    each?.(record, diagnostics, source);
     const core = new Map<string, { diagnostic: Compared; message: string; named: Named }[]>();
-    for (const diagnostic of reportedDiagnostics(answers)) {
+    for (const diagnostic of reportedDiagnostics(answers, diagnostics)) {
       if (diagnostic.kind === "budget") continue;
       const key = `${files[diagnostic.site.file]!.path}:${source.line(diagnostic.site)}:${diagnostic.code}`;
       const list = core.get(key) ?? [];
@@ -766,6 +779,9 @@ function pairs<Analysed extends { readonly name: string; readonly files: readonl
         if (found > score) [best, score] = [candidate, found];
       }
       const forms = fixes(current.message).map((fix) => {
+        // (a check that owes the runtime nothing keeps the current checker's sentence, the one its shared rule gives
+        // the runtime too: each fix as it is written, decision 3 on #1072)
+        if (best.diagnostic.kind === "static") return { fix, form: exact(fix) };
         for (const port of PORTS) {
           const match = port.from.exec(fix);
           if (match !== null) return { fix, form: port.to(match, best.named) };
@@ -790,10 +806,14 @@ function analysis(): Analysis {
   const records = readFixture();
   const sentences = new Map<FixtureRecord, string[]>();
   const found = pairs(records, (record, diagnostics, source) => {
+    // (the sentences the core composes: a check that owes the runtime nothing gives its shared rule's, the runtime's
+    // own, which shows a text value as the runtime does)
     if (heldBack(record) === null)
       sentences.set(
         record,
-        diagnostics.map((diagnostic) => coreMessage(diagnostic, source)),
+        diagnostics
+          .filter((diagnostic) => diagnostic.kind !== "static")
+          .map((diagnostic) => coreMessage(diagnostic, source)),
       );
   });
   return { records, pairs: found, sentences };
@@ -894,6 +914,17 @@ const INTENDED: readonly Intended[] = [
   },
   {
     rule:
+      "S9b's G2 (the sentence review of #1437): a compound assignment's target that is no variable is checked where " +
+      "it stands, in words, never kept in a new variable, which would take the change instead",
+    matches: ({ message, named }) =>
+      !/^[A-Za-z_]\w*$/.test(named.subject) &&
+      new RegExp(`Check that '${escaped(named.subject)}' is [^.']+ first\\.`).test(message),
+    replacement: ({ named }) =>
+      new RegExp(`Check that '${escaped(named.subject)}' is [^.']+ first\\.`),
+    count: 1,
+  },
+  {
+    rule:
       "§13 N2 (#1073, S10 part 2b): the null check the current checker asks for is written and holds at a read in a " +
       "stored value, so the new checker asks for none; its warning there is the external value's own property, which " +
       "only the run decides",
@@ -906,19 +937,22 @@ const INTENDED: readonly Intended[] = [
     rule: "S8c's (#1173): a number where a whole number is required, the count's and the written integer's sentences",
     matches: ({ diagnostic }) =>
       diagnostic.kind !== "written-type" &&
+      diagnostic.kind !== "static" &&
       (diagnostic.rule.rule === "count" ||
         ((diagnostic.rule.rule === "store" || diagnostic.rule.rule === "fallback") &&
           diagnostic.rule.type.includes("integer") &&
           diagnostic.kinds.includes("number"))),
     // (its sentences as they stand until S8c: rounding, a whole number, a fallback of the type, an unknown's test)
     replacement: ({ diagnostic, named }) =>
-      diagnostic.kind !== "written-type" && diagnostic.rule.rule === "fallback"
-        ? exact("Use null or a value of that type instead.")
-        : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("number")
-          ? exact(ROUND)
-          : diagnostic.kind !== "written-type" && diagnostic.kinds.includes("unknown")
-            ? typeTest(named, "integer")
-            : exact("Use a whole number here."),
+      diagnostic.kind === "written-type" || diagnostic.kind === "static"
+        ? exact("Use a whole number here.")
+        : diagnostic.rule.rule === "fallback"
+          ? exact("Use null or a value of that type instead.")
+          : diagnostic.kinds.includes("number")
+            ? exact(ROUND)
+            : diagnostic.kinds.includes("unknown")
+              ? typeTest(named, "integer")
+              : exact("Use a whole number here."),
     // (four fewer since S10 part 2b: those records' stored values take `is integer`'s narrowing, a whole number)
     count: 173,
   },

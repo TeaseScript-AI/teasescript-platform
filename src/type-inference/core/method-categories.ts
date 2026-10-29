@@ -163,12 +163,15 @@ export function clockResult(name: string): ValueKind | undefined {
 }
 
 /**
- * F25: a method with a declared result per receiver kind that the categories above do not give: a temporal value's
- * (V30 §35), read from the language's table; `undefined` where a receiver of the kind has no such method.
+ * F25: a method with a declared result per receiver kind that the categories above do not give: a text value's, of one
+ * or two kinds (V30 §8), and a temporal value's (V30 §35), read from the language's tables; `undefined` where a receiver
+ * of the kind has no such method, or where its result is a list of text (`split`, `findAll`, `capture`), the runtime's.
  */
-export function declaredMethod(kind: string, name: string): ValueKind | undefined {
+export function declaredMethod(kind: string, name: string): readonly ValueKind[] | undefined {
+  if (kind === "string")
+    return isTextMethod(name) ? TEXT_RESULTS[TEXT_METHODS[name].result] : undefined;
   return isTemporalKind(kind) && hasTemporalMethod(kind, name)
-    ? TEMPORAL_METHODS[name].result
+    ? [TEMPORAL_METHODS[name].result]
     : undefined;
 }
 

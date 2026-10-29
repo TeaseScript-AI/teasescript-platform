@@ -20,6 +20,7 @@ import {
   outcomeOf,
   provenanceOf,
   targetName,
+  type CheckedDiagnostic,
   type ContextDetail,
   type CoreDiagnostic,
   type CoreResult,
@@ -171,7 +172,7 @@ function warning(
 }
 
 function result(
-  diagnostics: readonly CoreDiagnostic[],
+  diagnostics: readonly CheckedDiagnostic[],
   checks: readonly Obligation[] = [],
 ): CoreResult {
   return { outcome: outcomeOf(diagnostics), diagnostics, checks };

@@ -1,3 +1,5 @@
+import type { StoredCalendarDuration } from "../../duration.js";
+import type { ConversionName } from "../../language-facts.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
 import {
@@ -18,7 +20,9 @@ import { propertyName } from "./program.js";
  * composes them (D1–D3). The record the set compares holds no sentence.
  */
 
-export type DiagnosticClass = "compile-error" | "warning-runtime-check" | "not-checked-budget";
+/** An error, a warning with a runtime check, a warning the runtime owes nothing for (`StaticDiagnostic`), a stop's mark. */
+export type DiagnosticClass =
+  "compile-error" | "warning-runtime-check" | "warning" | "not-checked-budget";
 
 /**
  * The consumer a diagnostic belongs to (§10.5): a store into a typed place (and a fallback, C10), a member or element
@@ -30,10 +34,10 @@ export type ObligationKind =
   "copy-type" | "null-check" | "operand" | "integer-check" | "empty-check";
 
 /**
- * The worst diagnostic's class, or `valid` without one; a stop of the analysis is a warning (the owner's D4, TABLE
- * r4.54), never an outcome of its own.
+ * The worst diagnostic's class, or `valid` without one: an error, then a warning with a runtime check, then a warning
+ * without one; a stop of the analysis is a warning (the owner's D4, TABLE r4.54), never an outcome of its own.
  */
-export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check";
+export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check" | "warning";
 
 /**
  * A kind an obligation requires: a value kind; `unknown`, any value the runtime can represent (a boundary check with no
@@ -158,6 +162,46 @@ export type DiagnosticRule =
     }
   /** C12: a dict key. */
   | { readonly rule: "key" }
+  /**
+   * C13: an argument of a built-in method, `parameter` of `callee`, with the kinds it takes there (its contract's, on
+   * every kind its receiver may be) and what its contract calls them (`takes`), which a fix converts to.
+   */
+  | {
+      readonly rule: "argument";
+      readonly callee: string;
+      readonly parameter: string;
+      readonly domain: readonly ItemTag[];
+      readonly takes: "text" | "regex" | "textOrRegex" | "integer" | "list" | "collection";
+    }
+  /**
+   * C13 (Astra's G1): the elements of `receiver` that `callee` reads, `join` each one `${...}` shows, `sort` of one
+   * ordered type (`orderedFamily`); `families`, the ordered types they may hold where they mix them.
+   */
+  | {
+      readonly rule: "elements";
+      readonly callee: "join" | "sort";
+      readonly receiver: string;
+      readonly families: readonly ItemTag[];
+    }
+  /**
+   * C13, Astra's G1: a value `toJson` cannot write (`VALUE_KINDS`' `json`), its argument's own or one it holds below it
+   * (`nested`), in a value of one kind (`holder`), which the runtime's sentence names.
+   */
+  | { readonly rule: "json"; readonly holder: ItemTag | null; readonly nested: boolean }
+  /**
+   * TSV029 (V30 §19, TABLE r4.93): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
+   * or an element of a list or set option (`element`).
+   */
+  | {
+      readonly rule: "choice";
+      readonly part: "value" | "option" | "element";
+      /**
+       * A choice object the options hold: the property its button returns (`value`, else `text`), and whether the object
+       * is an element of the option (`within`); the sentence names that property, never its holder.
+       */
+      readonly member?: "value" | "text";
+      readonly within?: boolean;
+    }
   /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
   | { readonly rule: "iterable"; readonly entries: boolean }
   /** C5a–c, F19a, ADR 1.5: a member of `receiver` (`.n`, `.add()`, `[...]`) at a read, a call or a store. */
@@ -260,9 +304,58 @@ export interface WrittenTypeError {
   readonly suggestion: string | null;
 }
 
+/**
+ * A check that owes the runtime nothing (the lead's decision 3 on #1072): a known value outside the domain its use
+ * takes, which the runtime would reject as it does, or a fact no run can change. An error, or a warning with no runtime
+ * check (`warning`); never an obligation. Its rule names what its sentence says (`messages.ts`).
+ */
+export interface StaticDiagnostic {
+  readonly class: "compile-error" | "warning";
+  readonly kind: "static";
+  readonly code: CoreCode;
+  readonly site: SourceSite;
+  readonly rule: StaticRule;
+}
+
+/** The rule of a `StaticDiagnostic`, with the facts its sentence names. */
+export type StaticRule =
+  /** A `repeat` count whose known value is no whole number of at least 0 (`loop-rules.ts`). */
+  | { readonly rule: "repeat-count"; readonly value: number }
+  /** A conversion of known text it cannot convert (V30 §13, #1105), `default:` or not. */
+  | { readonly rule: "conversion"; readonly conversion: ConversionName; readonly text: string }
+  /**
+   * ADR 0026 §5 (the lead's decision 6 on #1072): a date or a local date and time moved by a known calendar duration
+   * with an exact offset, `+` or `-`, compound or not, beside the operation's own operand check (F16).
+   */
+  | {
+      readonly rule: "calendar-offset";
+      readonly target: "date" | "datetime";
+      readonly duration: StoredCalendarDuration;
+    }
+  /**
+   * V30 §6: a range written with whole-number literals that holds no number, as a `for` loop's iterable (`loop`) or
+   * `toList()`'s receiver (`list`): its bounds as written, an ordinary warning.
+   */
+  | {
+      readonly rule: "empty-range";
+      readonly use: "loop" | "list";
+      readonly start: string;
+      readonly end: string;
+      readonly inclusive: boolean;
+    };
+
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
 export type CoreCode =
-  "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
+  | "TSV011"
+  | "TSV012"
+  | "TSV029"
+  | "TSV041"
+  | "TSV042"
+  | "TSV043"
+  | "TSV044"
+  | "TSV046"
+  | "TSV075"
+  | "TSV076";
 
 /** A place the analysis counts work to and names: a function, or a file's top level, with its lines' site. */
 export interface WorkPlace {
@@ -343,20 +436,21 @@ export type CoreDiagnostic =
       readonly besides: readonly ItemTag[];
     };
 
+/** A diagnostic the core reports: the analysis's own (`CoreDiagnostic`), or a check's that owes the runtime nothing. */
+export type CheckedDiagnostic = CoreDiagnostic | StaticDiagnostic;
+
 export interface CoreResult {
   readonly outcome: CoreOutcome;
-  readonly diagnostics: readonly CoreDiagnostic[];
+  readonly diagnostics: readonly CheckedDiagnostic[];
   /** The checks that no diagnostic owns: the boundary checks (C9). */
   readonly checks: readonly Obligation[];
 }
 
 /** The outcome of these diagnostics: the worst class among them, or `valid`. */
-export function outcomeOf(diagnostics: readonly CoreDiagnostic[]): CoreOutcome {
-  if (diagnostics.some((diagnostic) => diagnostic.class === "compile-error"))
-    return "compile-error";
-  return diagnostics.some((diagnostic) => diagnostic.class === "warning-runtime-check")
-    ? "warning-runtime-check"
-    : "valid";
+export function outcomeOf(diagnostics: readonly CheckedDiagnostic[]): CoreOutcome {
+  for (const outcome of ["compile-error", "warning-runtime-check", "warning"] as const)
+    if (diagnostics.some((diagnostic) => diagnostic.class === outcome)) return outcome;
+  return "valid";
 }
 
 /**
@@ -450,7 +544,7 @@ export interface RecordObligation {
 
 export interface RecordDiagnostic {
   readonly class: DiagnosticClass;
-  readonly kind: CoreDiagnostic["kind"];
+  readonly kind: CheckedDiagnostic["kind"];
   readonly site: RecordSite;
   /** A warning's explanation: writer tokens `kind@file:offset`, `more` always `false` (F28). */
   readonly provenance?: {
@@ -521,7 +615,8 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
     ...(check.boundary ? { boundary: true, reason: "external-data" } : {}),
   });
   const diagnostics = result.diagnostics.map((diagnostic): RecordDiagnostic =>
-    diagnostic.kind === "budget"
+    // (a stop's warning and marks, and a check that owes the runtime nothing, by their site alone)
+    diagnostic.kind === "budget" || diagnostic.kind === "static"
       ? { class: diagnostic.class, kind: diagnostic.kind, site: site(diagnostic.site) }
       : diagnostic.class === "compile-error"
         ? {
