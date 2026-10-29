@@ -5,13 +5,14 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { reportedDiagnostics } from "../src/type-inference/core/consumer.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
-import { heldBack, readFixture } from "./helpers/type-core-fixture.js";
+import { readFixture } from "./helpers/type-core-fixture.js";
 
 /*
  * The sentences of the coarse core's diagnostics (D1–D3, TABLE r4.53, `core/messages.ts`): each consumer's and
  * obligation's first sentence as an error and as a warning, with its rule's code and its fix (#1195), and each context
  * word's cause on the set's record for that word. The sentences are the owner's: a change here is a change of what an
- * author reads.
+ * author reads. The form of every sentence of the set's records is tested on the pairs' analysis of the set
+ * (`type-core-message-parity.test.ts`).
  */
 
 const records = readFixture();
@@ -631,26 +632,6 @@ test("a word that came with its value from another line names that value's origi
         "'if d is integer { repeat d {} }'. The type of 'd' is known only when the script runs.",
     ],
   );
-});
-
-test("every sentence of the set's records keeps the form: code in single quotes, no semicolon, the word never shown (D1)", (t) => {
-  let count = 0;
-  for (const record of records) {
-    if (heldBack(record) !== null) continue;
-    for (const { message: text } of reported(record.files)) {
-      count += 1;
-      // (code is quoted whole, so outside the quotes no semicolon, backquote or double quote stands)
-      assert.ok(!/[;`"]/.test(text.replace(/'[^']*'/g, "")), `${record.name}: ${text}`);
-      assert.ok(!/dead-code|deferred-parameter|unmodelled/.test(text), `${record.name}: ${text}`);
-      // (#1195 rule 2: no implementation terms, "type" never "kind")
-      assert.ok(
-        !/\b(compiler|follows?|kinds?)\b/.test(text.replace(/'[^']*'/g, "")),
-        `${record.name}: ${text}`,
-      );
-      assert.ok(text.endsWith("."), `${record.name}: ${text}`);
-    }
-  }
-  t.diagnostic(`${count} sentences of the positive list`);
 });
 
 test("the developer warning for JSON that does not fit fromJson's expected type keeps the form (TSW020, TABLE r4.77 (5))", () => {
