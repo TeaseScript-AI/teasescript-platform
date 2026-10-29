@@ -181,8 +181,9 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
   assert.notEqual(compileSource("let n = 2\nlet x = (n) calendar months\nexit").plan, null);
   // A word taken for a unit names the unit meant and every unit, also a unit or such a word with capitals. Every word at
   // one place, and four words at every place a unit stands, after a number with and without a space and after a name.
-  // Every amount that a unit follows, at two places. The amount with the unit is shown only where it compiles pasted in
-  // place of the amount and the word; where the statement has another error, as after a range, the fix is in words.
+  // Every amount that a unit follows, at two places. A number with the unit is shown only where it compiles pasted in
+  // place of the number and the word; where the statement has another error, as after a range, the fix is in words.
+  // Whether another amount, such as a name, takes the unit only the type checker knows, so it gets words.
   const units =
     "The units of time are ms, s, min, h, d, and w. After 'calendar', the units are d, w, mo, and y.";
   const names =
@@ -245,16 +246,30 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     const why = word.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
     const lowercase = word === word.toLowerCase() ? "" : " Units are written in lowercase.";
     const offered = `${amount} ${unit}`;
-    const fix = others.length === 0 ? `write '${offered}'` : `use the unit ${unit}`;
+    const shown = others.length === 0 && /^[\d.]+$/u.test(amount);
+    const fix = shown ? `write '${offered}'` : `use the unit ${unit}`;
     assert.deepEqual(
       compileSource(`${names}${source}\nexit`).diagnostics.map(({ message }) => message),
       [`'${word}' is not a unit${why}.${lowercase} For ${name}, ${fix}. ${units}`, ...others],
       source,
     );
-    if (others.length === 0) {
+    if (shown) {
       const pasted = place.replace("#", offered);
       assert.notEqual(compileSource(`${names}${pasted}\nexit`).plan, null, pasted);
     }
+  }
+  // A name with the unit can fail, by the name's value or the place, so the words are needed there.
+  for (const source of [
+    'let n = "five"\nwait n #',
+    "let n = 2 s\nwait n #",
+    "let n = 2\nlet value: integer = n #",
+  ]) {
+    assert.match(
+      compileSource(`${source.replace("#", "mins")}\nexit`).diagnostics[0]!.message,
+      /For minutes, use the unit min\./u,
+      source,
+    );
+    assert.equal(compileSource(`${source.replace("#", "min")}\nexit`).plan, null, source);
   }
   // After a say mode or skip word, a name that is such a word is the text, as a name that is a unit is.
   for (const word of ["hr", "S", "mins"])

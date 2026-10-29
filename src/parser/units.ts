@@ -77,7 +77,7 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
       // Read as the unit meant, so that its error is the only one.
       if (meant !== undefined) {
         result = withUnit({ calendar: false, unit: meant }, parser.advance());
-        reportMistakenUnit(parser, expression, start, token, meant);
+        reportMistakenUnit(parser, expression, token, meant);
       }
     }
   }
@@ -249,7 +249,7 @@ export function parseDurationUnit(
     if (meant === undefined) return amount;
     // Read as the unit meant, so that its error is the only one.
     const result = literal({ calendar: false, unit: meant }, parser.advance());
-    reportMistakenUnit(parser, amount, start, token, meant);
+    reportMistakenUnit(parser, amount, token, meant);
     return result;
   }
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
@@ -274,14 +274,14 @@ const unitList = (units: readonly string[]) =>
 const UNITS_OF_TIME = `The units of time are ${unitList(DURATION_UNITS)}. After 'calendar', the units are ${unitList(CALENDAR_DURATION_UNITS)}.`;
 
 /**
- * A word after `amount`, which begins at token `start`, that is no unit, as in `5 m`, `n sec`, or `5 S`
- * (`mistakenDurationUnit`), whose error names the unit meant and every unit. It shows the amount with the unit only
- * where that compiles in the statement (see `Parser.offerFix`).
+ * A word after `amount` that is no unit, as in `5 m`, `n sec`, or `5 S` (`mistakenDurationUnit`), whose error names the
+ * unit meant and every unit. It shows a number with the unit only where that compiles in the statement (see
+ * `Parser.offerFix`). Whether another amount, such as a name, takes the unit only the type checker knows, so the unit
+ * meant is named in words there.
  */
 function reportMistakenUnit(
   parser: Parser,
   amount: Expression,
-  start: number,
   word: Token,
   meant: DurationUnit,
 ): void {
@@ -295,7 +295,8 @@ function reportMistakenUnit(
     message(`use the unit ${meant}`),
     word,
   );
-  const fixed = `${parser.sourceText(start, parser.current - 1)} ${meant}`;
+  if (amount.kind !== "numberLiteral") return;
+  const fixed = `${amount.raw} ${meant}`;
   parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
     { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
   ]);
