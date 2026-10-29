@@ -439,6 +439,19 @@ export interface PrefixStores {
   readonly cut: boolean;
 }
 
+/**
+ * G5 (5a): a cycle of whole copies, a strongly connected component of the places that the live, unguarded, exact whole
+ * copies `#prefixWork` follows link (`#copiedRoot`), with its members as ports. A member with one live store at its
+ * root (the copy of another member) is a link, an alias `#prefixWork` replaces by its source's entry as before; every
+ * other member is a stop, and a copy of a stop is an entry of its key wherever the copy is: the cut every entry into the
+ * cycle takes at once. Before, a stop's two or more entries gave that entry where the walk reached the stop, and the
+ * open stop's cut where it did not; a stop whose entries merge into one was replaced by it where the walk reached it.
+ */
+interface CopyRing {
+  readonly ports: readonly PlaceId[];
+  readonly stops: ReadonlySet<PlaceId>;
+}
+
 /** A source a prefix's read at a path takes, with the prefix's stores that brought it (A5's candidates). */
 export interface SubSource {
   readonly key: Key;
@@ -878,6 +891,10 @@ export interface ContractFacts {
   selectionVisits: number;
   /** The paths admission decided, in every pass (S6-CARRIERS §4.4: the member visits' bound). */
   decidedPaths: number;
+  /** The cycles of whole copies found (`#ringOf`), their ports and their stops, each once per pass. */
+  ringComponents: number;
+  ringPorts: number;
+  ringStops: number;
 }
 
 /** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
@@ -894,8 +911,13 @@ export class Contract {
     markVisits: 0,
     selectionVisits: 0,
     decidedPaths: 0,
+    ringComponents: 0,
+    ringPorts: 0,
+    ringStops: 0,
   };
   readonly #prefix = new Map<Key, PrefixStores>();
+  /** Per copy-only place its copies reach, the cycle of whole copies it is a port of, `null` for none (`#ringOf`). */
+  readonly #rings = new Map<PlaceId, CopyRing | null>();
   /** The prefixes under discovery (`#prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
   readonly #discovering = new Map<Key, PrefixFrame>();
   readonly #subPaths = new Map<Key, ReadonlySet<string>>();
@@ -3147,6 +3169,115 @@ export class Contract {
   }
 
   /**
+   * The root a store copies whole where `#prefixWork` follows the copy into its source's own stores: a live whole store,
+   * neither a parameter's default nor an argument of an unwritten parameter with several sites, copying (not calling)
+   * an unguarded read of a copy-only place's root; `null` for every other store.
+   */
+  #copiedRoot(d: Definition): PlaceId | null {
+    const { program, lists, guards } = this.pass;
+    if (!lists.live(d) || d.kind !== "whole" || d.how === "parameter default") return null;
+    if (d.how === "argument") {
+      const parameter = program.place(d.place).kind;
+      if (parameter.kind === "parameter" && parameter.written === null && !lists.singleSite(d.fn))
+        return null;
+    }
+    const copied = this.copiedKey(d.value!);
+    if (copied === null || keyPath(copied).length > 0 || guards.guardedRead(d.value!)) return null;
+    return this.#copyOnly(keyPlace(copied)) ? keyPlace(copied) : null;
+  }
+
+  /** Whether `place` is a stop of a cycle of whole copies (`CopyRing`): a copy of it is an entry of its key. */
+  #ringStop(place: PlaceId): boolean {
+    return this.#ringOf(place)?.stops.has(place) === true;
+  }
+
+  /**
+   * The cycle of whole copies `place` is a port of, or `null`: Tarjan's components over the copies `#copiedRoot` follows,
+   * from `place` over the places they reach, on an explicit stack, each place once per pass (one reached in an earlier
+   * walk is in a finished component). A component of links alone, each copying the next, holds no stop: no cycle here,
+   * `#prefixWork` cuts it at its open member as before.
+   */
+  #ringOf(place: PlaceId): CopyRing | null {
+    const known = this.#rings.get(place);
+    if (known !== undefined) return known;
+    if (!this.#copyOnly(place)) {
+      this.#rings.set(place, null);
+      return null;
+    }
+    const { definitions, lists } = this.pass;
+    const work = this.pass.program.work;
+    const index = new Map<PlaceId, number>();
+    const low = new Map<PlaceId, number>();
+    const held = new Set<PlaceId>();
+    const order: PlaceId[] = [];
+    const frames: { readonly at: PlaceId; readonly to: readonly PlaceId[]; next: number }[] = [];
+    const rootsOf = (at: PlaceId): PlaceId[] => {
+      const to: PlaceId[] = [];
+      for (const d of definitions.byKey.get(keyOf(at, [])) ?? []) {
+        work.charge("invSteps");
+        const root = this.#copiedRoot(d);
+        if (root !== null) to.push(root);
+      }
+      return to;
+    };
+    const visit = (at: PlaceId): void => {
+      const number = index.size;
+      index.set(at, number);
+      low.set(at, number);
+      held.add(at);
+      order.push(at);
+      frames.push({ at, to: rootsOf(at), next: 0 });
+    };
+    visit(place);
+    while (frames.length > 0) {
+      const top = frames.at(-1)!;
+      if (top.next < top.to.length) {
+        const to = top.to[top.next++]!;
+        work.charge("invSteps");
+        if (this.#rings.has(to)) continue;
+        if (!index.has(to)) visit(to);
+        else if (held.has(to)) low.set(top.at, Math.min(low.get(top.at)!, index.get(to)!));
+        continue;
+      }
+      frames.pop();
+      const lowest = low.get(top.at)!;
+      if (frames.length > 0) {
+        const parent = frames.at(-1)!.at;
+        low.set(parent, Math.min(low.get(parent)!, lowest));
+      }
+      if (lowest !== index.get(top.at)) continue;
+      const members: PlaceId[] = [];
+      for (;;) {
+        const member = order.pop()!;
+        held.delete(member);
+        members.push(member);
+        if (member === top.at) break;
+      }
+      let ring: CopyRing | null = null;
+      if (members.length > 1 || top.to.includes(top.at)) {
+        // (a link has one live store at its root, the copy of another member; every other member is a stop)
+        const stops = new Set<PlaceId>();
+        for (const member of members) {
+          let live = 0;
+          for (const d of definitions.byKey.get(keyOf(member, [])) ?? []) {
+            work.charge("invSteps");
+            if (lists.live(d)) live += 1;
+          }
+          if (live !== 1) stops.add(member);
+        }
+        if (stops.size > 0) {
+          ring = { ports: members.reverse(), stops };
+          this.facts.ringComponents += 1;
+          this.facts.ringPorts += members.length;
+          this.facts.ringStops += stops.size;
+        }
+      }
+      for (const member of members) this.#rings.set(member, ring);
+    }
+    return this.#rings.get(place)!;
+  }
+
+  /**
    * Per key, whether a store goes below a property named `value`, and one named `text` (a choice object changed after it
    * is made): then a held choice object's button value is read by that key, not per record (V30 §19).
    */
@@ -3610,7 +3741,9 @@ export class Contract {
    * is k stores, not k × k): one entry per source identity; a copied place that holds nothing but whole stores and has
    * at most one entry (an alias) is replaced by that entry; an add is an entry of its element, a clear or a removal one
    * of emptiness; an argument of an unwritten parameter with several sites is a deferred unknown. An explicit stack,
-   * memoised per pass; a key still open (a copy cycle) stays an entry, which the solver's fixpoint then closes.
+   * memoised per pass. A cycle of whole copies is cut at its stops at once (`CopyRing`, G5): a copy of a stop stays an
+   * entry of its key, which the solver's fixpoint then closes, so each member's stores are one answer, whichever place
+   * entered the cycle; any other key still open (a copy cycle through a projection) stays an entry, cut there.
    */
   public prefixStores(prefix: Key): PrefixStores {
     if (!this.#prefix.has(prefix)) this.#settle(this.#prefixWork(prefix));
@@ -3839,8 +3972,10 @@ export class Contract {
             )
               direct = true;
           }
-          if (direct || open.has(root) || !this.#copyOnly(keyPlace(copied))) {
-            if (open.has(root)) f.cut = true;
+          // (a copy of a cycle's stop is its key's entry wherever the cycle is entered, never a cut, G5)
+          const stop = this.#ringStop(keyPlace(copied));
+          if (direct || stop || open.has(root) || !this.#copyOnly(keyPlace(copied))) {
+            if (open.has(root) && !stop) f.cut = true;
             yield* adding(this, f, { key: copied });
             continue;
           }
@@ -3857,8 +3992,9 @@ export class Contract {
           push(frame(root));
           continue;
         }
-        if (open.has(copied) || !this.#copyOnly(keyPlace(copied))) {
-          if (open.has(copied)) f.cut = true;
+        const stop = this.#ringStop(keyPlace(copied));
+        if (stop || open.has(copied) || !this.#copyOnly(keyPlace(copied))) {
+          if (open.has(copied) && !stop) f.cut = true;
           yield* adding(this, f, { key: copied });
           continue;
         }
@@ -3883,8 +4019,8 @@ export class Contract {
         also: [...f.also].map(([layer, defs]) => ({ layer, defs })),
         cut: f.cut,
       };
-      // a result cut at an open copy cycle depends on where the query entered it: kept only for its own query, so
-      // every order gives one answer
+      // a result cut at an open copy cycle (a cycle through a projection, or of links alone) depends on where the query
+      // entered it: kept only for its own query, so every order gives one answer
       if (!stores.cut || stack.length === 0) this.#prefix.set(f.pk, stores);
       else stack.at(-1)!.cut = true;
       if (stack.length > 0) stack.at(-1)!.inner = stores;

@@ -2558,6 +2558,51 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
  * copies of one nested preset joined into one place, each storing its own property below one step (#1078); each at size
  * k, linear.
  */
+/**
+ * G5 (5a, #1339): cycles of whole copies, each member read, whose every entry walked the cycle again: a cycle of k
+ * whole copies of one object, each member but the first then given another object of the other type (one error per
+ * member), and the same cycle with each member also copying the member two ahead, fed objects of k agreeing properties.
+ */
+export const COPY_RING_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "ring-many-fed",
+    measures:
+      "k members of a cycle of copies, each but the first fed another object, each read: its cut per member",
+    program: (k) =>
+      main(
+        lines(
+          "let good = {p0: 1}",
+          'let other = {p0: "x"}',
+          "let a0 = good",
+          rows(k - 1, (i) => `let a${i + 1} = a${i}`),
+          `a0 = a${k - 1}`,
+          rows(k - 1, (i) => `a${i + 1} = other`),
+          rows(k, (i) => `say "\${a${i}.p0}"`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "ring-chords",
+    measures:
+      "k members of a cycle of copies of k properties, each also copying the member two ahead, each read",
+    program: (k) =>
+      main(
+        lines(
+          `let source = {${fields(k, () => "1", "p")}}`,
+          `let other = {${fields(k, () => "2", "p")}}`,
+          "let a0 = source",
+          rows(k - 1, (i) => `let a${i + 1} = a${i}`),
+          `a0 = a${k - 1}`,
+          rows(k, (i) => `a${i} = a${(i + 2) % k}`),
+          `a${k - 1} = other`,
+          rows(k, (i) => `say "\${a${i}.p0}"`),
+          "exit",
+        ),
+      ),
+  },
+];
+
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-empty-snapshot",

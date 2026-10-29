@@ -17,6 +17,7 @@ import {
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  COPY_RING_FAMILIES,
   DIRECT_INGRESS_PROGRAMS,
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
@@ -857,6 +858,19 @@ test("every admission family's work and each of its counters grow with the progr
  */
 test("every hot-candidate family's work and each of its counters grow with the program in either order (#1188)", () => {
   assert.deepEqual(steepCounters(HOT_CANDIDATE_FAMILIES), []);
+});
+
+/**
+ * G5 (5a, #1339): a cycle of whole copies is cut at its stops at once, so no member's entry walks the cycle again; each
+ * family's total and each of its counters grow with the program in either order, with the sharing on and off. The
+ * chord cycle reached the allowance at k = 64 on `main`. The series, the four modes and the conflicting chord cycle (whose
+ * per-property components remain, G5's 5b), are the step's evidence, outside CI.
+ */
+test("a cycle of whole copies read at every member grows with the program in either order, shared or not (#1339)", () => {
+  assert.deepEqual(
+    [...steepCounters(COPY_RING_FAMILIES), ...steepCounters(COPY_RING_FAMILIES, true)],
+    [],
+  );
 });
 
 /**

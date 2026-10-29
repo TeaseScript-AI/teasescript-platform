@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import type { ContractFacts } from "../src/type-inference/core/contract.js";
+import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import { keyOf } from "../src/type-inference/core/definitions.js";
+import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import {
+  publishedAnswers,
+  publishedRoute,
+  publishedUpToOrder,
+} from "./helpers/type-core-standing.js";
 
 /**
  * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
@@ -439,4 +447,313 @@ test("two equal literals share a class whatever absent properties were asked of 
           );
       }
   assert.deepEqual(got, []);
+});
+
+/**
+ * G5 (5a, #1339): a cycle of whole copies is cut at its stops at once, so each member's whole stores are one answer
+ * whichever place enters the cycle first: its own entries, a copy of a member with more than one store an entry of that
+ * member's key, a member with one store (a copy of another) replaced by its source's entry, and none of them cut. Asked
+ * in fresh passes in three orders: the members in source order, reversed, and a copy outside the cycle first; each
+ * entry's source, path, writer, holder, guard and the stores that brought it compared, whether it holds ingress, and whether the stores
+ * hold layers, hold more than copies, and are cut.
+ */
+const RINGS: readonly [string, string][] = [
+  [
+    "a ring fed once",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3",
+  ],
+  [
+    "a ring fed at every member",
+    "let good = {p0: 1}\nlet other = {p0: 2}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "a1 = other\na2 = other\na3 = other",
+  ],
+  [
+    "a ring with chords",
+    "let good = {p0: 1, p1: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "a0 = a2\na1 = a3\na2 = a0\na3 = a1",
+  ],
+  [
+    "a ring whose members store their own properties",
+    "let good = {f0: 1, f1: 1, f2: 1, f3: 1}\nlet a0 = good\na0.f0 = 2\nlet a1 = a0\na1.f1 = 2\nlet a2 = a1\n" +
+      "a2.f2 = 2\nlet a3 = a2\na3.f3 = 2\na0 = a3",
+  ],
+  [
+    "two rings through one member",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a1\na1 = a2\na1 = a3\na0 = a2",
+  ],
+  [
+    "a ring with a guarded copy",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "if a3.p0 is integer { a1 = a3 }",
+  ],
+];
+
+test("each member of a cycle of whole copies has one answer whichever place enters the cycle first", () => {
+  const text = (stores: PrefixStores): string =>
+    JSON.stringify({
+      list: stores.list.map((entry) => ({
+        key: entry.key,
+        value: entry.value,
+        unk: entry.unk,
+        empty: entry.empty,
+        elem: entry.elem,
+        at: entry.at,
+        w: entry.w === null ? null : writerKey(entry.w),
+        ds: [...entry.ds].map((d) => d?.uid ?? -1).sort((a, b) => a - b),
+        holder: entry.holder?.id ?? null,
+        guarded: entry.guarded,
+        ingress: entry.ingress !== undefined,
+      })),
+      subs: stores.subs !== null,
+      also: stores.also.length,
+      other: stores.other,
+      cut: stores.cut,
+    });
+  for (const [name, ring] of RINGS) {
+    const request = coreRequest([
+      { path: "main.tease", source: `${ring}\nlet outside = a2\nexit\n` },
+    ]);
+    assert.ok(request !== null, name);
+    const { places } = new CoreProgram(request);
+    const id = (named: string): number =>
+      places.find((place) => place.kind.kind === "binding" && place.kind.name === named)!.id;
+    const members = ["a0", "a1", "a2", "a3"].map(id);
+    const asked = (order: readonly number[]): string[] => {
+      const { contract } = narrowingPass(request);
+      for (const place of order) contract.prefixStores(keyOf(place, []));
+      return members.map((member) => text(contract.prefixStores(keyOf(member, []))));
+    };
+    const inSource = asked(members);
+    assert.deepEqual(asked([...members].reverse()), inSource, `${name}: reversed`);
+    assert.deepEqual(
+      asked([id("outside"), ...[...members].reverse()]),
+      inSource,
+      `${name}: from outside`,
+    );
+    assert.ok(
+      inSource.every((stores) => stores.endsWith('"cut":false}')),
+      `${name}: no member's stores cut`,
+    );
+  }
+});
+
+/**
+ * TABLE r4.185 (G5 5a's case 5): a stop whose own entries merge into one (two copies of one member, two copies reaching
+ * one member, a plain and a guarded copy of one member, of one holding an operation's result too, a copy of a parameter
+ * no call reaches) was replaced by its entry where `main`'s walk reached it and cut where it was open, so `main`'s answer
+ * hung on which place entered the cycle first; the cut is now the open stop's everywhere. What it publishes may differ
+ * from `main`'s only in the order of the items in an answer and of the kinds in a decided admitted type: in all four
+ * modes, its records and route are one, the rest (`publishedUpToOrder`) is one with those orders set aside, and both are
+ * `main`'s: the hashes of the record with the route and of the publication with those orders set aside, and its
+ * outcome, diagnostics, checks and decided types with their deciders, are a regression oracle taken from `main` at
+ * `ab3ec62bf` for these sources only (a change that changes `main`'s records of them updates it).
+ */
+const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
+  [
+    "two copies of one member",
+    'let bad = {p0: "x", p1: "x"}\nlet wobj: object? = {p0: 1}\nlet a0 = bad\nlet a1 = a0\nlet a2 = a1\na2 = a1\n' +
+      "a0 = a2\na1 = wobj\nexit\n",
+    {
+      record: "a60f85b0b9218ce8",
+      upToOrder: "8ec84600facd682a",
+      compact: [
+        "valid",
+        "bad object by 10",
+        "bad.p0 string by 15",
+        "bad.p1 string by 24",
+        "wobj.element unknown by -",
+        "wobj.p0 unknown by 54",
+        "a0 null|object by 66",
+        "a0.p0 integer|string by 66",
+        "a0.p1 string by 66",
+        "a1 null|object by 79",
+        "a1.p0 integer|string by 79",
+        "a1.p1 string by 79",
+        "a2 null|object by 91",
+        "a2.p0 integer|string by 91",
+        "a2.p1 string by 91",
+      ],
+    },
+  ],
+  [
+    "a plain and a guarded copy of one member",
+    "let good = [1]\nlet host = hostValue\nlet a5 = good\nlet a4 = a5\nlet a3 = a4\nlet a1 = a3\nlet a0 = a1\n" +
+      "if a1 != null {\n  a0 = a1\n}\na5 = a0\na1 = host\nexit\n",
+    {
+      record: "62c12ad619ffc257",
+      upToOrder: "e56cd6479164593a",
+      compact: [
+        "warning-runtime-check",
+        "warning-runtime-check TSV041 121-123",
+        "warning-runtime-check TSV041 131-133",
+        "warning-runtime-check TSV041 131-133",
+        "warning-runtime-check TSV041 139-143",
+        "check copy-type host 26",
+        "check copy-type a0.element 121",
+        "check copy-type a0.element 121",
+        "check copy-type a5 131",
+        "check copy-type a5.element 131",
+        "check copy-type a5.element 131",
+        "check copy-type a1 139",
+        "good list by 11",
+        "good.element integer by 12",
+        "a5 list by 45",
+        "a5.element integer by 45",
+        "a4 list by 59",
+        "a4.element integer by 59",
+        "a3 list by 71",
+        "a3.element integer by 71",
+        "a1 list by 83",
+        "a1.element integer by 83",
+        "a0 list by 95",
+        "a0.element integer by 95",
+      ],
+    },
+  ],
+  [
+    "two copies reaching one member",
+    'let good = {p0: 1}\nlet bad = {p0: "x"}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\na0 = a2\nlet b = a1\nb = a2\n' +
+      'a0 = b\na2 = bad\nsay "${a0.p0}"\nsay "${a1.p0}"\nsay "${a2.p0}"\nexit\n',
+    {
+      record: "b3c551d0d8ea4c78",
+      upToOrder: "63c49cbe0b0205e9",
+      compact: [
+        "compile-error",
+        "compile-error TSV041 115-118",
+        "good object by 11",
+        "good.p0 integer by 16",
+        "bad object by 29",
+        "bad.p0 string by 34",
+        "a0 object by 48",
+        "a0.p0 integer by 48",
+        "a1 object by 62",
+        "a1.p0 integer by 62",
+        "a2 object by 74",
+        "a2.p0 integer by 74",
+        "b object by 93",
+        "b.p0 integer by 93",
+      ],
+    },
+  ],
+  [
+    "a copy of a parameter no call reaches",
+    'let bad = {p0: "x"}\nfunction f(x) {\n  let a = x\n  let b = a\n  a = b\n  b = bad\n  say "${a.p0}"\n}\nexit\n',
+    {
+      record: "a7705fbc2e47a592",
+      upToOrder: "e721593c76151fe3",
+      compact: [
+        "valid",
+        "bad object by 10",
+        "bad.p0 string by 15",
+        "a object by 66",
+        "a.p0 string by 66",
+        "b object by 58",
+        "b.p0 string by 58",
+      ],
+    },
+  ],
+  [
+    "a plain and a guarded copy of a member holding an operation's result",
+    "let seed = [hostValue + 1, hostValue, hostValue + hostValue]\nlet a = seed\nlet b = a\nlet c = b\n" +
+      "if b != null {\n  c = b\n}\na = c\nb = [1]\nlet value = a[0]\nexit\n",
+    {
+      record: "579f38345edb7605",
+      upToOrder: "3a0cd1e7a8ab7743",
+      compact: [
+        "warning-runtime-check",
+        "warning-runtime-check TSV043 12-21",
+        "warning-runtime-check TSV043 38-47",
+        "warning-runtime-check TSV043 50-59",
+        "warning-runtime-check TSV041 82-83",
+        "check operand hostValue 12",
+        "check copy-type seed.element 12",
+        "check operand hostValue 38",
+        "check operand hostValue 50",
+        "check copy-type b.element 82",
+        "check copy-type b.element 82",
+        "seed list by 11",
+        "seed.element integer|number by 24",
+        "a list by 69",
+        "a.element integer|number by 69",
+        "b list by 82",
+        "b.element integer by 130",
+        "c list by 92",
+        "c.element integer|number by 92",
+        "value integer|number by 145",
+      ],
+    },
+  ],
+];
+
+interface MergedRecord {
+  readonly record: string;
+  readonly upToOrder: string;
+  readonly compact: readonly string[];
+}
+
+test("a stop whose own entries merge into one publishes main's records, its answers' orders aside (TABLE r4.185)", () => {
+  const hash = (text: string): string =>
+    createHash("sha256").update(text).digest("hex").slice(0, 16);
+  const inOrder = <T>(reversed: boolean, run: () => T): T =>
+    reversed
+      ? withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => withSolverSeam({ reverseWorklist: true }, run),
+        )
+      : run();
+  for (const [name, source, expected] of MERGED_STOPS) {
+    const files = [{ path: "main.tease", source }];
+    const request = coreRequest(files);
+    assert.ok(request !== null, name);
+    const { places } = new CoreProgram(request);
+    const bindings = places.filter((place) => place.kind.kind === "binding");
+    const ids = bindings.map((place) => place.id);
+    const runs = [false, true].flatMap((reversed) =>
+      [false, true].map((unshared) => {
+        const run = (): { exact: string; upToOrder: string; compact: string[] } => {
+          const answers = inOrder(reversed, () => analyseCore(request));
+          const route = inOrder(reversed, () => publishedRoute(files, ["hostValue"]));
+          const compact = [
+            answers.outcome,
+            ...answers.diagnostics.map((d) => `${d.class} ${d.code} ${d.site.start}-${d.site.end}`),
+            ...answers.checks.map(
+              (check) => `check ${check.kind} ${check.target} ${check.site.start}`,
+            ),
+            ...bindings.flatMap((place) =>
+              ["", "element", ...[...answers.placeProperties(place.id, [])].sort()].flatMap(
+                (property) => {
+                  const type = answers.place(place.id, property === "" ? [] : [property]).admitted;
+                  const label = `${place.kind.kind === "binding" ? place.kind.name : place.id}${property === "" ? "" : `.${property}`}`;
+                  return type.by === "decided"
+                    ? [
+                        `${label} ${[...type.kinds].sort().join("|")} by ${type.decider?.start ?? "-"}`,
+                      ]
+                    : [];
+                },
+              ),
+            ),
+          ];
+          return {
+            exact: `${publishedAnswers(answers, ids, ["main.tease"]).record}\n${route.text}`,
+            upToOrder: publishedUpToOrder(answers, ids),
+            compact,
+          };
+        };
+        return unshared ? withoutSharing(run) : run();
+      }),
+    );
+    for (const other of runs.slice(1)) {
+      assert.equal(other.exact, runs[0]!.exact, `${name}: one record and route in every mode`);
+      assert.equal(other.upToOrder, runs[0]!.upToOrder, `${name}: one publication, orders aside`);
+    }
+    assert.deepEqual(
+      {
+        record: hash(runs[0]!.exact),
+        upToOrder: hash(runs[0]!.upToOrder),
+        compact: runs[0]!.compact,
+      },
+      expected,
+      `${name}: main's records`,
+    );
+  }
 });
