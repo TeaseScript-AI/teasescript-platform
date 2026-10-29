@@ -198,13 +198,35 @@ export function compareKeyIds(contract: Contract, a: KeyId, b: KeyId): number {
   }
   if (belowX < 0) return -1;
   if (belowY < 0) return 1;
-  // (two distinct steps below one path: each text goes on with a dot where its path goes deeper, else ends, and a step
-  // holds no dot, so the texts part at or before it)
-  const [stepX, stepY] = [contract.pathLastSteps[belowX]!, contract.pathLastSteps[belowY]!];
-  convert(contract, 0, Math.min(stepX.length, stepY.length), 0);
-  const textX = belowX === pathA ? stepX : `${stepX}.`;
-  const textY = belowY === pathB ? stepY : `${stepY}.`;
-  return textX < textY ? -1 : 1;
+  return compareSteps(
+    contract,
+    contract.pathLastSteps[belowX]!,
+    belowX !== pathA,
+    contract.pathLastSteps[belowY]!,
+    belowY !== pathB,
+  );
+}
+
+/**
+ * Two distinct steps below one path in the order of their keys' texts, compared in place, no text made: each text goes
+ * on with a dot where its path goes deeper (`more`), else ends, and a step holds no dot, so the texts part at or before
+ * the shorter step's end; the code units scanned charged.
+ */
+function compareSteps(
+  contract: Contract,
+  x: string,
+  moreX: boolean,
+  y: string,
+  moreY: boolean,
+): number {
+  let at = 0;
+  while (at < x.length && at < y.length && x.charCodeAt(at) === y.charCodeAt(at)) at += 1;
+  convert(contract, 0, at + 1, 0);
+  if (at < x.length && at < y.length) return x.charCodeAt(at) < y.charCodeAt(at) ? -1 : 1;
+  // (one step ends here: its text's next code unit is a dot, or none, which sorts first)
+  const dot = 46;
+  if (at === x.length) return !moreX || dot < y.charCodeAt(at) ? -1 : 1;
+  return !moreY || dot < x.charCodeAt(at) ? 1 : -1;
 }
 
 /**

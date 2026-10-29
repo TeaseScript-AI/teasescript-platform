@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { analyseCore, solveDemands, type CorePass } from "../src/type-inference/core/answers.js";
@@ -31,8 +32,10 @@ import {
 import {
   keyLane,
   withKeyRecords,
+  wrapperShape,
   type KeyRecord,
 } from "../src/type-inference/core/contract/lanes.js";
+import type { WrapperHop } from "../src/type-inference/core/contract/model.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import { memberStep } from "../src/type-inference/core/method-categories.js";
@@ -513,6 +516,36 @@ test("a family's lane is the binding's whichever read asks; a question while its
   }
 });
 
+test("a shape's record counts its units as the ledger does: its demand's own, a shared build's, or apart (criterion 2)", () => {
+  const source = request(
+    "let leaf = {n: 1}\nlet box = {shell: leaf}\nlet out = box.shell.n\nexit\n",
+  );
+  // (a wrapper's shape and a failed one, asked as the demand's own work, inside a shared build, and apart)
+  for (const [label, step] of [
+    ["box", "shell"],
+    ["out", "x"],
+  ] as const)
+    for (const scope of ["own", "shared", "apart"] as const) {
+      const pass = narrowingPass(source);
+      const { contract } = pass;
+      const { work } = contract;
+      const ask = (): WrapperHop | null =>
+        wrapperShape(contract, bindingOf(pass, label), step, "lane");
+      const [total, own, finishing] = [work.total, work.own, work.finishing];
+      const { records } = withKeyRecords(() =>
+        scope === "shared" ? work.shared(ask) : scope === "apart" ? work.apart(ask) : ask(),
+      );
+      const spent = { own: work.own - own, apart: work.finishing - finishing };
+      const [record] = records;
+      assert.ok(record?.kind === "shape" && !record.hit, `${label}, ${scope}`);
+      assert.deepEqual(
+        [record.own, record.shared, record.apart],
+        [spent.own, work.total - total - spent.own, spent.apart],
+        `${label}, ${scope}`,
+      );
+    }
+});
+
 test("recording the shapes and lanes changes no answer and no unit", () => {
   for (const variant of ["plain", "rejected", "every-depth", "host"]) {
     const req = request(wrapped(3, variant));
@@ -552,6 +585,18 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
   site("memberStepIn", () => memberStepIn(contract, deepest, n >> 1));
   const apart = keyIdBelow(contract, rootId(7), "t");
   site("compareKeyIds", () => compareKeyIds(contract, deepest, apart));
+  // (width and branching, #1454 r1: `n` children below a step `n` code units wide, each compared with a short sibling;
+  // two siblings whose steps share their first `n` code units)
+  const wide = keyIdBelow(contract, rootId(13), "q".repeat(n));
+  const children = Array.from({ length: n }, (_, k) => keyIdBelow(contract, wide, `s${k}`));
+  const short = keyIdBelow(contract, rootId(13), "a");
+  site("compareKeyIds, wide branching", () =>
+    children.map((child) => compareKeyIds(contract, child, short)),
+  );
+  const [left, right] = ["0", "1"].map((end) =>
+    keyIdBelow(contract, rootId(14), `p${"a".repeat(n)}${end}`),
+  );
+  site("compareKeyIds, shared prefix", () => compareKeyIds(contract, left!, right!));
   const packet = site("exportKeyIds", () => exportKeyIds(contract, [deepest]));
   const fresh = narrowingPass(source).contract;
   const { result, work } = probeMade(fresh, () => importKeyIds(fresh, packet));
@@ -572,4 +617,46 @@ test("what each cursor conversion walks and makes grows no faster than what it c
     if (!(ratio <= 1.1)) problems.push(`${name}: walked per charged unit ×${ratio.toFixed(3)}`);
   }
   assert.deepEqual(problems, []);
+});
+
+/** The constructions of a text in the cursor modules, by form. */
+const MADE_FORMS: readonly (readonly [string, RegExp])[] = [
+  ["template", /`[^`]*\$\{/g],
+  ["slice", /\.slice\(/g],
+  ["concatenation", /\.concat\(|\.join\(|["'`]\s*\+[^+=]|[^+]\+\s*["'`]/g],
+  ["joinParts", /\bjoinParts\(/g],
+];
+
+/** The ones there are, by file and form, and why each is bounded or charged. */
+const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
+  "key-ids.ts template": [4, "the cursor's type and text (two numbers); two error messages"],
+  "key-ids.ts slice": [
+    5,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`)",
+  ],
+  "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
+  "lanes.ts joinParts": [
+    2,
+    "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",
+  ],
+};
+
+test("the cursor modules make no text but the listed ones, each bounded or charged (#1454 r1: the probe cannot see a string being made)", () => {
+  const found: Record<string, number> = {};
+  for (const file of ["key-ids.ts", "lanes.ts"]) {
+    const source = readFileSync(
+      new URL(`../../src/type-inference/core/contract/${file}`, import.meta.url),
+      "utf8",
+    );
+    // (code only, comments aside)
+    const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+    for (const [form, pattern] of MADE_FORMS) {
+      const count = [...code.matchAll(pattern)].length;
+      if (count > 0) found[`${file} ${form}`] = count;
+    }
+  }
+  assert.deepEqual(
+    found,
+    Object.fromEntries(Object.entries(MADE_LISTED).map(([key, [count]]) => [key, count])),
+  );
 });

@@ -79,6 +79,7 @@ function passOf(contract: Contract): number {
 
 /** The ledger as it stands, to tell a question's units (`KeyRecord`). */
 interface LedgerMark {
+  readonly sharing: boolean;
   readonly counts: ReadonlyMap<WorkCounter, number>;
   readonly apartCounts: ReadonlyMap<WorkCounter, number>;
   readonly total: number;
@@ -88,6 +89,7 @@ interface LedgerMark {
 
 function ledgerMark(work: WorkLedger): LedgerMark {
   return {
+    sharing: work.sharing,
     counts: work.counts(),
     apartCounts: work.apartCounts(),
     total: work.total,
@@ -96,7 +98,10 @@ function ledgerMark(work: WorkLedger): LedgerMark {
   };
 }
 
-/** The units charged since `before`, by counter and by how the ledger counted them. */
+/**
+ * The units charged since `before`, by counter and by how the ledger counted them: inside a `shared` build already
+ * running at `before`, all shared, though the ledger books them so only when that build ends.
+ */
 function chargedSince(
   work: WorkLedger,
   before: LedgerMark,
@@ -110,7 +115,7 @@ function chargedSince(
       const spent = units - (then.get(counter) ?? 0);
       if (spent > 0) counters[counter] = (counters[counter] ?? 0) + spent;
     }
-  const own = work.own - before.own;
+  const own = before.sharing ? 0 : work.own - before.own;
   return {
     counters,
     own,
