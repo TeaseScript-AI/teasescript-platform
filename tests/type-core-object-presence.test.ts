@@ -374,7 +374,11 @@ test("a load's or parse's default proves a property only where its reader fills 
         const { plan } = inMode(mode, () =>
           publishedRoute([{ path: "main.tease", source }], globals),
         );
-        assert.ok(plan !== null && plan !== "outside", `${c.name}: the candidate plans it`);
+        // (each case reports, so a tree that plans none of them shows every verdict)
+        if (plan === null || plan === "outside") {
+          wrong.push(`${c.name}, ${JSON.stringify(mode)}: not planned`);
+          continue;
+        }
         const result = runGlobals(
           plan,
           { hostValue: 0, hostText: "json" in read ? read.json : "{}" },
