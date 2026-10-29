@@ -5,7 +5,7 @@ import { analyseCore, type Answers } from "../../src/type-inference/core/answers
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
-import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
+import { CoreProgram, propertyName, propertyStep } from "../../src/type-inference/core/program.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "./type-core-analysis.js";
@@ -299,12 +299,14 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     readonly into: Destination;
     /** The written type of the destination's place: the form's, or a list of it (an add's). */
     readonly holds: (form: Form) => Form;
-    /** The stored value's text for a value of the form (an `addAll`'s list of it). */
+    /** The stored value's text for a value of the form (an `addAll`'s list of it), and the line storing it. */
     readonly stored: (value: string) => string;
+    readonly line: string;
     readonly collections: boolean;
   }[] = [
     {
       name: "argument",
+      line: "f(",
       lines: (type, value) => [
         `function f(xs: ${type}) {`,
         '  say "CALLEE"',
@@ -320,6 +322,7 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     },
     {
       name: "dead argument",
+      line: "f(",
       lines: (type, value) => [
         `function f(xs: ${type}) {`,
         '  say "CALLEE"',
@@ -335,6 +338,7 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     },
     {
       name: "return",
+      line: "  return ",
       lines: (type, value) => [
         `function g(n): ${type} {`,
         `  return ${value}`,
@@ -350,6 +354,7 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     },
     {
       name: "add",
+      line: "xs.add(",
       lines: (type, value, seed) => [
         `let xs: ${type} = [${seed}]`,
         ...REPLACED(seed),
@@ -364,6 +369,7 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     },
     {
       name: "addAll",
+      line: "xs.addAll(",
       lines: (type, value, seed) => [
         `let xs: ${type} = [${seed}]`,
         ...REPLACED(seed),
@@ -378,6 +384,7 @@ function analysisFamily(few: boolean): EnclosingCase[] {
     },
     {
       name: "written collection",
+      line: "t = ",
       lines: (type, value, seed) => [
         `let t: ${type} = ${seed}`,
         'say "BEFORE"',
@@ -399,8 +406,12 @@ function analysisFamily(few: boolean): EnclosingCase[] {
       const seed = literalText(valuesOf(form, true)[0]!);
       const add = (value: string, values: EnclosingCase["values"]): void => {
         const stored = shape.stored(value);
-        const source = [...shape.lines(type, stored, seed), "exit"].join("\n") + "\n";
-        const start = source.lastIndexOf(stored);
+        const lines = shape.lines(type, stored, seed);
+        const source = [...lines, "exit"].join("\n") + "\n";
+        // (the value's site on the line that stores it: its text may stand elsewhere too, as `g(1)`'s `1`)
+        const at = lines.findIndex((line) => line.startsWith(`${shape.line}${stored}`));
+        const start =
+          lines.slice(0, at).reduce((sum, line) => sum + line.length + 1, 0) + shape.line.length;
         cases.push({
           name: `${shape.name}, ${type}, ${value === "hostValue" ? "host" : `literal ${value}`}`,
           source,
@@ -510,13 +521,17 @@ function termText(term: TypeTerm): string {
   }
 }
 
-/** The budget-context records at a site, shown or deferred: the stop's owned marks there. */
-function marksAt(answers: Answers, site: EnclosingCase["site"]): number {
+/**
+ * The budget-context records at a site, shown or deferred, whose obligation is the destination's (`target`): the stop's
+ * owned marks of the store there, not a decision's own warning at another level of its value.
+ */
+function marksAt(answers: Answers, site: EnclosingCase["site"], target: string): number {
   return [...answers.diagnostics, ...answers.budget.deferred].filter(
     (d) =>
       d.class === "warning-runtime-check" &&
       "provenance" in d &&
       d.provenance.context === "budget" &&
+      d.obligation.target === target &&
       d.site.start === site.start &&
       d.site.end === site.end,
   ).length;
@@ -538,6 +553,11 @@ export function enclosingProblems(
   const request = coreRequest([{ path: "main.tease", source: c.source }]);
   if (request === null) throw new Error(`The case does not resolve: ${c.name}`);
   const place = placeOf(request, c);
+  // (the destination's obligation target, as a store's mark names it: its place's label and steps)
+  const target = [
+    new CoreProgram(request).place(place).label,
+    ...c.into.path.map(propertyName),
+  ].join(".");
   const capped = <T>(make: () => T): T =>
     mode.run(() => (allowance === null ? make() : withTestDemandAllowance(allowance, make)));
   const answers = capped(() => analyseCore(request));
@@ -563,17 +583,23 @@ export function enclosingProblems(
   const judged =
     relation === "at" ? "exact" : c.form === null || unsettledInferred ? "mark" : "domain";
   const problems: string[] = [];
+  const inside = (d: { readonly site: EnclosingCase["site"] }): boolean =>
+    d.site.start >= c.site.start && d.site.end <= c.site.end;
+  const errors = answers.diagnostics.filter((d) => d.class === "compile-error" && inside(d)).length;
+  // (C1's error at the store's value rejects it and stands for its mark, A6; another rule's error, as a literal's mixed
+  // elements', leaves the mark)
+  const rejects = answers.diagnostics.some(
+    (d) => d.class === "compile-error" && "rule" in d && d.rule.rule === "store" && inside(d),
+  );
+  // (one owned mark at a store above a stop, none beside its rejection)
+  const owned = (marks: number): boolean => marks === (rejects ? 0 : 1);
   if (!c.slice) {
     // (at the analysis: a literal's error uncapped, and above a stop the mark and the complete type its check carries)
-    const errors = answers.diagnostics.filter(
-      (d) =>
-        d.class === "compile-error" && d.site.start >= c.site.start && d.site.end <= c.site.end,
-    ).length;
     if (phase === "unstopped" && !c.host && errors > 0 !== !c.values[0]!.fits)
       problems.push(`${errors} errors at the store of ${JSON.stringify(c.values[0]!.value)}`);
     if (relation === "above" && judged === "domain") {
-      const marks = marksAt(answers, c.site);
-      if (marks !== 1) problems.push(`${marks} owned marks at the store above the stop`);
+      const marks = marksAt(answers, c.site, target);
+      if (!owned(marks)) problems.push(`${marks} owned marks at the store above the stop`);
       const required = answers.requirement(place, c.into.path);
       if (required === null || termText(required) !== checkedText(c.form!))
         problems.push(`requirement ${required === null ? "none" : termText(required)}`);
@@ -620,11 +646,11 @@ export function enclosingProblems(
       problems.push(`no planned check at ${site}`);
   }
   if (relation === "above") {
-    const marks = marksAt(answers, c.site);
-    if (judged === "domain" ? marks !== 1 : marks < 1)
+    const marks = marksAt(answers, c.site, target);
+    if (judged === "domain" ? !owned(marks) : marks < 1 && !rejects)
       problems.push(`${marks} owned marks at the store above the stop`);
   }
-  if (unsettledInferred && relation !== "at" && marksAt(answers, c.site) < 1)
+  if (unsettledInferred && relation !== "at" && marksAt(answers, c.site, target) < 1)
     problems.push("no mark at a store into an inferred place before admission settled");
   return {
     allowance,
