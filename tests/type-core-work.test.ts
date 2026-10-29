@@ -970,6 +970,45 @@ test("copies of a deep written type walk the type once, not once per copy (#1194
 });
 
 /**
+ * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
+ * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
+ * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
+ * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
+ * as before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both shapes'
+ * decisions at their allowance at 300 levels.
+ */
+test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
+  const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
+  const shapes: readonly (readonly [string, (k: number) => string, readonly boolean[]])[] = [
+    ["of two kinds", (k) => `let xs = [${nest(k, "1")}, ${nest(k, '"bad"')}]`, [false, true]],
+    [
+      "copying a written union",
+      (k) => `let typed: integer | string = 1\nlet xs = [${nest(k, "typed")}, ${nest(k, '"ok"')}]`,
+      [false],
+    ],
+  ];
+  const largest = (budget: Answers["budget"]): number =>
+    Math.max(...budget.decisions.map((decision) => decision.units));
+  const steep: string[] = [];
+  for (const [name, source, orders] of shapes) {
+    const [at64, at128] = [64, 128].map((k): Sized => {
+      const request = coreRequest([{ path: "main.tease", source: `${source(k)}\nexit` }]);
+      assert.ok(request !== null, `${name} at ${k}: its file parses and resolves`);
+      return { name: `${name} at ${k}`, request };
+    });
+    for (const reversed of orders) {
+      const [small, large] = [at64!, at128!].map((at) => analysed(at, reversed).budget);
+      const scale =
+        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (largest(large!) / largest(small!))) / scale;
+      if (doubling > DOUBLING)
+        steep.push(`${name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
+  }
+  assert.deepEqual(steep, []);
+});
+
+/**
  * Admission (TABLE §5, §10.3; the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as
  * W34 is; A6's chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is
  * a gated known limit by the owner's decision (TABLE r4.49, option A): a regression check on the 64 → 128 step only,
