@@ -1,5 +1,9 @@
+import type { Expression, Statement } from "../../src/ast.js";
 import { compileProject, compileProjectWithBackend } from "../../src/compiler.js";
+import { handlerBlocks, nestedStatements, unwrap } from "../../src/expression-children.js";
 import { createFreshRuntimeSession } from "../../src/index.js";
+import { parse } from "../../src/parser.js";
+import type { SourceSpan } from "../../src/source.js";
 import type { TypeAnalysisBackend } from "../../src/type-inference/backend.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
@@ -15,8 +19,9 @@ import { coreRequest } from "./type-core-analysis.js";
  * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs; a declaration
  * form under the new core alone where the current checker's recorded difference from the accepted text is its only
  * rejection (#1412: a list join whose written destination admits every operand), as the checker whose message offers it
- * decides (the lead's ruling on #1310): the join in the declaration's own text, and no other (Codex r12 on #1310). The
- * parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
+ * decides (the lead's ruling on #1310): the joins whose value the declaration's written type receives, and no other
+ * (Codex r12 and r13 on #1310). The parity test runs a sample of it; the whole family is the step's evidence, run
+ * outside CI.
  */
 
 /** An erroneous expression a fix offers code for, with the lines before it that make it so. */
@@ -561,11 +566,50 @@ export function pastedForms(
 }
 
 /**
- * The current checker without its recorded difference from the accepted text (#1412): a list join's error inside a
- * pasted declaration, whose written type is the join's destination and admits every operand, as the new core proves
- * where it is quiet. A join error anywhere else stands (Codex r12 on #1310: #1383's missing core check).
+ * The joins whose value a pasted declaration's written type receives, by their offsets: its start value's `+`, and each
+ * such join's operands that are joins, parentheses aside. A join anywhere else in its text (an element, an argument, a
+ * member's receiver) lands elsewhere (Codex r13 on #1310).
  */
-function recorded(declared: { readonly start: number; readonly end: number }): TypeAnalysisBackend {
+function landingJoins(source: string, declared: { readonly start: number }): Set<string> {
+  const joins = new Set<string>();
+  const spine = (expression: Expression | null): void => {
+    if (expression === null) return;
+    const join = unwrap(expression);
+    if (join.kind !== "binaryExpression" || join.operator !== "+") return;
+    joins.add(`${join.span.start.offset},${join.span.end.offset}`);
+    spine(join.left);
+    spine(join.right);
+  };
+  const at = (node: { readonly span: SourceSpan }): boolean =>
+    node.span.start.offset === declared.start;
+  // (a `let`'s start value; a global's, and its `= value` beside a `default:`; a parameter's default)
+  const visit = (statements: readonly Statement[]): void => {
+    for (const statement of statements) {
+      if (statement.kind === "letStatement" && at(statement)) spine(statement.initializer);
+      if (statement.kind === "globalStatement" && at(statement)) {
+        spine(statement.initial);
+        spine(statement.assignment?.value ?? null);
+      }
+      if (statement.kind === "functionDeclaration") {
+        for (const parameter of statement.parameters)
+          if (at(parameter)) spine(parameter.defaultValue);
+        visit(statement.body.statements);
+      }
+      visit(nestedStatements(statement));
+      for (const block of handlerBlocks(statement)) visit(block.statements);
+    }
+  };
+  visit(parse(source).program.statements);
+  return joins;
+}
+
+/**
+ * The current checker without its recorded difference from the accepted text (#1412): a list join's error where a
+ * pasted declaration's written type receives the join's value (`landingJoins`) and so admits every operand, as the new
+ * core proves where it is quiet. A join error anywhere else stands, inside the declaration's text or not (Codex r12 and
+ * r13 on #1310: #1383's missing core check).
+ */
+function recorded(landing: ReadonlySet<string>): TypeAnalysisBackend {
   return {
     name: "legacy",
     analyze(request) {
@@ -575,8 +619,7 @@ function recorded(declared: { readonly start: number; readonly end: number }): T
           ({ code, message, span }) =>
             code !== "TSV044" ||
             !/^'\+=?' would mix /.test(message) ||
-            span.start.offset < declared.start ||
-            span.end.offset > declared.end,
+            !landing.has(`${span.start.offset},${span.end.offset}`),
         ),
       );
       return { checked: { ...outcome.checked, diagnostics }, facts: () => outcome.facts() };
@@ -597,7 +640,7 @@ export function pasteFailure(
   const compiled =
     declared === undefined
       ? compileProject(files)
-      : compileProjectWithBackend(files, {}, recorded(declared));
+      : compileProjectWithBackend(files, {}, recorded(landingJoins(source, declared)));
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0)
     return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");

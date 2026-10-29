@@ -1424,20 +1424,27 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
   assert.ok(pasted > 0, `${pasted} forms pasted`);
 });
 
-test("a join's pasted declaration is checked under the core alone at its own join, and the current checker's other join errors stand (#1412, Codex r12 on #1310)", () => {
-  const pasted = (source: string): string | null => {
-    const forms = pastedForms(source, 24, 34).forms.filter((form) => form.declared !== undefined);
+test("a join's pasted declaration is checked under the core alone at the joins its type receives, and the current checker's other join errors stand (#1412, Codex r12 and r13 on #1310)", () => {
+  const pasted = (source: string, line: string): string | null => {
+    const start = source.indexOf(line);
+    const forms = pastedForms(source, start, start + line.length).forms.filter(
+      (form) => form.declared !== undefined,
+    );
     assert.equal(forms.length, 1, source);
     return pasteFailure(forms[0]!.source, forms[0]!.declared);
   };
-  assert.equal(pasted('let xs = [1]\nlet both = xs + ["x"]\nexit\n'), null);
-  // (a join of objects whose property differs, which the core misses, #1383)
-  assert.match(
-    pasted(
-      'let xs = [1]\nlet both = xs + ["x"]\nlet a = [{n: 1}]\nlet b = [{n: "x"}]\nsay (a + b).length\nexit\n',
-    ) ?? "",
-    /^TSV044: '\+' would mix objects/,
-  );
+  const objects = 'let a = [{n: 1}]\nlet b = [{n: "x"}]\n';
+  assert.equal(pasted('let xs = [1]\nlet both = xs + ["x"]\nexit\n', 'xs + ["x"]'), null);
+  // (a join of objects whose property differs, which the core misses, #1383: beside the declaration, and inside its
+  // text where the declared type does not receive it)
+  for (const [source, line] of [
+    [`let xs = [1]\nlet both = xs + ["x"]\n${objects}say (a + b).length\nexit\n`, 'xs + ["x"]'],
+    [
+      `let xs = [1]\n${objects}let both = xs + ["x"] + [(a + b).length]\nexit\n`,
+      'let both = xs + ["x"] + [(a + b).length]',
+    ],
+  ] as const)
+    assert.match(pasted(source, line) ?? "", /^TSV044: '\+' would mix objects/, source);
 });
 
 test("what a site takes is read through a long chain of untyped copies or calls, and a wide literal (#1241, Codex r8, r13)", () => {
