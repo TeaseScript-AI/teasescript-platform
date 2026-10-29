@@ -38,11 +38,10 @@ import {
   numericFunction,
 } from "./runtime/values/pure-operations.js";
 import {
-  cloneCapturedSerializableValue,
-  createCapturedSerializableList,
-  createCapturedSerializableSet,
+  addOwnedSerializableSetValue,
   setOwnedSerializableDictValue,
   type SerializableRuntimeDict,
+  type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./runtime/values/serializable-values.js";
 import { callStringMethod } from "./runtime/values/string-operations.js";
@@ -659,6 +658,8 @@ export class KnownValues {
           ? this.#run(() => joinedValue(left, right, expression.span))
           : knownValue(expression, known);
       }
+      // Known values never change, so a collection holds its elements' values as they are: copies would make a literal
+      // nested n deep keep memory in proportion to n².
       case "listLiteral":
       case "setLiteral": {
         const items: KnownValue[] = [];
@@ -667,9 +668,11 @@ export class KnownValues {
           if (value === undefined) return undefined;
           items.push(value);
         }
-        return expression.kind === "listLiteral"
-          ? createCapturedSerializableList(items)
-          : createCapturedSerializableSet(items);
+        if (expression.kind === "listLiteral") return { kind: "list", items };
+        // The first of equal members stays.
+        const set: SerializableRuntimeSet = { kind: "set", items: [] };
+        for (const item of items) addOwnedSerializableSetValue(set, item);
+        return set;
       }
       case "dictLiteral": {
         const dict: SerializableRuntimeDict = { kind: "dict", entries: [] };
@@ -679,7 +682,7 @@ export class KnownValues {
           // A key that is not text fails the run.
           if (typeof key !== "string" || value === undefined) return undefined;
           // A later entry with an equal key replaces the earlier one in its position.
-          setOwnedSerializableDictValue(dict, key, cloneCapturedSerializableValue(value));
+          setOwnedSerializableDictValue(dict, key, value);
         }
         return dict;
       }
