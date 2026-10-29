@@ -17,7 +17,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,cts,mts,js,jsx,cjs,mjs}\"",
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
-    "check": "node tools/run-parallel.mjs format:check lint lint:design test:lint:design test:lint knip test:build:typescript test:verification && BUILD_SOURCEMAPS=0 npm test",
+    "check": "node tools/run-parallel.mjs format:check lint lint:design test:lint:design test:lint knip test:build:typescript test:verification test:families && BUILD_SOURCEMAPS=0 npm test",
     "knip": "knip",
     "lint": "node tools/oxlint/run.mjs",
     "lint:design": "eslint --config eslint.design.config.mjs player/vue/src --ext .vue,.ts --max-warnings 0",
@@ -35,6 +35,7 @@
     "test:player:firefox-camera": "node tools/player-firefox-camera.mjs",
     "dev:player": "vite --config player/vue/vite.config.ts",
     "test:verification": "node --test tools/run-parallel.test.mjs",
+    "test:families": "node tests/families/check.mjs",
     "test:lint:design": "node --test tools/design-lint/test.mjs"
   },
   "devDependencies": {

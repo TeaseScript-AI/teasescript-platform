@@ -12,9 +12,7 @@ import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs"
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-
-/** The host globals a source may read, unless its generator exports its own `globals`. */
-const GLOBALS = ["hostValue", "hostOther", "hostInit", "otherHost"];
+import { sourcesOf } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -120,21 +118,6 @@ if (!isMainThread) {
       current.postMessage(message);
     });
 
-  /** A generator's sources: its fixed `cases`, and each of its `shapes` at each size. */
-  const sourcesOf = (generator) => {
-    const files = (value) =>
-      typeof value === "string" ? [{ path: "main.tease", source: value }] : value;
-    const cases = (generator.cases ?? []).map(([name, value]) => ({ name, files: files(value) }));
-    const shapes = generator.shapes ?? {};
-    const sized = (sizesOption ?? generator.sizes ?? [4, 8]).flatMap((size) =>
-      Object.entries(shapes).map(([name, shape]) => ({
-        name: `${name}@${size}`,
-        files: files(shape(size)),
-      })),
-    );
-    return [...cases, ...sized];
-  };
-
   const folder = path.join(path.dirname(fileURLToPath(import.meta.url)), area);
   const generators = readdirSync(folder)
     .filter((name) => name.endsWith(".mjs"))
@@ -145,12 +128,13 @@ if (!isMainThread) {
   for (const name of generators) {
     const generator = await import(pathToFileURL(path.join(folder, name)).href);
     const checks = generator.checks ?? ["publication"];
-    const globals = generator.globals ?? GLOBALS;
     const row = { generator: name, sources: 0, unparsed: 0, stalled: 0, runs: 0, differences: 0 };
-    const sources = sourcesOf(generator).filter((_, index) => index % shards === shard);
+    const sources = sourcesOf(generator, sizesOption).filter(
+      (_, index) => index % shards === shard,
+    );
     for (const source of sources) {
       row.sources += 1;
-      const reply = await analysed({ files: source.files, checks, globals });
+      const reply = await analysed({ files: source.files, checks, globals: source.globals });
       if ("stalled" in reply) {
         row.stalled += 1;
         record({
@@ -158,6 +142,7 @@ if (!isMainThread) {
           source: source.name,
           stalled: reply.stalled,
           files: source.files,
+          globals: source.globals,
         });
         continue;
       }
@@ -165,7 +150,13 @@ if (!isMainThread) {
       if (!reply.parsed) row.unparsed += 1;
       row.differences += reply.differences.length;
       for (const difference of reply.differences)
-        record({ generator: name, source: source.name, ...difference, files: source.files });
+        record({
+          generator: name,
+          source: source.name,
+          ...difference,
+          files: source.files,
+          globals: source.globals,
+        });
     }
     console.log(JSON.stringify(row));
     total.generators += 1;
