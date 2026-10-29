@@ -41,8 +41,9 @@ import type { Join, JoinDecided, OwnStructure } from "./model.js";
 import { ownOf } from "./own.js";
 import { joinedDomain, permittedAt, unrestricted } from "./permitted.js";
 import { earliestDecider } from "./scan.js";
-import { literalLanding, pathsBelow, sharedPaths, valueStructure } from "./structure.js";
+import { literalLanding, pathsBelow, sharedPaths, sourceOf, valueStructure } from "./structure.js";
 import { touchCopy, touchesOf, touchOf, touchRead } from "./touches.js";
+import { writtenSource } from "./walk.js";
 
 // Literals (ADR 0021 1.3, A8): their elements of one type, their stores at a step, and where an error inside one sits.
 
@@ -615,11 +616,21 @@ export function joinElements(
     for (const operand of c.arguments) if (joins.has(operand)) inner.add(operand);
   const roots: Join[] = [];
   for (const c of joins.values()) if (!inner.has(c.result)) roots.push(c);
-  for (const root of order(roots)) {
-    // the tree's operands in source order, each with the node it is read at (a `+=`'s its statement's): what the type
-    // a fix writes holds (`levelsAt`)
+  const byResult = new Map<PlaceId, Join>();
+  for (const root of roots) byResult.set(root.result, root);
+  // a tree's operands in source order, each with the node it is read at (a `+=`'s its statement's): what the type a fix
+  // writes holds (`levelsAt`); and its joins, each before the joins it holds; once per tree
+  const shapes = new Map<
+    PlaceId,
+    {
+      readonly operands: readonly { readonly operand: PlaceId; readonly node: FlowNode }[];
+      readonly tree: readonly Join[];
+    }
+  >();
+  const shapeOf = (root: Join) => {
+    const known = shapes.get(root.result);
+    if (known !== undefined) return known;
     const operands: { readonly operand: PlaceId; readonly node: FlowNode }[] = [];
-    // (and its joins, each before the joins it holds)
     const tree: Join[] = [];
     const pending: { value: PlaceId; node: FlowNode | null }[] = [
       { value: root.result, node: null },
@@ -637,7 +648,102 @@ export function joinElements(
       pending.push({ value: c.arguments[1]!, node: at });
       pending.push({ value: c.arguments[0]!, node: at });
     }
-    if (operands.length < 2) continue;
+    const shape = { operands, tree };
+    shapes.set(root.result, shape);
+    return shape;
+  };
+  // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths of
+  // its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of every
+  // operand it holds there), the earliest operand deciding the element asked at any other path (its type may give it);
+  // read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310). An operand
+  // open at a path (`list`, V30 §13: any list) leaves the join open there and below, whichever operand came first: no
+  // conflict is proved from it (Astra r2's B1a on #1310)
+  interface Decider {
+    readonly decided: JoinDecided | "open";
+    readonly position: number;
+  }
+  interface Entry {
+    readonly path: readonly string[];
+    first: Decider | null;
+    readonly kinds: Set<ItemTag>;
+    nulls: boolean;
+  }
+  interface Held {
+    readonly entries: Map<string, Entry>;
+    /** The paths an operand leaves open: open there and below. */
+    readonly opens: Set<string>;
+    /** Its list levels: where a variable holding it is compared (`pathsBelow`). */
+    readonly levels: Set<string>;
+    head: { readonly operand: PlaceId; readonly node: FlowNode; readonly position: number } | null;
+  }
+  // (what an operand's value is, through the projections the join rule resolves (`carriersOf`, a literal's cells at the
+  // step read): a projection's owner, an `otherwise`'s sides; each part an earlier tree's join, whose composed type
+  // stands for it, or a value taken for its own type; `null` where no part is a join, or a step is read into a value
+  // that is no literal and carries nothing. The join check never derives again a type the join rule already composed:
+  // a join answers the same inline as kept (the lead's rule on #1310))
+  type Part = { readonly join: PlaceId } | { readonly leaf: PlaceId };
+  const RESOLVED: ReadonlySet<string> = new Set([
+    "projection/owner",
+    "projection/record field",
+    "otherwise/operand",
+    "otherwise/fallback",
+  ]);
+  const reaches = new Map<PlaceId, readonly Part[] | null>();
+  const reachOf = (operand: PlaceId): readonly Part[] | null => {
+    const known = reaches.get(operand);
+    if (known !== undefined) return known;
+    const parts: Part[] = [];
+    let joined = false;
+    let resolved = true;
+    const pending: (readonly [PlaceId, readonly string[]])[] = [[operand, []]];
+    while (resolved && pending.length > 0) {
+      const [at, strip] = pending.pop()!;
+      program.work.charge("checks");
+      if (joins.has(at)) {
+        resolved = strip.length === 0 && byResult.has(at);
+        parts.push({ join: at });
+        joined = true;
+        continue;
+      }
+      const literal = program.hasOf.has(at);
+      if (writtenSource(admission, at, strip) === null && literal && strip.length > 0) {
+        const children = literalChildren(admission, at, strip[0]!);
+        resolved = children.length > 0;
+        const rest = keptSlice(admission.work, strip, 1);
+        for (let index = children.length - 1; index >= 0; index -= 1)
+          pending.push([children[index]!.value!, rest]);
+        continue;
+      }
+      const carried =
+        literal || sourceOf(admission, at) !== null || writtenSource(admission, at, strip) !== null
+          ? []
+          : admission.carriersOf(at, strip);
+      if (carried.length > 0 && carried.every(([, , role]) => RESOLVED.has(role))) {
+        for (let index = carried.length - 1; index >= 0; index -= 1)
+          pending.push([carried[index]![0], carried[index]![1]]);
+        continue;
+      }
+      resolved = strip.length === 0;
+      parts.push({ leaf: at });
+    }
+    const out = resolved && joined ? parts : null;
+    reaches.set(operand, out);
+    return out;
+  };
+  // (each tree composed once, a tree an operand reaches before the tree reading it, and reported in the order given)
+  const composed = new Map<PlaceId, { readonly held: Held | null; readonly report: () => void }>();
+  // (the trees whose composed type an operand took: each is reached once, by the operand holding it)
+  const taken = new Set<PlaceId>();
+  const compose = (root: Join): { readonly held: Held | null; readonly report: () => void } => {
+    const { operands, tree } = shapeOf(root);
+    const reports: (() => void)[] = [];
+    const done = (final: Held | null) => ({
+      held: final,
+      report: () => {
+        for (const each of reports) each();
+      },
+    });
+    if (operands.length < 2) return done(null);
     // (before admission settled, a decision is read nowhere: a join with an operand that reads a place or holds a
     // source, a copy or a call, is marked instead, as a literal with a named element is)
     if (
@@ -649,8 +755,8 @@ export function joinElements(
           valueStructure(admission, operand).sources.length > 0,
       )
     ) {
-      undecided(root.result);
-      continue;
+      reports.push(() => undecided(root.result));
+      return done(null);
     }
     const written = contract.landsIn(root.result, []);
     // (a `+=`'s left operand reads the place its store sets, a selection there an own property where the store's
@@ -811,39 +917,13 @@ export function joinElements(
         admission.admitted(read.place, joinSteps(read.path, steps)).includes("null")
       );
     };
-    // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths
-    // of its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of
-    // every operand it holds there), the earliest operand deciding the element asked at any other path (its type may
-    // give it); read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310).
-    // An operand open at a path (`list`, V30 §13: any list) leaves the join open there and below, whichever operand
-    // came first: no conflict is proved from it (Astra r2's B1a on #1310)
-    interface Decider {
-      readonly decided: JoinDecided | "open";
-      readonly position: number;
-    }
-    interface Entry {
-      readonly path: readonly string[];
-      first: Decider | null;
-      readonly kinds: Set<ItemTag>;
-      nulls: boolean;
-    }
-    interface Held {
-      readonly entries: Map<string, Entry>;
-      /** The paths an operand leaves open: open there and below. */
-      readonly opens: Set<string>;
-      /** Its list levels: where a variable holding it is compared (`pathsBelow`). */
-      readonly levels: Set<string>;
-      head: {
-        readonly operand: PlaceId;
-        readonly node: FlowNode;
-        readonly position: number;
-      } | null;
-    }
+    // (an operand's place in evaluation order: where its source starts, so an earlier tree's composed type keeps its
+    // own operands' places inside the operand that reaches it, before every operand after it and after every one before)
+    const startOf = (value: PlaceId): number => program.places[value]?.site?.start ?? 0;
     const positions = new Map<PlaceId, { readonly node: FlowNode; readonly position: number }>();
-    for (const [position, { operand, node }] of operands.entries())
-      positions.set(operand, { node, position });
-    const leaf = (operand: PlaceId): Held | null => {
-      const { node, position } = positions.get(operand)!;
+    for (const { operand, node } of operands)
+      positions.set(operand, { node, position: startOf(operand) });
+    const leaf = (operand: PlaceId, node: FlowNode, position: number): Held | null => {
       if (!isList(operand, node)) return null;
       const held: Held = { entries: new Map(), opens: new Set(), levels: new Set(), head: null };
       const paths: (readonly string[])[] = [[]];
@@ -957,10 +1037,94 @@ export function joinElements(
         into.head = from.head;
       return into;
     };
+    // (an earlier join's composed type for an operand that reaches it, taken whole: a join's result is reached by one
+    // operand only, and its own operands' places stand inside that operand's; compared at its list levels, as a join is
+    // (its paths are the earlier tree's, which grow with a chain: Codex r7's B3, #1383))
+    const reaching = new Set<PlaceId>();
+    // (an operand's parts in evaluation order, the earlier part `first`: the earliest deciding at a path decides alone, as
+    // `decidedAt`'s earliest decider does, a later part adding only the numbers that make whole numbers numbers and its
+    // `null`, and deciding where no earlier part does. The larger part's map is the result, by reference, and only the
+    // smaller part's entries, opens and levels are visited, whichever of the two it is, so a growing earlier join is never
+    // walked again whatever position it stands in (Codex r15's and r16's B1 on #1310: the lead's rule))
+    const parted = (first: Held, later: Held): Held => {
+      const numbers = (into: Entry, from: Entry): void => {
+        if (into.kinds.has("integer"))
+          for (const kind of from.kinds) if (NUMERIC.has(kind)) into.kinds.add(kind);
+      };
+      if (first.entries.size >= later.entries.size) {
+        // (a later part leaves its paths open where the earlier part decides nothing: asked before its entries join)
+        for (const at of later.opens) {
+          program.work.charge("partVisits");
+          if ((first.entries.get(at)?.first ?? null) === null) first.opens.add(at);
+        }
+        for (const [at, entry] of later.entries) {
+          program.work.charge("partVisits");
+          const known = first.entries.get(at);
+          if (known !== undefined && known.first !== null) {
+            numbers(known, entry);
+            known.nulls ||= entry.nulls;
+            continue;
+          }
+          if (known !== undefined) entry.nulls ||= known.nulls;
+          first.entries.set(at, entry);
+        }
+        for (const at of later.levels) first.levels.add(at);
+        first.head ??= later.head;
+        return first;
+      }
+      for (const [at, entry] of first.entries) {
+        program.work.charge("partVisits");
+        const known = later.entries.get(at);
+        if (entry.first === null) {
+          if (known === undefined) later.entries.set(at, entry);
+          else known.nulls ||= entry.nulls;
+          continue;
+        }
+        if (known !== undefined) {
+          numbers(entry, known);
+          entry.nulls ||= known.nulls;
+        }
+        later.entries.set(at, entry);
+        later.opens.delete(at);
+      }
+      for (const at of first.opens) later.opens.add(at);
+      for (const at of first.levels) later.levels.add(at);
+      later.head = first.head ?? later.head;
+      return later;
+    };
+    const reached = (operand: PlaceId): Held | null | undefined => {
+      const parts = reachOf(operand);
+      if (
+        parts === null ||
+        parts.some(
+          (part) =>
+            "join" in part &&
+            ((composed.get(part.join)?.held ?? null) === null || taken.has(part.join)),
+        )
+      )
+        return undefined;
+      const { node } = positions.get(operand)!;
+      let out: Held | null = null;
+      for (const part of parts) {
+        let one: Held | null;
+        if ("join" in part) {
+          taken.add(part.join);
+          one = composed.get(part.join)!.held;
+        } else one = leaf(part.leaf, node, startOf(part.leaf));
+        out = out === null ? one : one === null ? out : parted(out, one);
+      }
+      reaching.add(operand);
+      return out;
+    };
     // each join after the joins it holds, its operands' values taken once
     const held = new Map<PlaceId, Held | null>();
     const take = (value: PlaceId): Held | null => {
-      if (!joins.has(value)) return leaf(value);
+      if (!joins.has(value)) {
+        const found = reached(value);
+        if (found !== undefined) return found;
+        const { node, position } = positions.get(value)!;
+        return leaf(value, node, position);
+      }
       const found = held.get(value) ?? null;
       held.delete(value);
       return found;
@@ -971,7 +1135,9 @@ export function joinElements(
       const theirs = take(right);
       let rejected = !admission.pass.lists.joined(right);
       if (ours !== null && theirs !== null)
-        for (const at of joins.has(right) ? theirs.levels : theirs.entries.keys()) {
+        for (const at of joins.has(right) || reaching.has(right)
+          ? theirs.levels
+          : theirs.entries.keys()) {
           program.work.charge("checks");
           const path = theirs.entries.get(at)!.path;
           const ruled = decisionOf(ours, path, at);
@@ -997,7 +1163,7 @@ export function joinElements(
               ))
           )
             continue;
-          error({
+          const found: Parameters<typeof error>[0] = {
             c,
             path,
             earliest:
@@ -1007,10 +1173,13 @@ export function joinElements(
             kinds: own.nulls || own.decided.nullable === true ? [...kinds, "null"] : kinds,
             value: root.result,
             levels: levelsAt(path),
-          });
-          admission.rejections += 1;
+          };
           const key = keptKey(admission.work, c.result, joinSteps(["element"], path));
-          admission.newlyRejected.set(joinedOperand(right), new Set([key]));
+          reports.push(() => {
+            error(found);
+            admission.rejections += 1;
+            admission.newlyRejected.set(joinedOperand(right), new Set([key]));
+          });
           rejected = true;
           break;
         }
@@ -1019,6 +1188,30 @@ export function joinElements(
         theirs === null || rejected ? ours : ours === null ? theirs : joined(ours, theirs),
       );
     }
+    return done(held.get(root.result) ?? null);
+  };
+  // (a tree after the earlier trees its operands reach: each asked before the tree reading it, without recursion)
+  const ensure = (first: Join): void => {
+    const stack: { readonly root: Join; ready: boolean }[] = [{ root: first, ready: false }];
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]!;
+      program.work.charge("checks");
+      if (composed.has(top.root.result)) stack.pop();
+      else if (top.ready) {
+        stack.pop();
+        composed.set(top.root.result, compose(top.root));
+      } else {
+        top.ready = true;
+        for (const { operand } of shapeOf(top.root).operands)
+          for (const part of reachOf(operand) ?? [])
+            if ("join" in part && !composed.has(part.join))
+              stack.push({ root: byResult.get(part.join)!, ready: false });
+      }
+    }
+  };
+  for (const root of order(roots)) {
+    ensure(root);
+    composed.get(root.result)!.report();
   }
 }
 

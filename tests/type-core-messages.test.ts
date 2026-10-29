@@ -564,6 +564,12 @@ test("a list's '+' mixes element types as a literal does, with the current check
       'say ([1] + [1.5] + ["x"]).length\nexit',
       `TSV044 [5,24) ${mix("+", "a number and text (string)", typed("(number | string)[]"))}`,
     ],
+    // an operand reaching an earlier join takes its composed type: beside a part holding only `null`, which decides
+    // nothing but keeps its `null` (Codex r15's N1 on #1310)
+    [
+      "let s = [[null], ([1] + [2])][0] + [true]\nexit",
+      `TSV044 [8,41) ${mix("+", "a whole number (integer) or null and true or false (boolean)", declared("let s: (integer | boolean | null)[] = [[null], ([1] + [2])][0] + [true]"))}`,
+    ],
     ["let xs = [1]\nlet b = [1.5]\nsay (xs + b).length\nexit", null],
     ['let xs = []\nlet more = xs + ["x"]\nsay more.length\nexit', null],
     ["let xs = [1]\nlet more = xs + []\nsay more.length\nexit", null],
@@ -782,6 +788,46 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
       [`TSV044 ${JSON.stringify([["null"], ["integer"]])}`],
       store,
     );
+  // a call's written result a join carries deeper than any written copy (in a literal's property or element, below
+  // two): the decider reads it at every depth a stop stands at, the values' too (#1410's `stopDepths`), so an open one
+  // takes text and a union keeps out what it does not hold, warnings included, as V1 has them
+  const reported = (source: string): string[] => {
+    const request = coreRequest(main(source));
+    assert.ok(request !== null, source);
+    const runs = [true, false].flatMap((shared) =>
+      [false, true].map((reversed) => {
+        const go = () => analyseCore(request);
+        const ordered = reversed
+          ? () =>
+              withConsumerOrder(
+                (list) => [...list].reverse(),
+                () => withSolverSeam({ reverseWorklist: true }, go),
+              )
+          : go;
+        return reportedDiagnostics(shared ? ordered() : withoutSharing(ordered)).map(
+          (diagnostic) => `${diagnostic.class === "compile-error" ? "E" : "W"} ${diagnostic.code}`,
+        );
+      }),
+    );
+    for (const run of runs) assert.deepEqual(run, runs[0], source);
+    return runs[0]!;
+  };
+  for (const [contain, read] of [
+    [(j: string) => `{n: ${j}}`, ".n"],
+    [(j: string) => `[${j}]`, "[0]"],
+    [(j: string) => `{m: {n: ${j}}}`, ".m.n"],
+    [(j: string) => `[{n: ${j}}]`, "[0].n"],
+  ] as const)
+    for (const join of ["make() + [2]", "[2] + make()"])
+      for (const [result, element, expected] of [
+        ["list", '"tail"', []],
+        ["(integer | string)[]", '"tail"', []],
+        ["(integer | string)[]", "true", ["E TSV041"]],
+        ["(integer | string)[]", "null", ["E TSV041"]],
+      ] as const) {
+        const source = `function make: ${result} {\n  return [1]\n}\nlet o = ${contain(join)}\no${read}.add(${element})\nsay o${read}.length\nexit\n`;
+        assert.deepEqual(reported(source), expected, source);
+      }
 });
 
 /**

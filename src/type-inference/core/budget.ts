@@ -93,6 +93,8 @@ export type WorkCounter =
   | "quietProofs"
   | "c1Visits"
   | "structureSteps"
+  // the list join check's composition of an operand's parts (#1310): each entry and open path of the smaller part
+  | "partVisits"
   // the writers the result names
   | "evidence"
   // what a decision's stop forgets by (#1403), counted apart (`countApart`): each demand's reader, each key a demand
