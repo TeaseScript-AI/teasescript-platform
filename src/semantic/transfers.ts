@@ -2,9 +2,11 @@ import type {
   Expression,
   FileTarget,
   LabelTarget,
+  LetStatement,
   TagQueryExpression,
   TagQueryStep,
 } from "../ast.js";
+import { CORE_RUNTIME_BUILTINS } from "../language-facts.js";
 import {
   declarationsOnlyMessage,
   globMatches,
@@ -19,7 +21,8 @@ import type { SourceSpan } from "../source.js";
 import { staticNumber } from "../static-evaluation.js";
 import { mayMatchTags, tagQueryKey } from "../tag-query.js";
 import { semanticCode } from "./diagnostics.js";
-import { interpolatedTexts, literalText } from "./expressions.js";
+import { interpolatedTexts, literalText, unwrapParentheses } from "./expressions.js";
+import type { SemanticScope } from "./scope.js";
 
 // The targets of transfers and script references (V30 §29): labels, file paths, globs, and tagged picks.
 
@@ -266,4 +269,178 @@ export function taggedCandidates(
   );
   validator.project.taggedPicks.set(key, picks);
   return picks;
+}
+
+/**
+ * The files that a computed target may name, for the checks that follow the plan: those listed, `null` for any file, or
+ * `"project"` for those that any script reference of the project may name (`ProjectNames.referencedScripts`).
+ */
+export type TargetFiles = readonly string[] | null | "project";
+
+/** Where the references of a value come from: files, any file, the project's references, and the `let`s it reads. */
+interface ReferenceSources {
+  readonly paths: Set<string>;
+  any: boolean;
+  project: boolean;
+  readonly lets: LetStatement[];
+}
+
+/** The built-ins: but for `script`, which makes a reference, their result holds only those of their arguments. */
+const PASSING_BUILTINS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
+
+/**
+ * The files that the computed target `expression` of a `goto` or `call`, read in `scope`, may name (V30 §29), by where
+ * its script references come from. Only `script(...)` and `findScripts(...)` make one: a `script(...)` names its file,
+ * the files its text with `${...}` allows, or any file, and a `findScripts(...)` list the files it may list. A `load`
+ * or a value of the host may hold a reference to any file. A list, set, dict, or object holds the references of its
+ * parts, and an operator and a built-in function or method make none of their own, so their result holds those of what
+ * they read; a variable whose `let` keeps its first value (see `SemanticValidator.writtenLets`) holds those of that
+ * value. Anything else, such as a function's result, a parameter, a global, or a variable that code assigns, may hold
+ * any reference of the project. `memo` keeps what each `let` gives, for the targets of one file.
+ */
+export function computedTargetFiles(
+  validator: SemanticValidator,
+  expression: Expression,
+  scope: SemanticScope,
+  memo: Map<LetStatement, TargetFiles>,
+): TargetFiles {
+  const sources = referenceSources(validator, expression, scope);
+  // Each `let` once, after those its value reads; one that reads itself, which only code with errors does, counts as
+  // any reference of the project.
+  const work: { readonly site: LetStatement; sources: ReferenceSources | null }[] =
+    sources.lets.map((site) => ({ site, sources: null }));
+  const open = new Set<LetStatement>();
+  while (work.length > 0) {
+    const item = work.at(-1)!;
+    if (memo.has(item.site)) {
+      work.pop();
+      continue;
+    }
+    if (item.sources === null) {
+      open.add(item.site);
+      const letScope = validator.letScopes.get(item.site);
+      item.sources =
+        letScope === undefined
+          ? { paths: new Set(), any: false, project: true, lets: [] }
+          : referenceSources(validator, item.site.initializer, letScope);
+      for (const site of item.sources.lets)
+        if (!memo.has(site) && !open.has(site)) work.push({ site, sources: null });
+      continue;
+    }
+    work.pop();
+    open.delete(item.site);
+    memo.set(item.site, joinedFiles(item.sources, memo));
+  }
+  return joinedFiles(sources, memo);
+}
+
+/**
+ * The files of `sources`, with those of the `let`s it reads, which `memo` holds; those of the one `let` it reads, where
+ * that is all, so that targets that read one variable share its list.
+ */
+function joinedFiles(
+  sources: ReferenceSources,
+  memo: ReadonlyMap<LetStatement, TargetFiles>,
+): TargetFiles {
+  if (sources.lets.length === 1 && sources.paths.size === 0 && !sources.any && !sources.project)
+    return memo.get(sources.lets[0]!) ?? "project";
+  let { any, project } = sources;
+  const paths = new Set(sources.paths);
+  for (const site of sources.lets) {
+    const files = memo.get(site) ?? "project";
+    if (files === null) any = true;
+    else if (files === "project") project = true;
+    else for (const path of files) paths.add(path);
+  }
+  return any ? null : project ? "project" : [...paths];
+}
+
+/** Where the references that the value of `expression`, read in `scope`, may hold come from (see `computedTargetFiles`). */
+function referenceSources(
+  validator: SemanticValidator,
+  expression: Expression,
+  scope: SemanticScope,
+): ReferenceSources {
+  const sources: ReferenceSources = { paths: new Set(), any: false, project: false, lets: [] };
+  const add = (paths: readonly string[]): void => {
+    for (const path of paths) sources.paths.add(path);
+  };
+  const pending = [expression];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    switch (node.kind) {
+      case "booleanLiteral":
+      case "nullLiteral":
+      case "numberLiteral":
+      case "durationLiteral":
+      case "unitExpression":
+      case "angleExpression":
+      case "stringLiteral":
+      case "regexLiteral":
+      case "rangeExpression":
+      case "typeTestExpression":
+        break;
+      case "parenthesizedExpression":
+        pending.push(node.expression);
+        break;
+      case "listLiteral":
+      case "setLiteral":
+        for (const element of node.elements) pending.push(element);
+        break;
+      case "objectLiteral":
+        for (const property of node.properties) pending.push(property.value);
+        break;
+      case "dictLiteral":
+        for (const entry of node.entries) pending.push(entry.key, entry.value);
+        break;
+      case "propertyAccessExpression":
+        pending.push(node.object);
+        break;
+      case "indexExpression":
+        pending.push(node.object, node.index);
+        break;
+      case "unaryExpression":
+        pending.push(node.operand);
+        break;
+      case "binaryExpression":
+        pending.push(node.left, node.right);
+        break;
+      case "tagQueryExpression":
+        if (node.catalog === "scripts") add(taggedCandidates(validator, node));
+        break;
+      case "loadExpression":
+        sources.any = true;
+        break;
+      case "identifier": {
+        const binding = scope.lookup(node.name);
+        if (binding?.kind === "global" && binding.project === undefined) sources.any = true;
+        else if (binding?.site?.kind === "letStatement" && !validator.writtenLets.has(binding.site))
+          sources.lets.push(binding.site);
+        else sources.project = true;
+        break;
+      }
+      case "callExpression": {
+        const callee = unwrapParentheses(node.callee);
+        if (callee.kind === "propertyAccessExpression") {
+          // A method of a built-in value.
+          pending.push(callee.object);
+          for (const argument of node.arguments) pending.push(argument.value);
+        } else if (callee.kind !== "identifier" || scope.lookup(callee.name) !== undefined)
+          sources.project = true;
+        else if (callee.name === "script") {
+          const paths = node.arguments.filter((argument) => argument.kind === "positionalArgument");
+          const path = paths.length === 1 ? literalText(paths[0]!.value) : undefined;
+          const texts = paths.length === 1 ? interpolatedTexts(paths[0]!.value) : undefined;
+          if (path !== undefined) add([path]);
+          else if (texts !== undefined) add(validator.project.filesLike(texts));
+          else sources.any = true;
+        } else if (PASSING_BUILTINS.has(callee.name))
+          for (const argument of node.arguments) pending.push(argument.value);
+        else sources.project = true;
+        break;
+      }
+      default:
+        sources.project = true;
+    }
+  }
+  return sources;
 }

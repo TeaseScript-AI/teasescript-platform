@@ -132,8 +132,8 @@ test("findScripts lists script references to the matching files, in path order",
         "goto (strict[0])",
       ].join("\n"),
       "exit",
-      // No list may hold a reference to it.
-      ["notes.tease"],
+      // The goto reads only the first list, which may hold no reference to these (#1146).
+      ["notes.tease", "rooms/public.tease"],
     ),
     ["1", "3", "0", "strict"],
   );
@@ -173,8 +173,12 @@ test("a pick whose literal tags match no file is a compile error; one that only 
   for (const main of ['goto tagged all: (["absent"])', 'call tagged all: [("absent")]\nexit']) {
     assert.deepEqual(errors(main), [["TST002", NO_FILE]], main);
   }
+  // The known bound rules every file out, so none of them runs.
   const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum', "exit", [
     "notes.tease",
+    "rooms/public.tease",
+    "rooms/soft.tease",
+    "rooms/strict.tease",
   ]);
   const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(failed.snapshot.status, "failed");

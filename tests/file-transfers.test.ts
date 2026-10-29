@@ -391,6 +391,28 @@ test("a call whose file only the run decides warns, and fails when it starts the
     );
     assert.deepEqual(said(files, { warnings: ["TSV073"] }), outcome);
   }
+  // A block that calls a file which ends the session may leave first, so the call only warns (#1402 review r1).
+  assert.deepEqual(
+    warned(
+      project('timer async 1 s { call "stop.tease" }\nwait 2 s\nvisit()\nexit', {
+        "lib.tease": 'global function visit { call "main.tease" }',
+        "stop.tease": 'say "stopped", instant\nexit',
+      }),
+    ).map((line) => line.split(" ", 2).join(" ")),
+    ["main.tease TSV073", "lib.tease TSV073"],
+  );
+  // Where every way through the file runs the global function up to its call of that file, the call fails whenever the
+  // file runs, which is an error (#1146).
+  for (const [main, lib] of [
+    ["visit()\nexit", 'global function visit { call "main.tease" }'],
+    [
+      'say "start"\nrelay()\nexit',
+      'global function relay { visit() }\nglobal function visit { call "main.tease" }',
+    ],
+  ] as const)
+    assert.deepEqual(warned(project(main, { "lib.tease": lib })), [
+      "lib.tease TSV072 This call starts 'main.tease', which is already running, because 'main.tease' always runs global function 'visit' up to this call. Run 'visit' only from files other than 'main.tease'.",
+    ]);
   // Where the known values rule the running file out, and references name only other files, the call runs.
   assert.deepEqual(
     said(
@@ -410,14 +432,26 @@ test("a block runs later, so its end and its call of a file only warn and are ch
     const after = run(plan, pressed.snapshot);
     return [...pressed.events, ...after.events];
   };
-  // A Skip button of main.tease ends the file that main.tease called, while it waits.
+  // A Skip button of main.tease ends the file that main.tease called, while it waits (#1146). It can only be pressed
+  // then, so its end has a call to return to.
+  const scene = { "scene.tease": 'say "scene"\nwait 2 s\nsay "never"\nend' };
   const skip = compileProject(
-    project('let skip = showPermanentButton "Skip" { end }\ncall "scene.tease"\nsay "back"\nexit', {
-      "scene.tease": 'say "scene"\nwait 2 s\nsay "never"\nend',
-    }),
+    project('let skip = showPermanentButton "Skip" { end }\ncall "scene.tease"\nexit', scene),
   );
+  assert.deepEqual(skip.diagnostics, []);
+  const waiting = run(skip.plan!, createImmediatePacingRuntimeSnapshot(skip.plan!));
+  assert.deepEqual(outputs([...waiting.events, ...press(skip.plan!, waiting.snapshot)]), [
+    "scene",
+    "exit",
+  ]);
+  // Once the call has come back, a message's reading time is a wait in main.tease, where no call waits.
   assert.deepEqual(
-    skip.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    compileProject(
+      project(
+        'let skip = showPermanentButton "Skip" { end }\ncall "scene.tease"\nsay "back"\nexit',
+        scene,
+      ),
+    ).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
     [
       [
         "TSV071",
@@ -425,10 +459,95 @@ test("a block runs later, so its end and its call of a file only warn and are ch
       ],
     ],
   );
-  const waiting = run(skip.plan!, createImmediatePacingRuntimeSnapshot(skip.plan!));
-  assert.deepEqual(outputs([...waiting.events, ...press(skip.plan!, waiting.snapshot)]), [
+  // A timer may be due without a wait: one of no length, or one whose handle may set what remains to zero. A button may
+  // then be pressed while the timer's block waits, and its block runs where that one returns to. Each still warns.
+  for (const [main, line] of [
+    ['timer async 0 s { end }\ncall "scene.tease"\nexit', 1],
+    ['let t = timer async 1 s { end }\ncall "scene.tease"\nexit', 1],
+    [
+      'let skip = showPermanentButton "Skip" { end }\ntimer async 0 s { let hold = askBoolean "Hold?" }\ncall "scene.tease"\nexit',
+      1,
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileProject(project(main, scene)).diagnostics.map(
+        (diagnostic) => `${diagnostic.code} ${diagnostic.span.start.line + 1}`,
+      ),
+      [`TSV071 ${line}`],
+      main,
+    );
+  assert.deepEqual(
+    said(project('timer async 0 s { end }\ncall "scene.tease"\nexit', scene), {
+      warnings: ["TSV071"],
+      ending: "failed",
+    }),
+    ["failure TSR066"],
+  );
+  // Two copies of a button may stay where the file that shows it starts again while the first stays: one copy may be
+  // pressed while the other's block waits, and run where that one's end returns to.
+  for (const [main, others] of [
+    [
+      'call "scene.tease"\ncall "scene.tease"\nexit',
+      {
+        "scene.tease":
+          'let skip = showPermanentButton "Skip", persist: true { end }\nwait 2 s\nend',
+      },
+    ],
+    [
+      'let skip = showPermanentButton "Skip" {\n    say "skipping"\n    end\n}\ncall "g.tease"\nexit',
+      {
+        "g.tease": 'let again = askBoolean "Again?"\nif again { call "h.tease" }\nwait 1 s\nend',
+        "h.tease": 'call "main.tease"\nend',
+      },
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileProject(project(main, others))
+        .diagnostics.filter((diagnostic) => diagnostic.code === "TSV071")
+        .map((diagnostic) => diagnostic.path),
+      [Object.keys(others).length === 1 ? "scene.tease" : "main.tease"],
+      main,
+    );
+  // A block created in a block's frame, also by a global function the block calls, belongs to the entry of that block,
+  // which may stay after the called file ended. A block's goto to a label goes on in its own entry, here main.tease,
+  // where no call waits (#1402 review r1).
+  for (const [main, others, warned] of [
+    [
+      'global function spawn {\n    timer async 0 s { end }\n}\ntimer async 1 s {\n    spawn()\n    end\n}\ncall "scene.tease"\nexit',
+      { "scene.tease": "wait 5 s\nend" },
+      ["main.tease TSV071 2", "main.tease TSV071 6"],
+    ],
+    [
+      'let skip = showPermanentButton "Skip" { goto later }\ncall "scene.tease"\nexit\nlabel later\nsay "later"\nend',
+      scene,
+      ["main.tease TSV071 6"],
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileProject(project(main, others)).diagnostics.map(
+        (diagnostic) => `${diagnostic.path} ${diagnostic.code} ${diagnostic.span.start.line + 1}`,
+      ),
+      warned,
+      main,
+    );
+  // Where that entry was called, the call waits below it as long as the blocks stay, so they are safe (#1402 review r2).
+  for (const holder of [
+    'timer async 1 s {\n    timer async 1 s { end }\n}\ncall "scene.tease"\nend',
+    'timer async 1 s {\n    showPermanentButton "Continue" { goto later }\n}\ncall "scene.tease"\nend\nlabel later\nsay "later"\nend',
+  ])
+    assert.deepEqual(
+      compileProject(
+        project('call "holder.tease"\nexit', {
+          "holder.tease": holder,
+          "scene.tease": "wait 5 s\nend",
+        }),
+      ).diagnostics,
+      [],
+      holder,
+    );
+  // One with a length written out whose handle is not kept is due only once the called file waited.
+  assert.deepEqual(said(project('timer async 1 s { end }\ncall "scene.tease"\nexit', scene)), [
     "scene",
-    "back",
     "exit",
   ]);
   // A Replay button that a called file shows calls that file again once main.tease runs. Pressed while the file
@@ -661,6 +780,18 @@ test("an end with no call to return to is an error where code that runs without 
       "room",
       "exit",
     ]);
+  // Also a block that calls a file which ends the session (#1402 review r1).
+  assert.deepEqual(
+    said(
+      project('global byCall = true\ncall "room.tease"\nbyCall = false\ngoto "room.tease"', {
+        "room.tease":
+          'if not byCall {\n    timer async 1 s { call "stop.tease" }\n}\nwait 2 s\nend',
+        "stop.tease": 'say "stopped", instant\nexit',
+      }),
+      { warnings: ["TSV073", "TSV071"] },
+    ),
+    ["stopped", "exit"],
+  );
   // A block may run while the code waits and leave first: here a timer that the goto does not stop.
   assert.deepEqual(
     said(
@@ -672,6 +803,97 @@ test("an end with no call to return to is an error where code that runs without 
     ),
     ["room", "room", "exit"],
   );
+});
+
+test("an end warns or fails only where the ways into its file decide it, for every entry, target, and block (#1146)", () => {
+  // Generated over where the `end`s stand (the file's top level, a block of that file, or a block of the file that
+  // calls it), how that file is entered (`call`, `goto`, or both), how many `end`s it has, and how the transfers name
+  // it. Every project also holds what made the checks project-wide: a `script(...)` of any path, a load of an object,
+  // and a called file whose block may leave the code it interrupts.
+  const placements = [
+    ["top", "button"],
+    ["scene", "button"],
+    ["scene", "timer"],
+    ["scene", "media"],
+    ["caller", "button"],
+    ["caller", "timer"],
+  ] as const;
+  const entries = ["call", "goto", "both"] as const;
+  const targets = {
+    literal: { prelude: "", target: '"scene.tease"' },
+    computed: { prelude: 'let next = script("scene.tease")\n', target: "(next)" },
+    tagged: { prelude: "", target: 'tagged "scene"' },
+    load: { prelude: 'let next = load "next", default: script("scene.tease")\n', target: "(next)" },
+  } as const;
+  const ends = (count: 1 | 2, test: string) =>
+    count === 1 ? "{ end }" : `{\n    if ${test} { end }\n    say "bye"\n    end\n}`;
+  const block = (kind: "button" | "timer" | "media", body: string) =>
+    kind === "button"
+      ? `let skip = showPermanentButton "Skip" ${body}`
+      : kind === "timer"
+        ? `timer async 1 s ${body}`
+        : `playAudio async "music.mp3" {\n    at 1 s ${body.replaceAll("\n", "\n    ")}\n}`;
+  const noise = {
+    "lib.tease": "global function anywhere(path) { return script(path) }",
+    "far.tease": 'timer async 1 s { goto "other.tease" }\nwait 2 s\nend',
+    "other.tease": 'say "other"\nexit',
+  };
+  let members = 0;
+  for (const [where, blockKind] of placements)
+    for (const entry of entries)
+      for (const count of [1, 2] as const)
+        for (const [kind, { prelude, target }] of Object.entries(targets)) {
+          const caller =
+            where === "caller" ? `${block(blockKind, ends(count, "data.count > 0"))}\n` : "";
+          const transfer =
+            entry === "call"
+              ? `${caller}call ${target}\nexit`
+              : entry === "goto"
+                ? `let stop = askBoolean "Stop?"\nif stop { exit }\n${caller}goto ${target}`
+                : `let pick = askBoolean "Call it?"\n${caller}if pick { call ${target} } else { goto ${target} }\nexit`;
+          const again = count === 2 ? 'let again = askBoolean "Again?"\n' : "";
+          const scene =
+            (kind === "tagged" ? '---\ntags: "scene"\n---\n' : "") +
+            (where === "top"
+              ? count === 1
+                ? 'say "scene"\nend'
+                : `${again}if again { end }\nsay "bye"\nend`
+              : where === "scene"
+                ? `${again}${block(blockKind, ends(count, "again"))}\nwait 5 s\nexit`
+                : 'say "scene"\nwait 2 s\nend');
+          const main = `call "far.tease"\nlet data = load "data", default: { count: 0 }\n${prelude}${transfer}`;
+          // The oracle. Called, the file's ends have a call to return to. Entered by a goto with none, an end of its top
+          // level fails for certain when the goto names the file, also when a call reaches it too; a computed target
+          // hides that. A block of the file may run while no call waits, so its end warns. A block of the calling file
+          // runs only while the called file runs, or never, as a goto leaves the entry that created it.
+          const scenes = where === "top" ? count : 1;
+          const named = kind === "literal" || kind === "tagged";
+          const expected: string[] = [];
+          if (entry !== "call" && where !== "scene")
+            for (let index = 0; index < scenes; index += 1)
+              expected.push(`scene.tease ${named ? "TSV070" : "TSV071"}`);
+          // A loaded reference may name any file: the declarations of lib.tease, far.tease, which ends, or main.tease,
+          // which may then start again, as the checks see it, with a second copy of a block that outlives its file
+          // entry: one of main.tease, or a media block.
+          const copies = kind === "load" && entry !== "goto";
+          if (where === "scene" && (entry !== "call" || (copies && blockKind === "media")))
+            for (let index = 0; index < count; index += 1) expected.push("scene.tease TSV071");
+          if (where === "caller" && copies)
+            for (let index = 0; index < count; index += 1) expected.push("main.tease TSV071");
+          if (kind === "load" && entry !== "call")
+            expected.push("main.tease TSV074", "far.tease TSV071");
+          if (copies) expected.push("main.tease TSV073");
+          const label = `${where} ${where === "top" ? "" : blockKind}, ${entry}, ${count} end(s), ${kind}`;
+          assert.deepEqual(
+            compileProject(project(main, { ...noise, "scene.tease": scene }))
+              .diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`)
+              .sort(),
+            expected.sort(),
+            label,
+          );
+          members += 1;
+        }
+  assert.equal(members, 144);
 });
 
 test("a computed target may start only the files that a reference of the project may name", () => {
@@ -731,13 +953,21 @@ test("a computed target may start only the files that a reference of the project
       'call "a.tease"\nlet next = load "next", default: script("rooms/hall.tease")\ngoto (next)',
       {},
     ],
-    ['call "a.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)', { globals: ["host"] }],
+    ['call "a.tease"\ngoto (host)', { globals: ["host"] }],
   ] as const)
     assert.deepEqual(
       warnings(project(main, called), options),
       ["a.tease TSV071", "b.tease TSV071", "c.tease TSV071"],
       main,
     );
+  // Only where the target reads one (#1146): a host value that it does not read leaves it to the file it names.
+  assert.deepEqual(
+    warnings(
+      project('call "a.tease"\nlet next = script("rooms/hall.tease")\ngoto (next)', called),
+      { globals: ["host"] },
+    ),
+    ["b.tease TSV065", "c.tease TSV065"],
+  );
 });
 
 test("an object that a load gives may hold a reference to any file", () => {
@@ -762,7 +992,8 @@ test("an object that a load gives may hold a reference to any file", () => {
     ),
     ["scene", "failure TSR066"],
   );
-  // Also an object in a list, and an object whose type lists other properties.
+  // Only where the target reads it (#1146): such a load elsewhere, also of an object in a list or of an object whose
+  // type lists other properties, leaves a target that reads none to the files it names.
   for (const load of [
     'let items: object[] = load "items", default: []',
     'let data = load "data", default: { count: 0 }',
@@ -774,7 +1005,7 @@ test("an object that a load gives may hold a reference to any file", () => {
           "done.tease": "exit",
         }),
       ).diagnostics.map((diagnostic) => `${diagnostic.path} ${diagnostic.code}`),
-      ["scene.tease TSV071"],
+      [],
       load,
     );
 });
