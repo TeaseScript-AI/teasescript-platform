@@ -17,9 +17,10 @@ import { ts } from "ts-morph";
  * are its own with a body (a method, an accessor, the constructor) and the functions of its files (its entry, and the
  * parts in the folder beside it) whose first parameter's type is the class's name proved: a method whose body moved to
  * a function (#1071). Names compare without `#`, so a member and the function it moved to are one name. A name is
- * proved in a file only as its one top-level declaration there, or as an unrenamed named import from the source file
- * that declares it so; nothing further is followed (a re-export, a second import, a renamed, default or namespace
- * import, a type parameter of the class's name prove nothing). A guarded class is the one class of its name in the
+ * proved in a file only as its one top-level declaration there, or as an unrenamed named import of the declaration its
+ * source file exports under that name, resolved by declaration there (`export class N`, or `export { M as N }` of its
+ * own top-level `M`); nothing further is followed (a re-export from a module, an export of an import, a second import,
+ * a renamed, default or namespace import, a type parameter of the class's name prove nothing). A guarded class is the one class of its name in the
  * sources, a nested one included; a second is reported. A public method that only forwards to the function of its name
  * (`return f(this, …)` or `f(this, …);`, its own parameters in order, none with an initializer, no decorator or other
  * modifier), the callee proved as that function of its class, is that function: its call names no reference. Neither
@@ -104,13 +105,16 @@ export function questionSourceDiagnostics(sources, readers) {
       ? name.text
       : null;
 
-  // Identity, in closed forms (TABLE r4.182; Codex r1–r3 B1 on #1371): the files by path, each with its top-level
-  // declarations and its import bindings. A name is proved in a file as its one binding there: a top-level
-  // declaration, or an unrenamed named import whose own module declares it so at top level; nothing is followed further.
+  // Identity, in closed forms (TABLE r4.182; Codex r1–r4 B1 on #1371): the files by path, each with its top-level
+  // declarations, import bindings and export lists. A name is proved in a file as its one binding there: a top-level
+  // declaration, or an unrenamed named import of the declaration its own module exports under that name; nothing is
+  // followed further.
   const files = new Map();
   for (const { file, sourceFile } of parsed) {
     const top = new Map();
     const imports = new Map();
+    // (each exported name of an export list: the local name it exports, or null for a re-export from a module)
+    const exports = new Map();
     const declare = (map, name, node) => map.set(name, [...(map.get(name) ?? []), node]);
     sourceFile.forEachChild((node) => {
       if (
@@ -136,9 +140,21 @@ export function questionSourceDiagnostics(sources, readers) {
         else if (clause.namedBindings !== undefined)
           for (const specifier of clause.namedBindings.elements)
             declare(imports, specifier.name.text, specifier);
+      } else if (ts.isExportDeclaration(node) && node.exportClause !== undefined) {
+        if (ts.isNamespaceExport(node.exportClause))
+          declare(exports, node.exportClause.name.text, null);
+        else
+          for (const element of node.exportClause.elements)
+            declare(
+              exports,
+              element.name.text,
+              node.moduleSpecifier === undefined
+                ? (element.propertyName ?? element.name).text
+                : null,
+            );
       }
     });
-    files.set(file, { top, imports });
+    files.set(file, { top, imports, exports });
   }
   const moduleFile = (from, specifier) => {
     if (!specifier.startsWith(".")) return null;
@@ -153,11 +169,36 @@ export function questionSourceDiagnostics(sources, readers) {
     const own = entry?.top.get(name) ?? [];
     return own.length === 1 && !entry.imports.has(name) ? own[0] : null;
   };
-  // what an import specifier proves: unrenamed, the one top-level declaration of its name in the file its module names
+  // whether a top-level declaration carries its own named export (`export class N`, not as default)
+  const exportsItself = (declaration) => {
+    const modifiers =
+      ts.getModifiers(
+        ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration,
+      ) ?? [];
+    return (
+      modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) &&
+      !modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)
+    );
+  };
+  // the declaration a module exports under a name, resolved by declaration in that module (Codex r4 B1): its one
+  // export of the name, either a top-level declaration exported itself or an export list's local name, the one
+  // top-level declaration of that local name; a re-export from a module, or a local name that is an import, proves
+  // nothing
+  const exportedIn = (file, name) => {
+    const entry = files.get(file);
+    const candidates = [
+      ...(entry.top.get(name) ?? []).filter(exportsItself).map(() => topIn(file, name)),
+      ...(entry.exports.get(name) ?? []).map((local) =>
+        local === null ? null : topIn(file, local),
+      ),
+    ];
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  // what an import specifier proves: unrenamed, the declaration the file its module names exports under its name
   const importedBy = (file, specifier) => {
     if (!ts.isImportSpecifier(specifier) || specifier.propertyName !== undefined) return null;
     const target = moduleFile(file, specifier.parent.parent.parent.moduleSpecifier.text);
-    return target === null ? null : topIn(target, specifier.name.text);
+    return target === null ? null : exportedIn(target, specifier.name.text);
   };
   // what a name is proved as in a file: its one binding there, a top-level declaration or an import, else null
   const provedIn = (file, name) => {
@@ -241,23 +282,31 @@ export function questionSourceDiagnostics(sources, readers) {
     };
   };
 
-  // every member with a body, by its owner and bare name
+  // every member with a body, by its owner and bare name: the guarded classes' own, wherever the class stands (as
+  // attribution reads them, Codex r4 N1), and the functions they own
   const members = new Map();
   const addMember = (owner, name, declaration, file, sourceFile) => {
     if (owner === null || name === null) return;
     const key = `${owner} ${bare(name)}`;
     members.set(key, [...(members.get(key) ?? []), { declaration, file, sourceFile }]);
   };
+  for (const name of GUARDED) {
+    const cls = guardedClass(name);
+    if (cls === undefined) continue;
+    const { file, sourceFile } = classes.get(name)[0];
+    for (const member of cls.members)
+      if (ts.isFunctionLike(member) && member.body !== undefined)
+        addMember(
+          name,
+          ts.isConstructorDeclaration(member) ? "constructor" : nameText(member.name),
+          member,
+          file,
+          sourceFile,
+        );
+  }
   for (const { file, sourceFile } of parsed)
     sourceFile.forEachChild((node) => {
-      if (ts.isClassDeclaration(node))
-        for (const member of node.members) {
-          const body = ts.isFunctionLike(member) ? member.body : undefined;
-          if (body === undefined) continue;
-          const name = ts.isConstructorDeclaration(member) ? "constructor" : nameText(member.name);
-          addMember(classOwner(node), name, member, file, sourceFile);
-        }
-      else if (ts.isFunctionDeclaration(node) && node.body !== undefined)
+      if (ts.isFunctionDeclaration(node) && node.body !== undefined)
         addMember(functionOwner(node), nameText(node.name), node, file, sourceFile);
     });
   // a public method that only forwards to the function of its name, its callee bound to that function of its class

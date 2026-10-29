@@ -314,6 +314,43 @@ const IDENTITY = [
       "FINISHING_READERS lists Consumers.typedRead",
     ],
   ],
+  // (Codex r4 B1: an import proves the declaration its module exports itself so, not a local one exported otherwise)
+  [
+    "the class local, another class exported under its name",
+    SPLIT_CLASS.replace("export class Consumers {", "class Consumers {").concat(
+      '\nexport { Consumers as RealConsumers };\nexport { Other as Consumers } from "../review-other.js";\n',
+    ),
+    SPLIT_PART,
+    {},
+    [`${PART}: finishingRead is named only in`, "FINISHING_READERS lists Consumers.typedRead"],
+  ],
+  [
+    "the class local, its name re-exported from another module",
+    SPLIT_CLASS.replace("export class Consumers {", "class Consumers {").concat(
+      '\nexport { Consumers } from "../review-other.js";\n',
+    ),
+    SPLIT_PART,
+    {},
+    [`${PART}: finishingRead is named only in`, "FINISHING_READERS lists Consumers.typedRead"],
+  ],
+  [
+    "the class local, exported by an export list",
+    SPLIT_CLASS.replace("export class Consumers {", "class Consumers {").concat(
+      "\nexport { Consumers };\n",
+    ),
+    SPLIT_PART,
+    {},
+    [],
+  ],
+  [
+    "the class local, an imported class exported under its name",
+    SPLIT_CLASS.replace("export class Consumers {", "class Consumers {").concat(
+      '\nimport type { Other } from "../review-other.js";\nexport { Consumers as RealConsumers };\nexport type { Other as Consumers };\n',
+    ),
+    SPLIT_PART,
+    {},
+    [`${PART}: finishingRead is named only in`, "FINISHING_READERS lists Consumers.typedRead"],
+  ],
   [
     "a reader whose `Consumers` a module re-exports",
     SPLIT_CLASS,
@@ -354,6 +391,20 @@ const IDENTITY = [
       "src/type-inference/core/reader.ts: finishingRead is named only in",
       "FINISHING_READERS lists Consumers.typedRead",
     ],
+  ],
+  // (a site of the one class, wherever it stands, is counted, Codex r4 N1)
+  [
+    "a site declared twice in the one class, a class expression",
+    SPLIT_CLASS.replace(
+      "export class Consumers {",
+      "export const Consumers = class Consumers {",
+    ).replace(
+      "  public valueItems(",
+      "  #typedRead(value: number): number {\n    return finishingRead(this, value);\n  }\n  public typedRead(value: number): number {\n    return finishingRead(this, value);\n  }\n  public valueItems(",
+    ),
+    SPLIT_PART,
+    {},
+    ["Consumers.typedRead has 2 declarations"],
   ],
   // (a property is no site, Codex r3 N1)
   [
