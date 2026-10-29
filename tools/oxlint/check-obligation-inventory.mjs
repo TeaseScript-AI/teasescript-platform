@@ -80,7 +80,10 @@ export const READS = new Map([
     "the written type a copy decides a key by: a decision's answer, recorded by `decide`",
   ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
-  ["expand", "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read"],
+  [
+    "expand",
+    "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read",
+  ],
   ["groups", "the places and paths `decide` decides: its inputs"],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
   [
