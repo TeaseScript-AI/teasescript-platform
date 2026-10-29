@@ -60,6 +60,7 @@ import type {
   Identity,
   IdentityWork,
   IndexNode,
+  KeptClass,
   LevelGroup,
   LiteralIndex,
   LiteralObject,
@@ -80,7 +81,6 @@ import type {
   StoredClass,
   SubLayer,
   SubSource,
-  ValueClass,
   ValueEntry,
 } from "./contract/model.js";
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
@@ -128,6 +128,7 @@ export type {
   ContractFacts,
   GatherSite,
   IndexNode,
+  KeptClass,
   LiteralIndex,
   PrefixStores,
   StoppedKey,
@@ -227,14 +228,20 @@ export class Contract {
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
   readonly readClasses = [new Map<PlaceId, ReadClass>(), new Map<PlaceId, ReadClass>()];
   /** Per read of a stable binding, its class across bindings on the contract side and the value side (`boundClass`). */
-  readonly boundClasses = [new Map<PlaceId, ValueClass>(), new Map<PlaceId, ValueClass>()];
+  readonly boundClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
   /** Per read, the one definition of its stable binding on the contract side and the value side (`stableDefinition`). */
   readonly stableDefinitions = [
     new Map<PlaceId, Definition | null>(),
     new Map<PlaceId, Definition | null>(),
   ];
-  /** Per value, its class and its roles' writers on the contract side and on the value side (`classOf`). */
-  readonly valueClasses = [new Map<PlaceId, ValueClass>(), new Map<PlaceId, ValueClass>()];
+  /** Per value, its class on the contract side and on the value side (`classOf`); per class text, its short name. */
+  readonly valueClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
+  readonly classIds = new Map<string, string>();
+  /** Per value, its roles' writers on the contract side and on the value side (`classWriters`), where asked. */
+  readonly classWritersBySide = [
+    new Map<PlaceId, readonly (Writer | null)[] | null>(),
+    new Map<PlaceId, readonly (Writer | null)[] | null>(),
+  ];
   /** Per literal's list of computed values at a path, its groups on the contract side and the value side (`othersAt`). */
   readonly otherGroups = [
     new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
@@ -470,7 +477,7 @@ export class Contract {
     return aliasWriter(this, value, exact);
   }
 
-  public boundClass(value: PlaceId, exact: boolean): ValueClass {
+  public boundClass(value: PlaceId, exact: boolean): KeptClass {
     return boundClass(this, value, exact);
   }
 

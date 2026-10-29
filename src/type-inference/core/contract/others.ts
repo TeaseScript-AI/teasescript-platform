@@ -4,7 +4,7 @@ import type { Contract } from "../contract.js";
 import { firstWriter, type Writer } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { sharing } from "../sharing.js";
-import { boundOf, choiceMembers, NO_CLASS } from "./classes.js";
+import { boundOf, choiceMembers, NO_CLASS, NO_KEPT_CLASS, writersOf } from "./classes.js";
 import { declaredBefore } from "./key-contract.js";
 import { markFree } from "./levels.js";
 import type {
@@ -178,7 +178,7 @@ export function readGroupsAt(
       markFree(contract, entry.holder) &&
       boundOf(contract, read, value) !== null
         ? contract.boundClass(read, value)
-        : NO_CLASS;
+        : NO_KEPT_CLASS;
     // (where a read stands decides its contract read's certainty on the value side, its cell's writer on the contract)
     const node = value ? (program.occNode.get(read) ?? null) : null;
     const stands =
@@ -196,7 +196,7 @@ export function readGroupsAt(
           );
     members.push({
       cls: key,
-      writers: key === null ? null : bound.writers,
+      writers: key === null ? null : writersOf(contract, bound, value),
       mixed: key === null ? 0 : bound.mixed,
     });
   }

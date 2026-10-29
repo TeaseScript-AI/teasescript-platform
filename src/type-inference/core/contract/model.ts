@@ -270,6 +270,19 @@ export interface ValueClass {
   readonly mixed: number;
 }
 
+/**
+ * A value's class as `classOf` keeps it: its roles' writers (`classWriters`) are its own, then its parts' in turn, read
+ * from them where asked, so a chain of k operations keeps k parts, not k lists of up to k writers (#1357).
+ */
+export interface KeptClass {
+  readonly cls: string | null;
+  readonly mixed: number;
+  /** Its own role's writer: a read's alias's, a literal's own place's; none for any other value. */
+  readonly own: readonly (Writer | null)[];
+  /** The values its other roles rest on, in their order (`classParts`). */
+  readonly parts: readonly PlaceId[];
+}
+
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
 export interface StoredChoiceKeys {
   readonly value: boolean;

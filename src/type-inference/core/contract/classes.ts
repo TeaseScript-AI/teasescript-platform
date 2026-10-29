@@ -9,13 +9,15 @@ import { choiceLabels } from "./choices.js";
 import { guardsBelow } from "./identity.js";
 import { markFree } from "./levels.js";
 import { emptyIds, heldBelow, kindsPart, namesPart, pathOrder } from "./literal-index.js";
-import type { ReadClass, ValueClass } from "./model.js";
+import type { KeptClass, ReadClass, ValueClass } from "./model.js";
 import { operatorOf } from "./operations.js";
 import { defaultOf, writtenOf } from "./terms.js";
 
 // The classes the value side keys a value by (S6c): a read's, a bound binding's, a literal's, from their parts.
 
 export const NO_CLASS: ValueClass = { cls: null, writers: null, mixed: 0 };
+
+export const NO_KEPT_CLASS: KeptClass = { cls: null, mixed: 0, own: [], parts: [] };
 
 /** Whether an operation is a choice (`askChoice`, V30 §19). */
 function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): boolean {
@@ -231,7 +233,7 @@ export function boundOf(contract: Contract, value: PlaceId, exact: boolean): Def
  * `classOf`, where reads of one binding stay one class unmixed, their leaves one: a site that shares a bound class
  * reads each member's leaves (`readGroupsAt`, `leafRoles`) or decides by kinds alone. Once per read and side.
  */
-export function boundClass(contract: Contract, value: PlaceId, exact: boolean): ValueClass {
+export function boundClass(contract: Contract, value: PlaceId, exact: boolean): KeptClass {
   const d = boundOf(contract, value, exact);
   if (d === null) return classed(contract, value, exact);
   const memo = contract.boundClasses[exact ? 1 : 0]!;
@@ -239,7 +241,7 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
   if (known !== undefined) return known;
   const { definitions, guards, values } = contract.pass;
   const source = classed(contract, d.value!, exact);
-  const bound: ValueClass =
+  const bound: KeptClass =
     source.cls === null
       ? classed(contract, value, exact)
       : {
@@ -251,10 +253,11 @@ export function boundClass(contract: Contract, value: PlaceId, exact: boolean): 
             guards.guardedBelowRead(value).join(" "),
             exact ? values.narrowingMark(value) : "",
           ),
-          writers: source.writers === null ? null : [definitions.writerOf(d), ...source.writers],
           mixed: source.mixed,
+          own: [definitions.writerOf(d)],
+          parts: [d.value!],
         };
-  contract.keep(1 + (bound.writers?.length ?? 0));
+  contract.keep(3);
   memo.set(value, bound);
   return bound;
 }
@@ -291,7 +294,35 @@ export function classWriters(
   value: PlaceId,
   exact: boolean,
 ): readonly (Writer | null)[] | null {
-  return classed(contract, value, exact).writers;
+  const memo = contract.classWritersBySide[exact ? 1 : 0]!;
+  if (!memo.has(value))
+    memo.set(value, writersOf(contract, classed(contract, value, exact), exact));
+  return memo.get(value)!;
+}
+
+/**
+ * A kept class's roles' writers (`classWriters`, `boundClass`): its own, then each part's in turn, read from the parts'
+ * kept classes on an explicit walk; `null` for no class.
+ */
+export function writersOf(
+  contract: Contract,
+  kept: KeptClass,
+  exact: boolean,
+): readonly (Writer | null)[] | null {
+  if (kept.cls === null) return null;
+  const memo = contract.valueClasses[exact ? 1 : 0]!;
+  const out = [...kept.own];
+  // (pre-order: a part's own writer, then its parts', the first part's first)
+  const pending = [...kept.parts].reverse();
+  while (pending.length > 0) {
+    contract.pass.program.work.charge("invSteps");
+    const part = memo.get(pending.pop()!)!;
+    for (const writer of part.own) out.push(writer);
+    for (let index = part.parts.length - 1; index >= 0; index -= 1)
+      pending.push(part.parts[index]!);
+  }
+  contract.keep(1 + out.length);
+  return out;
 }
 
 /**
@@ -304,7 +335,7 @@ export function classMixed(contract: Contract, value: PlaceId, exact: boolean): 
 }
 
 /** A value's class (`classOf`), its parts' first, on an explicit stack. */
-function classed(contract: Contract, value: PlaceId, exact: boolean): ValueClass {
+function classed(contract: Contract, value: PlaceId, exact: boolean): KeptClass {
   const memo = contract.valueClasses[exact ? 1 : 0]!;
   const known = memo.get(value);
   if (known !== undefined) return known;
@@ -323,17 +354,30 @@ function classed(contract: Contract, value: PlaceId, exact: boolean): ValueClass
       parts.set(top, found);
       for (const part of found)
         if (!memo.has(part)) {
-          if (parts.has(part)) memo.set(part, NO_CLASS);
+          if (parts.has(part)) memo.set(part, NO_KEPT_CLASS);
           else stack.push(part);
         }
       continue;
     }
     stack.pop();
     const joined = joinedClass(contract, top, exact, own);
-    contract.keep(1 + (joined.writers?.length ?? 0));
-    memo.set(top, joined);
+    contract.keep(1 + joined.own.length + joined.parts.length);
+    memo.set(top, joined.cls === null ? joined : { ...joined, cls: classId(contract, joined.cls) });
   }
   return memo.get(value)!;
+}
+
+/**
+ * A class's text by its short name (`classOf`), interned: a class names its parts by their names, never by their
+ * expansions, so the k operations of a run keep k texts of their own size, not of the run's (#1357).
+ */
+function classId(contract: Contract, text: string): string {
+  let id = contract.classIds.get(text);
+  if (id === undefined) {
+    contract.keep(1);
+    contract.classIds.set(text, (id = `C${contract.classIds.size}`));
+  }
+  return id;
 }
 
 /** The values a class rests on (`classOf`), in its roles' order: a projection's owner, a literal's cells, operands. */
@@ -371,20 +415,21 @@ export function classParts(contract: Contract, value: PlaceId, exact: boolean): 
   return out;
 }
 
-/** A value's class (`classOf`), its parts' known. */
+/** A value's class (`classOf`), its parts' known, before its text is interned (`classId`). */
 function joinedClass(
   contract: Contract,
   value: PlaceId,
   exact: boolean,
   parts: readonly PlaceId[],
-): ValueClass {
+): KeptClass {
   const { program, definitions, values, lists, handlers, guards } = contract.pass;
   const read = contract.readClass(value, exact);
-  if (read !== null) return { cls: read, writers: [contract.aliasWriter(value, exact)], mixed: 0 };
+  if (read !== null)
+    return { cls: read, mixed: 0, own: [contract.aliasWriter(value, exact)], parts };
   // #1196: a host global's read answers external data at every path, on either side, named by its own leaf (C9) and
   // marked where its guards mark it, so a value over it (a projection, a literal, a parse) is classed by its other parts
   if (program.occurrenceOf.has(value)) {
-    if (!definitions.ingress.has(value)) return NO_CLASS;
+    if (!definitions.ingress.has(value)) return NO_KEPT_CLASS;
     const cls = keptParts(
       contract.work,
       "host",
@@ -392,19 +437,16 @@ function joinedClass(
       guards.guardedRead(value) ? "g" : "",
       guards.guardedBelowRead(value).join(" "),
     );
-    return { cls, writers: [], mixed: MIXED_LEAF };
+    return { cls, mixed: MIXED_LEAF, own: [], parts };
   }
   const memo = contract.valueClasses[exact ? 1 : 0]!;
   const of = parts.map((part) => memo.get(part)!);
-  if (of.some(({ cls }) => cls === null)) return NO_CLASS;
+  if (of.some(({ cls }) => cls === null)) return NO_KEPT_CLASS;
   const classes = of.map(({ cls }) => cls!);
-  let writers: (Writer | null)[] | null = [];
-  for (const part of of)
-    if (part.writers === null) writers = null;
-    else if (writers !== null) for (const writer of part.writers) writers.push(writer);
   const projection = program.projOf.get(value);
   if (projection !== undefined) {
-    if (projection.step === "iteration" || (exact && projection.node === null)) return NO_CLASS;
+    if (projection.step === "iteration" || (exact && projection.node === null))
+      return NO_KEPT_CLASS;
     const cls = keptParts(
       contract.work,
       "p",
@@ -413,40 +455,42 @@ function joinedClass(
       guards.guardedRead(value) ? "g" : "",
       guards.guardedBelowRead(value).join(" "),
     );
-    return { cls, writers, mixed: of[0]!.mixed };
+    return { cls, mixed: of[0]!.mixed, own: [], parts };
   }
+  // (a call's result stands for its callee's stores, no role of its own)
   if (program.callOutOf.has(value)) {
     const call = program.opOf.get(value);
-    if (call?.kind !== "call") return NO_CLASS;
+    if (call?.kind !== "call") return NO_KEPT_CLASS;
     const key = keyOf(program.functionOf(call.fn).result, []);
     const node = program.callOutOf.get(value) ?? null;
-    if (!exact) return { cls: keptParts(contract.work, "call", key), writers: [], mixed: 0 };
-    if (node === null) return NO_CLASS;
+    if (!exact) return { cls: keptParts(contract.work, "call", key), mixed: 0, own: [], parts: [] };
+    if (node === null) return NO_KEPT_CLASS;
     const signature = lists.readSignature(key, node);
     const after = handlers.afterSomeCreation(node) ? "h" : "";
-    return { cls: keptParts(contract.work, "call", key, signature, after), writers: [], mixed: 0 };
+    const cls = keptParts(contract.work, "call", key, signature, after);
+    return { cls, mixed: 0, own: [], parts: [] };
   }
-  if (program.hasOf.has(value)) return literalClass(contract, value, of);
+  if (program.hasOf.has(value)) return literalClass(contract, value, parts, of);
   const c = program.opOf.get(value);
   if (c === undefined || c.kind === "call" || (exact && program.exprAt(c.site) === null))
-    return NO_CLASS;
+    return NO_KEPT_CLASS;
   let mixed = of.reduce((all, part) => all | part.mixed, 0);
   if (definitions.ingress.has(value)) mixed |= MIXED_LEAF;
   if (c.kind === "operation" && operatorOf(c) !== null) mixed |= MIXED_FAN;
   let cls: string;
   if (c.kind === "get" || c.kind === "fallback") {
     const proof = exact ? values.proofOf(value) : "";
-    if (proof === null) return NO_CLASS;
+    if (proof === null) return NO_KEPT_CLASS;
     cls = keptParts(contract.work, c.kind, ...classes, proof);
   } else if (c.kind === "load") {
-    if (c.receiver !== null || contract.landsIn(value, []) !== null) return NO_CLASS;
+    if (c.receiver !== null || contract.landsIn(value, []) !== null) return NO_KEPT_CLASS;
     const below = c.fallback === null ? "" : guardsBelow(contract, c.fallback);
     cls = keptParts(contract.work, c.key === null ? "load?" : "load", ...classes, below);
   } else if (c.kind === "operation" && isChoice(c)) {
     const options: string[] = [];
     let next = 0;
     for (const member of choiceMembers(contract, c)) {
-      if (member === null) return NO_CLASS;
+      if (member === null) return NO_KEPT_CLASS;
       options.push(
         member.place === undefined
           ? contract.kept(`l${member.label}`)
@@ -459,14 +503,14 @@ function joinedClass(
     const { family, name } = c.contract;
     const fallback = defaultOf(c);
     const parses = family === "conversion" && conversionCategory(name)?.kind === "parses";
-    if (parses && contract.landsIn(value, []) !== null) return NO_CLASS;
+    if (parses && contract.landsIn(value, []) !== null) return NO_KEPT_CLASS;
     const below = parses && fallback !== undefined ? guardsBelow(contract, fallback) : "";
     const named = "named" in c ? c.named.map((argument) => argument.name).join(",") : "";
     const own = c.receiver === null ? "" : "r";
     // (its operands' classes joined first: an operation may take more of them than one call does)
     cls = keptParts(contract.work, family, name, own, named, contract.joined(classes, "|"), below);
-  } else return NO_CLASS;
-  return { cls, writers, mixed };
+  } else return NO_KEPT_CLASS;
+  return { cls, mixed, own: [], parts };
 }
 
 /**
@@ -497,15 +541,17 @@ export function choiceMembers(
 }
 
 /** A literal's class (`classOf`), its cells' known, in `classParts`' order. */
-function literalClass(contract: Contract, literal: PlaceId, of: readonly ValueClass[]): ValueClass {
+function literalClass(
+  contract: Contract,
+  literal: PlaceId,
+  cells: readonly PlaceId[],
+  of: readonly KeptClass[],
+): KeptClass {
   const { program } = contract.pass;
   const index = contract.literalIndex(literal);
   const site = program.places[literal]?.site;
-  if (heldBelow(contract, index.root).reference || !site) return NO_CLASS;
+  if (heldBelow(contract, index.root).reference || !site) return NO_KEPT_CLASS;
   const parts: string[] = [program.cellOwner.get(literal)?.kind === "cell" ? "c" : ""];
-  let writers: (Writer | null)[] | null = [
-    { kind: "literal", file: site.file, start: site.start, end: site.end },
-  ];
   let mixed = 0;
   let next = 0;
   for (const [at, node] of pathOrder(contract, index)) {
@@ -520,15 +566,18 @@ function literalClass(contract: Contract, literal: PlaceId, of: readonly ValueCl
         const read = "holder" in entry ? entry : null;
         // (a read of host data is mixed by its class: its leaves, unioned here, are what literals of it differ by)
         if (part.cls === null || (read !== null && !markFree(contract, read.holder)))
-          return NO_CLASS;
+          return NO_KEPT_CLASS;
         parts.push(contract.kept(`${mark}${read?.guarded === true ? "g" : ""}${part.cls}`));
         mixed |= part.mixed;
-        if (part.writers === null) writers = null;
-        else if (writers !== null) for (const writer of part.writers) writers.push(writer);
       }
     for (const object of node.objects?.list ?? []) parts.push(namesPart(contract, object.names));
   }
   // (its objects' names give its absences: a class never counts the absences asked of it so far, #1392)
   parts.push(`empty:${emptyIds(contract, index)}`);
-  return { cls: contract.internStructure(`lit(${contract.joined(parts, ";")})`), writers, mixed };
+  return {
+    cls: contract.internStructure(`lit(${contract.joined(parts, ";")})`),
+    mixed,
+    own: [{ kind: "literal", file: site.file, start: site.start, end: site.end }],
+    parts: cells,
+  };
 }
