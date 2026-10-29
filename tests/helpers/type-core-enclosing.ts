@@ -514,6 +514,7 @@ type Spine =
   | "null before the copy"
   | "inferred copy"
   | "copy of a copy"
+  | "copy of a copy in a property"
   | "indexed copy";
 
 const CERTIFIED_SPINES: ReadonlySet<Spine> = new Set([
@@ -601,6 +602,11 @@ function spineOf(
         into: { binding: "t", path: [] },
         form,
       };
+    case "copy of a copy in a property":
+      return {
+        ...box("slot: mid", "box.slot", ["slot"]),
+        lines: [written, "let mid = seed", "let box = {slot: mid}"],
+      };
     case "indexed copy":
       return {
         lines: [`let seeds: ${formText(collection("list", form))} = [${seed}]`, "let t = seeds[0]"],
@@ -617,14 +623,14 @@ const LITERAL_DECIDED: ReadonlySet<Spine> = new Set(["earlier literal", "inferre
 /**
  * #1440's family (TABLE r4.200): a store at a destination whose decision stops, at or below it, the destination's
  * complete type proved by the source apart from that decision (`certified`: its written type, or a read of a written
- * binding its declaration's start value holds through object literal properties, the root's own, one, two levels
- * down, a property named `element` or `entry`, one beside another, one of many, one of many stores) or not (an earlier
- * literal, `null` before the copy, a copy of an inferred or a copied place, a selected element). Each over the forms
- * (every leaf bare and in a list, integers two and four deep, a nullable element and list, an open `list`), stored as
- * a host value whole and inside literals and as a literal per value (`few` in the anchors), and the wrong-choice
- * controls: a later `integer[]` after a first `number[]`, a later open `list` after a first `integer[]`. The index
- * stores the candidate route leaves out (S10) are judged at the analysis: a written list's element, a root copy's, a
- * list literal's and one an earlier index store decides.
+ * binding its declaration's start value holds through object literal properties, the root's own, one, two levels down,
+ * a property named `element` or `entry`, one beside another, one of many, one of many stores) or not (an earlier
+ * literal, `null` before the copy, a copy of an inferred or a copied place, at the root or in a property, a selected
+ * element). Each over the forms (every leaf bare and in a list, integers two and four deep, a nullable element and
+ * list, an open `list`), stored as a host value whole and inside literals and as a literal per value (`few` in the
+ * anchors), and the wrong-choice controls: a later `integer[]` after a first `number[]`, a later open `list` after a
+ * first `integer[]`. The index stores the candidate route leaves out (S10) are judged at the analysis: a written list's
+ * element, a root copy's, a list literal's and one an earlier index store decides.
  */
 export function certificateFamily(few = false): EnclosingCase[] {
   const cases: EnclosingCase[] = [];
@@ -647,6 +653,7 @@ export function certificateFamily(few = false): EnclosingCase[] {
         "null before the copy",
         "inferred copy",
         "copy of a copy",
+        "copy of a copy in a property",
         "indexed copy",
       ] as const),
     ]) {

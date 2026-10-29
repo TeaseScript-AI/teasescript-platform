@@ -164,7 +164,7 @@ test("a store at a stopped decision is checked against the type the source prove
         if (verdict.relation === "at") judged.add(verdict.judged);
       }
   }
-  assert.equal(reached.size, 20);
+  assert.equal(reached.size, 21);
   // (a binding's root, written or a copy's, is decided without a demand: its index stores reach the stop at the store)
   const rooted = new Set(["root copy", "written", "copy of a copy", "indexed copy"]);
   for (const c of anchors) {
