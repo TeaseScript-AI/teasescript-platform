@@ -1,6 +1,10 @@
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
-import { type Answers, coreResult } from "../../src/type-inference/core/answers.js";
+import {
+  type AdmittedType,
+  type Answers,
+  coreResult,
+} from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
 import { propertyStep } from "../../src/type-inference/core/program.js";
@@ -84,7 +88,7 @@ export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[
       item.fan ?? "",
       item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join("+"),
     ].join("|");
-  const admitted = (place: PlaceId, path: readonly string[]): unknown => {
+  const admitted = (place: PlaceId, path: readonly string[]): AdmittedType => {
     const type = answers.place(place, path).admitted;
     return type.by === "decided"
       ? {
