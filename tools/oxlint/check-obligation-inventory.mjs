@@ -80,6 +80,7 @@ export const READS = new Map([
     "the written type a copy decides a key by: a decision's answer, recorded by `decide`",
   ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
+  ["expand", "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read"],
   ["groups", "the places and paths `decide` decides: its inputs"],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
   [
@@ -91,6 +92,7 @@ export const READS = new Map([
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],
   ["ownIngress", "whether an item is the store's own ingress: a test"],
   ["ownReadItem", "whether external data is an operation's own read's alone: a test"],
+  ["partOf", "a part's own recipe of the store walk (`expand`), made once: syntax, read"],
   ["reject", "records a rejected store (A6): the C1 error that rejects it is the consumer's own"],
   ["retained", "the decision admission retained before a stop: a decision's answer"],
   ["siteAt", "the site of an error for a store's contribution: a site, read"],
