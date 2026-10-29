@@ -619,6 +619,65 @@ test("what each cursor conversion walks and makes grows no faster than what it c
   assert.deepEqual(problems, []);
 });
 
+/**
+ * Each conversion at its boundary inputs (a place's own key, one step, three; a span from the start, the middle and the
+ * end, an empty one), cold and made once before, each on a pass of its own (Astra r1 B1: a cold empty span read the arena
+ * and charged nothing). The parts (`keyIdParent`, `keyIdStep`, …) are constant reads, no conversion.
+ */
+test("every cursor conversion that reads the arena charges its inspection, at every boundary, cold and warm, a span walk at least the nodes it must inspect", () => {
+  const source = request("let x = 1\nexit\n");
+  const problems: string[] = [];
+  for (const depth of [0, 1, 3]) {
+    const steps = Array.from({ length: depth }, (_, k) => (k === 1 ? "values" : `s${k}`));
+    const spans = [0, depth >> 1, depth];
+    for (const warm of [false, true]) {
+      const calls: (readonly [string, (contract: Contract, fresh: Contract) => void, number])[] = [
+        ["keyIdBelow", (contract) => keyIdBelow(contract, keyIdOf(contract, 5, steps), "n"), 1],
+        ["keyIdOf", (contract) => keyIdOf(contract, 6, steps), depth === 0 ? 0 : 1],
+        ["keyIdOfText", (contract) => keyIdOfText(contract, keyOf(6, steps)), 1],
+        ["keyOfId", (contract) => keyOfId(contract, keyIdOf(contract, 5, steps)), 1],
+        ...spans.map(
+          (from) =>
+            [
+              `stepsOfId @${from}`,
+              (contract: Contract) => stepsOfId(contract, keyIdOf(contract, 5, steps), from),
+              warm && from === 0 ? 1 : depth - from + 1,
+            ] as const,
+        ),
+        ...spans.map(
+          (from) =>
+            [
+              `memberStepIn @${from}`,
+              (contract: Contract) => memberStepIn(contract, keyIdOf(contract, 5, steps), from),
+              1,
+            ] as const,
+        ),
+        ["exportKeyIds", (contract) => exportKeyIds(contract, [keyIdOf(contract, 5, steps)]), 1],
+        [
+          "importKeyIds",
+          (contract, fresh) =>
+            importKeyIds(fresh, exportKeyIds(contract, [keyIdOf(contract, 5, steps)])),
+          1,
+        ],
+      ];
+      for (const [name, call, least] of calls) {
+        const [contract, fresh] = [narrowingPass(source).contract, narrowingPass(source).contract];
+        // (the cursor and the packet made outside the measured call)
+        keyIdOf(contract, 5, steps);
+        if (warm) call(contract, narrowingPass(source).contract);
+        const measured = name === "importKeyIds" ? fresh : contract;
+        const { work } = probeMade(measured, () => call(contract, fresh));
+        const inspected = work.counters.invSteps ?? 0;
+        if (work.visits > 0 && inspected < Math.max(1, least))
+          problems.push(
+            `${name}, ${depth} steps, ${warm ? "warm" : "cold"}: ${work.visits} reads, ${inspected} charged`,
+          );
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
 /** The constructions of a text in the cursor modules, by form. */
 const MADE_FORMS: readonly (readonly [string, RegExp])[] = [
   ["template", /`[^`]*\$\{/g],

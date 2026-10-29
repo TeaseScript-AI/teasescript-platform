@@ -142,7 +142,8 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): readonly str
     convert(contract, 1, 0, 0);
     return from === 0 ? whole : keptArray(contract.work, whole.slice(from));
   }
-  convert(contract, depth - from, 0, from === 0 ? 1 : 0);
+  // (the span's nodes and the one it ends at, an empty span's endpoint too)
+  convert(contract, depth - from + 1, 0, from === 0 ? 1 : 0);
   const steps: string[] = [];
   for (let at = path; contract.pathDepths[at]! > from; at = contract.pathParents[at]!)
     steps.push(contract.pathLastSteps[at]!);
