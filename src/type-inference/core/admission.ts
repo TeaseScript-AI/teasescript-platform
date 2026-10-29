@@ -295,6 +295,8 @@ export class Admission {
    * class alone (`snapshots`).
    */
   readonly snapshotLists = new WeakMap<readonly Stop[], (readonly Stop[] | undefined)[]>();
+  /** Per such snapshot, its stops a list join carries (`earliestDecider`), each asked whatever came before it. */
+  readonly joinedLists = new WeakMap<readonly Stop[], readonly Stop[]>();
   readonly resolved = new Map<IngressNode, boolean>();
   readonly f18 = new Map<
     PlaceId,

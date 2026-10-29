@@ -1,8 +1,8 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, pathText } from "../budget.js";
-import { typeTags } from "../contract.js";
-import { keyOf, sortCost, type Definition, type Key } from "../definitions.js";
+import { typeTags, writtenOf } from "../contract.js";
+import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -135,17 +135,22 @@ export function* scanAt(
     const copied = first?.term ?? null;
     if (copied !== null) {
       // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
-      // 1.3, A8)
+      // 1.3, A8; a list join's, a written operand's or an element's, make the joined list optional, ADR 0021 1.3, V30
+      // §16, Codex r9's B1b on #1310)
       const copiedTags = typeTags(copied);
+      const joinedNull =
+        first!.joinedNull === true ||
+        (first!.joined === true && evaluate(d, at).some((item) => item.tag === "null"));
       return {
         tags: copiedTags.filter((tag) => tag !== "null"),
         nullable:
           sawNull ||
           copiedTags.includes("null") ||
+          joinedNull ||
           (admission.pass.program.hasOf.has(d.value!) &&
             evaluate(d, at).some((item) => item.tag === "null")),
         byWritten: true,
-        permitsNull: copiedTags.includes("null"),
+        permitsNull: copiedTags.includes("null") || joinedNull,
         copied,
         decider: d,
         site: first?.site ?? d.site,
@@ -178,9 +183,11 @@ export function* scanAt(
  * of definite kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
  * neither, while a literal's other elements still may (A8: `[1, hostValue]`'s elements are whole numbers, Sol's
  * records for the owner's F1); a later copy never comes before an earlier definite element. The place's decision and
- * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
- * nothing on the path decides. Where no written copy on the path asks a type, the value's carriers' transfers answer
- * (`transferredDecider`), each carrier once; else its stops are scanned here.
+ * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. A list join's
+ * written operands count by `joinedDomain`, each whatever came before or after it: an open one leaves the path open,
+ * and one holding `null` makes the copy's type optional (`joinedNull`). `null` where nothing on the path decides.
+ * Where no written copy on the path asks a type, the value's carriers' transfers answer (`transferredDecider`), each
+ * carrier once; else its stops are scanned here.
  */
 export function* earliestDecider(
   admission: Admission,
@@ -193,8 +200,11 @@ export function* earliestDecider(
   readonly site: SourceSite | null;
   /** A deciding value's kinds there (`term` `null`). */
   readonly tags?: readonly ItemTag[];
+  /** Whether a list join carries the deciding copy (`term`), and whether one of its written operands holds `null`. */
+  readonly joined?: boolean;
+  readonly joinedNull?: boolean;
 } | null> {
-  const { program, values } = admission.pass;
+  const { program, values, contract } = admission.pass;
   const transferred = transferredDecider(admission, expand(admission, value, node, []), at);
   if (transferred !== undefined)
     return transferred === null
@@ -209,33 +219,67 @@ export function* earliestDecider(
   // the earliest copy whose written type reaches the rest of the path
   let copy: { readonly key: EvaluationKey; readonly term: TypeTerm; readonly stop: Stop } | null =
     null;
-  // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`)
+  // (a list join's written operands by `joinedDomain`, each whatever came before or after it: an open one leaves the
+  // value open there, one holding `null` makes it optional, Codex r9's B1 on #1310)
+  let joinedNull = false;
+  const self = admission;
+  function* termOf(stop: Stop, length: number): Inheriting<TypeTerm | null> {
+    // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
+    // read out of has it alone, and each operation surely gives it)
+    if (stop.deep && length === at.length && !(stop.single && selects(self, stop, true)))
+      return null;
+    const rest = joinSteps(stop.strip, at.slice(length));
+    const term =
+      stop.from === null
+        ? permittedAt(stop.term!, rest)
+        : yield* inheritedInto(self, stop.from, rest, into);
+    // (a written copy an operation carries decides only where the operation selects it: an operand it never gives is
+    // no copy of the place, while a selected copy keeps its whole written type, A4)
+    return term !== null && (stop.via === null || selects(self, stop)) ? term : null;
+  }
+  // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
+  // values)
   const depths = stopDepths(admission, stops);
-  for (let length = 0; length <= Math.min(at.length, depths.written); length += 1) {
+  const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
+  for (let length = 0; length <= deepest; length += 1) {
     program.work.charge("checks");
-    const written = snapshots(admission, stops.written.get(pathText(at.slice(0, length))), false);
+    const prefix = pathText(at.slice(0, length));
+    const written = snapshots(admission, stops.written.get(prefix), false);
+    // (and a call a join carries by its written result, as `joinElements` reads it: F20)
+    const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
+    for (const stop of [...joinedOf(admission, written), ...calls]) {
+      program.work.charge("checks");
+      let term: TypeTerm | null;
+      if (stop.term !== null || stop.from !== null) term = yield* termOf(stop, length);
+      else {
+        const key = contract.resultKey(stop.value);
+        const result = key === null ? null : writtenOf(program.place(keyPlace(key)).kind);
+        term =
+          result === null || !selects(admission, stop)
+            ? null
+            : permittedAt(result, joinSteps(keyPath(key!), stop.strip, at.slice(length)));
+      }
+      if (term === null) continue;
+      const domain = joinedDomain(typeTags(term));
+      if (domain === "open") return { term, site: siteOf(stop) };
+      joinedNull ||= typeTags(term).includes("null");
+      if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
+        copy = { key: stop.key, term, stop };
+    }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
-      // (at the path's end itself a carried copy decides only where it surely is the value there: each literal it was
-      // read out of has it alone, and each operation surely gives it)
-      if (stop.deep && length === at.length && !(stop.single && selects(admission, stop, true)))
-        continue;
-      const rest = joinSteps(stop.strip, at.slice(length));
-      const term =
-        stop.from === null
-          ? permittedAt(stop.term!, rest)
-          : yield* inheritedInto(admission, stop.from, rest, into);
-      // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
-      // is no copy of the place, while a selected copy keeps its whole written type, A4; in a list join by
-      // `joinedDomain`: open whichever operand came first, nothing where it holds only `null`)
-      if (term !== null && (stop.via === null || selects(admission, stop))) {
-        const domain = stop.via?.joined === true ? joinedDomain(typeTags(term)) : "kinds";
-        if (domain === "open") return { term, site: siteOf(stop) };
-        if (domain === "kinds") copy = { key: stop.key, term, stop };
-      }
+      if (stop.via?.joined === true) continue;
+      const term = yield* termOf(stop, length);
+      if (term !== null) copy = { key: stop.key, term, stop };
     }
   }
+  const copied = () => ({
+    term: copy!.term,
+    site: siteOf(copy!.stop),
+    joined: copy!.stop.via?.joined === true,
+    joinedNull,
+  });
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
   // (a value a projection selects stands for its parts below the path, never at it; of the values of one class the
@@ -271,7 +315,7 @@ export function* earliestDecider(
     const next = best < 0 ? null : lists[best]!.list[positions[best]!]!;
     // (a copy of a place that inherits a written type comes before that copy's own value, A4)
     if (next === null || (copy !== null && compareKeys(copy.key, next.key) <= 0))
-      return copy === null ? null : { term: copy.term, site: siteOf(copy.stop) };
+      return copy === null ? null : copied();
     program.work.charge("checks", lists.length);
     positions[best]! += 1;
     // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
@@ -353,6 +397,17 @@ function snapshots(
     admission.pass.program.work.charge("checks", list.length);
   }
   memo[slot] = out;
+  return out;
+}
+
+/** Of a snapshot of a walk's stops, those a list join carries (`ViaChain.joined`), once per snapshot. */
+function joinedOf(admission: Admission, list: readonly Stop[] | undefined): readonly Stop[] {
+  if (list === undefined) return [];
+  let out = admission.joinedLists.get(list);
+  if (out === undefined) {
+    admission.pass.program.work.charge("checks", list.length);
+    admission.joinedLists.set(list, (out = list.filter((stop) => stop.via?.joined === true)));
+  }
   return out;
 }
 

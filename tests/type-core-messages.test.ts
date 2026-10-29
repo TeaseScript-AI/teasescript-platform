@@ -657,14 +657,16 @@ test("a list join answers the same inline as kept in a variable (#1272)", () => 
 });
 
 /**
- * #1272 (Astra r2's B1 on #1310, ADR 0021 1.3, V30 §13 and §16, `joinedDomain`): an operand's element domain decides a
- * join as it decides a variable holding the join. An open one (`list`, `list[]` with or without an element yet) leaves
- * the join open there and below, whichever operand came first, so nothing beside it errs; one that holds only `null`
- * (`null[]`, `null[][]`) decides nothing, so a join errs only where its other operands conflict among themselves; a
- * strict written destination stays strict. Each domain (beside a concrete, a nullable written, a written union and a
- * two-level one) as either operand of a join, alone or nested in either operand of another, beside whole numbers, text
- * or `null`; a binding, a copy, a call with a written result, and a call returning it inferred (inline only, #1393);
- * inline as kept, both orders, the sharing on and off.
+ * #1272 (Astra r2's B1 and Codex r9's B1 on #1310, ADR 0021 1.3, V30 §13 and §16, `joinedDomain`): an operand's element
+ * domain decides a join as it decides a variable holding the join. An open one (`list`, `list[]` with or without an
+ * element yet) leaves the join open there and below, whatever decided before or after it, a written type included, so
+ * nothing beside it errs and a variable holding the join takes any element; one that holds only `null` (`null[]`,
+ * `null[][]`) decides nothing and makes the joined list optional, so a join errs only where its other operands
+ * conflict, and a variable holding it takes `null`; a strict written destination stays strict. Each domain (beside a
+ * concrete, a nullable written, a written union and a two-level one) as either operand of a join, alone or nested in
+ * either operand of another, beside whole numbers, text, `null` or a written `integer[]` before or after it; a binding,
+ * a copy, a call with a written result, and a call returning it inferred (inline only, #1393); inline as kept, both
+ * orders, the sharing on and off.
  */
 test("an open or null-only operand proves no conflict in a list join, inline as kept (#1272)", () => {
   const domains = [
@@ -678,7 +680,8 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
     ["two-open-empty", 2, "let d: list[] = []"],
     ["two-null", 2, "let d: null[][] = [[null]]"],
   ] as const;
-  const neighbours = { I: "2", S: '"tail"', N: "null" } as const;
+  // (whole numbers, text, `null`, and `w`, a written `integer[]`: before, after or beside the domain's operand)
+  const neighbours = { I: "2", S: '"tail"', N: "null", W: "w" } as const;
   const positions = [
     ["left", "X", (j: string) => j],
     ["right", "X", (j: string) => j],
@@ -687,9 +690,17 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
     ["left of right", "XY", (j: string) => `Y + ${j}`],
     ["right of right", "XY", (j: string) => `Y + ${j}`],
   ] as const;
+  const pairs = [
+    ["I", "S"],
+    ["N", "S"],
+    ["S", "I"],
+    ["W", "S"],
+    ["S", "W"],
+  ] as const;
   let checked = 0;
   for (const [domain, depth, declaration] of domains) {
-    const wrap = (element: string) => "[".repeat(depth) + element + "]".repeat(depth);
+    const wrap = (element: string) =>
+      element === "w" ? element : "[".repeat(depth) + element + "]".repeat(depth);
     const forms: (readonly [string, string, string])[] = [["binding", "", "d"]];
     if (domain === "open" || domain === "null")
       forms.push(
@@ -702,24 +713,25 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
       );
     if (domain === "open" || domain === "union")
       forms.push(["inferred call", "function make {\n  return d\n}\n", "make()"]);
+    const open = domain.includes("open");
+    const nulls = domain === "null" || domain === "two-null";
     for (const [form, extra, d] of forms)
       for (const [position, uses, outer] of positions)
         for (const [x, y] of uses === "X"
-          ? (["I", "S", "N"] as const).map((x) => [x, "I"] as const)
-          : ([
-              ["I", "S"],
-              ["N", "S"],
-              ["S", "I"],
-            ] as const)) {
-          // (the other forms, and the controls beside them, at one neighbour each: whole numbers, text beside them)
-          const subject = domain.includes("open") || domain === "null" || domain === "two-null";
+          ? (["I", "S", "N", "W"] as const).map((x) => [x, "I"] as const)
+          : pairs) {
+          // (the other forms, the controls and a join in a right operand at fewer neighbours: `w` before or after it,
+          // whole numbers, text beside them)
           if (form !== "binding" && !(position === "left" || position === "right of left"))
             continue;
-          if (!subject && x !== (uses === "X" ? "S" : "I")) continue;
+          if ((form !== "binding" || position.endsWith("of right")) && x === "N") continue;
+          if (depth === 2 && position.endsWith("of right") && x !== "W") continue;
+          if (form !== "binding" && x === "S") continue;
+          if (!open && !nulls && !(uses === "X" ? x === "S" : x === "I" || x === "W")) continue;
           const [X, Y] = [wrap(neighbours[x]), wrap(neighbours[y])];
           const inner = position.startsWith("left") ? `${d} + ${X}` : `${X} + ${d}`;
           const result = (join: string) => outer(join).replace("Y", Y);
-          const start = `${declaration}\n${extra}`;
+          const start = `let w: integer${"[]".repeat(depth)} = ${wrap("7")}\n${declaration}\n${extra}`;
           const nested = uses === "XY";
           const name = `${domain} ${form} ${position}: ${result(`(${inner})`)}`;
           const inline = joinAnswers(
@@ -735,17 +747,30 @@ test("an open or null-only operand proves no conflict in a list join, inline as 
               ).toSorted(),
               name,
             );
-          // (open: nothing errs; only `null`: an error only where whole numbers meet text beside it)
-          if (domain.includes("open")) assert.deepEqual(inline, [], name);
-          if (domain === "null" || domain === "two-null")
+          // (open: nothing errs, and a variable holding the join takes text; only `null`: an error only where whole
+          // numbers meet text beside it, and a variable holding the join takes `null`)
+          if (open) assert.deepEqual(inline, [], name);
+          if (nulls) {
+            const kinds = new Set(
+              [x, y].flatMap((kind) => (kind === "N" ? [] : [kind === "W" ? "I" : kind])),
+            );
             assert.equal(
               inline.some((answer) => answer.startsWith("TSV044")),
-              nested && new Set([x, y].filter((kind) => kind !== "N")).size === 2,
+              nested && kinds.size === 2,
               name,
+            );
+          }
+          if (!nested && form !== "inferred call" && (open || nulls) && (x === "I" || x === "W"))
+            assert.deepEqual(
+              joinAnswers(
+                `${start}let held = ${inner}\nheld.add(${"[".repeat(depth - 1)}${open ? '"tail"' : "null"}${"]".repeat(depth - 1)})\nsay held.length\nexit\n`,
+              ),
+              [],
+              `${name}, then a store`,
             );
         }
   }
-  assert.ok(checked > 120, `${checked} joins`);
+  assert.ok(checked > 150, `${checked} joins`);
   // a strict written destination stays strict: a `+=` or a store back into a written `null[]` errs
   for (const store of ["d += [1]", "d = d + [1]"])
     assert.deepEqual(
