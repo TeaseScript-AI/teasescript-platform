@@ -45,6 +45,11 @@ Data, indexed here and not imported: run each from its own folder on the desktop
 - `desktop:~/work/evidence/corpus/stops/owner-s8/`: the owner's independent S8 reviews. It holds the 75-source
   domain matrix, the every-allowance sweeps, the cache lifecycle probe and the JSON and load matrix. It is untrusted
   input, never imported into a build.
+- `desktop:~/work/evidence/corpus/stops/owner-s8/compiler-enclosing-evidence/`: the owner's reviewer's second bundle
+  (164 files, PR #1434). It holds the 75-source domain generator, a 134-text complete-requirement matrix with an
+  implementation-independent predicate, the relocation-only replay driver (`replay.mjs`, `check-run.py`),
+  `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
+  the stops area: it runs before a builder's first review there.
 
 ## Inventory
 
