@@ -1,5 +1,8 @@
 import { compileSourceWithBackend } from "../../src/compiler.js";
-import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+import {
+  createSerializableObject,
+  type SerializableRuntimeValue,
+} from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
@@ -285,10 +288,7 @@ export interface HeldCase {
 
 /** A host object as the runtime takes it, its `n` the value. */
 function hostObject(value: SerializableRuntimeValue): SerializableRuntimeValue {
-  return {
-    kind: "object",
-    properties: [{ name: "n", value }],
-  } as unknown as SerializableRuntimeValue;
+  return createSerializableObject([{ name: "n", value }]);
 }
 
 /**
