@@ -15,7 +15,14 @@ import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations
 import { elapsedDurationUnit, UNIT_OPERANDS } from "../../duration.js";
 import { expressionParts, statementExpressions } from "../../expression-children.js";
 import { listDraw, listMethod } from "../../list-methods.js";
-import { FOR_SOURCE_RULE, REPEAT_COUNT_RULE, ROUND_COUNT_FIX } from "../../loop-rules.js";
+import {
+  FOR_SOURCE_RULE,
+  REPEAT_COUNT_RULE,
+  repeatCountFix,
+  repeatCountMessage,
+  ROUND_COUNT_FIX,
+} from "../../loop-rules.js";
+import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
 import { LIST_INDEX_RULE, logicalOperandRule } from "../../operand-rules.js";
 import { misspelledPropertyHint, nameList } from "../../object-properties.js";
 import { PERSON_FIELDS, PLAYER } from "../../speaker-terms.js";
@@ -38,13 +45,14 @@ import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
   BudgetStop,
+  CheckedDiagnostic,
   ContextDetail,
   CoreCode,
-  CoreDiagnostic,
   DiagnosticRule,
   NotChecked,
   Presence,
   SiteExpectation,
+  StaticRule,
   StoreRoot,
   WorkPlace,
   WrittenTypeError,
@@ -82,7 +90,7 @@ export interface MessageSource {
    * `codeAt`'s "no other diagnostic" fact.
    */
   readonly alone: (
-    self: CoreDiagnostic,
+    self: CheckedDiagnostic,
     held: SourceSite,
     rulesOut: ((kind: ItemTag) => boolean) | null,
   ) => boolean;
@@ -281,7 +289,7 @@ function acts(node: Expression): boolean {
  */
 export function messageSource(
   sources: readonly string[],
-  diagnostics: readonly CoreDiagnostic[],
+  diagnostics: readonly CheckedDiagnostic[],
 ): MessageSource {
   const starts = new Map<number, number[]>();
   const programs = new Map<number, Program>();
@@ -336,7 +344,7 @@ export function messageSource(
   // unchecked code, where the checks it moved to the runtime stand unreported (Astra r3); a stop's own warning, which
   // claims no region, nothing. Each file's in start order, with the furthest end among those before each.
   type Covered = {
-    readonly diagnostic: CoreDiagnostic;
+    readonly diagnostic: CheckedDiagnostic;
     readonly start: number;
     readonly end: number;
   };
@@ -447,6 +455,7 @@ export function messageSource(
             other.site.end === self.site.end &&
             other.kind !== "written-type" &&
             other.kind !== "budget" &&
+            other.kind !== "static" &&
             other.kinds.length > 0 &&
             other.kinds.every(rulesOut));
         if (!ruledOut) return false;
@@ -475,8 +484,34 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
   }
 }
 
+/**
+ * The code of a check that owes the runtime nothing (`StaticRule`): the code its kept sentence has under the current
+ * checker and the runtime.
+ */
+export function staticCode(rule: StaticRule): CoreCode {
+  switch (rule.rule) {
+    case "repeat-count":
+      return "TSV011";
+    case "conversion":
+      return "TSV043";
+  }
+}
+
+/** The message of a check that owes the runtime nothing: its rule's sentence, the one the runtime's check gives. */
+function staticMessage(rule: StaticRule): string {
+  switch (rule.rule) {
+    case "repeat-count":
+      return repeatCountMessage("this", describeShownValue(rule.value), repeatCountFix(rule.value));
+    case "conversion": {
+      const conversion = CONVERSIONS[rule.conversion];
+      if (conversion.takes !== "value") throw new Error(`${rule.conversion} converts no value.`);
+      return cannotConvert(rule.conversion, conversion, rule.text);
+    }
+  }
+}
+
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
-export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): string {
+export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource): string {
   // (whether the values it names and its store's declaration reads are there when the script runs, unproved where it
   // does not say; whether its program runs at all; and whether an author's text a form holds lies clear of the other
   // diagnostics: TABLE r4.162, r4.168)
@@ -489,6 +524,7 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
       alone,
     });
   if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
+  if (diagnostic.kind === "static") return staticMessage(diagnostic.rule);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;
   const diagnosed: Diagnosed = {

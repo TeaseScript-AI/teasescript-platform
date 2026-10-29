@@ -29,12 +29,14 @@ import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/
 import { CARRIER_KINDS, type CarrierKind } from "../src/type-inference/core/carriers.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import {
+  checkedResult,
   coreCheckResult,
   nodeOf,
   reportedDiagnostics,
   SliceIndex,
 } from "../src/type-inference/core/consumer.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
@@ -2688,6 +2690,76 @@ test("the candidate's side outputs follow the flow graph's literal facts and the
   assert.deepEqual(sited(large), ["error TSV011@32"]);
   assert.match(large.diagnostics[0]!.message, /Use a smaller count\.$/);
   assert.deepEqual(sited(candidate('say "[color=bad]x[/color]"\nexit\n')), ["error TSC008@4"]);
+});
+
+/**
+ * The lead's decision 3 on #1072 (Astra's G3): a check that owes the runtime nothing is a diagnostic of its own kind,
+ * published in the core's record with its site alone and no obligation, its sentence composed from its rule, and read
+ * alike by the record and the compiler: the record's every diagnostic is the compiler's, at the same span and severity,
+ * with the sentence `coreMessage` gives it; a warning with a runtime check beside it keeps its obligation and its check.
+ */
+test("a check that owes the runtime nothing is published in the record and by the compiler alike, with no obligation (decision 3 on #1072)", () => {
+  const source =
+    'let n = toInteger("-2", default: 0)\nlet m: integer = hostValue\nrepeat n {}\nsay toNumber("1,5", default: m)\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null);
+  const { record, compiled } = inBothOrdersAs(
+    () => ({
+      record: coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]),
+      compiled: candidate(source),
+    }),
+    ({ record, compiled }) => ({
+      record,
+      compiled: compiled.diagnostics.map((d) => [
+        d.severity,
+        d.code,
+        d.span.start.offset,
+        d.span.end.offset,
+      ]),
+    }),
+  )[1];
+  const at = (text: string, from = 0): readonly [number, number] => {
+    const start = source.indexOf(text, from);
+    return [start, start + text.length];
+  };
+  assert.equal(record.outcome, "compile-error");
+  assert.deepEqual(
+    record.diagnostics.map((d) => [d.class, d.kind, d.site.offset, d.site.end, "obligation" in d]),
+    [
+      // (the analysis's own diagnostics first, then the checks that owe nothing, each in its source order)
+      ["warning-runtime-check", "written-target", ...at("hostValue"), true],
+      ["compile-error", "static", ...at("n", source.indexOf("repeat")), false],
+      ["compile-error", "static", ...at('"1,5"'), false],
+    ],
+  );
+  // the warning's check and the boundary's, nothing for the checks that owe nothing
+  assert.deepEqual(
+    record.runtimeChecks.map((check) => [
+      check.kind,
+      check.target,
+      check.boundary === true,
+      check.site.offset,
+    ]),
+    [
+      ["copy-type", "m", false, source.indexOf("hostValue")],
+      ["copy-type", "m", true, source.indexOf("hostValue")],
+    ],
+  );
+  // the compiler reports each at the record's span and severity
+  assert.deepEqual(compiled, [
+    ["warning", "TSV041", ...at("hostValue")],
+    ["error", "TSV011", ...at("n", source.indexOf("repeat"))],
+    ["error", "TSV043", ...at('"1,5"')],
+  ]);
+  const messages = candidate(source).diagnostics.map((d) => d.message);
+  assert.equal(
+    messages[1],
+    "A repeat count must be a whole number (integer) of at least 0, but this is -2. Check that it is at least 0 first.",
+  );
+  assert.match(
+    messages[2]!,
+    /^toNumber\(\.\.\.\) cannot convert text \(string\) "1,5" to a number/,
+  );
 });
 
 /**

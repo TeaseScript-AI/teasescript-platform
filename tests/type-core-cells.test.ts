@@ -50,8 +50,9 @@ test("the core gives the expected record for every record of the cells it comple
     "stage 3b's cells (S10)": 653,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 shapes (r4.81 (1))": 32,
+    "a known-value error the record lacks (decision 3 on #1072)": 1,
   });
-  assert.equal(asserted.length, 1_318);
+  assert.equal(asserted.length, 1_317);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -2531,8 +2532,10 @@ test("admission decides from the start value, keeps written copies, rejects ever
     [
       "a default's other kind beside the receiving union",
       'function alternate(flag: boolean): string | integer {\n  if flag { return "allowed" }\n  return 2\n}\nlet r: boolean | string = toBoolean("bad", default: alternate(true))\nexit',
+      // (known text the conversion cannot convert is its own error, `default:` or not: V30 §13, #1105)
       (at) => [
-        "warning-runtime-check",
+        "compile-error",
+        `static compile-error @${at('"bad"')}`,
         `written-target warning-runtime-check @${at("toBoolean")}`,
         `written-target warning-runtime-check @${at("alternate(true)")}`,
         `copy-type r [boolean, string] @${at("toBoolean")}`,

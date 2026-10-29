@@ -1,3 +1,4 @@
+import type { ConversionName } from "../../language-facts.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
 import {
@@ -18,7 +19,9 @@ import { propertyName } from "./program.js";
  * composes them (D1–D3). The record the set compares holds no sentence.
  */
 
-export type DiagnosticClass = "compile-error" | "warning-runtime-check" | "not-checked-budget";
+/** An error, a warning with a runtime check, a warning the runtime owes nothing for (`StaticDiagnostic`), a stop's mark. */
+export type DiagnosticClass =
+  "compile-error" | "warning-runtime-check" | "warning" | "not-checked-budget";
 
 /**
  * The consumer a diagnostic belongs to (§10.5): a store into a typed place (and a fallback, C10), a member or element
@@ -30,10 +33,10 @@ export type ObligationKind =
   "copy-type" | "null-check" | "operand" | "integer-check" | "empty-check";
 
 /**
- * The worst diagnostic's class, or `valid` without one; a stop of the analysis is a warning (the owner's D4, TABLE
- * r4.54), never an outcome of its own.
+ * The worst diagnostic's class, or `valid` without one: an error, then a warning with a runtime check, then a warning
+ * without one; a stop of the analysis is a warning (the owner's D4, TABLE r4.54), never an outcome of its own.
  */
-export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check";
+export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check" | "warning";
 
 /**
  * A kind an obligation requires: a value kind; `unknown`, any value the runtime can represent (a boundary check with no
@@ -260,6 +263,26 @@ export interface WrittenTypeError {
   readonly suggestion: string | null;
 }
 
+/**
+ * A check that owes the runtime nothing (the lead's decision 3 on #1072): a known value outside the domain its use
+ * takes, which the runtime would reject as it does, or a fact no run can change. An error, or a warning with no runtime
+ * check (`warning`); never an obligation. Its rule names what its sentence says (`messages.ts`).
+ */
+export interface StaticDiagnostic {
+  readonly class: "compile-error" | "warning";
+  readonly kind: "static";
+  readonly code: CoreCode;
+  readonly site: SourceSite;
+  readonly rule: StaticRule;
+}
+
+/** The rule of a `StaticDiagnostic`, with the facts its sentence names. */
+export type StaticRule =
+  /** A `repeat` count whose known value is no whole number of at least 0 (`loop-rules.ts`). */
+  | { readonly rule: "repeat-count"; readonly value: number }
+  /** A conversion of known text it cannot convert (V30 §13, #1105), `default:` or not. */
+  | { readonly rule: "conversion"; readonly conversion: ConversionName; readonly text: string };
+
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
 export type CoreCode =
   "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
@@ -343,20 +366,21 @@ export type CoreDiagnostic =
       readonly besides: readonly ItemTag[];
     };
 
+/** A diagnostic the core reports: the analysis's own (`CoreDiagnostic`), or a check's that owes the runtime nothing. */
+export type CheckedDiagnostic = CoreDiagnostic | StaticDiagnostic;
+
 export interface CoreResult {
   readonly outcome: CoreOutcome;
-  readonly diagnostics: readonly CoreDiagnostic[];
+  readonly diagnostics: readonly CheckedDiagnostic[];
   /** The checks that no diagnostic owns: the boundary checks (C9). */
   readonly checks: readonly Obligation[];
 }
 
 /** The outcome of these diagnostics: the worst class among them, or `valid`. */
-export function outcomeOf(diagnostics: readonly CoreDiagnostic[]): CoreOutcome {
-  if (diagnostics.some((diagnostic) => diagnostic.class === "compile-error"))
-    return "compile-error";
-  return diagnostics.some((diagnostic) => diagnostic.class === "warning-runtime-check")
-    ? "warning-runtime-check"
-    : "valid";
+export function outcomeOf(diagnostics: readonly CheckedDiagnostic[]): CoreOutcome {
+  for (const outcome of ["compile-error", "warning-runtime-check", "warning"] as const)
+    if (diagnostics.some((diagnostic) => diagnostic.class === outcome)) return outcome;
+  return "valid";
 }
 
 /**
@@ -450,7 +474,7 @@ export interface RecordObligation {
 
 export interface RecordDiagnostic {
   readonly class: DiagnosticClass;
-  readonly kind: CoreDiagnostic["kind"];
+  readonly kind: CheckedDiagnostic["kind"];
   readonly site: RecordSite;
   /** A warning's explanation: writer tokens `kind@file:offset`, `more` always `false` (F28). */
   readonly provenance?: {
@@ -521,7 +545,8 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
     ...(check.boundary ? { boundary: true, reason: "external-data" } : {}),
   });
   const diagnostics = result.diagnostics.map((diagnostic): RecordDiagnostic =>
-    diagnostic.kind === "budget"
+    // (a stop's warning and marks, and a check that owes the runtime nothing, by their site alone)
+    diagnostic.kind === "budget" || diagnostic.kind === "static"
       ? { class: diagnostic.class, kind: diagnostic.kind, site: site(diagnostic.site) }
       : diagnostic.class === "compile-error"
         ? {

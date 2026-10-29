@@ -48,6 +48,11 @@ export function heldBack(record: FixtureRecord): string | null {
   // S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)): a named default's call-site answer and a copy of a written type as
   // `fromJson`'s and `load`'s receiving context, which the core's rule takes with S9b
   if (record.name.startsWith("cp9-cells/s9b/f18-held/")) return "S9b's F18 shapes (r4.81 (1))";
+  // Known text the conversion cannot convert is a compile error of its own (V30 §13, #1105), which the core's record
+  // holds since the checks that owe the runtime nothing publish there (the lead's decision 3 on #1072): the record lacks
+  // it until its maintainer adds it.
+  if (record.name === "cp9-cells/r46/m3/astra-m3/conversion/default")
+    return "a known-value error the record lacks (decision 3 on #1072)";
   // the adapters' cell (C13 and the storage rules' adapter rows): the kept checks the consumer calls run with S9b
   if (record.owner === "adapter") return "the adapters' records (S9b)";
   // stage 3b (§13: N1–N10): narrowing definitions, N3's required checks for a possible null and for written unions, and

@@ -2,7 +2,8 @@ import { CORE_RUNTIME_BUILTINS } from "../../src/compiler.js";
 import { parse } from "../../src/parser.js";
 import { compareProjectPaths } from "../../src/project-paths.js";
 import { validateProjectSemantics } from "../../src/semantic.js";
-import { analyseCore, coreResult } from "../../src/type-inference/core/answers.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { checkedResult } from "../../src/type-inference/core/consumer.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
 import { compactRecord, type CompactRecord } from "./type-core-records.js";
@@ -53,12 +54,15 @@ export function coreRequest(
   };
 }
 
-/** The core's record of a request in the compact shape the expectation set is compared in. */
+/**
+ * The core's record of a request in the compact shape the expectation set is compared in, with the checks that owe the
+ * runtime nothing (`checkedResult`), as the compiler reports them.
+ */
 export function compactAnalysis(request: CoreAnalysisRequest): CompactRecord {
   const answers = analyseCore(request);
   return compactRecord(
     coreRecord(
-      coreResult(answers),
+      checkedResult(answers, request),
       request.files.map((file) => file.path),
     ),
   );
