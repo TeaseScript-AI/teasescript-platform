@@ -2226,3 +2226,58 @@ test("a pass in which a decision stops is not settled: the next starts with its 
     [["n"], []],
   );
 });
+
+/**
+ * Codex c-r8 B1 on #1165: a narrowed read of a key whose decision stopped reads it as every read does, through the one
+ * key read (`Values.#keyRead`), so the test narrows its contract, the reason `budget` carried: `is not integer` leaves
+ * `unknown`, and `is integer` gives the integer the test proves, as for host data. Both orders.
+ */
+test("a narrowed read of a stopped decision's key narrows its contract, the reason budget carried (S3 §5)", () => {
+  for (const [form, expected] of [
+    ["is integer", ["integer/16"]],
+    ["is not integer", ["unknown/16"]],
+  ] as const) {
+    const source =
+      [
+        "let tally = 1",
+        ...Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}`),
+        "tally = hostValue",
+        `if tally ${form} {`,
+        "  let picked: integer = tally",
+        "}",
+        "repeat tally {}",
+        "exit",
+      ].join("\n") + "\n";
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null);
+    const tally = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === "tally",
+    )!.id;
+    for (const reversed of [false, true]) {
+      const inOrder = <T>(make: () => T): T =>
+        reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), make),
+            )
+          : make();
+      const own = inOrder(() => analyseCore(request)).budget.decisions.find(
+        (d) => d.place === tally && d.path.length === 0,
+      )!;
+      const answers: Answers = withTestDemandAllowance(Math.floor(own.units / 2), () =>
+        inOrder(() => analyseCore(request)),
+      );
+      const where = `${form}, reversed: ${reversed}`;
+      assert.deepEqual(answers.place(tally).admitted, { by: "undecided" }, where);
+      const read = (start: number) =>
+        answers
+          .at(
+            answers.graph.nodes.find(
+              (each) => each.expression?.kind === "identifier" && each.span?.start.offset === start,
+            )!,
+          )!
+          .items.map((item) => `${item.tag}/${item.reasons}`);
+      assert.deepEqual(read(source.indexOf("tally\n}")), expected, where);
+      assert.deepEqual(read(source.indexOf("tally {}")), ["unknown/16"], where);
+    }
+  }
+});
