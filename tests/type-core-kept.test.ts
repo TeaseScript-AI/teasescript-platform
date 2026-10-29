@@ -99,10 +99,8 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "consumer.ts takesNull spread": [2, "lookups of a landing's levels, not kept"],
   "contract.ts #carried step": [1, "a method's name, two identifiers"],
   "contract.ts #groupsAt composite": [3, "an entry's text, charged by `#kept` before it is kept"],
-  "contract.ts #indexWork composite": [5, "an entry's text, charged by `#kept` before it is kept"],
   "contract.ts #keyContract spread": [2, "items, no path"],
   "contract.ts #levelsOf spread": [2, "a copy of a set of path ids, charged by `#keep`"],
-  "contract.ts #pathAt step": [1, "the interner's text, charged by `#keepText` before it is made"],
   "definitions.ts keyBelow join": [2, "a helper itself"],
   "definitions.ts keyBelow step": [1, "a helper itself"],
   "definitions.ts keyOf composite": [1, "a helper itself"],
@@ -294,7 +292,7 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
   "property-names.ts propertyNames slice": [
-    3,
+    2,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
   ],
   "property-names.ts propertyNames id": [

@@ -492,7 +492,9 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
     case "lp": {
       // (`Contract.gathered`: its kind, literal, range, node, flags, path and rest)
       const node = parts[4] === "-" ? null : (program.flow.nodes[Number(parts[4])] ?? null);
-      const [kind, flags, path] = [parts[0]!, parts[5] ?? "", parts[6] ?? ""];
+      // (the path by its steps, its id this pass's: `Contract.pathIdOf`)
+      const [kind, flags] = [parts[0]!, parts[5] ?? ""];
+      const path = contract.pathIdOf(splitPath(parts[6] ?? ""));
       const literal = Number(parts[1]);
       let site: GatherSite;
       if (kind === "selected")

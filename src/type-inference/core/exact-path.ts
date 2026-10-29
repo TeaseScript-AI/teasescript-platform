@@ -40,6 +40,7 @@ import {
   pathText,
   type WorkLedger,
 } from "./budget.js";
+import type { IndexNode } from "./contract.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
 
@@ -375,13 +376,14 @@ export class ExactPath {
       !(program.hasOf.has(d.value) || program.cellOwner.has(d.value))
     )
       return false;
-    const index = contract.literalIndex(d.value);
-    const inElement = program.cellOwner.get(d.value)?.kind === "cell";
-    for (let length = 0; length < rest.length; length += 1) {
+    // (each prefix of the rest by its node of the literal's index, until one the index holds none at)
+    let at: IndexNode | undefined = contract.literalIndex(d.value).root;
+    let element = program.cellOwner.get(d.value)?.kind === "cell";
+    for (let length = 0; length < rest.length && at !== undefined; length += 1) {
       program.work.charge("invSteps");
-      const at = rest.slice(0, length);
-      if ((inElement || at.includes("element")) && (index.reads.get(pathText(at))?.length ?? 0) > 0)
-        return true;
+      if (element && at.reads.length > 0) return true;
+      if (rest[length] === "element") element = true;
+      at = at.children.get(rest[length]!);
     }
     return false;
   }

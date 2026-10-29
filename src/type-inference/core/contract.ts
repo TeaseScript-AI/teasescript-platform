@@ -17,7 +17,6 @@ import {
   keptSteps,
   keptText,
   pathText,
-  splitPath,
   stepText,
   textUnits,
   type WorkLedger,
@@ -320,16 +319,16 @@ interface Holder {
   readonly reads: { readonly value: PlaceId; readonly path: readonly string[] }[];
   readonly readSeen: Set<PlaceId>;
   /** Its references, by the path below it where they stand: another holder, seen from `shift` below it. */
-  readonly refsAt: Map<string, HolderReference[]>;
+  readonly refsAt: Map<number, HolderReference[]>;
   readonly refSeen: Set<string>;
-  /** The paths of a literal's guarded reads. */
-  readonly guarded: Set<string>;
+  /** The paths of a literal's guarded reads, by their ids (`Contract.#pathAt`). */
+  readonly guarded: Set<number>;
   depth?: number;
   memo?: Map<string, boolean>;
   /** #1278: the first steps of the paths its mark can depend on (`#markFirsts`), `null` for any. */
   firsts?: ReadonlySet<string> | null;
   /** #1278: per path it holds references at, those references by the first step their marks can depend on. */
-  byStep?: Map<string, ReferencesByStep>;
+  byStep?: Map<number, ReferencesByStep>;
 }
 
 /** A holder's references at a path (`Contract.#marksAt`), by the first step each one's mark can depend on, or any. */
@@ -631,29 +630,136 @@ export interface StoredChoiceKeys {
 /** A choice object's property its button value reads (V30 §19), or none. */
 type Selected = { readonly name: string; readonly type: TypeTerm } | null;
 
+/** An object of a literal at a path (`IndexNode.objects`). */
+interface IndexObject {
+  readonly names: Set<string>;
+  readonly token: Writer;
+  readonly term: Extract<TypeTerm, { readonly kind: "object" }>;
+  /** V30 §19: the property its button value reads, its `value`, else its `text`, or `null`. */
+  readonly selected: Selected;
+}
+
+/**
+ * What one path of a literal's index holds (§8 r4.9), with a node per step below it. A nested literal that alone
+ * stands at a step is its own index's root there, shared, never copied (TABLE r4.164's local recipes): k nested
+ * literals keep k nodes, never k indexes each through the literals below it.
+ */
+export interface IndexNode {
+  /** The kinds its own terms give here, with the first literal's token. */
+  readonly terms: Map<ItemTag, Writer>;
+  readonly reads: ReadEntry[];
+  /** The reads for the value side: once per exact identity (the copied key, guarded or not). */
+  readonly exact: ValueEntry[];
+  readonly others: ValueEntry[];
+  objects: { readonly list: IndexObject[]; readonly count: Map<string, number> } | null;
+  /** A reference kind stands here (F19a). */
+  reference: boolean;
+  /** A collection's element without a cell stands here. */
+  empty: boolean;
+  readonly children: Map<string, IndexNode>;
+  /** The identities its entries were taken by: a computed value's source, a read's and an exact read's (`#indexWork`). */
+  readonly seen: Set<string>;
+  readonly readIds: Map<string, ReadEntry>;
+  /** What it and the nodes below it hold, once asked (`Contract.#below`). */
+  below?: NodeBelow;
+  /** Its first read's and first computed value's place in the walk (`WalkRank`); per step, the tasks it came from. */
+  firstRead: WalkRank | null;
+  firstOther: WalkRank | null;
+  readonly via: Map<string, WalkRank[]>;
+  /** Its shape and everything below it as a literal's signature or structure takes it, once asked (`#nodeShape`). */
+  shapes?: { sig?: NodeShape; str?: NodeShape };
+}
+
+/**
+ * What a node of a literal's index and the nodes below it hold (`Contract.#below`): anything, a reference kind, a
+ * computed value, a read a mark rests on (a guarded one, or one with a holder).
+ */
+interface NodeBelow {
+  readonly holds: boolean;
+  readonly reference: boolean;
+  readonly others: boolean;
+  readonly marks: boolean;
+  /** Its read and exact entries, and the nodes holding reads and computed values, counted at every path. */
+  readonly reads: number;
+  readonly exact: number;
+  readonly readStands: number;
+  readonly otherStands: number;
+  /** A term's kind, an object or an empty collection stands at it or below it. */
+  readonly beside: boolean;
+}
+
+/**
+ * Where a node's first entry of a kind, or the task a step below it came from, stands in the walk of its node's own
+ * tasks (`at`), and which of its node's first tasks it descends from (`top`): with each step's `via`, the order of the
+ * literal's one walk before its index was a trie, a path's tasks in turn and a task's steps below it before the next
+ * (`#walkOrder`).
+ */
+interface WalkRank {
+  readonly top: number;
+  readonly at: number;
+}
+
+/** Whether a node of a literal's index holds a read a mark rests on (`#collectMarks`). */
+function marksOwn(node: IndexNode): boolean {
+  return node.reads.some((entry) => entry.guarded || entry.holder !== null);
+}
+
+/**
+ * A node's part of a literal's signature (`sig`) or structure (`str`), and everything below it (`Contract.#nodeShape`):
+ * its interned name, whether each part is plain (no reference kind, no ingress occurrence, no value standing for
+ * itself), and for a structure whether a part is marked.
+ */
+interface NodeShape {
+  readonly name: string;
+  readonly plain: boolean;
+  readonly marked: boolean;
+}
+
+/** A node of a literal's index holding nothing yet. */
+function indexNode(): IndexNode {
+  return {
+    terms: new Map(),
+    reads: [],
+    exact: [],
+    others: [],
+    objects: null,
+    reference: false,
+    empty: false,
+    children: new Map(),
+    seen: new Set(),
+    readIds: new Map(),
+    firstRead: null,
+    firstOther: null,
+    via: new Map(),
+  };
+}
+
+/** Two places in a literal's one walk by their places at each depth (`Contract.standsAlong`): the earlier first. */
+function walkOrder(a: readonly number[], b: readonly number[]): number {
+  for (let at = 0; at < a.length && at < b.length; at += 1)
+    if (a[at] !== b[at]) return a[at]! - b[at]!;
+  return a.length - b.length;
+}
+
+/** Whether a node of a literal's index holds anything of its own. */
+function ownsAny(node: IndexNode): boolean {
+  return (
+    node.terms.size > 0 ||
+    node.reads.length > 0 ||
+    node.exact.length > 0 ||
+    node.others.length > 0 ||
+    node.objects !== null ||
+    node.reference ||
+    node.empty
+  );
+}
+
 /** One index of a literal's structure, through its nested literals at every step (§8 r4.9). */
 export interface LiteralIndex {
-  /** Per path, the kinds its own terms give there, with the first literal's token. */
-  readonly terms: Map<string, Map<ItemTag, Writer>>;
-  readonly reads: Map<string, ReadEntry[]>;
-  /** The reads for the value side: once per exact identity (the copied key, guarded or not). */
-  readonly exact: Map<string, ValueEntry[]>;
-  readonly others: Map<string, ValueEntry[]>;
-  readonly objects: Map<
-    string,
-    {
-      readonly list: {
-        readonly names: Set<string>;
-        readonly token: Writer;
-        readonly term: Extract<TypeTerm, { readonly kind: "object" }>;
-        /** V30 §19: the property its button value reads, its `value`, else its `text`, or `null`. */
-        readonly selected: Selected;
-      }[];
-      readonly count: Map<string, number>;
-    }
-  >;
-  readonly references: Set<string>;
-  readonly empty: Set<string>;
+  readonly root: IndexNode;
+  /** Its nodes by the pass's path ids (`Contract.#nodeAt`), each found once; `null` where it holds no node. */
+  readonly byId: Map<number, IndexNode | null>;
+  /** F11: per path id and property, the first object there without it (`#lackingAt`). */
   readonly lacking: Map<string, Writer | null>;
 }
 
@@ -671,7 +777,7 @@ interface StoredClass {
 }
 
 /** An object of a literal at a path (a selection's alternative, `#selectedAt`). */
-type LiteralObject = NonNullable<ReturnType<LiteralIndex["objects"]["get"]>>["list"][number];
+type LiteralObject = IndexObject;
 
 /**
  * #1278: a selection's objects on one side (`Contract.#selectionOf`): those it reads, in order, and by position those whose
@@ -712,20 +818,21 @@ export type GatherSite =
   | {
       readonly kind: "exact" | "copies" | "others" | "reads" | "groups";
       readonly literal: PlaceId;
-      readonly path: string;
+      /** Its path's id (`#pathAt`). */
+      readonly path: number;
       readonly deeper: boolean;
     }
   | {
       readonly kind: "selected";
       readonly literal: PlaceId;
-      readonly path: string;
+      readonly path: number;
       readonly byValue: boolean;
       readonly below: boolean;
     }
   | {
       readonly kind: "absent";
       readonly literal: PlaceId;
-      readonly path: string;
+      readonly path: number;
       readonly byValue: boolean;
       readonly below: boolean;
       readonly exact: boolean;
@@ -821,19 +928,20 @@ export class Contract {
   ];
   readonly #storedNames = new Map<string, string>();
   /**
-   * The paths of the literal indexes, each made once per pass (TABLE r4.58): a path is its parent's and one step, with
-   * one text that the indexes of nested literals share; its id orders and names it in a literal's signature and
-   * structure, never its text. The empty path is id 0.
+   * The paths of the literal indexes, each made once per pass (TABLE r4.58) as it is first asked: a path is its parent's
+   * and one step, keeping that step alone, never its whole text; its id orders and names it in a literal's signature
+   * and structure. The empty path is id 0.
    */
-  readonly #pathTexts: string[] = [""];
   readonly #pathParents: number[] = [-1];
   readonly #pathDepths: number[] = [0];
+  readonly #pathLast: string[] = [""];
   readonly #pathSteps: (Map<string, number> | undefined)[] = [];
-  readonly #pathIds = new Map<string, number>([["", 0]]);
   readonly #signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`#identityWork`), interned; a plain literal's (`#signatureWork`). */
   readonly #carrierIds = new Map<string, string>();
   readonly #literalIds = new Map<string, string>();
+  /** The shapes of literal indexes' nodes (`#nodeShape`), interned. */
+  readonly #nodeShapes = new Map<string, string>();
   /** Per read, its snapshot (`readSnapshot`). */
   readonly #snapshots = new Map<PlaceId, string>();
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
@@ -1600,18 +1708,10 @@ export class Contract {
     const index = this.literalIndex(literal);
     // (the literal's own path too: its whole structure is a member's key at the prefix; and each path's prefixes)
     const paths = new Set<number>([0]);
-    for (const texts of [
-      index.terms.keys(),
-      index.reads.keys(),
-      index.others.keys(),
-      index.objects.keys(),
-      index.references,
-      index.empty,
-    ])
-      for (const text of texts) {
-        this.#keep(1);
-        paths.add(this.#pathId(text));
-      }
+    for (const [id] of this.#indexPaths(index)) {
+      this.#keep(1);
+      paths.add(id);
+    }
     for (const path of [...paths])
       for (
         let parent = this.#pathParents[path]!;
@@ -1624,17 +1724,17 @@ export class Contract {
     const at = new Map<number, string>();
     for (const id of paths) {
       program.work.charge("structureSteps");
-      const path = this.#pathTexts[id]!;
-      const tags = [...(index.terms.get(path)?.keys() ?? [])].sort();
+      const node = this.#nodeAt(index, id);
+      const tags = [...(node?.terms.keys() ?? [])].sort();
       this.#keep(tags.length);
       const parts = [
         this.#joined(tags, ","),
-        ...[...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])].map((entry) =>
+        ...[...(node?.reads ?? []), ...(node?.others ?? [])].map((entry) =>
           this.structureOf(entry.value),
         ),
-        ...(index.objects.get(path)?.list ?? []).map((object) => this.#namesPart(object.names)),
-        index.references.has(path) ? "ref" : "",
-        index.empty.has(path) ? "empty" : "",
+        ...(node?.objects?.list ?? []).map((object) => this.#namesPart(object.names)),
+        node?.reference === true ? "ref" : "",
+        node?.empty === true ? "empty" : "",
       ];
       at.set(id, this.#internStructure(`at(${this.#joined(parts, ";")})`));
     }
@@ -2581,10 +2681,9 @@ export class Contract {
     if (program.hasOf.has(value)) {
       const index = this.literalIndex(value);
       const out: PlaceId[] = [];
-      for (const at of this.#pathOrder(index)) {
-        const path = this.#pathTexts[at]!;
-        for (const entry of index.reads.get(path) ?? []) out.push(entry.value);
-        for (const entry of index.others.get(path) ?? []) out.push(entry.value);
+      for (const [, node] of this.#pathOrder(index)) {
+        for (const entry of node.reads) out.push(entry.value);
+        for (const entry of node.others) out.push(entry.value);
       }
       this.#keep(out.length);
       return out;
@@ -2731,20 +2830,19 @@ export class Contract {
     const { program } = this.pass;
     const index = this.literalIndex(literal);
     const site = program.places[literal]?.site;
-    if (index.references.size > 0 || !site) return NO_CLASS;
+    if (this.#below(index.root).reference || !site) return NO_CLASS;
     const parts: string[] = [program.cellOwner.get(literal)?.kind === "cell" ? "c" : ""];
     let writers: (Writer | null)[] | null = [
       { kind: "literal", file: site.file, start: site.start, end: site.end },
     ];
     let mixed = 0;
     let next = 0;
-    for (const at of this.#pathOrder(index)) {
+    for (const [at, node] of this.#pathOrder(index)) {
       program.work.charge("structureSteps");
-      const path = this.#pathTexts[at]!;
-      parts.push(this.#kindsPart(at, index.terms.get(path)));
+      parts.push(this.#kindsPart(at, node.terms));
       for (const [mark, entries] of [
-        ["r", index.reads.get(path) ?? []],
-        ["o", index.others.get(path) ?? []],
+        ["r", node.reads],
+        ["o", node.others],
       ] as const)
         for (const entry of entries) {
           const part = of[next++]!;
@@ -2756,14 +2854,10 @@ export class Contract {
           if (part.writers === null) writers = null;
           else if (writers !== null) for (const writer of part.writers) writers.push(writer);
         }
-      for (const object of index.objects.get(path)?.list ?? [])
-        parts.push(this.#namesPart(object.names));
+      for (const object of node.objects?.list ?? []) parts.push(this.#namesPart(object.names));
     }
-    this.#keep(index.lacking.size);
-    const lacking = [...index.lacking.keys()]
-      .map((path) => this.#pathId(path))
-      .sort((a, b) => a - b);
-    parts.push(`empty:${this.#emptyIds(index)}`, this.#kept(`lacking:${lacking.join(",")}`));
+    // (its objects' names give its absences: a class never counts the absences asked of it so far, #1392)
+    parts.push(`empty:${this.#emptyIds(index)}`);
     return { cls: this.#internStructure(`lit(${this.#joined(parts, ";")})`), writers, mixed };
   }
 
@@ -3359,26 +3453,11 @@ export class Contract {
       }
     } else if (program.hasOf.has(value)) {
       const index = yield* this.#needIndex(value);
-      let plain = index.references.size === 0;
-      let marked = false;
-      const parts: string[] = [];
-      for (const at of this.#pathOrder(index)) {
-        program.work.charge("structureSteps");
-        const path = this.#pathTexts[at]!;
-        parts.push(this.#kindsPart(at, index.terms.get(path)));
-        for (const entry of [...(index.reads.get(path) ?? []), ...(index.others.get(path) ?? [])]) {
-          const part = yield* this.#needStructure(entry.value);
-          if (part.startsWith("v")) plain = false;
-          marked ||= this.#markedStructures.has(part);
-          parts.push(this.#kept(`s${part}`));
-        }
-        for (const object of index.objects.get(path)?.list ?? [])
-          parts.push(this.#namesPart(object.names));
-      }
-      parts.push(`empty:${this.#emptyIds(index)}`);
-      if (plain) {
-        id = this.#internStructure(`l(${this.#joined(parts, ";")})`);
-        if (marked) this.#markedStructures.add(id);
+      program.work.charge("structureSteps");
+      const shape = yield* this.#nodeShape(index.root, "str");
+      if (shape.plain) {
+        id = this.#internStructure(`l(${shape.name})`);
+        if (shape.marked) this.#markedStructures.add(id);
       }
     } else {
       const carried = this.#carried(value, true);
@@ -4040,19 +4119,13 @@ export class Contract {
   }
 
   /** A reference from `holder` to `to`, seen from `shift` below `to`'s identity, standing at `at` below `holder`'s. */
-  #refer(
-    holder: Holder,
-    to: Holder,
-    shift: readonly string[] = [],
-    at: readonly string[] = [],
-  ): void {
+  #refer(holder: Holder, to: Holder, shift: readonly string[] = [], where = 0): void {
     this.pass.program.work.charge("invSteps");
-    const key = joinParts(to.id, shift, at);
+    const key = joinParts(to.id, shift, where);
     if (holder.refSeen.has(key)) return;
     this.#keepText(key.length);
     holder.refSeen.add(key);
     this.facts.markNodes += 1;
-    const where = keptText(this.#work, at);
     const list = holder.refsAt.get(where);
     if (list === undefined) holder.refsAt.set(where, [{ to, shift }]);
     else list.push({ to, shift });
@@ -4279,11 +4352,11 @@ export class Contract {
       if (held.has(value)) continue;
       const holder = this.identityOf(value).holder;
       if (holder === null) continue;
-      for (const [path, list] of this.literalIndex(value).reads)
-        for (const entry of list) {
+      for (const [path, node] of this.#indexPaths(this.literalIndex(value), "marks"))
+        for (const entry of node.reads) {
           program.work.charge("invSteps");
           if (entry.guarded) holder.guarded.add(path);
-          if (entry.holder !== null) this.#refer(holder, entry.holder, [], splitPath(path));
+          if (entry.holder !== null) this.#refer(holder, entry.holder, [], path);
         }
     }
   }
@@ -4296,22 +4369,16 @@ export class Contract {
   #depthOf(holder: Holder): number {
     if (holder.depth !== undefined) return holder.depth;
     const { guards, program } = this.pass;
-    // (a path's steps counted by its dots, no array made)
-    const steps = (at: string): number => {
-      let count = at === "" ? 0 : 1;
-      for (let index = at.indexOf("."); index >= 0; index = at.indexOf(".", index + 1)) count += 1;
-      return count;
-    };
     const stack: {
       readonly holder: Holder;
-      readonly references: readonly (readonly [string, HolderReference])[];
+      readonly references: readonly (readonly [number, HolderReference])[];
       index: number;
       depth: number;
     }[] = [];
     const open = (each: Holder): void => {
       each.depth = Infinity;
       let depth = guards.testedLength();
-      for (const at of each.guarded) depth = Math.max(depth, steps(at));
+      for (const at of each.guarded) depth = Math.max(depth, this.#pathDepths[at]!);
       stack.push({
         holder: each,
         references: [...each.refsAt].flatMap(([at, list]) =>
@@ -4334,7 +4401,7 @@ export class Contract {
         program.work.charge("invSteps");
         top.depth = Math.max(
           top.depth,
-          steps(at) + Math.max(0, reference.to.depth - reference.shift.length),
+          this.#pathDepths[at]! + Math.max(0, reference.to.depth - reference.shift.length),
         );
         continue;
       }
@@ -4386,7 +4453,7 @@ export class Contract {
       this.#keepText(memoKey.length);
       asked.memo.set(memoKey, false);
       work.charge("eventSteps", 1 + rest.length);
-      const { references, absent } = this.#referencesAt(asked, "", rest, 0, tested);
+      const { references, absent } = this.#referencesAt(asked, 0, rest, 0, tested);
       stack.push({
         holder: asked,
         rest,
@@ -4396,7 +4463,7 @@ export class Contract {
         references,
         absent,
         index: 0,
-        hit: asked.guarded.has(""),
+        hit: asked.guarded.has(0),
       });
       return undefined;
     };
@@ -4430,11 +4497,10 @@ export class Contract {
           frame.references = [];
           continue;
         }
-        const at = this.#pathTexts[frame.path]!;
-        if (frame.holder.guarded.has(at)) frame.hit = true;
+        if (frame.holder.guarded.has(frame.path)) frame.hit = true;
         ({ references: frame.references, absent: frame.absent } = this.#referencesAt(
           frame.holder,
-          at,
+          frame.path,
           frame.rest,
           frame.length,
           tested,
@@ -4462,7 +4528,7 @@ export class Contract {
    */
   #referencesAt(
     holder: Holder,
-    where: string,
+    where: number,
     rest: readonly string[],
     length: number,
     tested: ReadonlySet<string>,
@@ -4479,7 +4545,7 @@ export class Contract {
   /** A holder's references at a path by the first steps their marks can depend on (`#markFirsts`), once per path. */
   #referencesBy(
     holder: Holder,
-    where: string,
+    where: number,
     references: readonly HolderReference[],
   ): ReferencesByStep {
     holder.byStep ??= new Map();
@@ -4526,7 +4592,7 @@ export class Contract {
         opened.add(top);
         // (a cycle back to it may depend on any step)
         top.firsts = null;
-        for (const reference of top.refsAt.get("") ?? [])
+        for (const reference of top.refsAt.get(0) ?? [])
           if (reference.shift.length === 0 && reference.to.firsts === undefined)
             stack.push(reference.to);
         continue;
@@ -4543,11 +4609,13 @@ export class Contract {
   #ownFirsts(holder: Holder): ReadonlySet<string> | null {
     const own = new Set<string>();
     const sources = new Set<ReadonlySet<string>>();
-    const add = (where: string): void => {
+    const add = (where: number): void => {
       this.pass.program.work.charge("eventSteps");
-      if (where === "") return;
-      const end = where.indexOf(".");
-      const step = end < 0 ? where : where.slice(0, end);
+      if (where === 0) return;
+      // (its first step: the path's ancestor one step deep)
+      let first = where;
+      while (this.#pathParents[first]! > 0) first = this.#pathParents[first]!;
+      const step = this.#pathLast[first]!;
       if (own.has(step)) return;
       this.#keepText(step.length);
       own.add(step);
@@ -4555,7 +4623,7 @@ export class Contract {
     for (const where of holder.guarded) add(where);
     for (const [where, references] of holder.refsAt) {
       add(where);
-      if (where !== "") continue;
+      if (where !== 0) continue;
       for (const reference of references) {
         this.pass.program.work.charge("eventSteps");
         if (reference.shift.length > 0) return null;
@@ -4661,52 +4729,216 @@ export class Contract {
     return parts.join(separator);
   }
 
-  /** The id of the path one `step` below the path `parent`, made (and charged) the first time it is asked. */
+  /** The id of the path one `step` below the path `parent`, made (and charged, its step and slot) when first asked. */
   #pathAt(parent: number, step: string): number {
     let steps = this.#pathSteps[parent];
     if (steps === undefined) this.#pathSteps[parent] = steps = new Map();
     const known = steps.get(step);
     if (known !== undefined) return known;
-    this.#keepText((parent === 0 ? 0 : this.#pathTexts[parent]!.length + 1) + step.length);
-    const text = parent === 0 ? step : `${this.#pathTexts[parent]!}.${step}`;
-    const id = this.#pathTexts.length;
-    this.#pathTexts.push(text);
+    this.#keepText(step.length);
+    this.#keep(1);
+    const id = this.#pathParents.length;
     this.#pathParents.push(parent);
     this.#pathDepths.push(this.#pathDepths[parent]! + 1);
-    this.#pathIds.set(text, id);
+    this.#pathLast.push(step);
     steps.set(step, id);
     return id;
   }
 
-  /** The id of a path one `step` below the path `parent` if an index has made it, else -1 (no index holds it). */
+  /** The id of a path one `step` below the path `parent` if one has been made, else -1 (no index holds it). */
   #pathBelow(parent: number, step: string): number {
     return parent < 0 ? -1 : (this.#pathSteps[parent]?.get(step) ?? -1);
   }
 
-  /** The id of an index's path, by its text. */
-  #pathId(text: string): number {
-    return this.#pathIds.get(text)!;
+  /** A path's steps, made fresh (the caller charges what it keeps). */
+  #stepsOf(id: number): string[] {
+    const steps: string[] = [];
+    for (let at = id; at > 0; at = this.#pathParents[at]!) steps.push(this.#pathLast[at]!);
+    return steps.reverse();
   }
 
-  /** The paths an index holds kinds, reads, other values or objects at, by id in id order. */
-  #pathOrder(index: LiteralIndex): number[] {
-    const maps = [index.terms, index.reads, index.others, index.objects];
-    this.#keep(maps.reduce((sum, map) => sum + map.size, 0));
-    const ids = new Set<number>();
-    for (const map of maps) for (const path of map.keys()) ids.add(this.#pathId(path));
-    this.#keep(ids.size);
-    return [...ids].sort((a, b) => a - b);
+  /**
+   * The reads (`reads`) or computed values (`others`) of a literal's index standing at each prefix of `path` its index
+   * holds, by depth, in the order a property query reads them (`propertyNames`): with more such paths in the literal
+   * than the path's prefixes, by depth; else in the order the literal's one walk first stood an entry at each
+   * (`WalkRank`), a path's tasks in turn and a task's steps below it before the next.
+   */
+  public standsAlong(
+    literal: PlaceId,
+    path: readonly string[],
+    kind: "reads" | "others",
+  ): readonly { readonly depth: number; readonly entries: readonly ValueEntry[] }[] {
+    const nodes: IndexNode[] = [this.literalIndex(literal).root];
+    for (const step of path) {
+      this.pass.program.work.charge("invSteps");
+      const below = nodes.at(-1)!.children.get(step);
+      if (below === undefined) break;
+      nodes.push(below);
+    }
+    const stands = nodes.flatMap((node, depth) =>
+      node[kind].length === 0 ? [] : [{ depth, entries: node[kind] }],
+    );
+    const all = this.#below(nodes[0]!);
+    if ((kind === "reads" ? all.readStands : all.otherStands) > path.length + 1) return stands;
+    // (each stand's first entry by its place at each depth down to it, `#walkOrder`)
+    const ranks = stands.map(({ depth }) => {
+      this.pass.program.work.charge("invSteps", depth + 1);
+      const first = kind === "reads" ? nodes[depth]!.firstRead! : nodes[depth]!.firstOther!;
+      const at: number[] = [first.at];
+      for (let level = depth - 1, top = first.top; level >= 0; level -= 1) {
+        const from = nodes[level]!.via.get(path[level]!)![top]!;
+        at.push(from.at);
+        top = from.top;
+      }
+      return at.reverse();
+    });
+    const order = stands.map((_, index) => index);
+    this.pass.program.work.charge("invSteps", sortCost(order.length));
+    order.sort((a, b) => walkOrder(ranks[a]!, ranks[b]!));
+    return order.map((index) => stands[index]!);
+  }
+
+  /**
+   * The one read a literal's index holds, where it holds no computed value and no reference kind, one read entry and one
+   * exact one in all, no term, object or empty collection at or below the read's path, and on the way to it no object
+   * without its next step (an alias's literal, `Admission.#aliasKey`); its path's steps made for it alone, else `null`.
+   */
+  public loneRead(
+    literal: PlaceId,
+  ): { readonly steps: readonly string[]; readonly value: PlaceId } | null {
+    const { program } = this.pass;
+    let node = this.literalIndex(literal).root;
+    const all = this.#below(node);
+    if (all.others || all.reference || all.reads !== 1 || all.exact !== 1) return null;
+    const steps: string[] = [];
+    while (node.reads.length === 0) {
+      program.work.charge("aliasSteps");
+      let next: readonly [string, IndexNode] | undefined;
+      for (const child of node.children) if (this.#below(child[1]).reads > 0) next = child;
+      const objects = node.objects;
+      if (
+        next === undefined ||
+        (objects !== null && (objects.count.get(next[0]) ?? 0) < objects.list.length)
+      )
+        return null;
+      this.#keep(1);
+      steps.push(next[0]);
+      node = next[1];
+    }
+    return this.#below(node).beside ? null : { steps, value: node.reads[0]!.value };
+  }
+
+  /** The id of the path of `steps`, each made as asked (`#pathAt`): a path a key or a question names by its steps. */
+  public pathIdOf(steps: readonly string[]): number {
+    let id = 0;
+    for (const step of steps) id = this.#pathAt(id, step);
+    return id;
+  }
+
+  /** A literal's index node at a path, `null` where none stands: down from the nearest ancestor already found. */
+  #nodeAt(index: LiteralIndex, id: number): IndexNode | null {
+    if (id < 0 || id >= this.#pathParents.length) return null;
+    const known = index.byId.get(id);
+    if (known !== undefined) return known;
+    const way: number[] = [];
+    for (let at = id; !index.byId.has(at); at = this.#pathParents[at]!) way.push(at);
+    let node: IndexNode | null = index.byId.get(this.#pathParents[way.at(-1)!]!)!;
+    for (let at = way.length - 1; at >= 0; at -= 1) {
+      this.pass.program.work.charge("invSteps");
+      this.#keep(1);
+      node = node?.children.get(this.#pathLast[way[at]!]!) ?? null;
+      index.byId.set(way[at]!, node);
+    }
+    return node;
+  }
+
+  /**
+   * An index's nodes that hold something of their own (`wanted`: or a read a mark rests on), each with its path's id, in a
+   * walk of the index from its root (each id made as the walk reaches it, `#pathAt`); a subtree holding none of it is
+   * not entered (`#below`).
+   */
+  #indexPaths(
+    index: LiteralIndex,
+    wanted: "holds" | "marks" = "holds",
+  ): readonly (readonly [number, IndexNode])[] {
+    const out: (readonly [number, IndexNode])[] = [];
+    const pending: (readonly [number, IndexNode])[] = [[0, index.root]];
+    while (pending.length > 0) {
+      const [id, node] = pending.pop()!;
+      this.pass.program.work.charge("invSteps");
+      if (wanted === "holds" ? ownsAny(node) : marksOwn(node)) {
+        this.#keep(1);
+        out.push([id, node]);
+      }
+      const below = [...node.children].filter(([, child]) => this.#below(child)[wanted]);
+      for (let at = below.length - 1; at >= 0; at -= 1)
+        pending.push([this.#pathAt(id, below[at]![0]), below[at]![1]]);
+    }
+    return out;
+  }
+
+  /**
+   * What a node and the nodes below it hold, once per node (an explicit walk, deepest first): anything, a reference
+   * kind, a computed value, a read a mark rests on.
+   */
+  #below(node: IndexNode): NodeBelow {
+    if (node.below !== undefined) return node.below;
+    const pending: { readonly node: IndexNode; readonly children: IndexNode[]; at: number }[] = [
+      { node, children: [...node.children.values()], at: 0 },
+    ];
+    while (pending.length > 0) {
+      const top = pending.at(-1)!;
+      if (top.at < top.children.length) {
+        const child = top.children[top.at++]!;
+        this.pass.program.work.charge("invSteps");
+        if (child.below === undefined)
+          pending.push({ node: child, children: [...child.children.values()], at: 0 });
+        continue;
+      }
+      pending.pop();
+      this.#keep(1);
+      const own = top.node;
+      const sum = (count: (below: NodeBelow) => number): number =>
+        top.children.reduce((total, child) => total + count(child.below!), 0);
+      top.node.below = {
+        holds: ownsAny(own) || top.children.some((child) => child.below!.holds),
+        reference: own.reference || top.children.some((child) => child.below!.reference),
+        others: own.others.length > 0 || top.children.some((child) => child.below!.others),
+        marks: marksOwn(own) || top.children.some((child) => child.below!.marks),
+        reads: own.reads.length + sum((below) => below.reads),
+        exact: own.exact.length + sum((below) => below.exact),
+        readStands: (own.reads.length > 0 ? 1 : 0) + sum((below) => below.readStands),
+        otherStands: (own.others.length > 0 ? 1 : 0) + sum((below) => below.otherStands),
+        beside:
+          own.terms.size > 0 ||
+          own.objects !== null ||
+          own.empty ||
+          top.children.some((child) => child.below!.beside),
+      };
+    }
+    return node.below!;
+  }
+
+  /** The paths an index holds kinds, reads, other values or objects at, by id in id order, with their nodes. */
+  #pathOrder(index: LiteralIndex): readonly (readonly [number, IndexNode])[] {
+    const paths = this.#indexPaths(index).filter(
+      ([, node]) =>
+        node.terms.size > 0 ||
+        node.reads.length > 0 ||
+        node.others.length > 0 ||
+        node.objects !== null,
+    );
+    this.#keep(paths.length);
+    return paths.sort(([a], [b]) => a - b);
   }
 
   /** An index's empty collections' paths, as their ids in order. */
   #emptyIds(index: LiteralIndex): string {
-    this.#keep(index.empty.size);
-    return this.#kept(
-      [...index.empty]
-        .map((path) => this.#pathId(path))
-        .sort((a, b) => a - b)
-        .join(","),
-    );
+    const ids = this.#indexPaths(index)
+      .filter(([, node]) => node.empty)
+      .map(([id]) => id);
+    this.#keep(ids.length);
+    return this.#kept(ids.sort((a, b) => a - b).join(","));
   }
 
   /** An object's property names as a signature's part, charged. */
@@ -4741,189 +4973,212 @@ export class Contract {
     // (TABLE r4.58: each object, collection, array element and map entry it keeps charged one unit as it is made, each
     // kept text its `textUnits`; here the index's own ten)
     this.#keep(10);
-    const index: LiteralIndex = {
-      terms: new Map(),
-      reads: new Map(),
-      exact: new Map(),
-      others: new Map(),
-      objects: new Map(),
-      references: new Set(),
-      empty: new Set(),
-      lacking: new Map(),
+    // (an entry in its node's list)
+    const put = <T>(list: T[], entry: T): void => {
+      this.#keep(list.length === 0 ? 3 : 2);
+      list.push(entry);
     };
-    const seen = new Set<string>();
-    const reads = new Map<string, ReadEntry>();
-    // (an entry under its path's one text, `#pathAt`)
-    const put = <T>(map: Map<string, T[]>, path: number, entry: T): void => {
-      const text = this.#pathTexts[path]!;
-      const list = map.get(text);
-      this.#keep(list === undefined ? 3 : 2);
-      if (list === undefined) map.set(text, [entry]);
-      else list.push(entry);
-    };
-    type Task =
-      | {
-          readonly kind: "value";
-          readonly g: Definition | null;
-          readonly value: PlaceId;
-          readonly path: number;
-        }
-      | {
-          readonly kind: "term";
-          readonly site: Writer;
-          readonly term: TypeTerm;
-          readonly path: number;
-        };
-    const pending: Task[] = [];
+    // what stands at a node, in the order the walk of the literal reaches it: a value (with the cell that holds it), or
+    // a term of a literal's type
+    type Task = (
+      | { readonly kind: "value"; readonly g: Definition | null; readonly value: PlaceId }
+      | { readonly kind: "term"; readonly site: Writer; readonly term: TypeTerm }
+    ) & { readonly top?: number };
     // (a cell's definitions copied, and a task scheduled for each)
     const cells = (place: PlaceId): Definition[] => {
       const defs = definitions.cellDefs.get(place) ?? [];
       this.#keep(2 * defs.length);
       return [...defs].reverse();
     };
+    // a node to fill from its tasks; below it, per step, the tasks standing there and whether a collection's element
+    // without a cell stands there
+    const root = indexNode();
+    const nodes: { readonly node: IndexNode; readonly tasks: Task[] }[] = [];
     if (program.hasOf.has(literal))
-      pending.push({ kind: "value", g: null, value: literal, path: 0 });
-    else
-      for (const d of cells(literal))
+      nodes.push({ node: root, tasks: [{ kind: "value", g: null, value: literal }] });
+    else {
+      const tasks: Task[] = [];
+      for (const d of cells(literal).reverse())
         // a literal's element that admission rejected is ignored (A6, ADR 0021 1.3)
-        if (this.pass.lists.live(d))
-          pending.push({ kind: "value", g: d, value: d.value!, path: 0 });
-    while (pending.length > 0) {
-      const task = pending.pop()!;
-      program.work.charge("invSteps");
-      if (task.kind === "value") {
-        const { g, value, path } = task;
-        const literals = program.hasOf.get(value) ?? [];
-        if (literals.length > 0) {
-          this.#keep(2 * literals.length);
-          for (const has of [...literals].reverse())
-            pending.push({
-              kind: "term",
-              site: program.writer("literal", has.site),
-              term: has.type,
-              path,
-            });
-          continue;
-        }
-        // §8 r4.13, r4.15: a call is a read of its callee's result key (F20) and a read its source: k calls of one
-        // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
-        const source = yield* this.#needValue(value);
-        if (this.copiedKey(value) === null) {
-          if (source.key === null) {
-            put(index.others, path, { g, value });
+        if (this.pass.lists.live(d)) tasks.push({ kind: "value", g: d, value: d.value! });
+      nodes.push({ node: root, tasks });
+    }
+    while (nodes.length > 0) {
+      const { node, tasks } = nodes.pop()!;
+      const below = new Map<string, { tasks: Task[]; empty: boolean; via: WalkRank[] }>();
+      const step = (name: string): { tasks: Task[]; empty: boolean; via: WalkRank[] } => {
+        let at = below.get(name);
+        if (at === undefined) below.set(name, (at = { tasks: [], empty: false, via: [] }));
+        return at;
+      };
+      // (each task with the node's first task it descends from, `top`, and its place in the node's walk, `WalkRank`)
+      const pending: Task[] = tasks.map((task, top) => ({ ...task, top })).reverse();
+      let position = 0;
+      while (pending.length > 0) {
+        const task = pending.pop()!;
+        program.work.charge("invSteps");
+        const rank: WalkRank = { top: task.top!, at: position++ };
+        const own = (next: Task): Task => ({ ...next, top: rank.top });
+        if (task.kind === "value") {
+          const { g, value } = task;
+          const literals = program.hasOf.get(value) ?? [];
+          if (literals.length > 0) {
+            this.#keep(2 * literals.length);
+            for (const has of [...literals].reverse())
+              pending.push(
+                own({ kind: "term", site: program.writer("literal", has.site), term: has.type }),
+              );
             continue;
           }
-          const key = this.#kept(`${path}|${source.id}`);
-          if (seen.has(key)) continue;
-          this.#keep(1);
-          seen.add(key);
-          this.facts.literalEntries += 1;
-          put(index.others, path, { g, value });
+          // §8 r4.13, r4.15: a call is a read of its callee's result key (F20) and a read its source: k calls of one
+          // function, k copies of one source, are one entry at the path, their guards and ingress its annotations
+          const source = yield* this.#needValue(value);
+          if (this.copiedKey(value) === null) {
+            if (source.key === null) {
+              node.firstOther ??= rank;
+              put(node.others, { g, value });
+              continue;
+            }
+            const key = this.#kept(`o${source.id}`);
+            if (node.seen.has(key)) continue;
+            this.#keep(1);
+            node.seen.add(key);
+            this.facts.literalEntries += 1;
+            node.firstOther ??= rank;
+            put(node.others, { g, value });
+            continue;
+          }
+          // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
+          const snapshot = this.readSnapshot(value)!;
+          // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their
+          // leaves unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again,
+          // S6-CARRIERS §3.1, Codex r23 F1, #1210)
+          const leaf = this.#ingressLeaf(value);
+          const id = this.#kept(
+            !sharing() ? `v${value}` : leaf === undefined ? source.id : snapshot,
+          );
+          // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
+          // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
+          const exactId = this.#kept(
+            !sharing() || leaf !== undefined ? `xv${value}` : `x${snapshot}`,
+          );
+          const read = node.readIds.get(id);
+          if (read === undefined) {
+            this.facts.literalEntries += 1;
+            this.#keep(2);
+            const entry: ReadEntry = {
+              g,
+              value,
+              guarded: source.guarded,
+              holder: source.holder,
+              ingress: leaf,
+            };
+            node.readIds.set(id, entry);
+            node.firstRead ??= rank;
+            put(node.reads, entry);
+          } else {
+            program.work.charge("invSteps");
+            if (source.guarded) read.guarded = true;
+            if (leaf !== undefined) read.ingress = program.scope.ingress.union(read.ingress, leaf);
+          }
+          if (!node.seen.has(exactId)) {
+            this.#keep(1);
+            node.seen.add(exactId);
+            put(node.exact, { g, value });
+          }
           continue;
         }
-        // one snapshot: one key read here, where nothing between the reads changes what they read (r4.68 (1))
-        const snapshot = this.readSnapshot(value)!;
-        // (k reads of one host global, or of one projection of it, are one entry as well, by their snapshot, their leaves
-        // unioned: an occurrence stays fresh as its own leaf, never as an entry each path reads again, S6-CARRIERS §3.1,
-        // Codex r23 F1, #1210)
-        const leaf = this.#ingressLeaf(value);
-        const id = this.#kept(
-          !sharing() ? `${path}|v${value}` : `${path}|${leaf === undefined ? source.id : snapshot}`,
-        );
-        // (the value side reads an exact entry by its first read alone, so an ingress occurrence keeps its own: its
-        // items carry its own leaf, which one shared entry would drop; the read entry above unions them, TABLE r4.72)
-        const exactId = this.#kept(
-          !sharing() || leaf !== undefined ? `x${path}|v${value}` : `x${path}|${snapshot}`,
-        );
-        const read = reads.get(id);
-        if (read === undefined) {
-          this.facts.literalEntries += 1;
-          this.#keep(2);
-          const entry: ReadEntry = {
-            g,
-            value,
-            guarded: source.guarded,
-            holder: source.holder,
-            ingress: leaf,
-          };
-          reads.set(id, entry);
-          put(index.reads, path, entry);
-        } else {
-          program.work.charge("invSteps");
-          if (source.guarded) read.guarded = true;
-          if (leaf !== undefined) read.ingress = program.scope.ingress.union(read.ingress, leaf);
+        // a term of a literal's type standing at the node
+        const { site, term } = task;
+        if (term.kind === "ref") {
+          const live = cells(term.place).filter((d) => this.pass.lists.live(d));
+          for (const d of live) pending.push(own({ kind: "value", g: d, value: d.value! }));
+          continue;
         }
-        if (!seen.has(exactId)) {
+        for (const tag of typeTags(term))
+          if (!node.terms.has(tag)) {
+            this.#keep(node.terms.size === 0 ? 3 : 1);
+            node.terms.set(tag, site);
+          }
+        if (term.kind === "atom" && REFERENCE.has(term.name) && !node.reference) {
           this.#keep(1);
-          seen.add(exactId);
-          put(index.exact, path, { g, value });
+          node.reference = true;
         }
-        continue;
-      }
-      // a term of a literal's type standing at the path
-      const { site, term, path } = task;
-      if (term.kind === "ref") {
-        for (const d of cells(term.place))
-          if (this.pass.lists.live(d)) pending.push({ kind: "value", g: d, value: d.value!, path });
-        continue;
-      }
-      const where = this.#pathTexts[path]!;
-      let kinds = index.terms.get(where);
-      if (kinds === undefined) {
-        this.#keep(2);
-        index.terms.set(where, (kinds = new Map()));
-      }
-      for (const tag of typeTags(term))
-        if (!kinds.has(tag)) {
+        if (term.kind === "object") {
+          if (node.objects === null) {
+            this.#keep(4);
+            node.objects = { list: [], count: new Map() };
+          }
+          // its property names, and the property its button value reads, decided once per record (V30 §19)
+          const names = new Set<string>();
+          let value: Selected = null;
+          let text: Selected = null;
+          // (its names and their entry, its counts, its properties copied, a task per property)
+          this.#keep(2 + 4 * (term.properties?.length ?? 0));
+          for (const property of term.properties ?? []) {
+            this.facts.selectionVisits += 1;
+            names.add(this.#kept(propertyStep(property.name)));
+            if (property.name === "value") value ??= property;
+            else if (property.name === "text") text ??= property;
+          }
+          node.objects.list.push({ names, token: site, term, selected: value ?? text });
+          for (const name of names)
+            node.objects.count.set(name, (node.objects.count.get(name) ?? 0) + 1);
+          for (const property of term.properties ?? []) {
+            const at = step(propertyStep(property.name));
+            at.tasks.push({ kind: "term", site, term: property.type });
+            at.via.push(rank);
+          }
+        } else if (term.kind === "list" || term.kind === "set" || term.kind === "dict") {
+          const element = term.element;
           this.#keep(1);
-          kinds.set(tag, site);
+          const at = step("element");
+          if (
+            element.kind === "ref" &&
+            (definitions.cellDefs.get(element.place) ?? []).length === 0
+          )
+            at.empty = true;
+          at.tasks.push({ kind: "term", site, term: element });
+          at.via.push(rank);
         }
-      if (term.kind === "atom" && REFERENCE.has(term.name) && !index.references.has(where)) {
-        this.#keep(1);
-        index.references.add(where);
       }
-      if (term.kind === "object") {
-        let objects = index.objects.get(where);
-        if (objects === undefined) {
-          this.#keep(4);
-          index.objects.set(where, (objects = { list: [], count: new Map() }));
+      // below the node: a nested literal that alone stands at a step is its own index's root there, shared (its
+      // tasks are its value's own terms, which its index walks as this walk would); any other step a node of its own
+      const fill: { readonly node: IndexNode; readonly tasks: Task[] }[] = [];
+      for (const [name, at] of below) {
+        this.#keep(2 + at.via.length);
+        node.via.set(name, at.via);
+        const alone = at.empty ? null : this.#aloneLiteral(at.tasks);
+        if (alone !== null) {
+          node.children.set(name, (yield* this.#needIndex(alone)).root);
+          continue;
         }
-        // its property names, and the property its button value reads, decided once per record (V30 §19)
-        const names = new Set<string>();
-        let value: Selected = null;
-        let text: Selected = null;
-        // (its names and their entry, its counts, its properties copied, a task per property)
-        this.#keep(2 + 4 * (term.properties?.length ?? 0));
-        for (const property of term.properties ?? []) {
-          this.facts.selectionVisits += 1;
-          names.add(this.#kept(propertyStep(property.name)));
-          if (property.name === "value") value ??= property;
-          else if (property.name === "text") text ??= property;
-        }
-        objects.list.push({ names, token: site, term, selected: value ?? text });
-        for (const name of names) objects.count.set(name, (objects.count.get(name) ?? 0) + 1);
-        for (const property of [...(term.properties ?? [])].reverse())
-          pending.push({
-            kind: "term",
-            site,
-            term: property.type,
-            path: this.#pathAt(path, propertyStep(property.name)),
-          });
-      } else if (term.kind === "list" || term.kind === "set" || term.kind === "dict") {
-        const element = term.element;
-        if (
-          element.kind === "ref" &&
-          (definitions.cellDefs.get(element.place) ?? []).length === 0
-        ) {
-          this.#keep(1);
-          index.empty.add(this.#pathTexts[this.#pathAt(path, "element")]!);
-        }
-        this.#keep(1);
-        pending.push({ kind: "term", site, term: element, path: this.#pathAt(path, "element") });
+        const child = indexNode();
+        if (at.empty) child.empty = true;
+        node.children.set(name, child);
+        fill.push({ node: child, tasks: at.tasks });
       }
+      for (let at = fill.length - 1; at >= 0; at -= 1) nodes.push(fill[at]!);
     }
     this.#indexing.delete(literal);
-    this.#literals.set(literal, index);
+    this.#literals.set(literal, { root, byId: new Map([[0, root]]), lacking: new Map() });
+  }
+
+  /**
+   * The literal value a step's tasks are alone, where they are a term of a cell place whose one live definition stores
+   * a literal (its index then stands for the step whole), else `null`.
+   */
+  #aloneLiteral(
+    tasks: readonly { readonly kind: string; readonly term?: TypeTerm }[],
+  ): PlaceId | null {
+    if (tasks.length !== 1) return null;
+    const term = tasks[0]!.term;
+    if (term?.kind !== "ref") return null;
+    const live = (this.pass.definitions.cellDefs.get(term.place) ?? []).filter((d) =>
+      this.pass.lists.live(d),
+    );
+    if (live.length !== 1 || !this.pass.program.hasOf.has(live[0]!.value!)) return null;
+    return this.#indexing.has(live[0]!.value!) ? null : live[0]!.value!;
   }
 
   /**
@@ -4942,47 +5197,111 @@ export class Contract {
   *#signatureWork(literal: PlaceId): IdentityWork {
     if (this.#signatures.has(literal)) return;
     const index = yield* this.#needIndex(literal);
-    let plain = index.references.size === 0;
-    const parts: string[] = [];
-    // (each path by its id, in the order of the ids: one order for every literal of the pass)
-    for (const at of this.#pathOrder(index)) {
-      this.pass.program.work.charge("invSteps");
-      const path = this.#pathTexts[at]!;
-      parts.push(this.#kindsPart(at, index.terms.get(path)));
-      for (const entry of index.reads.get(path) ?? []) {
-        // (an ingress occurrence is its own source; a projection of one reads its key, its leaf unioned in the entry)
-        if (entry.ingress !== undefined && this.pass.definitions.ingress.has(entry.value))
-          plain = false;
-        parts.push(this.#kept(`r${(yield* this.#needValue(entry.value)).id}`));
-      }
-      for (const entry of index.others.get(path) ?? []) {
-        const id = (yield* this.#needValue(entry.value)).id;
-        if (id.startsWith("v")) plain = false;
-        parts.push(this.#kept(`o${id}`));
-      }
-      for (const object of index.objects.get(path)?.list ?? [])
-        parts.push(this.#namesPart(object.names));
-    }
-    parts.push(`empty:${this.#emptyIds(index)}`);
-    // (interned: a literal names its inputs by their own short identities, never by their expansions)
+    const shape = yield* this.#nodeShape(index.root, "sig");
+    // (interned: a literal names its inputs by their own short identities, never by their expansions, and the nodes
+    // below it by their own shapes, which nested literals share)
     let signature = `v${literal}`;
-    if (plain) {
-      const shape = this.#joined(parts, ";");
-      signature = this.#literalIds.get(shape) ?? `l${this.#literalIds.size}`;
-      this.#literalIds.set(shape, signature);
+    if (shape.plain) {
+      signature = this.#literalIds.get(shape.name) ?? `l${this.#literalIds.size}`;
+      this.#literalIds.set(shape.name, signature);
     }
     this.#signatures.set(literal, signature);
   }
 
+  /**
+   * A node's shape for a literal's signature (`sig`: its reads' and computed values' identities) or structure (`str`:
+   * their structures), once per node, bottom-up on an explicit walk: its own terms' kinds, its entries, its objects'
+   * names, an empty collection, and per step below it that holds anything the shape there, by step; interned, so a
+   * node that nested literals share is shaped once. Two literals' indexes hold the same at every path exactly where
+   * their roots' shapes are one.
+   */
+  *#nodeShape(top: IndexNode, kind: "sig" | "str"): Generator<() => IdentityWork, NodeShape, void> {
+    const known = top.shapes?.[kind];
+    if (known !== undefined) return known;
+    const { program, definitions } = this.pass;
+    const stack: {
+      readonly node: IndexNode;
+      readonly below: (readonly [string, IndexNode])[];
+      at: number;
+    }[] = [];
+    const open = (node: IndexNode): void => {
+      const below = [...node.children]
+        .filter(([, child]) => this.#below(child).holds)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      this.#keep(below.length);
+      program.work.charge("invSteps", sortCost(below.length));
+      stack.push({ node, below, at: 0 });
+    };
+    open(top);
+    while (stack.length > 0) {
+      const frame = stack.at(-1)!;
+      if (frame.at < frame.below.length) {
+        const child = frame.below[frame.at]![1];
+        if (child.shapes?.[kind] === undefined) open(child);
+        else frame.at += 1;
+        continue;
+      }
+      stack.pop();
+      const { node } = frame;
+      program.work.charge("invSteps");
+      let plain = !node.reference;
+      let marked = false;
+      const parts: string[] = [this.#kindsPart(-1, node.terms)];
+      for (const [mark, entries] of [
+        ["r", node.reads],
+        ["o", node.others],
+      ] as const)
+        for (const entry of entries) {
+          let part: string;
+          if (kind === "sig") {
+            // (an ingress occurrence is its own source; a projection of one reads its key, its leaf unioned in the
+            // entry)
+            const id = (yield* this.#needValue(entry.value)).id;
+            if (
+              mark === "r" &&
+              "ingress" in entry &&
+              entry.ingress !== undefined &&
+              definitions.ingress.has(entry.value)
+            )
+              plain = false;
+            if (mark === "o" && id.startsWith("v")) plain = false;
+            part = `${mark}${id}`;
+          } else {
+            const structure = yield* this.#needStructure(entry.value);
+            if (structure.startsWith("v")) plain = false;
+            marked ||= this.#markedStructures.has(structure);
+            part = `s${structure}`;
+          }
+          parts.push(this.#kept(part));
+        }
+      for (const object of node.objects?.list ?? []) parts.push(this.#namesPart(object.names));
+      if (node.empty) parts.push("empty");
+      for (const [step, child] of frame.below) {
+        const below = child.shapes![kind]!;
+        plain &&= below.plain;
+        marked ||= below.marked;
+        parts.push(this.#kept(`${step}=${below.name}`));
+      }
+      const shape = this.#joined(parts, ";");
+      const name = this.#nodeShapes.get(shape) ?? `n${this.#nodeShapes.size}`;
+      this.#nodeShapes.set(shape, name);
+      node.shapes ??= {};
+      node.shapes[kind] = { name, plain, marked };
+      const parent = stack.at(-1);
+      if (parent !== undefined) parent.at += 1;
+    }
+    return top.shapes![kind]!;
+  }
+
   /** F11: the first object at the path without the property, once per (path, property): its token, or `null`. */
-  #lackingAt(index: LiteralIndex, path: string, step: string): Writer | null {
+  #lackingAt(index: LiteralIndex, path: number, step: string): Writer | null {
     const key = joinParts(path, step);
     const known = index.lacking.get(key);
     if (known !== undefined) return known;
     this.#keepText(key.length);
-    const objects = index.objects.get(path);
+    const objects = this.#nodeAt(index, path)?.objects ?? null;
     let token: Writer | null = null;
-    if (objects !== undefined && (objects.count.get(step) ?? 0) < objects.list.length)
+    if (objects !== null && (objects.count.get(step) ?? 0) < objects.list.length)
       for (const object of objects.list) {
         this.pass.program.work.charge("invSteps");
         if (!object.names.has(step)) {
@@ -5037,14 +5356,20 @@ export class Contract {
     // the contributions the read gathers: past an element step, several of them are several elements, of which
     // positions do not tell which one (F12)
     let sources = 0;
-    // each prefix of the path by its text, `undefined` where no index holds it (`#pathBelow`)
-    const paths: (string | undefined)[] = [""];
-    for (let id = 0, length = 0; length < rest.length; length += 1) {
-      id = this.#pathBelow(id, rest[length]!);
-      paths.push(id < 0 ? undefined : this.#pathTexts[id]);
+    // each prefix of the path: its id and the index's node there, `null` past the deepest one the index holds
+    const paths: ({ readonly id: number; readonly at: IndexNode } | null)[] = [
+      { id: 0, at: index.root },
+    ];
+    for (let length = 0; length < rest.length; length += 1) {
+      const above = paths[length]!;
+      const at = above?.at.children.get(rest[length]!);
+      paths.push(
+        above === null || at === undefined
+          ? null
+          : { id: this.#pathAt(above.id, rest[length]!), at },
+      );
     }
-    const whole = paths[rest.length];
-    for (const [tag, token] of (whole === undefined ? undefined : index.terms.get(whole)) ?? []) {
+    for (const [tag, token] of paths[rest.length]?.at.terms ?? []) {
       out.push(makeItem(tag, token));
       sources += 1;
     }
@@ -5052,8 +5377,9 @@ export class Contract {
     for (let length = 0; length <= rest.length; length += 1) {
       program.work.charge("invSteps");
       if (length > 0 && rest[length - 1] === "element") elementAbove = true;
-      const path = paths[length];
-      if (path === undefined) break;
+      const prefix = paths[length];
+      if (prefix === null || prefix === undefined) break;
+      const path = prefix.id;
       // (the rest below the path, made only for an entry that stands there)
       let tail: readonly string[] | undefined;
       const after = (): readonly string[] => (tail ??= rest.slice(length));
@@ -5071,7 +5397,7 @@ export class Contract {
             for (const item of yield* this.gathered(site, node, after(), 0, count)) out.push(item);
         }
       } else {
-        const copies = length < rest.length && elementAbove ? (index.reads.get(path) ?? []) : null;
+        const copies = length < rest.length && elementAbove ? prefix.at.reads : null;
         if (copies !== null && copies.length > 0) overCopy = true;
         // (each kind of contribution read one by one, or past `WIDE` of them as a tree of demands, `gathered`)
         const deeper = length < rest.length;
@@ -5084,8 +5410,7 @@ export class Contract {
           else
             for (const item of yield* this.gathered(site, node, after(), 0, count)) out.push(item);
         }
-        const others = index.others.get(path) ?? [];
-        sources += (copies ?? index.exact.get(path) ?? []).length + others.length;
+        sources += (copies ?? prefix.at.exact).length + prefix.at.others.length;
       }
       // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
       const step = rest[length];
@@ -5115,12 +5440,11 @@ export class Contract {
             ? makeItem("unknown", lacking, { reasons: REASON.missing, context: "missing" })
             : unknownItem(REASON.missing, lacking),
         );
-      if (index.references.has(path)) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+      if (prefix.at.reference) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
       // an empty collection on the way holds no element (the contract's M below it; the value's at its end)
       if (
         rest[length] === "element" &&
-        paths[length + 1] !== undefined &&
-        index.empty.has(paths[length + 1]!) &&
+        paths[length + 1]?.at.empty === true &&
         (!exact || length === rest.length - 1)
       )
         out.push(EMPTY);
@@ -5218,7 +5542,7 @@ export class Contract {
         hi,
         node?.id ?? "-",
         flags,
-        site.path,
+        this.#stepsOf(site.path),
         rest,
       ),
       kind:
@@ -5254,19 +5578,21 @@ export class Contract {
 
   /** How many contributions a gather site of a literal's index reads. */
   #gatherCount(site: IndexSite): number {
-    const index = this.literalIndex(site.literal);
-    if (site.kind === "exact") return (index.exact.get(site.path) ?? []).length;
+    const at = this.#siteNode(site);
+    if (site.kind === "exact") return at?.exact.length ?? 0;
     if (site.kind === "copies" || site.kind === "reads")
-      return this.#readGroupsAt(index.reads.get(site.path), site.kind === "copies").length;
+      return this.#readGroupsAt(at?.reads, site.kind === "copies").length;
     return this.#gatherGroups(site).length;
+  }
+
+  /** A gather site's node of its literal's index, `null` where the index holds none there. */
+  #siteNode(site: GatherSite): IndexNode | null {
+    return this.#nodeAt(this.literalIndex(site.literal), site.path);
   }
 
   /** A gather site's computed values' groups at its path (`#othersAt`), past a step those below it. */
   #gatherGroups(site: GatherSite): readonly (OtherGroup | null)[] {
-    const groups = this.#othersAt(
-      this.literalIndex(site.literal).others.get(site.path),
-      site.kind !== "groups",
-    );
+    const groups = this.#othersAt(this.#siteNode(site)?.others, site.kind !== "groups");
     return (site.kind === "others" || site.kind === "groups") && site.deeper
       ? (this.#othersBelowOf.get(groups) ?? groups)
       : groups;
@@ -5281,13 +5607,14 @@ export class Contract {
   ): Work<readonly Item[]> {
     const { values } = this.pass;
     const index = this.literalIndex(site.literal);
+    const here = this.#siteNode(site);
     if (site.kind === "exact") {
-      const entry = index.exact.get(site.path)![at]!;
+      const entry = here!.exact[at]!;
       return yield* values.valueItems(entry.value, entry.g?.node ?? node, rest);
     }
     if (site.kind === "copies" || site.kind === "reads") {
       const copies = site.kind === "copies";
-      const group = this.#readGroupsAt(index.reads.get(site.path), copies)[at]!;
+      const group = this.#readGroupsAt(here!.reads, copies)[at]!;
       const self = this;
       return yield* this.#groupItems(group, copies, function* (entry) {
         const items = copies
@@ -5299,11 +5626,7 @@ export class Contract {
     if (site.kind === "groups") {
       const group = this.#gatherGroups(site)[at]!;
       if (group === null)
-        return yield* this.#loadsBelow(
-          this.#othersAt(index.others.get(site.path), false),
-          rest,
-          false,
-        );
+        return yield* this.#loadsBelow(this.#othersAt(here?.others, false), rest, false);
       return yield* this.#groupItems(group, false, (entry) =>
         this.contractOfValueAt(entry.value, rest),
       );
@@ -5345,12 +5668,7 @@ export class Contract {
     }
     const group = this.#gatherGroups(site)[at]!;
     if (group === null)
-      return yield* this.#loadsBelow(
-        this.#othersAt(index.others.get(site.path), true),
-        rest,
-        true,
-        node,
-      );
+      return yield* this.#loadsBelow(this.#othersAt(here?.others, true), rest, true, node);
     return yield* this.#groupItems(group, true, (entry) =>
       values.valueItems(entry.value, entry.g?.node ?? node, rest),
     );
@@ -5454,13 +5772,12 @@ export class Contract {
       if (!program.hasOf.has(at)) parts.push(...this.#classParts(at, exact));
       else {
         const index = this.literalIndex(at);
-        for (const id of this.#pathOrder(index)) {
+        for (const [, node] of this.#pathOrder(index)) {
           program.work.charge("invSteps");
-          const path = this.#pathTexts[id]!;
-          for (const entry of index.reads.get(path) ?? [])
+          for (const entry of node.reads)
             if (entry.ingress === undefined) parts.push(entry.value);
             else found &&= leafNodes(entry.ingress, out, program.scope);
-          for (const entry of index.others.get(path) ?? []) parts.push(entry.value);
+          for (const entry of node.others) parts.push(entry.value);
         }
         this.#keep(parts.length);
       }
@@ -5475,7 +5792,7 @@ export class Contract {
   *#selectedAt(
     literal: PlaceId,
     index: LiteralIndex,
-    path: string,
+    path: number,
     byValue: boolean,
     after: readonly string[],
     node: FlowNode | null,
@@ -5483,13 +5800,14 @@ export class Contract {
     below: boolean,
   ): Work<{ readonly items: readonly Item[]; readonly sources: number }> {
     const out: Item[] = [];
-    const terms = [...(index.terms.get(path) ?? [])].filter(([tag]) => tag !== "object");
-    const objects = index.objects.get(path)?.list ?? [];
-    const sources = terms.length + objects.length + (index.references.has(path) ? 1 : 0);
+    const here = this.#nodeAt(index, path);
+    const terms = [...(here?.terms ?? [])].filter(([tag]) => tag !== "object");
+    const objects = here?.objects?.list ?? [];
+    const reference = here?.reference === true;
+    const sources = terms.length + objects.length + (reference ? 1 : 0);
     if (byValue && after.length === 0)
       for (const [tag, token] of terms) out.push(makeItem(tag, token));
-    if (byValue && index.references.has(path))
-      out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
+    if (byValue && reference) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
     const selection = this.#selectionOf(literal, index, path, byValue, below, exact);
     const pieces = this.#selectionPieces(selection, after);
     // (on the value side past `WIDE` parts as a tree of demands, `gathered`)
@@ -5519,7 +5837,7 @@ export class Contract {
   #selectionOf(
     literal: PlaceId,
     index: LiteralIndex,
-    path: string,
+    path: number,
     byValue: boolean,
     below: boolean,
     exact: boolean,
@@ -5705,9 +6023,8 @@ export class Contract {
     const sources = new Set<ReadonlySet<string>>();
     const own = this.#literalNames(index);
     if (own === null) return null;
-    if (own.size > 0 || (index.objects.get("")?.list.length ?? 0) > 0)
-      this.#addSource(sources, own);
-    for (const entry of [...(index.reads.get("") ?? []), ...(index.exact.get("") ?? [])]) {
+    if (own.size > 0 || (index.root.objects?.list.length ?? 0) > 0) this.#addSource(sources, own);
+    for (const entry of [...index.root.reads, ...index.root.exact]) {
       this.pass.program.work.charge("invSteps");
       const names = this.#bindingNames(entry.value);
       if (names === null) return null;
@@ -5744,7 +6061,7 @@ export class Contract {
       if (d.kind !== "whole" || d.value === undefined || !program.hasOf.has(d.value)) return null;
       const literal = this.literalIndex(d.value);
       const names = this.#literalNames(literal);
-      if (names === null || (literal.objects.get("")?.list.length ?? 0) === 0) return null;
+      if (names === null || (literal.root.objects?.list.length ?? 0) === 0) return null;
       this.#addSource(sources, names);
     }
     if (sources.size === 0) return null;
@@ -5768,10 +6085,11 @@ export class Contract {
    * nothing but objects stands (no read, no computed value, no reference, no other kind); else `null`.
    */
   #literalNames(index: LiteralIndex): ReadonlySet<string> | null {
-    if (index.references.has("") || (index.others.get("")?.length ?? 0) > 0) return null;
-    for (const [tag] of index.terms.get("") ?? []) if (tag !== "object") return null;
+    const { root } = index;
+    if (root.reference || root.others.length > 0) return null;
+    for (const [tag] of root.terms) if (tag !== "object") return null;
     const sources = new Set<ReadonlySet<string>>();
-    for (const object of index.objects.get("")?.list ?? []) {
+    for (const object of root.objects?.list ?? []) {
       this.pass.program.work.charge("invSteps");
       if (object.term.properties === null) return null;
       this.#addSource(sources, object.names);
@@ -5815,7 +6133,7 @@ export class Contract {
   #selectionObjects(
     literal: PlaceId,
     index: LiteralIndex,
-    path: string,
+    path: number,
     byValue: boolean,
     below: boolean,
     exact: boolean,
@@ -5827,7 +6145,7 @@ export class Contract {
     const kept: LiteralObject[] = [];
     // Per class, the kept option whose span ends first; class-common writers may lie outside it.
     const firsts = new Map<string, Writer | null>();
-    for (const object of index.objects.get(path)?.list ?? []) {
+    for (const object of this.#nodeAt(index, path)?.objects?.list ?? []) {
       program.work.charge("invSteps");
       const { selected } = object;
       if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
