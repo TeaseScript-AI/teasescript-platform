@@ -112,6 +112,8 @@ export class Reachability {
    */
   readonly #local: Uint8Array;
   readonly #localBefore: Int32Array;
+  /** The functions that may return to their caller (see {@link #returningFunctions}), found once. */
+  #returning: ReadonlySet<number> | undefined;
   /** The ways of the computed targets, and where blocks stay, found once for the targets the checks share. */
   #transfers:
     | {
@@ -482,16 +484,19 @@ export class Reachability {
 
   /**
    * Whether at most one copy of the block `block` that the instruction `creator` creates stays at a time, so that no
-   * copy starts where another left: a button's, which takes no click while its block waits to run or runs, or that of a
-   * timer that does not repeat, where no way on which the block stays leads back to its creation. A media block may run
-   * again on the next pass.
+   * copy starts where another left: a button's, which takes no click while its block waits to run or runs, that of a
+   * timer that does not repeat, and that of a media that plays once and whose handle the script does not keep, which
+   * could seek it back, where no way on which the block stays leads back to its creation.
    */
   #single(creator: number, block: number, staying: StayingBlocks): boolean {
     const instruction = this.plan.instructions[creator]!;
-    if (
-      instruction.kind !== "showPermanentButton" &&
-      (instruction.kind !== "startTimer" || instruction.repeat)
-    )
+    if (!(
+      instruction.kind === "showPermanentButton" ||
+      (instruction.kind === "startTimer" && !instruction.repeat) ||
+      (instruction.kind === "playMedia" &&
+        instruction.repeat.kind === "once" &&
+        instruction.destinationTemporary === null)
+    ))
       return false;
     const before = staying.leavers(creator, false);
     return before !== block && before !== SEVERAL_LEAVERS;
@@ -782,71 +787,68 @@ export class Reachability {
    * How the code from each instruction on can stop (see {@link Ending}), by the ways of {@link #ways}, where a computed
    * target that `ways` leads into its files for certain goes on in them: a `goto` of a file goes on in it, a file `call`
    * comes back unless the called file may leave, and a function call does what the function does, then goes on after
-   * the call where the function may return. A first solve, in which every function may return, tells where one may. A
-   * block that an instruction creates runs later, so it is no way on from there, but one that may leave the code it
-   * interrupts may run where `interrupted` tells, which may then leave.
+   * the call where the function may return (see {@link #returningFunctions}). A block that an instruction creates runs
+   * later, so it is no way on from there, but one that may leave the code it interrupts may run where `interrupted`
+   * tells, which may then leave.
    */
   #endings(ways: ComputedWays, interrupted: (index: number) => boolean): (Ending | null)[] {
     const count = this.plan.instructions.length;
-    let first: readonly (Ending | null)[] | null = null;
-    const solve = (): (Ending | null)[] =>
-      solveBackward<Ending, string>({
-        nodeCount: count + ways.hubs.length,
-        successors: (index) => {
-          if (index >= count)
-            return ways.hubs[index - count]!.map((entry) => ({ node: entry, edge: "hub" }));
-          const out: { node: number | null; edge: string }[] = this.#ways(index).map(
-            ({ node, edge }) => {
-              if (node !== null || edge === "end" || edge === "return") return { node, edge };
-              const target = ways.targets.get(index);
-              return target?.edge === "transfer" ? target : { node: null, edge: "leaves" };
-            },
-          );
-          if (interrupted(index)) out.push({ node: null, edge: "leaves" });
-          return out;
-        },
-        join: (left, right) => ({
-          end:
-            left.end === null || left.end === right.end
-              ? right.end
-              : right.end === null
-                ? left.end
-                : SEVERAL,
-          leaves: left.leaves || right.leaves,
-          returns: left.returns || right.returns,
-        }),
-        equals: (left, right) =>
-          left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
-        transfer: (index, edge, state) => {
-          switch (edge) {
-            case "end":
-              return { end: index, leaves: false, returns: false };
-            case "return":
-              return RETURNS;
-            case "leaves":
-              return LEAVING;
-            // Into a function: what it does, where its return goes on after the call.
-            case "call":
-              return state?.returns === true ? { ...state, returns: false } : state;
-            case "resume": {
-              const instruction = this.plan.instructions[index]!;
-              if (first === null || instruction.kind !== "callFunction") return state;
-              const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
-              return entry === undefined || first[entry]?.returns === true ? state : null;
-            }
-            case "transfer": {
-              const instruction = this.plan.instructions[index]!;
-              if (instruction.kind !== "transfer" || instruction.mode === "goto") return state;
-              // The called file's `end` comes back after the call.
-              return state?.leaves === true ? LEAVING : null;
-            }
-            default:
-              return state;
+    const returning = this.#returningFunctions();
+    return solveBackward<Ending, string>({
+      nodeCount: count + ways.hubs.length,
+      successors: (index) => {
+        if (index >= count)
+          return ways.hubs[index - count]!.map((entry) => ({ node: entry, edge: "hub" }));
+        const out: { node: number | null; edge: string }[] = this.#ways(index).map(
+          ({ node, edge }) => {
+            if (node !== null || edge === "end" || edge === "return") return { node, edge };
+            const target = ways.targets.get(index);
+            return target?.edge === "transfer" ? target : { node: null, edge: "leaves" };
+          },
+        );
+        if (interrupted(index)) out.push({ node: null, edge: "leaves" });
+        return out;
+      },
+      join: (left, right) => ({
+        end:
+          left.end === null || left.end === right.end
+            ? right.end
+            : right.end === null
+              ? left.end
+              : SEVERAL,
+        leaves: left.leaves || right.leaves,
+        returns: left.returns || right.returns,
+      }),
+      equals: (left, right) =>
+        left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
+      transfer: (index, edge, state) => {
+        switch (edge) {
+          case "end":
+            return { end: index, leaves: false, returns: false };
+          case "return":
+            return RETURNS;
+          case "leaves":
+            return LEAVING;
+          // Into a function: what it does, where its return goes on after the call.
+          case "call":
+            return state?.returns === true ? { ...state, returns: false } : state;
+          case "resume": {
+            const instruction = this.plan.instructions[index]!;
+            return instruction.kind !== "callFunction" || returning.has(instruction.functionId)
+              ? state
+              : null;
           }
-        },
-      });
-    first = solve();
-    return solve();
+          case "transfer": {
+            const instruction = this.plan.instructions[index]!;
+            if (instruction.kind !== "transfer" || instruction.mode === "goto") return state;
+            // The called file's `end` comes back after the call.
+            return state?.leaves === true ? LEAVING : null;
+          }
+          default:
+            return state;
+        }
+      },
+    });
   }
 
   /**
@@ -909,6 +911,53 @@ export class Reachability {
   }
 
   /**
+   * The functions that may return to their caller: those where a way from their start reaches a `return` or the end of
+   * the body, on which a call of another function goes on only where that one may return, and a file call goes on
+   * unless it is one of `stops`, which never go on. A transfer of the session does not return.
+   */
+  #returningFunctions(stops?: ReadonlySet<number>): ReadonlySet<number> {
+    if (stops === undefined && this.#returning !== undefined) return this.#returning;
+    const returning = new Set<number>();
+    // The places after the calls of each function that does not return so far, which go on once it may.
+    const after = new Map<number, number[]>();
+    const reached = new Uint8Array(this.plan.instructions.length);
+    const work: number[] = [];
+    const reach = (index: number): void => {
+      if (reached[index] === 1) return;
+      reached[index] = 1;
+      work.push(index);
+    };
+    for (const definition of this.plan.functions) reach(definition.entryInstruction);
+    for (let index = work.pop(); index !== undefined; index = work.pop()) {
+      const instruction = this.plan.instructions[index]!;
+      if (stops?.has(index) === true) continue;
+      for (const { node, edge } of this.#ways(index))
+        if (edge === "return") {
+          const definition = this.#flow.functionOf(index);
+          if (definition === null || returning.has(definition.id)) continue;
+          returning.add(definition.id);
+          for (const next of after.get(definition.id) ?? []) reach(next);
+        } else if (edge === "resume" && instruction.kind === "callFunction") {
+          if (returning.has(instruction.functionId)) reach(node!);
+          else {
+            const list = after.get(instruction.functionId) ?? [];
+            list.push(node!);
+            after.set(instruction.functionId, list);
+          }
+        } else if (
+          node !== null &&
+          edge !== "call" &&
+          edge !== "transfer" &&
+          edge !== "computed" &&
+          edge !== "goto"
+        )
+          reach(node);
+    }
+    if (stops === undefined) this.#returning = returning;
+    return returning;
+  }
+
+  /**
    * The file call that the code from each instruction on certainly makes in the file that runs it (see {@link Ending},
    * whose `end` is that call here): one of `certain`, the calls that certainly start their one file, before the code
    * leaves that file, by an `end`, `exit`, or `goto`, or returns from its function. A function call does what the function
@@ -922,70 +971,67 @@ export class Reachability {
     const ways = this.#waysOf(targets());
     const { interrupted } = this.#blocksStaying(ways);
     const endings = this.#endings(ways, interrupted);
-    let first: readonly (Ending | null)[] | null = null;
-    const solve = (): (Ending | null)[] =>
-      solveBackward<Ending, string>({
-        nodeCount: this.plan.instructions.length,
-        successors: (index) => {
-          if (certain.has(index)) return [{ node: null, edge: "calls" }];
-          const instruction = this.plan.instructions[index]!;
-          if (
-            instruction.kind === "end" ||
-            instruction.kind === "exit" ||
-            instruction.kind === "goto" ||
-            (instruction.kind === "transfer" && instruction.mode === "goto")
+    const returning = this.#returningFunctions(certain);
+    return solveBackward<Ending, string>({
+      nodeCount: this.plan.instructions.length,
+      successors: (index) => {
+        if (certain.has(index)) return [{ node: null, edge: "calls" }];
+        const instruction = this.plan.instructions[index]!;
+        if (
+          instruction.kind === "end" ||
+          instruction.kind === "exit" ||
+          instruction.kind === "goto" ||
+          (instruction.kind === "transfer" && instruction.mode === "goto")
+        )
+          return [{ node: null, edge: "leaves" }];
+        const out: { node: number | null; edge: string }[] = [];
+        for (const way of this.#ways(index)) {
+          if (instruction.kind !== "transfer" || way.edge === "resume") out.push(way);
+          // The called file comes back unless it may leave.
+          else if (
+            way.node === null
+              ? ways.targets.get(index)?.edge !== "transfer" ||
+                endings[ways.targets.get(index)!.node]?.leaves !== false
+              : endings[way.node]?.leaves === true
           )
-            return [{ node: null, edge: "leaves" }];
-          const out: { node: number | null; edge: string }[] = [];
-          for (const way of this.#ways(index)) {
-            if (instruction.kind !== "transfer" || way.edge === "resume") out.push(way);
-            // The called file comes back unless it may leave.
-            else if (
-              way.node === null
-                ? ways.targets.get(index)?.edge !== "transfer" ||
-                  endings[ways.targets.get(index)!.node]?.leaves !== false
-                : endings[way.node]?.leaves === true
-            )
-              out.push({ node: null, edge: "leaves" });
+            out.push({ node: null, edge: "leaves" });
+        }
+        if (interrupted(index)) out.push({ node: null, edge: "leaves" });
+        return out;
+      },
+      join: (left, right) => ({
+        end:
+          left.end === null || left.end === right.end
+            ? right.end
+            : right.end === null
+              ? left.end
+              : SEVERAL,
+        leaves: left.leaves || right.leaves,
+        returns: left.returns || right.returns,
+      }),
+      equals: (left, right) =>
+        left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
+      transfer: (index, edge, state) => {
+        switch (edge) {
+          case "calls":
+            return { end: index, leaves: false, returns: false };
+          case "return":
+            return RETURNS;
+          case "leaves":
+            return LEAVING;
+          case "call":
+            return state?.returns === true ? { ...state, returns: false } : state;
+          case "resume": {
+            const instruction = this.plan.instructions[index]!;
+            return instruction.kind !== "callFunction" || returning.has(instruction.functionId)
+              ? state
+              : null;
           }
-          if (interrupted(index)) out.push({ node: null, edge: "leaves" });
-          return out;
-        },
-        join: (left, right) => ({
-          end:
-            left.end === null || left.end === right.end
-              ? right.end
-              : right.end === null
-                ? left.end
-                : SEVERAL,
-          leaves: left.leaves || right.leaves,
-          returns: left.returns || right.returns,
-        }),
-        equals: (left, right) =>
-          left.end === right.end && left.leaves === right.leaves && left.returns === right.returns,
-        transfer: (index, edge, state) => {
-          switch (edge) {
-            case "calls":
-              return { end: index, leaves: false, returns: false };
-            case "return":
-              return RETURNS;
-            case "leaves":
-              return LEAVING;
-            case "call":
-              return state?.returns === true ? { ...state, returns: false } : state;
-            case "resume": {
-              const instruction = this.plan.instructions[index]!;
-              if (first === null || instruction.kind !== "callFunction") return state;
-              const entry = this.#flow.functionById(instruction.functionId)?.entryInstruction;
-              return entry === undefined || first[entry]?.returns === true ? state : null;
-            }
-            default:
-              return state;
-          }
-        },
-      });
-    first = solve();
-    return solve();
+          default:
+            return state;
+        }
+      },
+    });
   }
 
   /**

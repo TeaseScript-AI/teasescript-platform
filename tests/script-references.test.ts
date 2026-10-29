@@ -200,8 +200,12 @@ test("a computed target that names no file, or a file that runs nothing, fails w
   );
 });
 
-test("a goto to a reference that can name a file of declarations only warns, or is an error where it names only that file", () => {
-  const others = { ...HALL, "helpers.tease": 'function greet { say "hi" }' };
+test("a goto to a reference that can name a file of declarations only warns, or is an error where it names only such files", () => {
+  const others = {
+    ...HALL,
+    "helpers.tease": 'function greet { say "hi" }',
+    "tools.tease": "function sharpen { }",
+  };
   const check = (main: string): [string, string][] =>
     diagnostics(project(main, others)).map(([, code, message]) => [code, message]);
   const runsNothing =
@@ -230,6 +234,19 @@ test("a goto to a reference that can name a file of declarations only warns, or 
     "hall",
     "exit",
   ]);
+  // Where every file the goto's references may name holds declarations only, each would fail (#1146).
+  assert.deepEqual(
+    check(
+      'if debugMode { exit }\nlet tools = [script("helpers.tease"), script("tools.tease")]\ngoto (tools[0])',
+    ),
+    [
+      [
+        "TSV057",
+        "Every file that this 'goto' can lead to, such as 'helpers.tease', holds declarations only and runs nothing, so going there would end nowhere. Make the 'goto' lead to a file that runs something.",
+      ],
+      ["TSV065", unstarted("rooms/hall.tease")],
+    ],
+  );
   // A call of such a file runs nothing and returns.
   assert.deepEqual(
     said(project('let next = script("helpers.tease")\ncall (next)\nsay "back"\nexit', others), {
