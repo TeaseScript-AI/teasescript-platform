@@ -2593,8 +2593,9 @@ function warningFix(
   diagnosed: Diagnosed,
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
-  // (the elements a call reads: no test of the call's value fixes them, and the run stops at the call)
+  // (the elements a call reads, and what toJson writes below its argument: no test of the value read fixes them)
   if (rule.rule === "elements") return "";
+  if (rule.rule === "json" && rule.nested) return WRITABLE_JSON_FIX;
   if (kinds.includes("null")) {
     // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
     // change would be lost)
