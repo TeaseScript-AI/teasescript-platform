@@ -14,7 +14,7 @@ import { defaultNull } from "./fallbacks.js";
 import { finishingKeyRead } from "./finishing.js";
 import { hasMethod } from "./kinds.js";
 import type { Offending } from "./model.js";
-import { keyLabel, ownSpan, quietKinds, receiverKinds } from "./names.js";
+import { keyLabel, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
 import { nullWarning, obligation, propertiesOf } from "./warnings.js";
 
 // C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
@@ -151,13 +151,18 @@ export function memberChecks(
 /**
  * C5c for a store: whether the receiver's sources have the property, once per receiver key and property: `none` (every
  * known source lacks it), `some`, `all`; the sources are those the contract reads at the property's path, and the
- * earliest literal that lacks it, where the store's error points (ADR 1.4).
+ * earliest literal that lacks it, where the store's error points (ADR 1.4); and whether one gives an unknown there, which
+ * an object the analysis cannot list gives at every property (#1436).
  */
 function propertyPresence(
   walk: Consumers,
   receiver: Key,
   property: string,
-): { readonly state: "none" | "some" | "all"; readonly literal: Writer | null } {
+): {
+  readonly state: "none" | "some" | "all";
+  readonly literal: Writer | null;
+  readonly unknown: boolean;
+} {
   const { program, contract } = walk.pass;
   const memoKey = joinParts(receiver, property);
   const known = walk.presence.get(memoKey);
@@ -165,6 +170,7 @@ function propertyPresence(
   const path = keyPath(receiver);
   let lacks = false;
   let has = false;
+  let unknown = false;
   let literal: Writer | null = null;
   // a source without the property gives `missing`; an unknown value of a present property says nothing of it
   const see = (all: readonly Item[]): void => {
@@ -178,6 +184,8 @@ function propertyPresence(
       }
     if (items.some((item) => !(item.tag === "unknown" && item.reasons === REASON.missing)))
       has = true;
+    if (items.some((item) => item.tag === "unknown" && item.reasons !== REASON.missing))
+      unknown = true;
   };
   for (let length = path.length; length >= 0 && !(lacks && has); length -= 1) {
     program.work.charge("checks");
@@ -188,7 +196,7 @@ function propertyPresence(
     for (const sub of contract.relevantSubs(stored, below))
       if (!(lacks && has)) see(walk.run(contract.subAt(sub.key, below)));
   }
-  const presence = { state: lacks ? (has ? "some" : "none") : "all", literal } as const;
+  const presence = { state: lacks ? (has ? "some" : "none") : "all", literal, unknown } as const;
   keepText(program.work, memoKey.length);
   walk.presence.set(memoKey, presence);
   return presence;
@@ -284,9 +292,16 @@ export function receivers(walk: Consumers): void {
         );
         continue;
       }
-      if (presence.state !== "all")
+      // (every source the contract reads has it, but an unknown there may be one an object the analysis cannot list
+      // lacks, as the read's: ADR 1.8, #1436)
+      const unlisted =
+        presence.state === "all" && presence.unknown && owner !== undefined
+          ? unlistedObject(walk, owner, { node: d.prep ?? d.node, kinds: receiver })
+          : null;
+      if (presence.state !== "all" || unlisted !== null)
         extra.push([
-          makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
+          unlisted ??
+            makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
           `has .${propertyName(property)} before the store`,
         ]);
     }

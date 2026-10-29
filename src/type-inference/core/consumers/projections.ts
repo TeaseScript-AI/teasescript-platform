@@ -13,7 +13,7 @@ import { defaultNull } from "./fallbacks.js";
 import { literalSyntax } from "./finishing.js";
 import { hasProperty, unsettledItem } from "./kinds.js";
 import type { Offending } from "./model.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds, receiverKinds } from "./names.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
 import { consume } from "./operands.js";
 import { memberChecks } from "./receivers.js";
 import { obligation, propertiesOf, warning } from "./warnings.js";
@@ -70,6 +70,10 @@ export function projection(
       !own.some((item) => item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) &&
       // (a member contract a stop left unsettled is no proof of the property)
       !own.some(unsettledItem) &&
+      // (nor an unknown one of an object the analysis cannot list, which may lack it: ADR 1.8, #1436)
+      !(
+        own.some((item) => item.tag === "unknown") && unlistedObject(walk, c.owner, null) !== null
+      ) &&
       !(
         selectsElement(property) &&
         quiet.some((tag) => tag === "list" || tag === "set" || tag === "object")
@@ -137,9 +141,15 @@ export function projection(
       );
       return;
     }
-    // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's)
-    const open = missing.length > 0 ? missing[0] : value.find(unsettledItem);
-    if (open !== undefined) extra.push([open, `has .${property} before the read`]);
+    // (a member read a stop left unsettled is no proof of the property either: its check stands, as C6's; nor is an
+    // unknown one of an object the analysis cannot list, a written or tested `object` included: ADR 1.8, #1436)
+    const open =
+      missing[0] ??
+      value.find(unsettledItem) ??
+      (value.some((item) => item.tag === "unknown")
+        ? unlistedObject(walk, c.owner, { node, kinds: owners })
+        : null);
+    if (open !== undefined && open !== null) extra.push([open, `has .${property} before the read`]);
   }
   const takes = (tag: ItemTag): boolean =>
     tag === "object" ? !indexStep : hasProperty(tag, property);

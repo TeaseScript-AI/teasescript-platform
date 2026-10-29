@@ -165,7 +165,11 @@ export class Consumers {
   readonly readKeys = new Map<PlaceId, Key | null>();
   readonly presence = new Map<
     string,
-    { readonly state: "none" | "some" | "all"; readonly literal: Writer | null }
+    {
+      readonly state: "none" | "some" | "all";
+      readonly literal: Writer | null;
+      readonly unknown: boolean;
+    }
   >();
   readonly defaults = new Map<string, { readonly key: Key; readonly at: FlowNode } | null>();
   /** The cheap deciders' shapes, one per key, and their decisions, one per key and path (`cheapDecided`). */

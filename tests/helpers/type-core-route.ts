@@ -5,6 +5,7 @@ import type {
   TypePlan,
 } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-data/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 import {
@@ -18,12 +19,22 @@ import {
 
 // The candidate route's plan and runs as the derived oracle compares them (S6-CARRIERS §5.2, TABLE r4.59).
 
-/** A run of `plan` to its end with the host globals' values: its status, its failure and what it said, with offsets. */
+/**
+ * A run of `plan` to its end with the host globals' values, and the script's stored values where given: its status, its
+ * failure and what it said, with offsets.
+ */
 export function runGlobals(
   plan: InstructionPlan,
   globals: Readonly<Record<string, SerializableRuntimeValue>>,
+  scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[],
 ): PredictedRun {
-  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals }));
+  const result = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, {
+      globals,
+      ...(scriptStorage === undefined ? {} : { scriptStorage }),
+    }),
+  );
   const failure = result.events.find((event) => event.kind === "runtimeFailure");
   return {
     status: result.snapshot.status === "halted" ? "halted" : "failed",

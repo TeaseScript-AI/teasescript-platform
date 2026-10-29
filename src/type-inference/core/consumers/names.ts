@@ -1,12 +1,13 @@
 import type { Expression } from "../../../ast.js";
 import type { PlaceId, SourceSite } from "../../graph.js";
+import { isExternal, isOpaque } from "../admission.js";
 import { joinSteps, stepText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { heldReference, REFERENCE } from "../contract.js";
 import { keptKey, keptKeyBelow, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { makeItem, type Item, type ItemTag } from "../items.js";
+import { makeItem, REASON, type Item, type ItemTag } from "../items.js";
 import { dictList } from "../method-categories.js";
 import { propertyName, siteKey, stepName } from "../program.js";
 import { elementStep } from "../result.js";
@@ -188,6 +189,44 @@ export function quietKinds(
   return items.length === 0 || items.some((item) => item.tag === "unknown")
     ? null
     : items.map((item) => item.tag);
+}
+
+/** A property step no literal lists: no property's name is `#`. */
+const UNLISTED: readonly string[] = Object.freeze(["#"]);
+
+/**
+ * The reasons of an unknown there from an object the analysis cannot list: host data, an unmodelled value, a stop. A
+ * literal's `missing` is none, nor a parameter's `deferred`, whose call sites' arguments answer for it.
+ */
+const UNLISTING = REASON.external | REASON.opaque | REASON.budget;
+
+/**
+ * ADR 0021 1.4, 1.8 (#1436): an object `value` may hold whose properties the analysis cannot list (host data, a load or
+ * a parse, a written or tested `object`), as the item that explains a member's presence check; `null` where each it may
+ * hold is a literal's. What the value holds at a property no literal lists says it: each literal's `missing`, an object
+ * the analysis cannot list more, as at every property. Without a `read`, the contract's answer (the quiet path's); else
+ * the read's at its node, where an opaque or external receiver kind or a reference among its `kinds` owes the access's
+ * member check itself (`memberChecks`), for whatever object it may be, and nothing is asked.
+ */
+export function unlistedObject(
+  walk: Consumers,
+  value: PlaceId,
+  read: { readonly node: FlowNode; readonly kinds: readonly Item[] } | null,
+): Item | null {
+  if (
+    read !== null &&
+    read.kinds.some((item) => isOpaque(item) || isExternal(item) || REFERENCE.has(item.tag))
+  )
+    return null;
+  const items =
+    read === null
+      ? walk.run(walk.pass.contract.contractOfValueAt(value, UNLISTED))
+      : walk.valueItems(value, read.node, UNLISTED);
+  return (
+    withoutEmpty(items).find(
+      (item) => item.tag !== "unknown" || (item.reasons & UNLISTING) !== 0,
+    ) ?? null
+  );
 }
 
 export function kindsOf(walk: Consumers, value: PlaceId, node: FlowNode | null): Item[] {
