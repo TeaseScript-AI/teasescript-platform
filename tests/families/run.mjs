@@ -4,14 +4,14 @@
 // in the four modes (source and reversed order, the sharing on and off), and compares what the sources publish
 // (`publication`) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each
 // demand allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in
-// a worker thread: a source that takes longer than `--timeout` seconds or more than `--memory` MB of heap is counted as
-// stalled and the next source runs in a fresh worker. Prints one JSON line per generator and a total: sources,
-// unparsed, stalled, modes, runs, differences.
+// a child process: a source that takes longer than `--timeout` seconds, more than `--memory` MB of heap, or that ends
+// the process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process.
+// Prints one JSON line per generator and a total: sources, unparsed, stalled, modes, runs, differences.
+import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { sourcesOf } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
@@ -33,11 +33,11 @@ function attempt(run) {
 
 const hash = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
-if (!isMainThread) {
-  // the worker: each source's runs in the four modes on both trees
-  const { baseRoot, headRoot, allowances } = workerData;
+if (process.argv[2] === "--child") {
+  // the child: each source's runs in the four modes on both trees
+  const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
   const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
-  parentPort.on("message", ({ files, checks, globals }) => {
+  process.on("message", ({ files, checks, globals }) => {
     const reply = { runs: 0, parsed: true, differences: [] };
     for (const mode of head.MODES) {
       const runs = [];
@@ -62,7 +62,7 @@ if (!isMainThread) {
           });
       }
     }
-    parentPort.postMessage(reply);
+    process.send(reply);
   });
 } else {
   const [area, baseRoot, headRoot, ...rest] = process.argv.slice(2);
@@ -89,33 +89,50 @@ if (!isMainThread) {
   // fail before the first source when a tree has no library
   await Promise.all([oracles(baseRoot), oracles(headRoot)]);
 
-  let worker = null;
-  const fresh = () =>
-    new Worker(fileURLToPath(import.meta.url), {
-      workerData: { baseRoot, headRoot, allowances },
-      resourceLimits: { maxOldGenerationSizeMb: memory },
+  let child = null;
+  /** A child process, keeping the end of its error output: a fatal V8 error says there why the process ended. */
+  const fresh = () => {
+    const created = fork(
+      fileURLToPath(import.meta.url),
+      ["--child", JSON.stringify({ baseRoot, headRoot, allowances })],
+      {
+        execArgv: [`--max-old-space-size=${memory}`],
+        serialization: "advanced",
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
+      },
+    );
+    created.errors = "";
+    created.stderr.on("data", (chunk) => {
+      created.errors = (created.errors + chunk).slice(-4000);
     });
-  /** One source's reply, or why it stalled (`timeout`, or the worker's error). */
+    return created;
+  };
+  /** One source's reply, or why it stalled (`timeout`, or how the process ended). */
   const analysed = (message) =>
     new Promise((resolve) => {
-      worker ??= fresh();
-      const current = worker;
+      child ??= fresh();
+      const current = child;
       const onMessage = (reply) => settle(reply);
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
-      const onExit = (code) => settle({ stalled: `exit ${code}` });
-      // (only these listeners go: the worker keeps its port referenced through its own)
+      // after `close`, the process's error output is complete
+      const onClose = (code, signal) => {
+        const fatal = /FATAL ERROR: [^\n]*/.exec(current.errors)?.[0];
+        settle({
+          stalled: [signal ?? `exit ${code}`, fatal].filter(Boolean).join(": ").slice(0, 200),
+        });
+      };
       const settle = (result) => {
         clearTimeout(timer);
-        current.off("message", onMessage).off("error", onError).off("exit", onExit);
+        current.off("message", onMessage).off("error", onError).off("close", onClose);
         if ("stalled" in result) {
-          worker = null;
-          void current.terminate();
+          child = null;
+          current.kill("SIGKILL");
         }
         resolve(result);
       };
       const timer = setTimeout(() => settle({ stalled: "timeout" }), timeout);
-      current.on("message", onMessage).on("error", onError).on("exit", onExit);
-      current.postMessage(message);
+      current.on("message", onMessage).on("error", onError).on("close", onClose);
+      current.send(message);
     });
 
   const folder = path.join(path.dirname(fileURLToPath(import.meta.url)), area);
@@ -162,7 +179,7 @@ if (!isMainThread) {
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
   }
-  await worker?.terminate();
+  child?.kill();
   console.log(JSON.stringify({ ...total, node: process.version }));
   process.exitCode = total.differences === 0 && total.stalled === 0 ? 0 : 1;
 }

@@ -16,10 +16,10 @@ node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dis
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
 publishes (`publication`) and, for a generator whose `checks` include `"stops"`, which decisions stop and when at each
-demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap is counted as
-stalled, and the runner goes on with the next. It prints one JSON line per generator and a total (sources, unparsed,
-stalled, modes, runs, differences), and exits 1 when any run differs or any source stalls. Run large sizes as one
-capped job per area or shard on a worker.
+demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap, or that ends
+its analysing process (a fatal V8 error), is counted as stalled with the reason (`--out`), and the runner goes on with
+the next. It prints one JSON line per generator and a total (sources, unparsed, stalled, modes, runs, differences), and
+exits 1 when any run differs or any source stalls. Run large sizes as one capped job per area or shard on a worker.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
