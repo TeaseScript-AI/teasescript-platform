@@ -285,9 +285,11 @@ function reportMistakenUnit(
   word: Token,
   meant: DurationUnit,
 ): void {
-  const why = word.lexeme.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
+  const lower = word.lexeme.toLowerCase();
+  const why = lower === "m" ? ", because it could mean minutes or months" : "";
+  const lowercase = lower === word.lexeme ? "" : " Units are written in lowercase.";
   const message = (fix: string) =>
-    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]}, ${fix}. ${UNITS_OF_TIME}`;
+    `'${word.lexeme}' is not a unit${why}.${lowercase} For ${MEANT_UNITS[meant]}, ${fix}. ${UNITS_OF_TIME}`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     message(`use the unit ${meant}`),

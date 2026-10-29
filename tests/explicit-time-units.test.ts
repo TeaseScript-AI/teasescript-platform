@@ -243,11 +243,12 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     const [unit, name] = meant.get(word)!;
     const source = place.replace("#", `${amount}${space}${word}`);
     const why = word.toLowerCase() === "m" ? ", because it could mean minutes or months" : "";
+    const lowercase = word === word.toLowerCase() ? "" : " Units are written in lowercase.";
     const offered = `${amount} ${unit}`;
     const fix = others.length === 0 ? `write '${offered}'` : `use the unit ${unit}`;
     assert.deepEqual(
       compileSource(`${names}${source}\nexit`).diagnostics.map(({ message }) => message),
-      [`'${word}' is not a unit${why}. For ${name}, ${fix}. ${units}`, ...others],
+      [`'${word}' is not a unit${why}.${lowercase} For ${name}, ${fix}. ${units}`, ...others],
       source,
     );
     if (others.length === 0) {
