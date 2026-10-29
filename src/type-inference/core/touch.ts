@@ -147,7 +147,7 @@ interface FoundBranch {
 /**
  * What a merge owes: `meet` (a place's landed types against its contents), `elements` (a literal's elements standing
  * together with two kinds), or `copies` (A2: as `elements`, over what the stores into one place or a literal's elements
- * definitely hold, `Admission.#heldOf`; a contributor holding anything decides nothing there).
+ * definitely hold, `heldOf` (`admission/held.ts`); a contributor holding anything decides nothing there).
  */
 export type TouchMode = "meet" | "elements" | "copies";
 
@@ -1436,7 +1436,7 @@ export class Touches {
       // (a node containing the other is their union; it owes the meetings found in making it where it differs from the
       // other, whose landed types may decide where the two are merged; all of them where a ring stands in it; for
       // `copies` nothing new, its meetings found where it was made: a store's own value, or its group's,
-      // `Admission.#groupHeld`)
+      // `groupHeld` in `admission/held.ts`)
       const owes = (outer: Touch, inner: Touch): Found =>
         mode === "copies"
           ? NONE
@@ -1550,7 +1550,7 @@ export class Touches {
   /**
    * The paths of `where` at which `node` stands (contributors at its node there), as a found trie: at each level the
    * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once (A2:
-   * where a store's own contribution stands at a live group's meetings, `Admission.#groupHeld`).
+   * where a store's own contribution stands at a live group's meetings, `groupHeld` in `admission/held.ts`).
    */
   public standsAt(node: Touch | null, where: Found): Found {
     if (node === null || where === NONE) return NONE;

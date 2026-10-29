@@ -12,12 +12,21 @@ import {
 } from "./check-obligation-inventory.mjs";
 import { repositoryRoot } from "./files.mjs";
 
-// Where the scratch copies are edited, in this layout (the #1071 splits repoint them): the class's entry and where its
-// members are inserted; the file holding `OBLIGATION_SITES`; the fresh pass, its first line, its instance and its label,
-// the path from it to admission's folder, and what it imports to name `Admission`.
+// Where the scratch copies are edited, in this layout (the #1071 splits repoint them): the class's entry, where its
+// members are inserted and what it imports to name `boundaryCheck`; the file holding `OBLIGATION_SITES`; the fresh pass,
+// its first line, its instance and its label, the path from it to admission's folder, and what it imports to name
+// `Admission`.
 const ADMISSION = "src/type-inference/core/admission.ts";
 const MEMBERS = "  public valueAt(";
-const INVENTORY = ADMISSION;
+const ADMISSION_IMPORTS = 'import { boundaryCheck } from "./admission/boundaries.js";\n';
+const INVENTORY = "src/type-inference/core/admission/boundaries.ts";
+// (the scratch edit that lets the entry import it: `boundaryCheck` is its part's own)
+const BOUNDARY_EXPORT = [
+  [
+    INVENTORY,
+    (text) => text.replace("\nfunction boundaryCheck(", "\nexport function boundaryCheck("),
+  ],
+];
 const CONSUMERS = "src/type-inference/core/consumers.ts";
 const FRESH = CONSUMERS;
 const FRESH_START = "  #freshStores(): void {\n";
@@ -357,15 +366,21 @@ const forwarded = (name) =>
 const importing = (names, from) => `import { ${names.join(", ")} } from "${from}";\n`;
 
 test("the single-file layout: each recognised creation must be listed; every other form of a guarded name is unproved", () => {
-  const messages = messagesWith({
-    [ADMISSION]: (text) =>
-      `${text.replace(
-        MEMBERS,
-        [...MEMBER_FORMS.map(([, member]) => member), ...ERROR_FORMS]
-          .map((member) => `  ${member}\n\n`)
-          .join("") + MEMBERS,
-      )}\n${ENTRY_FORMS.map(([, form]) => form).join("\n\n")}\n`,
-  });
+  const messages = messagesWith(
+    edits(
+      [
+        ADMISSION,
+        (text) =>
+          `${ADMISSION_IMPORTS}${text.replace(
+            MEMBERS,
+            [...MEMBER_FORMS.map(([, member]) => member), ...ERROR_FORMS]
+              .map((member) => `  ${member}\n\n`)
+              .join("") + MEMBERS,
+          )}\n${ENTRY_FORMS.map(([, form]) => form).join("\n\n")}\n`,
+      ],
+      ...BOUNDARY_EXPORT,
+    ),
+  );
   for (const [name, , gives] of MEMBER_FORMS)
     if (gives === "creates") expectStart(messages, `Admission.${name} creates`);
   for (const [start] of ENTRY_FORMS) expectStart(messages, start);
