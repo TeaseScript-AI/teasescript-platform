@@ -256,6 +256,8 @@ interface ParsedPart {
   readonly recoveredAtStatementBoundary: boolean;
   /** What the parse of `form` returned. */
   readonly result: unknown;
+  /** How many brace blocks are around it, which its recovery reads (see `Parser.atBraceCloser`). */
+  readonly braceDepth: number;
   readonly end: number;
   readonly diagnostics: DiagnosticSegment;
   /** The literals without their closing delimiter that its parse failed to read (see `Parser.unclosedLiterals`). */
@@ -405,6 +407,8 @@ export class Parser {
    */
   public unclosedLiterals = 0;
   public current = 0;
+  /** How many statement blocks with braces the parser is inside (`asStatements`), which recovery reads (`atBraceCloser`). */
+  #braceDepth = 0;
   #commaLookahead: {
     readonly at: number;
     readonly insideDelimiters: boolean;
@@ -730,6 +734,7 @@ export class Parser {
     const speculative = new Parser(this.tokens, this.shared);
     speculative.current = at;
     speculative.#speculative = true;
+    speculative.#braceDepth = this.#braceDepth;
     return speculative;
   }
 
@@ -748,7 +753,8 @@ export class Parser {
         part.insideDelimiters === this.insideDelimiters &&
         sameStorageDelimiters(part.storageDelimiters, this.storageDelimiters) &&
         part.blockEndsCompactInteraction === this.blockEndsCompactInteraction &&
-        part.recoveredAtStatementBoundary === this.recoveredAtStatementBoundary,
+        part.recoveredAtStatementBoundary === this.recoveredAtStatementBoundary &&
+        part.braceDepth === this.#braceDepth,
     );
     if (known !== undefined) {
       const diagnosticCount = this.diagnostics.length;
@@ -770,6 +776,7 @@ export class Parser {
       storageDelimiters: this.storageDelimiters,
       blockEndsCompactInteraction: this.blockEndsCompactInteraction,
       recoveredAtStatementBoundary: this.recoveredAtStatementBoundary,
+      braceDepth: this.#braceDepth,
     };
     const diagnosticCount = this.diagnostics.length;
     const fixOfferCount = this.#fixOffers.length;
@@ -1855,6 +1862,13 @@ export class Parser {
       if (this.match(TokenKind.LeftBracket)) {
         const start = expression;
         this.skipNewlines();
+        if (this.atGroupEnd(true)) {
+          this.reportMissingCloser(
+            parserDiagnosticCode.expectedExpression,
+            "Expected an expression.",
+          );
+          return expression;
+        }
         const index = yield* parseChild(this.withinDelimiters(this.parseRequiredExpressionTask()));
         this.skipNewlines();
         if (index === null || !this.match(TokenKind.RightBracket)) {
@@ -1907,6 +1921,7 @@ export class Parser {
     let sawNamed = false;
     this.skipNewlines();
     while (!this.check(TokenKind.RightParenthesis) && !this.check(TokenKind.EndOfFile)) {
+      if (this.atGroupEnd(true)) break;
       let argument: CallArgument | null = null;
       if (isPropertyName(this.peek()) && this.peek(1).kind === TokenKind.Colon) {
         const name = this.identifier(this.advance());
@@ -2192,11 +2207,15 @@ export class Parser {
   /** Parses a block of statements, where a line break ends a complete statement again. */
   public *asStatements<T>(task: ParseTask<T>): ParseTask<T> {
     const enclosing = this.insideDelimiters;
+    const braceDepth = this.#braceDepth;
     this.insideDelimiters = false;
+    // An indented block after a `:` has no brace.
+    if (this.check(TokenKind.LeftBrace)) this.#braceDepth += 1;
     try {
       return yield* parseChild(this.#withoutEnclosingDelimiters(task));
     } finally {
       this.insideDelimiters = enclosing;
+      this.#braceDepth = braceDepth;
     }
   }
 
@@ -2238,8 +2257,7 @@ export class Parser {
     const first = afterNewlines[this.current + 1]!;
     if (isPropertyName(this.tokens[first]!) && this.tokens[first + 1]?.kind === TokenKind.Colon)
       return false;
-    this.shared.closers ??= delimiterClosers(this.tokens);
-    const closer = this.shared.closers.get(this.current);
+    const closer = this.closerOf(this.current);
     if (closer === undefined) return true;
     const after = afterNewlines[closer + 1]!;
     const next = this.tokens[after]!.kind;
@@ -2389,14 +2407,47 @@ export class Parser {
     }
   }
 
+  /**
+   * Skips the rest of a statement to its line break, or to the `}` of the statement block it is in (see
+   * `atBraceCloser`); with `stopAtRightBrace`, to any `}`, as a statement in a block and some commands always did.
+   */
   public synchronizeStatement(stopAtRightBrace = false): void {
     while (
       !this.check(TokenKind.Newline) &&
       !this.check(TokenKind.EndOfFile) &&
-      !(stopAtRightBrace && this.check(TokenKind.RightBrace))
+      !(stopAtRightBrace ? this.check(TokenKind.RightBrace) : this.atBraceCloser())
     ) {
       this.advance();
     }
+  }
+
+  /**
+   * Whether the token here is a `}` while the parser is inside a statement block's braces. Skipping the rest of a
+   * statement never skips it, as the `}` in `if ok { goto }`. Recovery inside a value does not read it: which group a
+   * `}` there closes cannot be told while recovering (#1147), as in `if ok { let v = [(1}` with `, 3]` on the next line.
+   */
+  public atBraceCloser(): boolean {
+    return this.check(TokenKind.RightBrace) && this.#braceDepth > 0;
+  }
+
+  /**
+   * Whether the group being read must have ended before the token here, at a statement on a line of its own that its
+   * content cannot start, as after `let v = [`. With `values`, that is a statement that no value starts, such as `let`,
+   * while a `say` there is a value; in an object or dict, whose entries start with a key, it is any statement but a
+   * property named like one. The content stops there, and the group's missing closer is reported where its line ends.
+   */
+  public atGroupEnd(values: boolean): boolean {
+    return (
+      this.previous().kind === TokenKind.Newline &&
+      this.isRecoveredTopLevelStatement() &&
+      !(values && isExpressionStart(this.peek()))
+    );
+  }
+
+  /** The index of the delimiter that closes the one at `opener`, if one does. */
+  public closerOf(opener: number): number | undefined {
+    this.shared.closers ??= delimiterClosers(this.tokens);
+    return this.shared.closers.get(opener);
   }
 
   /**
@@ -2601,8 +2652,7 @@ export class Parser {
     if (statement === undefined || anyNext || OPERAND_STARTS.has(this.peek(1).kind))
       return statement;
     if (this.peek(1).kind !== TokenKind.LeftParenthesis) return undefined;
-    this.shared.closers ??= delimiterClosers(this.tokens);
-    const closer = this.shared.closers.get(this.current + 1);
+    const closer = this.closerOf(this.current + 1);
     return closer !== undefined && this.tokens[closer + 1]?.kind === TokenKind.LeftBrace
       ? statement
       : undefined;
@@ -2620,8 +2670,7 @@ export class Parser {
 
   /** Skips the group that the opening delimiter next starts, to after its closing one, or else to the end of the line. */
   public skipGroup(): void {
-    this.shared.closers ??= delimiterClosers(this.tokens);
-    const closer = this.shared.closers.get(this.current);
+    const closer = this.closerOf(this.current);
     if (closer === undefined) this.synchronizeStatement();
     else this.current = closer + 1;
   }

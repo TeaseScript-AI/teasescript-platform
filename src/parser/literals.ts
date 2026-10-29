@@ -26,6 +26,10 @@ export function* parseParenthesized(
   start: Token,
 ): ParseTask<ParenthesizedExpression | null> {
   parser.skipNewlines();
+  if (parser.atGroupEnd(true)) {
+    parser.reportMissingCloser(parserDiagnosticCode.expectedExpression, "Expected an expression.");
+    return null;
+  }
   const expression = yield* parseChild(parser.parseRequiredExpressionTask());
   parser.skipNewlines();
   if (expression === null || !parser.match(TokenKind.RightParenthesis)) {
@@ -67,6 +71,7 @@ function* parseDelimitedElements(parser: Parser, closing: TokenKind): ParseTask<
   const elements: Expression[] = [];
   parser.skipNewlines();
   while (!parser.check(closing) && !parser.check(TokenKind.EndOfFile)) {
+    if (parser.atGroupEnd(true)) break;
     const value = yield* parseChild(parser.parseRequiredExpressionTask());
     if (value === null) {
       parser.synchronizeDelimited(closing);
@@ -91,9 +96,8 @@ export function* parseObjectLiteral(parser: Parser, start: Token): ParseTask<Obj
   const properties: ObjectProperty[] = [];
   parser.skipNewlines();
   while (!parser.check(TokenKind.RightBrace) && !parser.check(TokenKind.EndOfFile)) {
-    // A statement on a line of its own ends a literal left open, as after `let o = {`; `let: 1` stays a property.
-    if (parser.previous().kind === TokenKind.Newline && parser.isRecoveredTopLevelStatement())
-      break;
+    // A literal left open ends as after `let o = {` (see `atGroupEnd`); `let: 1` stays a property.
+    if (parser.atGroupEnd(false)) break;
     if (!isPropertyName(parser.peek())) {
       parser.reportInsertion(
         parserDiagnosticCode.expectedPropertyName,
@@ -143,9 +147,8 @@ export function* parseDictLiteral(parser: Parser, start: Token): ParseTask<DictL
   const entries: DictEntry[] = [];
   parser.skipNewlines();
   while (!parser.check(TokenKind.RightBrace) && !parser.check(TokenKind.EndOfFile)) {
-    // As in an object literal, a statement on a line of its own ends a dict left open.
-    if (parser.previous().kind === TokenKind.Newline && parser.isRecoveredTopLevelStatement())
-      break;
+    // As in an object literal, a dict left open ends where its group must have (see `atGroupEnd`).
+    if (parser.atGroupEnd(false)) break;
     const keyStart = parser.peek();
     const key = yield* parseChild(parseDictKey(parser));
     if (key === null) {

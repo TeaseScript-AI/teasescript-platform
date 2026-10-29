@@ -57,13 +57,20 @@ test("general expression continuations parse valid and malformed nesting on a co
         assert.deepEqual(rejected.program.statements.map((s) => s.kind), ['letStatement', 'exitStatement'], name);
         continue;
       }
-      // Only the root diagnostic is fixed: the missing value before 'exit', or
-      // the physical newline inside the innermost string. Secondary unwinding
-      // may improve but must stay structured, source-associated and deterministic.
+      // Only the root diagnostic is fixed: the physical newline inside the
+      // innermost string, the closer or index of a set, call, or index left open,
+      // which ends before the statement on the next line, or else the missing
+      // value before 'exit'. Secondary unwinding may improve but must stay
+      // structured, source-associated and deterministic.
       const compact = (d) => [d.code, d.span.start.offset, d.span.end.offset];
-      const root = name === 'interpolation'
-        ? ['TSL008', malformed.indexOf('\\n'), malformed.indexOf('\\n') + 1]
-        : ['TSP012', malformed.lastIndexOf('exit'), malformed.lastIndexOf('exit')];
+      const newline = malformed.indexOf('\\n');
+      const exit = malformed.lastIndexOf('exit');
+      const root = {
+        interpolation: ['TSL008', newline, newline + 1],
+        sets: ['TSP017', newline, newline],
+        calls: ['TSP017', newline, newline],
+        index: ['TSP012', newline, newline],
+      }[name] ?? ['TSP012', exit, exit];
       assert.deepEqual(compact(rejected.diagnostics[0]), root, name);
       for (const d of rejected.diagnostics) {
         assert.match(d.code, /^TS[LP][0-9]{3}$/u, name);
