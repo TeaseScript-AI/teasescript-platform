@@ -973,9 +973,9 @@ test("copies of a deep written type walk the type once, not once per copy (#1194
  * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
  * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
  * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
- * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (3.58 here,
- * 3.61 before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both
- * shapes' decisions at their allowance at 300 levels.
+ * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
+ * as before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both shapes'
+ * decisions at their allowance at 300 levels.
  */
 test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
   const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
