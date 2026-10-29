@@ -1,7 +1,7 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import { concrete, isExternal } from "../admission.js";
 import { expand, partOf } from "../admission/walk.js";
-import type { Expansion } from "../admission/model.js";
+import type { Expansion, Part } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
 import { joinSteps, keptParts, keptSlice, keptSteps, NESTING_LIMIT } from "../budget.js";
 import type { Consumers } from "../consumers.js";
@@ -351,12 +351,40 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[], dep
         if (copied !== NOTHING) at.copies.push(copied);
       }
     }
-    let kept = false;
-    for (const part of task.parts)
-      if (part.step === null) values.push(partOf(walk.admission, part));
-      else kept = true;
-    if (kept) at.tasks.push(task);
+    const { cells, operands } = partsOf(walk, task);
+    for (const part of operands) {
+      program.work.charge("checks");
+      values.push(partOf(walk.admission, part));
+    }
+    if (cells.size > 0) at.tasks.push(task);
   }
+}
+
+/** Each value's parts once (`partsOf`). */
+const partsByValue = new WeakMap<
+  Expansion,
+  { readonly cells: Map<string, Part[]>; readonly operands: Part[] }
+>();
+
+/** A value's parts: its cells by their steps, so a step enters them in one look-up, and the operands at its path. */
+function partsOf(
+  walk: Consumers,
+  task: Expansion,
+): { readonly cells: Map<string, Part[]>; readonly operands: Part[] } {
+  let found = partsByValue.get(task);
+  if (found !== undefined) return found;
+  found = { cells: new Map(), operands: [] };
+  for (const part of task.parts) {
+    walk.pass.program.work.charge("checks");
+    if (part.step === null) found.operands.push(part);
+    else {
+      const list = found.cells.get(part.step);
+      if (list === undefined) found.cells.set(part.step, [part]);
+      else list.push(part);
+    }
+  }
+  partsByValue.set(task, found);
+  return found;
 }
 
 /** Enters the stores at a frontier's node: each value there, an `addAll`'s elements. */
@@ -411,7 +439,10 @@ function stepFrontier(
   from.steps.set(step, at);
   const cells: Expansion[] = [];
   for (const task of from.tasks)
-    for (const part of task.parts) if (part.step === step) cells.push(partOf(walk.admission, part));
+    for (const part of partsOf(walk, task).cells.get(step) ?? []) {
+      walk.pass.program.work.charge("checks");
+      cells.push(partOf(walk.admission, part));
+    }
   enterValues(walk, at, cells, depth);
   enterStores(walk, at, depth);
   for (const copy of from.copies) {
