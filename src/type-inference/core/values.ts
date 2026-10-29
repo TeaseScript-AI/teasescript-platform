@@ -472,7 +472,12 @@ export class Values {
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<{ readonly items: readonly Item[]; readonly proof: Position | null }> {
-    if (rest.length > 0 && positions() && rest.every(propertyOnly) && this.#rooted(value, rest[0]!)) {
+    if (
+      rest.length > 0 &&
+      positions() &&
+      rest.every(propertyOnly) &&
+      this.#rooted(value, rest[0]!)
+    ) {
       const { items, proof } = yield* this.pass.solver.proven(
         this.#position(value, node, this.pass.contract.pathIdOf(rest), rest),
       );
@@ -481,7 +486,11 @@ export class Values {
     return { items: yield* this.#through(value, node, rest, 0), proof: null };
   }
 
-  *#positioned(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
+  *#positioned(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
     return yield this.#position(value, node, this.pass.contract.pathIdOf(rest), rest);
   }
 
@@ -529,11 +538,13 @@ export class Values {
     const step = rest.at(-1)!;
     const own = (): Work<readonly Item[]> => this.#through(value, node, rest, 0);
     const from = yield* this.#positionOf(value, node, contract.pathParent(path), rest.slice(0, -1));
-    const hop = from !== null && from.rest === 0 ? yield* this.#hop(from.read, from.node, step) : null;
+    const hop =
+      from !== null && from.rest === 0 ? yield* this.#hop(from.read, from.node, step) : null;
     if (from === null || (!from.hopped && hop === null))
       return { items: yield* own(), proof: UNPOSITIONED };
     const noRef =
-      from.noRef && (from.outer === null || !heldReference(yield* contract.receiverKinds(from.outer)));
+      from.noRef &&
+      (from.outer === null || !heldReference(yield* contract.receiverKinds(from.outer)));
     if (!noRef) return { items: yield* own(), proof: UNPOSITIONED };
     const items = from.hopped
       ? mergeItems(
@@ -595,7 +606,16 @@ export class Values {
     if (path === 0) {
       const binding = program.occurrenceOf.get(value);
       if (binding !== undefined)
-        return new Position(value, 0, node, false, null, true, false, keptKey(program.work, binding, []));
+        return new Position(
+          value,
+          0,
+          node,
+          false,
+          null,
+          true,
+          false,
+          keptKey(program.work, binding, []),
+        );
       if (program.hasOf.has(value)) return new Position(value, 0, node, false, null, true, false);
       const projection = program.projOf.get(value);
       if (
@@ -625,7 +645,11 @@ export class Values {
     read: PlaceId,
     node: FlowNode | null,
     step: string,
-  ): Work<{ readonly read: PlaceId; readonly node: FlowNode | null; readonly writer: Writer | null } | null> {
+  ): Work<{
+    readonly read: PlaceId;
+    readonly node: FlowNode | null;
+    readonly writer: Writer | null;
+  } | null> {
     const { program, contract, exact } = this.pass;
     if (program.hasOf.has(read)) {
       const lone = contract.literalHop(read, step);

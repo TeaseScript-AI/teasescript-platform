@@ -1,10 +1,4 @@
-import {
-  KeyTrie,
-  keptPrefixes,
-  sortCost,
-  type DefinitionIndex,
-  type Key,
-} from "./definitions.js";
+import { KeyTrie, keptPrefixes, sortCost, type DefinitionIndex, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { CoreProgram } from "./program.js";
 

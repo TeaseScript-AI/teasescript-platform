@@ -189,7 +189,7 @@ function wrappedFrontier(
   const { contract } = admission.pass;
   const ids: number[] = [contract.pathIdOf(path)];
   // (up to the nearest path known, then each one step below its parent's)
-  for (let id = ids[0]!; !admission.frontiers.has(joinParts(place, id)) && id > 0; ) {
+  for (let id = ids[0]!; !admission.frontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
     ids.push(id);
   }
@@ -235,8 +235,11 @@ function scanHop(
   keepText(admission.work, memoKey.length);
   const { program, contract } = admission.pass;
   program.work.charge("checks");
-  let found: { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null =
-    null;
+  let found: {
+    readonly binding: PlaceId;
+    readonly read: PlaceId;
+    readonly decl: Definition;
+  } | null = null;
   const hop = contract.wrapperHop(place, step);
   const binding = hop === null ? undefined : program.occurrenceOf.get(hop.read);
   if (hop !== null && binding !== undefined) {
@@ -246,7 +249,8 @@ function scanHop(
     const own = (list: readonly Stop[] | undefined): boolean =>
       list === undefined ||
       list.every(
-        (stop) => stop.value === hop.read && stop.strip.length === 0 && stop.via === null && !stop.deep,
+        (stop) =>
+          stop.value === hop.read && stop.strip.length === 0 && stop.via === null && !stop.deep,
       );
     const beside = stopSteps(admission, stops);
     if (
@@ -330,8 +334,7 @@ function* wrapped(
   if (copied === null) return null;
   return {
     copied,
-    nullable:
-      typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
+    nullable: typeTags(copied).includes("null") || value.items.some((item) => item.tag === "null"),
   };
 }
 

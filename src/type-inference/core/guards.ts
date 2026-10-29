@@ -108,8 +108,10 @@ export class GuardIndex {
   public constructor(readonly program: CoreProgram) {
     const work = program.work;
     const flow = program.flow;
-    this.#tested = new KeyTrie(work, "eventSteps", () =>
-      new Set([...this.#branches.keys(), ...this.#operands.keys()]),
+    this.#tested = new KeyTrie(
+      work,
+      "eventSteps",
+      () => new Set([...this.#branches.keys(), ...this.#operands.keys()]),
     );
     const branches = new Map<Key, Map<Callable | null, FlowNode[]>>();
     for (const [uses, conditions] of [
