@@ -59,13 +59,13 @@ export function positioned(
 ): ProofDemand<Proof> {
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
-    key: joinParts("cp", key),
+    key: joinParts("cp", contract.keyId(key)),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
     proves: true,
     make: () => {
-      contract.remember(joinParts("cp", key));
+      contract.remember(joinParts("cp", contract.keyId(key)));
       const parent = keyOf(keyPlace(key), path.slice(0, -1));
       return advance(contract, { key: parent, length: path.length - 1 }, path.at(-1)!, () =>
         keyThrough(contract, key, 0),

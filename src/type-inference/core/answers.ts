@@ -448,13 +448,15 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
   const { program, contract, values, exact } = pass;
   switch (kind) {
     case "c":
-      return contract.contractOf(parts.join("|"));
+      return contract.contractOf(contract.keyOfId(parts.join("|")));
+    case "cp":
+      return contract.contractOf(contract.keyOfId(parts.join("|")));
     case "s": {
       const rest = splitPath(parts[2] ?? "");
       return contract.subAt(joinParts(parts[0]!, parts[1] ?? ""), rest);
     }
     case "rc":
-      return contract.receiverKinds(parts.join("|"));
+      return contract.receiverKinds(contract.keyOfId(parts.join("|")));
     case "cv":
       return contract.valueReceiver(Number(parts[0]));
     case "cop":

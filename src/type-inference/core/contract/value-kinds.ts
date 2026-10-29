@@ -2,6 +2,7 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { CorePass } from "../answers.js";
 import { joinParts, joinSteps, keepText } from "../budget.js";
 import type { Contract } from "../contract.js";
+import { cursors } from "../cursors.js";
 import { keyOf } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
 import { marked } from "../guards.js";
@@ -41,12 +42,41 @@ const NESTING = 256;
  * long names reaches the allowance by its own work.
  */
 export function memberStepOf(contract: Contract, path: readonly string[], from: number): number {
+  // (G3's path cursors: a whole path's first member step, once per path id from its parent's, never its text again)
+  if (from === 0 && cursors()) {
+    contract.pass.program.work.charge("invSteps");
+    return firstMember(contract, contract.pathIdOf(path));
+  }
   const at = memberStep(path, from);
   let length = 0;
   for (let index = from, end = at < 0 ? path.length : at + 1; index < end; index += 1)
     length += path[index]!.length + 1;
   contract.pass.program.work.charge("invSteps", length >> 3);
   return at;
+}
+
+/** The index of a path's first step a built-in value answers (`memberStep`), -1 for none: once per path id. */
+function firstMember(contract: Contract, id: number): number {
+  const pending: number[] = [];
+  for (
+    let at = id;
+    at > 0 && contract.firstMembers[at] === undefined;
+    at = contract.pathParents[at]!
+  )
+    pending.push(at);
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const at = pending[index]!;
+    const above =
+      contract.pathParents[at]! > 0 ? contract.firstMembers[contract.pathParents[at]!]! : -1;
+    contract.keep(1);
+    contract.firstMembers[at] =
+      above >= 0
+        ? above
+        : memberStep([contract.pathLastSteps[at]!], 0) === 0
+          ? contract.pathDepths[at]! - 1
+          : -1;
+  }
+  return id === 0 ? -1 : contract.firstMembers[id]!;
 }
 
 /** The kinds at a path of a value: a literal's field, a copied record's field. */

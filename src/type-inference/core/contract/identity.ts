@@ -26,7 +26,7 @@ export function copiedKey(contract: Contract, value: PlaceId): Key | null {
   if (binding !== undefined) return keyOf(binding, []);
   // (G3 3b: a projection's key is its owner's and its step, once per projection, never its whole chain again)
   const known = contract.copiedKeys.get(value);
-  if (known !== undefined) return known;
+  if (known !== undefined) return known === null ? null : contract.keyOfId(known);
   const pending: PlaceId[] = [];
   let current = value;
   let below: Key | null = null;
@@ -41,19 +41,20 @@ export function copiedKey(contract: Contract, value: PlaceId): Key | null {
     const owner = program.occurrenceOf.get(projection.owner);
     const memo = owner === undefined ? contract.copiedKeys.get(projection.owner) : undefined;
     if (owner !== undefined || memo !== undefined) {
-      below = owner !== undefined ? keyOf(owner, []) : memo!;
+      below = owner !== undefined ? contract.rootId(owner) : memo!;
       break;
     }
     current = projection.owner;
   }
   for (let index = pending.length - 1; index >= 0; index -= 1) {
     const at = pending[index]!;
-    if (below !== null)
-      below = keptKeyBelow(contract.work, below, [stepName(program.projOf.get(at)!.step)]);
+    if (below !== null) below = contract.keyIdBelow(below, stepName(program.projOf.get(at)!.step));
     contract.keep(1);
     contract.copiedKeys.set(at, below);
   }
-  return pending.length === 0 ? null : (contract.copiedKeys.get(value) ?? null);
+  // (kept by its cursor, `keyId`: its text made where it is asked, never kept per projection)
+  const found = pending.length === 0 ? null : (contract.copiedKeys.get(value) ?? null);
+  return found === null ? null : contract.keyOfId(found);
 }
 
 /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */

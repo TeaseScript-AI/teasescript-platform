@@ -1,5 +1,4 @@
 import type { PlaceId } from "../graph.js";
-import type { Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import { writerKey, type ItemScope, type Writer } from "./items.js";
 import type { Proof } from "./solver.js";
@@ -47,8 +46,11 @@ export class Position implements Proof {
     readonly writer: Writer | null,
     readonly noRef: boolean,
     readonly clean: boolean,
-    /** On the value side, the key whose receivers the read's own receivers are (`noRef`), once a read stands above it. */
-    readonly outer: Key | null = null,
+    /**
+     * On the value side, the key whose receivers the read's own receivers are (`noRef`), once a read stands above it, by
+     * its cursor (`Contract.keyId`).
+     */
+    readonly outer: string | null = null,
   ) {}
 
   public signature(scope: ItemScope): string {

@@ -422,6 +422,14 @@ export class Admission {
     ]));
   }
 
+  /**
+   * G3's path cursors: the name a place's key at a path is kept by in the inherited types, their cycles and the waiting
+   * scans (`Contract.keyId`), its text inside `withTextKeys`.
+   */
+  public keyId(place: PlaceId, path: readonly string[]): Key {
+    return this.pass.contract.keyId(keyOf(place, path));
+  }
+
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
   public get work(): WorkLedger {
     return this.pass.program.work;

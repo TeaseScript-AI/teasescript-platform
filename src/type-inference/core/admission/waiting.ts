@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { keyOf, type Key } from "../definitions.js";
+import type { Key } from "../definitions.js";
 import type { Inheriting } from "./model.js";
 import { permittedAt } from "./permitted.js";
 
@@ -19,7 +19,7 @@ function* inheritedSteps(
     const above = yield* inheritedSteps(admission, from, path.slice(0, admission.reach));
     return above === null ? null : permittedAt(above, path.slice(admission.reach));
   }
-  const key = keyOf(from, path);
+  const key = admission.keyId(from, path);
   const known = admission.inherited.get(key);
   return known !== undefined ? known : yield key;
 }
@@ -35,7 +35,10 @@ export function* inheritedInto(
   into: Key | null,
 ): Inheriting<TypeTerm | null> {
   // (past the deepest path a written type reaches, the place's path there is what it waits on, `inheritedAt`)
-  const source = keyOf(from, path.length > admission.reach ? path.slice(0, admission.reach) : path);
+  const source = admission.keyId(
+    from,
+    path.length > admission.reach ? path.slice(0, admission.reach) : path,
+  );
   if (into !== null && cut(admission, into, source)) return null;
   const term = yield* inheritedSteps(admission, from, path);
   return into !== null && cut(admission, into, source) ? null : term;

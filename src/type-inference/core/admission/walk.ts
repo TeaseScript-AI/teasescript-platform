@@ -1,6 +1,7 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import {
+  keep,
   keepText,
   keptArray,
   keptParts,
@@ -14,7 +15,8 @@ import { writtenOf } from "../contract.js";
 import { keyPath, keyPlace, sortCost, type Definition } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import { dictList } from "../method-categories.js";
-import type { CoreProgram } from "../program.js";
+import { cursors } from "../cursors.js";
+import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { EvaluationKey, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
@@ -109,6 +111,27 @@ function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaC
  * into an array once and only where a binding lands at it, so a literal nested k deep costs k steps, not k paths of
  * up to k steps each (TABLE r4.100 (2)).
  */
+/** A strip as `copySources` keeps it: an array, or a step before another strip (G3's path cursors). */
+interface StripCell {
+  readonly step: string;
+  readonly rest: Strip;
+}
+type Strip = readonly string[] | StripCell;
+
+function isCell(strip: Strip): strip is StripCell {
+  return "step" in strip;
+}
+
+/** A strip's steps as an array, made where it is read (`copySources`). */
+function stripSteps(admission: Admission, strip: Strip): readonly string[] {
+  if (!isCell(strip)) return strip;
+  const steps: string[] = [];
+  let at: Strip = strip;
+  for (; isCell(at); at = at.rest) steps.push(at.step);
+  for (const step of at) steps.push(step);
+  return keptArray(admission.work, steps);
+}
+
 export function copySources(
   admission: Admission,
   value: PlaceId,
@@ -148,11 +171,35 @@ export function copySources(
     strip: readonly string[];
     cellsLive: boolean;
   }[] = [];
-  const pending: [PlaceId, Steps | null, readonly string[], boolean][] = [[value, null, [], true]];
+  // (G3's path cursors: a strip is kept as the steps a chain of projections put before it, one cell per step, and made
+  // an array where a copy ends or another carrier reads it, never again at each projection; `withTextKeys` keeps it an
+  // array throughout, as before)
+  const pending: [PlaceId, Steps | null, Strip, boolean][] = [[value, null, [], true]];
   while (pending.length > 0) {
-    const [current, path, strip, cellsLive] = pending.pop()!;
+    const [current, path, held, cellsLive] = pending.pop()!;
     program.work.charge("indexSteps");
     const binding = program.occurrenceOf.get(current);
+    const projection = cursors() ? program.projOf.get(current) : undefined;
+    if (
+      binding === undefined &&
+      projection !== undefined &&
+      projection.step !== "iteration" &&
+      dictList(projection.step) === undefined
+    ) {
+      // (a projection by any other step passes its owner the strip with its step before it: `carried`'s
+      // `projection/owner`, unless its receiver may be a reference, `keepsOwn`)
+      if (!admission.keepsOwn(current)) {
+        keep(admission.work, 2);
+        pending.push([
+          projection.owner,
+          path,
+          { step: stepName(projection.step), rest: held },
+          cellsLive,
+        ]);
+      }
+      continue;
+    }
+    const strip = stripSteps(admission, held);
     if (binding !== undefined) {
       out.push({ path: made(path), binding, strip, cellsLive });
       continue;

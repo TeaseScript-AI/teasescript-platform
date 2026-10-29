@@ -2,7 +2,7 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, keep, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
+import { keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { landed, passThrough } from "./landings.js";
 import type { Frontier, Inheriting, Stop, Stops, Waiting } from "./model.js";
 import { permittedAt, unrestricted } from "./permitted.js";
@@ -85,7 +85,7 @@ export function inheritedAt(
     const above = inheritedAt(admission, place, path.slice(0, admission.reach));
     return above === null ? null : permittedAt(above, path.slice(admission.reach));
   }
-  const key = keyOf(place, path);
+  const key = admission.keyId(place, path);
   const known = admission.inherited.get(key);
   if (known !== undefined) return known;
   // (a resolution resolves every key its scans wait on itself, so none starts inside another)
@@ -94,7 +94,8 @@ export function inheritedAt(
   admission.resolving = true;
   try {
     const scan = (next: Key): Waiting => {
-      const [place, path] = [keyPlace(next), keyPath(next)];
+      const named = admission.pass.contract.keyOfId(next);
+      const [place, path] = [keyPlace(named), keyPath(named)];
       // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
       const frontier = positions() ? wrappedFrontier(admission, place, path) : null;
       if (frontier !== null)
@@ -106,15 +107,12 @@ export function inheritedAt(
       return ownScan(next);
     };
     const ownScan = (next: Key): Waiting => {
-      const [place, path] = [keyPlace(next), keyPath(next)];
+      const named = admission.pass.contract.keyOfId(next);
+      const [place, path] = [keyPlace(named), keyPath(named)];
       // (a place that answers through a copy above it asks that copy's place, nothing scanned)
       const through = passThrough(admission, place, path);
       if (through !== place)
-        return {
-          key: next,
-          steps: answerOf(admission, keptKey(admission.work, through, path)),
-          cycle: "",
-        };
+        return { key: next, steps: answerOf(admission, admission.keyId(through, path)), cycle: "" };
       const inputs = inputsOf(admission, place, path);
       return {
         key: next,
@@ -344,7 +342,8 @@ export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
   for (;;) {
     const step = steps.next(given);
     if (step.done === true) return step.value;
-    given = inheritedAt(admission, keyPlace(step.value), keyPath(step.value));
+    const named = admission.pass.contract.keyOfId(step.value);
+    given = inheritedAt(admission, keyPlace(named), keyPath(named));
   }
 }
 

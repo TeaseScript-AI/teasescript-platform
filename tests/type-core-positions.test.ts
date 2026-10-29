@@ -4,6 +4,7 @@ import test from "node:test";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
+import { withTextKeys } from "../src/type-inference/core/cursors.js";
 import { withoutPositions } from "../src/type-inference/core/positions.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -19,7 +20,8 @@ import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.j
  * `withoutPositions`, in both orders, with the sharing on and off. The family varies what keeps a binding from being a
  * wrapper (`Contract.wrapperHop`, `admission/inherited.ts`'s `scanHop`, `landings.ts`'s `landingHop`) at a middle one:
  * a store below it before or after the read, a sibling store, a rejected store before a valid one, a test of it, a
- * store from another callable or a handler, a copy of it, a sibling property, reads at every depth, a literal leaf.
+ * store from another callable or a handler, a copy of it, a sibling property, reads at every depth, a literal leaf. Each
+ * program publishes the same, too, with its keys and paths kept as their texts (`withTextKeys`, `cursors.ts`).
  */
 
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
@@ -137,7 +139,7 @@ function published(source: string, reversed: boolean): string {
   return [answers.text, route.text, observed(analysis)].join("\n");
 }
 
-test("a read through wrappers publishes the same from its position as from its root, for every variant, in both orders, with the sharing on and off (G3 3a)", () => {
+test("a read through wrappers publishes the same from its position as from its root, and with its keys as cursors as with their texts, for every variant, in both orders, with the sharing on and off (G3 3a, path cursors)", () => {
   const differing: string[] = [];
   let runs = 0;
   for (const depth of [2, 4])
@@ -149,11 +151,11 @@ test("a read through wrappers publishes the same from its position as from its r
             const run = (): string => published(source, reversed);
             const on = shared ? run() : withoutSharing(run);
             const off = withoutPositions(() => (shared ? run() : withoutSharing(run)));
+            const texts = withTextKeys(() => (shared ? run() : withoutSharing(run)));
             runs += 1;
-            if (on !== off)
-              differing.push(
-                `${variant} depth ${depth} leaf ${leaf}${reversed ? " reversed" : ""}${shared ? "" : " unshared"}`,
-              );
+            const name = `${variant} depth ${depth} leaf ${leaf}${reversed ? " reversed" : ""}${shared ? "" : " unshared"}`;
+            if (on !== off) differing.push(name);
+            if (on !== texts) differing.push(`${name} (text keys)`);
           }
       }
   assert.equal(runs, 2 * 2 * VARIANTS.length * 4);
@@ -182,13 +184,14 @@ test("a read through wrappers makes its states one step at a time: the wrapper c
     const small = counts[0]!;
     const large = counts[1]!;
     const scale = large.nodes / small.nodes;
-    // (a root and residual walk per read was cubic: 1,275 → 4,059 frames and 39,530 → 184,741 units at these sizes)
+    // (a root and residual walk per read was cubic: 1,275 → 4,059 frames and 39,530 → 184,741 units at these sizes; the
+    // keys' texts, quadratic)
     assert.ok(
       (2 * large.frames) / small.frames / scale < 2.2,
       `frames ${small.frames} → ${large.frames}${reversed ? " (reversed)" : ""}`,
     );
     assert.ok(
-      (2 * large.total) / small.total / scale < 2.3,
+      (2 * large.total) / small.total / scale < 2.2,
       `total ${small.total} → ${large.total}${reversed ? " (reversed)" : ""}`,
     );
   }

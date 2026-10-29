@@ -28,11 +28,23 @@ import {
   contractRead,
   literalRoute,
   receiverKinds,
+  receiverKindsOf,
   refReceiver,
   severalElements,
   subAt,
   valueReceiver,
 } from "./contract/key-contract.js";
+import {
+  keyId,
+  keyIdBelow,
+  keyIdParent,
+  keyIdPath,
+  keyIdPlace,
+  keyOfId,
+  pathKey,
+  pathOfKey,
+  rootId,
+} from "./contract/key-ids.js";
 import { entryAt } from "./contract/levels.js";
 import {
   heldBelow,
@@ -222,6 +234,8 @@ export class Contract {
   readonly pathDepths: number[] = [0];
   readonly pathLastSteps: string[] = [""];
   readonly pathChildren: (Map<string, number> | undefined)[] = [];
+  /** Per path id, the index of its first member step, -1 for none (`firstMember`). */
+  readonly firstMembers: (number | undefined)[] = [];
   readonly signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
   readonly carrierIds = new Map<string, string>();
@@ -435,6 +449,46 @@ export class Contract {
 
   public chainOf(value: PlaceId): ChainRoot | null {
     return chainOf(this, value);
+  }
+
+  public keyId(key: Key): string {
+    return keyId(this, key);
+  }
+
+  public keyIdBelow(id: string, step: string): string {
+    return keyIdBelow(this, id, step);
+  }
+
+  public pathKey(path: readonly string[]): string {
+    return pathKey(this, path);
+  }
+
+  public keyIdParent(id: string): string | null {
+    return keyIdParent(this, id);
+  }
+
+  public keyIdPlace(id: string): PlaceId {
+    return keyIdPlace(id);
+  }
+
+  public keyIdPath(id: string): string {
+    return keyIdPath(this, id);
+  }
+
+  public pathOfKey(key: string): readonly string[] {
+    return pathOfKey(this, key);
+  }
+
+  public rootId(place: PlaceId): string {
+    return rootId(place);
+  }
+
+  public receiverKindsOf(id: string): Work<readonly Item[]> {
+    return receiverKindsOf(this, id);
+  }
+
+  public keyOfId(id: string): Key {
+    return keyOfId(this, id);
   }
 
   public pathStep(parent: number, step: string): number {

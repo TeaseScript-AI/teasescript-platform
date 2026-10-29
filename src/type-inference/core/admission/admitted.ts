@@ -2,7 +2,7 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, type Key } from "../definitions.js";
+import { keyOf, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { ItemTag } from "../items.js";
 import { drive, openAbove } from "./inherited.js";
@@ -18,7 +18,8 @@ import { inputsOf, scanAt } from "./scan.js";
  * its contents fit, so its decision owes nothing, and its answer is the one deciding it with the copy gives.
  */
 function lazily(admission: Admission, place: PlaceId, path: readonly string[]): void {
-  if (admission.attempted.has(keyOf(place, path)) || !landed(admission, place, path)) return;
+  if (admission.attempted.has(admission.keyId(place, path)) || !landed(admission, place, path))
+    return;
   // (after a stop admission decides nothing more: such a path is answered from what it retained, `retainedSource`;
   // nor below a decision that stopped, S3 §5)
   if (admission.pass.program.work.stopped !== null || admission.decisionStopped(place, path))
@@ -45,10 +46,10 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
   if (undecidedCopy(admission, place, path))
     return retainedSource(admission, place, path)?.tags ?? [];
   lazily(admission, place, path);
-  const key = keyOf(place, path);
+  const key = admission.keyId(place, path);
   // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
   if (admission.unrestricted.has(key) || openBelow(admission, place, path)) return ["unknown"];
-  const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
+  const kinds = withoutEmpty(admission.run(contract.contractOf(keyOf(place, path))));
   const decided = admission.decided.get(key);
   let tags = [
     ...(decided ?? new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))),
@@ -105,7 +106,7 @@ function retainedSource(
     // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5)
     if (admission.decisionStopped(at.place, at.path)) return null;
     // (kept in `seen`)
-    const key = keptKey(admission.work, at.place, at.path);
+    const key = admission.keyId(at.place, at.path);
     if (admission.unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };
     const decided = admission.decided.get(key);
     if (decided !== undefined)
@@ -156,7 +157,7 @@ function retainedSource(
 function undecidedCopy(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   return (
     admission.pass.program.work.stopped !== null &&
-    !admission.attempted.has(keyOf(place, path)) &&
+    !admission.attempted.has(admission.keyId(place, path)) &&
     landed(admission, place, path)
   );
 }
@@ -171,7 +172,7 @@ export function inheritsWritten(
     return retainedSource(admission, place, path)?.inherited ?? false;
   lazily(admission, place, path);
   return (
-    admission.inheritsWrittenKeys.has(keyOf(place, path)) ||
+    admission.inheritsWrittenKeys.has(admission.keyId(place, path)) ||
     (writtenOf(admission.pass.program.place(place).kind) === null &&
       openBelow(admission, place, path))
   );
@@ -185,7 +186,9 @@ export function inheritsWritten(
 function openBelow(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   const written = writtenOf(admission.pass.program.place(place).kind);
   if (written === null)
-    return !admission.attempted.has(keyOf(place, path)) && openAbove(admission, place, path);
+    return (
+      !admission.attempted.has(admission.keyId(place, path)) && openAbove(admission, place, path)
+    );
   const term = permittedAt(written, path);
   return term !== null && unrestricted(term);
 }
@@ -201,16 +204,20 @@ export function deciderAt(
   path: readonly string[],
 ): SourceSite | null {
   lazily(admission, place, path);
-  const key = keyOf(place, path);
+  const key = admission.keyId(place, path);
   if (!admission.deciderSites.has(key)) {
     const inputs = inputsOf(admission, place, path);
-    const below = path.length > 0 && admission.run(admission.pass.contract.refReceiver(key));
+    const below =
+      path.length > 0 && admission.run(admission.pass.contract.refReceiver(keyOf(place, path)));
     keepText(admission.work, key.length);
     admission.deciderSites.set(
       key,
       inputs === null || below
         ? null
-        : (drive(admission, scanAt(admission, inputs.direct, inputs.prefixes, key))?.site ?? null),
+        : (drive(
+            admission,
+            scanAt(admission, inputs.direct, inputs.prefixes, admission.keyId(place, path)),
+          )?.site ?? null),
     );
   }
   return admission.deciderSites.get(key)!;

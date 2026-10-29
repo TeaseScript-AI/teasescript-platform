@@ -1,17 +1,25 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinSteps, keptParts, keptSplit, keptSteps, keptText, pathText } from "../budget.js";
+import {
+  joinSteps,
+  keptParts,
+  keptSplit,
+  keptSteps,
+  keptText,
+  pathText,
+  splitPath,
+} from "../budget.js";
 import { writtenOf } from "../contract.js";
 import {
   keptKey,
+  keyOf,
   keptPath,
-  keptPathText,
-  keptParent,
   keptPrefixes,
   keyPlace,
   type Definition,
   type Key,
 } from "../definitions.js";
+import { cursors } from "../cursors.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { Item } from "../items.js";
 import { decided } from "./decision.js";
@@ -59,14 +67,21 @@ export function groups(
   if (admission.groupList !== null) return admission.groupList;
   const { program, definitions } = admission.pass;
   const work = program.work;
-  const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
+  // (G3's path cursors: the tracked keys by their cursors, `Contract.keyId`, each parent one step up, never a key's text
+  // made again per prefix)
+  const { contract } = admission.pass;
+  const tracked = new Set<Key>(
+    [...definitions.byKey.keys(), ...definitions.candidates.keys()].map((key) =>
+      contract.keyId(key),
+    ),
+  );
   for (const c of program.constraints)
     if (c.kind === "project") {
       const target = program.targetRoot(c.into);
       if (!program.cellOwner.has(target.root) && !program.hasOf.has(target.root))
-        tracked.add(keptKey(admission.work, target.root, target.path));
+        tracked.add(admission.keyId(target.root, target.path));
     }
-  for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(admission.work, binding, []));
+  for (const [, binding] of program.occurrenceOf) tracked.add(contract.rootId(binding));
   const reaching = admission.stores();
   const stores = new Map<Key, number>();
   for (const d of reaching)
@@ -82,19 +97,15 @@ export function groups(
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       const structure = valueStructure(admission, d.value!);
       for (const path of structure.paths)
-        tracked.add(keptKey(admission.work, d.place, joinSteps(base, path)));
+        tracked.add(admission.keyId(d.place, joinSteps(base, path)));
       for (const { below, key } of structure.sources) {
         work.charge("indexSteps");
-        const landing = keptKey(admission.work, d.place, joinSteps(base, below));
+        const landing = admission.keyId(d.place, joinSteps(base, below));
         const depth = depthOf(admission, key);
         if (depth <= (deepest.get(landing) ?? 0)) continue;
         deepest.set(landing, depth);
         tracked.add(
-          keptKey(
-            admission.work,
-            d.place,
-            joinSteps(base, below, Array<string>(depth).fill("element")),
-          ),
+          admission.keyId(d.place, joinSteps(base, below, Array<string>(depth).fill("element"))),
         );
       }
     }
@@ -108,7 +119,7 @@ export function groups(
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       for (const path of structure.paths) {
         work.charge("indexSteps");
-        tracked.add(keptKey(admission.work, d.place, joinSteps(base, path)));
+        tracked.add(admission.keyId(d.place, joinSteps(base, path)));
       }
     }
   // A2 (TABLE r4.131): a place receiving copies is checked where they meet it, read or not: the paths where what two
@@ -141,14 +152,14 @@ export function groups(
     )
       for (const path of heldMeetings(admission, list, [])) {
         const key = keptKey(admission.work, place, path);
-        tracked.add(key);
+        tracked.add(admission.keyId(place, path));
         admission.atCopies.add(key);
       }
   // (and where a live group's members owe its meetings, `finishHeld`; the groups the discovery above made, so every
   // order of the consumers sees the same)
   for (const key of admission.groupMeetings) {
     work.charge("indexSteps");
-    tracked.add(key);
+    tracked.add(contract.keyId(key));
     admission.atCopies.add(key);
   }
   // C9: where each ingress store's external data stands below its destination, decided with the store whether a
@@ -158,7 +169,7 @@ export function groups(
       work.charge("indexSteps");
       const below = elementsBelow(d, stop.path);
       if (below.length > 0)
-        tracked.add(keptKey(admission.work, d.place, joinSteps(admission.destPath(d), below)));
+        tracked.add(admission.keyId(d.place, joinSteps(admission.destPath(d), below)));
     }
   // (each key's prefixes, walked up a step at a time to one whose own are in already: each prefix made once, so a
   // literal nested k deep makes its k keys' prefixes in k steps, not k² made again per key, TABLE r4.100 (2))
@@ -166,7 +177,7 @@ export function groups(
   for (const key of [...tracked])
     for (let at: Key | null = key; at !== null && !closed.has(at);) {
       closed.add(at);
-      at = keptParent(admission.work, at);
+      at = contract.keyIdParent(at);
       if (at === null) break;
       work.charge("indexSteps");
       tracked.add(at);
@@ -180,9 +191,10 @@ export function groups(
   );
   const roots = new Map<PlaceId, Set<string>>();
   for (const key of tracked) {
-    let paths = roots.get(keyPlace(key));
-    if (paths === undefined) roots.set(keyPlace(key), (paths = new Set()));
-    paths.add(keptPathText(admission.work, key));
+    const place = contract.keyIdPlace(key);
+    let paths = roots.get(place);
+    if (paths === undefined) roots.set(place, (paths = new Set()));
+    paths.add(contract.keyIdPath(key));
   }
   // A1, A8: a written collection's elements at every depth
   for (const place of program.places) {
@@ -191,7 +203,7 @@ export function groups(
     if (written === null || paths === undefined) continue;
     let path: readonly string[] = [];
     for (let level = 1; level < levelsOf(admission, written).length; level += 1)
-      paths.add(keptText(admission.work, (path = joinSteps(path, ["element"]))));
+      paths.add(contract.pathKey((path = joinSteps(path, ["element"]))));
   }
   const at = (place: PlaceId): Set<string> => {
     let paths = roots.get(place);
@@ -202,7 +214,7 @@ export function groups(
   const { seeds, into, order } = inheritance(admission);
   for (const [place, paths] of seeds) {
     const own = at(place);
-    for (const text of paths.keys()) own.add(text);
+    for (const text of paths.keys()) own.add(cursors() ? contract.pathKey(splitPath(text)) : text);
   }
   // A4 through copies (r4.75 (1)): a copy of a place that may inherit a written type lands at its own path; below it,
   // where copies of written types land in that place, it is decided with the copy only where the place's contents may
@@ -217,16 +229,16 @@ export function groups(
       const own = at(place);
       for (const { path } of copies) {
         work.charge("indexSteps");
-        own.add(keptText(admission.work, path));
+        own.add(contract.pathKey(path));
       }
       for (const path of hots.get(place) ?? []) {
         work.charge("indexSteps");
-        own.add(keptText(admission.work, path));
+        own.add(contract.pathKey(path));
       }
     }
   const groups: { readonly root: PlaceId; readonly path: readonly string[] }[] = [];
   for (const [root, paths] of roots)
-    for (const path of paths) groups.push({ root, path: keptSplit(admission.work, path) });
+    for (const path of paths) groups.push({ root, path: contract.pathOfKey(path) });
   admission.groupList = groups;
   return groups;
 }
@@ -396,7 +408,7 @@ function hotAt(admission: Admission, place: PlaceId, path: readonly string[]): b
   const found = decided(admission, place, path);
   if (found === null || found.tags === null || found.tags.includes("unknown")) return false;
   return offending(
-    withoutEmpty(admission.run(admission.pass.contract.contractOf(found.key))),
+    withoutEmpty(admission.run(admission.pass.contract.contractOf(keyOf(place, path)))),
     found,
   );
 }

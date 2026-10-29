@@ -4920,7 +4920,8 @@ export class Consumers {
       while (next !== null) {
         const step: { readonly key: Key; readonly at: FlowNode } = next;
         next = null;
-        const memoKey = joinParts(step.key, step.at.id);
+        // (G3's path cursors: the key by its cursor, `Contract.keyId`)
+        const memoKey = joinParts(this.pass.contract.keyId(step.key), step.at.id);
         if (this.#defaults.has(memoKey)) {
           found = this.#defaults.get(memoKey)!;
           break;

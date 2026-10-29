@@ -94,7 +94,7 @@ export function* contractOf(contract: Contract, key: Key): Work<readonly Item[]>
   if (contract.keyStopped(key)) return STOPPED;
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return yield {
-    key: joinParts("c", key),
+    key: joinParts("c", contract.keyId(key)),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -381,7 +381,7 @@ function* receiverWalk(
 export function* receiverKinds(contract: Contract, key: Key): Work<readonly Item[]> {
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return yield {
-    key: joinParts("rc", key),
+    key: joinParts("rc", contract.keyId(key)),
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
@@ -525,4 +525,18 @@ function* subAtMade(contract: Contract, sub: Key, rest: readonly string[]): Work
     yield* contractAlong(contract, keyPlace(sub), joinSteps(base, rest), base.length + 1),
     program.scope,
   );
+}
+
+/** `receiverKinds` of the key a cursor names (`keyId`), its demand named by the cursor. */
+export function* receiverKindsOf(contract: Contract, id: string): Work<readonly Item[]> {
+  const place = Number(id.slice(0, Math.max(id.indexOf("#"), id.indexOf("|"))));
+  const site = contract.pass.program.places[place]?.site ?? null;
+  return yield {
+    key: joinParts("rc", id),
+    kind: "contract",
+    file: site?.file ?? -1,
+    offset: site?.start ?? -1,
+    make: () => contract.contractOf(contract.keyOfId(id)),
+    decision: RECEIVER,
+  };
 }

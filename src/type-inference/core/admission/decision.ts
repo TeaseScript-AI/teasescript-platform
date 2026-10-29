@@ -2,7 +2,7 @@ import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, joinSteps, keptParts, pathText, splitPath } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, sortCost, type Definition, type Key } from "../definitions.js";
+import { keyOf, sortCost, type Definition, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { marked } from "../guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
@@ -76,7 +76,7 @@ export function compareLanded(admission: Admission): void {
   for (const place of inheritance(admission).into.keys())
     for (const text of landedBelow(admission, place, [])) {
       const path = splitPath(text);
-      if (admission.attempted.has(keyOf(place, path))) continue;
+      if (admission.attempted.has(admission.keyId(place, path))) continue;
       const inputs = inputsOf(admission, place, path);
       if (inputs !== null) compareMembers(admission, place, path, inputs.prefixes);
     }
@@ -88,7 +88,7 @@ export function compareLanded(admission: Admission): void {
  * (`Contract.stop`).
  */
 export function stopDecision(admission: Admission, root: PlaceId, path: readonly string[]): void {
-  const key = keptKey(admission.work, root, path);
+  const key = admission.keyId(root, path);
   admission.decided.delete(key);
   admission.nullable.delete(key);
   admission.permitsNull.delete(key);
@@ -121,7 +121,8 @@ export function decide(
 ): Decision | null {
   const { program, definitions, lists, contract } = admission.pass;
   const work = program.work;
-  const key = keptKey(admission.work, root, path);
+  // (G3's path cursors: the decision's maps keep its key by its cursor, `Admission.keyId`)
+  const key = admission.keyId(root, path);
   admission.attempted.add(key);
   const inputs = inputsOf(admission, root, path);
   if (inputs === null) return null;
@@ -190,7 +191,7 @@ export function decide(
       if (offends(admission.run(contract.subAt(sub.key, rest)))) takeAll(sub.defs);
     }
     // A6: a rejected store is decided again in every pass, where it was rejected
-    const retaken = admission.retaken.get(key) ?? [];
+    const retaken = admission.retaken.get(keyOf(root, path)) ?? [];
     work.charge("checks", retaken.length);
     for (const d of retaken)
       if (
@@ -246,7 +247,7 @@ export function decided(
   path: readonly string[],
   inputs = inputsOf(admission, root, path),
 ): Decided | null {
-  const key = keptKey(admission.work, root, path);
+  const key = admission.keyId(root, path);
   const known = admission.decisions.get(key);
   if (known !== undefined) return known;
   const found = inputs === null ? null : decision(admission, root, path, key, inputs);
@@ -262,6 +263,8 @@ function decision(
   inputs: Inputs,
 ): Decided {
   const { program, lists, contract } = admission.pass;
+  // (the key's text for the contract's questions; the decision keeps its cursor, `key`)
+  const text = keyOf(root, path);
   const work = program.work;
   const place = program.place(root);
   const { direct, prefixes } = inputs;
@@ -272,7 +275,7 @@ function decision(
   const transfer =
     term !== null && (place.kind.kind === "parameter" || place.kind.kind === "result");
   // F19a: below a reference nothing is admitted
-  if (path.length > 0 && admission.run(contract.refReceiver(key))) {
+  if (path.length > 0 && admission.run(contract.refReceiver(text))) {
     work.charge("checksSkipped");
     return { ...NOTHING, ...none };
   }
@@ -283,7 +286,7 @@ function decision(
   if (path.length > 0 && term === null) {
     // A3: a settled family needs no scan, where no store on the path was rejected
     const clean = isClean(admission, root, path);
-    const kinds = clean ? withoutEmpty(admission.run(contract.contractOf(key))) : [];
+    const kinds = clean ? withoutEmpty(admission.run(contract.contractOf(text))) : [];
     if (
       clean &&
       kinds.every((item) => item.tag !== "unknown") &&
@@ -328,20 +331,23 @@ function decision(
   if (
     tags === null &&
     isClean(admission, root, path) &&
-    !withoutEmpty(admission.run(contract.contractOf(key))).some((item) => concrete(item))
+    !withoutEmpty(admission.run(contract.contractOf(text))).some((item) => concrete(item))
   ) {
     work.charge("checksSkipped");
     return { ...NOTHING, ...none };
   }
   if (tags === null) {
-    const found = drive(admission, scanAt(admission, direct, prefixes, key));
+    const found = drive(
+      admission,
+      scanAt(admission, direct, prefixes, admission.keyId(root, path)),
+    );
     if (found !== null)
       ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
     else {
       // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
       // kinds are the type the place is published with, so external data a store brings into it owes its check
       // there, named as well as inline (`published`)
-      const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
+      const kinds = withoutEmpty(admission.run(contract.contractOf(text)));
       if (kinds.some((item) => concrete(item)) && kinds.some(isExternal)) {
         tags = [...new Set(kinds.filter((item) => concrete(item)).map((item) => item.tag))];
         deciderSite = concreteSite(admission, direct, prefixes);
@@ -356,7 +362,7 @@ function decision(
     !tags.includes("unknown") &&
     !byWritten &&
     tags.includes("integer") &&
-    withoutEmpty(admission.run(contract.contractOf(key))).some(admitsNumber)
+    withoutEmpty(admission.run(contract.contractOf(text))).some(admitsNumber)
   )
     tags = [...new Set(tags.map((tag) => (tag === "integer" ? "number" : tag)))];
   return {

@@ -82,7 +82,8 @@ export function* scanAt(
   const work = program.work;
   const seen = new Map<string, Item[]>();
   const evaluate = (d: Definition, at: readonly string[]): Item[] => {
-    const memoKey = joinParts(d.uid, at);
+    // (G3's path cursors: the path by its id, `Contract.keyId`)
+    const memoKey = joinParts(d.uid, admission.pass.contract.pathKey(at));
     let items = seen.get(memoKey);
     if (items === undefined) {
       keepText(admission.work, memoKey.length);

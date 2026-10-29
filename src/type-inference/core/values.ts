@@ -24,7 +24,6 @@ import {
 import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
   keptKey,
-  keptKeyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -544,7 +543,7 @@ export class Values {
       return { items: yield* own(), proof: UNPOSITIONED };
     const noRef =
       from.noRef &&
-      (from.outer === null || !heldReference(yield* contract.receiverKinds(from.outer)));
+      (from.outer === null || !heldReference(yield* contract.receiverKindsOf(from.outer)));
     if (!noRef) return { items: yield* own(), proof: UNPOSITIONED };
     const items = from.hopped
       ? mergeItems(
@@ -563,7 +562,7 @@ export class Values {
           program.scope,
         )
       : yield* own();
-    const outer = from.outer === null ? null : keptKeyBelow(program.work, from.outer, [step]);
+    const outer = from.outer === null ? null : contract.keyIdBelow(from.outer, step);
     return {
       items,
       proof:
@@ -586,7 +585,7 @@ export class Values {
               from.writer ?? hop.writer,
               true,
               false,
-              outer ?? keptKey(program.work, program.occurrenceOf.get(hop.read)!, []),
+              outer ?? contract.rootId(program.occurrenceOf.get(hop.read)!),
             ),
     };
   }
@@ -606,16 +605,7 @@ export class Values {
     if (path === 0) {
       const binding = program.occurrenceOf.get(value);
       if (binding !== undefined)
-        return new Position(
-          value,
-          0,
-          node,
-          false,
-          null,
-          true,
-          false,
-          keptKey(program.work, binding, []),
-        );
+        return new Position(value, 0, node, false, null, true, false, contract.rootId(binding));
       if (program.hasOf.has(value)) return new Position(value, 0, node, false, null, true, false);
       const projection = program.projOf.get(value);
       if (
