@@ -26,6 +26,8 @@ import { entered, ingressOf } from "./contract/ingress.js";
 import {
   contractOf,
   contractRead,
+  keyContract,
+  keyListsAt,
   literalRoute,
   receiverKinds,
   refReceiver,
@@ -101,6 +103,7 @@ import {
   defaultKinds,
   expectedOf,
   landsIn,
+  memberStepOf,
   onlyNull,
 } from "./contract/value-kinds.js";
 import {
@@ -439,6 +442,15 @@ export class Contract {
 
   public contractOf(key: Key): Work<readonly Item[]> {
     return contractOf(this, key);
+  }
+
+  /**
+   * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
+   * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
+   */
+  public keyThrough(key: Key, from: number): Work<readonly Item[]> {
+    const at = memberStepOf(this, keyPath(key), from);
+    return at < 0 ? keyContract(this, key) : keyListsAt(this, key, at);
   }
 
   public severalElements(key: Key): Work<boolean> {

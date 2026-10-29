@@ -8,8 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { Position, positions, UNPOSITIONED } from "../positions.js";
 import { stepName } from "../program.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
-import { holdsBelow, keyThrough } from "./key-contract.js";
-import { heldReference, propertyOnly } from "./kinds.js";
+import { heldReference, holdsBelow, propertyOnly } from "./kinds.js";
 import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
 import type { ChainRoot, LoneRead, Owner } from "./model.js";
@@ -68,7 +67,7 @@ export function positioned(
       contract.remember(joinParts("cp", key));
       const parent = keyOf(keyPlace(key), path.slice(0, -1));
       return advance(contract, { key: parent, length: path.length - 1 }, path.at(-1)!, () =>
-        keyThrough(contract, key, 0),
+        contract.keyThrough(key, 0),
       );
     },
   };

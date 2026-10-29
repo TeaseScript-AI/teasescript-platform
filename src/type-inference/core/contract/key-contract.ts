@@ -1,4 +1,3 @@
-import { isScalarKind } from "../../../static-types.js";
 import type { PlaceId } from "../../graph.js";
 import { joinParts, joinSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
@@ -27,13 +26,20 @@ import {
 } from "../items.js";
 import type { Decision, Work } from "../solver.js";
 import type { ReadRoute } from "../values.js";
-import { HELD_REFERENCE, heldReference, hostAt, REFERENCE, unknownItem } from "./kinds.js";
+import {
+  HELD_REFERENCE,
+  heldReference,
+  holdsBelow,
+  hostAt,
+  REFERENCE,
+  unknownItem,
+} from "./kinds.js";
 import { entryGroups, groupsAt, prefixLevels } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
 import { positionable, positioned, positionOf } from "./positions.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
-import { members, memberStepOf } from "./value-kinds.js";
+import { members } from "./value-kinds.js";
 
 // The contract of a key (§3.2): its demand, its stores' and prefixes' contracts, its receivers, a read's contract.
 
@@ -51,21 +57,6 @@ const RECEIVER: Decision = {
   choose: (input) => (input.some((item) => REFERENCE.has(item.tag)) ? "reference" : "other"),
   answer: (choice, input) => (choice === "reference" ? [...input, HELD_REFERENCE] : input),
 };
-
-/**
- * Whether a receiver's item has a structure a step below is read from, through the stores into it: a record or a
- * collection. A scalar or `null` has none; a reference's members are the runtime's (F19a); an unknown's members are
- * unknown for its own reasons, from its own ingress (`belowUnknown`), whatever those reasons are.
- */
-export function holdsBelow(item: Item): boolean {
-  return (
-    item.tag !== "unknown" &&
-    item.tag !== "empty" &&
-    item.tag !== "null" &&
-    !isScalarKind(item.tag) &&
-    !REFERENCE.has(item.tag)
-  );
-}
 
 /** What a step below an unknown holds: an unknown for the same reasons, from the same ingress (F15, C9). */
 function belowUnknown(item: Item): Item {
@@ -113,35 +104,26 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   const path = keyPath(key);
   if (positionable(contract, key, path)) return yield positioned(contract, key, path);
   // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
-  const items = yield* keyThrough(contract, key, 0);
+  const items = yield* contract.keyThrough(key, 0);
   // a parameter's and a result's kinds come through their calls (F20–F22): marked so, as the guard mark travels
   return found.kind.kind === "parameter" || found.kind.kind === "result"
     ? items.map((item) => (item.tag === "empty" ? item : { ...item, called: true }))
     : items;
 }
 
-/**
- * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
- * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
- */
-export function keyThrough(contract: Contract, key: Key, from: number): Work<readonly Item[]> {
-  const at = memberStepOf(contract, keyPath(key), from);
-  return at < 0 ? keyContract(contract, key) : keyListsAt(contract, key, at);
-}
-
 /** `keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
-function* keyListsAt(contract: Contract, key: Key, at: number): Work<readonly Item[]> {
+export function* keyListsAt(contract: Contract, key: Key, at: number): Work<readonly Item[]> {
   const place = keyPlace(key);
   const path = keyPath(key);
   const receiver = yield* contract.receiverKinds(keyOf(place, path.slice(0, at)));
   if (heldReference(receiver)) return yield* keyContract(contract, key);
   return yield* members(contract, path, at, receiver, (along, start) =>
-    keyThrough(contract, keyOf(place, along), start),
+    contract.keyThrough(keyOf(place, along), start),
   );
 }
 
 /** The contract of a key from its stores and its prefixes' (§3.2). */
-function* keyContract(contract: Contract, key: Key): Work<readonly Item[]> {
+export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]> {
   const { program } = contract.pass;
   const place = keyPlace(key);
   const path = keyPath(key);

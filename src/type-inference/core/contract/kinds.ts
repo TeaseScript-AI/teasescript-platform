@@ -1,3 +1,4 @@
+import { isScalarKind } from "../../../static-types.js";
 import { hasIdentity, VALUE_KIND_NAMES, type ValueKind } from "../../../value-kinds.js";
 import { SELECTED_TEXT, SELECTED_VALUE } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -91,6 +92,21 @@ export const OPAQUE_MEMBER: Item = OWN_SELECTION;
 export const HELD_REFERENCE: Item = Object.freeze(
   makeItem("unknown", null, { reasons: REASON.opaque }),
 );
+
+/**
+ * Whether a receiver's item has a structure a step below is read from, through the stores into it: a record or a
+ * collection. A scalar or `null` has none; a reference's members are the runtime's (F19a); an unknown's members are
+ * unknown for its own reasons, from its own ingress (`belowUnknown`), whatever those reasons are.
+ */
+export function holdsBelow(item: Item): boolean {
+  return (
+    item.tag !== "unknown" &&
+    item.tag !== "empty" &&
+    item.tag !== "null" &&
+    !isScalarKind(item.tag) &&
+    !REFERENCE.has(item.tag)
+  );
+}
 
 /** F19a (r4.44): whether a receiver's kinds, as a `RECEIVER` demand answers them, are a reference's. */
 export function heldReference(items: readonly Item[]): boolean {
