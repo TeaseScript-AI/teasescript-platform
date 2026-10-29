@@ -332,6 +332,16 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
 export function collectMarks(contract: Contract): void {
   if (contract.collected) return;
   contract.collected = true;
+  // (a key's lane asked meanwhile would read the marks unfinished: `keyLane`)
+  contract.building += 1;
+  try {
+    collectAll(contract);
+  } finally {
+    contract.building -= 1;
+  }
+}
+
+function collectAll(contract: Contract): void {
   const { program, definitions, lists, guards } = contract.pass;
   const stores = new Set([...definitions.storeDefs, ...definitions.transferDefs]);
   const held = new Set<PlaceId>();
