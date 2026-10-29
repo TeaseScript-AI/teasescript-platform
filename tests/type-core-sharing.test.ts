@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
+import { ingressLeaves, type Item } from "../src/type-inference/core/items.js";
 import { type CoreAnalysisRequest, CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
@@ -32,7 +30,12 @@ import {
 import { readFixture } from "./helpers/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "./helpers/type-core-roles.js";
 import { shapesOf } from "./helpers/type-core-rule.js";
-import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
+import {
+  ingressAnswers,
+  inOrder,
+  publishedAnswers,
+  publishedRoute,
+} from "./helpers/type-core-oracles.js";
 import {
   BOUNDED_ADMISSION_WITNESSES,
   CARRIER_WITNESSES,
@@ -52,7 +55,7 @@ import {
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
- * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-standing.ts`).
+ * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
  * Any difference fails the test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices'
  * sources (whose own tests run each source in both orders) run in the source order only, every other program in both;
  * a local `npm run check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26,
@@ -369,16 +372,6 @@ function prepared(program: Program): Prepared {
   return { program, request, bindings };
 }
 
-/** A computation in the source order, or in the reversed consumer and solver orders. */
-function inOrder<T>(reversed: boolean, callback: () => T): T {
-  return reversed
-    ? withConsumerOrder(
-        (list) => [...list].reverse(),
-        () => withSolverSeam({ reverseWorklist: true }, callback),
-      )
-    : callback();
-}
-
 /**
  * What a program publishes, in one order (`publishedAnswers`, `publishedRoute`): the answers, each binding's admitted
  * types, the plan or the rejection; the record alone; and whether each of its lists is in source order of its sites.
@@ -442,21 +435,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
  * leaves, is the same with the sharing on and off, in both orders, over #1196's controls and #1210's programs.
  */
 test("every occurrence over host data names each ingress's leaf with the sharing on and off, in both orders (#1196)", () => {
-  const itemText = ({ ingress, writer, ...rest }: Item): string =>
-    JSON.stringify({
-      ...rest,
-      writer: writer === null ? null : writerKey(writer),
-      leaves: ingress === undefined ? [] : ingressLeaves(ingress).map(writerKey).sort(),
-    });
-  const occurrences = (request: CoreAnalysisRequest): string => {
-    const answers = analyseCore(request);
-    return answers.graph.nodes
-      .flatMap((node) => {
-        const answer = answers.at(node);
-        return answer === null ? [] : [`${node.id} ${answer.items.map(itemText).join(" ")}`];
-      })
-      .join("\n");
-  };
+  const occurrences = (request: CoreAnalysisRequest): string =>
+    ingressAnswers(analyseCore(request));
   const differing: string[] = [];
   for (const { name, files } of [
     ...DIRECT_INGRESS_PROGRAMS,

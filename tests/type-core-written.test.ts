@@ -20,7 +20,7 @@ import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { writtenTypeErrors } from "../src/type-inference/core/written.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { plannedStores, runGlobals } from "./helpers/type-core-route.js";
-import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
+import { inMode, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 import {
   DEFAULT_CHAIN_MATRIX,
   INFERRED_COPY_MATRIX,
@@ -46,7 +46,7 @@ import {
  * (not whether the route still leaves it out: the slice grows). Each exact source is analysed once per mode and planned
  * in each where its row is executable, else in the source order alone; the two orders' plans are compared whole, and
  * each distinct plan runs its host values once; every row that holds the source is compared with that. The same
- * analyses and plans give the sharing differential (TABLE r4.72, `type-core-standing.ts`) of the sources of the four
+ * analyses and plans give the sharing differential (TABLE r4.72, `type-core-oracles.ts`) of the sources of the four
  * matrices checked so, which `type-core-sharing.test.ts` runs for every other program.
  * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
  * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads
@@ -191,18 +191,11 @@ function runsOf(c: WrittenCase, plan: InstructionPlan | null | "outside") {
  * source-order modes planned it.
  */
 function observeModes(c: WrittenCase) {
-  const inMode = (reverse: boolean, shared: boolean) => {
-    const run = () => observe(c, c.executable || !reverse);
-    const mode = () => (shared ? run() : withoutSharing(run));
-    return reverse
-      ? withSolverSeam({ reverseWorklist: true }, () =>
-          withConsumerOrder((list) => [...list].reverse(), mode),
-        )
-      : mode();
-  };
+  const observeIn = (reversed: boolean, shared: boolean) =>
+    inMode({ reversed, unshared: !shared }, () => observe(c, c.executable || !reversed));
   // (each order's modes, the sharing on and off)
-  const forward = [inMode(false, true), inMode(false, false)];
-  const reversed = [inMode(true, true), inMode(true, false)];
+  const forward = [observeIn(false, true), observeIn(false, false)];
+  const reversed = [observeIn(true, true), observeIn(true, false)];
   const orders = [
     ["source order", forward],
     ["reversed", reversed],

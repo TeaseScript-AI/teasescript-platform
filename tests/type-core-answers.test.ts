@@ -6,15 +6,11 @@ import { analyseCore, type Answers } from "../src/type-inference/core/answers.js
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { FlowNode } from "../src/type-inference/core/flow-graph.js";
-import {
-  ingressLeaves,
-  REASON,
-  writerKey,
-  type ItemTag,
-} from "../src/type-inference/core/items.js";
+import { ingressLeaves, REASON, type ItemTag } from "../src/type-inference/core/items.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { everyAnswer } from "./helpers/type-core-oracles.js";
 
 /**
  * The core's published answers per occurrence, projection and property (the port plan's S3 note §1), which the kept
@@ -22,21 +18,6 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
  * place, a projection of a value that is no place has none, and a value's properties come from every source the
  * contract and the literal index know (review r1).
  */
-
-/** A program's outcome, diagnostics and checks, and every occurrence's answer, its items whole with their leaves. */
-function everyAnswer(answers: Answers): string {
-  const occurrences = answers.graph.nodes.flatMap((node) => {
-    const at = node.kind === "expression" ? answers.at(node) : null;
-    if (at === null) return [];
-    const items = at.items.map((item) => ({
-      ...item,
-      ingress: item.ingress === undefined ? [] : ingressLeaves(item.ingress).map(writerKey),
-    }));
-    return [[node.span?.start.offset, at.route, at.place, at.obligations, items]];
-  });
-  const { outcome, diagnostics, checks } = answers;
-  return JSON.stringify({ outcome, diagnostics, checks, occurrences });
-}
 
 function analysed(source: string): {
   readonly answers: Answers;

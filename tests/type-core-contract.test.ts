@@ -2,24 +2,24 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import type { Diagnostic } from "../src/diagnostics.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
-import { type CoreDiagnostic, coreRecord } from "../src/type-inference/core/result.js";
+import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { stopIdentity } from "./helpers/type-core-stop-oracle.js";
 import {
+  inMode,
+  inOrder,
+  mergedIdentity,
+  MODES,
   publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
-} from "./helpers/type-core-standing.js";
+} from "./helpers/type-core-oracles.js";
 
 /**
  * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
@@ -397,11 +397,7 @@ test("two literals whose kinds differ only in their paths are two sources, in bo
     const place = analyseCore(request).place(archive.id, ["element", "element", "a", "element"]);
     return `${place.contract.kinds.map((item) => item.tag).join("|")} ${place.admitted.by}`;
   };
-  const reversed = (run: () => string): string =>
-    withConsumerOrder(
-      (list) => [...list].reverse(),
-      () => withSolverSeam({ reverseWorklist: true }, run),
-    );
+  const reversed = (run: () => string): string => inOrder(true, run);
   assert.deepEqual(
     [answer(), reversed(answer), withoutSharing(answer), reversed(() => withoutSharing(answer))],
     Array<string>(4).fill("integer decided"),
@@ -694,55 +690,9 @@ interface MergedRecord {
   readonly compact: readonly string[];
 }
 
-/**
- * The record with the route as `MERGED_STOPS` pins it: each diagnostic by its identity (`stopIdentity`) without the other
- * facts only its fix reads, the kinds its site's other diagnostics report (`besides`) and its store root's declaration,
- * and each of the route's by its severity, code and span, without its message.
- */
-function mergedIdentity(answers: Answers, route: string): string {
-  const identity = (diagnostic: CoreDiagnostic): Readonly<Record<string, unknown>> => {
-    const { besides: _, ...kept } = stopIdentity(diagnostic);
-    return "rule" in diagnostic && diagnostic.rule.rule === "store" && diagnostic.rule.root !== null
-      ? {
-          ...kept,
-          rule: {
-            ...diagnostic.rule,
-            root: { kind: diagnostic.rule.root.kind, name: diagnostic.rule.root.name },
-          },
-        }
-      : kept;
-  };
-  // EVIDENCE: invariant: `publishedRoute` writes a plan with the compiler's diagnostics, or the construct it rejects.
-  const routed = JSON.parse(route) as { readonly diagnostics?: readonly Diagnostic[] };
-  return JSON.stringify({
-    outcome: answers.outcome,
-    diagnostics: answers.diagnostics.map(identity),
-    checks: answers.checks,
-    serialized: coreRecord(coreResult(answers), ["main.tease"]),
-    route:
-      routed.diagnostics === undefined
-        ? routed
-        : {
-            ...routed,
-            diagnostics: routed.diagnostics.map(({ severity, code, span }) => ({
-              severity,
-              code,
-              span,
-            })),
-          },
-  });
-}
-
 test("a stop whose own entries merge into one publishes main's records, its answers' orders aside (TABLE r4.185)", () => {
   const hash = (text: string): string =>
     createHash("sha256").update(text).digest("hex").slice(0, 16);
-  const inOrder = <T>(reversed: boolean, run: () => T): T =>
-    reversed
-      ? withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => withSolverSeam({ reverseWorklist: true }, run),
-        )
-      : run();
   for (const [name, source, expected] of MERGED_STOPS) {
     const files = [{ path: "main.tease", source }];
     const request = coreRequest(files);
@@ -750,16 +700,12 @@ test("a stop whose own entries merge into one publishes main's records, its answ
     const { places } = new CoreProgram(request);
     const bindings = places.filter((place) => place.kind.kind === "binding");
     const ids = bindings.map((place) => place.id);
-    const runs = [false, true].flatMap((reversed) =>
-      [false, true].map((unshared) => {
-        const run = (): {
-          exact: string;
-          identity: string;
-          upToOrder: string;
-          compact: string[];
-        } => {
-          const answers = inOrder(reversed, () => analyseCore(request));
-          const route = inOrder(reversed, () => publishedRoute(files, ["hostValue"]));
+    const runs = MODES.map((mode) =>
+      inMode(
+        mode,
+        (): { exact: string; identity: string; upToOrder: string; compact: string[] } => {
+          const answers = analyseCore(request);
+          const route = publishedRoute(files, ["hostValue"]);
           const compact = [
             answers.outcome,
             ...answers.diagnostics.map((d) => `${d.class} ${d.code} ${d.site.start}-${d.site.end}`),
@@ -786,9 +732,8 @@ test("a stop whose own entries merge into one publishes main's records, its answ
             upToOrder: publishedUpToOrder(answers, ids),
             compact,
           };
-        };
-        return unshared ? withoutSharing(run) : run();
-      }),
+        },
+      ),
     );
     for (const other of runs.slice(1)) {
       assert.equal(other.exact, runs[0]!.exact, `${name}: one record and route in every mode`);
