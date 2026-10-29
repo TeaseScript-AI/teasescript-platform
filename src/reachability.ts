@@ -1347,7 +1347,7 @@ export class Reachability {
               DiagnosticSeverity.Error,
               "TSV072",
               made
-                ? `This call starts '${path(certain)}' while it is already running, because '${path(certain)}' always runs global function '${global!}' up to here. ${calledFileFix(path(certain), call.form, global)}`
+                ? `This call starts '${path(certain)}', which is already running, because '${path(certain)}' always runs global function '${global!}' up to this call. ${call.form === "path" ? `Run '${global!}' only from files other than '${path(certain)}'.` : calledFileFix(path(certain), call.form, global)}`
                 : calledFileMessage(path(certain), call.form),
               call.span,
             )

@@ -401,7 +401,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
     ],
   ] as const)
     assert.deepEqual(warned(project(main, { "lib.tease": lib })), [
-      "lib.tease TSV072 This call starts 'main.tease' while it is already running, because 'main.tease' always runs global function 'visit' up to here. Run 'visit' only from other files.",
+      "lib.tease TSV072 This call starts 'main.tease', which is already running, because 'main.tease' always runs global function 'visit' up to this call. Run 'visit' only from files other than 'main.tease'.",
     ]);
   // Where the known values rule the running file out, and references name only other files, the call runs.
   assert.deepEqual(
