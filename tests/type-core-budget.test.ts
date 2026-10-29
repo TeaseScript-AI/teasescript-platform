@@ -441,47 +441,70 @@ test("a linked record list stops at the allowance with its count checked when it
 });
 
 /**
- * #1445 (Codex r1's B1): a ring of k copies of host objects, each read by a count. After a settled program stop the
- * finishing read's host data treats the ring as one component, made once and shared (`heldHost`), so the work is
- * linear in k, not a walk of the ring per read. The test measures the first settled walk stop at k = 16 and 32, in both
- * orders. Per doubling of the syntax nodes, the finishing units stay within 2.15 and each counter of 64 units or more
- * within 2.35.
+ * #1445: after a settled program stop, the finishing read's host data (`heldIngress`) is made once per place path, so
+ * the work stays linear in the program's size in two shapes.
+ *
+ * - A ring of k copies of host objects, each read by a count (Codex r1's B1). A cycle of copies is one component, made
+ *   once and shared.
+ * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1). A
+ *   step enters only the cells of its own property, indexed when the frontier is made.
+ *
+ * The test measures the first settled walk stop at k = 16 and 32, in both orders. Per doubling of the syntax nodes:
+ *
+ * - the ring's finishing units stay within 2.15, and each of its counters of 64 units or more within 2.35;
+ * - the stores' `checks`, the counter the frontier charges, stay within 2.35. Their admission and contract work, and with
+ *   it their whole finishing, grows faster on `main` already: #1456.
+ *
+ * The uncharged-work probe runs beside it, outside CI.
  */
-test("a settled stop finishes a ring of copies' host data in linear work", () => {
+test("a settled stop finishes a ring of copies' and a place's many stores' host data in linear work", () => {
   const rows = (k: number, line: (i: number) => string) =>
     Array.from({ length: k }, (_, i) => line(i)).join("\n");
-  const ring = (k: number) =>
-    `${rows(k, (i) => `let c${i} = {f: hostValue}`)}\n${rows(k, (i) => `c${i} = c${(i + 1) % k}`)}\n${rows(k, (i) => `repeat c${i}.f {}`)}\nexit`;
-  for (const reversed of [false, true]) {
-    const measured = (k: number) => {
-      const request = requestOf(main(ring(k)));
-      const full = analysed(request, reversed);
-      const walk = phaseEnds(full.budget.total, (allowance) => {
-        const { stoppedIn, settled } = analysed(request, reversed, allowance).budget;
-        return settled ? stoppedIn : null;
-      }).get("walk");
-      assert.ok(walk !== undefined, `${k}`);
-      const { budget } = analysed(request, reversed, walk[0]);
-      return {
-        units: budget.finishing,
-        nodes: budget.counts.get("syntaxNodes")!,
-        counts: budget.counts,
+  // (each shape with the counters gated: all, or the frontier's own)
+  const counted: Record<string, ((counter: string) => boolean) | null> = {
+    ring: null,
+    stores: (counter) => counter === "checks",
+  };
+  const shapes: Record<string, (k: number) => string> = {
+    ring: (k) =>
+      `${rows(k, (i) => `let c${i} = {f: hostValue}`)}\n${rows(k, (i) => `c${i} = c${(i + 1) % k}`)}\n${rows(k, (i) => `repeat c${i}.f {}`)}\nexit`,
+    stores: (k) =>
+      `let root = {f0: hostValue}\n${rows(k, (i) => `${i === 0 ? "" : `root = {f${i}: hostValue}\n`}repeat root.f${i} {}`)}\nexit`,
+  };
+  for (const [shape, make] of Object.entries(shapes))
+    for (const reversed of [false, true]) {
+      const measured = (k: number) => {
+        const request = requestOf(main(make(k)));
+        const full = analysed(request, reversed);
+        const walk = phaseEnds(full.budget.total, (allowance) => {
+          const { stoppedIn, settled } = analysed(request, reversed, allowance).budget;
+          return settled ? stoppedIn : null;
+        }).get("walk");
+        assert.ok(walk !== undefined, `${shape} ${k}`);
+        const { budget } = analysed(request, reversed, walk[0]);
+        return {
+          units: budget.finishing,
+          nodes: budget.counts.get("syntaxNodes")!,
+          counts: budget.counts,
+        };
       };
-    };
-    const [small, large] = [measured(16), measured(32)];
-    const nodes = large.nodes / small.nodes;
-    const doubling = (2 * (large.units / small.units)) / nodes;
-    assert.ok(
-      doubling <= 2.15,
-      `${reversed}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`,
-    );
-    for (const [counter, count] of small.counts) {
-      if (count < 64) continue;
-      const grown = (2 * ((large.counts.get(counter) ?? 0) / count)) / nodes;
-      assert.ok(
-        grown <= 2.35,
-        `${reversed} ${counter}: ${count} -> ${large.counts.get(counter)}: ${grown.toFixed(3)}`,
-      );
+      const [small, large] = [measured(16), measured(32)];
+      const nodes = large.nodes / small.nodes;
+      const where = `${shape}${reversed ? " reversed" : ""}`;
+      const only = counted[shape] ?? null;
+      const doubling = (2 * (large.units / small.units)) / nodes;
+      if (only === null)
+        assert.ok(
+          doubling <= 2.15,
+          `${where}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`,
+        );
+      for (const [counter, count] of small.counts) {
+        if (count < 64 || (only !== null && !only(counter))) continue;
+        const grown = (2 * ((large.counts.get(counter) ?? 0) / count)) / nodes;
+        assert.ok(
+          grown <= 2.35,
+          `${where} ${counter}: ${count} -> ${large.counts.get(counter)}: ${grown.toFixed(3)}`,
+        );
+      }
     }
-  }
 });

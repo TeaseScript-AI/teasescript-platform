@@ -258,14 +258,14 @@ interface StoreNode {
 
 /**
  * What stands at a path of a place by its stores' structure, made from its owner path's by one step (as the syntax
- * decision's frontier is, `cheapFrontier`): the values there whose literal cells or carriers' operands a step enters
- * (admission's store walk, `expand`), the node of the place's stored paths there, the frontiers of what the copies
+ * decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
+ * (admission's store walk, `expand`), so a step enters its own cells alone, the node of the place's stored paths there, the frontiers of what the copies
  * standing there copy, and the host data standing there or above it. One holding nothing but one copy's is that copy's,
  * so a chain of copies read deep is made once per link, unless its place has a decision that stopped: then the frontier
  * keeps its place and path, so a step below that decision reads the stop alone (r4.186).
  */
 interface HostFrontier {
-  readonly tasks: Expansion[];
+  readonly cells: Map<string, Part[]>;
   readonly node: StoreNode | null;
   /** Its place and path where the place has a decision that stopped, else `null`. */
   readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
@@ -292,7 +292,7 @@ const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
  */
 function holdsOnlyCopies(at: HostFrontier): boolean {
   return (
-    at.tasks.length === 0 &&
+    at.cells.size === 0 &&
     at.host === undefined &&
     (at.node?.children.size ?? 0) === 0 &&
     at.at === null
@@ -300,7 +300,7 @@ function holdsOnlyCopies(at: HostFrontier): boolean {
 }
 
 const NOTHING: HostFrontier = {
-  tasks: [],
+  cells: new Map(),
   node: null,
   at: null,
   copies: [],
@@ -313,7 +313,7 @@ function frontier(
   host: IngressNode | undefined,
   at: HostFrontier["at"] = null,
 ): HostFrontier {
-  return { tasks: [], node, at, copies: [], host, steps: new Map() };
+  return { cells: new Map(), node, at, copies: [], host, steps: new Map() };
 }
 
 /** The walk's frontiers, its places' stored paths made once from the definitions (each store, add and transfer). */
@@ -375,8 +375,16 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[], dep
       program.work.charge("checks");
       values.push(partOf(walk.admission, part));
     }
-    if (cells.size > 0) at.tasks.push(task);
+    for (const [step, parts] of cells) addCells(walk, at, step, parts);
   }
+}
+
+/** Adds cells a step enters to a frontier's, each charged once. */
+function addCells(walk: Consumers, at: HostFrontier, step: string, parts: readonly Part[]): void {
+  walk.pass.program.work.charge("checks", parts.length);
+  const list = at.cells.get(step);
+  if (list === undefined) at.cells.set(step, [...parts]);
+  else list.push(...parts);
 }
 
 /** Each value's parts once (`partsOf`). */
@@ -415,7 +423,7 @@ function enterStores(walk: Consumers, at: HostFrontier, depth: number): void {
       const list = frontier(null, undefined);
       enterValues(walk, list, value, depth);
       const element = stepFrontier(walk, list, "element", depth);
-      at.tasks.push(...element.tasks);
+      for (const [step, parts] of element.cells) addCells(walk, at, step, parts);
       at.copies.push(...element.copies);
       at.host = walk.pass.program.scope.ingress.union(at.host, element.host);
     }
@@ -470,11 +478,10 @@ function stepFrontier(
   const at = frontier(from.node?.children.get(step) ?? null, from.host, below);
   from.steps.set(step, at);
   const cells: Expansion[] = [];
-  for (const task of from.tasks)
-    for (const part of partsOf(walk, task).cells.get(step) ?? []) {
-      walk.pass.program.work.charge("checks");
-      cells.push(partOf(walk.admission, part));
-    }
+  for (const part of from.cells.get(step) ?? []) {
+    walk.pass.program.work.charge("checks");
+    cells.push(partOf(walk.admission, part));
+  }
   enterValues(walk, at, cells, depth);
   enterStores(walk, at, depth);
   for (const copy of from.copies) {
