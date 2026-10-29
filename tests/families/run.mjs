@@ -107,10 +107,17 @@ if (process.argv[2] === "--child") {
     });
     return created;
   };
+  // a runner stopped by a signal stops its child first (it would go on analysing), then ends by that signal
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.once(signal, () => {
+      child?.kill("SIGKILL");
+      process.kill(process.pid, signal);
+    });
   /** One source's reply, or why it stalled (`timeout`, or how the process ended). */
   const analysed = (message) =>
     new Promise((resolve) => {
-      child ??= fresh();
+      // a child that ended between sources (its channel closed) is replaced, not given the next source
+      if (child?.connected !== true) child = fresh();
       const current = child;
       const onMessage = (reply) => settle(reply);
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
