@@ -13,6 +13,7 @@ import {
   OPAQUE_MEMBER,
   operatorOf,
   plusElements,
+  propertyOnly,
   REFERENCE,
   typedDefault,
   unknownItem,
@@ -23,6 +24,7 @@ import {
 import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
   keptKey,
+  keptKeyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -30,7 +32,7 @@ import {
   type ForLoopFacts,
   type Key,
 } from "./definitions.js";
-import { belowSelected, withoutEmpty } from "./exact-path.js";
+import { belowSelected, withoutEmpty, withWriter } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import { marked } from "./guards.js";
 import {
@@ -60,11 +62,13 @@ import {
   weaken,
   type Item,
   type ItemTag,
+  type Writer,
 } from "./items.js";
 import { Laminar, narrowedItems, type Narrowing } from "./narrowing.js";
 import { operationItems } from "./operator-table.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
-import type { Work } from "./solver.js";
+import { Position, positions, UNPOSITIONED } from "./positions.js";
+import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
 
 /*
  * The value side of the coarse core (checkpoint 9, TABLE §3): a read of a key at a node takes, in this order, the host
@@ -440,7 +444,200 @@ export class Values {
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
+    // G3 3a: a read at a path of property steps stands one step below its parent's position
+    if (rest.length > 0 && positions() && rest.every(propertyOnly) && this.#rooted(value, rest[0]!))
+      return this.#positioned(value, node, rest);
     return this.#through(value, node, rest, 0);
+  }
+
+  /**
+   * Whether a value's read at a path of property steps stands at a position (`#position`): a read, a literal, or a chain
+   * of property reads of a read, whose first step passes a wrapper (`Contract.wrapperHop`, `Contract.literalHop`); a
+   * read through no wrapper is its own read, as before.
+   */
+  #rooted(value: PlaceId, first: string): boolean {
+    const { program, contract } = this.pass;
+    if (program.occurrenceOf.has(value)) return contract.wrapperHop(value, first) !== null;
+    if (program.hasOf.has(value)) return contract.literalHop(value, first) !== null;
+    const chain = contract.chainOf(value);
+    return chain !== null && contract.wrapperHop(chain.root, chain.first) !== null;
+  }
+
+  /**
+   * G3 3a: a value's read at a path with its position (`#position`'s proof), `null` where it stands at none (a read
+   * through no wrapper, outside positions): A2's scan past wrappers asks it (`admission/inherited.ts`).
+   */
+  public *valuePosition(
+    value: PlaceId,
+    node: FlowNode | null,
+    rest: readonly string[],
+  ): Work<{ readonly items: readonly Item[]; readonly proof: Position | null }> {
+    if (rest.length > 0 && positions() && rest.every(propertyOnly) && this.#rooted(value, rest[0]!)) {
+      const { items, proof } = yield* this.pass.solver.proven(
+        this.#position(value, node, this.pass.contract.pathIdOf(rest), rest),
+      );
+      return { items, proof: proof instanceof Position ? proof : null };
+    }
+    return { items: yield* this.#through(value, node, rest, 0), proof: null };
+  }
+
+  *#positioned(value: PlaceId, node: FlowNode | null, rest: readonly string[]): Work<readonly Item[]> {
+    return yield this.#position(value, node, this.pass.contract.pathIdOf(rest), rest);
+  }
+
+  /**
+   * G3 3a: a value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
+   * parent's (one step up, at its root its own) advanced one step (`#advance`).
+   */
+  #position(
+    value: PlaceId,
+    node: FlowNode | null,
+    path: number,
+    rest: readonly string[],
+  ): ProofDemand<Proof> {
+    const { contract, program } = this.pass;
+    const site = program.places[value]?.site ?? null;
+    const key = joinParts("vq", value, node?.id ?? "-", path);
+    return {
+      key,
+      kind: "value",
+      file: site?.file ?? -1,
+      offset: site?.start ?? -1,
+      proves: true,
+      make: () => {
+        contract.remember(key);
+        return this.#advance(value, node, path, rest);
+      },
+    };
+  }
+
+  /**
+   * G3 3a: a value's read one step below its parent's position. Where every receiver of the read's key on the way holds
+   * no reference (`Contract.refReceiver`'s walk, step by step), a read past a wrapper or a literal's lone read is its
+   * frontier's read at its path below, as one literal's alternatives with the outermost wrapper's writer (the wrapper's
+   * lemma: `Contract.wrapperHop`); its frontier passes the next wrapper where it stands at one, a wrapper's read where
+   * the exact path answers its key at the step from its declaration. A read through no wrapper, and wherever a receiver
+   * fails, is the read's own computation from its root, which every read answers outside positions.
+   */
+  *#advance(
+    value: PlaceId,
+    node: FlowNode | null,
+    path: number,
+    rest: readonly string[],
+  ): Work<Proven<Proof>> {
+    const { contract, program } = this.pass;
+    const step = rest.at(-1)!;
+    const own = (): Work<readonly Item[]> => this.#through(value, node, rest, 0);
+    const from = yield* this.#positionOf(value, node, contract.pathParent(path), rest.slice(0, -1));
+    const hop = from !== null && from.rest === 0 ? yield* this.#hop(from.read, from.node, step) : null;
+    if (from === null || (!from.hopped && hop === null))
+      return { items: yield* own(), proof: UNPOSITIONED };
+    const noRef =
+      from.noRef && (from.outer === null || !heldReference(yield* contract.receiverKinds(from.outer)));
+    if (!noRef) return { items: yield* own(), proof: UNPOSITIONED };
+    const items = from.hopped
+      ? mergeItems(
+          withWriter(
+            alternatives(
+              yield* this.#through(
+                from.read,
+                from.node,
+                joinSteps(contract.pathSteps(from.rest), [step]),
+                0,
+              ),
+              program.scope,
+            ),
+            from.writer,
+          ),
+          program.scope,
+        )
+      : yield* own();
+    const outer = from.outer === null ? null : keptKeyBelow(program.work, from.outer, [step]);
+    return {
+      items,
+      proof:
+        hop === null
+          ? new Position(
+              from.read,
+              contract.pathStep(from.rest, step),
+              from.node,
+              true,
+              from.writer,
+              true,
+              false,
+              outer,
+            )
+          : new Position(
+              hop.read,
+              0,
+              hop.node,
+              true,
+              from.writer ?? hop.writer,
+              true,
+              false,
+              outer ?? keptKey(program.work, program.occurrenceOf.get(hop.read)!, []),
+            ),
+    };
+  }
+
+  /**
+   * A value's position at a path (`#advance`): a read's or a literal's own at no path, a property read's its owner's one
+   * step down; else its demand's proof; `null` for any other value, and outside positions.
+   */
+  *#positionOf(
+    value: PlaceId,
+    node: FlowNode | null,
+    path: number,
+    rest: readonly string[],
+  ): Work<Position | null> {
+    const { program, solver, contract } = this.pass;
+    if (!positions()) return null;
+    if (path === 0) {
+      const binding = program.occurrenceOf.get(value);
+      if (binding !== undefined)
+        return new Position(value, 0, node, false, null, true, false, keptKey(program.work, binding, []));
+      if (program.hasOf.has(value)) return new Position(value, 0, node, false, null, true, false);
+      const projection = program.projOf.get(value);
+      if (
+        projection === undefined ||
+        selectsElement(projection.step) ||
+        !propertyOnly(stepName(projection.step))
+      )
+        return null;
+      const step = stepName(projection.step);
+      return yield* this.#positionOf(
+        projection.owner,
+        projection.node ?? node,
+        contract.pathStep(0, step),
+        [step],
+      );
+    }
+    const { proof } = yield* solver.proven(this.#position(value, node, path, rest));
+    return proof instanceof Position ? proof : null;
+  }
+
+  /**
+   * The wrapper a value position's frontier passes at `step` (`#advance`): a literal's lone read there
+   * (`Contract.literalHop`), read at the literal's node; or a read of a wrapper (`Contract.wrapperHop`) whose key at the
+   * step the exact path answers from the wrapper's declaration, read at the node its literal reads it at.
+   */
+  *#hop(
+    read: PlaceId,
+    node: FlowNode | null,
+    step: string,
+  ): Work<{ readonly read: PlaceId; readonly node: FlowNode | null; readonly writer: Writer | null } | null> {
+    const { program, contract, exact } = this.pass;
+    if (program.hasOf.has(read)) {
+      const lone = contract.literalHop(read, step);
+      return lone === null ? null : { read: lone.read, node: lone.node ?? node, writer: null };
+    }
+    const binding = program.occurrenceOf.get(read);
+    const hop = binding === undefined ? null : contract.wrapperHop(read, step);
+    const at = program.occNode.get(read) ?? node;
+    if (hop === null || at === null) return null;
+    const answer = exact.exactPath(keyOf(binding!, [step]), at);
+    if (!("def" in answer) || answer.def !== hop.decl || answer.rest.length !== 1) return null;
+    return { read: hop.read, node: hop.node, writer: hop.writer };
   }
 
   /**

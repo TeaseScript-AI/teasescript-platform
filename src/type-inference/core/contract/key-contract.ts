@@ -31,6 +31,7 @@ import { HELD_REFERENCE, heldReference, hostAt, REFERENCE, unknownItem } from ".
 import { entryGroups, groupsAt, prefixLevels } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
+import { positionable, positioned } from "./positions.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members, memberStepOf } from "./value-kinds.js";
 
@@ -56,7 +57,7 @@ const RECEIVER: Decision = {
  * collection. A scalar or `null` has none; a reference's members are the runtime's (F19a); an unknown's members are
  * unknown for its own reasons, from its own ingress (`belowUnknown`), whatever those reasons are.
  */
-function holdsBelow(item: Item): boolean {
+export function holdsBelow(item: Item): boolean {
   return (
     item.tag !== "unknown" &&
     item.tag !== "empty" &&
@@ -108,6 +109,9 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
   if (found === undefined) return [unknownItem(REASON.external)];
   if (program.isHost(place)) return hostAt(keyPath(key));
   if (program.speakerPlaces.has(place)) return [unknownItem(REASON.opaque)];
+  // G3 3a: a key past a wrapper, one step below its parent's position
+  const path = keyPath(key);
+  if (positionable(contract, key, path)) return yield positioned(contract, key, path);
   // a key through a member a built-in value answers by itself (a copy of `d.values`, of `date.year`)
   const items = yield* keyThrough(contract, key, 0);
   // a parameter's and a result's kinds come through their calls (F20–F22): marked so, as the guard mark travels
@@ -120,7 +124,7 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
  * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
  * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
  */
-function keyThrough(contract: Contract, key: Key, from: number): Work<readonly Item[]> {
+export function keyThrough(contract: Contract, key: Key, from: number): Work<readonly Item[]> {
   const at = memberStepOf(contract, keyPath(key), from);
   return at < 0 ? keyContract(contract, key) : keyListsAt(contract, key, at);
 }

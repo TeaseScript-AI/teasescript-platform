@@ -544,6 +544,12 @@ export class GuardIndex {
     return false;
   }
 
+  /** Whether no test names a key of `place`, at any path (so `narrowed` answers no for every key of it). */
+  public untested(place: PlaceId): boolean {
+    const root = keyOf(place, []);
+    return !this.belowTested.has(root) && !this.#branches.has(root) && !this.#operands.has(root);
+  }
+
   /** Whether a branch a test of exactly `key` guards in a reached node's own callable holds it (§3.2). */
   public branchHolds(key: Key, node: FlowNode): boolean {
     const program = this.program;

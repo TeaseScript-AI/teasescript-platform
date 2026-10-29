@@ -173,6 +173,16 @@ export interface Storing {
 export type Inheriting<T> = Generator<Key, T, TypeTerm | null>;
 
 /** `inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
+/**
+ * G3 3a: where a key's inherited type stands past wrappers (`wrappedFrontier`): the binding and read its last wrapper
+ * holds (the key's own place and no read before the first), and the path below it (a path id).
+ */
+export interface Frontier {
+  readonly place: PlaceId;
+  readonly read: PlaceId | null;
+  readonly rest: number;
+}
+
 export interface Waiting {
   readonly key: Key;
   readonly steps: Inheriting<{
