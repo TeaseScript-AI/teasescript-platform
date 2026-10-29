@@ -1,5 +1,6 @@
 import {
   checkReadDepth,
+  countApart,
   DemandExhausted,
   joinParts,
   keep,
@@ -505,12 +506,15 @@ export class Solver {
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
   #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
-    // (its reader kept for `forget`: no work, the read is charged as a yield)
+    // (its reader kept for `forget`, each new one counted apart from the allowance)
     const reader = demandOf(frame);
     if (reader !== null) {
-      const readers = this.#readers.get(demand.key);
-      if (readers === undefined) this.#readers.set(demand.key, new Set([reader]));
-      else readers.add(reader);
+      let readers = this.#readers.get(demand.key);
+      if (readers === undefined) this.#readers.set(demand.key, (readers = new Set()));
+      if (!readers.has(reader)) {
+        readers.add(reader);
+        countApart(this.#work, "readerRecords");
+      }
     }
     const finished = this.#memo.get(demand.key);
     if (finished !== undefined) {

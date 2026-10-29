@@ -200,6 +200,8 @@ export interface BudgetAnswer {
   readonly deferred: readonly Extract<CoreDiagnostic, { obligation: unknown }>[];
   /** The work after the stop: the finishing path's, apart from `total`. */
   readonly finishing: number;
+  /** `finishing` by counter, with what was counted apart without a stop (`WorkLedger.apart`). */
+  readonly apart: ReadonlyMap<WorkCounter, number>;
   /**
    * The phase the stop came in (TABLE r4.90's lifecycle): the setup (a pass's own included), admission's walk, the
    * consumers' walk, the publication of boundaries, or the questions after a finished analysis; `null` without a stop.
@@ -919,6 +921,7 @@ class CoreAnswers implements Answers {
       exhausted,
       deferred: consumers.deferred,
       finishing: program.work.finishing,
+      apart: program.work.apartCounts(),
       stoppedIn,
       settled: exhausted === null || consumers.settled,
       demands: consumers.reads,

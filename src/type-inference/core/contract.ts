@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { keep, textUnits, type WorkLedger } from "./budget.js";
+import { countApart, keep, textUnits, type WorkLedger } from "./budget.js";
 import {
   aliasWriter,
   boundClass,
@@ -331,15 +331,18 @@ export class Contract {
     );
   }
 
-  /** The running demand asked whether `key` stopped: kept for `stop` (no work: the read it answers is charged). */
+  /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
   #asked(place: PlaceId, key: () => Key): void {
     const demand = this.pass.solver.reading;
     if (demand === null) return;
     let byDemand = this.#askers.get(place);
     if (byDemand === undefined) this.#askers.set(place, (byDemand = new Map()));
-    const keys = byDemand.get(demand);
-    if (keys === undefined) byDemand.set(demand, new Set([key()]));
-    else keys.add(key());
+    let keys = byDemand.get(demand);
+    if (keys === undefined) byDemand.set(demand, (keys = new Set()));
+    const asked = key();
+    if (keys.has(asked)) return;
+    keys.add(asked);
+    countApart(this.work, "stopAsks");
   }
 
   /** The keys whose decision stopped (`stop`), the set the next pass starts with. */

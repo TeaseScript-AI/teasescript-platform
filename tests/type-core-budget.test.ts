@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   allowanceFor,
   BudgetExhausted,
+  countApart,
   ledgerFor,
   WORK_FLOOR,
   WORK_PER_NODE,
@@ -172,6 +173,29 @@ test("after a stop the ledger counts only finishing work, and before it each uni
   // (a later limit does not replace the first)
   work.stop("read-depth");
   assert.equal(work.stopped, "work");
+});
+
+test("work counted apart never stops the analysis, inside another apart callback too, and keeps its counter", () => {
+  const work = new WorkLedger(10);
+  work.charge("checks", 9);
+  work.apart(() => {
+    countApart(work, "readerRecords", 5);
+    // (still apart after an inner `countApart` ends)
+    work.charge("checks", 7);
+  });
+  countApart(work, "stopAsks", 3);
+  assert.deepEqual(
+    { total: work.total, finishing: work.finishing, stopped: work.stopped },
+    { total: 9, finishing: 15, stopped: null },
+  );
+  assert.deepEqual(
+    [...work.apartCounts()],
+    [
+      ["readerRecords", 5],
+      ["checks", 7],
+      ["stopAsks", 3],
+    ],
+  );
 });
 
 /**

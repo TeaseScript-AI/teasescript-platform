@@ -1156,3 +1156,85 @@ test("every family's member visits are bounded by its output and its decided pat
   }
   assert.deepEqual(over, []);
 });
+
+/**
+ * TABLE r4.192 (#1403): what a decision's stop forgets by, each demand's reader and each key a demand asked whether it
+ * stopped, is counted apart from the allowance (`countApart`), never in `total`, so no stop point moves. On nested
+ * selections that count doubles at one doubling of the source; on a chain of wrappers read through every link the
+ * charged reads themselves grow faster (G6's deep shapes), and the records stay below one per charged read (`yields`).
+ * Both orders, the sharing on and off.
+ */
+test("what a stop forgets by is counted apart: linear on nested selections, below the charged reads on wrappers (#1403)", () => {
+  const nest = (k: number, leaf: string): string =>
+    Array.from({ length: k }).reduce<string>((inner) => `[${inner}, "other"][0]`, leaf);
+  const program = (source: string): SourceFile[] => [{ path: "main.tease", source }];
+  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean])[] = [
+    [
+      "nested selections of a variable",
+      (k) => program(`let seed = "origin"\nlet out = ${nest(k, "seed")}\nsay out\nexit\n`),
+      true,
+    ],
+    [
+      "nested selections of a literal",
+      (k) => program(`let out = ${nest(k, '"origin"')}\nsay out\nexit\n`),
+      true,
+    ],
+    [
+      "a chain of wrappers read through every link",
+      (k) =>
+        program(
+          [
+            "let typed: integer = 1",
+            "let root = {f: typed, q: null}",
+            ...Array.from(
+              { length: k },
+              (_, i) => `let a${i} = {q: ${i === 0 ? "root" : `a${i - 1}`}}`,
+            ),
+            `let out = a${k - 1}.${Array.from({ length: k }, () => "q").join(".")}.f`,
+            "exit",
+          ].join("\n") + "\n",
+        ),
+      false,
+    ],
+  ];
+  const apart: readonly WorkCounter[] = ["readerRecords", "stopAsks"];
+  const over: string[] = [];
+  for (const [shape, make, linear] of shapes) {
+    const sizes = linear ? [32, 64] : [8, 16];
+    const family: WorkFamily = { name: shape, measures: shape, program: make };
+    const at = sizes.map((k) => sized(family, k));
+    for (const reversed of [false, true])
+      for (const unshared of [false, true]) {
+        const where = `${shape}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+        const [small, large] = at.map((one) => analysed(one, reversed, unshared).budget);
+        for (const budget of [small!, large!]) {
+          // (counted apart, never in the charged work, so never what stops the analysis)
+          assert.ok(
+            apart.every((counter) => !budget.counts.has(counter)),
+            where,
+          );
+          assert.equal(
+            [...budget.counts.values()].reduce((sum, units) => sum + units, 0),
+            budget.total,
+            where,
+          );
+          const records = apart.map((counter) => budget.apart.get(counter) ?? 0);
+          assert.ok(records[0]! > 0, `${where}: its readers are recorded`);
+          if (records[0]! + records[1]! > (budget.counts.get("yields") ?? 0))
+            over.push(
+              `${where}: ${records.join(" + ")} records, ${budget.counts.get("yields")} reads`,
+            );
+        }
+        if (!linear) continue;
+        const scale =
+          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+        for (const counter of apart) {
+          const before = small!.apart.get(counter) ?? 0;
+          const doubling = (2 * ((large!.apart.get(counter) ?? 0) / Math.max(1, before))) / scale;
+          if (before > 0 && doubling > DOUBLING)
+            over.push(`${where} ${counter}: ${doubling.toFixed(3)}`);
+        }
+      }
+  }
+  assert.deepEqual(over, []);
+});
