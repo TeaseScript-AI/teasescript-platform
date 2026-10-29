@@ -4,6 +4,7 @@ import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { mergeItems, type Item, type ItemTag, type Writer } from "../items.js";
+import { memberStep } from "../method-categories.js";
 import { propertyStep } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
@@ -116,6 +117,12 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathParents.push(parent);
   contract.pathDepths.push(contract.pathDepths[parent]! + 1);
   contract.pathLastSteps.push(step);
+  // (G3 stage 1's metadata, each from its parent's and the step alone: `key-ids.ts`)
+  contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
+  contract.pathTextLengths.push(
+    parent === 0 ? step.length : contract.pathTextLengths[parent]! + 1 + step.length,
+  );
+  contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   steps.set(step, id);
   return id;
 }

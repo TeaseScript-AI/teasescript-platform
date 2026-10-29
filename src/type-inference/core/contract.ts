@@ -234,6 +234,16 @@ export class Contract {
   readonly pathDepths: number[] = [0];
   readonly pathLastSteps: string[] = [""];
   readonly pathChildren: (Map<string, number> | undefined)[] = [];
+  /**
+   * G3 stage 1 (`key-ids.ts`): per path, made with it from its parent's in constant work, its first step, its text's
+   * length, and the nearest path at or above it whose last step a built-in value answers (`memberStep`), 0 for none.
+   */
+  readonly pathFirstSteps: string[] = [""];
+  readonly pathTextLengths: number[] = [0];
+  readonly pathMembers: number[] = [0];
+  /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
+  readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
+  readonly pathStepLists = new Map<number, readonly string[]>();
   readonly signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
   readonly carrierIds = new Map<string, string>();
