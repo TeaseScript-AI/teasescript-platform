@@ -33,7 +33,11 @@ import {
   type PredictedRun,
 } from "./helpers/type-core-derived.js";
 import { assignments, runGlobals } from "./helpers/type-core-route.js";
-import type { CheckedDiagnostic, DiagnosticRule } from "../src/type-inference/core/result.js";
+import {
+  coreRecord,
+  type CheckedDiagnostic,
+  type DiagnosticRule,
+} from "../src/type-inference/core/result.js";
 
 /*
  * C13 (TABLE C13, S3 §1) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
@@ -1364,6 +1368,47 @@ test("toJson proves an unchanged value once and sees what changed between calls"
       fourModes(`${typed}say toJson(again)\nsay toJson(copy)\nsay toJson(root)\nexit\n`),
       JSON.stringify(["warning-runtime-check 5", "warning-runtime-check 6"]),
       `${type}, the copies first`,
+    );
+  }
+  // (a class shared by two aliases, each warning's writers its own read's: the proof is the class's, the items each
+  // read's own, in all four modes, Codex r6)
+  {
+    const source =
+      "let root = {f: hostValue otherwise /a/}\nlet a = root\nlet b = a\nsay toJson(a)\nsay toJson(b)\nexit\n";
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const line = (offset: number): number => source.slice(0, offset).split("\n").length;
+    const once = (): string =>
+      JSON.stringify(
+        coreRecord(checkedResult(analyseCore(request), request), ["main.tease"])
+          .diagnostics.filter(
+            (d) => d.class === "warning-runtime-check" && line(d.site.offset) >= 4,
+          )
+          .map((d) => [
+            line(d.site.offset),
+            (d.provenance?.writers ?? []).map((writer) => line(Number(writer.split(":").at(-1)))),
+          ]),
+      );
+    const modes = [false, true].flatMap((unshared) =>
+      [false, true].map((reversed) => {
+        const run = (): string =>
+          reversed
+            ? withSolverSeam({ reverseWorklist: true }, () =>
+                withConsumerOrder((list) => [...list].reverse(), once),
+              )
+            : once();
+        return unshared ? withoutSharing(run) : run();
+      }),
+    );
+    assert.deepEqual(
+      modes,
+      Array(4).fill(
+        JSON.stringify([
+          [4, [2]],
+          [5, [3]],
+        ]),
+      ),
+      "the aliases' writers",
     );
   }
   // (copies of it, unchanged: each call its own warning)
