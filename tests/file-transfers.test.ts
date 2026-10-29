@@ -372,7 +372,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
       }),
     ),
     [
-      "lib.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is 'main.tease', which runs global function 'visit'. If it is, and 'main.tease' is running then, the call fails. If it can be 'main.tease', run 'visit' only from files other than 'main.tease'.",
+      "lib.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is 'main.tease', which runs global function 'visit'. If it is, and 'main.tease' is running then, the call fails. If that can happen, run 'visit' only from files other than 'main.tease'.",
     ],
   );
   // So does a call of the global function whose run a file's own code decides.
