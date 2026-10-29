@@ -9,7 +9,7 @@ import { conditionShape } from "../narrowing-shapes.js";
 import { joinParts, keepText, keptArray, keptParts, type WorkLedger } from "./budget.js";
 import { keyBelow, keyOf, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
-import { mergeItems, type Item, type ItemScope, type ItemTag } from "./items.js";
+import { mergeItems, REASON, type Item, type ItemScope, type ItemTag } from "./items.js";
 import { selectsElement } from "./method-categories.js";
 import { propertyStep, siteKey, type CoreProgram } from "./program.js";
 import {
@@ -252,6 +252,16 @@ function overlap(
 }
 
 /**
+ * An item a test proves of a kind: an unknown that a stop left (`budget`) is known by the test itself, so the stop's
+ * reason and word go; any other keeps its own (host data its external origin), TABLE r4.183.
+ */
+function proved(item: Item, tag: ItemTag): Item {
+  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
+    ? { ...item, tag, reasons: item.reasons & ~REASON.budget, context: null }
+    : { ...item, tag };
+}
+
+/**
  * G's value (N1): the input items filtered by the form. Emptiness (`empty`) is untouched; after a positive test,
  * `!= null` or `is not null`, a single remaining kind without `unknown` is definite; after `is not T` certainties stay.
  * An empty result is the unreachable branch's value.
@@ -274,12 +284,12 @@ export function narrowedItems(
         if (item.tag !== "null") kept.push(item);
         break;
       case "null":
-        if (item.tag === "null" || item.tag === "unknown") kept.push({ ...item, tag: "null" });
+        if (item.tag === "null" || item.tag === "unknown") kept.push(proved(item, "null"));
         break;
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
           const tag = overlap(item.tag, kind, form.fractional === true, work);
-          if (tag !== null) kept.push(tag === item.tag ? item : { ...item, tag });
+          if (tag !== null) kept.push(tag === item.tag ? item : proved(item, tag));
         }
         break;
       case "is-not":

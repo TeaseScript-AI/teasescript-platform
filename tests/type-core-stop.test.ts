@@ -2243,13 +2243,14 @@ test("a pass in which a decision stops is not settled: the next starts with its 
 });
 
 /**
- * Codex c-r8 B1 on #1165: a narrowed read of a key whose decision stopped reads it as every read does, through the one
- * key read (`Values.#keyRead`), so the test narrows its contract, the reason `budget` carried: `is not integer` leaves
- * `unknown`, and `is integer` gives the integer the test proves, as for host data. Both orders.
+ * Codex c-r8 B1 on #1165 and TABLE r4.183: a narrowed read of a key whose decision stopped reads it as every read does,
+ * through the one key read (`Values.#keyRead`), as unknown data with the reason `budget`, and the test narrows it as it
+ * narrows host data: under `is integer` the read is the integer the test itself proves, so its reason is the test's, not
+ * `budget`; under `is not integer`, and unguarded, it stays `unknown` with `budget`. Both orders.
  */
-test("a narrowed read of a stopped decision's key narrows its contract, the reason budget carried (S3 §5)", () => {
+test("a narrowed read of a stopped decision's key is what its test proves, unguarded reads budget (TABLE r4.183)", () => {
   for (const [form, expected] of [
-    ["is integer", ["integer/16"]],
+    ["is integer", ["integer/0"]],
     ["is not integer", ["unknown/16"]],
   ] as const) {
     const source =
