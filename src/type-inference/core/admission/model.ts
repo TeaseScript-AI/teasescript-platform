@@ -485,6 +485,11 @@ export interface Decided {
   readonly decider: Definition | null;
   readonly site: SourceSite | null;
   readonly published: boolean;
+  /**
+   * Where a copy decides the path (A4): the written type it copies there, the decision's `null` added (`optionalOf`),
+   * whole below the path, so a store above a stopped decision is checked against it (`storeRequirement`, #1416).
+   */
+  readonly copied: TypeTerm | null;
 }
 
 /** A list `+` (`joinElements`). */

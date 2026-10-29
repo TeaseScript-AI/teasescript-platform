@@ -91,6 +91,10 @@ export const READS = new Map([
     "stopDecision",
     "takes back what a decision stopped at its demand allowance made of its key: each read of the key owes its own check",
   ],
+  [
+    "storeRequirement",
+    "the complete type a store above a stopped decision is checked against: a decision's answer, recorded by `decide`",
+  ],
   ["storesAt", "the stores reaching a key: `decide`'s inputs"],
   ["takeBackReadChecks", "takes the running unit's read checks back at a stop: creates none"],
   ["typedByDefault", "whether an ingress is typed by its default alone (F18): a test"],
@@ -169,6 +173,12 @@ const LISTED_READS = [
     "the site that decided an answer, read where the answer asks it",
   ],
   ["inheritsWritten", "call", "answers.ts", "whether a copy decides an answer, read with it"],
+  [
+    "stored",
+    ".along",
+    "enclosing.ts",
+    "the keys whole stores and adds reach above a stopped key: the stores the stop stands for, read",
+  ],
 ];
 
 export function checkObligationInventory(root) {

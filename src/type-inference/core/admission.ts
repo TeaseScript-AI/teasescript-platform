@@ -8,7 +8,13 @@ import {
   publish,
   takeBackReadChecks,
 } from "./admission/boundaries.js";
-import { compareLanded, decide, decisionStopped, stopDecision } from "./admission/decision.js";
+import {
+  compareLanded,
+  decide,
+  decisionStopped,
+  stopDecision,
+  storeRequirement,
+} from "./admission/decision.js";
 import { groups, stores } from "./admission/groups.js";
 import { atCopy } from "./admission/held.js";
 import {
@@ -563,6 +569,10 @@ export class Admission {
 
   public decide(root: PlaceId, path: readonly string[], lazily?: boolean): Decision | null {
     return decide(this, root, path, lazily);
+  }
+
+  public storeRequirement(place: PlaceId, path: readonly string[]): TypeTerm | null {
+    return storeRequirement(this, place, path);
   }
 
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {

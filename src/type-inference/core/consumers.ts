@@ -12,6 +12,7 @@ import {
   type BudgetLimit,
 } from "./budget.js";
 import { withFacts } from "./consumers/diagnostics.js";
+import { enclosingStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
 import { freshStores, ingressMark, storeMark } from "./consumers/fresh.js";
 import { mixed, mixedJoin } from "./consumers/mixed.js";
@@ -488,6 +489,19 @@ export class Consumers {
   public cheapDecided(root: PlaceId, path: readonly string[]): CheapDecision | null {
     return cheapDecided(this, root, path);
   }
+
+  /** The stores above a stopped decision: each checked against its destination's complete type, or marked (#1416). */
+  public enclosingStores(): void {
+    enclosingStores(this);
+  }
+
+  /** The destinations `enclosingStores` resolved this pass, a whole store's key and an add's receiver's apart. */
+  readonly enclosed = new Set<Key>();
+  readonly enclosedAdds = new Set<Key>();
+  /** Their stores checked against the complete type, by uid, once (`enclosingStores`). */
+  readonly required = new Set<number>();
+  /** Each such destination's complete type, which its stores' checks carry into the plan whole (`Answers.requirement`). */
+  readonly requirements = new Map<Key, TypeTerm>();
 
   readonly marked = new Set<number>();
 
