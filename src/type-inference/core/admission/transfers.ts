@@ -200,7 +200,7 @@ interface Region {
   readonly root: RegionPath;
   /** Whether a written copy stands at any of its paths (`holdsWritten`). */
   readonly written: boolean;
-  /** The groups of its carriers' operands, at any of its paths (`holdsWritten`). */
+  /** The groups of its carriers' operands, path by path as each first held a value (`holdsWritten` asks them so). */
   readonly bound: readonly DeciderGroup[];
 }
 
@@ -297,8 +297,12 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
     distinctAtEnd: null,
   });
   const root = emptyPath();
-  let paths = 1;
-  const bound: DeciderGroup[] = [];
+  // (its paths in the order each first held a value, as `holdsWritten` asks their operands' groups)
+  const valued: RegionPath[] = [];
+  const value = (path: RegionPath, entry: Entry): void => {
+    if (path.values.length === 0) valued.push(path);
+    path.values.push(entry);
+  };
   interface Item {
     readonly member: number;
     readonly task: Expansion;
@@ -355,13 +359,9 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
         const entry = (): Entry => ({ ...item, rank: rank++, bound: null });
         if (item.task.inherits !== null) here.written.push(entry());
         const stop = item.task.stop;
-        if (stop !== null)
-          (stop.list === "written"
-            ? here.written
-            : stop.list === "literals"
-              ? here.literals
-              : here.values
-          ).push(entry());
+        if (stop?.list === "written") here.written.push(entry());
+        else if (stop?.list === "literals") here.literals.push(entry());
+        else if (stop?.list === "values") value(here, entry());
         const above = group.members[item.member]!;
         // (a call a list join carries is read by its written result, as a written copy is, so the scan of the stops
         // answers there: F20, `earliestDecider`)
@@ -414,31 +414,34 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
     }
     if (frame.next < frame.positions.length) {
       const at = frame.positions[frame.next++]!;
-      if (at.bound.length > 0) {
-        const operands = groupOf(admission, at.bound);
-        bound.push(operands);
-        here.values.push({
+      if (at.bound.length > 0)
+        value(here, {
           rank: rank++,
           member: at.from[0]!,
           task: at.bound[0]!.task,
           deep: at.bound[0]!.deep,
           single: at.bound[0]!.single,
-          bound: { group: operands, from: at.from, through: at.through, roles: at.roles },
+          bound: {
+            group: groupOf(admission, at.bound),
+            from: at.from,
+            through: at.through,
+            roles: at.roles,
+          },
         });
-      }
       if (at.items.length > 0) {
         let next = here.below.get(at.step!);
-        if (next === undefined) {
-          here.below.set(at.step!, (next = emptyPath()));
-          paths += 1;
-        }
+        if (next === undefined) here.below.set(at.step!, (next = emptyPath()));
         stack.push({ items: at.items, path: next, positions: null, next: 0 });
       }
       continue;
     }
     stack.pop();
   }
-  keep(admission.work, paths + rank + bound.length);
+  const bound: DeciderGroup[] = [];
+  for (const path of valued)
+    for (const entry of path.values) if (entry.bound !== null) bound.push(entry.bound.group);
+  // (a path is kept for the entries at or below it, and rides on their units)
+  keep(admission.work, 1 + rank);
   group.region = { root, written, bound };
   return group.region;
 }
@@ -679,19 +682,19 @@ function restIds(admission: Admission, at: readonly string[]): number[] {
 }
 
 /**
- * Each of a region's paths along a decided path's rest from `rest`, with its length, the region's own first; a prefix
- * no path of the region stands at, nor any longer one, holds nothing.
+ * Each prefix of a decided path's rest from `rest`, with its length, the empty one first, and the region's path there:
+ * `null` past the region's paths, where nothing stands.
  */
 function forEachPath(
   region: Region,
   at: readonly string[],
   rest: number,
-  visit: (path: RegionPath, length: number) => void,
+  visit: (path: RegionPath | null, length: number) => void,
 ): void {
-  let path: RegionPath | undefined = region.root;
-  for (let length = 0; path !== undefined; length += 1) {
+  let path: RegionPath | null = region.root;
+  for (let length = 0; rest + length <= at.length; length += 1) {
+    if (length > 0) path = path?.below.get(at[rest + length - 1]!) ?? null;
     visit(path, length);
-    path = rest + length < at.length ? path.below.get(at[rest + length]!) : undefined;
   }
 }
 
@@ -738,9 +741,9 @@ function writtenOn(
       const below: { group: DeciderGroup; rest: number }[] = [];
       forEachPath(regionOf(admission, group), at, rest, (path, length) => {
         admission.pass.program.work.charge("checks");
-        for (const entry of path.written)
+        for (const entry of path?.written ?? [])
           asks ||= asksType(admission, group, entry, rest + length === at.length);
-        for (const entry of path.values)
+        for (const entry of path?.values ?? [])
           if (entry.bound !== null) below.push({ group: entry.bound.group, rest: rest + length });
       });
       if (asks) {
@@ -818,6 +821,7 @@ function firstValue(
       }
       const lists: { list: readonly Entry[]; length: number }[] = [];
       forEachPath(regionOf(admission, group), at, rest, (path, length) => {
+        if (path === null) return;
         const end = rest + length === at.length;
         const list = distinctAt(admission, path, end);
         if (list.length > 0) lists.push({ list, length });
