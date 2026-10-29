@@ -79,6 +79,10 @@ const edits = (...pairs) => {
 /** How many messages start so. */
 const count = (messages, start) => messages.filter((message) => message.startsWith(start)).length;
 
+/** That exactly `n` messages start so, else the count named and the messages, for the assertion. */
+const expectCount = (messages, start, n) =>
+  assert.equal(count(messages, start), n, `count "${start}":\n${messages.join("\n")}`);
+
 /** Whether a message starts so, else the messages, for the assertion. */
 const expectStart = (messages, start, present = true) =>
   assert.equal(
@@ -94,10 +98,7 @@ test("a call from an obligation-creating consumer method into an unlisted Admiss
     [FRESH]: (text) =>
       text.replace(FRESH_START, `${FRESH_START}    ${SELF}.admission.newDecision();\n`),
   });
-  assert.ok(
-    messages.some((message) => message.includes("calls Admission.newDecision")),
-    messages.join("\n"),
-  );
+  assert.ok(messages.some((message) => message.includes("calls Admission.newDecision")));
 });
 
 test("a fresh-pass derivation left in a block comment, or an entry left out of the list, fails", () => {
@@ -372,17 +373,9 @@ test("the single-file layout: each recognised creation must be listed; every oth
     (sum, [, , gives]) => sum + (typeof gives === "number" ? gives : 0),
     0,
   );
-  assert.equal(
-    count(messages, UNPROVED_AT("Admission.readChecks")),
-    readChecks,
-    messages.join("\n"),
-  );
-  assert.equal(
-    count(messages, UNPROVED_AT("an error parameter")),
-    ERROR_FORMS.length + 1,
-    messages.join("\n"),
-  );
-  assert.equal(count(messages, OUTSIDE), 3, messages.join("\n"));
+  expectCount(messages, UNPROVED_AT("Admission.readChecks"), readChecks);
+  expectCount(messages, UNPROVED_AT("an error parameter"), ERROR_FORMS.length + 1);
+  expectCount(messages, OUTSIDE, 3);
 });
 
 test("the split layout: each function taking the instance is a derivation; only an exact forwarder is its function's", () => {
@@ -405,7 +398,7 @@ test("the split layout: each function taking the instance is a derivation; only 
     },
   );
   for (const [start] of PART_FORMS) expectStart(messages, start);
-  assert.equal(count(messages, OUTSIDE), 3, messages.join("\n"));
+  expectCount(messages, OUTSIDE, 3);
   for (const [name, , reported] of FORWARDERS)
     expectStart(messages, `Admission.${name} names 2 derivations`, reported);
   expectStart(messages, "Admission.probeErrorForward creates");
@@ -474,12 +467,23 @@ const VALUES = [
   ],
   // (a shorthand property's value)
   ["Admission.routeDirect", "const bag = { routeDirect };\n    void bag;"],
+  // (a class's `extends` expression is a value position: a member, a namespace's moved derivation, Codex r7 B1)
+  [
+    "Admission.probeBase",
+    `class ProbeDerived extends ${SELF}.admission.probeBase {}\n    void ProbeDerived;`,
+  ],
+  [
+    "Admission.probeBaseMoved",
+    `class ProbeMovedBase extends probe.probeBaseMoved(${SELF}.admission) {}\n    void ProbeMovedBase;`,
+  ],
 ];
-/** Writes of a listed getter: each unproved (Codex r6 B4). */
+/** Writes and deletions of a listed getter, no read: each unproved (Codex r6 B4, r7 B2). */
 const WRITES = [
   `${SELF}.admission.probeKnown = 1;`,
   `${SELF}.admission.probeKnown++;`,
   `${SELF}.admission.probeKnown += 1;`,
+  `delete (${SELF}.admission as Partial<Admission>).probeKnown;`,
+  `delete ((${SELF}.admission as Partial<Admission>).probeKnown);`,
 ];
 /** Consumers by how they record, each calling its own unlisted derivation: [the consumer, the derivation, the body, creating]. */
 const RECORDING = [
@@ -542,7 +546,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
               "  probeOpaque = (() => () => 0)();\n\n  probeMaybe: (() => number) | undefined = (() => () => 0)();\n\n",
               "  get probeKnown(): number {\n    return 0;\n  }\n\n  set probeKnown(value: number) {\n    void value;\n  }\n\n",
               "  set probeSetOnly(value: number) {\n    void value;\n  }\n\n",
-              "  probeUnionRead = 0;\n\n",
+              "  probeUnionRead = 0;\n\n  probeBase = class {};\n\n",
             ].join("") + MEMBERS,
           ),
       ],
@@ -609,7 +613,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
         .map(unlisted)
         .join(
           "\n\n",
-        )}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
+        )}\n\nexport function probeBaseMoved(admission: Admission) {\n  void admission;\n  return class {};\n}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
     },
     new Map([...READS, ["probeKnown", "a getter read"], ["probeSetOnly", "a setter alone"]]),
   );
@@ -620,24 +624,20 @@ test("a creating consumer's direct calls must be listed; every other form of a g
   expectStart(messages, UNPROVED_AT("Admission.routeAlias"));
   for (const [label] of VALUES) expectStart(messages, UNPROVED_AT(label));
   expectStart(messages, "Unproved: Admission.probeOpaque is called but is no derivation");
-  assert.equal(count(messages, UNPROVED_AT("Admission.probeOpaque")), 2, messages.join("\n"));
-  // (the listed getter's dot read is quiet, as a listed read; its destructuring and its writes are not)
-  assert.equal(
-    count(messages, UNPROVED_AT("Admission.probeKnown")),
-    1 + WRITES.length,
-    messages.join("\n"),
-  );
+  expectCount(messages, UNPROVED_AT("Admission.probeOpaque"), 2);
+  // (the listed getter's dot read is quiet, as a listed read; its destructuring, writes and deletions are not)
+  expectCount(messages, UNPROVED_AT("Admission.probeKnown"), 1 + WRITES.length);
   expectStart(messages, `${FRESH_LABEL} calls Admission.probeKnown:`, false);
   // (an overloaded derivation's call reaches it, Codex r6 B3)
   expectStart(messages, `${FRESH_LABEL} calls Admission.probeOverloaded:`);
   for (const [name, route, , creating] of RECORDING)
     expectStart(messages, `Consumers.${name} calls Admission.${route}:`, creating);
   // (the quoted, destructured, assigned, aliased and parameter forms of a recording array, and the read alone)
-  assert.equal(count(messages, UNPROVED_AT("Consumers.diagnostics")), 6, messages.join("\n"));
+  expectCount(messages, UNPROVED_AT("Consumers.diagnostics"), 6);
   expectStart(messages, UNPROVED_AT("Admission.routeSelf"));
   expectStart(messages, UNPROVED_AT("Admission.probeUnionRead"));
   // (a setter alone is written and read: each unproved)
-  assert.equal(count(messages, UNPROVED_AT("Admission.probeSetOnly")), 2, messages.join("\n"));
+  expectCount(messages, UNPROVED_AT("Admission.probeSetOnly"), 2);
   expectStart(
     messages,
     "Unproved: Admission.routeSelf is called outside every consumer derivation",

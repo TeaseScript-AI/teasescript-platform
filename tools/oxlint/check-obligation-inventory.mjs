@@ -13,12 +13,15 @@ import { Project, ts } from "ts-morph";
  * checker (a constructor's parameter properties, accessors and overloads, each with all its declarations), `readChecks`
  * and `Consumers`' recording arrays among them, `boundaryCheck`, a parameter named `error` in admission's files, and a
  * derivation moved to a function. A reference is every name whose symbol is one, or an alias of one: an import, a
- * namespace's member, a destructuring's key in a declaration or an assignment, a shorthand property. The check
+ * namespace's member, a destructuring's key in a declaration or an assignment, a shorthand property; in a value
+ * position, a class's `extends` expression included, not a type's (an annotation, a type argument, an interface's or an
+ * `implements` heritage). The check
  * recognises a closed list of its forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written, and an exact
  * forwarder's call; inside a derivation of admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a
  * call of a parameter named `error` (each creating an obligation); inside a consumer derivation, a push onto a
  * recording array (`diagnostics`, `deferred`, `checks`), a conditional of them included; admission's own code using its
- * own state; a dot read of a `get` accessor `READS` lists, no write; and the reads `LISTED_READS` lists. Every other
+ * own state; a dot read of a `get` accessor `READS` lists, a read (no write, no `delete`); and the reads `LISTED_READS`
+ * lists. Every other
  * reference, anywhere in `src/type-inference/core/`, is reported as unproved by the name it contains, whatever flows
  * from it. The check rejects:
  * - a name that names more than one derivation;
@@ -568,6 +571,14 @@ export function obligationInventoryDiagnostics(program, root, files) {
       return false;
     }
   };
+  // whether an expression is `delete`'s operand: no read
+  const deleted = (expression) => {
+    let at = expression;
+    while (ts.isParenthesizedExpression(at.parent)) at = at.parent;
+    return ts.isDeleteExpression(at.parent);
+  };
+  // whether a dot reference reads: neither written nor deleted
+  const reads = (access) => !assignedTo(access) && !deleted(access);
   // the listed read form a dot reference `R.m` stands in, else null
   const readForm = (access) => {
     const parent = access.parent;
@@ -727,8 +738,11 @@ export function obligationInventoryDiagnostics(program, root, files) {
     if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
       const access = parent;
       const callee = ts.isCallExpression(access.parent) && access.parent.expression === access;
-      const written = assignedTo(access);
-      const form = written ? "a write" : (readForm(access) ?? "a value");
+      const form = assignedTo(access)
+        ? "a write"
+        : deleted(access)
+          ? "a deletion"
+          : (readForm(access) ?? "a value");
       if (kind === "moved" || kind === "boundary" || kind === "error")
         unproved(access, entry, "a namespace member");
       else if (kind === "record") {
@@ -749,8 +763,8 @@ export function obligationInventoryDiagnostics(program, root, files) {
           );
         else admissionCalls.push([access.parent, derivation, consumer.around(access)]);
       } else if (
-        // (a listed getter's dot read, nothing else: no write, no setter alone, N1, Codex r6 B4)
-        !written &&
+        // (a listed getter's dot read, nothing else: a read, no setter alone, N1, Codex r6 B4, r7 B2)
+        reads(access) &&
         files.reads.has(name) &&
         declarationsOf(symbol).some((declaration) => ts.isGetAccessorDeclaration(declaration))
       ) {
@@ -788,6 +802,17 @@ export function obligationInventoryDiagnostics(program, root, files) {
   };
   for (const sourceFile of scopeFiles) {
     const visit = (node) => {
+      // (a class's `extends` expression is a value, its type arguments types, Codex r7 B1; every other type node is a type
+      // position: an annotation, a type argument, an interface's or an `implements` heritage)
+      if (
+        ts.isExpressionWithTypeArguments(node) &&
+        ts.isHeritageClause(node.parent) &&
+        node.parent.token === ts.SyntaxKind.ExtendsKeyword &&
+        ts.isClassLike(node.parent.parent)
+      ) {
+        visit(node.expression);
+        return;
+      }
       if (ts.isTypeNode(node)) return;
       for (const [at, entry, symbol] of namedBy(node)) classify(at, entry, symbol, sourceFile);
       node.forEachChild(visit);
@@ -836,7 +861,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
       .filter((callee) => callee !== undefined);
     for (const declaration of consumer.nodesIn(derivation)) {
       const visit = (node) => {
-        if (ts.isPropertyAccessExpression(node) && !assignedTo(node)) {
+        if (ts.isPropertyAccessExpression(node) && reads(node)) {
           // (a getter's read, its pair found by symbol whatever the order of its declarations, Codex r6 B3)
           const read = symbolOf(node.name);
           if (declarationsOf(read).some((at) => ts.isGetAccessorDeclaration(at))) {
