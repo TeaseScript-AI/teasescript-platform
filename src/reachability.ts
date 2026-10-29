@@ -334,7 +334,8 @@ export class Reachability {
    * it interrupts (see {@link #leavingBlocks}) leaves to. While a called file runs, a call waits. A block starts only while
    * it stays, on the ways from its creation that {@link #staying} follows. Its `end` ends the file running where it
    * starts, so it has a call to return to when one waits at every such place and no other block that may leave stays
-   * there, nor another copy of it (see {@link #single}). The block's code then runs with calls waiting, and else as code
+   * there, nor another copy of it (see {@link #single}); and so it has when it belongs to a file entry that a call waits
+   * below wherever it is created, as the block goes with that entry. The block's code then runs with calls waiting, and else as code
    * that may have none, by the instruction that created it (`hidden`). `interrupted` tells where a block that may leave
    * the code it interrupts may start.
    */
@@ -417,21 +418,33 @@ export class Reachability {
             case "back":
               return state;
             case "created":
-              return { kind: "gate", created: true, run: null };
+              return state.kind === "calls"
+                ? {
+                    kind: "gate",
+                    created: true,
+                    uncalled: state.none !== null || state.hidden !== null,
+                    run: null,
+                  }
+                : null;
             case "runs":
-              return state.kind === "runs" ? { kind: "gate", created: false, run: state } : null;
+              return state.kind === "runs"
+                ? { kind: "gate", created: false, uncalled: false, run: state }
+                : null;
             case "block": {
               if (state.kind !== "gate" || !state.created || state.run === null) return null;
               const { creator, block } = gates[node - firstGate]!;
               const starts = this.#startsAnywhere(creator) ? state.run.anywhere : state.run.due;
               if (starts === null) return null;
+              // A block of a file entry that a call waits below whenever it is created starts only while that entry
+              // stays, so while the call waits.
+              const kept = !state.uncalled && !this.#outlivesItsFile(creator);
               const alone =
                 starts.leavers === null ||
                 (starts.leavers === block && this.#single(creator, ways));
               return {
                 kind: "calls",
                 none: null,
-                hidden: starts.unsafe || !alone ? creator : null,
+                hidden: !kept && (starts.unsafe || !alone) ? creator : null,
                 waiting: true,
               };
             }
@@ -1640,10 +1653,14 @@ interface BlockRuns {
   readonly due: BlockStarts | null;
 }
 
-/** For a block where an instruction creates it: whether the instruction runs, and where the block starts then. */
+/**
+ * For a block where an instruction creates it: whether the instruction runs, whether a way to it may have no call
+ * waiting, `uncalled`, and where the block starts then.
+ */
 interface BlockGate {
   readonly kind: "gate";
   readonly created: boolean;
+  readonly uncalled: boolean;
   readonly run: BlockRuns | null;
 }
 
@@ -1663,6 +1680,7 @@ function joinBlockStates(left: BlockState, right: BlockState): BlockState {
     return {
       kind: "gate",
       created: left.created || right.created,
+      uncalled: left.uncalled || right.uncalled,
       run:
         left.run === null
           ? right.run
@@ -1714,6 +1732,7 @@ function sameBlockStates(left: BlockState, right: BlockState): boolean {
       return (
         right.kind === "gate" &&
         left.created === right.created &&
+        left.uncalled === right.uncalled &&
         (left.run === null || right.run === null
           ? left.run === right.run
           : sameBlockStates(left.run, right.run))

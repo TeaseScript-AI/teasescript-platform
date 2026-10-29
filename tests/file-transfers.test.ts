@@ -814,9 +814,10 @@ test("an end warns or fails only where the ways into its file decide it, for eve
             for (let index = 0; index < scenes; index += 1)
               expected.push(`scene.tease ${named ? "TSV070" : "TSV071"}`);
           // A loaded reference may name any file: the declarations of lib.tease, far.tease, which ends, or main.tease,
-          // which then starts again, and with it a second copy of a block that its call leads to.
+          // which may then start again, as the checks see it, with a second copy of a block that outlives its file
+          // entry: one of main.tease, or a media block.
           const copies = kind === "load" && entry !== "goto";
-          if (where === "scene" && (entry !== "call" || copies))
+          if (where === "scene" && (entry !== "call" || (copies && blockKind === "media")))
             for (let index = 0; index < count; index += 1) expected.push("scene.tease TSV071");
           if (where === "caller" && copies)
             for (let index = 0; index < count; index += 1) expected.push("main.tease TSV071");
