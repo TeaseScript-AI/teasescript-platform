@@ -4,7 +4,7 @@ import type { Contract } from "../contract.js";
 import { firstWriter, type Writer } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import { sharing } from "../sharing.js";
-import { boundOf, choiceMembers, NO_CLASS } from "./classes.js";
+import { boundOf, choiceMembers, NO_CLASS, NO_KEPT_CLASS, writersOf } from "./classes.js";
 import { declaredBefore } from "./key-contract.js";
 import { markFree } from "./levels.js";
 import type {
@@ -22,10 +22,11 @@ import type {
  * TABLE r4.85: the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
  * answer alike at every path apart from the writers of their roles (`classWriters`), each role's writer standing for
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
- * earliest in some role, merged, answer as all of them, whatever order the writers come in. A member without a class,
- * or whose roles are not known, stands by itself. Per class in the order of its first member: the members read, each
- * once and in role order (the first member for a role no later one is earlier in), the others where the class is
- * mixed (`Contract.classMixed`: read where the read ones' answer holds a leaf or an operand's identity), and all.
+ * earliest in some role, merged, answer as all of them, whatever order the writers come in; a class's roles are read
+ * once a second member comes, so a member alone in its class reads none. A member without a class stands by itself. Per
+ * class in the order of its first member: the members read, each once and in role order (the first member for a role
+ * no later one is earlier in), the others where the class is mixed (`Contract.classMixed`: read where the read ones'
+ * answer holds a leaf or an operand's identity), and all.
  */
 function roleMinima(
   members: readonly ValueClass[],
@@ -36,28 +37,24 @@ function roleMinima(
   readonly all: readonly number[];
   readonly mixed: number;
 }[] {
-  const classes: {
-    readonly read: number[];
-    readonly best: (Writer | null)[];
-    readonly all: number[];
-  }[] = [];
+  const classes: { read: number[]; best: (Writer | null)[] | null; readonly all: number[] }[] = [];
   const byClass = new Map<string, number>();
   for (const [index, { cls, writers }] of members.entries()) {
     charge();
-    const at = cls === null || writers === null ? undefined : byClass.get(cls);
+    const at = cls === null ? undefined : byClass.get(cls);
     if (at === undefined) {
-      if (cls !== null && writers !== null) byClass.set(cls, classes.length);
-      const roles = writers ?? [];
-      classes.push({
-        read: roles.length === 0 ? [index] : roles.map(() => index),
-        best: [...roles],
-        all: [index],
-      });
+      if (cls !== null) byClass.set(cls, classes.length);
+      classes.push({ read: [index], best: null, all: [index] });
       continue;
     }
     const into = classes[at]!;
+    if (into.best === null) {
+      const first = into.all[0]!;
+      into.best = [...members[first]!.writers()];
+      if (into.best.length > 0) into.read = into.best.map(() => first);
+    }
     into.all.push(index);
-    for (const [role, mine] of writers!.entries()) {
+    for (const [role, mine] of writers().entries()) {
       charge();
       const best = into.best[role] ?? null;
       if (mine !== null && best !== null && firstWriter(best, mine) !== best) {
@@ -108,7 +105,7 @@ export function othersAt(
         : keptParts(contract.work, cls, exact || cellWriter(entry) !== null ? "w" : "");
     members.push({
       cls: key,
-      writers: key === null ? null : contract.classWriters(entry.value, exact),
+      writers: () => contract.classWriters(entry.value, exact) ?? [],
       mixed: key === null ? 0 : contract.classMixed(entry.value, exact),
     });
   }
@@ -178,7 +175,7 @@ export function readGroupsAt(
       markFree(contract, entry.holder) &&
       boundOf(contract, read, value) !== null
         ? contract.boundClass(read, value)
-        : NO_CLASS;
+        : NO_KEPT_CLASS;
     // (where a read stands decides its contract read's certainty on the value side, its cell's writer on the contract)
     const node = value ? (program.occNode.get(read) ?? null) : null;
     const stands =
@@ -196,7 +193,7 @@ export function readGroupsAt(
           );
     members.push({
       cls: key,
-      writers: key === null ? null : bound.writers,
+      writers: () => writersOf(contract, bound, value) ?? [],
       mixed: key === null ? 0 : bound.mixed,
     });
   }
@@ -239,13 +236,19 @@ export function choiceOptions(
     if (sharing() && member !== null) {
       const cls = member.place === undefined ? null : contract.classOf(member.place, exact);
       if (member.place === undefined)
-        classed = { cls: keptParts(contract.work, "l", member.label!), writers: [], mixed: 0 };
-      else if (cls !== null)
+        classed = {
+          cls: keptParts(contract.work, "l", member.label!),
+          writers: () => [],
+          mixed: 0,
+        };
+      else if (cls !== null) {
+        const place = member.place;
         classed = {
           cls: keptParts(contract.work, member.object ? "o" : "c", cls),
-          writers: contract.classWriters(member.place, exact),
-          mixed: contract.classMixed(member.place, exact),
+          writers: () => contract.classWriters(place, exact) ?? [],
+          mixed: contract.classMixed(place, exact),
         };
+      }
     }
     members.push(classed);
   }

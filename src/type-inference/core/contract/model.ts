@@ -262,12 +262,28 @@ export interface ChoiceGroup {
   readonly mixed: number;
 }
 
-/** A value's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`). */
+/**
+ * A member's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`), as
+ * `roleMinima` reads them: the writers only where another member of its class compares them (#1357).
+ */
 export interface ValueClass {
   readonly cls: string | null;
-  readonly writers: readonly (Writer | null)[] | null;
+  readonly writers: () => readonly (Writer | null)[];
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
   readonly mixed: number;
+}
+
+/**
+ * A value's class as `classOf` keeps it: its roles' writers (`classWriters`) are its own, then its parts' in turn, read
+ * from them where asked, so a chain of k operations keeps k parts, not k lists of up to k writers (#1357).
+ */
+export interface KeptClass {
+  readonly cls: string | null;
+  readonly mixed: number;
+  /** Its own role's writer: a read's alias's, a literal's own place's; none for any other value. */
+  readonly own: readonly (Writer | null)[];
+  /** The values its other roles rest on, in their order, as its writers' walk reads them (`roleParts`). */
+  readonly parts: readonly PlaceId[];
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
