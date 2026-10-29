@@ -14,7 +14,7 @@ import { defaultNull } from "./fallbacks.js";
 import { finishingKeyRead } from "./finishing.js";
 import { hasMethod } from "./kinds.js";
 import type { Offending } from "./model.js";
-import { keyLabel, ownSpan, quietKinds, receiverKinds } from "./names.js";
+import { keyLabel, ownSpan, quietKinds, receiverKinds, unlistedObject } from "./names.js";
 import { nullWarning, obligation, propertiesOf } from "./warnings.js";
 
 // C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
@@ -284,9 +284,15 @@ export function receivers(walk: Consumers): void {
         );
         continue;
       }
-      if (presence.state !== "all")
+      // (every source the contract reads has it, but an object the analysis cannot list may lack it: ADR 1.8, #1436)
+      const unlisted =
+        presence.state === "all" && owner !== undefined
+          ? unlistedObject(walk, owner, { node: d.prep ?? d.node, kinds: receiver })
+          : null;
+      if (presence.state !== "all" || unlisted !== null)
         extra.push([
-          makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
+          unlisted ??
+            makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
           `has .${propertyName(property)} before the store`,
         ]);
     }
