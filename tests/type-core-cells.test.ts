@@ -2697,12 +2697,23 @@ test("admission decides from the start value, keeps written copies, rejects ever
     [
       "a choice object's selected value read below the choice",
       'let out = askChoice [{text: "a", value: {n: 1}}, {text: "b", value: {n: "x"}}]\nsay "${out.n}"\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
+      // (each object as a button's value is TSV029's error too since S9b, TABLE r4.93)
+      (at) => [
+        "compile-error",
+        `operator compile-error @${at("{n: 1}")}`,
+        `operator compile-error @${at('{n: "x"}')}`,
+        `written-target compile-error @${at('"x"')}`,
+      ],
     ],
     [
       "the choice objects in the other order",
       'let out = askChoice [{text: "b", value: {n: "x"}}, {text: "a", value: {n: 1}}]\nsay "${out.n}"\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("1}")}`],
+      (at) => [
+        "compile-error",
+        `operator compile-error @${at('{n: "x"}')}`,
+        `operator compile-error @${at("{n: 1}")}`,
+        `written-target compile-error @${at("1}")}`,
+      ],
     ],
     [
       "nested selections of a nullable written source",
