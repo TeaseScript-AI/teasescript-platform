@@ -24,6 +24,7 @@ import {
   JOIN_REACH_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
+  NESTED_OBJECT_SELECTIONS,
   ORACLE_PROGRAMS,
   READ_CHAIN_PRODUCTS,
   VALUE_CLASS_SITES,
@@ -1015,6 +1016,37 @@ test("a cycle of whole copies read at every member grows with the program in eit
     [...steepCounters(COPY_RING_FAMILIES), ...steepCounters(COPY_RING_FAMILIES, true)],
     [],
   );
+});
+
+/**
+ * #1426: in a selection nested k deep whose options are objects, read at a property, each level's literal is read at the
+ * path once, its answer composed from the level inside's: the contract's merges and steps grow with the program in
+ * either order (a level merged again from every literal inside measured 3.75 to 3.93 here). Admission's own structure
+ * of each literal still walks the nest inside it where the order asks the outer literal first (`valueStructure`), so
+ * the total is gated in the source order of the issue's shape alone. The series to k = 256, the four modes and the
+ * siblings are the step's evidence, outside CI.
+ */
+test("nested selections of objects merge each level's items once, in either order (#1426)", () => {
+  const steep: string[] = [];
+  for (const family of NESTED_OBJECT_SELECTIONS) {
+    const [at32, at64] = [sized(family, 32), sized(family, 64)];
+    for (const reversed of [false, true]) {
+      const [small, large] = [at32, at64].map((at) => analysed(at, reversed).budget);
+      const scale =
+        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}`;
+      for (const counter of ["mergeItems", "invSteps"] as const) {
+        const factor = doubling(small!.counts.get(counter) ?? 0, large!.counts.get(counter) ?? 0);
+        if (factor > COUNTER_DOUBLING) steep.push(`${name} ${counter}: ${factor.toFixed(3)}`);
+      }
+      if (family === NESTED_OBJECT_SELECTIONS[0] && !reversed)
+        if (doubling(small!.total, large!.total) > DOUBLING)
+          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+    }
+  }
+  assert.deepEqual(steep, []);
 });
 
 /**

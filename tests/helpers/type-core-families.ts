@@ -2603,6 +2603,39 @@ export const COPY_RING_FAMILIES: readonly WorkFamily[] = [
   },
 ];
 
+/**
+ * #1426: a selection nested k deep whose options are objects, read at a property; each level a literal of two whose one
+ * element is the level inside. Each level's literal at the path is read once, its answer composed from the level
+ * inside's, never merged again per level above (`mergeItems` 8,969 → 34,313 at k = 64, 128 on `bf9b655a9`). By index
+ * with the level inside first; by name with it last, at two properties, one named `element`; and a method between
+ * levels, read two steps down.
+ */
+export const NESTED_OBJECT_SELECTIONS: readonly WorkFamily[] = (
+  [
+    ["by index", '{p: "origin"}', (inner: string) => `[${inner}, {p: "other"}][0]`, "out.p"],
+    [
+      "by name, the level inside last",
+      '{element: "origin", q: 1}',
+      (inner: string) => `[{element: "other", q: 2}, ${inner}].last`,
+      "out.element} ${out.q",
+    ],
+    [
+      "through a method",
+      '{p: {q: "origin"}}',
+      (inner: string) => `[${inner}, {p: {q: "other"}}].get(0, default: {p: {q: "none"}})`,
+      "out.p.q",
+    ],
+  ] as const
+).map(([shape, seed, wrap, read]) => ({
+  name: `nested-object-selections ${shape}`,
+  measures: `#1426: k selections of objects nested ${shape}, read at a property`,
+  program: (k: number) => {
+    let value = "seed";
+    for (let i = 0; i < k; i += 1) value = wrap(value);
+    return main(lines(`let seed = ${seed}`, `let out = ${value}`, `say "\${${read}}"`, "exit"));
+  },
+}));
+
 export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-empty-snapshot",

@@ -180,8 +180,19 @@ function* valueAt(
     }
     if (program.callOutOf.has(value))
       return yield* contract.contractOf(keyOf(resultOf(contract, value), rest));
-    if (program.hasOf.has(value) || program.cellOwner.has(value))
-      return yield* contract.contractOfLiteral(value, rest);
+    // a literal's contract at a path once per literal and path, whatever asks: a selection nested k deep reads each
+    // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
+    if (program.hasOf.has(value) || program.cellOwner.has(value)) {
+      const site = program.places[value]?.site ?? null;
+      const demand: Demand = {
+        key: joinParts("cl", value, rest),
+        kind: "contract",
+        file: site?.file ?? -1,
+        offset: site?.start ?? -1,
+        make: () => contract.contractOfLiteral(value, rest),
+      };
+      return yield demand;
+    }
     const operation = program.opOf.get(value);
     if (operation === undefined) return [unknownItem(REASON.opaque)];
     // a choice's answer at a path once per choice and path, whatever asks: the key's contract and A5's candidate test of
