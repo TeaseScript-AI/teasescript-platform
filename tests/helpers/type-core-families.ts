@@ -5771,8 +5771,9 @@ const parsed = (input: string, fallback: string | null = "seed"): string =>
  * #1196's controls: values over reads of host data in one literal, choice or run of adds, each beside what a coarser
  * class would merge: a parse without a default (open) and a default with a field of host data, every form of input,
  * another default, a written destination, a guard of the input, a store of the default between parses, literals of one
- * and of two host reads, records holding host data and adds of host reads. Each keeps its own leaves, diagnostics and
- * checks: the sharing differential and the leaf comparison (`type-core-sharing.test.ts`) run them in both orders.
+ * and of two host reads, records holding host data, adds of host reads and choices of host reads read together in
+ * several lists. Each keeps its own leaves, diagnostics and checks: the sharing differential and the leaf comparison
+ * (`type-core-sharing.test.ts`) run them in both orders.
  */
 export const DIRECT_INGRESS_PROGRAMS: readonly {
   readonly name: string;
@@ -5877,6 +5878,22 @@ export const DIRECT_INGRESS_PROGRAMS: readonly {
       "gathered.add(hostValue.t)",
       "gathered.add(hostValue)",
       "let n: integer = gathered[0]",
+    ],
+    [
+      "choices of host reads, two or three read together in each list, also beside a literal (#1357)",
+      'let left = askChoice {text: "0", value: hostValue.f0}, {text: "1", value: hostValue.f1}, {text: "2", value: hostValue.f2}',
+      'let mid = askChoice {text: "0", value: hostValue.f0}, {text: "1", value: hostValue.f1}, {text: "2", value: hostValue.f2}',
+      'let right = askChoice {text: "0", value: hostValue.f0}, {text: "1", value: hostValue.f1}, {text: "2", value: hostValue.f2}',
+      "let xs0 = [left, right]",
+      "let n0: integer = xs0[hostValue.i]",
+      "let xs1 = [left, [0], right]",
+      "let n1: integer = xs1[hostValue.i]",
+      "let xs2 = [left, mid, right]",
+      "let n2: integer = xs2[hostValue.i]",
+      "let xs3 = [left, right]",
+      "let n3: integer = xs3[hostValue.i]",
+      "let xs4 = [left, mid, right]",
+      "let n4: integer = xs4[hostValue.i]",
     ],
   ] as const
 ).map(([name, ...source]) => ({

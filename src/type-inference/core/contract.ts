@@ -581,6 +581,15 @@ export interface KeptClass {
 
 const NO_KEPT_CLASS: KeptClass = { cls: null, mixed: 0, own: [], parts: [] };
 
+/**
+ * A member's leaf roles' proofs (`#leafRoles`, `#othersLeaves`): per ingress node whether it holds every one of them, and
+ * per node (none first) that node joined with each of them in turn.
+ */
+interface LeafProofs {
+  readonly held: Map<IngressNode, boolean>;
+  readonly joined: Map<IngressNode | undefined, IngressNode>;
+}
+
 /** Whether an operation is a choice (`askChoice`, V30 §19). */
 function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): boolean {
   return (
@@ -915,6 +924,8 @@ export class Contract {
     new Map<PlaceId, readonly IngressNode[] | null>(),
     new Map<PlaceId, readonly IngressNode[] | null>(),
   ];
+  /** Per list of leaves `#leafRoles` names, its proofs (`#proofsOf`). */
+  readonly #leafProofs = new WeakMap<readonly IngressNode[], LeafProofs>();
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`#othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of
@@ -5446,7 +5457,6 @@ export class Contract {
     answers: readonly (readonly Item[])[],
     exact: boolean,
   ): IngressNode | null {
-    const { program } = this.pass;
     if (group.mixed !== MIXED_LEAF) return null;
     let roles = -1;
     for (const [at, entry] of group.read.entries()) {
@@ -5454,8 +5464,7 @@ export class Contract {
       if (own === null || (roles >= 0 && own.length !== roles)) return null;
       roles = own.length;
       for (const item of answers[at]!)
-        if (differsIn(item, group.mixed) && !holdsLeaves(item.ingress, own, program.scope))
-          return null;
+        if (differsIn(item, group.mixed) && !this.#holdsLeaves(item.ingress, own)) return null;
     }
     if (this.#othersLeavesOf.has(group)) return this.#othersLeavesOf.get(group)!;
     let leaves: IngressNode | undefined;
@@ -5465,11 +5474,57 @@ export class Contract {
         leaves = undefined;
         break;
       }
-      for (const leaf of own) leaves = program.scope.ingress.union(leaves, leaf);
+      leaves = this.#joinedLeaves(leaves, own);
     }
     this.#keep(1);
     this.#othersLeavesOf.set(group, leaves ?? null);
     return leaves ?? null;
+  }
+
+  /**
+   * A leaf list's proofs (`#leafRoles`, `#holdsLeaves`, `#joinedLeaves`), kept once per list whichever site asks, so k
+   * sites of one answer and one binding's leaves walk them once, not k times (#1357).
+   */
+  #proofsOf(leaves: readonly IngressNode[]): LeafProofs {
+    let known = this.#leafProofs.get(leaves);
+    if (known === undefined) {
+      this.#keep(1);
+      this.#leafProofs.set(leaves, (known = { held: new Map(), joined: new Map() }));
+    }
+    return known;
+  }
+
+  /** Whether an answer's ingress node holds every one of a member's leaves (`holdsLeaves`), once per node and list. */
+  #holdsLeaves(node: IngressNode | undefined, leaves: readonly IngressNode[]): boolean {
+    const { scope } = this.pass.program;
+    scope.work.charge("mergeItems");
+    if (node === undefined) return holdsLeaves(node, leaves, scope);
+    const { held } = this.#proofsOf(leaves);
+    let holds = held.get(node);
+    if (holds === undefined) {
+      this.#keep(1);
+      held.set(node, (holds = holdsLeaves(node, leaves, scope)));
+    }
+    return holds;
+  }
+
+  /** An ingress node (none first) joined with each of a member's leaves in turn, once per node and list. */
+  #joinedLeaves(node: IngressNode | undefined, leaves: readonly IngressNode[]): IngressNode {
+    const { scope } = this.pass.program;
+    scope.work.charge("mergeItems");
+    const { joined } = this.#proofsOf(leaves);
+    let out = joined.get(node);
+    if (out === undefined) {
+      let at = node;
+      for (const leaf of leaves) {
+        scope.work.charge("mergeItems");
+        at = scope.ingress.union(at, leaf);
+      }
+      out = at!;
+      this.#keep(1);
+      joined.set(node, out);
+    }
+    return out;
   }
 
   /**
@@ -5522,7 +5577,8 @@ export class Contract {
       for (let index = parts.length - 1; index >= 0; index -= 1) pending.push(parts[index]!);
     }
     const roles = found && out.length > 0 ? out : null;
-    this.#keep(1 + out.length);
+    // (an entry for the value, one more for the binding's value where its reads share it, and the leaves)
+    this.#keep((shared ? 2 : 1) + out.length);
     if (shared) memo.set(root, roles);
     memo.set(value, roles);
     return roles;
