@@ -1408,12 +1408,15 @@ export class Values {
         if (declared === undefined) return [OPAQUE_MEMBER];
         return rest.length > 0
           ? []
-          : [
+          : declared.map((tag) =>
               carried(
-                { ...makeItem(declared, item.writer, { context: item.context }), cert: item.cert },
+                {
+                  ...makeItem(tag, item.writer, { context: item.context }),
+                  cert: declared.length === 1 ? item.cert : ("pos" as const),
+                },
                 [item],
               ),
-            ];
+            );
       });
     }
     return [unknownItem(REASON.external)];

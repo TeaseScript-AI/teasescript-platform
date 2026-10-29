@@ -250,12 +250,12 @@ export function* contractOfOp(
   if (family === "method" && c.receiver !== null) {
     const receiver = withoutEmpty(yield* contract.contractOfValue(c.receiver));
     return mergeItems(
-      receiver.map((item) => {
-        if (item.tag === "unknown") return item;
+      receiver.flatMap((item) => {
+        if (item.tag === "unknown") return [item];
         const declared = declaredMethod(item.tag, name);
         return declared === undefined
-          ? unknownItem(REASON.opaque)
-          : carried(makeItem(declared, item.writer), [item]);
+          ? [unknownItem(REASON.opaque)]
+          : declared.map((tag) => carried(makeItem(tag, item.writer), [item]));
       }),
       scope,
     );
