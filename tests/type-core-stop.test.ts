@@ -1156,20 +1156,24 @@ test("a stop before admission settled checks a written store's literal parts at 
  * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
  * never lets through code the unstopped analysis withholds: at stops across a grid of allowances (the setup,
  * admission's passes, the walk), every check and declaration a published diagnostic offers compiles where it is
- * pasted, one inside a marked region is words, and a check just outside it keeps its code. Each source declares a
- * sibling the stop may hide: in the same statement (`ns + 1`, a null-returning call), or elsewhere in its function.
+ * pasted, one inside a marked region is words, also a check the stop publishes there, and a check just outside it
+ * keeps its code. Each source declares a sibling the stop may hide: in the same statement (`ns + 1`, a null-returning
+ * call), or elsewhere in its function.
  */
 const UNCHECKED: readonly string[] = [
   'function hide(n) { return n }\nlet v: integer = hostValue\nlet ns: integer? = hide(null)\nlet xs: integer set = set["wrong", ns + 1]\nexit\n',
   'function bad { return null }\nlet v: integer = hostValue\nlet xs: integer set = set["wrong", bad() + 1]\nexit\n',
   'function f(n) {\n  let ys: integer set = set["wrong"]\n  say n + 1\n  return ys\n}\nlet xs: integer set = set["wrong"]\nsay f(hostValue)\nexit\n',
   'function f(n) {\n  let ys: integer set = set["wrong"]\n  say n + 1\n  return ys\n}\nlet ns = [1, null]\nsay ns[1] + 1\nsay f(hostValue)\nexit\n',
+  // (a null check a stop publishes inside the function's unchecked region: words, the mark covering the region)
+  "function f(n) {\n  let ms = [1, null]\n  say ms[1] + 1\n  say n + 1\n  return 1\n}\nsay f(hostValue)\nexit\n",
 ];
 
 test("a stop's unchecked region gives words for a fix's code in it, never code it would hide (TABLE r4.162)", () => {
   const globals = { globals: ["hostValue", "hostOther"] };
   const phases = new Set<string>();
   let inside = 0;
+  let warned = 0;
   let outside = 0;
   for (const source of UNCHECKED) {
     const request = coreRequest([{ path: "main.tease", source }], globals.globals);
@@ -1211,6 +1215,7 @@ test("a stop's unchecked region gives words for a fix's code in it, never code i
         if (marked) assert.equal(form, undefined, where);
         if (form === undefined) {
           if (marked) inside += 1;
+          if (marked && d.class === "warning-runtime-check") warned += 1;
           continue;
         }
         if (regions.length > 0) outside += 1;
@@ -1237,7 +1242,10 @@ test("a stop's unchecked region gives words for a fix's code in it, never code i
     ["setup", "admission", "walk"].every((phase) => phases.has(phase)),
     [...phases].join(),
   );
-  assert.ok(inside > 0 && outside > 0, `${inside} inside, ${outside} outside`);
+  assert.ok(
+    inside > 0 && warned > 0 && outside > 0,
+    `${inside} inside, ${warned} of them warnings, ${outside} outside`,
+  );
 });
 
 /**
