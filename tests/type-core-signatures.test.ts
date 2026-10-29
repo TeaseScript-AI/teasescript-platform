@@ -1,0 +1,623 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSourceWithBackend } from "../src/compiler.js";
+import type { InstructionPlan } from "../src/plan/model.js";
+import { run } from "../src/runtime/engine.js";
+import {
+  createCapturedSerializableList,
+  createCapturedSerializableObject,
+  type SerializableRuntimeValue,
+} from "../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { checkedResult } from "../src/type-inference/core/consumer.js";
+import { withTestAllowance } from "../src/type-inference/core/budget.js";
+import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { withoutSharing } from "../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../src/type-inference/core/solver.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import type { CheckedDiagnostic, DiagnosticRule } from "../src/type-inference/core/result.js";
+
+/*
+ * C13 (TABLE C13, S3 §1) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
+ * `join` and `sort` read, what `toJson` writes (Astra's G1) and what a choice's buttons return (TSV029, TABLE r4.93):
+ * each consumer's operand, written in every form a value reaches it by, of a kind that fits, of one that does not, of
+ * both possible, or unknown, gives the ordered predicate's verdict at its own site, in both orders, and a stop never
+ * turns it into an error; on the candidate route each verdict's check is the runtime's own, at the use, before the next
+ * effect; and each consumer's work grows with the program.
+ */
+
+/**
+ * A program's diagnostics with their rules, its record compared in the core's order and with its consumers' and solver's
+ * orders reversed: both, equal.
+ */
+function analysed(source: string, allowance?: number): readonly CheckedDiagnostic[] {
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null, source);
+  const allowed = <T>(make: () => T): T =>
+    allowance === undefined ? make() : withTestAllowance(allowance, make);
+  const forward = allowed(() => compactAnalysis(request));
+  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
+    withConsumerOrder(
+      (list) => [...list].reverse(),
+      () => allowed(() => compactAnalysis(request)),
+    ),
+  );
+  assert.deepEqual(reversed, forward, `${source}: both orders`);
+  return allowed(() => checkedResult(analyseCore(request), request)).diagnostics;
+}
+
+/** A consumer of the family: its program around the operand `V`, the kinds it takes, a fitting and a misfit value. */
+interface Consumer {
+  readonly name: string;
+  /** The rule its diagnostics carry. */
+  readonly rule: DiagnosticRule["rule"];
+  readonly program: (operand: string) => string;
+  readonly fit: string;
+  readonly misfit: string;
+  /** The diagnostic's kind, and where it stands: at the operand, or at the call that reads the operand's elements. */
+  readonly kind: "operator" | "member-read";
+  readonly at: "operand" | ((source: string, operand: string) => readonly [number, number]);
+  /** Whether an unknown operand owes the consumer's warning (C13's rule), or the runtime checks it (`toJson`, TSV029). */
+  readonly unknown: boolean;
+}
+
+/** The call around an operand: from the operand to the end of the call's parentheses. */
+const call =
+  (method: string) =>
+  (source: string, operand: string): readonly [number, number] => {
+    const start = source.lastIndexOf(`${operand}.${method}(`);
+    return [start, source.indexOf(")", start + `${operand}.${method}(`.length) + 1];
+  };
+
+const CONSUMERS: readonly Consumer[] = [
+  {
+    name: "a for loop's iterable",
+    rule: "iterable",
+    program: (v) => `for e in ${v} {}`,
+    fit: "[1]",
+    misfit: "1",
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "a pair loop's iterable",
+    rule: "iterable",
+    program: (v) => `for k, e in ${v} {}`,
+    fit: "dict{a: 1}",
+    misfit: "[1]",
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "text or a regex an argument of text takes",
+    rule: "argument",
+    program: (v) => `say "abc".contains(${v})`,
+    fit: '"a"',
+    misfit: "1",
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "a regex an argument of text takes",
+    rule: "argument",
+    program: (v) => `say "abc".matches(${v})`,
+    fit: "/a/",
+    misfit: '"a"',
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "a list or a set an argument of a list takes",
+    rule: "argument",
+    program: (v) => `let r = [1].union(${v})`,
+    fit: "[2]",
+    misfit: "1",
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "join's separator",
+    rule: "argument",
+    program: (v) => `say ["a"].join(${v})`,
+    fit: '","',
+    misfit: "1",
+    kind: "operator",
+    at: "operand",
+    unknown: true,
+  },
+  {
+    name: "the elements join shows",
+    rule: "elements",
+    program: (v) => `say ${v}.join()`,
+    fit: '["a"]',
+    misfit: "[{n: 1}]",
+    kind: "member-read",
+    at: call("join"),
+    unknown: false,
+  },
+  {
+    name: "the elements sort orders",
+    rule: "elements",
+    program: (v) => `${v}.sort()`,
+    fit: "[2, 1]",
+    misfit: "[{n: 1}]",
+    kind: "member-read",
+    at: call("sort"),
+    unknown: false,
+  },
+  {
+    name: "a value toJson writes below its argument",
+    rule: "json",
+    program: (v) => `say toJson({a: ${v}})`,
+    fit: "[1]",
+    misfit: "[1..2]",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("{a: ");
+      return [start, source.indexOf("})", start) + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a choice object's value",
+    rule: "choice",
+    program: (v) => `let c = askChoice {text: "x", value: ${v}}`,
+    fit: "1",
+    misfit: "{n: 1}",
+    kind: "operator",
+    at: "operand",
+    unknown: false,
+  },
+  {
+    name: "an element of a choice's list",
+    rule: "choice",
+    program: (v) => `let c = askChoice [${v}]`,
+    fit: '"a"',
+    misfit: "[1]",
+    kind: "operator",
+    at: "operand",
+    unknown: false,
+  },
+];
+
+/** How a value reaches the operand: its setup before the program, and the operand's text. */
+interface Form {
+  readonly name: string;
+  readonly reach: (value: string) => readonly [string, string];
+}
+
+const FORMS: readonly Form[] = [
+  { name: "written", reach: (value) => ["", value] },
+  { name: "a variable", reach: (value) => [`let v = ${value}\n`, "v"] },
+  { name: "a property", reach: (value) => [`let o = {p: ${value}}\n`, "o.p"] },
+  {
+    name: "a function's result",
+    reach: (value) => [`function f {\n  return ${value}\n}\n`, "f()"],
+  },
+];
+
+/** The verdicts: none at the operand, an error, a warning with the operand's check. */
+type Verdict = "quiet" | "error" | "warning";
+
+/**
+ * A consumer's diagnostics of its own rule (any site: one elsewhere is a defect too) as a verdict at its site: none, an
+ * error, or warnings each with the operand check its obligation owes there.
+ */
+function verdict(
+  diagnostics: readonly CheckedDiagnostic[],
+  consumer: Consumer,
+  site: readonly [number, number],
+): Verdict | string {
+  const own = diagnostics.filter((d) => "rule" in d && d.rule.rule === consumer.rule);
+  const described = own.map((d) => `${d.class} ${d.kind} @${d.site.start}-${d.site.end}`);
+  if (own.length === 0) return "quiet";
+  if (
+    !own.every(
+      (d) => d.kind === consumer.kind && d.site.start === site[0] && d.site.end === site[1],
+    )
+  )
+    return described.join(", ");
+  if (own.every((d) => d.class === "compile-error")) return "error";
+  if (
+    own.every(
+      (d) =>
+        d.class === "warning-runtime-check" &&
+        d.kind !== "budget" &&
+        d.obligation.kind === "operand" &&
+        d.obligation.site.start === site[0],
+    )
+  )
+    return "warning";
+  return described.join(", ");
+}
+
+/**
+ * The family over C13's axes (closing a family by construction): every consumer × every form × a fitting value, a misfit
+ * one, both possible (a function's two returns) and an unknown one (host data), in both orders. The verdict is derived
+ * from the axes alone: a fitting value is quiet; a misfit the error, a possible misfit the warning with its check; an
+ * unknown the warning where the consumer's rule warns of one, else quiet.
+ */
+test("C13's consumers give the ordered predicate's verdict for every form, kind and certainty, in both orders", (t) => {
+  const differing: string[] = [];
+  let programs = 0;
+  for (const consumer of CONSUMERS) {
+    const outcomes = (value: string, name: string, expected: Verdict): void => {
+      for (const form of FORMS) {
+        const [setup, operand] = form.reach(value);
+        const source = `${setup}${consumer.program(operand)}\nexit\n`;
+        const at = consumer.at;
+        const site =
+          at === "operand"
+            ? ([source.lastIndexOf(operand), source.lastIndexOf(operand) + operand.length] as const)
+            : at(source, operand);
+        const got = verdict(analysed(source), consumer, site);
+        programs += 1;
+        if (got !== expected) differing.push(`${consumer.name}, ${form.name}, ${name}: ${got}`);
+      }
+    };
+    outcomes(consumer.fit, "fitting", "quiet");
+    outcomes(consumer.misfit, "misfit", "error");
+    // (both possible: a list's element or the default of its `get`, Q2)
+    const possible = `[${consumer.fit}].get(hostValue, default: ${consumer.misfit})`;
+    const setup = "";
+    {
+      const source = `${setup}${consumer.program(possible)}\nexit\n`;
+      const at = consumer.at;
+      const site =
+        at === "operand"
+          ? ([
+              source.lastIndexOf(possible),
+              source.lastIndexOf(possible) + possible.length,
+            ] as const)
+          : at(source, possible);
+      const got = verdict(analysed(source), consumer, site);
+      programs += 1;
+      if (got !== "warning") differing.push(`${consumer.name}, possible: ${got}`);
+    }
+    {
+      const source = `${consumer.program("hostValue")}\nexit\n`;
+      const at = consumer.at;
+      const site =
+        at === "operand"
+          ? ([
+              source.indexOf("hostValue"),
+              source.indexOf("hostValue") + "hostValue".length,
+            ] as const)
+          : at(source, "hostValue");
+      const got = verdict(analysed(source), consumer, site);
+      programs += 1;
+      const expected: Verdict = consumer.unknown ? "warning" : "quiet";
+      if (got !== expected) differing.push(`${consumer.name}, unknown: ${got}`);
+    }
+  }
+  t.diagnostic(`${programs} programs, each in both orders`);
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * Astra's G2: a compound assignment's operation is its binary form's, one operand consumer (C4, F16) for both: over each
+ * compound operator, a variable's and a property's target and an operand that fits, does not fit, is null or unknown,
+ * the compound form owes what the binary form owes, each obligation's kind, target domain and verdict alike, its site
+ * the compound's statement where the binary form's is its operation, and an operand's own where it is the operand's; a
+ * known calendar duration with an exact offset is the same error beside it (decision 6 on #1072).
+ */
+test("a compound assignment owes what its binary form owes, for every operator, target and operand (G2)", (t) => {
+  const differing: string[] = [];
+  let pairs = 0;
+  for (const operator of ["+", "-"])
+    for (const [setup, target] of [
+      ["let x = 4\n", "x"],
+      ["let o = {x: 4}\n", "o.x"],
+      ['let d = toDate("2026-08-11")\n', "d"],
+    ] as const)
+      for (const operand of ["2", '"a"', "1 calendar day + 2 h", "null", "hostValue"]) {
+        const compound = `${setup}${target} ${operator}= ${operand}\nexit\n`;
+        const binary = `${setup}${target} = ${target} ${operator} (${operand})\nexit\n`;
+        const operation = (source: string, statement: boolean): string[] =>
+          analysed(source)
+            .filter(
+              (d) =>
+                "rule" in d && (d.rule.rule === "operator" || d.rule.rule === "calendar-offset"),
+            )
+            .map((d) => {
+              const whole = statement
+                ? d.site.start === source.indexOf(`${target} ${operator}=`)
+                : d.site.start === source.indexOf(`${target} ${operator} (`);
+              const obligation =
+                d.class === "warning-runtime-check" && d.kind !== "budget"
+                  ? ` ${d.obligation.kind} [${d.obligation.against.join(", ")}]`
+                  : "";
+              return `${d.class}${obligation} ${whole ? "the operation" : `'${source.slice(d.site.start, d.site.end)}'`}`;
+            })
+            .sort();
+        const [got, expected] = [operation(compound, true), operation(binary, false)];
+        pairs += 1;
+        // (the binary form's own operand sits in parentheses, its text the operand's alike)
+        if (
+          JSON.stringify(got) !==
+          JSON.stringify(expected.map((e) => e.replace(`'(${operand})'`, `'${operand}'`)))
+        )
+          differing.push(
+            `${compound.replace(/\n/g, "; ")}: ${got.join(", ")} against ${expected.join(", ")}`,
+          );
+      }
+  t.diagnostic(`${pairs} compound forms against their binary forms`);
+  assert.deepEqual(differing, []);
+});
+
+/** A run of `plan` to its end with `hostValue`: what it said, and the code and span of its failure. */
+function ran(plan: InstructionPlan, hostValue: SerializableRuntimeValue) {
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }));
+  const failure = result.events.find((event) => event.kind === "runtimeFailure");
+  return {
+    said: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    failure:
+      failure?.kind === "runtimeFailure"
+        ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+        : null,
+  };
+}
+
+/**
+ * The source-to-runtime pairs of C13's new consumers on the candidate route: each warning's check is the use's own,
+ * so the plan holds no check content for it and the same plan as the production route's checks; a value that fits
+ * runs on, one that does not stops the run at the use, before the next effect.
+ */
+test("each new C13 warning's check is its use's own on the candidate route: a fitting run goes on, a misfit stops at the use", () => {
+  // each program, its warned use, the call whose own check stops the run, its code, a fitting and a misfit value
+  const object = createCapturedSerializableObject([{ name: "n", value: 1 }]);
+  const cases: readonly (readonly [
+    string,
+    string,
+    string,
+    string,
+    SerializableRuntimeValue,
+    SerializableRuntimeValue,
+  ])[] = [
+    // (an argument of text, of a list; the elements `join` shows, `sort` orders; what `toJson` writes)
+    [
+      'say "abc".contains(hostValue)\nsay "after"\nexit\n',
+      "hostValue",
+      '"abc".contains(hostValue)',
+      "TSV043",
+      "a",
+      1,
+    ],
+    [
+      'let r = [1].union(hostValue)\nsay "after"\nexit\n',
+      "hostValue",
+      "[1].union(hostValue)",
+      "TSV043",
+      createCapturedSerializableList([2]),
+      1,
+    ],
+    [
+      'let xs = [hostValue]\nsay xs.join()\nsay "after"\nexit\n',
+      "xs.join()",
+      "xs.join()",
+      "TSV042",
+      "a",
+      object,
+    ],
+    [
+      'let xs = [hostValue, hostValue]\nxs.sort()\nsay "after"\nexit\n',
+      "xs.sort()",
+      "xs.sort()",
+      "TSV043",
+      2,
+      object,
+    ],
+    [
+      'say toJson(hostValue otherwise /a/)\nsay "after"\nexit\n',
+      "hostValue otherwise /a/",
+      "toJson(hostValue otherwise /a/)",
+      "TSV043",
+      "x",
+      null,
+    ],
+  ];
+  for (const [source, use, stops, code, fitting, misfit] of cases) {
+    const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+    assert.ok(result.plan !== null, source);
+    const at = source.indexOf(use);
+    assert.ok(
+      result.diagnostics.some(
+        (d) =>
+          d.severity === "warning" &&
+          d.span.start.offset === at &&
+          d.span.end.offset === at + use.length,
+      ),
+      `${source}: ${result.diagnostics.map((d) => d.message).join(" | ")}`,
+    );
+    const fits = ran(result.plan, fitting);
+    assert.equal(fits.failure, null, `${source}: fitting`);
+    assert.equal(fits.said.at(-1), "after", `${source}: fitting`);
+    const call = source.indexOf(stops);
+    assert.deepEqual(
+      ran(result.plan, misfit),
+      { said: [], failure: `${code}@${call}:${call + stops.length}` },
+      `${source}: misfit`,
+    );
+  }
+});
+
+/** The work families of the new consumers, each at size k (the lead's gates: total 2.15, counters 2.35 per doubling). */
+const SIGNATURE_FAMILIES: readonly {
+  readonly name: string;
+  readonly program: (k: number) => string;
+}[] = [
+  {
+    name: "k method arguments on one text and one list",
+    program: (k) =>
+      `let t = "abc"\nlet xs = [1]\n${Array.from({ length: k }, (_, i) => `say t.contains("${i}")\nlet r${i} = xs.union([${i}])`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "k lists each sorted and joined",
+    program: (k) =>
+      `${Array.from({ length: k }, (_, i) => `let x${i} = [${i}, 1]\nx${i}.sort()\nsay x${i}.join()`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of an object k wide",
+    program: (k) =>
+      `say toJson({${Array.from({ length: k }, (_, i) => `f${i}: [${i}]`).join(", ")}})\nexit\n`,
+  },
+  { name: "k compound assignments", program: (k) => `let x = 0\n${"x += 1\n".repeat(k)}exit\n` },
+  {
+    name: "k loops over one list",
+    program: (k) => `let xs = [1, 2]\n${"for e in xs {}\n".repeat(k)}exit\n`,
+  },
+  {
+    name: "k choices of written choice objects",
+    program: (k) =>
+      `${Array.from({ length: k }, (_, i) => `let c${i} = askChoice [{text: "a", value: ${i}}, {text: "b", value: "${i}"}]`).join("\n")}\nexit\n`,
+  },
+];
+
+/**
+ * The new consumers' work grows with the program: each family at k = 64 and 128, in the core's order and reversed, with
+ * the sharing of answers on and off, its charged total per doubling of its syntax nodes within 2.15 and each counter of
+ * at least 200 units within 2.35 (the work test's gates), and the analysis within its allowance.
+ */
+test("each new C13 consumer's work and counters grow with the program in all four modes", () => {
+  const steep: string[] = [];
+  for (const family of SIGNATURE_FAMILIES)
+    for (const reversed of [false, true])
+      for (const unshared of [false, true]) {
+        const [small, large] = [64, 128].map((k) => {
+          const request = coreRequest([{ path: "main.tease", source: family.program(k) }]);
+          assert.ok(request !== null, `${family.name} at ${k}`);
+          const analyse = () =>
+            reversed
+              ? withConsumerOrder(
+                  (list) => [...list].reverse(),
+                  () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
+                )
+              : analyseCore(request);
+          const { budget } = unshared ? withoutSharing(analyse) : analyse();
+          assert.equal(budget.exhausted, null, `${family.name} at ${k}: within the allowance`);
+          return budget;
+        });
+        const scale =
+          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+        const doubling = (before: number, after: number): number =>
+          (2 * (after / Math.max(1, before))) / scale;
+        const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+        if (doubling(small!.total, large!.total) > 2.15)
+          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+        for (const [counter, after] of large!.counts)
+          if (
+            counter !== "syntaxNodes" &&
+            after >= 200 &&
+            doubling(small!.counts.get(counter) ?? 0, after) > 2.35
+          )
+            steep.push(
+              `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
+            );
+      }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * TABLE r4.93's witness (Astra's B6-r4): k record-valued nested choices, each TSV029's error, their answer read k levels
+ * below: no record a button holds is composed into the answer, so the chain takes less work than its literal analogue
+ * (the same objects read through `.value`, a deep literal read chain, itself the accepted read-chain product), at both
+ * sizes and in both orders, and without the read it grows as the accepted nested-choice product (`I1106-nested-choices`
+ * measured 3.06).
+ */
+test("record-valued nested choices compose no record: below their literal analogue, and within the nested-choice product", () => {
+  const chain = (k: number, read: boolean): string => {
+    let value = "0";
+    for (let index = k - 1; index >= 0; index -= 1)
+      value = `{x: askChoice {text: "${index}", value: ${value}}}`;
+    return read
+      ? `let c = (askChoice {text: "top", value: ${value}})${".x".repeat(k)}\nexit\n`
+      : `let c = askChoice {text: "top", value: ${value}}\nexit\n`;
+  };
+  const analogue = (k: number): string => {
+    let value = "0";
+    for (let index = k - 1; index >= 0; index -= 1)
+      value = `{x: {text: "${index}", value: ${value}}.value}`;
+    return `let c = ${value}${".x".repeat(k)}\nexit\n`;
+  };
+  for (const reversed of [false, true]) {
+    const budget = (source: string) => {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null);
+      const analyse = () => analyseCore(request);
+      const { budget: spent } = reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, analyse),
+          )
+        : analyse();
+      assert.equal(spent.exhausted, null);
+      return spent;
+    };
+    for (const k of [64, 128])
+      assert.ok(
+        budget(chain(k, true)).total < budget(analogue(k)).total,
+        `at ${k}${reversed ? " reversed" : ""}`,
+      );
+    const [small, large] = [budget(chain(64, false)), budget(chain(128, false))];
+    const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+    assert.ok((2 * (large.total / small.total)) / scale <= 3.06, `reversed: ${reversed}`);
+  }
+});
+
+/**
+ * The work of `join`'s and `sort`'s element checks does not grow with the list's width: over a list literal of k
+ * elements (whose own check of one type, A8, is the literal's), the checks they add are the same at 64 and 128; and
+ * `toJson`'s walk of an object k deep reads each level once, each level's key one step longer than the one above it: the
+ * read chain through nested literals, TABLE r4.83 (2)'s gated known limit (3.17 per doubling, measured at 64 → 128), the
+ * depth no real script reaches.
+ */
+test("join's and sort's element checks take the same work at any width, and toJson's deep walk is the read chain's known product", () => {
+  const spent = (source: string) => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    return analyseCore(request).budget;
+  };
+  const list = (k: number): string =>
+    `let xs = [${Array.from({ length: k }, (_, i) => String(i)).join(", ")}]\n`;
+  const added = (k: number): number =>
+    (spent(`${list(k)}xs.sort()\nsay xs.join()\nexit\n`).counts.get("checks") ?? 0) -
+    (spent(`${list(k)}exit\n`).counts.get("checks") ?? 0);
+  assert.equal(added(128), added(64));
+  const deep = (k: number) => spent(`say toJson(${"{a: ".repeat(k)}1${"}".repeat(k)})\nexit\n`);
+  const [small, large] = [deep(64), deep(128)];
+  assert.equal(large.exhausted, null);
+  const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+  assert.ok((2 * (large.total / small.total)) / scale <= 3.17);
+});
+
+/**
+ * C13 on receivers of several kinds and elements of several ordered types: an argument is checked where every kind the
+ * receiver may be takes only some kinds (a text-or-list's `startsWith` is text's alone), and quiet where one kind takes
+ * any value (a list's `contains`); `sort`'s elements of two ordered types possible are the warning with its check, in
+ * both orders.
+ */
+test("C13 decides an argument by every kind its receiver may be, and sort by every ordered type its elements may be", () => {
+  const either = '[["x"]].get(hostValue, default: "abc")';
+  const own = (source: string, rule: DiagnosticRule["rule"]): string[] =>
+    analysed(source)
+      .filter((d) => "rule" in d && d.rule.rule === rule)
+      .map((d) => `${d.class} '${source.slice(d.site.start, d.site.end)}'`);
+  assert.deepEqual(own(`say ${either}.contains(1)\nexit\n`, "argument"), []);
+  assert.deepEqual(own(`say ${either}.startsWith(1)\nexit\n`, "argument"), ["compile-error '1'"]);
+  const mixed = '[[1].get(hostValue, default: "a")]';
+  assert.deepEqual(own(`let xs = ${mixed}\nxs.sort()\nexit\n`, "elements"), [
+    "warning-runtime-check 'xs.sort()'",
+  ]);
+  assert.deepEqual(
+    own(`let xs = [[1].get(hostValue, default: 2)]\nxs.sort()\nexit\n`, "elements"),
+    [],
+  );
+});
