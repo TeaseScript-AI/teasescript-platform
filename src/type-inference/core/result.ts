@@ -147,14 +147,14 @@ export type DiagnosticRule =
     }
   /**
    * C11: a value `${...}` shows, or an element of a list it shows; an object's first property, a fix shows instead;
-   * `joinable`, whether every element of a set and every value of a dict it may be is one `${...}` shows on its own, as
-   * `join()` takes them (V30 §16), so that a fix may join them (#1268).
+   * `elements`, the kinds of a set's elements and a dict's values it may be, which a fix may join only where `${...}`
+   * shows each, as `join()` takes them (V30 §16, #1268).
    */
   | {
       readonly rule: "shown";
       readonly element: boolean;
       readonly property: string | null;
-      readonly joinable: boolean;
+      readonly elements: readonly ItemTag[];
     }
   /** C12: a dict key. */
   | { readonly rule: "key" }
@@ -304,6 +304,8 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
+      /** A store's: whether the values its root's declaration reads are there, which a fix's declaration holds. */
+      readonly declared?: Presence;
     }
   | WrittenTypeError
   | {
@@ -324,6 +326,8 @@ export type CoreDiagnostic =
       readonly expects?: SiteExpectation;
       /** Whether the values it names are there when the script runs (`unproved` where it does not say). */
       readonly present?: Presence;
+      /** A store's: whether the values its root's declaration reads are there, which a fix's declaration holds. */
+      readonly declared?: Presence;
       /**
        * The value's other known kinds that the site's other diagnostics of the rule report, each a problem of its own:
        * beside them a fix of this kind alone, such as a fallback for null, leaves the use invalid (#1268).

@@ -392,6 +392,11 @@ const PORTS: readonly Port[] = [
   // date and time operators and fields: an example where the value it converts is a variable or a path, the other
   // operand one or a quantity, else the sentence alone
   {
+    from: /^Write '\d+ calendar (?:day|week)s?'\.$/,
+    to: ([text], { proved }) =>
+      exact(proved ? text! : "A date moves only by calendar units, such as calendar days."),
+  },
+  {
     from: /^Convert it first, as in '(.+)', or use calendar units to keep the clock time\.$/,
     to: (_, { operands: [left = "", right = ""], proved }) =>
       proved && stablePath(left) && (stablePath(right) || quantity(right))
@@ -512,10 +517,10 @@ const PORTS: readonly Port[] = [
   },
   {
     from: /^Use (length, keys, or values|contains, remove, clear, or get)\.$/,
+    // (each with its own type, which the read's use may not take: in words, Codex r4 on #1268)
     to: ([, names]) =>
       exact(
-        `Use one of the dict's ${names!.startsWith("length") ? "properties" : "methods"} instead: ` +
-          `${names!.replace(/(\w+)/g, "'$1'").replace("'or' ", "or ")}.`,
+        `Use one of the dict's ${names!.startsWith("length") ? "properties" : "methods"} instead: ${names!}.`,
       ),
   },
   {
@@ -860,7 +865,7 @@ const INTENDED: readonly Intended[] = [
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 16,
+    count: 25,
   },
   {
     rule:
@@ -1143,14 +1148,10 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     /as in '([^']*)'/,
   ],
   ['let t = toDateTime("2026-01-01T00:00:00")\nsay ⟦t + 1 s⟧\nexit\n', /as in '([^']*)'/],
-  ['say toDate("2026-10-23") + ⟦1 day⟧\nexit\n', /Write '([^']*)'/],
+  ['let day = toDate("2026-10-23")\nsay day + ⟦1 day⟧\nexit\n', /Write '([^']*)'/],
   [
-    'let d = toDateTime("2026-10-23T12:00:00")\nsay toDate("2026-10-23") < ⟦d⟧\nexit\n',
+    'let day = toDate("2026-10-23")\nlet d = toDateTime("2026-10-23T12:00:00")\nsay day < ⟦d⟧\nexit\n',
     /as in '([^']*)'/,
-  ],
-  [
-    'let a = toDateTime("2026-10-23T12:00:00")\nlet b = toDateTime("2026-10-22T12:00:00")\nsay ⟦a - b⟧\nexit\n',
-    /dates with '([^']*)'/,
   ],
   // members of a kind without them, on a composed receiver
   [
@@ -1158,6 +1159,8 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     /as in '([^']*)'/,
   ],
   ["let d = 1 s+2 s\nsay ⟦d.seconds⟧\nexit\n", /as in '([^']*)'/, ["3"]],
+  // (a divisor's place takes the number, Codex r4's words where no fact proved it before `codeAt`'s site, #1268)
+  ["let d = 2 s\nsay 4 / ⟦d.seconds⟧\nexit\n", /as in '([^']*)'/, ["2"]],
   // (#1268: the value in place, read once, where its own text may stand in code: a receiver that is no stable path, a
   // literal or an expression shown or stored as text)
   ["let ns = [12, 13]\nsay ⟦ns.random⟧.length\nexit\n", /with '([^']*)'/],
@@ -1167,7 +1170,6 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['say "⟦${set[4, 7]}⟧"\nexit\n', /with '([^']*)'/, ["4, 7"]],
   ['say "⟦${dict{a: 1}}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
   ['let d = dict{a: 1}\nsay "⟦${d}⟧"\nexit\n', /with '([^']*)'/, ["1"]],
-  ['function make { return {a: 1, b: 2} }\nsay "⟦${make()}⟧"\nexit\n', /as in '([^']*)'/, ["1"]],
   ['let s = "a"\nif ⟦s⟧ { say "x" }\nexit\n', /as in '([^']*)'/, ["x"]],
   ["let n = 1\nsay ⟦n.length⟧\nexit\n", /as in '([^']*)'/],
   // `${...}`: an object's first property it shows, a set
@@ -1188,11 +1190,6 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
   ['let d = dict{"1": 5}\nlet k = 1\nsay d[⟦k⟧]\nexit\n', /as in '([^']*)'/, ["5"]],
   ["let n = 1\nlet caption: string = ⟦n⟧\nsay caption\nexit\n", /write '([^']*)'/, ["1"]],
   // a stable path through an index variable (TABLE §13 N1, Astra r2), in a fix the predicate does not test
-  [
-    'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ⟦ts[i].year⟧\nexit\n',
-    /as in '([^']*)'/,
-    ["2026"],
-  ],
   // the null check's fallback, of a kept value and of a composed one; a warning's read by an index, which its program
   // already performs there, wrapped in place (TABLE r4.168)
   ["let xs = [7, null]\nsay ⟦xs[0]⟧ + 1\nexit\n", /fallback, as in '([^']*)'/, ["8"]],
@@ -1206,29 +1203,14 @@ const REPAIRS: readonly (readonly [string, RegExp, (readonly string[])?])[] = [
     /fallback, as in '([^']*)'/,
   ],
   // the declarations a union or null widens (ADR 0021 rules 1.1, 1.2, 1.3, 1.7, 7.3), each start value as written: a
-  // literal (Astra on #1273), a call, a global's `default:`, a parameter's default, a list literal, a fallback
+  // literal (Astra on #1273), a global's `default:`, a parameter, a list literal, a warning's call, a fallback
   ['⟦let mood = 1⟧\nmood = "happy"\nsay mood\nexit\n', /as '([^']*)'/, ["happy"]],
-  [
-    'function make { return 1 }\n⟦let mood = make()⟧\nmood = "happy"\nsay mood\nexit\n',
-    /as '([^']*)'/,
-    ["happy"],
-  ],
   ['⟦global g = 1, default: 2⟧\ng = "x"\nsay g\nexit\n', /as '([^']*)'/, ["x"]],
   ['⟦let d = dict{a: 1}⟧\nd["b"] = "x"\nsay d["b"]\nexit\n', /as '([^']*)'/, ["x"]],
   ['⟦let a = [1, "x"]⟧\nsay a.length\nexit\n', /as '([^']*)'/, ["2"]],
   ['function use(⟦n: integer⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
-  ['function use(⟦n: integer = [1][0]⟧) { say n }\nuse("x")\nexit\n', /as '([^']*)'/, ["x"]],
   ["let n = null\n⟦let whole: integer = n⟧\nexit\n", /as '([^']*)'/],
   ['let source = ["s"]\n⟦let copy = source.removeAt(0)⟧\ncopy = 2\nexit\n', /as '([^']*)'/],
-  [
-    '⟦let result: integer = load("count", default: ["bad"].last)⟧\nsay result\nexit\n',
-    /as '([^']*)'/,
-  ],
-  [
-    'let y: integer? = null\n⟦let x: integer = y otherwise "a"⟧\nsay x\nexit\n',
-    /as '([^']*)'/,
-    ["a"],
-  ],
   // #1241 (TABLE r4.151): each code form a fix offers, pasted whole at the site its diagnostic sits on, where its
   // predicate holds: a number given a unit, also an operation's value; text converted; a member the type has, on a
   // receiver written plainly, nested, as an element and as a dict value, also as a range's bound; a join's elements
@@ -1794,6 +1776,33 @@ const WORDED: readonly (readonly [string, string])[] = [
     "let groups: integer[][] = [[], [21]]\nlet x = groups.random.last\nexit\n",
     "Keep 'groups.random' in a new variable and check its length first.",
   ],
+  // after an error, a declaration's start value that reads by an index or a key or calls (TABLE r4.168), and a shown
+  // object's property of a call's
+  [
+    'function make { return 1 }\nlet mood⟦⟧ = make()\nmood = "happy"\nsay mood\nexit\n',
+    "To allow both, declare it with the type 'integer | string'.",
+  ],
+  [
+    'function use(n⟦: integer⟧ = [1][0]) { say n }\nuse("x")\nexit\n',
+    "To allow both, declare the parameter 'n' with the type 'integer | string'.",
+  ],
+  [
+    'let result⟦: integer⟧ = load("count", default: ["bad"].last)\nsay result\nexit\n',
+    "declare 'result' with the type 'integer | string'.",
+  ],
+  [
+    'function make { return {a: 1, b: 2} }\nsay "${make()}"\nexit\n',
+    "Show one of its properties instead.",
+  ],
+  [
+    'let ts = [toAbsoluteDateTime("2026-01-01T00:00:00Z")]\nlet i = 0\nsay ts[i].year\nexit\n',
+    "Convert 'ts[i]' with the toDateTime method first.",
+  ],
+  // (a value the walk does not prove non-null, as a fallback's own side, TABLE r4.162)
+  [
+    'let y: integer? = null\nlet x⟦: integer⟧ = y otherwise "a"\nsay x\nexit\n',
+    "To allow both, declare it with the type 'integer | string'.",
+  ],
   // a start value over lines (Astra on #1273's sibling)
   [
     'let mood⟦⟧ = [\n  1\n][0]\nmood = "happy"\nexit\n',
@@ -1845,7 +1854,7 @@ test("a use no check may hold as written gets the check in words, with no block 
  * Text joins, `⟦…⟧` around the operand that is not text: the example puts it in `${...}` as the source writes it, and
  * the source with the operand so written says these lines (the owner's review; r3's and r4's shapes among them).
  */
-const JOINS: readonly (readonly [string, readonly string[]])[] = [
+const JOINS: readonly (readonly [string, readonly string[] | null])[] = [
   ['let score = 3\nsay "You have " + ⟦score⟧ + " points"\nexit\n', ["You have 3 points"]],
   [
     'function f(n) {\nsay "You have " + ⟦n⟧ + " points"\n}\nf(1)\nf(2)\nexit\n',
@@ -1859,12 +1868,13 @@ const JOINS: readonly (readonly [string, readonly string[]])[] = [
   ['let n = 1\nsay "Sum: " + (⟦n + 2⟧)\nexit\n', ["Sum: 3"]],
   ['let who = "Alice"\nlet n = 1\nsay "$" + "{who}" + ⟦n⟧\nexit\n', ["${who}1"]],
   ['let box = {n: 2}\nsay "n is " + ⟦box.n⟧\nexit\n', ["n is 2"]],
-  ['let xs = [5]\nsay "First: " + ⟦xs[0]⟧\nexit\n', ["First: 5"]],
   // (a chain over two lines, its operand on one)
   ['let n = 1\nsay "Sum: " +\n  ⟦n⟧\nexit\n', ["Sum: 1"]],
-  ['function two { return 2 }\nsay "Two: " + ⟦two()⟧\nexit\n', ["Two: 2"]],
-  ['let d = dict{"a": 1}\nsay "A: " + ⟦d["a"]⟧\nexit\n', ["A: 1"]],
-  ['say "A: " + ⟦dict{"a": 1}["a"]⟧\nexit\n', ["A: 1"]],
+  // (after an error, a read by an index or a key, or a call, is not proved there: words, TABLE r4.168)
+  ['let xs = [5]\nsay "First: " + ⟦xs[0]⟧\nexit\n', null],
+  ['function two { return 2 }\nsay "Two: " + ⟦two()⟧\nexit\n', null],
+  ['let d = dict{"a": 1}\nsay "A: " + ⟦d["a"]⟧\nexit\n', null],
+  ['say "A: " + ⟦dict{"a": 1}["a"]⟧\nexit\n', null],
 ];
 
 test("a text join's example puts the operand that is not text in '${...}', and the result says what the join meant (#1195)", () => {
@@ -1880,6 +1890,10 @@ test("a text join's example puts the operand that is not text in '${...}', and t
           /in the text as '(\$\{[^']*\})' instead/.exec(coreMessage(diagnostic, text))?.[1],
       )
       .find((found) => found !== undefined);
+    if (says === null) {
+      assert.equal(suggested, undefined, source);
+      continue;
+    }
     assert.ok(suggested !== undefined, `an example: ${source}`);
     const fixed = marked.replace(/⟦[^⟧]*⟧/, `"${suggested}"`);
     const compiled = compileProject([{ path: "main.tease", source: fixed }]);
@@ -2057,7 +2071,17 @@ test("a fix whose subject is no stable path, or not on one line, keeps its advic
       "let d = 2 s\nrepeat d.seconds { say 1 }\nexit\n",
       "Divide the duration by a unit of time instead.",
     ],
-    ["let d = 2 s\nsay 4 / d.seconds\nexit\n", "Divide the duration by a unit of time instead."],
+    // (after an error, a call's reads are not proved, TABLE r4.168)
+    [
+      'say toDate("2026-10-23") + 1 day\nexit\n',
+      "A date moves only by calendar units, such as calendar days.",
+    ],
+    // (an operand's diagnostic proves neither the other operand's kinds nor the operation's place, #1268: a duration
+    // on the left would take no toDate)
+    [
+      'let a = toDateTime("2026-10-23T12:00:00")\nlet b = toDateTime("2026-10-22T12:00:00")\nsay a - b\nexit\n',
+      "Subtract their dates with the toDate function, or convert both with the toAbsoluteDateTime method for the elapsed time.",
+    ],
     [
       'let t = toDateTime("2026-10-23T12:00:00")\nif t + 1 s { say 1 }\nexit\n',
       "Convert it with the toAbsoluteDateTime method first, or use calendar units to keep the clock time.",

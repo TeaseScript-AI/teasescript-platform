@@ -1,6 +1,6 @@
 import type { Expression } from "../../ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "../../compiler/continuation.js";
-import { expressionParts } from "../../expression-children.js";
+import { expressionParts, statementExpressions } from "../../expression-children.js";
 import { lazyDefaultOperation } from "../../lazy-defaults.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS, type ValueKind } from "../../value-kinds.js";
 import * as clockTemporal from "../adapters/clock-temporal.js";
@@ -199,8 +199,6 @@ const PRESENT_KINDS: ReadonlySet<Expression["kind"]> = new Set<Expression["kind"
 
 /** What `say` shows (V30 §8): every kind `${...}` shows, and a list, set, dict or object in code-like notation. */
 const SAID: readonly ValueKind[] = [...SHOWN_KINDS, "list", "set", "dict", "object"];
-/** The kinds `${...}` shows on its own, and `join()` shows of each element (V30 §16). */
-const SHOWN_ALONE: ReadonlySet<ItemTag> = new Set(SHOWN);
 
 /** The order an operand's domain lists the kinds of the operator table's rows in (F16), as the rows name them. */
 const DOMAIN_ORDER: readonly ValueKind[] = [
@@ -1919,24 +1917,79 @@ export class Consumers {
         (rule.rule === "member" && rule.use !== "store") || rule.rule === "operator"
           ? this.#expected(site)
           : undefined;
+      const declared = this.#declared(rule);
       return {
         ...diagnostic,
         ...(expects === undefined ? {} : { expects }),
         present: this.#present(site, rule),
+        ...(declared === undefined ? {} : { declared }),
       };
     }
     if (diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget") {
       const { rule, site } = diagnostic;
-      // (a null value's fallback stands where its rule takes the value: whether it divides there)
-      const expects = diagnostic.kinds.includes("null") ? this.#expected(site) : undefined;
+      // (a null value's fallback stands where its rule takes the value: whether it divides there; an operation's join
+      // or date and time form, what its place takes)
+      const expects =
+        diagnostic.kinds.includes("null") || rule.rule === "operator"
+          ? this.#expected(site)
+          : undefined;
+      const declared = this.#declared(rule);
       return {
         ...diagnostic,
         ...(expects === undefined ? {} : { expects }),
         present: this.#present(site, rule),
+        ...(declared === undefined ? {} : { declared }),
       };
     }
     return diagnostic;
   }
+
+  /**
+   * Whether every value the declaration of a store's root reads is there when the script runs, which a fix's
+   * declaration holds (#1268, TABLE r4.168): a `let`'s or a `global`'s values, a parameter's default, by `#present`'s
+   * walk of their parts, the value itself a kind `PRESENT_KINDS` lists (it may be null: the declaration stores it);
+   * unproved where the declaration is not found; none for a rule without a declared root.
+   */
+  #declared(rule: DiagnosticRule): Presence | undefined {
+    const root =
+      rule.rule === "store" || rule.rule === "fallback" || rule.rule === "mixed" ? rule.root : null;
+    const site = root?.site ?? null;
+    if (site === null) return undefined;
+    const { program } = this.pass;
+    const values: Expression[] = [];
+    if (root?.kind === "parameter") {
+      // (the parameters by their sites, once)
+      if (this.#parameters === null) {
+        this.#parameters = new Map();
+        for (const { kind, site: at } of program.places)
+          if (kind.kind === "parameter" && at !== null)
+            this.#parameters.set(siteKey(at), { fn: kind.fn, index: kind.index });
+      }
+      const parameter = this.#parameters.get(siteKey(site));
+      const declared =
+        parameter === undefined
+          ? undefined
+          : program.functionRegion(parameter.fn)?.declaration.parameters[parameter.index];
+      if (declared === undefined) return "unproved";
+      if (declared.defaultValue !== null) values.push(declared.defaultValue);
+    } else {
+      const node = program.flow.statementAt(site);
+      const statement = node !== undefined && "statement" in node ? node.statement : undefined;
+      if (statement === undefined) return "unproved";
+      values.push(...statementExpressions(statement));
+    }
+    return values.some(
+      (value) =>
+        !PRESENT_KINDS.has(value.kind) ||
+        (value.kind === "propertyAccessExpression" && this.#mayBeAbsent(value, site)) ||
+        expressionParts(value).some((part) => this.#readsAbsent(part, site)),
+    )
+      ? "unproved"
+      : true;
+  }
+
+  /** `#declared`'s parameters by their sites. */
+  #parameters: Map<string, { readonly fn: number; readonly index: number }> | null = null;
 
   /**
    * Whether every value a fix's form reads where the diagnostic at `site` sits is there when the script runs (`Presence`,
@@ -4110,20 +4163,27 @@ export class Consumers {
       const property = kinds.some((item) => item.tag === "object")
         ? this.#shownProperty(value)
         : null;
-      // (a set's elements and a dict's values, which a fix may join only where `${...}` shows each, #1268)
-      const joinable =
-        kinds.some((item) => item.tag === "set" || item.tag === "dict") &&
-        [
-          ...this.#run(this.pass.values.valueItems(value, node, ["element"])),
-          ...this.#run(this.pass.values.valueItems(value, node, ["entry"])),
-        ].every((item) => item.tag === "empty" || SHOWN_ALONE.has(item.tag));
+      // (a set's elements' and a dict's values' kinds, which a fix may join only where `${...}` shows each, #1268; an
+      // empty one joins to empty text)
+      const elements = kinds.some((item) => item.tag === "set" || item.tag === "dict")
+        ? [
+            ...new Set(
+              [
+                ...this.#run(this.pass.values.valueItems(value, node, ["element"])),
+                ...this.#run(this.pass.values.valueItems(value, node, ["entry"])),
+              ]
+                .map((item) => item.tag)
+                .filter((tag) => tag !== "empty"),
+            ),
+          ]
+        : [];
       this.#consume(
         value,
         node,
         c.site,
         new Set([...SHOWN, "list"]),
         "${...}",
-        { rule: "shown", element: false, property, joinable },
+        { rule: "shown", element: false, property, elements },
         [...SHOWN, "list"],
       );
       if (kinds.some((item) => item.tag === "list")) {
@@ -4133,7 +4193,7 @@ export class Consumers {
           c.site,
           new Set(SHOWN),
           "an element in ${...}",
-          { rule: "shown", element: true, property: null, joinable: false },
+          { rule: "shown", element: true, property: null, elements: [] },
           SHOWN,
           "operator",
           "operand",
