@@ -1,5 +1,5 @@
 // #1417; builder/review archive; shared generation code from one original module.
-export const sizes = [3, 6];
+export const sizes = [2, 3, 5, 7, 9, 64, 128];
 const outputs = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const choice = (k, host = "hostValue", wrap = (x) => x) =>

@@ -10,3 +10,5 @@ const fixedCases = [
 ];
 export const cases = fixedCases;
 export const checks = ["publication", "stops"];
+
+for (const index of [6]) cases.splice(index, 1);

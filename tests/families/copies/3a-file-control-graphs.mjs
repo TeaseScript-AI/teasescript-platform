@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent GRAPH source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const FILES = (main, parts) => [{ path: "main.tease", source: main }, ...parts];
@@ -42,15 +40,18 @@ const corpus = (() => {
         ]),
     ],
   ];
-  return {
-    shapes: {
-      "function chain from k files/1": (n) => GRAPH[0][1](n),
-      "ending buttons before file calls/1": (n) => GRAPH[1][1](n),
-      "files going to one tail/1": (n) => GRAPH[2][1](n),
-    },
-    cases: [["0", GRAPH["0"]["0"]]],
-  };
+  return { shapes: Object.fromEntries(GRAPH.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
-export const cases = corpus.cases;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

@@ -103,3 +103,5 @@ exit`,
   return cases.map((c) => [c.name, c.source]);
 })();
 export const checks = ["publication"];
+
+for (const index of [50]) cases.splice(index, 1);

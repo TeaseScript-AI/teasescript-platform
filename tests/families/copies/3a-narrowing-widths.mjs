@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent NARROW source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const NARROW = [
@@ -45,18 +43,18 @@ const corpus = (() => {
         `${many(k, (i) => `let v${i} = 1\nif hostFlag { v${i} = null }`)}\n${many(k, (i) => `if v${i} == null { exit }`)}\nrepeat 2 {\n${many(k, (i) => `v${i} = v${i} + 1`)}\n${many(k, (i) => `repeat v${i} {}`)}\n}\nexit`,
     ],
   ];
-  return {
-    shapes: {
-      "one key's tests/1": (n) => NARROW[0][1](n),
-      "sibling tests then reads/1": (n) => NARROW[1][1](n),
-      "an and chain/1": (n) => NARROW[2][1](n),
-      "an or chain read after/1": (n) => NARROW[3][1](n),
-      "invalidations/1": (n) => NARROW[4][1](n),
-      "one key's preserving loops/1": (n) => NARROW[5][1](n),
-      "a loop of preserving stores/1": (n) => NARROW[6][1](n),
-      "k scalars preserved in one loop/1": (n) => NARROW[7][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(NARROW.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

@@ -1,5 +1,5 @@
 // #1268; Astra review.
-export const sizes = [4, 8];
+export const sizes = [64, 128, 256, 512];
 export const shapes = (() => {
   const lines = (k, line) => Array.from({ length: k }, (_, i) => line(i)).join("\n");
   const FAMILIES = {

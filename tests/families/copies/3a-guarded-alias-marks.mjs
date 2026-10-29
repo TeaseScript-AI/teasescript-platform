@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent MARKS source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const MARKS = [
@@ -90,25 +88,18 @@ const corpus = (() => {
         `let seed = {t: 3, ${many(k, (i) => `f${i}: 3`, ", ")}}\nif seed.t is integer { say "ok" }\nlet archive = [${many(k, () => "seed", ", ")}]\n${many(k, (i) => `let o${i}: integer = archive.first.f${i}`)}`,
     ],
   ];
-  return {
-    shapes: {
-      "alias chain/1": (n) => MARKS[0][1](n),
-      "alias group/1": (n) => MARKS[1][1](n),
-      "sibling guards/1": (n) => MARKS[2][1](n),
-      "every alias tested/1": (n) => MARKS[3][1](n),
-      "shared array/1": (n) => MARKS[4][1](n),
-      "chain then group/1": (n) => MARKS[5][1](n),
-      "projected chain/1": (n) => MARKS[6][1](n),
-      "guarded projected aliases/1": (n) => MARKS[7][1](n),
-      "projected aliases in wrappers/1": (n) => MARKS[8][1](n),
-      "wrappers of one alias/1": (n) => MARKS[9][1](n),
-      "alias forest/1": (n) => MARKS[10][1](n),
-      "callable groups per tested field/1": (n) => MARKS[11][1](n),
-      "logical operand tests, k callables/1": (n) => MARKS[12][1](n),
-      "operand tests in k functions/1": (n) => MARKS[13][1](n),
-      "one source read k times in a literal/1": (n) => MARKS[14][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(MARKS.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

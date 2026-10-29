@@ -1,5 +1,4 @@
-// #1196; Astra review.
-export const cases = (() => {
+const corpus = (() => {
   const parse = (input, fallback = "seed", files = "false") =>
     `fromJson(${input}${fallback === null ? "" : `, default: ${fallback}`}, files: ${files})`;
   const cases = [];
@@ -172,6 +171,29 @@ export const cases = (() => {
     "let n: integer = a.n",
     "let m: integer = b.n",
   ]);
-  return cases.map((c, i) => [c.name ?? c.id ?? String(i), c.files]);
+  return { cases: cases.map(({ name, files }) => [name, files]) };
 })();
+export const cases = corpus.cases;
+
+for (const input of [
+  [
+    "original/1/separate-file-reads",
+    [
+      {
+        path: "main.tease",
+        source:
+          "let a = {n: hostValue}\nlet b = {n: hostValue}\nlet n: integer = a.n\nlet m: integer = b.n\nexit\n",
+      },
+      {
+        path: "other.tease",
+        source:
+          "let c = [{n: hostValue}, {n: otherHost}, {n: hostValue}]\nlet k: integer = c[0].n\nexit\n",
+      },
+    ],
+  ],
+])
+  cases.push(input);
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "thirdHost"];

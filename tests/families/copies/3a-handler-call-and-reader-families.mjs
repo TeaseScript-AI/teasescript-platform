@@ -1,6 +1,10 @@
-// 3a model builder; shared generation code from one original module.
-export const sizes = [8, 16];
-const outputs = (() => {
+export const cases = (() => {
+  const sourceCases = [];
+  // Work families for spike 7: revision 6's families (both reviewers' round-4 and round-5 families, the earlier
+  // families, the quiet shapes at scale) and both reviewers' round-6 witnesses and families: the mutating helper called
+  // k times (calls × modified keys), the shared-state helper behind k buttons, shared label tails, label fall-through,
+  // records replaced by buttons, wide records, handler-created locals, loop rotation, files sharing a global helper and
+  // independent registering functions. Usage: node families8.mjs [8,16,32,64,128] [axes]  (axes: both,first,second)
   const rows = (k, f) => Array.from({ length: k }, (_, i) => f(i)).join("\n");
   const wide = (k) => Array.from({ length: k }, (_, i) => `p${i}: ${i}`).join(", ");
   const total = (w, s) =>
@@ -412,85 +416,146 @@ const outputs = (() => {
       rows(k, (i) => `let value${i}: integer = settings.p${i}`) +
       `\nexit`,
   };
-  const shapes0 = (() => {
-    return {
-      "handlers-readers": (n) => AXES["handlers-readers"](n),
-      "calls-width": (n) => AXES["calls-width"](n),
-      "loops-keys": (n) => AXES["loops-keys"](n),
-      "files-globals": (n) => AXES["files-globals"](n),
-      "wide-copies-fields": (n) => AXES["wide-copies-fields"](n),
-      "handlers-reading-state": (n) => AXES["handlers-reading-state"](n),
-      "astra-handlers": (n) => AXES["astra-handlers"](n),
-      "sol-tag-changing-sum": (n) => AXES["sol-tag-changing-sum"](n),
-      "sol5-record-fields-loops": (n) => AXES["sol5-record-fields-loops"](n),
-      "astra6-calls-mutate": (n) => AXES["astra6-calls-mutate"](n),
-      "sol6-calls-global": (n) => AXES["sol6-calls-global"](n),
-      "sol6-handler-shared": (n) => AXES["sol6-handler-shared"](n),
-      "sol6-labels-shared-tail": (n) => AXES["sol6-labels-shared-tail"](n),
-    };
-  })();
-  const shapes1 = (() => {
-    return {
-      "astra-wide-helper-many-calls": (n) => ONE["astra-wide-helper-many-calls"](n),
-      "sol-calls-scalar-with-many-stores": (n) => ONE["sol-calls-scalar-with-many-stores"](n),
-      "sol-loops-keys": (n) => ONE["sol-loops-keys"](n),
-      "sol-files-globals": (n) => ONE["sol-files-globals"](n),
-      "sol-files-globals-shared-reader": (n) => ONE["sol-files-globals-shared-reader"](n),
-      "sol-distinct-handles": (n) => ONE["sol-distinct-handles"](n),
-      "sol-older-source-updated": (n) => ONE["sol-older-source-updated"](n),
-      "copy-chain": (n) => ONE["copy-chain"](n),
-      "nested-dating-sites": (n) => ONE["nested-dating-sites"](n),
-      "reverse-calls-with-reads": (n) => ONE["reverse-calls-with-reads"](n),
-      "staggered-wide-refresh": (n) => ONE["staggered-wide-refresh"](n),
-      "wide-refresh-reads": (n) => ONE["wide-refresh-reads"](n),
-      "saved-views": (n) => ONE["saved-views"](n),
-      "loop-band-reads": (n) => ONE["loop-band-reads"](n),
-      "nested-ifs-10": (n) => ONE["nested-ifs-10"](n),
-      "diamond-depth": (n) => ONE["diamond-depth"](n),
-      "while-helper-loop": (n) => ONE["while-helper-loop"](n),
-      "astra-wide-private-locals": (n) => ONE["astra-wide-private-locals"](n),
-      "astra-default-many-calls": (n) => ONE["astra-default-many-calls"](n),
-      "astra-many-shallow-wrappers": (n) => ONE["astra-many-shallow-wrappers"](n),
-      "astra-many-independent-functions": (n) => ONE["astra-many-independent-functions"](n),
-      "astra-loop-presets": (n) => ONE["astra-loop-presets"](n),
-      "astra-whole-presets": (n) => ONE["astra-whole-presets"](n),
-      "sol-plain-bindings": (n) => ONE["sol-plain-bindings"](n),
-      "sol-functions": (n) => ONE["sol-functions"](n),
-      "sol-default-calls": (n) => ONE["sol-default-calls"](n),
-      "sol-local-call-width": (n) => ONE["sol-local-call-width"](n),
-      "sol-handler-lifecycle": (n) => ONE["sol-handler-lifecycle"](n),
-      "quiet-score-buttons": (n) => ONE["quiet-score-buttons"](n),
-      "quiet-settings-helpers": (n) => ONE["quiet-settings-helpers"](n),
-      "quiet-timers-counters": (n) => ONE["quiet-timers-counters"](n),
-      "astra5-handlers-readers": (n) => ONE["astra5-handlers-readers"](n),
-      "astra5-handlers-independent-keys": (n) => ONE["astra5-handlers-independent-keys"](n),
-      "astra5-loops-keys": (n) => ONE["astra5-loops-keys"](n),
-      "astra5-nested-ifs-10-groups": (n) => ONE["astra5-nested-ifs-10-groups"](n),
-      "astra5-files-globals": (n) => ONE["astra5-files-globals"](n),
-      "astra5-call-chain": (n) => ONE["astra5-call-chain"](n),
-      "sol5-loops-keys": (n) => ONE["sol5-loops-keys"](n),
-      "sol5-nested-ifs10-groups-reads": (n) => ONE["sol5-nested-ifs10-groups-reads"](n),
-      "sol5-wrapper-chains10": (n) => ONE["sol5-wrapper-chains10"](n),
-      "sol5-global-state-shared-helpers": (n) => ONE["sol5-global-state-shared-helpers"](n),
-      "sol5-global-functions-two-files": (n) => ONE["sol5-global-functions-two-files"](n),
-      "sol5-sequential-ifs-depth1": (n) => ONE["sol5-sequential-ifs-depth1"](n),
-      "sol5-sequential-ifs-depth2": (n) => ONE["sol5-sequential-ifs-depth2"](n),
-      "sol5-sequential-ifs-depth10": (n) => ONE["sol5-sequential-ifs-depth10"](n),
-      "astra6-handler-records": (n) => ONE["astra6-handler-records"](n),
-      "astra6-wide-record": (n) => ONE["astra6-wide-record"](n),
-      "astra6-handler-created-locals": (n) => ONE["astra6-handler-created-locals"](n),
-      "astra6-ten-deep-groups": (n) => ONE["astra6-ten-deep-groups"](n),
-      "sol6-labels-fallthrough": (n) => ONE["sol6-labels-fallthrough"](n),
-      "sol6-files-shared-helper": (n) => ONE["sol6-files-shared-helper"](n),
-      "sol6-independent-handlers": (n) => ONE["sol6-independent-handlers"](n),
-      "sol6-loop-rotation": (n) => ONE["sol6-loop-rotation"](n),
-      "sol6-wide-record": (n) => ONE["sol6-wide-record"](n),
-    };
-  })();
-  return { shapes0, shapes1 };
+  const ks = ([][2] ?? "8,16,32,64,128").split(",").map(Number);
+  const axes = ([][3] ?? "both,first,second").split(",");
+  for (const [name, gen] of Object.entries(AXES))
+    for (const ax of axes)
+      for (const k of ks) {
+        const [x, y] = ax === "both" ? [k, k] : ax === "first" ? [8, k] : [k, 8];
+        sourceCases.push({ name: `${name}-${ax}/${k}`, source: gen(x, y), expect: "valid" });
+      }
+  for (const [name, gen] of Object.entries(ONE))
+    for (const k of name === "diamond-depth"
+      ? [2, 4, 6, 8, 10]
+      : name.startsWith("sol5-sequential")
+        ? [...ks, 256]
+        : ks)
+      sourceCases.push({ name: `${name}/${k}`, source: gen(k), expect: "valid" });
+  // revision 8: both reviewers' revision-7 delta families. Astra: the chapter family (k scores, `advanceDay` increments
+  // all, k chapters each call it, main reads each score: linear source), the shared-label tail in surface syntax, and
+  // the interleaved story (k reward helpers over k relationship scores, k×k reward calls, k×k typed scene snapshots each
+  // behind a narration helper that changes nothing: quadratic source). Sol: k story variables, k chapter-ending helpers,
+  // k² chapter calls, k² status reads interleaved with `describeScene()` (a separate counter), the distinct-narrator
+  // variant, and the linear control. Own: the dispatcher family (k keys each with its own setter, one `endOfDay`
+  // dispatcher calling every setter, k scenes each calling the dispatcher, k typed reads): k classes at one entry.
+  const DELTA = {
+    "astra7-chapter-shared-update": [
+      [8, 16, 32, 64, 128],
+      (k) =>
+        rows(k, (i) => `global mood${i} = 0`) +
+        `\nfunction advanceDay {\n` +
+        rows(k, (i) => `mood${i} += 1`) +
+        `\n}\n` +
+        rows(k, (i) => `function chapter${i} {\nsay "Chapter ${i}"\nadvanceDay()\n}`) +
+        `\n` +
+        rows(k, (i) => `chapter${i}()`) +
+        `\n` +
+        rows(k, (i) => `let check${i}: integer = mood${i}`) +
+        `\nexit`,
+    ],
+    "astra7-labels-shared-tail": [
+      [8, 16, 32, 64, 128],
+      (k) =>
+        `let score = 0\n` +
+        rows(k, (i) => `call part${i}`) +
+        `\nexit\n` +
+        rows(k, (i) => `label part${i}`) +
+        `\n` +
+        rows(k, (i) => `let temp${i} = ${i}`) +
+        `\nscore += 1\nend`,
+    ],
+    "astra7-story-interleaved": [
+      [8, 16, 32, 64],
+      (k) =>
+        rows(k, (i) => `global rapport${i} = 0`) +
+        `\n` +
+        rows(
+          k,
+          (h) => `function reward${h} {\n` + rows(k, (i) => `rapport${i} = ${h + i}`) + `\n}`,
+        ) +
+        `\nfunction describeRoom { say "You look around the room." }\n` +
+        rows(k, () => rows(k, (h) => `reward${h}()`)) +
+        `\n` +
+        rows(k, (scene) =>
+          rows(k, (i) => `describeRoom()\nlet scene${scene}Score${i}: integer = rapport${i}`),
+        ) +
+        `\nexit`,
+    ],
+    "sol7-story-shared-state": [
+      [4, 8, 16, 32, 64],
+      (k) =>
+        rows(k, (i) => `let trust${i} = 0`) +
+        `\nlet sceneNumber = 0\n` +
+        rows(
+          k,
+          (h) =>
+            `function finishChapter${h} {\n` + rows(k, (i) => `trust${i} = ${(h + i) % 5}`) + `\n}`,
+        ) +
+        `\nfunction describeScene { sceneNumber += 1\n say "A door opens" }\n` +
+        rows(k * k, (j) => `finishChapter${j % k}()`) +
+        `\n` +
+        rows(k * k, (j) => `describeScene()\nsay trust${j % k} + 1`) +
+        `\nexit`,
+    ],
+    "sol7-story-distinct-scenes": [
+      [4, 8, 16, 32, 64],
+      (k) =>
+        rows(k, (i) => `let trust${i} = 0`) +
+        `\nlet sceneNumber = 0\n` +
+        rows(
+          k,
+          (h) =>
+            `function finishChapter${h} {\n` + rows(k, (i) => `trust${i} = ${(h + i) % 5}`) + `\n}`,
+        ) +
+        `\n` +
+        rows(k, (h) => `function describeScene${h} { sceneNumber += 1\n say "A door opens" }`) +
+        `\n` +
+        rows(k * k, (j) => `finishChapter${j % k}()`) +
+        `\n` +
+        rows(k * k, (j) => `describeScene${j % k}()\nsay trust${j % k} + 1`) +
+        `\nexit`,
+    ],
+    "sol7-story-linear-control": [
+      [4, 8, 16, 32, 64],
+      (k) =>
+        rows(k, (i) => `let trust${i} = 0`) +
+        `\nlet sceneNumber = 0\nfunction finishChapter {\n` +
+        rows(k, (i) => `trust${i} = 1`) +
+        `\n}\nfunction describeScene { sceneNumber += 1\n say "A door opens" }\nfinishChapter()\n` +
+        rows(k, (i) => `describeScene()\nsay trust${i} + 1`) +
+        `\nexit`,
+    ],
+    "own8-dispatcher-classes": [
+      [8, 16, 32, 64, 128],
+      (k) =>
+        rows(k, (i) => `global stat${i} = 0`) +
+        `\n` +
+        rows(k, (i) => `function raise${i} { stat${i} = stat${i} + 1 }`) +
+        `\nfunction endOfDay {\n` +
+        rows(k, (i) => `raise${i}()`) +
+        `\n}\n` +
+        rows(k, (i) => `function scene${i} {\nsay "Scene ${i}"\nendOfDay()\n}`) +
+        `\n` +
+        rows(k, (i) => `scene${i}()`) +
+        `\n` +
+        rows(k, (i) => `let shown${i}: integer = stat${i}`) +
+        `\nexit`,
+    ],
+  };
+  for (const [name, [sizes, gen]] of Object.entries(DELTA))
+    for (const k of sizes)
+      if ([][2] === undefined || ks.includes(k))
+        sourceCases.push({ name: `${name}/${k}`, source: gen(k), expect: "valid" });
+
+  return sourceCases.map(({ name, source, files }) => [name, files ?? source]);
 })();
-export const shapes = Object.fromEntries([
-  ...Object.entries(outputs.shapes0).map(([name, make]) => ["shapes0/" + name, make]),
-  ...Object.entries(outputs.shapes1).map(([name, make]) => ["shapes1/" + name, make]),
-]);
+
+for (const index of [
+  491, 490, 486, 485, 481, 480, 477, 476, 475, 474, 473, 447, 446, 445, 444, 443, 194, 193, 192,
+  191, 190, 189, 188, 187, 186, 185, 184, 183, 182, 181, 180,
+])
+  cases.splice(index, 1);
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

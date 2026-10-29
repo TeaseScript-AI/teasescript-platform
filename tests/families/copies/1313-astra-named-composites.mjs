@@ -1,6 +1,4 @@
-// #1313; Astra review.
-export const sizes = [4, 8];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (k, f, sep = ", ") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const wide = (k, name = "f") => `{${many(k, (i) => `${name}${i}: 1`)}}`;
   const at = (where, k) => (where === "first" ? 0 : where === "last" ? k : k >> 1);
@@ -58,18 +56,9 @@ export const shapes = (() => {
           '(load("k",default:hostValue) otherwise (load("j",default:hostValue) otherwise {p0:1}))',
       ),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(4);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [4, 6, 8, 12, 24, 48, 64, 96, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

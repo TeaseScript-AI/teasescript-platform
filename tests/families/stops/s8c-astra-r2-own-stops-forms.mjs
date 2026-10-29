@@ -1,63 +1,36 @@
-// #1165 / S8; Astra review.
-export const cases = (() => {
-  const forms = [
-    [
-      "object-list",
-      "repeat {payload: [tally]}.payload.first {}",
-      [["{payload: [tally]}.payload.first", "budget"]],
-    ],
-    [
-      "list-object",
-      "repeat [{payload: tally}].first.payload {}",
-      [["[{payload: tally}].first.payload", "budget"]],
-    ],
-    [
-      "composed-fallback",
-      "repeat ({payload: tally}.payload otherwise 0) + 1 {}",
-      [["({payload: tally}.payload otherwise 0) + 1", "budget"]],
-    ],
-    [
-      "stored-projection",
-      "let packed = {payload: [tally]}\nlet copied = packed\nrepeat copied.payload.first {}",
-      [["copied.payload.first", "budget"]],
-    ],
-    [
-      "positive-else",
-      "if tally is integer { let yes: integer = tally } else { let no = tally }\nrepeat tally {}",
-      [
-        ["tally }", "integer"],
-        ["tally }\nrepeat", "budget"],
-        ["tally {}", "budget"],
-      ],
-    ],
-    [
-      "negative-else",
-      "if tally is not integer { let no = tally } else { let yes: integer = tally }\nrepeat tally {}",
-      [
-        ["tally } else", "budget"],
-        ["tally }\nrepeat", "integer"],
-        ["tally {}", "budget"],
-      ],
-    ],
-    [
-      "guard-composition",
-      "if tally is integer { let packed = {payload: [tally]}\nrepeat packed.payload.first {} }\nrepeat tally {}",
-      [
-        ["tally]}", "integer"],
-        ["packed.payload.first", "integer"],
-        ["tally {}", "budget"],
-      ],
-    ],
-    [
-      "two-demands",
-      "let one: integer = tally\nlet two: integer = tally\nrepeat tally {}",
-      [
-        ["tally\nlet two", "budget"],
-        ["tally\nrepeat", "budget"],
-        ["tally {}", "budget"],
-      ],
-    ],
-  ];
-  return forms.map(([name, source]) => [name, source]);
-})();
+export const cases = [
+  [
+    "object-list",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nrepeat {payload: [tally]}.payload.first {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "list-object",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nrepeat [{payload: tally}].first.payload {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "composed-fallback",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nrepeat ({payload: tally}.payload otherwise 0) + 1 {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "stored-projection",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nlet packed = {payload: [tally]}\nlet copied = packed\nrepeat copied.payload.first {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "positive-else",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nif tally is integer { let yes: integer = tally } else { let no = tally }\nrepeat tally {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "negative-else",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nif tally is not integer { let no = tally } else { let yes: integer = tally }\nrepeat tally {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "guard-composition",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nif tally is integer { let packed = {payload: [tally]}\nrepeat packed.payload.first {} }\nrepeat tally {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "two-demands",
+    'let tally = 1\ntally = 2\ntally = 3\ntally = 4\ntally = 5\ntally = 6\ntally = 7\ntally = 8\ntally = 9\ntally = 10\ntally = 11\ntally = 12\ntally = 13\ntally = 14\ntally = 15\ntally = 16\ntally = 17\ntally = 18\ntally = 19\ntally = 20\ntally = 21\ntally = 22\ntally = 23\ntally = 24\ntally = 25\ntally = 26\ntally = 27\ntally = 28\ntally = 29\ntally = 30\ntally = 31\ntally = 32\ntally = 33\ntally = 34\ntally = 35\ntally = 36\ntally = 37\ntally = 38\ntally = 39\ntally = 40\ntally = 41\ntally = 42\ntally = 43\ntally = 44\ntally = 45\ntally = 46\ntally = 47\ntally = 48\ntally = 49\ntally = 50\ntally = 51\ntally = 52\ntally = 53\ntally = 54\ntally = 55\ntally = 56\ntally = 57\ntally = 58\ntally = 59\ntally = 60\ntally = 61\ntally = 62\ntally = 63\ntally = 64\ntally = 65\ntally = 66\ntally = 67\ntally = 68\ntally = 69\ntally = 70\ntally = 71\ntally = 72\ntally = 73\ntally = 74\ntally = 75\ntally = 76\ntally = 77\ntally = 78\ntally = 79\ntally = 80\ntally = 81\ntally = hostValue\nlet one: integer = tally\nlet two: integer = tally\nrepeat tally {}\nlet count = 1\ncount = 0.5\nrepeat count {}\nsay "DONE"\nexit\n',
+  ],
+];
+
 export const checks = ["publication", "stops"];

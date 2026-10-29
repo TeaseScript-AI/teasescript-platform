@@ -1,6 +1,4 @@
-// #1394 G5 5a Astra review / builder corpus.
-export const sizes = [4, 8];
-export const shapes = (() => {
+const corpus = (() => {
   const { families: families } = (() => {
     const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
     const families = {};
@@ -326,18 +324,9 @@ export const shapes = (() => {
         "exit",
       ].join("\n"),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(4);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [24, 48, 96, 192];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

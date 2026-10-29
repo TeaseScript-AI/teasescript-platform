@@ -1,5 +1,5 @@
 // #1417; builder/review archive: size-dependent shapes source families.
-export const sizes = [16, 32];
+export const sizes = [2, 3, 5, 9, 16, 32, 64];
 const corpus = (() => {
   const many = (n, f, separator = "\n") =>
     Array.from({ length: n }, (_, i) => f(i)).join(separator);

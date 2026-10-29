@@ -1,6 +1,4 @@
-// #1278; Astra review.
-export const sizes = [4, 8];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (n, f, by = "\n") => Array.from({ length: n }, (_, i) => f(i)).join(by);
   const SHAPES = {
     // #1278: k options, each its own object holding its own property
@@ -133,18 +131,9 @@ export const shapes = (() => {
     twoSharedStore: (k) =>
       SHAPES.twoShared(k).replace("let options", 'second.f1 = "x"\nlet options'),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(SHAPES)) {
-    const sample = make(4);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: SHAPES };
 })();
+export const sizes = [4, 6, 8, 12, 24, 48, 64, 96, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

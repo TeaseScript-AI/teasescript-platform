@@ -1,5 +1,3 @@
-// #1310; builder/review archive: size-dependent families source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const wrap = (n, inner) => "{p: ".repeat(n) + inner + "}".repeat(n);
   const families = {
@@ -16,14 +14,9 @@ const corpus = (() => {
     "empty-list-read-width": (n) =>
       `let u: list[][][][] = []\n${Array.from({ length: n }, (_, i) => `let r${i} = [[[[[${i}]]]]] + u\nsay r${i}.length`).join("\n")}\nexit\n`,
   };
-  return {
-    shapes: {
-      "prefix-sibling-depth": (n) => families["prefix-sibling-depth"](n),
-      "prefix-distinct-width": (n) => families["prefix-distinct-width"](n),
-      "empty-list-depth": (n) => families["empty-list-depth"](n),
-      "empty-list-read-width": (n) => families["empty-list-read-width"](n),
-    },
-  };
+  return { shapes: families };
 })();
+export const sizes = [24, 48];
 export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

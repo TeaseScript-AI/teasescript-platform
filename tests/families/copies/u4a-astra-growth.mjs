@@ -1,5 +1,3 @@
-// Astra review: size-dependent families source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const lines = (n, f, sep = "\n") => Array.from({ length: n }, (_, i) => f(i)).join(sep);
   const select = (i) => ["first", "last", "random"][i % 3];
@@ -14,14 +12,9 @@ const corpus = (() => {
     invalidated: (k) =>
       `${pre}\nlet xs: integer?[] = [1]\nif c { xs = [null] }\nif xs is integer[] {\n${lines(k, (i) => `xs.reverse()\nlet take${i}: integer = xs.${select(i)}`)}\n}\nexit\n`,
   };
-  return {
-    shapes: {
-      width: (n) => families["width"](n),
-      independent: (n) => families["independent"](n),
-      computed: (n) => families["computed"](n),
-      invalidated: (n) => families["invalidated"](n),
-    },
-  };
+  return { shapes: families };
 })();
+export const sizes = [16, 32];
 export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent CORRIDOR source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const CORRIDOR = [
@@ -40,17 +38,18 @@ const corpus = (() => {
         `let clear = askBoolean "Clear?"\nlet n = 1\nif clear { n = null }\nlet s0 = n\n${many(k - 1, (i) => `let s${i + 1} = s${i}`)}\n${many(k, () => `repeat s${k - 1} {}`)}\nexit`,
     ],
   ];
-  return {
-    shapes: {
-      "a record's whole stores read at k fields/1": (n) => CORRIDOR[0][1](n),
-      "k calls between k null stores and k uses/1": (n) => CORRIDOR[1][1](n),
-      "k calls before k null stores and k uses/1": (n) => CORRIDOR[2][1](n),
-      "k closed candidates then k reads/1": (n) => CORRIDOR[3][1](n),
-      "child layers with own stores/1": (n) => CORRIDOR[4][1](n),
-      "child layers with own tests/1": (n) => CORRIDOR[5][1](n),
-      "a scalar copy chain/1": (n) => CORRIDOR[6][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(CORRIDOR.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

@@ -1,5 +1,5 @@
 // Astra review: size-dependent scaleCases source families.
-export const sizes = [4, 8];
+export const sizes = [64, 128];
 const corpus = (() => {
   const { scaleCases: scaleCases } = (() => {
     function scaleCases(k, depth = 3) {
@@ -60,3 +60,18 @@ const corpus = (() => {
 })();
 export const shapes = corpus.shapes;
 export const checks = ["publication"];
+
+export const cases = [
+  [
+    "original/1/original-11",
+    'let root={p0:1,p1:1,p2:1,p3:1}\nlet a0=root\nlet a1=a0\nlet a2=a1\nlet a3=a2\nlet out=askChoice {text:"0",value:[[[[[[[[[[[[[[[[a0]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"1",value:[[[[[[[[[[[[[[[[a1]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"2",value:[[[[[[[[[[[[[[[[a2]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"3",value:[[[[[[[[[[[[[[[[a3]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last}\nrepeat out.p0 {}\nrepeat out.p1 {}\nrepeat out.p2 {}\nrepeat out.p3 {}\nexit',
+  ],
+  [
+    "original/2/original-12",
+    'let root={p0:1,p1:1,p2:1,p3:1}\nlet a0=root\nlet a1=a0\nlet a2=a1\nlet a3=a2\nlet out=askChoice {text:"0",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"1",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"2",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a2]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"3",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a3]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last}\nrepeat out.p0 {}\nrepeat out.p1 {}\nrepeat out.p2 {}\nrepeat out.p3 {}\nexit',
+  ],
+  [
+    "original/3/original-13",
+    'let root={p0:1,p1:1,p2:1,p3:1}\nlet a0=root\nlet a1=a0\nlet a2=a1\nlet a3=a2\nlet out=askChoice {text:"0",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"1",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"2",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a2]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last},{text:"3",value:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[a3]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]].last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last.last}\nrepeat out.p0 {}\nrepeat out.p1 {}\nrepeat out.p2 {}\nrepeat out.p3 {}\nexit',
+  ],
+];

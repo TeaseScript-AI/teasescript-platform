@@ -1,5 +1,4 @@
-// #1165 / S8; Astra review.
-export const cases = (() => {
+const corpus = (() => {
   const programs = [
     [
       "wide",
@@ -15,6 +14,13 @@ export const cases = (() => {
       `let maybe: integer? = null\n${Array.from({ length: 64 }, () => `if maybe != null { say maybe }`).join("\n")}\nexit\n`,
     ],
   ];
-  return programs.map(([name, source]) => [name, source]);
+  return { cases: programs.map(([name, source]) => [name, source]) };
 })();
+export const cases = corpus.cases;
+
+for (const input of [
+  ["original/1/original-5", "let x: integer? = null\nif x != null { say x }\nexit\n"],
+])
+  cases.push(input);
+
 export const checks = ["publication", "stops"];

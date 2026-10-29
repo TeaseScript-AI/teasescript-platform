@@ -132,3 +132,20 @@ export const cases = (() => {
   return cases.map((c) => [c.name, c.source ?? c.files[0].source]);
 })();
 export const checks = ["publication", "stops"];
+
+for (const input of [
+  ["original/1/join-call", 'function award(x) { return x*3 }\nsay "L:" + award(4) + ":R"\nexit\n'],
+  ["original/2/join-nested-quotes", 'say "L:" + toInteger("23") + ":R"\nexit\n'],
+  ["original/3/join-dict-literal", 'say "L:" + dict{"x": 17}["x"] + ":R"\nexit\n'],
+  ["original/4/join-escaped-quotes", 'say "L:" + "x\\"y".length + ":R"\nexit\n'],
+  ["original/5/join-comment", 'say "L:" + (8 /* marker */ + 2) + ":R"\nexit\n'],
+  ["original/6/join-multiline", 'say "L:" + (8 +\n2) + ":R"\nexit\n'],
+  ["original/7/join-quantity", 'say "L:" + 750 ms + ":R"\nexit\n'],
+  ["original/8/selection-call", "function obtain { return [] }\nsay obtain().last\nexit\n"],
+  ["original/9/condition-literal", 'if 17 { say "yes" }\nexit\n'],
+  ["original/10/shown-reference", 'say "${player}"\nexit\n'],
+  ["original/11/speaker-create", "player.badge = 17\nsay player.badge\nexit\n"],
+  ["original/12/speaker-missing", "say player.badge\nexit\n"],
+  ["original/13/profile", "say player.firstName\nexit\n"],
+])
+  cases.push(input);

@@ -1,5 +1,4 @@
-// Astra review.
-export const cases = (() => {
+const corpus = (() => {
   const cases = [];
   const literalGroups = [
     ["null", "integer | null", ["(null)"]],
@@ -78,6 +77,17 @@ export const cases = (() => {
     tag: "null",
     witness: false,
   });
-  return cases.map((c, i) => [c.name ?? c.id ?? String(i), c.source]);
+  return { cases: cases.map(({ name, source }) => [name, source]) };
 })();
+export const cases = corpus.cases;
+
+for (const input of [
+  ["original/1/original-35", "switch hostValue { case 8 { say 1 } }\nexit\n"],
+  ["original/2/original-36", "switch hostValue { case 3 min { say 1 } }\nexit\n"],
+  ["original/3/original-37", "switch hostValue { case 2 calendar years { say 1 } }\nexit\n"],
+  ["original/4/original-38", "switch hostValue { case 180 deg { say 1 } }\nexit\n"],
+  ["original/5/original-39", "switch hostValue { case -0 deg { say 1 } }\nexit\n"],
+])
+  cases.push(input);
+
 export const checks = ["publication"];

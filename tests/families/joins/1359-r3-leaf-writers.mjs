@@ -1,6 +1,4 @@
-// #1359 review r3 (reviewer not recorded); retained in #1417.
-export const sizes = [4, 8];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (k, f, sep = ", ") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const chain = (k, seed = "hostValue") =>
     `${"max(".repeat(k)}${seed}${many(k, (i) => `, ${i})`, "")}`;
@@ -42,18 +40,9 @@ export const shapes = (() => {
       sites(k),
     flatMaxPure: (k) => pair(`max(${many(k, (i) => i + 1)})`) + sites(k, "left, right", "xs[i][0]"),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(4);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [2, 3, 4, 5, 8, 9, 64, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

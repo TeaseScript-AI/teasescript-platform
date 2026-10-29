@@ -1,7 +1,8 @@
-// #1253; Astra review.
-export const cases = (() => {
-  const source =
-    "let parcel: object = fromJson(hostValue, default: {score: 4}, files: false)\nsay parcel.score\nexit\n";
-  return [["source", source]];
-})();
+export const cases = [
+  [
+    "files",
+    'let parcel: object? = fromJson(hostValue, default: {meta: {score: 4}})\nsay "complete"\nexit\n',
+  ],
+];
+
 export const checks = ["publication"];

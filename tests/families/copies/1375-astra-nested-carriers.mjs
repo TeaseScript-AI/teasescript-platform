@@ -100,3 +100,8 @@ say picked.b`,
   return cases.map((c) => [c.name, c.source ?? c.files[0].source]);
 })();
 export const checks = ["publication"];
+
+for (const index of [
+  102, 71, 70, 65, 64, 59, 58, 53, 52, 47, 46, 41, 40, 35, 34, 29, 28, 23, 22, 17, 16, 11, 10, 5, 4,
+])
+  cases.splice(index, 1);

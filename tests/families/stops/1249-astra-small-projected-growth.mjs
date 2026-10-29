@@ -62,10 +62,12 @@ let pair${i}=[relay${i},${b}]`,
       ];
     }
   }
-  cases = Array.from(generate(4), ([name, reverse, source]) => ({
-    name: name + "/" + reverse + "/4",
-    source,
-  }));
+  cases = [4, 64, 128, 256].flatMap((n) =>
+    Array.from(generate(n), ([name, reverse, source]) => ({
+      name: name + "/" + reverse + "/" + n,
+      source,
+    })),
+  );
 
   return cases.map((c) => [c.name, c.source ?? c.files[0].source]);
 })();

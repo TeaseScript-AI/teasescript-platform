@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent WIDE source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const WIDE = [
@@ -43,16 +41,18 @@ const corpus = (() => {
         `let n: integer | string | null = 1\nif hostFlag { n = "bad" }\nif hostFlag { n = null }\n${many(k, () => "if n == null { exit }")}\n${many(k, () => "repeat n {}")}\nexit`,
     ],
   ];
-  return {
-    shapes: {
-      "a wide literal certificate/1": (n) => WIDE[0][1](n),
-      "a copy chain with interleaved field stores/1": (n) => WIDE[1][1](n),
-      "sibling fields each stored, projected and read/1": (n) => WIDE[2][1](n),
-      "a copy chain with interleaved field stores, read once/1": (n) => WIDE[3][1](n),
-      "the two-roots join/1": (n) => WIDE[4][1](n),
-      "a needed form under k tests/1": (n) => WIDE[5][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(WIDE.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

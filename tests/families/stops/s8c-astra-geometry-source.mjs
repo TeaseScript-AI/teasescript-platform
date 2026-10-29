@@ -1,5 +1,5 @@
 // #1165 / S8; Astra review: size-dependent source-variants source families.
-export const sizes = [24, 48];
+export const sizes = [24, 96];
 const corpus = (() => {
   const source = (n, padding, form) =>
     [
@@ -20,10 +20,11 @@ const corpus = (() => {
       "exit",
     ].join("\n");
   return {
-    shapes: {
-      callable: (n) => source(n, undefined, "callable"),
-      recursive: (n) => source(n, undefined, "recursive"),
-    },
+    shapes: Object.fromEntries(
+      ["callable", "top", "recursive"].flatMap((form) =>
+        [0, 192].map((padding) => [`${form}/padding-${padding}`, (n) => source(n, padding, form)]),
+      ),
+    ),
   };
 })();
 export const shapes = corpus.shapes;

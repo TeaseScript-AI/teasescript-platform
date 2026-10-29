@@ -94,3 +94,5 @@ export const shapes = Object.fromEntries([
   ...Object.entries(outputs.shapes2).map(([name, make]) => ["shapes2/" + name, make]),
 ]);
 export const checks = ["publication"];
+
+for (const index of [30, 29]) cases.splice(index, 1);

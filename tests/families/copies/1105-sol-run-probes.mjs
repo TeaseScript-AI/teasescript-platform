@@ -1,5 +1,4 @@
-// #1105; Sol review.
-export const cases = (() => {
+const corpus = (() => {
   const cases = [];
   const add = (group, name, source) =>
     cases.push({ family: group, name, source: source + "\nexit\n" });
@@ -55,6 +54,47 @@ export const cases = (() => {
     ["toBase64-copy", 'let text = "12a"\nsay toBase64(text)'],
   ])
     add("siblings", name, source);
-  return cases.map((c, i) => [c.name ?? c.id ?? String(i), c.source]);
+  return { cases: cases.map(({ name, source }) => [name, source]) };
 })();
+export const cases = corpus.cases;
+
+for (const input of [
+  ["original/1/variable", 'let text = "12a"\nsay toInteger(text, default: 0)\nexit\n'],
+  [
+    "original/2/two-step",
+    'let first = "12"\nlet text = first + "a"\nsay toInteger(text, default: 0)\nexit\n',
+  ],
+  ["original/3/literal", 'say bubble(color: "transparent") "Hi"\nexit\n'],
+  ["original/4/variable", 'let text = "transparent"\nsay bubble(color: text) "Hi"\nexit\n'],
+  ["original/5/concatenation", 'say bubble(color: "trans" + "parent") "Hi"\nexit\n'],
+  [
+    "original/6/copy",
+    'let seed = "transparent"\nlet text = seed\nsay bubble(color: text) "Hi"\nexit\n',
+  ],
+  [
+    "original/7/two-step",
+    'let first = "trans"\nlet text = first + "parent"\nsay bubble(color: text) "Hi"\nexit\n',
+  ],
+  ["original/8/literal", 'let answer = askText "Name?", prefill: "  "\nexit\n'],
+  ["original/9/variable", 'let text = "  "\nlet answer = askText "Name?", prefill: text\nexit\n'],
+  ["original/10/concatenation", 'let answer = askText "Name?", prefill: " " + " "\nexit\n'],
+  [
+    "original/11/copy",
+    'let seed = "  "\nlet text = seed\nlet answer = askText "Name?", prefill: text\nexit\n',
+  ],
+  [
+    "original/12/two-step",
+    'let first = " "\nlet text = first + " "\nlet answer = askText "Name?", prefill: text\nexit\n',
+  ],
+  ["original/13/literal", 'say dict{ ["ab"]: 1, ab: 2 }\nexit\n'],
+  ["original/14/variable", 'let text = "ab"\nsay dict{ [text]: 1, ab: 2 }\nexit\n'],
+  ["original/15/concatenation", 'say dict{ ["a" + "b"]: 1, ab: 2 }\nexit\n'],
+  ["original/16/copy", 'let seed = "ab"\nlet text = seed\nsay dict{ [text]: 1, ab: 2 }\nexit\n'],
+  [
+    "original/17/two-step",
+    'let first = "a"\nlet text = first + "b"\nsay dict{ [text]: 1, ab: 2 }\nexit\n',
+  ],
+])
+  cases.push(input);
+
 export const checks = ["publication"];

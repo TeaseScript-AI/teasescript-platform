@@ -1,5 +1,5 @@
 // #1165 / S8; Astra review: size-dependent forms source families.
-export const sizes = [32, 64];
+export const sizes = [32, 64, 128];
 const corpus = (() => {
   const forms = {
     direct: (n) =>

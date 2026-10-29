@@ -1,6 +1,4 @@
-// #1359 review r1 (reviewer not recorded); retained in #1417.
-export const sizes = [3, 6];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (n, f, by = ", ") => Array.from({ length: n }, (_, i) => f(i)).join(by);
   const lines = (...s) => s.join("\n");
   const shapes = {
@@ -105,18 +103,9 @@ export const shapes = (() => {
         "exit",
       ),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(3);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [2, 3, 5, 6, 9, 64, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

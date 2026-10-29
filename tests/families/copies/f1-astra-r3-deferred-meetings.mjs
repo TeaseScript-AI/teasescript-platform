@@ -1,5 +1,3 @@
-// Astra review: size-dependent meeting source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i));
   const fields = (n, f, p = "f") =>
@@ -17,7 +15,9 @@ const corpus = (() => {
       ),
     );
   }
-  return { shapes: { meeting: (n) => meeting(n) } };
+  return { shapes: { meeting: meeting } };
 })();
+export const sizes = [64, 128];
 export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

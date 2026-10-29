@@ -1,5 +1,3 @@
-// #1417; builder/review archive: size-dependent shapes source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep) => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const shapes = {
@@ -21,12 +19,9 @@ const corpus = (() => {
       ].join("\n");
     },
   };
-  return {
-    shapes: {
-      "join-run-ending-in-another-type": (n) => shapes["join-run-ending-in-another-type"](n),
-      "join-prefixes-each-in-an-object": (n) => shapes["join-prefixes-each-in-an-object"](n),
-    },
-  };
+  return { shapes: shapes };
 })();
+export const sizes = [2, 3, 4, 5, 8, 9, 64, 128];
 export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

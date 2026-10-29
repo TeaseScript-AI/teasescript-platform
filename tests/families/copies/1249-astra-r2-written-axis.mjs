@@ -1,5 +1,3 @@
-// #1249; Astra review: size-dependent shapes source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const each = (k, f) => Array.from({ length: k }, (_, i) => f(i));
   const typed = (k) =>
@@ -50,17 +48,9 @@ const corpus = (() => {
       (k) => k,
     ],
   ];
-  return {
-    shapes: {
-      "elements of written fields/1": (n) => shapes[0][1](n),
-      "stores of written fields/1": (n) => shapes[1][1](n),
-      "places of written fields/1": (n) => shapes[2][1](n),
-      "places of written fields, the other first/1": (n) => shapes[3][1](n),
-      "a list of written fields/1": (n) => shapes[4][1](n),
-      "a list of written fields, the other first/1": (n) => shapes[5][1](n),
-      "a ring fed two objects of k written fields/1": (n) => shapes[6][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(shapes.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [64, 128];
 export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

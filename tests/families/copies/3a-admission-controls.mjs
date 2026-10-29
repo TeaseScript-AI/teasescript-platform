@@ -20,6 +20,6 @@ export const cases = (() => {
       "let v = null\nlet copy = v\nv = RATE\ncopy = 1.5\nexit\n",
     ],
   ];
-  return programs.map(([name, source]) => [name, source]);
+  return programs.map(([name, source]) => [name, source.replaceAll("RATE", 'askInteger "Rate"')]);
 })();
 export const checks = ["publication"];

@@ -1,5 +1,5 @@
 // #1165; builder/review archive: size-dependent shapes source families.
-export const sizes = [4, 8];
+export const sizes = [64, 128, 256];
 const corpus = (() => {
   const nest = (n, open, close, leaf) => open.repeat(n) + leaf + close.repeat(n);
   const shapes = {
@@ -33,3 +33,5 @@ const corpus = (() => {
 })();
 export const shapes = corpus.shapes;
 export const checks = ["publication", "stops"];
+
+for (const [name, make] of Object.entries(shapes)) shapes[name] = (n) => "" + make(n) + "\nexit\n";

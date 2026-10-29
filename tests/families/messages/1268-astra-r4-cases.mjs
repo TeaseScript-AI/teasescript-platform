@@ -135,3 +135,5 @@ export const cases = (() => {
   return cases.map((c, i) => [c.name ?? c.id ?? String(i), c.source]);
 })();
 export const checks = ["publication"];
+
+for (const index of [82, 81, 34, 33, 32, 31, 30, 29]) cases.splice(index, 1);

@@ -1,4 +1,9 @@
-// Fixed compiler inputs from astra-m4-s8d-r3-evidence/speaker-check.mjs.
-const fixedCases = [["inline-1", "player.rank = 73\nsay player.rank\nexit\n"]];
-export const cases = fixedCases;
+export const cases = [
+  ["original-1", "player.add(73)\nexit\n"],
+  ["original-2", "player.clear()\nexit\n"],
+  ["original-3", "say player.rank\nexit\n"],
+  ["original-4", "player.rank = 73\nsay player.rank\nexit\n"],
+  ["original-5", "say player.get(0)\nexit\n"],
+];
+
 export const checks = ["publication"];

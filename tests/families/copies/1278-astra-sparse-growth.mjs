@@ -1,68 +1,12 @@
-// #1278; Astra review: size-dependent growth-variants source families.
-export const sizes = [7, 14];
-const corpus = (() => {
-  const many = (k, f, by = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(by);
-  const record = (name, source) => ({
-    name,
-    files: [{ path: "main.tease", source: source + "\nexit" }],
-  });
-  function growth(k, shape) {
-    const lines = ["let n = 1"];
-    let value = (i) => `p${i}`,
-      read = (i) => `picked.f${i}`;
-    if (shape === "sparse-overlap-deep") {
-      lines.push(many(k, (i) => `let p${i} = {f${i}: {leaf: n}, f${(i + 1) % k}: {leaf: 2.5}}`));
-      read = (i) => `picked.f${i}.leaf`;
-    } else if (shape === "sparse-late-stores") {
-      lines.push(
-        many(k, (i) => `let p${i} = {anchor: n}`),
-        many(k, (i) => `p${i}.f${i} = n`),
-      );
-    } else if (shape === "sparse-open-gaps") {
-      lines.push(
-        "let ingressA = hostValue",
-        "let ingressB = hostValue",
-        many(k, (i) => `let p${i} = {f${i}: n}`),
-      );
-    } else if (shape === "sparse-text-value") {
-      lines.push(many(k, (i) => `let p${i} = {f${i}: n}`));
-    } else {
-      lines.push(
-        `let a = {${many(k, (i) => `f${i}: {leaf: 1}`, ", ")}}`,
-        `let b = {${many(k, (i) => `f${i}: {leaf: ${i % 3 ? "1" : "2.5"}}`, ", ")}}`,
-      );
-      value = (i) => (i % 2 ? "a" : "b");
-      read = (i) => `picked.f${i}.leaf`;
-      if (shape === "shared-own-wrappers") {
-        value = (i) => `{box: ${i % 2 ? "a" : "b"}, own: {tag: ${i}}}`;
-        read = (i) => `picked.box.f${i}.leaf`;
-      }
-    }
-    const options = Array.from({ length: k }, (_, i) =>
-      shape === "sparse-text-value" && i % 2
-        ? `{text: ${value(i)}}`
-        : `{text: "${i}", value: ${value(i)}}`,
-    );
-    if (shape === "sparse-open-gaps") {
-      options.splice(Math.floor(k / 3), 0, '{text:"A",value:ingressA}');
-      options.splice(Math.floor((2 * k) / 3), 0, '{text:"B",value:ingressB}');
-    }
-    lines.push(
-      `let options = [${options.join(", ")}]`,
-      "let picked = askChoice options",
-      many(k, (i) => `repeat ${read(i)} {}`),
-    );
-    return record(shape + "@" + k, lines.join("\n"));
-  }
-  return {
-    shapes: {
-      "sparse-overlap-deep": (n) => growth(n, "sparse-overlap-deep").files,
-      "sparse-late-stores": (n) => growth(n, "sparse-late-stores").files,
-      "sparse-open-gaps": (n) => growth(n, "sparse-open-gaps").files,
-      "sparse-text-value": (n) => growth(n, "sparse-text-value").files,
-      "shared-own-wrappers": (n) => growth(n, "shared-own-wrappers").files,
-    },
-  };
-})();
-export const shapes = corpus.shapes;
+export const cases = [
+  [
+    "undefined@7",
+    'let n = 1\nlet a = {f0: {leaf: 1}, f1: {leaf: 1}, f2: {leaf: 1}, f3: {leaf: 1}, f4: {leaf: 1}, f5: {leaf: 1}, f6: {leaf: 1}}\nlet b = {f0: {leaf: 2.5}, f1: {leaf: 1}, f2: {leaf: 1}, f3: {leaf: 2.5}, f4: {leaf: 1}, f5: {leaf: 1}, f6: {leaf: 2.5}}\nlet options = [{text: "0", value: b}, {text: "1", value: a}, {text: "2", value: b}, {text: "3", value: a}, {text: "4", value: b}, {text: "5", value: a}, {text: "6", value: b}]\nlet picked = askChoice options\nrepeat picked.f0.leaf {}\nrepeat picked.f1.leaf {}\nrepeat picked.f2.leaf {}\nrepeat picked.f3.leaf {}\nrepeat picked.f4.leaf {}\nrepeat picked.f5.leaf {}\nrepeat picked.f6.leaf {}\nexit',
+  ],
+  [
+    "undefined@14",
+    'let n = 1\nlet a = {f0: {leaf: 1}, f1: {leaf: 1}, f2: {leaf: 1}, f3: {leaf: 1}, f4: {leaf: 1}, f5: {leaf: 1}, f6: {leaf: 1}, f7: {leaf: 1}, f8: {leaf: 1}, f9: {leaf: 1}, f10: {leaf: 1}, f11: {leaf: 1}, f12: {leaf: 1}, f13: {leaf: 1}}\nlet b = {f0: {leaf: 2.5}, f1: {leaf: 1}, f2: {leaf: 1}, f3: {leaf: 2.5}, f4: {leaf: 1}, f5: {leaf: 1}, f6: {leaf: 2.5}, f7: {leaf: 1}, f8: {leaf: 1}, f9: {leaf: 2.5}, f10: {leaf: 1}, f11: {leaf: 1}, f12: {leaf: 2.5}, f13: {leaf: 1}}\nlet options = [{text: "0", value: b}, {text: "1", value: a}, {text: "2", value: b}, {text: "3", value: a}, {text: "4", value: b}, {text: "5", value: a}, {text: "6", value: b}, {text: "7", value: a}, {text: "8", value: b}, {text: "9", value: a}, {text: "10", value: b}, {text: "11", value: a}, {text: "12", value: b}, {text: "13", value: a}]\nlet picked = askChoice options\nrepeat picked.f0.leaf {}\nrepeat picked.f1.leaf {}\nrepeat picked.f2.leaf {}\nrepeat picked.f3.leaf {}\nrepeat picked.f4.leaf {}\nrepeat picked.f5.leaf {}\nrepeat picked.f6.leaf {}\nrepeat picked.f7.leaf {}\nrepeat picked.f8.leaf {}\nrepeat picked.f9.leaf {}\nrepeat picked.f10.leaf {}\nrepeat picked.f11.leaf {}\nrepeat picked.f12.leaf {}\nrepeat picked.f13.leaf {}\nexit',
+  ],
+];
+
 export const checks = ["publication"];

@@ -1,6 +1,4 @@
-// #1357; Astra review.
-export const sizes = [4, 8];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (n, f, sep = "\n") => Array.from({ length: n }, (_, i) => f(i)).join(sep);
   const program = (...s) => s.join("\n") + "\nexit\n";
   const chain = (n, last) => `[0] + ${many(n, (i) => `[${i + 1}]`, " + ")} + [${last}]`;
@@ -109,18 +107,9 @@ let n${i}: integer = s${i}[hostValue.i]`,
       "let s = x + y + z + x + y + z",
       "say s",
     );
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(4);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [4, 8, 64, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

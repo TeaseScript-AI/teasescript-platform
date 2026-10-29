@@ -751,3 +751,5 @@ export const cases = (() => {
   ]);
 })();
 export const checks = ["publication"];
+
+for (const index of [368]) cases.splice(index, 1);

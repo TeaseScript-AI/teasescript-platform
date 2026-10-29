@@ -1,6 +1,7 @@
-// 3a model builder.
-export const sizes = [8, 16];
-export const shapes = (() => {
+export const cases = (() => {
+  const sourceCases = [];
+  // Work families for the program-point spike: fan-out combined with context count and dependency width, both
+  // reviewers' round-2 quadratic witnesses, and the earlier families. Usage: node families3.mjs 8,16,32,64,128
   const rows = (k, f) => Array.from({ length: k }, (_, i) => f(i)).join("\n");
   const wide = (k) => Array.from({ length: k }, (_, i) => `p${i}: ${i}`).join(", ");
   const total = (w, s) =>
@@ -82,18 +83,13 @@ export const shapes = (() => {
           `${"if hostFlag {\n".repeat(10)}x = x + ${i}\n${"}\n".repeat(10)}let r${i}: integer = x`,
       ),
   };
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(FAMILIES)) {
-    const sample = make(8);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  const ks = ([][2] ?? "8,16,32,64").split(",").map(Number);
+  for (const [name, gen] of Object.entries(FAMILIES))
+    for (const k of ks) sourceCases.push({ name: `${name}/${k}`, source: gen(k), expect: "valid" });
+
+  return sourceCases.map(({ name, source, files }) => [name, files ?? source]);
 })();
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];

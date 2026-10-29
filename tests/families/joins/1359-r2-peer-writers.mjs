@@ -1,6 +1,4 @@
-// #1359 review r2 (reviewer not recorded); retained in #1417.
-export const sizes = [3, 6];
-export const shapes = (() => {
+const corpus = (() => {
   const many = (k, f, sep = ", ") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const join = (k) => `seed + ${many(k, (i) => `[${i}]`, " + ")} + ["s"]`;
   const pair = (k) =>
@@ -81,18 +79,9 @@ export const shapes = (() => {
     "\nexit";
   shapes.constantMaxPeerOneList = (k) =>
     `let left = ${constantMax(k)}\nlet right = ${constantMax(k)}\nlet xs = [${many(k, (i) => (i % 2 ? "left" : "right"))}]\nsay xs[0]\nexit`;
-  const result = {};
-  const leaf = (v) =>
-    typeof v === "string" ||
-    (Array.isArray(v) &&
-      v.every((f) => f && typeof f.path === "string" && typeof f.source === "string"));
-  for (const [name, make] of Object.entries(shapes)) {
-    const sample = make(3);
-    if (leaf(sample)) result[name] = make;
-    else
-      for (const [variant, source] of Object.entries(sample))
-        if (leaf(source)) result[name + "/" + variant] = (n) => make(n)[variant];
-  }
-  return result;
+  return { shapes: shapes };
 })();
+export const sizes = [2, 3, 5, 6, 9, 64, 128];
+export const shapes = corpus.shapes;
+
 export const checks = ["publication"];

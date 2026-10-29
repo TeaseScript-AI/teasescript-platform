@@ -1,5 +1,3 @@
-// 3a model builder: size-dependent COPIES source families.
-export const sizes = [4, 8];
 const corpus = (() => {
   const many = (k, f, sep = "\n") => Array.from({ length: k }, (_, i) => f(i)).join(sep);
   const COPIES = [
@@ -34,15 +32,18 @@ const corpus = (() => {
         `let box0 = {${many(k, (i) => `f${i}: 1`, ", ")}}\nif hostFlag { box0 = {${many(k, (i) => `f${i}: null`, ", ")}} }\n${many(k, (i) => `let box${i + 1} = box${i}`)}\n${many(k, (i) => `repeat box${k}.f${i} {}`)}\nexit`,
     ],
   ];
-  return {
-    shapes: {
-      "a tested whole-copy chain read at k fields/1": (n) => COPIES[0][1](n),
-      "a marked whole-copy chain/1": (n) => COPIES[1][1](n),
-      "sibling guarded copies, one field each/1": (n) => COPIES[2][1](n),
-      "copies inside an and over k fields/1": (n) => COPIES[3][1](n),
-      "a whole-copy chain read at k fields/1": (n) => COPIES[4][1](n),
-    },
-  };
+  return { shapes: Object.fromEntries(COPIES.map((row) => [row[0], row[1]])) };
 })();
+export const sizes = [8, 32];
 export const shapes = corpus.shapes;
+
+export const cases = [
+  [
+    "original/1/original-1",
+    "let seed = {a: 1}\nlet picked = seed\nif hostFlag { picked = seed }\nif hostFlag { picked = seed }\nlet n: integer = picked.a",
+  ],
+];
+
 export const checks = ["publication"];
+
+export const globals = ["hostValue", "hostOther", "hostInit", "otherHost", "hostFlag"];
