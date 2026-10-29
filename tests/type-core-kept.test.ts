@@ -280,10 +280,6 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "a candidate's path, its decision read once by the consumer and then dropped",
   ],
-  "admission/scan.ts inputsOf prefix": [
-    1,
-    "a decision's prefix key, returned and read once by the decision, not kept",
-  ],
   "admission/scan.ts inputsOf slice": [
     1,
     "a decision's prefixes, returned and read once by the decision, not kept",

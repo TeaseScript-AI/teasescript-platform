@@ -49,16 +49,11 @@ export function inputsOf(
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
   );
-  // (G3 3b: the place's own keys that whole stores, adds or dead arguments reach, shortest first, each compared with
-  // the path's steps: never a key made per prefix of the path)
+  // (G3 3b: the keys whole stores, adds or dead arguments reach along the path, shortest first, by one walk of its
+  // steps down their trie: never a key made per prefix of the path)
   const prefixes: { readonly key: Key; readonly rest: readonly string[] }[] = [];
-  program.work.charge("checks");
-  for (const stored of admission.storedPrefixes(root)) {
-    if (stored.path.length >= path.length) break;
-    program.work.charge("checks");
-    if (stored.path.every((step, index) => path[index] === step))
-      prefixes.push({ key: stored.key, rest: path.slice(stored.path.length) });
-  }
+  for (const { key, depth } of admission.stored.along(root, path, false))
+    prefixes.push({ key, rest: path.slice(depth) });
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
 }
 
