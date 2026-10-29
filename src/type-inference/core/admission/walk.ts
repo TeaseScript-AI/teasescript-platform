@@ -1,6 +1,7 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import {
+  keep,
   keepText,
   keptArray,
   keptParts,
@@ -16,7 +17,7 @@ import type { FlowNode } from "../flow-graph.js";
 import { dictList } from "../method-categories.js";
 import type { CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
-import type { EvaluationKey, Stop, Stops, Via, ViaChain } from "./model.js";
+import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { fieldsOf, sourceOf } from "./structure.js";
 
@@ -224,24 +225,32 @@ export function writtenSource(
 }
 
 /**
- * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
- * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
- * elements stand below them; once per value. `once`: later copies or calls of one source identity at a path are one
- * stop (F2), as every walk made before a stop has them; a walk made after one keeps every stop instead, the same
- * boundaries and sites without asking identities nothing else after the stop asks (TABLE r4.55, r4.126).
+ * One task of the store walk, by its value, node and strip alone (`Expansion`), once per pass: what it stands as at
+ * its own path and the parts below it, whatever reached it. A4 through copies: a copy of an unwritten place that may
+ * inherit a written type stands as a written copy too, carrying at each path the type that place's own decision
+ * copies there (`inheritedAt`); its value stays where it stood, and decides where it carries none. A literal read
+ * into stands by its cells on the path; a projection or another carrier is its own contribution at the path, and
+ * below it what it carries (F12), an operation's under the certainty of its own value, its own contribution after
+ * what it carries, so a written copy it selects precedes its snapshot (A4); any other value is a stop, a literal's
+ * cells below it.
  */
-export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
-  const memo = once ? admission.stops : admission.everyStop;
-  const known = memo.get(value);
+export function expand(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  strip: readonly string[],
+  after = false,
+): Expansion {
+  const memoKey = keptParts(admission.work, value, node.id, after, strip);
+  const known = admission.expansions.get(memoKey);
   if (known !== undefined) return known;
-  const { program, definitions, contract } = admission.pass;
-  const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
-  const sources = new Set<string>();
-  const root = rootKey();
-  // a literal's cells at a step, in evaluation order
-  const cells = (literal: PlaceId, step: string | null): (readonly [Definition, string])[] => {
-    const next: (readonly [Definition, string])[] = [];
-    for (const has of program.hasOf.get(literal) ?? []) {
+  const { program, definitions } = admission.pass;
+  program.work.charge("indexSteps");
+  // a literal's cells at a step, in evaluation order: each with its position, its value's place in the literal's own
+  // source, never its index in a list one step filtered
+  const cells = (step: string | null): (readonly [Definition, string, number])[] => {
+    const next: (readonly [Definition, string, number])[] = [];
+    for (const has of program.hasOf.get(value) ?? []) {
       const fields: readonly (readonly [string, TypeTerm])[] =
         step === null
           ? fieldsOf(has.type)
@@ -250,49 +259,151 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
             );
       for (const [name, field] of fields)
         if (field.kind === "ref")
-          for (const d of definitions.cellDefs.get(field.place) ?? []) next.push([d, name]);
+          for (const d of definitions.cellDefs.get(field.place) ?? [])
+            next.push([d, name, program.places[d.value!]?.site?.start ?? 0]);
     }
     program.work.charge("checks", sortCost(next.length));
-    return next.sort(
-      ([x], [y]) =>
-        (program.places[x.value!]?.site?.start ?? 0) - (program.places[y.value!]?.site?.start ?? 0),
-    );
+    return next.sort(([, , x], [, , y]) => x - y);
   };
-  // a task: its value and node, its path, the strip still read into it, whether below an operation, its chain of
-  // operations, whether it is a carrier's own contribution, whether single, its evaluation key; each array a task or a
-  // stop keeps is the one it came from, shared, or made by a kept helper
+  const part = (
+    of: PlaceId,
+    at: FlowNode,
+    fields: Pick<Part, "step" | "strip" | "deep" | "single" | "position" | "after" | "role">,
+  ): Part => ({ value: of, node: at, ...fields, expansion: null });
+  const written = writtenSource(admission, value, strip);
+  const term = written?.term ?? null;
+  const inherits =
+    !after && written !== null && written.from !== null
+      ? { from: written.from, strip: written.strip }
+      : null;
+  const literal = term === null && program.hasOf.has(value);
+  let stop: Expansion["stop"] = null;
+  const parts: Part[] = [];
+  const carried =
+    literal || after || term !== null || sourceOf(admission, value) !== null
+      ? []
+      : admission.carriersOf(value, strip);
+  if (literal && strip.length > 0) {
+    const next = cells(strip[0]!);
+    // (its cells' tasks share one rest of the strip, charged as kept)
+    const below = next.length === 0 ? strip : keptSlice(admission.work, strip, 1);
+    for (const [d, , position] of next)
+      parts.push(
+        part(d.value!, d.node ?? node, {
+          step: null,
+          strip: below,
+          deep: null,
+          single: next.length === 1,
+          position,
+          after: false,
+          role: null,
+        }),
+      );
+  } else if (carried.length > 0) {
+    const projection = program.projOf.has(value);
+    for (const [operand, rest, role, position] of carried)
+      parts.push(
+        part(operand, node, {
+          step: null,
+          strip: rest,
+          deep: true,
+          single: true,
+          position,
+          after: false,
+          role: projection ? null : role,
+        }),
+      );
+    parts.push(
+      part(value, node, {
+        step: null,
+        strip,
+        deep: null,
+        single: true,
+        position: OWN,
+        after: true,
+        role: null,
+      }),
+    );
+  } else {
+    stop = {
+      list: term !== null ? "written" : literal ? "literals" : "values",
+      term,
+      strip: term !== null ? written!.strip : strip,
+    };
+    if (literal)
+      for (const [d, step, position] of cells(null))
+        parts.push(
+          part(d.value!, d.node ?? node, {
+            step,
+            strip: [],
+            deep: false,
+            single: true,
+            position,
+            after: false,
+            role: null,
+          }),
+        );
+  }
+  keep(admission.work, 1 + parts.length);
+  const expansion: Expansion = {
+    id: admission.expansions.size,
+    value,
+    node,
+    strip,
+    inherits,
+    stop,
+    parts,
+  };
+  admission.expansions.set(memoKey, expansion);
+  return expansion;
+}
+
+/** A part's own task (`expand`), made once and kept on the part. */
+export function partOf(admission: Admission, part: Part): Expansion {
+  part.expansion ??= expand(admission, part.value, part.node, part.strip, part.after);
+  return part.expansion;
+}
+
+/**
+ * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
+ * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
+ * elements stand below them; once per value, from its tasks' recipes (`expand`). `once`: later copies or calls of one
+ * source identity at a path are one stop (F2), as every walk made before a stop has them; a walk made after one keeps
+ * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks (TABLE
+ * r4.55, r4.126).
+ */
+export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
+  const memo = once ? admission.stops : admission.everyStop;
+  const known = memo.get(value);
+  if (known !== undefined) return known;
+  const { program, contract } = admission.pass;
+  const stops: Stops = { written: new Map(), values: new Map(), literals: new Map() };
+  const sources = new Set<string>();
+  const root = rootKey();
+  // a task: its recipe, its path, whether below an operation, its chain of operations, whether single, its evaluation
+  // key; each array a task or a stop keeps is the one it came from, shared, or made by a kept helper (each evaluation
+  // key and chain of operations a task or stop keeps is one node onto the one it extends: #1230)
   const pending: (readonly [
-    PlaceId,
-    FlowNode,
-    readonly string[],
+    Expansion,
     readonly string[],
     boolean,
     ViaChain | null,
     boolean,
-    boolean,
     EvaluationKey,
-  ])[] = [[value, node, [], [], false, null, false, true, root]];
-  // a cell's position: its value's place in the literal's own source, never its index in a list one step filtered
-  // (each evaluation key and chain of operations a task or stop keeps is one node onto the one it extends: #1230)
-  const cellKey = (key: EvaluationKey, d: Definition): EvaluationKey =>
-    longerKey(key, program.places[d.value!]?.site?.start ?? 0);
+  ])[] = [[expand(admission, value, node, []), [], false, null, true, root]];
   while (pending.length > 0) {
-    const [current, at, path, strip, deep, via, after, single, key] = pending.pop()!;
+    const [task, path, deep, via, single, key] = pending.pop()!;
     program.work.charge("indexSteps");
-    const written = writtenSource(admission, current, strip);
-    const term = written?.term ?? null;
-    // A4 through copies: a copy of an unwritten place that may inherit a written type stands as a written copy too,
-    // carrying at each path the type that place's own decision copies there (`inheritedAt`); its value stays where
-    // it stood, and decides where it carries none
-    if (!after && written !== null && written.from !== null) {
+    const { value: current, node: at, strip } = task;
+    if (task.inherits !== null) {
       const inherits: Stop = {
         key,
         value: current,
         node: at,
         path,
         term: null,
-        from: written.from,
-        strip: written.strip,
+        from: task.inherits.from,
+        strip: task.inherits.strip,
         deep,
         single,
         via,
@@ -302,64 +413,20 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
       if (list === undefined) stops.written.set(text, [inherits]);
       else list.push(inherits);
     }
-    const literal = term === null && program.hasOf.has(current);
-    // a literal read into stands by its cells on the path
-    if (literal && strip.length > 0) {
-      const next = cells(current, strip[0]!);
-      // (its cells' tasks share one rest of the strip, charged as kept)
-      const below = next.length === 0 ? strip : keptSlice(admission.work, strip, 1);
-      for (let index = next.length - 1; index >= 0; index -= 1)
-        pending.push([
-          next[index]![0].value!,
-          next[index]![0].node ?? at,
-          path,
-          below,
-          deep,
-          via,
-          false,
-          single && next.length === 1,
-          cellKey(key, next[index]![0]),
-        ]);
-      continue;
-    }
-    // a projection or another carrier is its own contribution at the path, and below it what it carries (F12), an
-    // operation's under the certainty of its own value
-    // its own contribution comes after what it carries, so a written copy it selects precedes its snapshot (A4)
-    if (!after && !literal && term === null && sourceOf(admission, current) === null) {
-      const carried = admission.carriersOf(current, strip);
-      if (carried.length > 0) {
-        pending.push([current, at, path, strip, deep, via, true, single, longerKey(key, OWN)]);
-        for (let index = carried.length - 1; index >= 0; index -= 1) {
-          const [operand, rest, role, position] = carried[index]!;
-          const through = program.projOf.has(current)
-            ? via
-            : viaLink(program, via, { value: current, node: at, path, strip, operand, role });
-          pending.push([
-            operand,
-            at,
-            path,
-            rest,
-            true,
-            through,
-            false,
-            single,
-            longerKey(key, position),
-          ]);
-        }
-        continue;
-      }
-    }
-    const map = term !== null ? stops.written : literal ? stops.literals : stops.values;
-    const pathKey = keptText(admission.work, path);
+    const own = task.stop;
     // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
     // where it reads the same snapshot, r4.68 (1); and only through the same operations, selected alike: an operand
     // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
     // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
+    const map = own === null ? null : own.list === "written" ? stops.written : stops[own.list];
+    const pathKey = own === null ? "" : keptText(admission.work, path);
+    let kept = own !== null;
     if (
+      own !== null &&
       once &&
       sharing() &&
       path.length > 0 &&
-      map === stops.values &&
+      own.list === "values" &&
       sourceOf(admission, current) !== null &&
       contract.ingressOf(current) === null
     ) {
@@ -373,38 +440,44 @@ export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, on
         contract.identityOf(current).id,
         contract.readSnapshot(current) ?? "",
       );
-      if (sources.has(identity)) continue;
-      sources.add(identity);
+      if (sources.has(identity)) kept = false;
+      else sources.add(identity);
     }
-    const stop: Stop = {
-      key,
-      value: current,
-      node: at,
-      path,
-      term,
-      from: null,
-      strip: term !== null ? written!.strip : strip,
-      deep,
-      single,
-      via,
-    };
-    const list = map.get(pathKey);
-    if (list === undefined) map.set(pathKey, [stop]);
-    else list.push(stop);
-    if (!literal) continue;
-    const next = cells(current, null);
-    for (let index = next.length - 1; index >= 0; index -= 1) {
-      const [d, step] = next[index]!;
-      pending.push([
-        d.value!,
-        d.node ?? at,
-        keptSteps(admission.work, path, [step]),
-        [],
-        false,
-        via,
-        false,
+    if (kept) {
+      const stop: Stop = {
+        key,
+        value: current,
+        node: at,
+        path,
+        term: own!.term,
+        from: null,
+        strip: own!.strip,
+        deep,
         single,
-        cellKey(key, d),
+        via,
+      };
+      const list = map!.get(pathKey);
+      if (list === undefined) map!.set(pathKey, [stop]);
+      else list.push(stop);
+    } else if (own !== null) continue;
+    for (let index = task.parts.length - 1; index >= 0; index -= 1) {
+      const part = task.parts[index]!;
+      pending.push([
+        partOf(admission, part),
+        part.step === null ? path : keptSteps(admission.work, path, [part.step]),
+        part.deep ?? deep,
+        part.role === null
+          ? via
+          : viaLink(program, via, {
+              value: current,
+              node: at,
+              path,
+              strip,
+              operand: part.value,
+              role: part.role,
+            }),
+        single && part.single,
+        longerKey(key, part.position),
       ]);
     }
   }

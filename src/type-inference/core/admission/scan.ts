@@ -7,10 +7,10 @@ import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import { sharing } from "../sharing.js";
-import { getProof } from "../values.js";
 import { addRest } from "./classes.js";
 import { eligibleOf } from "./eligibility.js";
 import { deciding } from "./kinds.js";
+import { chooses, live, snapshotOf } from "./links.js";
 import type {
   Candidate,
   EvaluationKey,
@@ -22,8 +22,9 @@ import type {
   ViaChain,
 } from "./model.js";
 import { permittedAt } from "./permitted.js";
+import { transferredDecider } from "./transfers.js";
 import { inheritedInto } from "./waiting.js";
-import { compareKeys, stopsOf, viaSignature } from "./walk.js";
+import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
 
@@ -178,7 +179,8 @@ export function* scanAt(
  * neither, while a literal's other elements still may (A8: `[1, hostValue]`'s elements are whole numbers, Sol's
  * records for the owner's F1); a later copy never comes before an earlier definite element. The place's decision and
  * the literal's own elements (`literalElements`) both take it, so they cannot pick opposite deciders. `null` where
- * nothing on the path decides.
+ * nothing on the path decides. Where no written copy on the path asks a type, the value's carriers' transfers answer
+ * (`transferredDecider`), each carrier once; else its stops are scanned here.
  */
 export function* earliestDecider(
   admission: Admission,
@@ -188,6 +190,11 @@ export function* earliestDecider(
   into: Key | null,
 ): Inheriting<{ readonly term: TypeTerm | null; readonly site: SourceSite | null } | null> {
   const { program, values } = admission.pass;
+  const transferred = transferredDecider(admission, expand(admission, value, node, []), at);
+  if (transferred !== undefined)
+    return transferred === null
+      ? null
+      : { term: null, site: program.places[transferred]?.site ?? null };
   const stops = stopsOf(admission, value, node);
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
@@ -375,14 +382,12 @@ function classFirsts(admission: Admission, list: readonly Stop[]): readonly Stop
  */
 export function distinctStops(admission: Admission, list: readonly Stop[]): Stop[] {
   if (!sharing()) return [...list];
-  const { program, contract } = admission.pass;
+  const { program } = admission.pass;
   const seen = new Set<string>();
   const out: Stop[] = [];
   for (const stop of list) {
     program.work.charge("checks");
-    const read =
-      contract.readSnapshot(stop.value) ??
-      (contract.resultKey(stop.value) === null ? null : `c${contract.identityOf(stop.value).id}`);
+    const read = snapshotOf(admission, stop.value);
     if (read !== null) {
       const snapshot = joinParts(
         viaSignature(admission, stop.via),
@@ -501,30 +506,7 @@ export function selects(admission: Admission, stop: Stop, surely = false): boole
  * operand where that is never null and its fallback where the operand is only null; no other carrier surely.
  */
 function chosen(admission: Admission, via: ViaChain | null, surely = false): boolean {
-  const { program, values } = admission.pass;
-  return perLink(admission, admission.chosenLinks[surely ? 1 : 0]!, via, true, (level) => {
-    const c = program.opOf.get(level.value);
-    const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
-    // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
-    // be null, an unknown either: F17a)
-    if (c?.kind === "fallback") {
-      const left = withoutEmpty(admission.run(values.valueItems(c.left, at, [])));
-      const value = left.some((item) => item.tag !== "null");
-      const absent = left.some((item) => item.tag === "null" || item.tag === "unknown");
-      if (level.operand === c.left) return value && !(surely && absent);
-      return level.operand !== c.right || (absent && !(surely && value));
-    }
-    if (c?.kind !== "get") return !surely;
-    const { reached, only } = getProof(program, c, at);
-    if (level.operand === c.receiver) return surely ? !reached : !only;
-    return level.operand !== c.fallback || (surely ? only : reached);
-  });
-}
-
-/** Whether a value's own expression runs: its flow node is live (an operand an operation never selects is not). */
-function live(admission: Admission, value: PlaceId): boolean {
-  const { program } = admission.pass;
-  const site = program.places[value]?.site ?? null;
-  const node = site === null ? null : program.exprAt(site);
-  return node === null || program.live(node);
+  return perLink(admission, admission.chosenLinks[surely ? 1 : 0]!, via, true, (level) =>
+    chooses(admission, level, surely),
+  );
 }

@@ -96,16 +96,9 @@ export function ownOf(
       const into = copying.has(keptParts(admission.work, stop.path, stop.value)) ? out.held : out;
       if (into === undefined) continue;
       const at = keptSteps(admission.work, base, stop.path);
-      const source = stop.deep ? null : sourceOf(admission, stop.value);
-      const kinds = into !== out && source !== null ? null : admission.quietKinds(stop.value);
-      if (source !== null)
-        into.reads.push({ at, source: keptKeyBelow(admission.work, source, stop.strip) });
-      else if (
-        kinds !== null &&
-        kinds.every((tag) => SCALAR.has(tag) || tag === "null") &&
-        stop.strip.length === 0
-      )
-        into.points.push(at);
+      const own = contributionOf(admission, stop.value, stop.strip, stop.deep);
+      if (typeof own === "object") into.reads.push({ at, source: own.read });
+      else if (own === "point") into.points.push(at);
       else if (into === out) out.below.push(at);
     }
   for (const list of stops.literals.values())
@@ -114,6 +107,27 @@ export function ownOf(
       if (skip?.has(stop.value) === true) continue;
       out.points.push(keptSteps(admission.work, base, stop.path));
     }
+}
+
+/**
+ * A value's own contribution where it stands in a store (`ownOf`, A2's held view): a read of its source key, below the
+ * path its stop reads into it (`strip`), where it is no operand; else a point where its contract holds scalars or
+ * `null` alone, read whole; else what lies below it, anything.
+ */
+export function contributionOf(
+  admission: Admission,
+  value: PlaceId,
+  strip: readonly string[],
+  deep: boolean,
+): { readonly read: Key } | "point" | "below" {
+  const source = deep ? null : sourceOf(admission, value);
+  if (source !== null) return { read: keptKeyBelow(admission.work, source, strip) };
+  const kinds = admission.quietKinds(value);
+  return kinds !== null &&
+    kinds.every((tag) => SCALAR.has(tag) || tag === "null") &&
+    strip.length === 0
+    ? "point"
+    : "below";
 }
 
 /**

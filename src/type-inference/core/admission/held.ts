@@ -1,6 +1,6 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { keptArray, keptSlice, keptText } from "../budget.js";
+import { keptArray, keptSlice, keptSteps, keptText } from "../budget.js";
 import {
   keptKey,
   keptPath,
@@ -10,14 +10,13 @@ import {
   type Key,
 } from "../definitions.js";
 import { refText, type Found, type Touch, type TouchRef } from "../touch.js";
-import type { HeldExtra, HeldOwn } from "./model.js";
-import { liveOwn, ownOf } from "./own.js";
+import type { HeldOwn } from "./model.js";
+import { liveOwn } from "./own.js";
 import { touchesOf, touchRef } from "./touches.js";
+import { heldInput } from "./transfers.js";
+import { expand } from "./walk.js";
 
 // What a place's live stores definitely hold (A2, TABLE r4.131): its held tries, built once per pass, and where they meet.
-
-/** No copies listed (`ownOf`): every copy of a written type stands below, as a value holding anything (A2). */
-const NO_COPIES: ReadonlySet<string> = new Set();
 
 /**
  * The strongly connected components of a graph over `nodes` and the nodes they reach (`next`: a node's successors),
@@ -307,8 +306,9 @@ function groupHeld(
 /**
  * A2 (TABLE r4.131): the paths where what the stores into one place (`base` empty, each store at its own path) or a
  * literal's elements (each at `base`, its landing) definitely hold meet with two kinds or more (`copies`), relative to
- * `base`, sorted by text. Each store's or element's trie is its own points (`heldPoints`) and its reads' held tries
- * (`heldOf`), and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only
+ * `base`, sorted by text. Each store's or element's trie is its own points and its reads' held tries (`heldOf`), as
+ * its value's carriers' transfers give them (`heldInput`: a nested carrier's once, never its element's whole walk
+ * again), and the distinct ones are merged largest first, so k stores of one copy merge it once. A property only
  * copies of whole objects bring is owed as any other: the copy is checked where it meets the place. A4's copies
  * inheriting written types and the values holding anything stand below and decide nothing here.
  */
@@ -329,16 +329,10 @@ export function heldMeetings(
   const distinct = new Map<number, Touch>();
   for (const [index, { d, at }] of list.entries()) {
     if (d.value === undefined) continue;
-    const own: HeldOwn & {
-      readonly points: (readonly string[])[];
-      readonly below: (readonly string[])[];
-      readonly reads: { readonly at: readonly string[]; readonly source: Key }[];
-      readonly held: HeldExtra;
-    } = { points: [], below: [], reads: [], held: { points: [], reads: [] } };
-    ownOf(admission, d, d.value, at, NO_COPIES, own);
+    const own = heldInput(admission, expand(admission, d.value, d.node, []), false);
     const parts: Touch[] = [];
-    for (const { at: where, source } of heldReads(admission, own)) {
-      const held = heldRead(admission, source, rest(where));
+    for (const { at: where, source } of own.reads.values()) {
+      const held = heldRead(admission, source, rest(keptSteps(admission.work, at, where)));
       if (held !== null) parts.push(held);
     }
     // (its own points, their contents asked of its value below `at`)
@@ -346,8 +340,8 @@ export function heldMeetings(
       const ref = { owner: `e${d.uid}`, place: -1 - index, path, lands: false, value: d.value! };
       return { ...ref, text: refText(admission.work, ref) };
     };
-    for (const point of heldPoints(admission, own))
-      parts.push(touches.leaf(rest(point), [mine(keptSlice(admission.work, point, at.length))]));
+    for (const point of own.points.values())
+      parts.push(touches.leaf(rest(keptSteps(admission.work, at, point)), [mine(point)]));
     work.charge("indexSteps", parts.length + sortCost(parts.length));
     parts.sort((a, b) => b.size - a.size || a.id - b.id);
     let node: Touch | null = null;

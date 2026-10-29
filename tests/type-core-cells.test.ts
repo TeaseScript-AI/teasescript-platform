@@ -2398,7 +2398,9 @@ test("a chain of methods without a category stays opaque", () => {
  * `fileFromBase64`, `decryptText` and `decryptFile` follow C10 (ADR 0021 7.2). Review r4: a copy of a written type is
  * decided at every path of that type, read or not, and admits `null` only where its type, an earlier store or a null
  * element of the literal it stands in does. Review r5: returns, parameter defaults and single-site arguments decide the
- * result's and the parameter's paths as stores do.
+ * result's and the parameter's paths as stores do. G3 2c: an element's earliest decider read through its carriers'
+ * transfers, below nested selections (of a nullable written source too, and before a fallback or as a default) and
+ * below a choice of choice objects, in both orders of the objects.
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
   const f =
@@ -2515,15 +2517,9 @@ test("admission decides from the start value, keeps written copies, rejects ever
     [
       "a deep literal's element copying a written union",
       `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
+      // (in both orders since G3 2c: reversed, its deepest paths' decisions cost depth × copies past their allowance,
+      // G6's in #1319's design-round list, until the decisions above the copy read the literal's transfers)
       () => ["valid"],
-      // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
-      // list: one restart, then a stop in it stops the analysis, TABLE r4.183; the G6 repair returns it to `valid`)
-      (at) => [
-        "warning-runtime-check",
-        `budget not-checked-budget @${at("[")}`,
-        `budget warning-runtime-check @${at("[")}`,
-        `copy-type xs [unknown] @${at("[")}`,
-      ],
     ],
     [
       "a default's other kind beside the receiving union",
@@ -2657,6 +2653,58 @@ test("admission decides from the start value, keeps written copies, rejects ever
         `copy-type fallback [integer] @${at("hostValue")}`,
         `copy-type fallback [integer] boundary @${at("hostValue")}`,
       ],
+    ],
+    // G3 2c: the earliest decider read through the carriers' transfers (`admission/transfers.ts`)
+    [
+      "nested selections' element of another type",
+      'let seed = "s"\nlet xs = [[[[seed, "o"][0], "o"][0], "o"][0], 1]\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("1]")}`],
+    ],
+    [
+      "a choice object's selected value read below the choice",
+      'let out = askChoice [{text: "a", value: {n: 1}}, {text: "b", value: {n: "x"}}]\nsay "${out.n}"\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
+    ],
+    [
+      "the choice objects in the other order",
+      'let out = askChoice [{text: "b", value: {n: "x"}}, {text: "a", value: {n: 1}}]\nsay "${out.n}"\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("1}")}`],
+    ],
+    [
+      "nested selections of a nullable written source",
+      'let typed: string? = hostValue\nlet xs = [[[typed, "o"][0], "o"][0], 1]\nexit',
+      (at) => [
+        "compile-error",
+        `copy-type typed [string, null] @${at("hostValue")}`,
+        `copy-type typed [string, null] boundary @${at("hostValue")}`,
+        `written-target compile-error @${at("1]")}`,
+        `written-target warning-runtime-check @${at("hostValue")}`,
+      ],
+    ],
+    [
+      "nested selections before a fallback",
+      'let seed = "s"\nlet xs = [([[seed, "o"][0], "o"][0] otherwise 2), 1]\nexit',
+      (at) => [
+        "compile-error",
+        `copy-type xs.element [string] @${at("[(")}`,
+        `written-target compile-error @${at("2)")}`,
+        `written-target compile-error @${at("1]")}`,
+        `written-target warning-runtime-check @${at("[(")}`,
+      ],
+    ],
+    [
+      "nested selections as a default",
+      'let seed = ["s"]\nlet xs = [seed.get(0, default: [["d", "o"][0], "o"][0]), 1]\nexit',
+      (at) => [
+        "warning-runtime-check",
+        `copy-type xs.element [integer] @${at("[seed")}`,
+        `written-target warning-runtime-check @${at("[seed")}`,
+      ],
+    ],
+    [
+      "a place decided below nested selections of objects",
+      'let seed = {p: "s"}\nlet box = [[seed, {p: "o"}][0], {p: "o"}][0]\nbox = {p: 2}\nsay box.p\nexit',
+      (at) => ["compile-error", `written-target compile-error @${at("2}")}`],
     ],
   ];
   const differing: string[] = [];
