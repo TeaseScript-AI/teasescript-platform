@@ -245,11 +245,12 @@ function writable(tag: ItemTag): boolean {
   return tag === "empty" || tag === "unknown" || VALUE_KINDS[tag].json !== null;
 }
 
-/** What `toJson`'s walk found: the first path in it that holds a kind it cannot write, there, and the root's kinds. */
+/**
+ * What `toJson`'s walk found, the class's (Codex r6): the first path in it that holds a kind it cannot write; the items
+ * there and the root's, with their writers, are each read's own, read where it stands.
+ */
 interface JsonProof {
   readonly path: readonly string[];
-  readonly items: readonly Item[];
-  readonly root: readonly Item[];
 }
 
 /**
@@ -297,9 +298,12 @@ export function jsonArgument(
     if (key !== null) proofs.set(key, proof);
   }
   if (proof === null) return;
-  const { path, items, root } = proof;
+  const { path } = proof;
+  const root = domainItems(walk, value, node, []);
+  const items = path.length === 0 ? root : domainItems(walk, value, node, path);
   const at = ownSpan(walk, value, c.site);
   const bad = items.filter((item) => !writable(item.tag));
+  if (bad.length === 0) return;
   // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
   const holders = path.length === 0 ? [] : [...new Set(root.map((item) => item.tag))];
   const rule: DiagnosticRule = {
@@ -345,7 +349,7 @@ function jsonProof(walk: Consumers, value: PlaceId, node: FlowNode): JsonProof |
     if (path.length > READ_DEPTH_LIMIT) continue;
     program.work.charge("checks");
     const items = path.length === 0 ? root : domainItems(walk, value, node, path);
-    if (items.some((item) => !writable(item.tag))) return { path, items, root };
+    if (items.some((item) => !writable(item.tag))) return { path };
     // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order; each path
     // charged as it is made, one step longer than its owner's)
     const below: (readonly string[])[] = [];
