@@ -131,21 +131,22 @@ function spine(form: Form): {
 function valuesOf(form: Form, few: boolean): SerializableRuntimeValue[] {
   const { kinds, good, bad } = spine(form);
   const depth = kinds.length;
-  // (`levels` collections from the outermost in around `inner`, or around `items` at the innermost of them)
-  const nest = (
+  // (`levels` collections from the outermost in, the innermost holding `items`)
+  const holding = (
     levels: number,
-    inner: SerializableRuntimeValue | readonly SerializableRuntimeValue[],
+    items: readonly SerializableRuntimeValue[],
     at = 0,
   ): SerializableRuntimeValue =>
-    levels === 0
-      ? (inner as SerializableRuntimeValue)
-      : levels === 1 && Array.isArray(inner)
-        ? wrap(kinds[at]!, ...inner)
-        : wrap(kinds[at]!, nest(levels - 1, inner, at + 1));
-  const out = [nest(depth, good), nest(depth, bad), nest(depth, [good, bad])];
+    levels === 1
+      ? wrap(kinds[at]!, ...items)
+      : wrap(kinds[at]!, holding(levels - 1, items, at + 1));
+  const nest = (levels: number, inner: SerializableRuntimeValue): SerializableRuntimeValue =>
+    levels === 0 ? inner : holding(levels, [inner]);
+  const out = [nest(depth, good), nest(depth, bad), holding(depth, [good, bad])];
   if (few) out.push(nest(depth - 1, bad));
   else {
-    for (let level = 0; level < depth; level += 1) out.push(nest(level, bad), nest(level + 1, []));
+    for (let level = 0; level < depth; level += 1)
+      out.push(nest(level, bad), holding(level + 1, []));
     out.push(null, nest(depth, null));
   }
   const seen = new Set<string>();
