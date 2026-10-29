@@ -1,8 +1,8 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { joinParts, joinSteps, pathText, splitPath, stepText } from "./budget.js";
+import { joinParts, joinSteps } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
-import { heldReference } from "./contract.js";
+import { heldReference, type IndexNode } from "./contract.js";
 import { keyBelow, keyOf, keyPath, keyPlace, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
@@ -67,29 +67,24 @@ export function propertyNames(
       continue;
     }
     if ("literal" in task) {
-      const index = contract.literalIndex(task.literal);
-      const at = pathText(task.path);
-      for (const object of index.objects.get(at)?.list ?? []) {
+      // (the literal's index node at each prefix of the path, until one it holds none at)
+      const nodes: IndexNode[] = [contract.literalIndex(task.literal).root];
+      for (const step of task.path) {
+        const below = nodes.at(-1)!.children.get(step);
+        if (below === undefined) break;
+        nodes.push(below);
+      }
+      for (const object of nodes.length > task.path.length
+        ? (nodes.at(-1)!.objects?.list ?? [])
+        : []) {
         objects?.(task.literal, object.names);
         for (const name of object.names) names.add(propertyName(name));
       }
-      // the reads and calls standing at the path or above it, followed at the rest of the path: asked by the path's
-      // prefixes, or by the stands of a map that has fewer (a deep path beside few stands, a shallow one beside many)
-      for (const map of [index.reads, index.others])
-        if (map.size > task.path.length + 1)
-          for (let depth = 0, stand = ""; depth <= task.path.length; depth += 1) {
-            if (depth > 0)
-              stand = depth === 1 ? task.path[0]! : stepText(stand, task.path[depth - 1]!);
-            for (const entry of map.get(stand) ?? [])
-              pending.push({ value: entry.value, path: task.path.slice(depth) });
-          }
-        else
-          for (const [stand, entries] of map) {
-            const depth = splitPath(stand).length;
-            if (stand !== "" && at !== stand && !at.startsWith(`${stand}.`)) continue;
-            for (const entry of entries)
-              pending.push({ value: entry.value, path: task.path.slice(depth) });
-          }
+      // the reads and calls standing at the path or above it, followed at the rest of the path (`standsAlong`)
+      for (const kind of ["reads", "others"] as const)
+        for (const { depth, entries } of contract.standsAlong(task.literal, task.path, kind))
+          for (const entry of entries)
+            pending.push({ value: entry.value, path: task.path.slice(depth) });
       continue;
     }
     const key = task.key;

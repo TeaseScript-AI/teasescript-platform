@@ -18,7 +18,14 @@ import {
   type WorkLedger,
 } from "./budget.js";
 import { carried, keepsOwn, operandsOf, type CarrierRole, type Dispatch } from "./carriers.js";
-import { defaultOf, heldReference, termAt, typeTags, writtenOf } from "./contract.js";
+import {
+  defaultOf,
+  heldReference,
+  termAt,
+  typeTags,
+  writtenOf,
+  type IndexNode,
+} from "./contract.js";
 import {
   keptKey,
   keptKeyBelow,
@@ -3803,44 +3810,23 @@ export class Admission {
       alias = { source: whole.source, read: whole.read, at: [], value: d.value };
       written = whole.written;
     } else if (program.hasOf.has(d.value)) {
-      const index = contract.literalIndex(d.value);
-      if (index.others.size > 0 || index.references.size > 0) return null;
-      let cell: { readonly path: string; readonly value: PlaceId } | null = null;
-      for (const [path, list] of index.reads)
-        for (const entry of list) {
-          program.work.charge("aliasSteps");
-          if (cell !== null) return null;
-          cell = { path, value: entry.value };
-        }
       // (one read, one guard: equal reads of one source in one literal are one entry, alike guarded or not; and the
       // read the only contribution at and below its path, no term, object or empty collection of the literal's own
       // there beside it, Codex r22 F5, nor an object on the way to it without its next step, whose `missing` stands
-      // there too, Codex r23 F2)
-      if (cell === null || [...index.exact.values()].flat().length !== 1) return null;
-      const at = cell.path;
-      const beside = (path: string): boolean => path === at || path.startsWith(`${at}.`);
-      for (const paths of [index.terms.keys(), index.objects.keys(), index.empty.keys()])
-        for (const path of paths) {
-          program.work.charge("aliasSteps");
-          if (beside(path)) return null;
-        }
-      const steps = splitPath(at);
-      for (let length = 0; length < steps.length; length += 1) {
-        program.work.charge("aliasSteps");
-        const objects = index.objects.get(pathText(steps.slice(0, length)));
-        if (objects !== undefined && (objects.count.get(steps[length]!) ?? 0) < objects.list.length)
-          return null;
-      }
+      // there too, Codex r23 F2: `Contract.loneRead`)
+      const cell = contract.loneRead(d.value);
+      if (cell === null) return null;
+      const path = pathText(cell.steps);
       const read = this.#stablePath(cell.value, d.node);
       if (read === null) return null;
       alias = {
         source: read.source,
         read: read.read,
-        at: keptSplit(this.#work, cell.path),
+        at: keptSplit(this.#work, path),
         value: cell.value,
       };
       written = read.written;
-      shape = `${contract.identityOf(d.value).id}@${cell.path}`;
+      shape = `${contract.identityOf(d.value).id}@${path}`;
     }
     if (alias === null) return null;
     this.#aliases.set(d, alias);
@@ -6602,7 +6588,8 @@ export class Admission {
     // per step walked: the elements asked at every path below it and those holding objects or a collection alone there,
     // each in their order; the objects' properties with their elements, listed once; the steps one longer
     type Holders = {
-      readonly text: string;
+      /** Per element asked here, its literal's index node at the steps walked (`null`: none, or no literal). */
+      readonly nodes: ReadonlyMap<number, IndexNode | null>;
       readonly always: readonly number[];
       readonly objects: readonly number[];
       readonly collections: readonly number[];
@@ -6617,7 +6604,7 @@ export class Admission {
       return out;
     };
     const holders = (
-      text: string,
+      nodes: ReadonlyMap<number, IndexNode | null>,
       candidates: readonly number[],
       always: readonly number[],
     ): Holders => {
@@ -6626,17 +6613,16 @@ export class Admission {
       const others: number[] = [];
       for (const at of candidates) {
         program.work.charge("checks");
-        const value = elements[at]!.value!;
-        const index = program.hasOf.has(value) ? contract.literalIndex(value) : null;
-        const kinds = index?.terms.get(text);
-        if (index === null || kinds?.size !== 1 || index.reads.has(text) || index.others.has(text))
+        const node = nodes.get(at) ?? null;
+        const kinds = node?.terms;
+        if (node === null || kinds?.size !== 1 || node.reads.length > 0 || node.others.length > 0)
           others.push(at);
-        else if (index.objects.has(text)) objects.push(at);
+        else if (node.objects !== null) objects.push(at);
         else if (kinds.has("list") || kinds.has("set") || kinds.has("dict")) collections.push(at);
         else others.push(at);
       }
       return {
-        text,
+        nodes,
         always: others.length === 0 ? always : merged(always, others),
         objects,
         collections,
@@ -6649,7 +6635,16 @@ export class Admission {
       const first = path[0];
       if (first === undefined || first === SELECTED_VALUE || first === SELECTED_TEXT)
         return elements;
-      root ??= holders("", [...elements.keys()], []);
+      root ??= holders(
+        new Map(
+          elements.map(({ value }, at) => [
+            at,
+            program.hasOf.has(value!) ? contract.literalIndex(value!).root : null,
+          ]),
+        ),
+        [...elements.keys()],
+        [],
+      );
       let at = root;
       for (let length = 0; length < path.length; length += 1) {
         const step = path[length]!;
@@ -6659,10 +6654,7 @@ export class Admission {
           if (at.named === null) {
             const named = new Map<string, number[]>();
             for (const element of at.objects)
-              for (const name of contract
-                .literalIndex(elements[element]!.value!)
-                .objects.get(at.text)!
-                .count.keys()) {
+              for (const name of at.nodes.get(element)!.objects!.count.keys()) {
                 program.work.charge("checks");
                 const list = named.get(name);
                 if (list === undefined) named.set(name, [element]);
@@ -6671,9 +6663,16 @@ export class Admission {
             at.named = named;
           }
           const element = step === "element";
+          const candidates = element ? at.collections : (at.named.get(step) ?? []);
+          // (each candidate's node one step down, charged as kept)
+          const below = new Map<number, IndexNode | null>();
+          for (const candidate of candidates) {
+            this.#work.charge("literalUnits");
+            below.set(candidate, at.nodes.get(candidate)?.children.get(step) ?? null);
+          }
           next = holders(
-            keptText(this.#work, path.slice(0, length + 1)),
-            element ? at.collections : (at.named.get(step) ?? []),
+            below,
+            candidates,
             element || at.collections.length === 0 ? at.always : merged(at.always, at.collections),
           );
           at.below.set(step, next);

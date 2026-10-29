@@ -2,6 +2,7 @@ import {
   checkReadDepth,
   DemandExhausted,
   joinParts,
+  keep,
   keepText,
   READ_DEPTH_LIMIT,
   type WorkLedger,
@@ -28,6 +29,15 @@ import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } 
  * gives `unknown`; F19a's receiver that holds a reference kind has opaque members) is made on a completed input: at
  * once outside every component; inside one, the component is solved first with every choice open and, where a choice
  * then changes an answer, again from bottom with the choices held (r4.40, r4.44).
+ *
+ * A demand may prove more than its items (a `ProofDemand`, TABLE r4.164's proof payload): what a fold selected, where a
+ * prefix's walk stands. Its proof is the solver's as its items are: provisional while its run or component is
+ * unfinished, reset with them to none (`null`) at each start from bottom, compared by its semantic signature where its
+ * items are (a changed proof under unchanged items reruns its readers; a new object or run with the same signature does
+ * not), chosen on as they are (a `ProofDecision`, whose held choice may change the proof alone), and kept with them,
+ * its slot charged before either is published. A stop forgets the unfinished proofs with the unfinished demands; a new
+ * pass has a new solver, so nothing of an earlier pass's proofs is read (A6, S8's fresh finishing pass). A reader takes
+ * a proof only through `proven`, which yields its demand.
  */
 
 /** What a demand asks, which orders the members of one component at one site (S3 §1). */
@@ -53,19 +63,69 @@ export interface Demand {
   /** Computes its answer, or its decision's input. */
   readonly make: () => Work<readonly Item[]>;
   readonly decision?: Decision;
+  readonly proves?: undefined;
+}
+
+/** What a proof demand proves beside its items (TABLE r4.164's proof payload). */
+export interface Proof {
+  /**
+   * Its semantic signature: equal for two proofs no reader can tell apart (the same chosen sources, roles, absences and
+   * provenance), whatever objects or run made them; its work charged as it is made (`itemsSignature`'s `sigItems`).
+   */
+  signature(scope: ItemScope): string;
+}
+
+/** A proof demand's run's result: its items and its proof. */
+export interface Proven<P extends Proof> {
+  readonly items: readonly Item[];
+  readonly proof: P;
+}
+
+/** A proof demand's answer: its items and its proof, `null` for none (after a stop, an unfinished demand's). */
+export interface ProvenAnswer<P extends Proof> {
+  readonly items: readonly Item[];
+  readonly proof: P | null;
+}
+
+/**
+ * A proof demand's choice that is not monotone in what its run computes (`Decision`'s, on its items and proof alike): a
+ * choice may change its answer's proof alone, its items unchanged, and is held as an item demand's is.
+ */
+export interface ProofDecision<P extends Proof> {
+  /** The choice on a completed input. */
+  choose(input: Proven<P>): string;
+  /** The answer under a choice, or an open one (`null`): monotone in the input either way. */
+  answer(choice: string | null, input: ProvenAnswer<P>): ProvenAnswer<P>;
+}
+
+/**
+ * A demand that proves a proof beside its items: one demand, one lifecycle (TABLE r4.164's ruling (1)). Its proof holds
+ * no ingress of its own: external data it carries is in its items, which a component's cells anchor (C9).
+ */
+export interface ProofDemand<P extends Proof> {
+  readonly key: string;
+  readonly kind: DemandKind;
+  readonly file: number;
+  readonly offset: number;
+  readonly make: () => Work<Proven<P>>;
+  readonly proves: true;
+  readonly decision?: ProofDecision<P>;
 }
 
 /** A computation that yields the demands it reads and receives their items. */
-export type Work<T> = Generator<Demand, T, readonly Item[]>;
+export type Work<T> = Generator<Demand | ProofDemand<Proof>, T, readonly Item[]>;
 
 /** An unfinished demand. */
 interface DemandNode {
-  readonly demand: Demand;
+  readonly demand: Demand | ProofDemand<Proof>;
   readonly index: number;
   /** Its answer so far: provisional until its component is solved. */
   value: readonly Item[];
-  /** What its last run computed: its decision's input. */
+  /** A proof demand's proof so far, provisional as its answer is; `null` before its run returns. */
+  proof: Proof | null;
+  /** What its last run computed: its decision's input, a proof demand's with its proof. */
   input: readonly Item[];
+  inputProof: Proof | null;
   /** Its decision's choice while its component is solved with the choices held; `null` while open. */
   choice: string | null;
   /** The component being solved that it is a member of. */
@@ -75,7 +135,8 @@ interface DemandNode {
 interface Frame {
   /** The demand a first run computes, or `null` for a member's run again or a top-level computation. */
   readonly node: DemandNode | null;
-  readonly work: Work<readonly Item[]>;
+  /** Its run: a demand's items, a proof demand's items and proof (`Proven`). */
+  readonly work: Work<readonly Item[] | Proven<Proof>>;
   pending: readonly Item[] | undefined;
   readonly index: number;
   low: number;
@@ -164,7 +225,7 @@ export interface DemandWork {
  * The canonical order of two demands: their file, their offset, their kind, then their key, so that distinct demands
  * at one site still have one order.
  */
-function canonical(a: Demand, b: Demand): number {
+function canonical(a: Demand | ProofDemand<Proof>, b: Demand | ProofDemand<Proof>): number {
   return (
     a.file - b.file ||
     a.offset - b.offset ||
@@ -215,8 +276,18 @@ class PositionHeap {
   }
 }
 
+/** A run's result: its items, and a proof demand's proof (else `null`). */
+function resultOf(result: readonly Item[] | Proven<Proof>): {
+  readonly items: readonly Item[];
+  readonly proof: Proof | null;
+} {
+  return "items" in result ? result : { items: result, proof: null };
+}
+
 export class Solver {
   readonly #memo = new Map<string, readonly Item[]>();
+  /** The finished proof demands' proofs, kept with their answers in `#memo`. */
+  readonly #proofs = new Map<string, Proof>();
   readonly #active = new Map<string, DemandNode>();
   /** Tarjan's stack of unfinished demands outside the components being solved. */
   readonly #stack: DemandNode[] = [];
@@ -307,16 +378,44 @@ export class Solver {
     for (let step = work.next(); ;) {
       if (step.done === true) return step.value;
       const demand = step.value;
-      step = work.next(
-        this.#memo.get(demand.key) ??
-          (demand.decision === undefined ? STOPPED : demand.decision.answer(null, STOPPED)),
-      );
+      step = work.next(this.#memo.get(demand.key) ?? this.#stopped(demand));
     }
+  }
+
+  /** An unfinished demand's items after a stop: `STOPPED`, through its decision's open answer (its proof none). */
+  #stopped(demand: Demand | ProofDemand<Proof>): readonly Item[] {
+    if (demand.decision === undefined) return STOPPED;
+    return demand.proves === undefined
+      ? demand.decision.answer(null, STOPPED)
+      : demand.decision.answer(null, { items: STOPPED, proof: null }).items;
   }
 
   /** The answer of a finished demand, if it has one. */
   public answer(key: string): readonly Item[] | undefined {
     return this.#memo.get(key);
+  }
+
+  /** A finished demand's answer, and its proof, forgotten between two runs: its next read computes it again. */
+  public forget(key: string): void {
+    if (this.#running) throw new Error("The solver cannot forget an answer while it runs.");
+    this.#memo.delete(key);
+    this.#proofs.delete(key);
+  }
+
+  /**
+   * A proof demand's items and proof: the demand yielded, so its reader depends on it (and reruns on a changed proof)
+   * as on any demand, and its proof as the solver holds it once the items are in: finished, a member's provisional one,
+   * or `null`, none (no run of it returned yet; after a stop, any unfinished one: only looked up, nothing run).
+   */
+  public *proven<P extends Proof>(
+    demand: ProofDemand<P>,
+  ): Work<{ readonly items: readonly Item[]; readonly proof: P | null }> {
+    const items = yield demand;
+    const finished = this.#proofs.get(demand.key);
+    const held = finished ?? (this.#running ? (this.#active.get(demand.key)?.proof ?? null) : null);
+    // EVIDENCE: invariant: a key is one demand's identity, so the proof held under it is what its demand's runs return.
+    const proof = held as P | null;
+    return { items, proof };
   }
 
   /** The finished demands with the work each cost, in the order they finished. */
@@ -326,7 +425,7 @@ export class Solver {
 
   #frame(
     node: DemandNode | null,
-    work: Work<readonly Item[]>,
+    work: Work<readonly Item[] | Proven<Proof>>,
     index: number,
     rerun: Rerun | null,
   ): Frame {
@@ -379,7 +478,7 @@ export class Solver {
   }
 
   /** A frame yields `demand`: its answer, a provisional one, or a new frame for it. */
-  #read(frame: Frame, demand: Demand): void {
+  #read(frame: Frame, demand: Demand | ProofDemand<Proof>): void {
     const finished = this.#memo.get(demand.key);
     if (finished !== undefined) {
       frame.pending = finished;
@@ -393,7 +492,9 @@ export class Solver {
         demand,
         index: this.#counter++,
         value: [],
+        proof: null,
         input: [],
+        inputProof: null,
         choice: null,
         component: null,
       };
@@ -419,11 +520,14 @@ export class Solver {
    * A demand's first run returned `items`: memoise its answer, keep it provisional, or start solving the component it
    * closes; its reader `parent` takes the answer then.
    */
-  #finish(frame: Frame, items: readonly Item[], parent: Frame): void {
+  #finish(frame: Frame, result: readonly Item[] | Proven<Proof>, parent: Frame): void {
     const node = frame.node!;
-    const decision = node.demand.decision;
+    const { items, proof } = resultOf(result);
     node.input = items;
-    node.value = decision === undefined ? items : decision.answer(null, items);
+    node.inputProof = proof;
+    const open = this.#answered(node, null);
+    node.value = open.items;
+    node.proof = open.proof;
     parent.low = Math.min(parent.low, frame.low);
     if (frame.low !== frame.index) {
       parent.pending = node.value;
@@ -431,8 +535,15 @@ export class Solver {
     }
     const members = this.#stack.splice(frame.base);
     if (members.length === 1 && !frame.selfRead) {
-      if (decision !== undefined) node.value = decision.answer(decision.choose(items), items);
+      if (node.demand.decision !== undefined) {
+        const held = this.#answered(node, this.#choice(node));
+        node.value = held.items;
+        node.proof = held.proof;
+      }
+      // (its proof's slot charged before its answer and proof are kept: a stop here keeps neither)
+      if (node.proof !== null) keep(this.#work, 1);
       this.#memo.set(node.demand.key, node.value);
+      if (node.proof !== null) this.#proofs.set(node.demand.key, node.proof);
       this.#active.delete(node.demand.key);
       this.#units.push({ key: node.demand.key, units: this.#work.total - frame.started });
       parent.pending = node.value;
@@ -464,7 +575,9 @@ export class Solver {
     this.#solving.push(solving);
   }
 
-  /** Solving starts again from bottom: no items, no recorded reads, fresh ingress cells, every member to run. */
+  /**
+   * Solving starts again from bottom: no items or proofs, no recorded reads, fresh ingress cells, every member to run.
+   */
   #begin(solving: Solving): void {
     const { component } = solving;
     const reverse = this.#seam?.reverseWorklist === true;
@@ -475,7 +588,10 @@ export class Solver {
     component.dependents.clear();
     component.reads.clear();
     component.cells = new Map();
-    for (const member of solving.members) member.value = [];
+    for (const member of solving.members) {
+      member.value = [];
+      member.proof = null;
+    }
     solving.now = new PositionHeap();
     solving.done = new Set();
     solving.next = new Set(solving.members.map((_, at) => at));
@@ -522,21 +638,27 @@ export class Solver {
   #choose(solving: Solving): boolean {
     let changes = false;
     for (const member of solving.members) {
-      const decision = member.demand.decision;
-      if (decision === undefined) continue;
-      member.choice = decision.choose(member.input);
+      if (member.demand.decision === undefined) continue;
+      member.choice = this.#choice(member);
+      const held = this.#answered(member, member.choice);
+      const open = this.#answered(member, null);
       if (
-        itemsSignature(decision.answer(member.choice, member.input), this.#scope) !==
-        itemsSignature(decision.answer(null, member.input), this.#scope)
+        itemsSignature(held.items, this.#scope) !== itemsSignature(open.items, this.#scope) ||
+        (held.proof?.signature(this.#scope) ?? null) !==
+          (open.proof?.signature(this.#scope) ?? null)
       )
         changes = true;
     }
     return changes;
   }
 
-  /** A member's run again returned `input`: record its reads and answer, and go on solving as that requires. */
-  #rerunDone(frame: Frame, input: readonly Item[]): void {
+  /**
+   * A member's run again returned `result`: record its reads, answer and proof, and go on solving as that requires; a
+   * changed proof is a change as a changed answer is.
+   */
+  #rerunDone(frame: Frame, result: readonly Item[] | Proven<Proof>): void {
     const { solving, member, reads } = frame.rerun!;
+    const { items: input, proof } = resultOf(result);
     const { component } = solving;
     this.#reruns.pop();
     component.low = Math.min(component.low, frame.low);
@@ -551,17 +673,17 @@ export class Solver {
       dependents.add(member);
     }
     component.reads.set(member, reads);
-    const decision = member.demand.decision;
-    const items = this.#anchored(
-      component,
-      member,
-      decision === undefined ? input : decision.answer(member.choice, input),
-    );
+    member.input = input;
+    member.inputProof = proof;
+    const answered = this.#answered(member, member.choice);
+    const items = this.#anchored(component, member, answered.items);
     const changed =
-      itemsSignature(items, this.#scope) !== itemsSignature(member.value, this.#scope);
+      itemsSignature(items, this.#scope) !== itemsSignature(member.value, this.#scope) ||
+      (answered.proof?.signature(this.#scope) ?? null) !==
+        (member.proof?.signature(this.#scope) ?? null);
     // its ingress cells took this run's stores whether or not its kinds changed
     member.value = items;
-    member.input = input;
+    member.proof = answered.proof;
     if (component.low < component.index) {
       this.#abandon(solving);
       return;
@@ -588,8 +710,14 @@ export class Solver {
     }
   }
 
-  /** A component is stable: its members are memoised, and the reader of the one that closed it takes its answer. */
+  /**
+   * A component is stable: its members are memoised with their proofs, and the reader of the one that closed it takes
+   * its answer. (Every proof's slot is charged before any member is kept: a stop here keeps none of them.)
+   */
   #solved(solving: Solving): void {
+    let proofs = 0;
+    for (const member of solving.members) if (member.proof !== null) proofs += 1;
+    keep(this.#work, proofs);
     this.#solving.pop();
     const solved = solving.members.map((member) => ({
       key: member.demand.key,
@@ -599,6 +727,7 @@ export class Solver {
       member.component = null;
       member.choice = null;
       this.#memo.set(member.demand.key, member.value);
+      if (member.proof !== null) this.#proofs.set(member.demand.key, member.proof);
       this.#active.delete(member.demand.key);
     }
     this.#seam?.onComponent?.(solved);
@@ -608,6 +737,22 @@ export class Solver {
       units: this.#work.total - solving.closing.started,
     });
     this.#frames.at(-1)!.pending = closing.value;
+  }
+
+  /** A demand's choice on its completed input (it has a decision). */
+  #choice(node: DemandNode): string {
+    const { demand, input, inputProof } = node;
+    if (demand.proves === undefined) return demand.decision!.choose(input);
+    return demand.decision!.choose({ items: input, proof: inputProof! });
+  }
+
+  /** A demand's answer on its last run's input under a choice, or open (`null`): its decision's, else the input. */
+  #answered(node: DemandNode, choice: string | null): ProvenAnswer<Proof> {
+    const { demand, input, inputProof } = node;
+    if (demand.decision === undefined) return { items: input, proof: inputProof };
+    if (demand.proves === undefined)
+      return { items: demand.decision.answer(choice, input), proof: null };
+    return demand.decision.answer(choice, { items: input, proof: inputProof });
   }
 
   /**

@@ -9,6 +9,7 @@ import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import { narrowingPass } from "./helpers/type-core-narrowing.js";
 
 /**
  * The contract's identity and mark controls (checkpoint 9, TABLE §8's contract row r4.15–r4.27): every path that
@@ -102,6 +103,13 @@ const IDENTITY: readonly [string, "prefixEntries" | "literalEntries", (k: number
     "literalEntries",
     (k) =>
       `let seed = {a: 1}\nlet archive = [${many(k, () => "seed", ", ")}]\nlet n: integer = archive.first.a`,
+  ],
+  [
+    // (each nested literal's index the inner one's at its element, shared: the read one entry, never one per level)
+    "a read in nested literals",
+    "literalEntries",
+    (k) =>
+      `let seed = {a: 1}\nlet archive = ${"[".repeat(k)}seed${"]".repeat(k)}\nlet n: integer = archive${"[0]".repeat(k)}.a`,
   ],
   [
     "a call result in a literal",
@@ -388,4 +396,47 @@ test("two literals whose kinds differ only in their paths are two sources, in bo
     [answer(), reversed(answer), withoutSharing(answer), reversed(() => withoutSharing(answer))],
     Array<string>(4).fill("integer decided"),
   );
+});
+
+/**
+ * #1392: a literal's class is its structure's, never what was asked of it before: two equal literals share one whether
+ * or not absent properties were read of either first (Codex r3's probe of #1375), whichever is indexed first, with the
+ * sharing on and off.
+ */
+test("two equal literals share a class whatever absent properties were asked of them before", () => {
+  const request = coreRequest([
+    {
+      path: "main.tease",
+      source: "let one = {a: 1}\nlet two = {a: 1}\nlet context = {q: {z: 1}}\nexit\n",
+    },
+  ]);
+  assert.ok(request !== null);
+  const got: string[] = [];
+  for (const sharing of [true, false])
+    for (const reversed of [false, true])
+      for (const asked of ["none", "absent properties", "a path another literal holds"] as const) {
+        const run = (): boolean => {
+          const pass = narrowingPass(request);
+          const { contract, program, solver } = pass;
+          const literals = [...program.hasOf.keys()].filter((value) =>
+            program.hasOf.get(value)!.some((has) => has.type.kind === "object"),
+          );
+          const [one, two] = literals;
+          for (const value of reversed ? [...literals].reverse() : literals)
+            contract.literalIndex(value);
+          if (asked === "absent properties") {
+            solver.run(contract.indexItems(two!, ["missingA"], null, false));
+            solver.run(contract.indexItems(two!, ["missingB"], null, false));
+          } else if (asked === "a path another literal holds") {
+            solver.run(contract.indexItems(one!, ["q", "z"], null, false));
+            solver.run(contract.indexItems(two!, ["missing"], null, false));
+          }
+          return contract.classOf(one!, false) === contract.classOf(two!, false);
+        };
+        if (!(sharing ? run() : withoutSharing(run)))
+          got.push(
+            `${sharing ? "shared" : "unshared"} ${reversed ? "reversed" : "in order"}: ${asked}`,
+          );
+      }
+  assert.deepEqual(got, []);
 });
