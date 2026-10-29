@@ -113,7 +113,7 @@ const CONSUMERS: Readonly<Record<string, Consumer>> = {
   say: {
     lines: (read) => [`say ${read}`],
     slice: true,
-    needs: (value) => typeof value === "number" || typeof value === "string",
+    needs: (value) => ["number", "string", "boolean"].includes(typeof value),
     says: (value) => [String(value)],
   },
   repeat: {
