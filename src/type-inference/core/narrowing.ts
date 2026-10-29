@@ -252,16 +252,6 @@ function overlap(
 }
 
 /**
- * An item a test proves of a kind: an unknown that a stop left (`budget`) is known by the test itself, so the stop's
- * reason and word go; any other keeps its own (host data its external origin), TABLE r4.183.
- */
-function proved(item: Item, tag: ItemTag): Item {
-  return item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
-    ? { ...item, tag, reasons: item.reasons & ~REASON.budget, context: null }
-    : { ...item, tag };
-}
-
-/**
  * G's value (N1): the input items filtered by the form. Emptiness (`empty`) is untouched; after a positive test,
  * `!= null` or `is not null`, a single remaining kind without `unknown` is definite; after `is not T` certainties stay.
  * An empty result is the unreachable branch's value.
@@ -279,17 +269,24 @@ export function narrowedItems(
       kept.push(item);
       continue;
     }
+    // (an unknown a stop left, `budget`, that the test proves of a kind is known by the test itself: the stop's reason and
+    // word go; any other keeps its own, host data its external origin, TABLE r4.183)
+    const proof =
+      item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
+        ? { reasons: item.reasons & ~REASON.budget, context: null }
+        : {};
     switch (form.kind) {
       case "non-null":
         if (item.tag !== "null") kept.push(item);
         break;
       case "null":
-        if (item.tag === "null" || item.tag === "unknown") kept.push(proved(item, "null"));
+        if (item.tag === "null" || item.tag === "unknown")
+          kept.push({ ...item, ...proof, tag: "null" });
         break;
       case "is":
         for (const kind of each(work, "mergeItems", form.kinds)) {
           const tag = overlap(item.tag, kind, form.fractional === true, work);
-          if (tag !== null) kept.push(tag === item.tag ? item : proved(item, tag));
+          if (tag !== null) kept.push(tag === item.tag ? item : { ...item, ...proof, tag });
         }
         break;
       case "is-not":
