@@ -530,6 +530,21 @@ test("a block runs later, so its end and its call of a file only warn and are ch
       warned,
       main,
     );
+  // Where that entry was called, the call waits below it as long as the blocks stay, so they are safe (#1402 review r2).
+  for (const holder of [
+    'timer async 1 s {\n    timer async 1 s { end }\n}\ncall "scene.tease"\nend',
+    'timer async 1 s {\n    showPermanentButton "Continue" { goto later }\n}\ncall "scene.tease"\nend\nlabel later\nsay "later"\nend',
+  ])
+    assert.deepEqual(
+      compileProject(
+        project('call "holder.tease"\nexit', {
+          "holder.tease": holder,
+          "scene.tease": "wait 5 s\nend",
+        }),
+      ).diagnostics,
+      [],
+      holder,
+    );
   // One with a length written out whose handle is not kept is due only once the called file waited.
   assert.deepEqual(said(project('timer async 1 s { end }\ncall "scene.tease"\nexit', scene)), [
     "scene",

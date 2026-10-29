@@ -336,9 +336,8 @@ export class Reachability {
    * it stays, on the ways from its creation that {@link #staying} follows. Its `end` ends the file running where it
    * starts, so it has a call to return to when one waits at every such place and no other block that may leave stays
    * there, nor another copy of it (see {@link #single}); and so it has when it belongs to a file entry that a call waits
-   * below wherever it is created, as the block goes with that entry, unless it is created in a block's frame, which
-   * belongs to that block's entry. A block's `goto` to a label goes on in its own entry, so a block that may jump runs as
-   * code that may have no call waiting unless that entry has one. The block's code then runs with calls waiting, and else as code
+   * below wherever it is created, as the block goes with that entry (`owner`, see {@link CallsWaiting}): the file that
+   * runs, or for code in a block's frame the entry of that block. A block's `goto` to a label goes on in that entry. The block's code then runs with calls waiting, and else as code
    * that may have none, by the instruction that created it (`hidden`). `interrupted` tells where a block that may leave
    * the code it interrupts may start.
    */
@@ -349,7 +348,6 @@ export class Reachability {
     const count = this.plan.instructions.length;
     const code = count + ways.hubs.length;
     const { stays, staying, interrupted } = this.#blocksStaying(ways);
-    const frames = this.#blockFrames(ways);
     // The nodes: the code, where the blocks start that each place leads to as one that stays on, by whether they
     // outlive their file entry, and each block where an instruction creates it.
     const runs = (outlives: boolean): number => code + (outlives ? stays.nodeCount : 0);
@@ -423,38 +421,41 @@ export class Reachability {
               return state;
             case "created":
               return state.kind === "calls"
-                ? {
-                    kind: "gate",
-                    created: true,
-                    uncalled: state.none !== null || state.hidden !== null,
-                    run: null,
-                  }
+                ? { kind: "gate", created: true, owner: state.owner, run: null }
                 : null;
             case "runs":
               return state.kind === "runs"
-                ? { kind: "gate", created: false, uncalled: false, run: state }
+                ? { kind: "gate", created: false, owner: null, run: state }
                 : null;
             case "block": {
-              if (state.kind !== "gate" || !state.created || state.run === null) return null;
+              if (state.kind !== "gate" || state.owner === null || state.run === null) return null;
               const { creator, block } = gates[node - firstGate]!;
               const starts = this.#startsAnywhere(creator) ? state.run.anywhere : state.run.due;
               if (starts === null) return null;
-              // A block of a file entry that a call waits below whenever it is created starts only while that entry
-              // stays, so while the call waits; one created in a block's frame belongs to that block's entry.
-              const outside = frames.inBlocks[creator] === 0;
-              const kept = !state.uncalled && outside && !this.#outlivesItsFile(creator);
+              // A block of a file entry that a call waits below whenever it is created goes with that entry, so it
+              // starts only while the call waits.
+              const owner = state.owner;
+              const called = owner.none === null && owner.hidden === null;
+              const outlives = this.#outlivesItsFile(creator);
               const alone =
                 starts.leavers === null ||
                 (starts.leavers === block && this.#single(creator, ways));
-              // A `goto` to a label goes on in the entry the block belongs to, with the calls that wait below it.
-              const jumps = frames.jumping.has(block) && (state.uncalled || !outside);
-              return {
-                kind: "calls",
+              const runs: Calls = {
                 none: null,
-                hidden: jumps || (!kept && (starts.unsafe || !alone)) ? creator : null,
+                hidden: (!called || outlives) && (starts.unsafe || !alone) ? creator : null,
                 waiting: true,
               };
+              // What the block creates, and where its `goto` to a label goes on, belong to the same entry; once the
+              // session left it, which it may have for a block that outlives it, that entry takes the place of the
+              // file that runs.
+              const own: Calls = called ? owner : { none: null, hidden: creator, waiting: true };
+              return { kind: "calls", ...runs, owner: outlives ? joinCalls(own, runs) : own };
             }
+            case "goto":
+              // A `goto` to a label goes on in the entry that the code belongs to, which a block's is its own.
+              return state.kind === "calls"
+                ? { kind: "calls", ...state.owner, owner: state.owner }
+                : null;
           }
           return state.kind === "calls" ? this.#waitingAfter(node, edge, state) : null;
         },
@@ -462,7 +463,13 @@ export class Reachability {
       [
         [
           this.plan.files[0]!.startInstruction,
-          { kind: "calls", none: SESSION_START, hidden: null, waiting: false },
+          {
+            kind: "calls",
+            none: SESSION_START,
+            hidden: null,
+            waiting: false,
+            owner: { none: SESSION_START, hidden: null, waiting: false },
+          },
         ],
         // Once a block returns, the code it interrupted goes on, wherever that was.
         ...stays.unknown.flatMap((index) =>
@@ -479,28 +486,30 @@ export class Reachability {
     return { states, interrupted };
   }
 
-  /** The calls that wait after `node` along `edge`, from those that wait at it (see {@link pendingCallDiagnostics}). */
+  /**
+   * The calls that wait after `node` along `edge`, from those that wait at it (see {@link pendingCallDiagnostics}). The
+   * file that a transfer starts runs as its own entry, which what it creates belongs to.
+   */
   #waitingAfter(node: number, edge: string, state: CallsWaiting): CallsWaiting {
     const instruction = this.plan.instructions[node];
     if (instruction?.kind !== "transfer" || (edge !== "transfer" && edge !== "computed"))
       return state;
-    if (instruction.mode === "call")
-      return { kind: "calls", none: null, hidden: null, waiting: true };
-    // A goto keeps the calls that wait; with none, the file it starts has none either.
-    if (edge === "transfer")
-      return {
-        kind: "calls",
-        none: state.none === null ? null : node,
-        hidden: state.hidden,
-        waiting: state.waiting,
-      };
-    const waitsForNone = state.none !== null || state.hidden !== null;
-    return {
-      kind: "calls",
-      none: null,
-      hidden: waitsForNone ? node : null,
-      waiting: state.waiting,
-    };
+    const calls: Calls =
+      instruction.mode === "call"
+        ? { none: null, hidden: null, waiting: true }
+        : // A goto keeps the calls that wait; with none, the file it starts has none either.
+          edge === "transfer"
+          ? {
+              none: state.none === null ? null : node,
+              hidden: state.hidden,
+              waiting: state.waiting,
+            }
+          : {
+              none: null,
+              hidden: state.none !== null || state.hidden !== null ? node : null,
+              waiting: state.waiting,
+            };
+    return { kind: "calls", ...calls, owner: calls };
   }
 
   /**
@@ -776,10 +785,9 @@ export class Reachability {
   /**
    * What the code of each timer, media, and button block does in its own frame, also in the functions it calls, found once
    * for `ways`: `leaving`, the blocks, by function, that may leave the code they interrupt, by a `goto`, an `end`, or an
-   * `exit`, or by a file call whose file may end the session (a called file otherwise returns into the block); `jumping`,
-   * those that may `goto` a label, which goes on in the file entry the block belongs to (V30 §29); and `inBlocks`, for
-   * each instruction, whether it may run in a block's frame, where a block it creates belongs to the entry of that block,
-   * not to the file that runs.
+   * `exit`, or by a file call whose file may end the session (a called file otherwise returns into the block); and
+   * `inBlocks`, for each instruction, whether it may run in a block's frame, where a transfer leaves the file that runs,
+   * not necessarily the entry that a block it created belongs to.
    */
   #blockFrames(ways: ComputedWays): BlockFrames {
     const facts = this.#transfers?.ways === ways ? this.#transfers : undefined;
@@ -803,12 +811,12 @@ export class Reachability {
         return this.#ways(index).filter(({ edge }) => edge === "resume");
       return this.#ways(index);
     };
-    const does = solveBackward<FrameEffects, string>({
+    const leaves = solveBackward<true, string>({
       nodeCount: count,
       successors: (index) => {
         const instruction = this.plan.instructions[index]!;
-        if (instruction.kind === "goto") return [{ node: null, edge: "jumps" }];
         if (
+          instruction.kind === "goto" ||
           instruction.kind === "end" ||
           instruction.kind === "exit" ||
           (instruction.kind === "transfer" && instruction.mode === "goto")
@@ -833,27 +841,16 @@ export class Reachability {
           out.push({ node: null, edge: "leaves" });
         return out;
       },
-      join: (left, right) => ({
-        leaves: left.leaves || right.leaves,
-        jumps: left.jumps || right.jumps,
-      }),
-      equals: (left, right) => left.leaves === right.leaves && left.jumps === right.jumps,
-      transfer: (_, edge, state) =>
-        edge === "jumps"
-          ? { leaves: true, jumps: true }
-          : edge === "leaves"
-            ? { leaves: true, jumps: false }
-            : state,
+      join: () => true,
+      equals: () => true,
+      transfer: (_, edge, state) => (edge === "leaves" ? true : state),
     });
     const leaving = new Set<number>();
-    const jumping = new Set<number>();
     const inBlocks = new Uint8Array(count);
     const work: number[] = [];
     for (const definition of this.plan.functions) {
       if (definition.handler === null) continue;
-      const effects = does[definition.entryInstruction];
-      if (effects?.leaves === true) leaving.add(definition.id);
-      if (effects?.jumps === true) jumping.add(definition.id);
+      if (leaves[definition.entryInstruction] === true) leaving.add(definition.id);
       inBlocks[definition.entryInstruction] = 1;
       work.push(definition.entryInstruction);
     }
@@ -864,7 +861,7 @@ export class Reachability {
           inBlocks[node] = 1;
           work.push(node);
         }
-    const frames = { leaving, jumping, inBlocks };
+    const frames = { leaving, inBlocks };
     if (facts !== undefined) facts.frames = frames;
     return frames;
   }
@@ -1709,11 +1706,32 @@ export class Reachability {
  * that may have done so. Both `null`: every way there has a call waiting. The first way found names each. `waiting`:
  * whether a way reaches the code with a call waiting.
  */
-interface CallsWaiting {
-  readonly kind: "calls";
+interface Calls {
   readonly none: number | null;
   readonly hidden: number | null;
   readonly waiting: boolean;
+}
+
+/**
+ * The calls that wait where code runs (see `Calls`), below the file that runs and, `owner`, below the file entry that the
+ * code belongs to: the one that runs, or for a timer, media, or button block's code the entry that the block belongs
+ * to, which a block it creates belongs to too and its `goto` to a label goes on in (V30 §29).
+ */
+interface CallsWaiting extends Calls {
+  readonly kind: "calls";
+  readonly owner: Calls;
+}
+
+function joinCalls(left: Calls, right: Calls): Calls {
+  return {
+    none: left.none ?? right.none,
+    hidden: left.hidden ?? right.hidden,
+    waiting: left.waiting || right.waiting,
+  };
+}
+
+function sameCalls(left: Calls, right: Calls): boolean {
+  return left.none === right.none && left.hidden === right.hidden && left.waiting === right.waiting;
 }
 
 /**
@@ -1736,13 +1754,12 @@ interface BlockRuns {
 }
 
 /**
- * For a block where an instruction creates it: whether the instruction runs, whether a way to it may have no call
- * waiting, `uncalled`, and where the block starts then.
+ * For a block where an instruction creates it: the calls that wait below the file entry it belongs to where the
+ * instruction runs, `null` until it does, and where the block starts then.
  */
 interface BlockGate {
   readonly kind: "gate";
-  readonly created: boolean;
-  readonly uncalled: boolean;
+  readonly owner: Calls | null;
   readonly run: BlockRuns | null;
 }
 
@@ -1751,18 +1768,17 @@ type BlockState = CallsWaiting | BlockRuns | BlockGate;
 
 function joinBlockStates(left: BlockState, right: BlockState): BlockState {
   if (left.kind === "calls" && right.kind === "calls")
-    return {
-      kind: "calls",
-      none: left.none ?? right.none,
-      hidden: left.hidden ?? right.hidden,
-      waiting: left.waiting || right.waiting,
-    };
+    return { kind: "calls", ...joinCalls(left, right), owner: joinCalls(left.owner, right.owner) };
   if (left.kind === "runs" && right.kind === "runs") return joinRuns(left, right);
   if (left.kind === "gate" && right.kind === "gate")
     return {
       kind: "gate",
-      created: left.created || right.created,
-      uncalled: left.uncalled || right.uncalled,
+      owner:
+        left.owner === null
+          ? right.owner
+          : right.owner === null
+            ? left.owner
+            : joinCalls(left.owner, right.owner),
       run:
         left.run === null
           ? right.run
@@ -1798,12 +1814,7 @@ function sameStarts(left: BlockStarts | null, right: BlockStarts | null): boolea
 function sameBlockStates(left: BlockState, right: BlockState): boolean {
   switch (left.kind) {
     case "calls":
-      return (
-        right.kind === "calls" &&
-        left.none === right.none &&
-        left.hidden === right.hidden &&
-        left.waiting === right.waiting
-      );
+      return right.kind === "calls" && sameCalls(left, right) && sameCalls(left.owner, right.owner);
     case "runs":
       return (
         right.kind === "runs" &&
@@ -1813,8 +1824,9 @@ function sameBlockStates(left: BlockState, right: BlockState): boolean {
     case "gate":
       return (
         right.kind === "gate" &&
-        left.created === right.created &&
-        left.uncalled === right.uncalled &&
+        (left.owner === null || right.owner === null
+          ? left.owner === right.owner
+          : sameCalls(left.owner, right.owner)) &&
         (left.run === null || right.run === null
           ? left.run === right.run
           : sameBlockStates(left.run, right.run))
@@ -1887,16 +1899,9 @@ interface Staying {
   readonly unknown: readonly number[];
 }
 
-/** What the code of a block may do in its own frame (see `Reachability.#blockFrames`). */
-interface FrameEffects {
-  readonly leaves: boolean;
-  readonly jumps: boolean;
-}
-
 /** What the timer, media, and button blocks do in their frames (see `Reachability.#blockFrames`). */
 interface BlockFrames {
   readonly leaving: ReadonlySet<number>;
-  readonly jumping: ReadonlySet<number>;
   readonly inBlocks: Uint8Array;
 }
 
