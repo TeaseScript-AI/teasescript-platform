@@ -6,6 +6,7 @@ import {
   type AdmittedType,
   analyseCore,
   type Answers,
+  type CorePass,
   coreResult,
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
@@ -339,14 +340,29 @@ export interface StopSet {
   readonly restarts: number;
   readonly outcome: Answers["outcome"];
   readonly exhausted: Answers["budget"]["exhausted"];
-  /** The published record at that allowance: its diagnostics and checks, serialized. */
+  /** What it publishes at that allowance (`stoppedRecord`). */
   readonly record: string;
+}
+
+/**
+ * What an analysis publishes at a stop, as the stop-set comparison compares it at every allowance: each diagnostic by
+ * its identity (`stopIdentity`: its code, site, rule and offending kinds, without the fix facts a stop never proves),
+ * the checks, and both serialized.
+ */
+export function stoppedRecord(answers: Answers, paths: readonly string[]): string {
+  return JSON.stringify({
+    diagnostics: answers.diagnostics.map(stopIdentity),
+    checks: answers.checks,
+    serialized: coreRecord(coreResult(answers), paths),
+  });
 }
 
 /**
  * Which decisions stop and when, per source and mode (#1405's stop-set comparison): `files` analysed in `mode` at the
  * test demand `allowance`, or at the natural one (`null`), with each pass's start, decision and decision stop traced,
- * and the record it publishes there; `null` when the files do not parse or resolve.
+ * and what it publishes there (`stoppedRecord`); `null` when the files do not parse or resolve. The trace keeps each
+ * analysis's events apart by its program and reports this analysis's own, so an analysis run inside one of its
+ * callbacks changes nothing.
  *
  * @public (the generator corpus's runner reads it from a built tree, not by an import)
  */
@@ -358,14 +374,21 @@ export function stopSet(
 ): StopSet | null {
   const request = coreRequest(files, globals);
   if (request === null) return null;
-  const stops: [number, string, string, number][] = [];
-  const trace = { pass: 0, decided: 0, stops };
+  type Trace = { pass: number; decided: number; stops: [number, string, string, number][] };
+  const traces = new Map<CorePass["program"]["flow"], Trace>();
+  const traceOf = (pass: CorePass): Trace => {
+    let trace = traces.get(pass.program.flow);
+    if (trace === undefined)
+      traces.set(pass.program.flow, (trace = { pass: 0, decided: 0, stops: [] }));
+    return trace;
+  };
   const [check, decide, stopDecision] = [
     Consumers.prototype.check,
     Admission.prototype.decide,
     Admission.prototype.stopDecision,
   ];
   Consumers.prototype.check = function (this: Consumers) {
+    const trace = traceOf(this.pass);
     trace.pass += 1;
     trace.decided = 0;
     check.call(this);
@@ -374,10 +397,11 @@ export function stopSet(
     this: Admission,
     ...args: Parameters<Admission["decide"]>
   ) {
-    trace.decided += 1;
+    traceOf(this.pass).decided += 1;
     return decide.apply(this, args);
   };
   Admission.prototype.stopDecision = function (this: Admission, root, path) {
+    const trace = traceOf(this.pass);
     trace.stops.push([
       trace.pass,
       this.pass.program.places[root]!.label,
@@ -391,17 +415,16 @@ export function stopSet(
     const answers = inMode(mode, () =>
       allowance === null ? once() : withTestDemandAllowance(allowance, once),
     );
+    const trace = traces.get(answers.graph) ?? { pass: 0, decided: 0, stops: [] };
     return {
       stops: trace.stops,
       passes: trace.pass,
       restarts: answers.budget.counts.get("stopPasses") ?? 0,
       outcome: answers.outcome,
       exhausted: answers.budget.exhausted,
-      record: JSON.stringify(
-        coreRecord(
-          coreResult(answers),
-          request.files.map((file) => file.path),
-        ),
+      record: stoppedRecord(
+        answers,
+        request.files.map((file) => file.path),
       ),
     };
   } finally {
