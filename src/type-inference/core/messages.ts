@@ -78,7 +78,8 @@ export interface MessageSource {
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
    * runtime stand unreported (Astra r3; a stop's own warning claims no region); apart from one at `self`'s site whose
-   * every type `rulesOut` rules out (a type test beside a null check). `codeAt`'s "no other diagnostic" fact.
+   * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).
+   * `codeAt`'s "no other diagnostic" fact.
    */
   readonly alone: (
     self: CoreDiagnostic,
@@ -821,9 +822,10 @@ interface Diagnosed {
  * its diagnostic's facts (`diagnosed`), and whether the values it reads are the site's own, read once where they stand
  * (`own`), it reads them again or elsewhere (`added`), or it reads none (`none`, a type, a literal of its own); the
  * author's texts it holds (`holds`: the diagnosed value, a statement, a declaration), each clear of the analysis's
- * other diagnostics but those of only the types its test rules out (`rulesOut`, a check's); the kinds its value has
- * (fact 2), with a collection's elements' kinds (none for a scalar); and whether it writes a value of its own (a
- * fallback's), which the script never held.
+ * other diagnostics but one at the diagnosed site of only the types it rules out (`rulesOut`: a check's test, the
+ * types a value it writes in place of the diagnosed one lacks, `unlike`); the kinds its value has (fact 2), with a
+ * collection's elements' kinds (none for a scalar); and whether it writes a value of its own (a fallback's), which the
+ * script never held.
  */
 interface CodeForm {
   readonly code: string;
@@ -850,6 +852,17 @@ const UNPROVED: SiteExpectation = {
  * statement), a function's parameter, a written type.
  */
 type Position = "statement" | "parameter" | "type";
+
+/**
+ * The types a value a form computes in place of the diagnosed one, from its parts, does not have: a diagnostic at the
+ * site of only those is the replaced value's own, which the form's result decides instead (`codeAt`'s fact 2), as a
+ * failed call's value the script cannot know. Not for a form that keeps the diagnosed value, whose site's diagnostics
+ * are of the text it holds.
+ */
+const unlike =
+  (gives: readonly ItemTag[]) =>
+  (kind: ItemTag): boolean =>
+    !gives.includes(kind);
 
 /** The kinds `${...}` shows (V30 §8), which `join` joins. */
 const SHOWN_KINDS_ALL: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
@@ -1251,7 +1264,7 @@ function memberFix(
         diagnosed,
         reads: "own",
         holds: [at],
-        rulesOut: null,
+        rulesOut: unlike(gives),
         gives,
         elements: [],
         writes: false,
@@ -1689,7 +1702,7 @@ function temporalFix(
             diagnosed,
             reads: "own",
             holds: [at],
-            rulesOut: null,
+            rulesOut: unlike(gives),
             gives,
             elements: [],
             writes: false,
@@ -1834,7 +1847,7 @@ function listJoinFix(
             diagnosed,
             reads: "own",
             holds: [site],
-            rulesOut: null,
+            rulesOut: rule.operand ? null : unlike(["list"]),
             gives: ["list"],
             elements: rule.elements ?? "unproved",
             writes: false,
@@ -1967,7 +1980,7 @@ function errorSentence(
     case "operator": {
       const join = joined(rule, text, kinds, [], source);
       if (join !== null)
-        return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join, site, expects ?? UNPROVED, diagnosed)}`;
+        return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join, site, !rule.operand, expects ?? UNPROVED, diagnosed)}`;
       const fix =
         temporalFix(rule, kinds, source, site, expects ?? UNPROVED, diagnosed) +
         listJoinFix(rule, kinds, site, expects ?? UNPROVED, source, diagnosed);
@@ -2038,14 +2051,15 @@ function joined(
 
 /**
  * The text-join fix (#1195): the operand that is not text, in `${...}` as the source writes it (the owner's review),
- * where `codeAt` proves the text it gives in place of the diagnosed site `at` (the operation, or the operand an
- * operand's diagnostic sits on): a value of a kind `${...}` shows, and text, which the failed operation never gave, one
- * the place takes (`expects`, Codex r6); else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
+ * where `codeAt` proves the text it gives in place of the diagnosed site `at` (the operation, `whole`, or the operand
+ * an operand's diagnostic sits on): a value of a kind `${...}` shows, and text, which the failed operation never gave,
+ * one the place takes (`expects`, Codex r6); else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
  * changed what some chains say (S8d's reviews r3 and r4).
  */
 function joinFix(
   join: { readonly other: readonly ItemTag[]; readonly operand: string | null },
   at: SourceSite,
+  whole: boolean,
   expects: SiteExpectation,
   diagnosed: Diagnosed,
 ): string {
@@ -2059,7 +2073,7 @@ function joinFix(
             diagnosed,
             reads: "own",
             holds: [at],
-            rulesOut: null,
+            rulesOut: whole ? unlike(["string"]) : null,
             gives: ["string"],
             elements: [],
             writes: false,
@@ -2449,7 +2463,7 @@ function warningFix(
     case "operator": {
       // (the repairs of the error the values would be: a text join, a date and time conversion)
       const join = joined(rule, text, kinds, fits, source);
-      if (join !== null) return joinFix(join, site, expects ?? UNPROVED, diagnosed);
+      if (join !== null) return joinFix(join, site, !rule.operand, expects ?? UNPROVED, diagnosed);
       const temporal = temporalFix(
         rule,
         kinds,
