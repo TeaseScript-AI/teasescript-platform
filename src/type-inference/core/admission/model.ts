@@ -3,6 +3,7 @@ import type { CarrierRole } from "../carriers.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { ItemTag } from "../items.js";
+import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 
 // The shapes admission's state and walks are made of.
@@ -335,6 +336,8 @@ export interface ViaChain {
   readonly typed: boolean;
   /** Whether some operation of the chain combines or removes a literal operand (`COMBINING_ROLES`). */
   readonly combining: boolean;
+  /** Whether some operation of the chain is a list join, its operand's elements the joined list's (`joinedDomain`). */
+  readonly joined: boolean;
 }
 
 /** A stored value's contributions by path (`stopsOf`): written copies, other whole values, and literals. */
@@ -482,4 +485,18 @@ export interface Decided {
   readonly decider: Definition | null;
   readonly site: SourceSite | null;
   readonly published: boolean;
+}
+
+/** A list `+` (`joinElements`). */
+export type Join = Extract<CoreProgram["constraints"][number], { kind: "operation" }>;
+
+/** What a joined value's element type is at a path: its kinds, whether written (each kind fits as itself), the own kinds. */
+export interface JoinDecided {
+  readonly tags: readonly ItemTag[];
+  readonly written: boolean;
+  /** Whether a written type decides it (a copy's, a place's): the later operands of a join add nothing to it. */
+  readonly typed: boolean;
+  readonly own: readonly ItemTag[];
+  /** Whether a written type there holds `null` (an element's own `null` is its items'). */
+  readonly nullable?: boolean;
 }

@@ -7,12 +7,14 @@ import {
   BudgetExhausted,
   DemandExhausted,
   demandAllowanceFor,
+  joinSteps,
+  keptSlice,
   type BudgetLimit,
 } from "./budget.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
-import { freshStores, ingressMark } from "./consumers/fresh.js";
-import { mixed } from "./consumers/mixed.js";
+import { freshStores, ingressMark, storeMark } from "./consumers/fresh.js";
+import { mixed, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
   CheapFrontier,
@@ -24,10 +26,10 @@ import type {
 } from "./consumers/model.js";
 import { operations } from "./consumers/operations.js";
 import { receivers } from "./consumers/receivers.js";
-import { admittedStores } from "./consumers/stores.js";
+import { admittedStores, decide } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
-import type { Definition, Key } from "./definitions.js";
+import { keptKey, keyOf, type Definition, type Key } from "./definitions.js";
 import type { FlowNode } from "./flow-graph.js";
 import { REASON, STOPPED, type Item, type Writer } from "./items.js";
 import { Laminar } from "./narrowing.js";
@@ -100,7 +102,10 @@ export class Consumers {
   rule = 0;
   /** The limit the walk stopped at, or `null`. */
   stopped: BudgetLimit | null = null;
-  /** Whether admission settled in this pass: its rejections are the pass's own (A6), so its findings stand. */
+  /**
+   * Whether admission settled in this pass: its rejections and its store targets are the pass's own (A6, #1275), so its
+   * findings stand.
+   */
   settled = false;
   /** Whether admission's boundary checks were published (`Admission.publish`), the walk's last step. */
   published = false;
@@ -114,6 +119,14 @@ export class Consumers {
   finishing = false;
   readonly #last: boolean;
   readonly #rejected: ReadonlyMap<number, ReadonlySet<Key>>;
+  /**
+   * Whether the store targets the pass keys by are its admission's own (#1275), asked before the walk: each receiver's
+   * decision a lazy one of this pass's own (`decide`), bounded by the demand allowance as every decision is.
+   */
+  readonly #ownTargets: (
+    admission: Admission,
+    decide: (root: PlaceId, path: readonly string[]) => void,
+  ) => boolean;
   /** Admission's decisions, rejections and boundary checks (§5, C9). */
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -168,10 +181,15 @@ export class Consumers {
     last = false,
     finishing = false,
     restarted = false,
+    ownTargets: (
+      admission: Admission,
+      decide: (root: PlaceId, path: readonly string[]) => void,
+    ) => boolean = () => true,
   ) {
     this.#rejected = rejected;
     this.#last = last;
     this.restarted = restarted;
+    this.#ownTargets = ownTargets;
     // (a walk made for the finishing path asks nothing from its start: admission's own setup asks values too)
     this.finishing = finishing;
     this.order = consumerOrder ?? ((list) => [...list]);
@@ -298,6 +316,35 @@ export class Consumers {
   }
 
   /**
+   * The stores and transfers at a key whose decision stopped (S3 §5): the stop stands for their obligations, as a stop
+   * before admission settled does for every store into an inferred place (TABLE r4.100, r4.111), so each is marked at its
+   * site, its type undecided, its value checked when the script runs (C9); a key below it is asked on its own (Codex
+   * r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores). Each key once a pass (Codex
+   * r11's N2: every receiver asking it again scanned its stores again).
+   */
+  public stoppedStores(root: PlaceId, path: readonly string[]): void {
+    const { program, definitions } = this.pass;
+    const at = keptKey(program.work, root, path);
+    if (this.#stoppedKeys.has(at)) return;
+    this.#stoppedKeys.add(at);
+    const lists = [definitions.byKey.get(at) ?? []];
+    // (an add stores at its receiver's element)
+    if (path.at(-1) === "element")
+      lists.push(
+        definitions.byKey.get(keyOf(root, keptSlice(program.work, path, 0, path.length - 1))) ?? [],
+      );
+    for (const list of lists)
+      for (const d of list) {
+        program.work.charge("checks");
+        if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
+        const stored = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
+        if (keyOf(d.place, stored) === at) storeMark(this, d, stored);
+      }
+  }
+
+  readonly #stoppedKeys = new Set<Key>();
+
+  /**
    * S3 §5: a demand's allowance, 256 × the nodes of the reading site's function, or of the whole program at a file's top
    * level (a top-level read reads the globals every file stores, so its file's nodes do not bound its work).
    */
@@ -345,8 +392,14 @@ export class Consumers {
       for (const { site, label } of this.admission.ingressStores()) ingressMark(this, site, label);
       this.rule = 3;
       this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
-      // (a pass in which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
+      // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
+      // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      const own = this.#ownTargets(this.admission, (root, path) => {
+        decide(this, root, path, true);
+      });
       this.settled =
+        own &&
         (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&
         !this.decisionStopped;
       // (admission's findings are the walk's before its first unit)

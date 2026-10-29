@@ -1325,7 +1325,10 @@ export class Values {
       const repeated = contract.plusRepeatOf(c.result, true);
       if (repeated !== c.result) return [...(yield* this.valueItems(repeated, at, rest))];
       const operands: (readonly Item[])[] = [];
-      for (const argument of c.arguments) operands.push(yield* this.valueItems(argument, at, rest));
+      // (an operand admission rejected from the join gives it nothing: A6, `joinElements`)
+      for (const argument of c.arguments)
+        if (this.pass.lists.joined(argument))
+          operands.push(yield* this.valueItems(argument, at, rest));
       return [...plusElements(operands, rest, this.pass)];
     }
     // F16

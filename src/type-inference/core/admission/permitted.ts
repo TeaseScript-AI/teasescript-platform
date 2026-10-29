@@ -2,6 +2,7 @@ import type { TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { keep } from "../budget.js";
 import { termAt, typeTags } from "../contract.js";
+import type { ItemTag } from "../items.js";
 
 // What a written type permits at a path: its open steps, its levels, and the unrestricted parts below it.
 
@@ -39,6 +40,18 @@ function permittedStep(term: TypeTerm, step: string): TypeTerm | null {
 /** Whether a written part restricts nothing (`typeTags`' `unknown`: an unwritten element, a type the core leaves open). */
 export function unrestricted(term: TypeTerm): boolean {
   return typeTags(term).includes("unknown");
+}
+
+/**
+ * ADR 0021 1.3, V30 §13 and §16 (Astra r2's B1 on #1310): what a type an operand's elements have at a path brings into a
+ * list join, whose joined list follows a literal's element rule: an unrestricted type (`list`'s elements) leaves the
+ * joined list open there and below, whichever operand came first, so no conflict is proved from it; a type that holds
+ * only `null` decides nothing, its `null` making the joined list optional; any other type decides by its kinds.
+ * `joinElements` reads its operands by it, and a place holding a join is decided by it (`earliestDecider`).
+ */
+export function joinedDomain(tags: readonly ItemTag[]): "open" | "null" | "kinds" {
+  if (tags.includes("unknown")) return "open";
+  return tags.every((tag) => tag === "null") ? "null" : "kinds";
 }
 
 /**

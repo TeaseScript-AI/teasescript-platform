@@ -183,15 +183,27 @@ export type DiagnosticRule =
     }
   /** C6: an element selection (`.first`, `.removeLast()`, `${...}`) of `collection`. */
   | { readonly rule: "selection"; readonly collection: string; readonly member: string }
-  /** ADR 0021 1.3, A8: a literal's elements, at `path` below them (key steps), of one type: the earliest element's. */
+  /**
+   * ADR 0021 1.3, A8: a literal's elements, at `path` below them (key steps), of one type: the earliest element's; or a
+   * run of list joins' (`operator`, `+` or `+=`), the earliest operand's elements (#1272).
+   */
   | {
       readonly rule: "mixed";
       readonly collection: "list" | "set" | "dict";
       readonly path: readonly string[];
       /** The earliest element's own kinds there (a whole number as such). */
       readonly type: readonly ItemTag[];
-      /** The variable whose start value the literal is, which a fix declares; `null` for any other literal. */
+      /**
+       * The variable whose start value the literal is, which a fix declares; `null` for any other literal. For a join,
+       * the first of its two operands that reads a variable or a parameter (a `+=`'s target only).
+       */
       readonly root: StoreRoot | null;
+      readonly operator?: "+" | "+=";
+      /**
+       * A join's elements at each list level from its elements down to `path`, every kind its operands bring there
+       * (`null` and numbers kept): the type a fix writes; `null` below a property.
+       */
+      readonly levels?: readonly (readonly ItemTag[])[] | null;
     };
 
 /**

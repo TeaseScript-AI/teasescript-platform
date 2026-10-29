@@ -8,7 +8,7 @@ import { pathPhrase } from "../messages.js";
 import { Laminar } from "../narrowing.js";
 import { siteKey } from "../program.js";
 import { targetName } from "../result.js";
-import { mixed } from "./mixed.js";
+import { mixed, mixedJoin } from "./mixed.js";
 import { admittedStores } from "./stores.js";
 import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
 
@@ -24,9 +24,10 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * F18's typed calls no store takes in (`ingressStores`); the ingress stores' boundaries against written types
  * (`publish`); the walk, which finishes every unit, the read boundaries. Every store and transfer into an inferred
  * place is marked at its site, its type undecided (r4.100); a mark stands for its records within its value (r4.111).
- * No syntax decision is made here (TABLE r4.135): admission decides an inferred place from its contract, which a fresh
- * pass has not solved, so only a settled stop's finishing read asks the stores' syntax, after the decision admission
- * retained.
+ * A list join's mixed operands (`joinElements`, #1272) where its operands' own kinds decide them, a join with an
+ * operand read through a decision marked as a literal is (`markValue`). No syntax decision is made here (TABLE
+ * r4.135): admission decides an inferred place from its contract, which a fresh pass has not solved, so only a settled
+ * stop's finishing read asks the stores' syntax, after the decision admission retained.
  */
 export function freshStores(walk: Consumers): void {
   const { program, definitions } = walk.pass;
@@ -47,6 +48,11 @@ export function freshStores(walk: Consumers): void {
     walk.order,
     (site, found) => mixed(walk, site, found),
     (cell) => markHolder(walk, cell),
+  );
+  walk.admission.joinElements(
+    walk.order,
+    (found) => mixedJoin(walk, found),
+    (value) => markValue(walk, value),
   );
   walk.rule = 1;
   admittedStores(walk, true);
@@ -73,7 +79,7 @@ export function stands(walk: Consumers, d: Definition): boolean {
 }
 
 /** A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once. */
-function storeMark(walk: Consumers, d: Definition, path: readonly string[]): void {
+export function storeMark(walk: Consumers, d: Definition, path: readonly string[]): void {
   if (walk.marked.has(d.uid)) return;
   walk.marked.add(d.uid);
   const { program } = walk.pass;
@@ -137,6 +143,16 @@ function inMarkedValue(walk: Consumers, site: SourceSite): boolean {
  * receiver's) marked itself, standing for its records within it (r4.138).
  */
 function markHolder(walk: Consumers, cell: PlaceId): void {
+  const owner = walk.pass.program.cellOwner.get(cell)?.owner;
+  if (owner !== undefined) markValue(walk, owner);
+}
+
+/**
+ * A value whose type needs a decision admission did not make, a literal (`markHolder`) or a list join
+ * (`Admission.joinElements`, #1272): each definition of the outermost literal holding it, or of the value itself,
+ * marked; a value no definition holds marked itself.
+ */
+function markValue(walk: Consumers, value: PlaceId): void {
   const { program, definitions } = walk.pass;
   if (walk.heldIn === null) {
     walk.heldIn = new Map();
@@ -154,21 +170,20 @@ function markHolder(walk: Consumers, cell: PlaceId): void {
       else list.push(d);
     }
   }
-  let literal = program.cellOwner.get(cell)?.owner;
-  for (let up = literal; up !== undefined;) {
+  let outer = value;
+  for (let up: PlaceId | undefined = value; up !== undefined;) {
     program.work.charge("checks");
-    literal = up;
+    outer = up;
     const holder = walk.heldIn.get(up);
     up = holder === undefined ? undefined : program.cellOwner.get(holder)?.owner;
   }
-  if (literal === undefined) return;
-  const holders = walk.storesOf?.get(literal) ?? [];
+  const holders = walk.storesOf?.get(outer) ?? [];
   for (const d of holders)
     storeMark(walk, d, d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path);
-  if (holders.length === 0) literalMark(walk, literal);
+  if (holders.length === 0) literalMark(walk, outer);
 }
 
-/** A literal no definition holds, marked at its own site, its type undecided (r4.100, r4.138), once. */
+/** A value no definition holds, a literal or a join, marked at its own site, its type undecided (r4.100, r4.138), once. */
 function literalMark(walk: Consumers, literal: PlaceId): void {
   const { program } = walk.pass;
   const site = program.places[literal]?.site ?? null;

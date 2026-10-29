@@ -1008,6 +1008,200 @@ test("before admission settled every store into an inferred place is marked, aft
 });
 
 /**
+ * #1275 (Codex r7's B2 on #1310): a pass keys the stores below an own selection by the targets the pass before it gave,
+ * and where its admission gives others the passes start again, so a stop before they do settles nothing (TABLE r4.110
+ * (3)): its finishing path marks such a store as it marks every store into an inferred place, and the store's error
+ * stands as that mark. Each own selection, both orders, each end of the first pass's walk.
+ */
+test("a stop before a store below an own selection takes its target settles nothing and marks the store", () => {
+  const options = { globals: ["hostValue", "hostOther"] };
+  const phases = ["setup", "admission", "walk", "publication"];
+  for (const own of ["first", "last", "random"])
+    for (const reversed of [false, true]) {
+      const source = `let box = {${own}: {n: 1}}\nbox.${own}.n = "bad"\nsay "AFTER"\nexit\n`;
+      const where = `${own} reversed: ${reversed}`;
+      const inOrder = <T>(make: () => T): T =>
+        reversed
+          ? withSolverSeam({ reverseWorklist: true }, () =>
+              withConsumerOrder((list) => [...list].reverse(), make),
+            )
+          : make();
+      const request = coreRequest([{ path: "main.tease", source }], options.globals);
+      assert.ok(request !== null);
+      const both = () =>
+        inOrder(() => ({
+          result: compileSourceWithBackend(source, options, CORE_BACKEND),
+          answers: analyseCore(request),
+        }));
+      const runAt = (allowance?: number): StopRun => {
+        const allowed = <T>(make: () => T): T =>
+          allowance === undefined ? make() : withTestAllowance(allowance, make);
+        return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
+      };
+      const unstopped = runAt();
+      const value = source.indexOf('"bad"');
+      assert.deepEqual(
+        unstopped.answers.diagnostics
+          .filter((d) => d.class === "compile-error")
+          .map((d) => `${d.code} ${d.site.start}`),
+        [`TSV041 ${value}`],
+        where,
+      );
+      // (how far a stop at the allowance came: the passes started again, its phase in its pass)
+      const reached = (allowance: number): number => {
+        const { counts, stoppedIn } = withTestAllowance(allowance, () =>
+          inOrder(() => analyseCore(request)),
+        ).budget;
+        return (counts.get("rejectPasses") ?? 0) * phases.length + phases.indexOf(stoppedIn ?? "");
+      };
+      const lowest = (at: number): number => {
+        let [low, high] = [1, unstopped.answers.budget.total];
+        while (low < high) {
+          const middle = (low + high) >> 1;
+          if (reached(middle) >= at) high = middle;
+          else low = middle + 1;
+        }
+        return low;
+      };
+      const walk = phases.indexOf("walk");
+      for (const allowance of [lowest(walk), lowest(walk + 1) - 1]) {
+        assert.equal(reached(allowance), walk, `${where} @${allowance}`);
+        const stopped = runAt(allowance);
+        assert.equal(stopped.answers.budget.settled, false, `${where} @${allowance}`);
+        assert.ok(
+          stopped.answers.budget.deferred.some(
+            (d) =>
+              d.code === "TSV041" &&
+              d.site.start === value &&
+              d.obligation.against.length === 1 &&
+              d.obligation.against[0] === "unknown",
+          ),
+          `${where} @${allowance}`,
+        );
+        assert.deepEqual(
+          stopProblems({ unstopped, stopped, fitting: [], violating: [] }),
+          [],
+          `${where} @${allowance}`,
+        );
+      }
+    }
+});
+
+/**
+ * S3 §5 with #1275 (Codex r10's B1 on #1310): a store at a key whose decision stopped is an obligation the stop stands
+ * for (`Consumers.#stoppedStores`), whichever pass stopped it: a pass that both stops a decision and gives new store
+ * targets starts again with the key stopped, and the store keeps a mark there, through demand-only completion and a
+ * settled program stop alike. Each own selection's invalid store beside a property's and a variable's, in both
+ * orders with the sharing on and off, at half of each decision's demand: the completed analysis keeps each error as an
+ * error or as a warning or a stop's mark with a check at its site, and adds none (against the unbounded analysis); and
+ * where a pass started again, a program stop halfway through the analysis and at its end changes nothing the stop oracle
+ * does not excuse (against the completed analysis at that demand allowance, as above). The generated family (every
+ * decision's demand at several fractions, an add, a k = 64 joined list, work stops across the restarted pass) runs
+ * outside CI.
+ */
+test("a store at a stopped decision's key keeps an obligation, whichever pass stopped it (S3 §5, #1275)", () => {
+  const options = { globals: ["hostValue", "hostOther"] };
+  const sources = [
+    ...["first", "last", "random"].map((own) => `let box = {${own}: {n: 1}}\nbox.${own}.n = "bad"`),
+    'let box = {inner: {n: 1}}\nbox.inner.n = "bad"',
+    'let n = 1\nn = "bad"',
+  ].map((body) => `${body}\nsay "DONE"\nexit\n`);
+  const modes: readonly (readonly [string, <T>(make: () => T) => T])[] = [
+    ["forward", (make) => make()],
+    [
+      "reversed",
+      (make) =>
+        withSolverSeam({ reverseWorklist: true }, () =>
+          withConsumerOrder((list) => [...list].reverse(), make),
+        ),
+    ],
+    ["forward, unshared", (make) => withoutSharing(make)],
+    [
+      "reversed, unshared",
+      (make) =>
+        withoutSharing(() =>
+          withSolverSeam({ reverseWorklist: true }, () =>
+            withConsumerOrder((list) => [...list].reverse(), make),
+          ),
+        ),
+    ],
+  ];
+  let combined = 0;
+  for (const source of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], options.globals);
+    assert.ok(request !== null);
+    for (const [name, inMode] of modes) {
+      const runAt = (demand: number | null, work: number | null): StopRun => {
+        const allowed = <T>(make: () => T): T =>
+          inMode(() => {
+            const demanded = () =>
+              demand === null ? make() : withTestDemandAllowance(demand, make);
+            return work === null ? demanded() : withTestAllowance(work, demanded);
+          });
+        const both = () => ({
+          result: compileSourceWithBackend(source, options, CORE_BACKEND),
+          answers: analyseCore(request),
+        });
+        return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
+      };
+      const unbounded = runAt(null, null);
+      const errors = unbounded.answers.diagnostics
+        .filter((d) => d.class === "compile-error")
+        .map((d) => d.site.start);
+      assert.ok(errors.length > 0, source);
+      const demands = new Set(
+        unbounded.answers.budget.decisions
+          .filter((d) => d.units >= 2)
+          .map((d) => Math.floor(d.units / 2)),
+      );
+      for (const demand of demands) {
+        const where = `${name} @${demand}: ${source}`;
+        const capped = runAt(demand, null);
+        const { budget } = capped.answers;
+        const kept = capped.answers.diagnostics
+          .filter((d) => d.class === "compile-error")
+          .map((d) => d.site.start);
+        const marked = [
+          ...capped.answers.diagnostics.filter((d) => d.class === "warning-runtime-check"),
+          ...budget.deferred,
+        ].map((d) => d.site.start);
+        const checked = capped.answers.checks.map((check) => check.site.start);
+        assert.deepEqual(
+          errors.filter(
+            (at) => !kept.includes(at) && !(marked.includes(at) && checked.includes(at)),
+          ),
+          [],
+          `${where}: an error neither kept nor checked`,
+        );
+        assert.deepEqual(
+          kept.filter((at) => !errors.includes(at)),
+          [],
+          `${where}: an error the unbounded analysis lacks`,
+        );
+        const stopPasses = budget.counts.get("stopPasses") ?? 0;
+        if (stopPasses === 0 || budget.exhausted !== null) continue;
+        if ((budget.counts.get("rejectPasses") ?? 0) > 0) combined += 1;
+        // (a program stop halfway through the analysis and at its end)
+        const total = budget.total;
+        for (const work of [Math.floor(total / 2), total - 1])
+          assert.deepEqual(
+            stopProblems({
+              unstopped: capped,
+              stopped: runAt(demand, work),
+              fitting: [],
+              violating: [],
+            }),
+            [],
+            `${where} #${work}`,
+          );
+      }
+    }
+  }
+  // (a decision stop and new store targets in one pass: Codex r10's B1 shape)
+  assert.ok(combined > 0);
+});
+
+/**
  * Before admission settled, a store marked with its type undecided stands for its records within its value and for the
  * errors it brought (TABLE r4.111): an object stored with host data inside it (Codex r8's copy of fields), a typed parse
  * inside a typed default, a copy whose conflict A2 finds where it meets the place (the error inside the store's value,
@@ -1688,7 +1882,8 @@ test("a marked store's records within its value are compared alike on both sides
  * Before admission settled, a store into a written type is checked by admission's own C1, the derivation the analysis
  * runs unstopped, reading what the stop retained (TABLE r4.125, r4.126, Astra r4's B1): two wrong elements give one
  * error, a record literal its own kind, in a list, a set, a dict and a nested list; and admission's mixed-element check
- * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred; a written
+ * (ADR 0021 1.3) as it runs it, a mixed literal's grouping and an error that only it finds, written or inferred, and a
+ * join of two literals' (#1272); a written
  * parameter's every call, a dead one too (Codex r16, r17). At every stop before admission settled the errors, their
  * sites and sentences equal the unstopped ones.
  */
@@ -1703,6 +1898,7 @@ test("a stop before admission settled checks a written store by admission's own 
     'let xs: integer[] set = set[]\nxs.add(["wrong", true])\nexit\n',
     'let xs: (integer | string)[] set = set[]\nxs.add([1, "a"])\nexit\n',
     'let ys = [1, "a"]\nexit\n',
+    'let ys = [1] + ["a"]\nexit\n',
     'function f(xs: integer[]) { say "x" }\nf(["wrong"])\nf(["bad"])\nexit\n',
     'function f(xs: integer[]) { say "x" }\nexit\nf(["wrong"])\n',
   ]) {
@@ -1743,6 +1939,33 @@ test("a stop before admission settled marks the store of a literal whose element
         (d) =>
           d.code === "TSV041" &&
           d.site.start === literal &&
+          d.obligation.against.length === 1 &&
+          d.obligation.against[0] === "unknown",
+      ),
+      `@${allowance}`,
+    );
+  }
+});
+
+/**
+ * Before admission settled, a list join with an operand read through a decision admission did not make (here an inferred
+ * variable) is not compared for mixed elements (#1272): a join no definition holds is marked at its own site, its type
+ * undecided, as a literal is (`#markValue`). At a stop in the setup and at the last before admission settled the mark
+ * stands.
+ */
+test("a stop before admission settled marks a list join whose operand needs a decision", () => {
+  const source = 'let xs = [1]\nsay (xs + ["a"]).length\nexit\n';
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+  assert.ok(request !== null);
+  const join = source.indexOf("xs +");
+  for (const allowance of [ALLOWANCE, lastUnsettled(source)]) {
+    const stopped: Answers = withTestAllowance(allowance, () => analyseCore(request));
+    assert.equal(stopped.budget.settled, false, `@${allowance}`);
+    assert.ok(
+      stopped.budget.deferred.some(
+        (d) =>
+          d.code === "TSV041" &&
+          d.site.start === join &&
           d.obligation.against.length === 1 &&
           d.obligation.against[0] === "unknown",
       ),

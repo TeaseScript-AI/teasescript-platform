@@ -23,6 +23,7 @@ import {
 import { copyGraph } from "./admission/inherited.js";
 import { typedByDefault } from "./admission/landing-index.js";
 import {
+  joinElements,
   literalChildren,
   literalElements,
   offendingAt,
@@ -42,6 +43,7 @@ import type {
   IngressStop,
   Inheritance,
   InheritedCopy,
+  Join,
   KeyStops,
   LandingIndex,
   Level,
@@ -293,6 +295,8 @@ export class Admission {
    * class alone (`snapshots`).
    */
   readonly snapshotLists = new WeakMap<readonly Stop[], (readonly Stop[] | undefined)[]>();
+  /** Per such snapshot, its stops a list join carries (`earliestDecider`), each asked whatever came before it. */
+  readonly joinedLists = new WeakMap<readonly Stop[], readonly Stop[]>();
   readonly resolved = new Map<IngressNode, boolean>();
   readonly f18 = new Map<
     PlaceId,
@@ -591,6 +595,7 @@ export class Admission {
     kinds: (of) =>
       new Set(this.run(this.pass.contract.contractOfValue(of)).map((item) => item.tag)),
     reference: (receiver) => heldReference(this.run(this.pass.contract.valueReceiver(receiver))),
+    joined: (operand) => this.pass.lists.joined(operand),
   };
 
   /** The values a value carries, with the path into each its value is read at: the carrier table's (`carried`). */
@@ -686,6 +691,21 @@ export class Admission {
     undecided?: (cell: PlaceId) => void,
   ): void {
     literalElements(this, order, error, undecided);
+  }
+
+  public joinElements(
+    order: <T>(list: readonly T[]) => T[],
+    error: (found: {
+      readonly c: Join;
+      readonly path: readonly string[];
+      readonly earliest: readonly ItemTag[];
+      readonly kinds: readonly ItemTag[];
+      readonly value: PlaceId;
+      readonly levels: readonly (readonly ItemTag[])[] | null;
+    }) => void,
+    undecided?: (value: PlaceId) => void,
+  ): void {
+    joinElements(this, order, error, undecided);
   }
 
   public typedByDefault(value: PlaceId): boolean {

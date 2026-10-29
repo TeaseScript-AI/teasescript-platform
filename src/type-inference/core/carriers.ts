@@ -172,10 +172,14 @@ export function operandsOf(program: CoreProgram, value: PlaceId): readonly Opera
   return [];
 }
 
-/** The value side's decisions a walk asks before it carries (F19a's RECEIVER decision, the contract's kinds). */
+/**
+ * The value side's decisions a walk asks before it carries (F19a's RECEIVER decision, the contract's kinds, and whether
+ * a list `+` keeps an operand admission did not reject from it: A6, `joinElements`).
+ */
 export interface Dispatch {
   kinds(of: PlaceId): ReadonlySet<ItemTag>;
   reference(receiver: PlaceId): boolean;
+  joined(operand: PlaceId): boolean;
 }
 
 /**
@@ -233,6 +237,7 @@ export function carried(
   let kinds: ReadonlySet<ItemTag> | null = null;
   for (const { operand, below, when, role, position } of operandsOf(program, value)) {
     if (when === "elements" && !elements) continue;
+    if (role === "concatenation/operand" && !dispatch.joined(operand)) continue;
     if (when === "list or set" || when === "object" || when === "dict") {
       kinds ??= dispatch.kinds(operand);
       if (when === "list or set" && !kinds.has("list") && !kinds.has("set")) continue;

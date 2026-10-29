@@ -35,6 +35,7 @@ export function propertyNames(
   const dispatch: Dispatch = {
     kinds: (of) => new Set(run(contract.contractOfValue(of)).map((item) => item.tag)),
     reference: (receiver) => heldReference(run(contract.valueReceiver(receiver))),
+    joined: (operand) => pass.lists.joined(operand),
   };
   while (pending.length > 0) {
     const task = pending.pop()!;

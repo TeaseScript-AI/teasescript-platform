@@ -363,7 +363,11 @@ export class DefinitionIndex {
   readonly ordinary: ReadonlySet<Callable>;
   #serial = 0;
 
-  public constructor(readonly program: CoreProgram) {
+  public constructor(
+    readonly program: CoreProgram,
+    /** Stores whose receivers select an object's own `first`, `last` or `random`, by their place: their targets (#1275). */
+    readonly storeTargets: ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>> = new Map(),
+  ) {
     const work = program.work;
     this.stored = new KeyTrie(work, "rdWalk", () => [
       ...this.byKey.keys(),
@@ -499,7 +503,8 @@ export class DefinitionIndex {
 
   #store(constraint: Extract<CoreProgram["constraints"][number], { kind: "store" }>): void {
     const program = this.program;
-    const target = program.targetRoot(constraint.into, true);
+    const target =
+      this.storeTargets.get(constraint.into) ?? program.targetRoot(constraint.into, true);
     const projection = program.projOf.get(constraint.into);
     const add =
       ["element", "elements", "entry"].includes(constraint.how) &&
@@ -939,6 +944,14 @@ export interface Reaching {
 }
 
 /**
+ * A list `+`'s operand that admission rejects from its join (A6, `joinElements`) is kept with the rejected stores, by
+ * a number no definition has (definitions count from 0).
+ */
+export function joinedOperand(operand: PlaceId): number {
+  return -1 - operand;
+}
+
+/**
  * The definition lists of one pass (A6 recomputes them after a rejection): per key its live definitions sorted in
  * dominator order with a lifting table, the nearest dominating definition over a key and its prefixes, the own-event
  * lists, X6's first event between two nodes, and R.
@@ -954,6 +967,8 @@ export class DefinitionLists {
     readonly index: DefinitionIndex,
     /** Whether a store takes part: not rejected by admission (A6). */
     readonly live: (d: Definition) => boolean,
+    /** Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`). */
+    readonly joined: (operand: PlaceId) => boolean = () => true,
   ) {}
 
   get #program(): CoreProgram {

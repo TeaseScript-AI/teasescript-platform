@@ -312,6 +312,8 @@ function plusBefore(contract: Contract, value: PlaceId, exact: boolean): PlaceId
   const own = plus(value);
   const left = own === null ? null : plus(own[0]!);
   if (own === null || left === null) return null;
+  // (a join an operand was rejected from answers alone: A6, `joinElements`)
+  if (![...own, ...left].every((operand) => contract.pass.lists.joined(operand))) return null;
   const cls = contract.classOf(own[1]!, exact);
   if (
     cls === null ||

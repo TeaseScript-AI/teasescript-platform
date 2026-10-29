@@ -80,8 +80,8 @@ export type WorkCounter =
   | "mergeItems"
   | "sigItems"
   | "operatorSteps"
-  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6),
-  // and those after a pass in which a decision stopped (TABLE r4.180)
+  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6,
+  // and #1275's store targets), and those after a pass in which a decision stopped (TABLE r4.180)
   | "checks"
   | "checksSkipped"
   | "rejectPasses"
@@ -93,6 +93,8 @@ export type WorkCounter =
   | "quietProofs"
   | "c1Visits"
   | "structureSteps"
+  // the list join check's composition of an operand's parts (#1310): each entry and open path of the smaller part
+  | "partVisits"
   // the writers the result names
   | "evidence"
   // what a decision's stop forgets by (#1403), counted apart (`countApart`): each demand's reader, each key a demand

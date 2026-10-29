@@ -8,6 +8,8 @@ import type { Landing, LandingQuestion } from "./model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
 import { placeText, storeRoot, storeSteps } from "./warnings.js";
 
+// Elements of more than one type (ADR 0021 1.3): a literal's where it lands, and a list join's (#1272).
+
 /**
  * Where a literal lands (A2): the place and the key path that a whole store, an add (an added list as the collection
  * itself, an added element one step below), or the literals around it (a collection's cell as `element`, an object's
@@ -197,6 +199,44 @@ export function mixed(
               (each) => each.kind === "whole" && each.path.length === 0,
             ),
       ),
+    },
+    found.kinds,
+  );
+}
+
+/**
+ * ADR 0021 1.3, V30 §4 and §16: a list's `+` whose right operand's elements are of another type than the left's
+ * (`Admission.joinElements`, #1272): an error at the join, a `+=`'s at its right operand, as the current checker gives
+ * it. Its fix declares the variable whose start value the joined list is, with its own start value (#1268, TABLE
+ * r4.146), and names the type in words elsewhere (`mixedJoinFix`).
+ */
+export function mixedJoin(
+  walk: Consumers,
+  found: Parameters<Parameters<Admission["joinElements"]>[1]>[0],
+): void {
+  const { program } = walk.pass;
+  const { c } = found;
+  const right = c.arguments[1]!;
+  const place = program.place(c.result).kind;
+  const compound = place.kind === "value" && place.node === "compound";
+  const start = (walk.pass.definitions.byValue.get(found.value) ?? []).find(
+    (d) =>
+      d.kind === "whole" &&
+      d.path.length === 0 &&
+      (d.how === "initializer" || d.how === "parameter default"),
+  );
+  error(
+    walk,
+    "written-target",
+    compound ? (program.places[right]?.site ?? c.site) : c.site,
+    {
+      rule: "mixed",
+      collection: "list",
+      path: found.path,
+      type: found.earliest,
+      root: start === undefined ? null : storeRoot(walk, start.place),
+      operator: compound ? "+=" : "+",
+      levels: found.levels,
     },
     found.kinds,
   );

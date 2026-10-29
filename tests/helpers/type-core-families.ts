@@ -3376,8 +3376,119 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       return main(lines('let seed = "origin"', `let out = ${value}`, "say out", "exit"));
     },
   })),
+  {
+    name: "join-run",
+    measures:
+      "#1272: a run of k joined lists, the last of another type, each operand decided once and the last rejected",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = [0] + ${Array.from({ length: k }, (_, i) => `[${i + 1}]`).join(" + ")} + ["x"]`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "join-right-nested",
+    measures: "#1272 (Codex r1 on #1310): k joins each holding the next in its right operand",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = ${Array.from({ length: k }).reduce<string>((inner, _, i) => `[${i + 1}] + (${inner})`, "[0]")}`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "join-right-nested-fields",
+    measures:
+      "#1272 (Codex r7's B3 on #1310): k joins each holding the next in its right operand, each element's property its own",
+    program: (k) =>
+      main(
+        lines(
+          `let xs = ${Array.from({ length: k }).reduce<string>((inner, _, i) => `[{p${i}: 1}] + (${inner})`, "[{lastValue: 0}]")}`,
+          "say xs.length",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "own-selection-stores",
+    measures:
+      "#1275 (Codex r1 on #1310): k stores of a receiver below an own selection, then k stores below it",
+    program: (k) =>
+      main(
+        lines(
+          "let a = {first: {last: {random: {n: 1}}}}",
+          rows(k, () => "a.first.last = {random: {n: 1}}"),
+          rows(k, () => "a.first.last.random.n = 2"),
+          "exit",
+        ),
+      ),
+  },
   ...INHERITED_FIELD_FAMILIES,
 ];
+
+/**
+ * #1310 (the lead's rule for the join check): k joins, each operand reaching the previous join's result through a
+ * literal's property, a nested list element, either side of an `otherwise`, a kept variable or a copy, the joins nested to the
+ * left and to the right; the first list of a written union (no error), or of whole numbers, the last join adding text
+ * (an error there), or each link an object of its own property, so the composed type grows with the chain (Codex r15's
+ * B1). Each operand that reaches an earlier join takes its composed type, never copied: no tree is composed again.
+ */
+export const JOIN_REACH_FAMILIES: readonly WorkFamily[] = (
+  [
+    ["property", (x: string) => `({n: ${x}}).n`],
+    ["element", (x: string) => `[${x}][0]`],
+    ["choice", (x: string, fallback: string) => `((${x}) otherwise ${fallback})`],
+    ["choice-later", (x: string) => `([] otherwise (${x}))`],
+    ["kept", null],
+    ["copy", null],
+  ] as const
+).flatMap(([way, wrap]) =>
+  [true, false].flatMap((left) =>
+    (["", "-conflict", "-width"] as const).map((leaf): WorkFamily => {
+      const element = (i: number): string => (leaf === "-width" ? `{p${i}: ${i}}` : `${i}`);
+      const join = (x: string, i: number): string =>
+        left ? `${x} + [${element(i)}]` : `[${element(i)}] + ${x}`;
+      // (the width's first list a literal: a variable read beside each join of distinct properties is #1384's)
+      const first = {
+        "": "let xs: (integer | string)[] = [0]",
+        "-conflict": "let xs = [0]",
+        "-width": null,
+      }[leaf];
+      const last = { "": '["x"]', "-conflict": '["x"]', "-width": "[{q: 0}]" }[leaf];
+      return {
+        name: `join-reach-${way}-${left ? "left" : "right"}${leaf}`,
+        measures: `#1310: k joins nested to the ${left ? "left" : "right"}, each reaching the last through ${{ kept: "a kept variable", copy: "a copy", choice: "an otherwise's first side", "choice-later": "an otherwise's later side", property: "a property", element: "an element" }[way]}${leaf === "-conflict" ? ", the last adding text" : leaf === "-width" ? ", each link an object of its own property" : ""}`,
+        program: (k) => {
+          const body: string[] = first === null ? [] : [first];
+          const fallback = leaf === "-width" ? "[{p0: 0}]" : "[0]";
+          let value = first === null ? "[{p0: 0}]" : "xs";
+          if (wrap !== null) for (let i = 1; i <= k; i += 1) value = wrap(join(value, i), fallback);
+          else {
+            body.push(`let v0 = ${value}`);
+            for (let i = 1; i <= k; i += 1) {
+              if (way === "copy") body.push(`let c${i} = v${i - 1}`);
+              body.push(`let v${i} = ${join(way === "copy" ? `c${i}` : `v${i - 1}`, i)}`);
+            }
+            value = `v${k}`;
+          }
+          return main(
+            lines(
+              ...body,
+              `let s = ${left ? `${value} + ${last}` : `${last} + ${value}`}`,
+              "say s.length",
+              "exit",
+            ),
+          );
+        },
+      };
+    }),
+  ),
+);
 
 /** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
 function nestedOwn(variant: string, wrap: (inner: string, i: number) => string): WorkFamily {

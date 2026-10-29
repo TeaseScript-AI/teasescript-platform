@@ -1545,6 +1545,95 @@ test("a store into an object's own first, last or random sets that property and 
 });
 
 /**
+ * #1275 (ADR 0021 §1.1, §1.4, §1.10): a store below an object's own `first`, `last` or `random` stores into the
+ * property below it, so its value is checked against that property's type as below any other property, while F11 still
+ * reads such a property opaquely. The owner's reviewer's matrix: each name × a direct, a copied, a projected and an
+ * indexed receiver × a literal of another type (the current checker's TSV041, no plan) and a host value (its store
+ * checked: text stops the run there, a whole number is stored), in both orders and with the sharing on and off. A final
+ * store keeps #1260's check, an object's own `random` draws nothing, and a list's selection stays its element.
+ */
+test("a store below an object's own first, last or random checks the property it stores into (#1275)", () => {
+  const receivers = [
+    ["let box = {NAME: {n: 1}}\n", "box"],
+    ["let seed = {NAME: {n: 1}}\nlet box = seed\n", "box"],
+    ["let outer = {box: {NAME: {n: 1}}}\n", "outer.box"],
+    ["let boxes = [{NAME: {n: 1}}]\n", "boxes[0]"],
+  ] as const;
+  for (const name of ["first", "last", "random"])
+    for (const [declaration, receiver] of receivers)
+      for (const value of ['"bad"', "hostValue"]) {
+        const store = `${receiver}.${name}.n = ${value}\n`;
+        const source =
+          `${declaration.replace("NAME", name)}say "BEFORE"\n${store}` +
+          `say ${receiver}.${name}.n\nsay "AFTER"\nexit\n`;
+        const at = source.indexOf(store) + store.indexOf(value);
+        for (const shared of [true, false]) {
+          const [{ plan }, diagnostics] = (shared ? <T>(run: () => T) => run() : withoutSharing)(
+            () => inBothOrdersAs(() => candidate(source), sited),
+          );
+          const errors = diagnostics.filter((diagnostic) => diagnostic.startsWith("error"));
+          if (value !== "hostValue") {
+            assert.deepEqual(errors, [`error TSV041@${at}`], source);
+            assert.equal(plan, null, source);
+            continue;
+          }
+          assert.deepEqual(errors, [], source);
+          assert.ok(diagnostics.includes(`warning TSV041@${at}`), `${source}: ${diagnostics}`);
+          assert.ok(plan !== null, source);
+          assert.deepEqual(
+            runWith(plan, "bad"),
+            { status: "failed", failure: `TSR058@${at}:${at + value.length}`, says: ["BEFORE"] },
+            source,
+          );
+          assert.deepEqual(runWith(plan, 2).says, ["BEFORE", "2", "AFTER"], source);
+        }
+      }
+  // a receiver admission decided keeps its object proof beside a later host value or a rejected store (Codex r1 on
+  // #1310)
+  for (const [parent, expected] of [
+    ["hostValue", ["error TSV041@91"]],
+    ["[]", ["error TSV041@57", "error TSV041@84"]],
+  ] as const) {
+    const source = `let a = {first: {last: {random: {n: 1}}}}\na.first.last = ${parent}\na.first.last.random.n = "bad"\nexit\n`;
+    const compiled = inBothOrders(() => candidate(source));
+    assert.deepEqual(
+      sited(compiled).filter((diagnostic) => diagnostic.startsWith("error")),
+      expected,
+      source,
+    );
+    assert.equal(compiled.plan, null, source);
+  }
+  // #1260's final store keeps its check
+  const final = candidate("let box = {first: 1}\nbox.first = hostValue\nsay box.first\nexit\n");
+  assert.ok(sited(final).includes("warning TSV041@33"), sited(final).join(", "));
+  assert.equal(runWith(final.plan!, "bad").failure, "TSR058@33:42");
+  // an object's own `random` is its property: storing below it draws nothing
+  const own = candidate(
+    "let box = {random: {n: 1}}\nbox.random.n = hostValue\nsay box.random.n\nexit\n",
+  );
+  const start = createImmediatePacingRuntimeSnapshot(own.plan!, { globals: { hostValue: 2 } });
+  assert.deepEqual(run(own.plan!, start).snapshot.rng, start.rng);
+  // a list's selection stays its element, its element's property checked
+  for (const [source, expected] of [
+    ['let xs = [{n: 1}]\nxs.first.n = "bad"\nexit\n', ["compile-error store"]],
+    ['let xs = [{n: 1}]\nxs.random.n = "bad"\nexit\n', ["compile-error store"]],
+    ["let xs = [{n: 1}]\nxs.first.n = 2\nexit\n", []],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    assert.deepEqual(
+      analyseCore(request).diagnostics.map((diagnostic) =>
+        diagnostic.kind === "written-type" || diagnostic.kind === "budget"
+          ? diagnostic.kind
+          : `${diagnostic.class} ${diagnostic.rule.rule}`,
+      ),
+      expected,
+      source,
+    );
+  }
+});
+
+/**
  * Deep and broad list literals on the candidate route (TABLE r4.58): their indexes share one text per path and order
  * their identities by path id, and the core charges what they keep. A read 64 levels into a literal, through two
  * aliases, of external data 32 levels in and of the last of 512 elements or 300 rows; and two literals 40 deep stored

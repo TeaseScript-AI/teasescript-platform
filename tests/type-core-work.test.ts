@@ -21,6 +21,7 @@ import {
   DIRECT_INGRESS_PROGRAMS,
   HOT_CANDIDATE_FAMILIES,
   INHERITED_FIELD_FAMILIES,
+  JOIN_REACH_FAMILIES,
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   ORACLE_PROGRAMS,
@@ -139,15 +140,16 @@ function steepCounters(
   unshared = false,
   measure: (at: Sized, reversed: boolean) => Measured = (at, reversed) =>
     analysed(at, reversed, unshared).budget,
+  sizes: readonly [number, number] = [64, 128],
 ): string[] {
   const steep: string[] = [];
   for (const family of families) {
-    const [at64, at128] = [sized(family, 64), sized(family, 128)];
+    const [at64, at128] = [sized(family, sizes[0]), sized(family, sizes[1])];
     for (const reversed of [false, true]) {
       const small = measure(at64, reversed);
       const large = measure(at128, reversed);
       const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-      const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+      const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}${sizes[0] === 64 ? "" : ` ${sizes[0]} → ${sizes[1]}`}`;
       const doubling = (before: number, after: number): number =>
         (2 * (after / Math.max(1, before))) / scale;
       if (doubling(small.total, large.total) > DOUBLING)
@@ -860,6 +862,77 @@ test("each product a repair removed grows with the program in either order (#119
         steep.push(`${name} ${family.counter}: ${doubling(before!, after!).toFixed(3)}`);
     }
   }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * #1310 (the lead's rule): an operand that reaches an earlier join, through a literal's property, a nested list element,
+ * an `otherwise`'s side, a kept variable or a copy, takes that join's composed type, so the join check composes each
+ * tree once (beside #1357's prefixes each in an object above): each family's total and its counters grow with the
+ * program in either order, the sharing on and off. The kept variables and copies of a written union without a conflicting
+ * leaf are reported, not gated: admission's landings walk the chain once per link on `main` too (#1428), the copies'
+ * charged work (`landedBelow`'s `copiesAlong`, `landsThrough` and `emit` from `hotSets`) and both forms' ids, made
+ * there below the charged length (`keptParts` in `landedBelow`, 14,470 → 57,510 code units kept, 28,974 → 115,217
+ * copied, as on `main`); at k = 64 → 128 total and `indexSteps`:
+ *
+ * | copies of a written union | `main` | this head |
+ * | joined at each link | 2.18, 2.47 | 2.16, 2.45 |
+ * | only copied | 2.02, 2.04 | 2.02, 2.04 |
+ * | joined, from an unwritten list | 2.01, 2.03 | 2.01, 2.02 |
+ *
+ * Each link an object of its own property, the composed type grows with the chain (Codex r15's and r16's B1): the
+ * projections' members are gated at 64 → 128 and 128 → 256, the growing join an operand's first part (an `otherwise`'s
+ * first side); a kept variable's and a copy's are reported, a variable read beside each join of distinct properties
+ * growing on `main` too (#1384: about 3.4 total, `exactValues` 3.9). An `otherwise` holding the earlier join on its
+ * later side is reported too: its charged work is linear, but on `main` too the fallback check makes its labels below
+ * the charged length, 4.0 per doubling for any nested `otherwise` (#1433); the composition's own invariant is gated on
+ * it below. (A literal's later element, the other later part, is #1192's accepted nested-literal product on `main`.)
+ */
+test("a join's operand reaching an earlier join takes its composed type, its work linear either way (#1310)", () => {
+  const gated = JOIN_REACH_FAMILIES.filter(
+    (family) =>
+      !/^join-reach-(kept|copy)-(left|right)(-width)?$/.test(family.name) &&
+      !family.name.startsWith("join-reach-choice-later-"),
+  );
+  assert.equal(gated.length, 22);
+  // (a composed type growing with the chain: its second doubling too, where a walk of a growing part first crosses the
+  // total's gate, Codex r16's B1)
+  const growing = gated.filter((family) => family.name.endsWith("-width"));
+  assert.deepEqual(
+    [
+      ...steepCounters(gated),
+      ...steepCounters(gated, true),
+      ...steepCounters(growing, false, undefined, [128, 256]),
+      ...steepCounters(growing, true, undefined, [128, 256]),
+    ],
+    [],
+  );
+});
+
+/**
+ * #1310: composing an operand's parts visits the smaller part only, so an earlier join growing with a chain is never
+ * walked again where it stands as an operand's later part (`join-reach-choice-later-*`, an `otherwise`'s later side).
+ * This gates that one operation, its visits (`partVisits`) at most 2.15 per doubling in either order; a walk of the
+ * later part measures 3.9. It claims nothing about the shape: the shape's total is #1433's, the fallback check making
+ * its labels below the charged length (4.0 per doubling, on `main` too), and the shape stays out of the gate above.
+ */
+test("the composition of an operand's parts visits only its smaller part, on a shape whose total is #1433's (#1310)", () => {
+  const steep: string[] = [];
+  const later = JOIN_REACH_FAMILIES.filter((family) =>
+    family.name.startsWith("join-reach-choice-later-"),
+  );
+  assert.equal(later.length, 6);
+  for (const family of later)
+    for (const reversed of [false, true]) {
+      const [small, large] = [64, 128].map((k) => analysed(sized(family, k), reversed).budget);
+      const visits = (budget: Measured): number => budget.counts.get("partVisits") ?? 0;
+      assert.ok(visits(large!) >= 128, `${family.name}: each link's parts composed`);
+      const scale =
+        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (visits(large!) / Math.max(1, visits(small!)))) / scale;
+      if (doubling > DOUBLING)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
   assert.deepEqual(steep, []);
 });
 
