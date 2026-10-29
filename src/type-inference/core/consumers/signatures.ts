@@ -11,7 +11,7 @@ import type { PlaceId } from "../../graph.js";
 import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
-import { keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
+import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
@@ -286,7 +286,7 @@ export function jsonArgument(
   const { contract } = walk.pass;
   const exact = contract.readClass(value, true);
   const kinds = contract.readClass(value, false);
-  const cls = exact === null || kinds === null ? null : `${exact}|${kinds}`;
+  const cls = exact === null || kinds === null ? null : keptParts(program.work, exact, kinds);
   let proofs = JSON_PROOFS.get(walk);
   if (proofs === undefined) JSON_PROOFS.set(walk, (proofs = new Map()));
   const key = cls === null ? null : `${walk.asksNothing() ? "n" : ""}${cls}`;
