@@ -8,7 +8,7 @@ import type { SerializableRuntimeValue } from "../../src/runtime/values/serializ
  */
 
 /** A written type form of V30 §13: a type name, `T?`, `T | U`, or a list, set or dict of a form. */
-type Form =
+export type Form =
   | { readonly kind: "name"; readonly name: string }
   | { readonly kind: "optional"; readonly of: Form }
   | { readonly kind: "union"; readonly members: readonly Form[] }
@@ -43,17 +43,17 @@ const CONTROL_NAMES = [
 
 const UNRESTRICTED: ReadonlySet<string> = new Set(UNRESTRICTED_NAMES);
 
-const name = (of: string): Form => ({ kind: "name", name: of });
-const optional = (of: Form): Form => ({ kind: "optional", of });
+export const name = (of: string): Form => ({ kind: "name", name: of });
+export const optional = (of: Form): Form => ({ kind: "optional", of });
 const union = (...members: Form[]): Form => ({ kind: "union", members });
-const collection = (kind: Collection, of: Form): Form => ({
+export const collection = (kind: Collection, of: Form): Form => ({
   kind: "collection",
   collection: kind,
   of,
 });
 
 /** The form as the source writes it. */
-function formText(form: Form): string {
+export function formText(form: Form): string {
   const grouped = (of: Form): string => (of.kind === "union" ? `(${formText(of)})` : formText(of));
   switch (form.kind) {
     case "name":
@@ -103,7 +103,7 @@ function levelsOf(form: Form): string[][] {
 }
 
 /** The whole type the plan checks a store of the form against, as the tests print a `TypePlan`. */
-function checkedText(form: Form): string {
+export function checkedText(form: Form): string {
   switch (form.kind) {
     case "name":
       return form.name !== "object" && UNRESTRICTED.has(form.name)
@@ -226,7 +226,7 @@ function kindsOf(value: SerializableRuntimeValue): string[] {
 }
 
 /** Whether a host value fits a form (V30 §13; the plan's check): each element of a list or set, each value of a dict. */
-function fits(form: Form, value: SerializableRuntimeValue): boolean {
+export function fits(form: Form, value: SerializableRuntimeValue): boolean {
   switch (form.kind) {
     case "name":
       return kindsOf(value).includes(form.name);
