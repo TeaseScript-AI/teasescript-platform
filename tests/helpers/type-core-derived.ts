@@ -6,7 +6,7 @@ import {
   numberFromText,
 } from "../../src/conversions.js";
 import { escapeMarkup } from "../../src/message-markup.js";
-import { listProperty } from "../../src/list-methods.js";
+import { listMethod, listProperty } from "../../src/list-methods.js";
 import { parse } from "../../src/parser.js";
 import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import {
@@ -27,7 +27,15 @@ import {
 import { binaryFromBase64, binaryFromDataUrl } from "../../src/runtime/host-data/stored-files.js";
 import { RuntimeFault } from "../../src/runtime/errors.js";
 import { jsonText } from "../../src/runtime/values/json-base64.js";
+import { readCollection, sortOrder } from "../../src/runtime/values/collection-operations.js";
 import { callStringMethod } from "../../src/runtime/values/string-operations.js";
+import {
+  isDict,
+  isList as isRuntimeList,
+  isRange,
+  isSet,
+  isTemporal,
+} from "../../src/runtime/values/value-predicates.js";
 import { joinedText } from "../../src/runtime/values/value-text.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { CompactRecord } from "./type-core-records.js";
@@ -1036,11 +1044,13 @@ export function derive(
       // C13 (S9b): a `for` loop's iterable, which the loop's own check of its source takes (TSR044)
       native("iteration", at);
     } else if (check.kind === "operand") {
-      // C13 (S9b): a method's argument or what `toJson` writes, which the call's own check takes at the call
+      // C13 (S9b): a method's argument or what `toJson` writes, which the call's own check takes at the call, or the
+      // elements `join` or `sort` reads, whose obligation is the whole call's
       const call = all.find(
         (expression) =>
           expression.kind === "callExpression" &&
-          expression.arguments.some((argument) => site(unwrap(argument.value)) === at),
+          (site(expression) === at ||
+            expression.arguments.some((argument) => site(unwrap(argument.value)) === at)),
       );
       if (call === undefined)
         throw new Underivable(`an operand obligation at ${at} without a call`);
@@ -1140,6 +1150,8 @@ function expressions(statements: readonly Statement[]): Expression[] {
     } else if (statement.kind === "repeatStatement") walk(statement.count);
     else if (statement.kind === "ifStatement") walk(statement.condition);
     else if (statement.kind === "sayStatement") walk(statement.value);
+    else if (statement.kind === "expressionStatement") walk(statement.expression);
+    else if (statement.kind === "forStatement") walk(statement.iterable);
   }
   return out;
 }
@@ -1519,6 +1531,11 @@ export function evaluate(
           from: new Set(items.flatMap((item) => [...item.from])),
         };
       }
+      case "regexLiteral":
+        return {
+          v: { kind: "regex", source: expression.source, flags: expression.flags },
+          from: new Set(),
+        };
       case "rangeExpression": {
         // (a range of whole-number bounds; any other is the runtime's to reject)
         const [start, end] = [value(expression.start), value(expression.end)];
@@ -1634,30 +1651,52 @@ export function evaluate(
         };
         if (callee.kind === "propertyAccessExpression") {
           if (callee.property.name !== "get") {
-            // a method of the slice that keeps its receiver (S9b): text's as the runtime calls it, a list's `join`
+            // a method of the slice (S9b) as the runtime calls it: text's (`callStringMethod`), a list's or a set's
+            // that changes nothing (`readCollection`), and `sort`, which orders its list in place; the runtime's own
+            // check of an argument or an element fails at the call (TSV043 stands for a check that passes), and a
+            // receiver of another kind has no such method (TSR016, the call's member check)
             const method = callee.property.name;
             const from = new Set([
               ...receiver!.from,
               ...positional.flatMap((operand) => [...operand.from]),
             ]);
-            const texts = positional.map((operand) => operand.v);
-            if (typeof receiver!.v === "string" && texts.every((text) => typeof text === "string"))
-              return { v: callStringMethod(receiver!.v, method, texts, expression.span), from };
-            const list = receiver!.v;
-            if (
-              method === "join" &&
-              typeof list === "object" &&
-              list !== null &&
-              list.kind === "list" &&
-              texts.every((text) => typeof text === "string")
-            )
-              return {
-                v: list.items
-                  .map((item) => joinedText(item, expression.span, DEFAULT_TEMPORAL_CONTEXT))
-                  .join(typeof texts[0] === "string" ? texts[0] : ", "),
-                from,
-              };
-            throw new Underivable(`the method ${method}`);
+            const target = receiver!.v;
+            const values = positional.map((operand) => operand.v);
+            const { span } = expression;
+            const called = (make: () => SerializableRuntimeValue | undefined): Value => {
+              let made: SerializableRuntimeValue | undefined;
+              try {
+                made = make();
+              } catch (error) {
+                if (!(error instanceof RuntimeFault)) throw error;
+                fail(error.code, error.span.start.offset, error.span.end.offset, from, false);
+                return { v: null, from };
+              }
+              fail("TSV043", span.start.offset, span.end.offset, from, true);
+              return made === undefined ? useDefault() : { v: made, from };
+            };
+            if (typeof target === "string")
+              return called(() => callStringMethod(target, method, values, span));
+            if (target !== null && (isRuntimeList(target) || isSet(target))) {
+              if (method === "sort" && isRuntimeList(target))
+                return called(() => {
+                  const items = [...target.items];
+                  const order = sortOrder(items, span);
+                  target.items.splice(0, items.length, ...order.map((index) => items[index]!));
+                  return null;
+                });
+              if (listMethod(method)?.changes !== undefined)
+                throw new Underivable(`the method ${method}, which changes its receiver`);
+              return called(() =>
+                readCollection(target, method, values, {}, false, span, (item) =>
+                  joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
+                ),
+              );
+            }
+            if (target !== null && (isDict(target) || isRange(target) || isTemporal(target)))
+              throw new Underivable(`the method ${method} of a ${target.kind}`);
+            fail("TSR016", span.start.offset, span.end.offset, from, false);
+            return { v: null, from };
           }
           const index = positional[0]!;
           const list = receiver!;
