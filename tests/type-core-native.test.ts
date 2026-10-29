@@ -155,7 +155,7 @@ test("a choice of written records is answered within the native stack", () => {
 });
 
 test("a choice record whose value holds host values is answered within the native stack", () => {
-  // `Contract.#selectedAt`
+  // `selectedAt`
   assert.deepEqual(spreadCase("property"), ["warning-runtime-check", 1, 2]);
 });
 
