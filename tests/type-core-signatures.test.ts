@@ -583,6 +583,11 @@ const SIGNATURE_FAMILIES: readonly {
       `let root = {${Array.from({ length: 8 }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
   },
   {
+    name: "toJson of k copies of one unchanged object k fields wide",
+    program: (k) =>
+      `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let c${i} = root\nlet j${i} = toJson(c${i})`).join("\n")}\nexit\n`,
+  },
+  {
     name: "toJson of one unchanged object k fields wide, at k calls",
     program: (k) =>
       `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
@@ -1260,6 +1265,13 @@ test("toJson proves an unchanged value once and sees what changed between calls"
       `let root = {f0: hostValue}\nlet a = toJson(root)\nroot.f0 = 1..2\nlet b = toJson(root)\nexit\n`,
     ),
     ["warning-runtime-check 2", "compile-error 4"],
+  );
+  // (copies of it, unchanged: each call its own warning)
+  assert.deepEqual(
+    sites(
+      `let root = {f0: ${regex}}\nlet c = root\nlet d = c\nlet a = toJson(c)\nlet b = toJson(d)\nexit\n`,
+    ),
+    ["warning-runtime-check 4", "warning-runtime-check 5"],
   );
   // (a copy changed after it is made, and the original: each its own)
   assert.deepEqual(
