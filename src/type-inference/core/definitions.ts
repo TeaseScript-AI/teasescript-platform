@@ -120,6 +120,30 @@ export class KeyTrie {
     return found.reverse();
   }
 
+  /**
+   * The keys of the set along a place's path of `steps` (the path's own key too where `self`), the shortest first, each
+   * with its depth: one walk down the steps as far as the trie holds them.
+   */
+  public along(
+    place: PlaceId,
+    steps: readonly string[],
+    self: boolean,
+  ): { readonly key: Key; readonly depth: number }[] {
+    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    let node = roots.get(place);
+    const found: { key: Key; depth: number }[] = [];
+    if (node === undefined) return found;
+    this.work.charge(this.counter);
+    if (node.key !== null && (self || steps.length > 0)) found.push({ key: node.key, depth: 0 });
+    for (let depth = 1; depth <= steps.length; depth += 1) {
+      node = node.children.get(steps[depth - 1]!);
+      if (node === undefined) break;
+      this.work.charge(this.counter);
+      if (node.key !== null && (self || depth < steps.length)) found.push({ key: node.key, depth });
+    }
+    return found;
+  }
+
   /** Whether a key of the set stands at or above `key`. */
   public any(key: Key, self: boolean): boolean {
     return this.above(key, self).length > 0;

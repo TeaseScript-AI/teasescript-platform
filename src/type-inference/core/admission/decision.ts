@@ -477,17 +477,11 @@ function concreteSite(
 }
 
 /**
- * Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4): G3 3b, by the
- * place's own such paths (`Admission.dirtyPaths`), each compared with the path's steps, never a key per prefix.
+ * Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4): G3 3b, by one walk
+ * of the path down those keys' trie (`Admission.dirty`), never a key made per prefix.
  */
 function isClean(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
-  admission.pass.program.work.charge("checks");
-  for (const dirty of admission.dirtyPaths(root)) {
-    admission.pass.program.work.charge("checks");
-    if (dirty.length <= path.length && dirty.every((step, index) => path[index] === step))
-      return false;
-  }
-  return true;
+  return admission.dirty.along(root, path, true).length === 0;
 }
 
 /** The written type an alias's read copies at `rest` below its path (`writtenDomainKey`), `null` where none. */
