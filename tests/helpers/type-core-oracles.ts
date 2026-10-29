@@ -11,7 +11,7 @@ import {
 } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { checkedResult } from "../../src/type-inference/core/consumer.js";
+import { asked, checkedResult } from "../../src/type-inference/core/consumer.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
 import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
@@ -146,43 +146,46 @@ export function publishedAnswers(
   bindings: readonly PlaceId[],
   request: CoreAnalysisRequest,
 ): { readonly text: string; readonly record: string; readonly sited: boolean } {
-  const admitted = bindings.map((place) => [
-    place,
-    answers.place(place, []).admitted,
-    answers.place(place, ["element"]).admitted,
-  ]);
-  // (with the checks that owe the runtime nothing, as the compiler reads them)
-  const checked = checkedResult(answers, request);
-  const paths = request.files.map((file) => file.path);
-  const record = {
-    outcome: checked.outcome,
-    diagnostics: checked.diagnostics,
-    checks: answers.checks,
-  };
-  const serialized = coreRecord(checked, paths);
-  const sitesOf = (
-    list: readonly {
-      readonly site: { readonly file: number; readonly start: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [site.file, site.start, site.end]);
-  const recordSites = (
-    list: readonly {
-      readonly site: { readonly file: string; readonly offset: number; readonly end: number };
-    }[],
-  ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
-  const sited = [
-    sitesOf(checked.diagnostics),
-    sitesOf(answers.checks),
-    recordSites(serialized.diagnostics),
-    recordSites(serialized.runtimeChecks),
-  ].every((sites) =>
-    sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
-  );
-  return {
-    text: JSON.stringify({ ...record, admitted }),
-    record: JSON.stringify({ record, serialized }),
-    sited,
-  };
+  // (every question past the finished analysis's allowance stops there, as the backend's do: `asked`)
+  return asked(answers, (answers) => {
+    const admitted = bindings.map((place) => [
+      place,
+      answers.place(place, []).admitted,
+      answers.place(place, ["element"]).admitted,
+    ]);
+    // (with the checks that owe the runtime nothing, as the compiler reads them)
+    const checked = checkedResult(answers, request);
+    const paths = request.files.map((file) => file.path);
+    const record = {
+      outcome: checked.outcome,
+      diagnostics: checked.diagnostics,
+      checks: answers.checks,
+    };
+    const serialized = coreRecord(checked, paths);
+    const sitesOf = (
+      list: readonly {
+        readonly site: { readonly file: number; readonly start: number; readonly end: number };
+      }[],
+    ) => list.map(({ site }) => [site.file, site.start, site.end]);
+    const recordSites = (
+      list: readonly {
+        readonly site: { readonly file: string; readonly offset: number; readonly end: number };
+      }[],
+    ) => list.map(({ site }) => [paths.indexOf(site.file), site.offset, site.end]);
+    const sited = [
+      sitesOf(checked.diagnostics),
+      sitesOf(answers.checks),
+      recordSites(serialized.diagnostics),
+      recordSites(serialized.runtimeChecks),
+    ].every((sites) =>
+      sites.every((site, index) => index === 0 || compareSites(sites[index - 1]!, site) <= 0),
+    );
+    return {
+      text: JSON.stringify({ ...record, admitted }),
+      record: JSON.stringify({ record, serialized }),
+      sited,
+    };
+  });
 }
 
 /** An item with all its marks, writer, context and ingress leaves. */
