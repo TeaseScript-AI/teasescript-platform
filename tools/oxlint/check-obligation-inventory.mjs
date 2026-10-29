@@ -8,8 +8,9 @@ import { Project, ts } from "ts-morph";
  * fresh pass. A derivation of `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and
  * setter pair as one, a property holding a function), or a function of its files (the entry, and the parts in the
  * folder beside it) with a parameter typed as the class: a method whose body moved there, known by its declaration. A
- * public method whose one statement forwards to the function of its name is that function. The check recognises a
- * closed list of forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written; inside a derivation of
+ * public method whose one statement forwards to the function of its name is that function, its arguments its own
+ * parameters. The check recognises a closed list of forms: a direct call of a derivation, `R.m(…)` or `f(…)` as
+ * written, and an exact forwarder's call; inside a derivation of
  * admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a call of a parameter named `error` (each
  * creating an obligation); inside a consumer derivation, a push onto a recording array (`diagnostics`, `deferred`,
  * `checks`), a conditional of them included; admission's own code reading its own state; a dot read of a listed getter;
@@ -105,7 +106,12 @@ export const HOST_READS = new Map([
  * recording arrays are listed here too: any other form of them is unproved.
  */
 const LISTED_READS = [
-  ["readChecks", "length", "admission.ts", "how many read checks a unit made: a count"],
+  [
+    "readChecks",
+    "length",
+    "admission.ts",
+    "the running unit's read checks taken back after a stop (D4 a′): truncated to a count",
+  ],
   ["readChecks", "length", "consumers.ts", "how many read checks a unit made: a count"],
   ["readChecks", "for-of", "answers.ts", "the published read checks, read after the walk"],
   [
@@ -301,6 +307,8 @@ export function obligationInventoryDiagnostics(program, root, files) {
           for (const declaration of node.declarationList.declarations) consider(declaration);
       });
     const known = new Set(declarations);
+    // (the calls of the forwarders proved: their arguments are their own parameters)
+    const forwarderCalls = new Set();
     const forwardsTo = (member) => {
       if (
         !ts.isMethodDeclaration(member) ||
@@ -338,13 +346,16 @@ export function obligationInventoryDiagnostics(program, root, files) {
         return undefined;
       const fn = declarationOf(call.expression);
       const first = fn === undefined ? undefined : functionOf(fn)?.parameters[0];
-      return known.has(fn) &&
-        fn.parent !== cls &&
-        nameOf(fn) === nameOf(member) &&
-        first !== undefined &&
-        typedAs(first, cls)
-        ? fn
-        : undefined;
+      if (
+        !known.has(fn) ||
+        fn.parent === cls ||
+        nameOf(fn) !== nameOf(member) ||
+        first === undefined ||
+        !typedAs(first, cls)
+      )
+        return undefined;
+      forwarderCalls.add(call);
+      return fn;
     };
     // (a getter and a setter of one name are one property)
     const accessors = new Map();
@@ -378,6 +389,8 @@ export function obligationInventoryDiagnostics(program, root, files) {
     return {
       derivations: [...parts.keys()],
       namedAll: (name) => byName.get(name) ?? [],
+      // whether a call is a proved forwarder's
+      forwards: (call) => forwarderCalls.has(call),
       // the derivation a declaration is part of
       of: (declaration) => (known.has(declaration) ? identity.get(declaration) : undefined),
       // the declaration of a derivation a node lies in, the innermost
@@ -619,7 +632,12 @@ export function obligationInventoryDiagnostics(program, root, files) {
           declaration !== undefined &&
           (declaration.name === node ||
             (ts.isImportSpecifier(node.parent) && node.parent.propertyName === undefined));
-        if (named && !ownName) {
+        // (an exact forwarder's argument: its own parameter, handed to the function it is)
+        const forwarded =
+          ts.isCallExpression(node.parent) &&
+          node.parent.arguments.includes(node) &&
+          (admission.forwards(node.parent) || consumer.forwards(node.parent));
+        if (named && !ownName && !forwarded) {
           const callee = ts.isCallExpression(node.parent) && node.parent.expression === node;
           if (callee && (isBoundaryCheck(declaration) || isErrorParameter(declaration)))
             creations.push([node.parent, admission.around(node)]);

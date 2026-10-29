@@ -335,6 +335,11 @@ const FORWARDERS = [
     true,
   ],
 ];
+// (an exact forwarder handing on its `error` parameter: its argument, no value read)
+const ERROR_FORWARDER = [
+  "public probeErrorForward(error: () => void): void {\n    probeErrorForward(this, error);\n  }",
+  "export function probeErrorForward(admission: Admission, error: () => void): void {\n  void admission;\n  error();\n}",
+];
 const forwarded = (name) =>
   `export function ${name}(admission: Admission, a: number, b = 0): number {\n  void admission;\n  return a + b;\n}`;
 const importing = (names, from) => `import { ${names.join(", ")} } from "${from}";\n`;
@@ -374,19 +379,27 @@ test("the split layout: each function taking the instance is a derivation; only 
     {
       [ADMISSION]: (text) =>
         importing(
-          FORWARDERS.map(([name]) => name),
+          [...FORWARDERS.map(([name]) => name), "probeErrorForward"],
           "./admission/probe.js",
         ) +
-        text.replace(MEMBERS, FORWARDERS.map(([, member]) => `  ${member}\n\n`).join("") + MEMBERS),
+        text.replace(
+          MEMBERS,
+          [...FORWARDERS.map(([, member]) => member), ERROR_FORWARDER[0]]
+            .map((member) => `  ${member}\n\n`)
+            .join("") + MEMBERS,
+        ),
     },
     {
-      [PART]: `${PART_HEAD}\n${[...PART_FORMS.map(([, form]) => form), ...FORWARDERS.map(([name]) => forwarded(name))].join("\n\n")}\n`,
+      [PART]: `${PART_HEAD}\n${[...PART_FORMS.map(([, form]) => form), ...FORWARDERS.map(([name]) => forwarded(name)), ERROR_FORWARDER[1]].join("\n\n")}\n`,
     },
   );
   for (const [start] of PART_FORMS) expectStart(messages, start);
   assert.equal(count(messages, OUTSIDE), 3, messages.join("\n"));
   for (const [name, , reported] of FORWARDERS)
     expectStart(messages, `Admission.${name} names 2 derivations`, reported);
+  expectStart(messages, "Admission.probeErrorForward creates");
+  expectStart(messages, "Admission.probeErrorForward names 2 derivations", false);
+  expectStart(messages, UNPROVED_AT("an error parameter"), false);
 });
 
 /** A creating consumer's calls into unlisted derivations: [the name, the statement, the report's start]. */
