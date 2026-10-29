@@ -3,7 +3,6 @@ import type { Consumers } from "../consumers.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
 import { keep, keptSlice, type WorkLedger } from "../budget.js";
 import { keptKey, keptKeyBelow, sortCost, type Definition, type Key } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
 import { STOPPED } from "../items.js";
 import { propertyName } from "../program.js";
 import type { StoreStep } from "../result.js";
@@ -118,11 +117,13 @@ function resolve(
 }
 
 /**
- * A destination's steps (`StoreStep`) by one walk down its path: a property by its name, an element step by the
- * collection the written type there holds, its place's own or the copy's that the first prefix a copy decides retained
- * (A4: the copied type is the place's below it), else by the kinds this pass decided or settled its prefix by (A3), else
- * by its prefix's contract; each prefix's key made only while no written type names the steps, one step longer than the one before, so
- * no step makes its prefix again (Astra's B1 on #1434).
+ * A destination's steps (`StoreStep`) by one walk down its path, asking no contract (Astra's B1 and Codex r2's blocker on
+ * #1434: a contract question per prefix decodes and formats each whole prefix again): a property by its name, an
+ * element step by the collection the written type there holds, its place's own or the copy's that the first prefix a
+ * copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or A3 settled
+ * the prefix by, else a list, as `storeSteps` names a container whose contract holds no dict or set. Each prefix's key
+ * is made once, one step longer than the one before, only while no written type names the steps. No prefix is stopped:
+ * a destination lies above its stop, and no other stop lies at or above it (`outermost`).
  */
 function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): StoreStep[] {
   const work = walk.pass.program.work;
@@ -140,11 +141,7 @@ function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): Stor
     if (step === "entry") steps.push({ collection: "dict" });
     else if (step !== "element") steps.push({ property: propertyName(step) });
     else {
-      const kinds =
-        above !== null
-          ? typeTags(above)
-          : (walk.admission.kindsAt(key!) ??
-            withoutEmpty(walk.run(walk.pass.contract.contractOf(key!))).map((item) => item.tag));
+      const kinds = above !== null ? typeTags(above) : (walk.admission.kindsAt(key!) ?? []);
       steps.push({
         collection: kinds.includes("dict") ? "dict" : kinds.includes("set") ? "set" : "list",
       });
