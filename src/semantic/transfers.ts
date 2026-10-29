@@ -285,7 +285,7 @@ interface ReferenceSources {
   readonly lets: LetStatement[];
 }
 
-/** The built-ins whose result holds only the references of their arguments: all of them but `script`. */
+/** The built-ins: but for `script`, which makes a reference, their result holds only those of their arguments. */
 const PASSING_BUILTINS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
 
 /**
@@ -334,11 +334,16 @@ export function computedTargetFiles(
   return joinedFiles(sources, memo);
 }
 
-/** The files of `sources`, with those of the `let`s it reads, which `memo` holds. */
+/**
+ * The files of `sources`, with those of the `let`s it reads, which `memo` holds; those of the one `let` it reads, where
+ * that is all, so that targets that read one variable share its list.
+ */
 function joinedFiles(
   sources: ReferenceSources,
   memo: ReadonlyMap<LetStatement, TargetFiles>,
 ): TargetFiles {
+  if (sources.lets.length === 1 && sources.paths.size === 0 && !sources.any && !sources.project)
+    return memo.get(sources.lets[0]!) ?? "project";
   let { any, project } = sources;
   const paths = new Set(sources.paths);
   for (const site of sources.lets) {
