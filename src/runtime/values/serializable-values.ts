@@ -556,14 +556,26 @@ export function builtSerializableDictIndex(
 }
 
 /**
- * The member keys of a set, aligned with its items, kept between operations so that adding or finding a member keys only
- * that member instead of comparing it with every other one; removing one still shifts the later keys and items. A set's
- * items change only through the functions below and by `clear()`, which empties them, so a count that no longer matches
- * means the keys must be built again; a copy of a set builds its own when first needed.
+ * The member keys of a set (`memberKey`), aligned with its items, kept between operations so that adding or finding a
+ * member keys only that member instead of comparing it with every other one; removing one still shifts the later keys and
+ * items. A set's items change only through the functions below and by `clear()`, which empties them, so a count that no
+ * longer matches means the keys must be built again; a copy of a set builds its own when first needed.
  */
 interface SetMembership {
   readonly keys: string[];
   readonly members: Set<string>;
+  /** The list, set, object, and dict items under each of their keys: more than one only where hashes collide. */
+  readonly composites: Map<string, SerializableRuntimeValue[]>;
+}
+
+/**
+ * A value's key among a set's members: its `valueKey` when it holds no other values, otherwise a hash of that key, so
+ * that the keys kept by the sets of a value nested n deep take memory in proportion to n, not n². Equal values have equal
+ * keys; a list, set, object, or dict member with the same key is equal only when its whole key (`whole`) is.
+ */
+interface MemberKey {
+  readonly key: string;
+  readonly whole: string | null;
 }
 
 const setMemberships = new WeakMap<SerializableRuntimeSet, SetMembership>();
@@ -571,10 +583,55 @@ const setMemberships = new WeakMap<SerializableRuntimeSet, SetMembership>();
 function membership(set: SerializableRuntimeSet): SetMembership {
   const known = setMemberships.get(set);
   if (known !== undefined && known.keys.length === set.items.length) return known;
-  const keys = set.items.map(valueKey);
-  const built = { keys, members: new Set(keys) };
+  const built: SetMembership = { keys: [], members: new Set(), composites: new Map() };
+  for (const item of set.items) remember(built, memberKey(item), item);
   setMemberships.set(set, built);
   return built;
+}
+
+function memberKey(value: SerializableRuntimeValue): MemberKey {
+  const leaf = leafKey(value);
+  if (leaf !== undefined) return { key: leaf, whole: null };
+  const whole = valueKey(value);
+  return { key: `#${textHash(whole)}`, whole };
+}
+
+function remember(known: SetMembership, member: MemberKey, item: SerializableRuntimeValue): void {
+  known.keys.push(member.key);
+  known.members.add(member.key);
+  if (member.whole === null) return;
+  const items = known.composites.get(member.key);
+  if (items === undefined) known.composites.set(member.key, [item]);
+  else items.push(item);
+}
+
+/** The set's item equal (`==`) to the value `member` keys, if it is a list, set, object, or dict. */
+function equalComposite(
+  known: SetMembership,
+  member: MemberKey,
+): SerializableRuntimeValue | undefined {
+  return known.composites.get(member.key)?.find((item) => valueKey(item) === member.whole);
+}
+
+function hasMember(known: SetMembership, member: MemberKey): boolean {
+  if (!known.members.has(member.key)) return false;
+  return member.whole === null || equalComposite(known, member) !== undefined;
+}
+
+/** A 53-bit hash of a text (cyrb53), the same in every host. */
+function textHash(text: string): number {
+  let first = 0xdeadbeef;
+  let second = 0x41c6ce57;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = Math.imul(first ^ code, 2654435761);
+    second = Math.imul(second ^ code, 1597334677);
+  }
+  first = Math.imul(first ^ (first >>> 16), 2246822507);
+  first ^= Math.imul(second ^ (second >>> 13), 3266489909);
+  second = Math.imul(second ^ (second >>> 16), 2246822507);
+  second ^= Math.imul(first ^ (first >>> 13), 3266489909);
+  return 4294967296 * (2097151 & second) + (first >>> 0);
 }
 
 /** Adds a copy of an engine-owned value unless the set already has an equal (`==`) member; returns whether it did. */
@@ -602,11 +659,11 @@ function addMember(
   copy: boolean,
 ): boolean {
   const known = membership(set);
-  const key = valueKey(value);
-  if (known.members.has(key)) return false;
-  known.members.add(key);
-  known.keys.push(key);
-  set.items.push(copy ? cloneCapturedSerializableValue(value) : value);
+  const member = memberKey(value);
+  if (hasMember(known, member)) return false;
+  const item = copy ? cloneCapturedSerializableValue(value) : value;
+  remember(known, member, item);
+  set.items.push(item);
   return true;
 }
 
@@ -615,10 +672,23 @@ export function removeSerializableSetValue(
   value: SerializableRuntimeValue,
 ): boolean {
   const known = membership(set);
-  const key = valueKey(value);
-  if (!known.members.has(key)) return false;
-  const index = known.keys.indexOf(key);
-  known.members.delete(key);
+  const member = memberKey(value);
+  if (!known.members.has(member.key)) return false;
+  let index: number;
+  if (member.whole === null) {
+    index = known.keys.indexOf(member.key);
+    known.members.delete(member.key);
+  } else {
+    const item = equalComposite(known, member);
+    if (item === undefined) return false;
+    index = set.items.indexOf(item);
+    const items = known.composites.get(member.key)!;
+    items.splice(items.indexOf(item), 1);
+    if (items.length === 0) {
+      known.composites.delete(member.key);
+      known.members.delete(member.key);
+    }
+  }
   known.keys.splice(index, 1);
   set.items.splice(index, 1);
   return true;
@@ -628,7 +698,7 @@ export function serializableSetContains(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
-  return membership(set).members.has(valueKey(value));
+  return hasMember(membership(set), memberKey(value));
 }
 
 /** Removes every member. */
@@ -793,8 +863,8 @@ export function serializableEquals(
   while (pending.length > 0) {
     const next = pending.pop()!;
     if (next.kind === "set") {
-      const members = membership(next.right).members;
-      if (!next.left.items.every((item) => members.has(valueKey(item)))) return false;
+      const known = membership(next.right);
+      if (!next.left.items.every((item) => hasMember(known, memberKey(item)))) return false;
     } else if (next.kind === "list") {
       for (let index = 0; index < next.left.items.length; index += 1) {
         if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
