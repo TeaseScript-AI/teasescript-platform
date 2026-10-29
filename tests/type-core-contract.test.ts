@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
+import type { Diagnostic } from "../src/diagnostics.js";
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
 import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
-import { coreRecord } from "../src/type-inference/core/result.js";
+import { type CoreDiagnostic, coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { stopIdentity } from "./helpers/type-core-stop-oracle.js";
 import {
   publishedAnswers,
   publishedRoute,
@@ -544,9 +546,10 @@ test("each member of a cycle of whole copies has one answer whichever place ente
  * hung on which place entered the cycle first; the cut is now the open stop's everywhere. What it publishes may differ
  * from `main`'s only in the order of the items in an answer and of the kinds in a decided admitted type: in all four
  * modes, its records and route are one, the rest (`publishedUpToOrder`) is one with those orders set aside, and both are
- * `main`'s: the hashes of the record with the route and of the publication with those orders set aside, and its
- * outcome, diagnostics, checks and decided types with their deciders, are a regression oracle taken from `main` at
- * `ab3ec62bf` for these sources only (a change that changes `main`'s records of them updates it).
+ * `main`'s: the hashes of the record with the route, its diagnostics by their identity (`mergedIdentity`), and of the
+ * publication with those orders set aside, and its outcome, diagnostics, checks and decided types with their deciders,
+ * are a regression oracle taken from `main` at `ab3ec62bf` for these sources only (a change that changes `main`'s records
+ * of them updates it; a change of a message, or of the fix's facts `mergedIdentity` sets aside, does not).
  */
 const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
   [
@@ -554,7 +557,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     'let bad = {p0: "x", p1: "x"}\nlet wobj: object? = {p0: 1}\nlet a0 = bad\nlet a1 = a0\nlet a2 = a1\na2 = a1\n' +
       "a0 = a2\na1 = wobj\nexit\n",
     {
-      record: "a60f85b0b9218ce8",
+      record: "8aaeac9dadbf8b26",
       upToOrder: "8ec84600facd682a",
       compact: [
         "valid",
@@ -580,7 +583,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "let good = [1]\nlet host = hostValue\nlet a5 = good\nlet a4 = a5\nlet a3 = a4\nlet a1 = a3\nlet a0 = a1\n" +
       "if a1 != null {\n  a0 = a1\n}\na5 = a0\na1 = host\nexit\n",
     {
-      record: "62c12ad619ffc257",
+      record: "6ac9cd3fc25be5c7",
       upToOrder: "e56cd6479164593a",
       compact: [
         "warning-runtime-check",
@@ -615,7 +618,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     'let good = {p0: 1}\nlet bad = {p0: "x"}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\na0 = a2\nlet b = a1\nb = a2\n' +
       'a0 = b\na2 = bad\nsay "${a0.p0}"\nsay "${a1.p0}"\nsay "${a2.p0}"\nexit\n',
     {
-      record: "b3c551d0d8ea4c78",
+      record: "47db810b2ecdbb7b",
       upToOrder: "63c49cbe0b0205e9",
       compact: [
         "compile-error",
@@ -639,7 +642,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "a copy of a parameter no call reaches",
     'let bad = {p0: "x"}\nfunction f(x) {\n  let a = x\n  let b = a\n  a = b\n  b = bad\n  say "${a.p0}"\n}\nexit\n',
     {
-      record: "a7705fbc2e47a592",
+      record: "1c31c49184a58f96",
       upToOrder: "e721593c76151fe3",
       compact: [
         "valid",
@@ -657,7 +660,7 @@ const MERGED_STOPS: readonly [string, string, MergedRecord][] = [
     "let seed = [hostValue + 1, hostValue, hostValue + hostValue]\nlet a = seed\nlet b = a\nlet c = b\n" +
       "if b != null {\n  c = b\n}\na = c\nb = [1]\nlet value = a[0]\nexit\n",
     {
-      record: "579f38345edb7605",
+      record: "87391b2d85943354",
       upToOrder: "3a0cd1e7a8ab7743",
       compact: [
         "warning-runtime-check",
@@ -691,6 +694,45 @@ interface MergedRecord {
   readonly compact: readonly string[];
 }
 
+/**
+ * The record with the route as `MERGED_STOPS` pins it: each diagnostic by its identity (`stopIdentity`) without the other
+ * facts only its fix reads, the kinds its site's other diagnostics report (`besides`) and its store root's declaration,
+ * and each of the route's by its severity, code and span, without its message.
+ */
+function mergedIdentity(answers: Answers, route: string): string {
+  const identity = (diagnostic: CoreDiagnostic): Readonly<Record<string, unknown>> => {
+    const { besides: _, ...kept } = stopIdentity(diagnostic);
+    return "rule" in diagnostic && diagnostic.rule.rule === "store" && diagnostic.rule.root !== null
+      ? {
+          ...kept,
+          rule: {
+            ...diagnostic.rule,
+            root: { kind: diagnostic.rule.root.kind, name: diagnostic.rule.root.name },
+          },
+        }
+      : kept;
+  };
+  // EVIDENCE: invariant: `publishedRoute` writes a plan with the compiler's diagnostics, or the construct it rejects.
+  const routed = JSON.parse(route) as { readonly diagnostics?: readonly Diagnostic[] };
+  return JSON.stringify({
+    outcome: answers.outcome,
+    diagnostics: answers.diagnostics.map(identity),
+    checks: answers.checks,
+    serialized: coreRecord(coreResult(answers), ["main.tease"]),
+    route:
+      routed.diagnostics === undefined
+        ? routed
+        : {
+            ...routed,
+            diagnostics: routed.diagnostics.map(({ severity, code, span }) => ({
+              severity,
+              code,
+              span,
+            })),
+          },
+  });
+}
+
 test("a stop whose own entries merge into one publishes main's records, its answers' orders aside (TABLE r4.185)", () => {
   const hash = (text: string): string =>
     createHash("sha256").update(text).digest("hex").slice(0, 16);
@@ -710,7 +752,12 @@ test("a stop whose own entries merge into one publishes main's records, its answ
     const ids = bindings.map((place) => place.id);
     const runs = [false, true].flatMap((reversed) =>
       [false, true].map((unshared) => {
-        const run = (): { exact: string; upToOrder: string; compact: string[] } => {
+        const run = (): {
+          exact: string;
+          identity: string;
+          upToOrder: string;
+          compact: string[];
+        } => {
           const answers = inOrder(reversed, () => analyseCore(request));
           const route = inOrder(reversed, () => publishedRoute(files, ["hostValue"]));
           const compact = [
@@ -735,6 +782,7 @@ test("a stop whose own entries merge into one publishes main's records, its answ
           ];
           return {
             exact: `${publishedAnswers(answers, ids, ["main.tease"]).record}\n${route.text}`,
+            identity: mergedIdentity(answers, route.text),
             upToOrder: publishedUpToOrder(answers, ids),
             compact,
           };
@@ -748,7 +796,7 @@ test("a stop whose own entries merge into one publishes main's records, its answ
     }
     assert.deepEqual(
       {
-        record: hash(runs[0]!.exact),
+        record: hash(runs[0]!.identity),
         upToOrder: hash(runs[0]!.upToOrder),
         compact: runs[0]!.compact,
       },
