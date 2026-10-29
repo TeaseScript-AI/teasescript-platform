@@ -26,8 +26,12 @@ function messages(files: readonly SourceFile[]): string[] {
 function reported(files: readonly SourceFile[]) {
   const request = coreRequest(files);
   assert.ok(request !== null, "the files parse and resolve");
-  const source = messageSource(files.map((file) => file.source));
-  return analyseCore(request).diagnostics.map((diagnostic) => ({
+  const { diagnostics } = analyseCore(request);
+  const source = messageSource(
+    files.map((file) => file.source),
+    diagnostics,
+  );
+  return diagnostics.map((diagnostic) => ({
     error: diagnostic.class === "compile-error",
     code: diagnostic.code,
     site: source.text(diagnostic.site),
@@ -58,7 +62,7 @@ test("each context word's cause says why the value may be of another type, on th
   word("cp9-cells/A7/later-decider", [
     "W TSV041 'source.removeAt(0)': 'copy' holds a whole number (integer) because of line 3, but " +
       `'source.removeAt(0)' may be text (string) here. ${STOPS} To allow both, declare it as ` +
-      "'let copy: integer | string = ...'.",
+      "'let copy: integer | string = source.removeAt(0)'.",
   ]);
   word("cp9-cells/F11/missing", [
     "W TSV043 'room.count': 'room' may hold an object without property 'count' here. If it does, the Tease stops " +
@@ -105,10 +109,11 @@ test("each context word's cause says why the value may be of another type, on th
     // (a store into a speaker gives it the property: no stop, #1195 rule 3)
     "W TSV043 'player.n': 'player' may not have property 'n' here. A speaker takes the property when the script runs.",
     `W TSV011 'player.n': ${COUNT}, but 'player.n' may be a value of another type here. ${STOPS} Keep 'player.n' ` +
-      "in a new variable, as in 'let value = player.n', and check it, as in 'if value is integer { ... }'. The type of " +
+      "in a new variable, as in 'let value = player.n', and check it, as in 'if value is integer { repeat value {} }'. " +
+      "The type of " +
       "'player.n' is known only when the script runs.",
     "W TSV043 'player.n': 'player' may not have property 'n' here. If it does not, the Tease stops with an error " +
-      `at this line. Assign the property before this line, as in 'player.n = ...'. ${speaker}`,
+      `at this line. Assign 'player.n' before this line. ${speaker}`,
   ]);
 });
 
@@ -125,21 +130,21 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let n = 1\nn = "text"\nexit\n',
       [
         "E TSV041 '\"text\"': 'n' holds a whole number (integer) since line 1, so it cannot take text (string). " +
-          "To allow both, declare it as 'let n: integer | string = ...'.",
+          "To allow both, declare it as 'let n: integer | string = 1'.",
       ],
     ],
     [
       "let n: integer = 1\nn = null\nexit\n",
       [
         "E TSV041 'null': 'n' is declared as a whole number (integer), so it cannot take null. To allow null, " +
-          "declare it as 'let n: integer? = ...'.",
+          "declare it as 'let n: integer? = 1'.",
       ],
     ],
     [
       "let n: integer = hostValue\nexit\n",
       [
         "W TSV041 'hostValue': 'n' is declared as a whole number (integer), but 'hostValue' may be a value of " +
-          `another type here. ${STOPS} Check 'hostValue' first, as in 'if hostValue is integer { ... }'. ` +
+          `another type here. ${STOPS} Check that 'hostValue' is a whole number (integer) first. ` +
           OUTSIDE("hostValue"),
       ],
     ],
@@ -161,7 +166,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "let xs = [1, 2]\nlet ys = xs.take(hostValue)\nexit\n",
       [
         "W TSV043 'hostValue': take() needs a whole number (integer), but 'hostValue' may be a value of another " +
-          `type here. ${STOPS} Check 'hostValue' first, as in 'if hostValue is integer { ... }'. ` +
+          `type here. ${STOPS} Check that 'hostValue' is a whole number (integer) first. ` +
           OUTSIDE("hostValue"),
       ],
     ],
@@ -184,7 +189,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let ok = hostValue\nif ok { say "x" }\nexit\n',
       [
         "W TSV043 'ok': A condition must be true or false (boolean), but 'ok' may be a value of another type " +
-          `here. ${STOPS} Check 'ok' first, as in 'if ok is boolean { ... }'. ${OUTSIDE("ok")}`,
+          `here. ${STOPS} Check 'ok' first, as in 'if ok is boolean { if ok { say "x" } }'. ${OUTSIDE("ok")}`,
       ],
     ],
     // C4: the offending operand, else the operation
@@ -196,7 +201,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "let x = hostValue - 1\nexit\n",
       [
         "W TSV043 'hostValue': '-' needs a number, but 'hostValue' may be a value of another type here. " +
-          `${STOPS} Check 'hostValue' first, as in 'if hostValue is number { ... }'. ${OUTSIDE("hostValue")}`,
+          `${STOPS} Check that 'hostValue' is a number first. ${OUTSIDE("hostValue")}`,
       ],
     ],
     // C5a–c: a null receiver, a kind without the member, a property no source has at a read and at a store (ADR 1.4)
@@ -245,7 +250,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "function recipient { return player }\nlet target = recipient()\ntarget.add(73)\nexit\n",
       [
         "W TSV043 'target.add(73)': 'target' may not have method 'add' here. If it does not, the Tease stops with an " +
-          "error at this line. A speaker has no methods. Use one of its properties instead, such as 'target.title'.",
+          "error at this line. A speaker has no methods. Use one of its properties instead.",
       ],
     ],
     // a method on a value from outside: called, not set; a literal index of it, with no test and no cause of its own
@@ -253,7 +258,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet v = load(key, default: null)\nv.add(2)\nexit\n',
       [
-        `W TSV043 'v.add(2)': 'v' may be null here. ${STOPS} Check 'v' first, as in 'if v != null { ... }'.`,
+        // (no check in code: 'v' may also lack the method there, which a null check does not rule out, TABLE r4.162)
+        `W TSV043 'v.add(2)': 'v' may be null here. ${STOPS} Check that 'v' is not null first.`,
         `W TSV043 'v.add(2)': 'v' may not have method 'add' here. If it does not, the Tease stops with an error at ` +
           `this line. ${OUTSIDE("v")}`,
       ],
@@ -261,8 +267,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get(0, default: 3)\nexit\n',
       [
-        `W TSV043 'value.get(0, default: 3)': 'value' may be null here. ${STOPS} Check 'value' first, as in ` +
-          "'if value != null { ... }', or give a fallback, as in 'value otherwise ...'.",
+        `W TSV043 'value.get(0, default: 3)': 'value' may be null here. ${STOPS} Check that 'value' is not null ` +
+          "first, or give a fallback of the same type with 'otherwise'.",
         "W TSV043 'value.get(0, default: 3)': 'value' may not have method 'get' here. If it does not, the Tease " +
           `stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '0': A list index must be a whole number (integer), but '0' may be a value of another type here. ${STOPS}`,
@@ -273,8 +279,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     [
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get("a\\"b", default: 3)\nexit\n',
       [
-        `W TSV043 'value.get("a\\"b", default: 3)': 'value' may be null here. ${STOPS} Check 'value' first, as ` +
-          "in 'if value != null { ... }', or give a fallback, as in 'value otherwise ...'.",
+        `W TSV043 'value.get("a\\"b", default: 3)': 'value' may be null here. ${STOPS} Check that 'value' is not ` +
+          "null first, or give a fallback of the same type with 'otherwise'.",
         `W TSV043 'value.get("a\\"b", default: 3)': 'value' may not have method 'get' here. If it does not, the ` +
           `Tease stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '"a\\"b"': A list index must be a whole number (integer), but '"a\\"b"' may be a value of another ` +
@@ -287,7 +293,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "let xs = [7, null]\nsay xs[0] + 1\nexit\n",
       [
         `W TSV043 'xs[0]': '+' needs a number, but 'xs[0]' may be null here. ${STOPS} Keep 'xs[0]' in a new variable, ` +
-          "as in 'let value = xs[0]', and check it, as in 'if value != null { ... }', or give a fallback, as in " +
+          "as in 'let value = xs[0]', and check it, as in 'if value != null { say value + 1 }', or give a fallback, " +
+          "as in " +
           "'(xs[0] otherwise 0)'. 'xs[0]' is a list element, and any element of the list may be null.",
       ],
     ],
@@ -296,7 +303,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       "let xs = []\nsay xs.first\nexit\n",
       [
         `W TSV043 'xs.first': 'xs' may be empty here. ${STOPS} Check 'xs.length' first, as in ` +
-          "'if xs.length > 0 { ... }'.",
+          "'if xs.length > 0 { say xs.first }'.",
       ],
     ],
     // C10
@@ -317,12 +324,15 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
     // C11
     [
       'say "${{a: 1}}"\nexit\n',
-      ["E TSV042 '{a: 1}': '${...}' cannot show an object. Show one of its properties instead."],
+      [
+        "E TSV042 '{a: 1}': '${{a: 1}}' cannot show an object. Show one of its properties instead, as in " +
+          "'${{a: 1}.a}'.",
+      ],
     ],
     [
       'let s = "${hostValue}"\nexit\n',
       [
-        "W TSV042 'hostValue': '${...}' shows its value as text, but 'hostValue' may be a value of another type " +
+        "W TSV042 'hostValue': '${hostValue}' shows its value as text, but 'hostValue' may be a value of another type " +
           `here. ${STOPS} ${OUTSIDE("hostValue")}`,
       ],
     ],
@@ -348,7 +358,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       [
         // (the current checker's sentences, the elements' own types, the owner's review)
         "E TSV044 '\"x\"': This list mixes a whole number (integer) and text (string). A list holds one type. To " +
-          "allow both, declare it as 'let a: (integer | string)[] = ...'.",
+          "allow both, declare it as 'let a: (integer | string)[] = [1, \"x\"]'.",
       ],
     ],
     [
@@ -393,7 +403,7 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let n = [1]\nn[0] = "x"\nexit\n',
       [
         "E TSV041 '\"x\"': 'n' holds whole numbers (integer[]) since line 1, so it cannot contain text (string). To " +
-          "allow both, declare it as 'let n: (integer | string)[] = ...'.",
+          "allow both, declare it as 'let n: (integer | string)[] = [1]'.",
       ],
     ],
     // ADR 0021 rule 1.1 (A2, TABLE r4.131): a property only copies bring, where the copy meets the place
@@ -613,12 +623,12 @@ test("a word that came with its value from another line names that value's origi
       .filter((found) => found.site !== "hostValue")
       .map((found) => found.message),
     [
-      `${member} Assign the property before this line, as in 'x.n = ...'. 'x' may be a speaker, whose properties ` +
-        "are known only when the script runs.",
+      `${member} Assign 'x.n' before this line. 'x' may be a speaker, whose properties are known only when the ` +
+        "script runs.",
       `${member} 'x' may be a timer handle, whose properties are known only when the script runs.`,
       `${member} ${OUTSIDE("x")}`,
       `${COUNT}, but 'd' may be a value of another type here. ${STOPS} Check 'd' first, as in ` +
-        "'if d is integer { ... }'. The type of 'd' is known only when the script runs.",
+        "'if d is integer { repeat d {} }'. The type of 'd' is known only when the script runs.",
     ],
   );
 });

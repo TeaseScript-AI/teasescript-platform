@@ -1,20 +1,29 @@
-import type { Expression } from "../../ast.js";
+import type { Block, Expression, Program, Statement } from "../../ast.js";
 import { parse } from "../../parser.js";
+import { someNode } from "../../project-globals.js";
+import {
+  changesAnything,
+  type EffectFacts,
+  functionEffects,
+  methodEffects,
+} from "../../runtime/evaluation/effect-facts.js";
+import type { SourceSpan } from "../../source.js";
 import type { SourceSite } from "../graph.js";
 import { angleUnit } from "../../angle.js";
 import { CONVERSIONS, conversionTo } from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit, UNIT_OPERANDS } from "../../duration.js";
-import { listMethod } from "../../list-methods.js";
+import { expressionParts, statementExpressions } from "../../expression-children.js";
+import { listDraw, listMethod } from "../../list-methods.js";
 import { FOR_SOURCE_RULE, REPEAT_COUNT_RULE, ROUND_COUNT_FIX } from "../../loop-rules.js";
 import { LIST_INDEX_RULE, logicalOperandRule } from "../../operand-rules.js";
 import { misspelledPropertyHint, nameList } from "../../object-properties.js";
-import { interpolatedDictMessage } from "../../shown-text-rules.js";
 import { PERSON_FIELDS, PLAYER } from "../../speaker-terms.js";
 import {
   CALENDAR_DURATION_PARTS,
   hasTemporalField,
   isTemporalKind,
+  TEMPORAL_FIELDS,
 } from "../../temporal-builtins.js";
 import {
   isTextMember,
@@ -50,16 +59,326 @@ import type {
  * semicolons, no implementation terms, and "type", never "kind" (`docs/DIAGNOSTICS.md`, "Messages").
  */
 
-/** How a message names the source: the text at a site, the line it starts on (1-based) and its column (0-based). */
+/**
+ * How a message names the source and what it knows of the analysis: the text at a site, the line it starts on
+ * (1-based), its column (0-based), the statement a check may hold, and whether an author's text lies clear of the
+ * analysis's other diagnostics, the fact `codeAt` reads of every form that holds it.
+ */
 export interface MessageSource {
   readonly text: (site: SourceSite) => string;
   readonly line: (site: SourceSite) => number;
   readonly column: (site: SourceSite) => number;
+  /**
+   * The statement a check may hold, as in `if n != null { say n + 1 }`, for the use at `use` of the value at `read`
+   * inside it: the innermost statement around the use that is one of a block's or a file's statements, on one line,
+   * where a check before it still holds at the use (`evaluation`); else `null`.
+   */
+  readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
+  /**
+   * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
+   * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
+   * runtime stand unreported (Astra r3; a stop's own warning claims no region); apart from one at `self`'s site whose
+   * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).
+   * `codeAt`'s "no other diagnostic" fact.
+   */
+  readonly alone: (
+    self: CoreDiagnostic,
+    held: SourceSite,
+    rulesOut: ((kind: ItemTag) => boolean) | null,
+  ) => boolean;
 }
 
-/** The message source of a project's files: each file's text, its lines counted once, on first need. */
-export function messageSource(sources: readonly string[]): MessageSource {
+/**
+ * The statements a check may not hold: a name or a label one declares would end with the check's block, a return
+ * there could end its function without a value, and a `while` tests its condition again after each pass, where a check
+ * before it no longer holds.
+ */
+const UNGUARDED: ReadonlySet<Statement["kind"]> = new Set([
+  "letStatement",
+  "globalStatement",
+  "functionDeclaration",
+  "speakerDeclaration",
+  "labelStatement",
+  "returnStatement",
+  "whileStatement",
+]);
+
+/** A line's statements on one line: in start order, the outer first, each with the index of the next one around it. */
+interface LineStatements {
+  readonly statements: Statement[];
+  readonly around: number[];
+}
+
+/** Whether a span holds a site. */
+const holds = ({ start, end }: SourceSpan, site: SourceSite): boolean =>
+  start.offset <= site.start && site.end <= end.offset;
+
+/** A site's key among a statement's nodes. */
+const spanKey = (start: number, end: number): string => `${start}:${end}`;
+
+/**
+ * What a statement evaluates, in evaluation order (`expression-children.ts`), each node after its parts: whether a run
+ * may skip it, whether it may change or draw anything itself (`acts`), and where its own parts begin. Prepared once per
+ * statement, for each of its uses.
+ */
+interface Evaluation {
+  readonly lazy: boolean[];
+  readonly first: number[];
+  /** How many nodes before each index act. */
+  readonly acting: number[];
+  /** The last node at each site. */
+  readonly at: Map<string, number>;
+}
+
+const EVALUATIONS = new WeakMap<Statement, Evaluation>();
+
+function evaluation(statement: Statement): Evaluation {
+  const known = EVALUATIONS.get(statement);
+  if (known !== undefined) return known;
+  const lazy: boolean[] = [];
+  const first: number[] = [];
+  const acting = [0];
+  const at = new Map<string, number>();
+  const add = (node: Expression, skipped: boolean, start: number): void => {
+    const index = lazy.length;
+    lazy.push(skipped);
+    first.push(start);
+    acting.push(acting[index]! + (acts(node) ? 1 : 0));
+    at.set(spanKey(node.span.start.offset, node.span.end.offset), index);
+  };
+  type Work =
+    | { readonly node: Expression; readonly lazy: boolean; readonly parts: true }
+    | {
+        readonly node: Expression;
+        readonly lazy: boolean;
+        readonly parts: false;
+        readonly start: number;
+      };
+  const work: Work[] = statementExpressions(statement)
+    .map((node): Work => ({ node, lazy: false, parts: true }))
+    .reverse();
+  for (let entry = work.pop(); entry !== undefined; entry = work.pop()) {
+    if (!entry.parts) {
+      add(entry.node, entry.lazy, entry.start);
+      continue;
+    }
+    const { node } = entry;
+    const start = lazy.length;
+    work.push({ node, lazy: entry.lazy, parts: false, start });
+    for (const part of partsOf(node, entry.lazy).toReversed()) work.push({ ...part, parts: true });
+  }
+  // (a store through a member or an index takes effect after its value)
+  if (statement.kind === "assignmentStatement" && statement.target.kind !== "identifier")
+    add(statement.target, false, 0);
+  const prepared = { lazy, first, acting, at };
+  EVALUATIONS.set(statement, prepared);
+  return prepared;
+}
+
+/**
+ * Whether a check before `statement` still holds at the use at `use` of the value at `read` (#1268, Codex r4 and r5):
+ * the statement evaluates the use whenever it runs (not after `and`, `or` or `otherwise`, nor in a `default:`), and
+ * nothing it evaluates before the use, apart from the value read, may change or draw anything (`effect-facts.ts`), so
+ * the check sees what the use sees and a value kept before it is the one the use would read. A value read that may
+ * itself change or draw, the read included, is kept before the statement only where it is the first thing evaluated, so
+ * that no draw or read before it, a text's placeholder's included, moves behind it.
+ */
+function guards(statement: Statement, use: SourceSite, read: SourceSite): boolean {
+  const { lazy, first, acting, at } = evaluation(statement);
+  const used = at.get(spanKey(use.start, use.end));
+  const value = at.get(spanKey(read.start, read.end));
+  if (used === undefined || value === undefined || lazy[used]) return false;
+  // (the value read, its parts first, inside the use's own)
+  const from = first[value]!;
+  if (from < first[used]! || value > used) return false;
+  // (before the value, and between it and the use, which evaluates its other parts there)
+  const between = used > value ? acting[used]! - acting[value + 1]! : 0;
+  const kept = acting[value + 1]! - acting[from]!;
+  return (
+    acting[from]! + between === 0 && (kept === 0 || from + Math.max(used - value - 1, 0) === 0)
+  );
+}
+
+/** The operators whose right operand only some runs evaluate. */
+const LAZY_RIGHT: ReadonlySet<string> = new Set(["and", "or", "otherwise"]);
+
+/**
+ * The parts of an expression in evaluation order (`expressionParts`), each with whether a run may skip it: the right
+ * operand of `and`, `or` and `otherwise`, a `default:`.
+ */
+function partsOf(
+  node: Expression,
+  lazy: boolean,
+): { readonly node: Expression; readonly lazy: boolean }[] {
+  if (node.kind === "callExpression")
+    return [
+      { node: node.callee, lazy },
+      ...(node.presentation === undefined ? [] : [{ node: node.presentation, lazy }]),
+      ...node.arguments.map((argument) => ({
+        node: argument.value,
+        lazy: lazy || (argument.kind === "namedArgument" && argument.name.name === "default"),
+      })),
+    ];
+  if (node.kind === "binaryExpression" && LAZY_RIGHT.has(node.operator))
+    return [
+      { node: node.left, lazy },
+      { node: node.right, lazy: true },
+    ];
+  if (node.kind === "loadExpression")
+    return [
+      { node: node.key, lazy },
+      ...(node.defaultValue === null ? [] : [{ node: node.defaultValue, lazy: true }]),
+    ];
+  return expressionParts(node).map((part) => ({ node: part, lazy }));
+}
+/**
+ * Whether evaluating `node` itself may change or draw anything, as `effect-facts.ts` decides it for the runtime: a call
+ * by its function or method, a read of a list's `random`, a text with values in it, a tag query; an ask, a say or
+ * another command; anything else, a read, is pure.
+ */
+function acts(node: Expression): boolean {
+  const effects = (facts: EffectFacts): boolean => changesAnything(facts) || facts.draws;
+  switch (node.kind) {
+    case "callExpression":
+      return node.callee.kind === "identifier"
+        ? effects(functionEffects(node.callee.name))
+        : node.callee.kind === "propertyAccessExpression"
+          ? effects(methodEffects(node.callee.property.name))
+          : true;
+    case "propertyAccessExpression":
+      return listDraw(node.property.name, "property") !== undefined;
+    case "stringLiteral":
+      return node.parts.some((part) => part.kind === "stringInterpolation");
+    case "identifier":
+    case "numberLiteral":
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "durationLiteral":
+    case "regexLiteral":
+    case "parenthesizedExpression":
+    case "listLiteral":
+    case "setLiteral":
+    case "objectLiteral":
+    case "dictLiteral":
+    case "indexExpression":
+    case "unaryExpression":
+    case "unitExpression":
+    case "angleExpression":
+    case "binaryExpression":
+    case "rangeExpression":
+    case "typeTestExpression":
+    case "loadExpression":
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
+ * The message source of a project's files and of their analysis's diagnostics: each file's text, its lines counted
+ * once, its statements on one line by their line, each parsed once, and its diagnostics' sites in start order, each
+ * on first need.
+ */
+export function messageSource(
+  sources: readonly string[],
+  diagnostics: readonly CoreDiagnostic[],
+): MessageSource {
   const starts = new Map<number, number[]>();
+  const programs = new Map<number, Program>();
+  const programOf = (file: number): Program => {
+    let found = programs.get(file);
+    if (found === undefined) {
+      found = parse(sources[file] ?? "").program;
+      programs.set(file, found);
+    }
+    return found;
+  };
+  const statements = new Map<number, Map<number, LineStatements>>();
+  const statementsOf = (file: number): Map<number, LineStatements> => {
+    let found = statements.get(file);
+    if (found === undefined) {
+      found = new Map<number, LineStatements>();
+      const byLine = found;
+      someNode(programOf(file), (node) => {
+        if (node.kind !== "program" && node.kind !== "block") return false;
+        // EVIDENCE: invariant: a parser-owned node whose kind is `program` or `block` holds its statements.
+        for (const statement of (node as Program | Block).statements) {
+          const { start, end } = statement.span;
+          if (start.line !== end.line) continue;
+          const line = byLine.get(start.line);
+          if (line === undefined) byLine.set(start.line, { statements: [statement], around: [] });
+          else line.statements.push(statement);
+        }
+        return false;
+      });
+      for (const line of byLine.values()) {
+        line.statements.sort(
+          (a, b) =>
+            a.span.start.offset - b.span.start.offset || b.span.end.offset - a.span.end.offset,
+        );
+        // (statements nest: the next one around each is on the stack of those it starts inside)
+        const open: number[] = [];
+        line.statements.forEach((statement, index) => {
+          while (
+            open.length > 0 &&
+            line.statements[open.at(-1)!]!.span.end.offset < statement.span.end.offset
+          )
+            open.pop();
+          line.around.push(open.at(-1) ?? -1);
+          open.push(index);
+        });
+      }
+      statements.set(file, found);
+    }
+    return found;
+  };
+  // what each diagnostic covers for `alone`: its site; a "not checked (budget)" mark's whole region, the stop's
+  // unchecked code, where the checks it moved to the runtime stand unreported (Astra r3); a stop's own warning, which
+  // claims no region, nothing. Each file's in start order, with the furthest end among those before each.
+  type Covered = {
+    readonly diagnostic: CoreDiagnostic;
+    readonly start: number;
+    readonly end: number;
+  };
+  // (with the furthest end before each and the one that reaches it, and the furthest of the others, so that a text in
+  // `self`'s own site, as an operand of it, is judged by the others)
+  type Index = {
+    readonly sorted: Covered[];
+    readonly reach: number[];
+    readonly reacher: number[];
+    readonly next: number[];
+  };
+  const sites = new Map<number, Index>();
+  const sitesOf = (file: number): Index => {
+    let found = sites.get(file);
+    if (found === undefined) {
+      const sorted = diagnostics
+        .flatMap((diagnostic): Covered[] => {
+          const covers =
+            diagnostic.kind !== "budget"
+              ? diagnostic.site
+              : diagnostic.class === "not-checked-budget"
+                ? diagnostic.place.lines
+                : null;
+          return covers === null || covers.file !== file
+            ? []
+            : [{ diagnostic, start: covers.start, end: covers.end }];
+        })
+        .sort((a, b) => a.start - b.start);
+      const reach = [-1];
+      const reacher = [-1];
+      const next = [-1];
+      sorted.forEach(({ end }, at) => {
+        const furthest = reach.at(-1)!;
+        reach.push(Math.max(furthest, end));
+        reacher.push(end > furthest ? at : reacher.at(-1)!);
+        next.push(end > furthest ? furthest : Math.max(next.at(-1)!, end));
+      });
+      found = { sorted, reach, reacher, next };
+      sites.set(file, found);
+    }
+    return found;
+  };
   const linesOf = (file: number): number[] => {
     let found = starts.get(file);
     if (found === undefined) {
@@ -83,10 +402,57 @@ export function messageSource(sources: readonly string[]): MessageSource {
     }
     return low;
   };
+  const line = (site: SourceSite): number => lineIndex(site) + 1;
+  const statement = (use: SourceSite, read: SourceSite): SourceSite | null => {
+    const found = statementsOf(use.file).get(line(use) - 1);
+    if (found === undefined) return null;
+    // the innermost around the use: from the last that starts at or before it, out through those around that one
+    let low = 0;
+    let high = found.statements.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (found.statements[middle]!.span.start.offset <= use.start) low = middle + 1;
+      else high = middle;
+    }
+    let at = low - 1;
+    while (at !== -1 && !holds(found.statements[at]!.span, use)) at = found.around[at]!;
+    const held = at === -1 ? undefined : found.statements[at];
+    return held === undefined || UNGUARDED.has(held.kind) || !guards(held, use, read)
+      ? null
+      : { file: use.file, start: held.span.start.offset, end: held.span.end.offset };
+  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
-    line: (site) => lineIndex(site) + 1,
+    line,
     column: (site) => site.start - linesOf(site.file)[lineIndex(site)]!,
+    statement,
+    alone: (self, held, rulesOut) => {
+      const { sorted, reach, reacher, next } = sitesOf(held.file);
+      // (one that starts before the text and reaches into it, then those that start in it, until another)
+      let low = 0;
+      let high = sorted.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (sorted[middle]!.start < held.start) low = middle + 1;
+        else high = middle;
+      }
+      if ((sorted[reacher[low]!]?.diagnostic === self ? next[low]! : reach[low]!) > held.start)
+        return false;
+      for (let at = low; at < sorted.length && sorted[at]!.start < held.end; at += 1) {
+        const other = sorted[at]!.diagnostic;
+        const ruledOut =
+          other === self ||
+          (rulesOut !== null &&
+            other.site.start === self.site.start &&
+            other.site.end === self.site.end &&
+            other.kind !== "written-type" &&
+            other.kind !== "budget" &&
+            other.kinds.length > 0 &&
+            other.kinds.every(rulesOut));
+        if (!ruledOut) return false;
+      }
+      return true;
+    },
   };
 }
 
@@ -111,15 +477,24 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
 
 /** A diagnostic's message: its first sentence, and a warning's consequence, fix and cause after it. */
 export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): string {
-  if (diagnostic.kind === "written-type") return writtenTypeMessage(diagnostic, source);
+  // (whether the values it names and its store's declaration reads are there when the script runs, unproved where it
+  // does not say; whether its program runs at all; and whether an author's text a form holds lies clear of the other
+  // diagnostics: TABLE r4.162, r4.168)
+  const alone = (held: SourceSite, rulesOut: ((kind: ItemTag) => boolean) | null): boolean =>
+    source.alone(diagnostic, held, rulesOut);
+  if (diagnostic.kind === "written-type")
+    return writtenTypeMessage(diagnostic, source, {
+      present: "unproved",
+      severity: "error",
+      alone,
+    });
   if (diagnostic.kind === "budget") return budgetMessage(diagnostic, source);
   const text = source.text(diagnostic.site);
   const { rule, kinds } = diagnostic;
-  // (whether the values it names are there when the script runs, unproved where it does not say, and whether its
-  // program runs at all: TABLE r4.162, r4.168)
   const diagnosed: Diagnosed = {
     present: diagnostic.present ?? "unproved",
     severity: diagnostic.class === "compile-error" ? "error" : "warning",
+    alone,
   };
   if (diagnostic.class === "compile-error")
     return errorSentence(rule, text, kinds, source, diagnostic.site, diagnostic.expects, diagnosed);
@@ -135,9 +510,11 @@ export function coreMessage(diagnostic: CoreDiagnostic, source: MessageSource): 
       text,
       kinds,
       diagnostic.fits,
+      diagnostic.besides,
       detail,
       context,
       source,
+      diagnostic.site,
       diagnostic.expects,
       diagnosed,
     ),
@@ -320,6 +697,12 @@ function operandText(code: string): string {
   return kind !== null && OPERANDS.has(kind) ? code : `(${code})`;
 }
 
+/** Code as the receiver of a member a fix writes: in parentheses unless it binds tighter. */
+function receiverText(code: string): string {
+  const kind = expressionKind(code);
+  return kind !== null && POSTFIX.has(kind) ? code : `(${code})`;
+}
+
 /**
  * A path below a place in words (D2: source text, never code the source does not hold): its properties as code after
  * the place's own (`'box.a.n'`), and each element or dict value step in words (`'n' of an element of 'xs'`). `root`: the
@@ -372,8 +755,8 @@ const SHOWN_RULE =
   "It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and " +
   "regexes, and selects one element of a list.";
 
-/** The rule an operand's kinds break: the first part of its consumer's sentence. */
-function operandRule(rule: DiagnosticRule): string {
+/** The rule an operand's kinds break: the first part of its consumer's sentence; `text`, the operand as written. */
+function operandRule(rule: DiagnosticRule, text: string): string {
   switch (rule.rule) {
     case "count":
       return rule.use === "repeat"
@@ -395,10 +778,11 @@ function operandRule(rule: DiagnosticRule): string {
       return rule.entries
         ? "A 'for' loop with a key and a value goes through a dict"
         : FOR_SOURCE_RULE;
+    // (the operand in its own '${…}', which is no placeholder, #1268)
     case "shown":
       return rule.element
-        ? "'${...}' shows one element of a list as text"
-        : "'${...}' shows its value as text";
+        ? `'\${${text}}' shows one element of a list as text`
+        : `'\${${text}}' shows its value as text`;
     default:
       throw new Error(`The rule '${rule.rule}' has no operand rule.`);
   }
@@ -419,24 +803,33 @@ interface Takes {
 /** The kinds whose structure a kind alone does not say: an object's properties, a collection's elements. */
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["object", "list", "set", "dict"]);
 
-/** A diagnostic's facts a code form reads: whether the values it names are there, and whether its program runs. */
+/**
+ * A diagnostic's facts a code form reads: whether the values it names are there, and whether its program runs; and
+ * whether an author's text lies clear of the analysis's other diagnostics (`alone`, `MessageSource.alone`).
+ */
 interface Diagnosed {
   readonly present: Presence;
   readonly severity: "error" | "warning";
+  readonly alone: (held: SourceSite, rulesOut: ((kind: ItemTag) => boolean) | null) => boolean;
 }
 
 /**
  * A code form a fix offers, every fact stated (TABLE r4.162): its code; what each of its operations takes (fact 1);
  * its diagnostic's facts (`diagnosed`), and whether the values it reads are the site's own, read once where they stand
- * (`own`), or it reads them again or elsewhere (`added`); the kinds its value has (fact 2), with a collection's
- * elements' kinds (none for a scalar); and whether it writes a value of its own (a fallback's), which the script never
- * held.
+ * (`own`), it reads them again or elsewhere (`added`), or it adds none (`none`: a type, a literal of its own, a
+ * declaration restated with its start value as written); the author's texts it holds (`holds`: the diagnosed value, a
+ * statement, a declaration), each clear of the analysis's other diagnostics but one at the diagnosed site of only the
+ * types it rules out (`rulesOut`: a check's test, the types a value it writes in place of the diagnosed one lacks,
+ * `unlike`); the kinds its value has (fact 2), with a collection's elements' kinds (none for a scalar); and whether it
+ * writes a value of its own (a fallback's), which the script never held.
  */
 interface CodeForm {
   readonly code: string;
   readonly takes: readonly Takes[];
   readonly diagnosed: Diagnosed;
-  readonly reads: "own" | "added";
+  readonly reads: "own" | "added" | "none";
+  readonly holds: readonly SourceSite[];
+  readonly rulesOut: ((kind: ItemTag) => boolean) | null;
   readonly gives: readonly ItemTag[];
   readonly elements: readonly ItemTag[] | "unproved";
   readonly writes: boolean;
@@ -450,13 +843,35 @@ const UNPROVED: SiteExpectation = {
   divides: "unproved",
 };
 
-/** A line of its own: a statement, whose value nothing takes or divides. */
-const STATEMENT: SiteExpectation = { takes: null, binds: "whole", elements: null, divides: false };
+/**
+ * A site that holds no value, where a form stands as the language's grammar takes it there: a line of its own (a
+ * statement), a function's parameter, a written type.
+ */
+type Position = "statement" | "parameter" | "type";
+
+/**
+ * The types a value a form computes in place of the diagnosed one, from its parts, does not have: a diagnostic at the
+ * site of only those is the replaced value's own, which the form's result decides instead (`codeAt`'s fact 2), as a
+ * failed call's value the script cannot know. Not for a form that keeps the diagnosed value, whose site's diagnostics
+ * are of the text it holds.
+ */
+const unlike =
+  (gives: readonly ItemTag[]) =>
+  (kind: ItemTag): boolean =>
+    !gives.includes(kind);
 
 /** The kinds `${...}` shows (V30 §8), which `join` joins. */
 const SHOWN_KINDS_ALL: readonly ItemTag[] = VALUE_KIND_NAMES.filter(
   (kind) => VALUE_KINDS[kind].shown !== null,
 );
+
+/** What `${...}` takes of the value it holds (V30 §8): a value it shows, whole within its braces. */
+const SHOWN_SITE: SiteExpectation = {
+  takes: SHOWN_KINDS_ALL,
+  binds: "whole",
+  elements: null,
+  divides: false,
+};
 
 /** The kinds a text method's result has (`TEXT_METHODS`). */
 function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["result"]): ItemTag[] {
@@ -471,17 +886,49 @@ function textResult(result: (typeof TEXT_METHODS)[keyof typeof TEXT_METHODS]["re
   return result.endsWith("?") ? [kind, "null"] : [kind];
 }
 
+/** Whether code is, by the language's own parser, exactly one construct of a position on one line. */
+function standsAt(code: string, position: Position): boolean {
+  const [prefix, suffix] =
+    position === "statement"
+      ? ["", "\nexit\n"]
+      : position === "parameter"
+        ? ["function fix(", ") {\n}\nexit\n"]
+        : ["let fix: ", " = null\nexit\n"];
+  const parsed = parse(`${prefix}${code}${suffix}`);
+  const statement = parsed.program.statements[0];
+  if (parsed.diagnostics.length > 0 || statement === undefined) return false;
+  const span =
+    position === "statement"
+      ? statement.span
+      : position === "parameter"
+        ? statement.kind === "functionDeclaration" && statement.parameters.length === 1
+          ? statement.parameters[0]!.span
+          : null
+        : statement.kind === "letStatement"
+          ? statement.typeAnnotation?.span
+          : null;
+  return (
+    span !== null &&
+    span !== undefined &&
+    span.start.offset === prefix.length &&
+    span.end.offset === prefix.length + code.length
+  );
+}
+
 /**
- * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on. It holds
- * where (1) each operation takes its subject: every value the form reads there when the script runs, every kind of
- * it known, and one the operation takes, a value it holds of a flat structure; (2) its value fits what the site takes (`site`, read from what
- * consumes the value there: any value where nothing restricts it), a structured value only there or as a collection
- * of scalars against its elements' kinds, and a value the fix writes itself only where the value is proved not to
- * divide; and (3) it binds there: as the site's whole value, or in parentheses where an operand or a receiver binds
- * tighter than its code. A site fact no fact proves gives words, never a form (TABLE r4.162). Its code, so grouped,
- * where it holds; `null` where it does not, and the fix gives its advice in words.
+ * TABLE r4.151: the one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
+ * position its sentence names. It holds where (1) each operation takes its subject: every value the form reads there
+ * when the script runs, every kind of it known, and one the operation takes, a value it holds of a flat structure;
+ * every author's text it holds clear of the analysis's other diagnostics, and of any region a stop left unchecked
+ * (TABLE r4.162, Astra r3 on #1273); (2) its value fits what the site takes (`site`, read from what consumes the value
+ * there: any value where nothing restricts it), a structured value only there or as a collection of scalars against its
+ * elements' kinds, and a value the fix writes itself only where the value is proved not to divide; and (3) it binds
+ * there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code; at a
+ * position as one statement, parameter or type (TABLE r4.171). A site fact no fact proves gives words, never a form
+ * (TABLE r4.162). Its code, so grouped, where it holds; `null` where it does not, and the fix gives its advice in
+ * words.
  */
-function codeAt(form: CodeForm, site: SiteExpectation): string | null {
+function codeAt(form: CodeForm, site: SiteExpectation | Position): string | null {
   const proved = (kinds: readonly ItemTag[]): boolean =>
     kinds.length > 0 && kinds.every((kind) => kind !== "unknown" && kind !== "empty");
   const fit = (kinds: readonly ItemTag[], takes: readonly ItemTag[]): boolean =>
@@ -489,17 +936,22 @@ function codeAt(form: CodeForm, site: SiteExpectation): string | null {
   // (a value held in a place, or landing in one that takes some type, fits by its structure too: the kinds alone prove
   // it only for a scalar, or a collection of scalars against its elements' kinds, Codex r6)
   const flat = (kinds: readonly ItemTag[]): boolean => !kinds.some((kind) => STRUCTURED.has(kind));
-  // (the values it reads are there when the script runs: proved, or a warning's own reads, which its program already
-  // performs where they stand, wrapped there in place, TABLE r4.168)
+  // (the values it reads are there when the script runs: none read, proved, or a warning's own reads, which its program
+  // already performs where they stand, wrapped there in place, TABLE r4.168)
   const there =
+    form.reads === "none" ||
     form.diagnosed.present === true ||
     (form.diagnosed.severity === "warning" && form.reads === "own");
   if (
     !there ||
     !ownText(form.code) ||
-    !form.takes.every(({ subject, takes, held }) => fit(subject, takes) && (!held || flat(subject)))
+    !form.takes.every(
+      ({ subject, takes, held }) => fit(subject, takes) && (!held || flat(subject)),
+    ) ||
+    !form.holds.every((held) => form.diagnosed.alone(held, form.rulesOut))
   )
     return null;
+  if (typeof site === "string") return standsAt(form.code, site) ? form.code : null;
   // (the predicate proves types, not values: a value the fix writes, such as a fallback's `0`, may stop the run where
   // the value divides, Astra on #1273; offered only where a fact proves it does not, TABLE r4.162)
   if (form.writes && site.divides !== false) return null;
@@ -570,45 +1022,102 @@ function elementOf(
 }
 
 /**
- * How a fix declares a store's root with the type `type` at the root (`declareAs` of the current checker); `subject`,
- * the root as the sentence names it.
+ * A written type a fix names (TABLE r4.171): a form at a type's position, which reads nothing and holds no author's
+ * text; `null` where it is none.
  */
-function declaration(root: StoreRoot | null, type: string, subject = "it"): string | null {
-  if (root === null) return null;
-  switch (root.kind) {
-    case "parameter":
-      return `declare the parameter as '${root.name}: ${type}${root.start === null ? "" : ` = ${root.start}`}'`;
-    case "result":
-      return null;
-    default:
-      return `declare ${subject} as '${root.kind} ${root.name}: ${type} = ...'`;
-  }
+function typeAt(type: string, diagnosed: Diagnosed): string | null {
+  return codeAt(
+    {
+      code: type,
+      takes: [],
+      diagnosed,
+      reads: "none",
+      holds: [],
+      rulesOut: null,
+      gives: [],
+      elements: [],
+      writes: false,
+    },
+    "type",
+  );
 }
 
 /**
- * The fix of a store of `kinds` into a place of `type`, as the current checker gives it: rounding a number into a whole
- * number; a conversion into the place's one type; for null a nullable type, else a written union (ADR 0021 rule 1.1),
- * where the place is a variable, a parameter, or an element or dict value of one; else a separate property or
+ * How a fix declares a store's root with the type `type` at the root (`declareAs` of the current checker): its whole
+ * declaration as the source writes it, with that type, where `codeAt` proves it in the declaration's place (#1268,
+ * TABLE r4.146): a statement or a parameter, its text clear of the other diagnostics, its start value the author's
+ * own, read where it stands; else the declaration and the type in words. `subject`, the root as the sentence names
+ * it; `null` where the type is no form (`typeAt`) or the root no declaration.
+ */
+function declaration(
+  root: StoreRoot | null,
+  type: string,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+  subject = "it",
+): string | null {
+  const written = typeAt(type, diagnosed);
+  if (root === null || root.kind === "result" || written === null) return null;
+  const parameter = root.kind === "parameter";
+  // (its text up to the name, the type, and its text from the `=` on, which no written type holds: a global's
+  // `default:` stays with it)
+  const text = root.site === null ? "" : source.text(root.site);
+  const start = text.indexOf("=");
+  const declared = `${parameter ? "" : `${root.kind} `}${root.name}: ${written}`;
+  const code =
+    root.site === null
+      ? null
+      : codeAt(
+          {
+            code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
+            takes: [],
+            diagnosed,
+            // (it restates the author's own declaration, its start value as written, and adds no read: TABLE r4.160,
+            // r4.168)
+            reads: "none",
+            holds: [root.site],
+            rulesOut: null,
+            gives: [],
+            elements: [],
+            writes: false,
+          },
+          parameter ? "parameter" : "statement",
+        );
+  return code === null
+    ? `declare ${parameter ? `the parameter '${root.name}'` : subject} with the type '${written}'`
+    : `declare ${parameter ? "the parameter" : subject} as '${code}'`;
+}
+
+/**
+ * The fix of a store of `kinds` at `at` into a place of `type`, as the current checker gives it: rounding a number into
+ * a whole number; a conversion into the place's one type; for null a nullable type, else a written union (ADR 0021 rule
+ * 1.1), where the place is a variable, a parameter, or an element or dict value of one; else a separate property or
  * collection for a property's or an element's values, or a separate variable.
  */
 function storeFix(
   rule: StoreRule,
   kinds: readonly ItemTag[],
   text: string,
+  at: SourceSite,
+  source: MessageSource,
   diagnosed: Diagnosed,
 ): string {
   if (rule.type.includes("integer") && kinds.includes("number")) return ROUND_COUNT_FIX;
   const values = known(kinds);
   const place = known(rule.type).filter((kind) => kind !== "null");
-  const conversion = conversionFix(rule, place, values, text, diagnosed);
+  const conversion = conversionFix(rule, place, values, text, at, diagnosed);
   if (conversion !== "") return conversion;
   const nullOnly = values.length > 0 && values.every((kind) => kind === "null");
   const both = typeText([...rule.type, ...kinds]);
   const collection = elementOf(rule);
   // (a collection a property holds: that property's first value, as the current checker says)
-  if (collection !== null && !collection.root && both !== null)
+  const first =
+    collection === null || collection.root || both === null
+      ? null
+      : typeAt(collectionText(collection.kind, both), diagnosed);
+  if (first !== null)
     return (
-      ` To allow both, give '${collection.name}' a first value of type '${collectionText(collection.kind, both)}', ` +
+      ` To allow both, give '${collection!.name}' a first value of type '${first}', ` +
       "such as a variable declared with that type."
     );
   if (rule.steps.some((step) => "property" in step))
@@ -619,19 +1128,19 @@ function storeFix(
   }
   const written =
     both === null ? null : collection === null ? both : collectionText(collection.kind, both);
-  const declared = written === null ? null : declaration(rule.root, written);
+  const declared = written === null ? null : declaration(rule.root, written, source, diagnosed);
   // (null into an element widens the element's type, which the current checker calls both)
   if (declared !== null)
     return ` To allow ${nullOnly && collection === null ? "null" : "both"}, ${declared}.`;
-  if (rule.root?.kind === "result" && both !== null)
-    return ` To return both, declare its result type as '${both}'.`;
+  const result = rule.root?.kind === "result" && both !== null ? typeAt(both, diagnosed) : null;
+  if (result !== null) return ` To return both, declare its result type as '${result}'.`;
   return nullOnly
     ? " Use a separate variable for null."
     : " Use a separate variable for a value of another type.";
 }
 
 /**
- * The conversion of a store's value into the place's one type (`place`), as the current checker gives it
+ * The conversion of a store's value at `at` into the place's one type (`place`), as the current checker gives it
  * (`conversionFix`): a number a unit (V30 §13), into an element too; and into a variable, a parameter, a result or a
  * property, text a date or a time with its conversion, and a number or a truth value shown as text; else "". Each code
  * form stands in place of the stored value, where the diagnostic sits, and is offered where `codeAt` proves it there:
@@ -642,6 +1151,7 @@ function conversionFix(
   place: readonly Known[],
   values: readonly Known[],
   text: string,
+  at: SourceSite,
   diagnosed: Diagnosed,
 ): string {
   const [type] = place;
@@ -653,14 +1163,21 @@ function conversionFix(
     elements: "unproved",
     divides: "unproved",
   };
-  const converted = (code: string, subject: readonly ItemTag[], takes: readonly ItemTag[]) =>
+  const converted = (
+    code: string,
+    subject: readonly ItemTag[],
+    takes: readonly ItemTag[],
+    gives: readonly ItemTag[] = [type],
+  ) =>
     codeAt(
       {
         code,
         takes: [{ subject, takes, held: false }],
         diagnosed,
         reads: "own",
-        gives: [type],
+        holds: [at],
+        rulesOut: null,
+        gives,
         elements: [],
         writes: false,
       },
@@ -699,39 +1216,29 @@ function conversionFix(
     type === "string" &&
     values.every((kind) => kind === "integer" || kind === "number" || kind === "boolean")
   ) {
-    // (#1213's decided text: the value in `${...}` where it is a stable path, else the advice alone)
-    const code = stablePath(text)
-      ? codeAt(
-          {
-            code: `"\${${text}}"`,
-            takes: [{ subject: values, takes: ["integer", "number", "boolean"], held: false }],
-            diagnosed,
-            reads: "own",
-            gives: ["string"],
-            elements: [],
-            writes: false,
-          },
-          site,
-        )
-      : null;
+    // (#1213's decided text: the value in `${...}` in place, read once, where `codeAt` proves it there, else the advice
+    // alone, #1268)
+    const code = converted(`"\${${text}}"`, values, ["integer", "number", "boolean"], ["string"]);
     return code === null
-      ? " To show it as text, put it in a text with '${...}'."
-      : ` To show it as text, write '${code}'.`;
+      ? " To show the value as text, put it in a text."
+      : ` To show '${text}' as text, write '${code}'.`;
   }
   return "";
 }
 
 /**
  * A member's fix where its receiver's kind has no such member (the current checker's, `operation-checks.ts`). Each code
- * form stands in place of the member access the diagnostic sits on, names the receiver where it is a stable path, and
- * is offered where `codeAt` proves it there: the receiver's kinds (`holder`: an error's own, a warning's whole
- * receiver's, none where its facts are lost) ones the member takes, a call's elements of a type it takes, and its value
- * one the access's place takes (`site`); else the member or the step in words (TABLE r4.151); `text`, the access's code.
+ * form stands in place of the member access the diagnostic sits on (`at`) and is offered where `codeAt` proves it
+ * there: the receiver's kinds (`holder`: an error's own, a warning's whole receiver's, none where its facts are lost)
+ * ones the member takes, a call's elements of a type it takes, and its value one the access's place takes (`site`);
+ * else the member or the step in words (TABLE r4.151). It names the receiver where it is a stable path; a conversion
+ * shows another receiver converted in its place, where the whole access is proved (#1268). `text`, the access's code.
  */
 function memberFix(
   rule: Extract<DiagnosticRule, { rule: "member" }>,
   kinds: readonly ItemTag[],
   text: string,
+  at: SourceSite,
   site: SiteExpectation,
   holder: readonly ItemTag[],
   diagnosed: Diagnosed,
@@ -740,27 +1247,34 @@ function memberFix(
   if (kind === undefined) return "";
   const receiver = rule.receiver;
   const named = stablePath(receiver);
-  // (code on the receiver, where it is written as a stable path: the form `codeAt` tests)
-  const on = (
+  // (code in place of the access: the form `codeAt` tests)
+  const access = (
     code: string,
     takes: readonly ItemTag[],
     gives: readonly ItemTag[],
     also: readonly Takes[] = [],
   ) =>
-    named
-      ? codeAt(
-          {
-            code,
-            takes: [{ subject: holder, takes, held: false }, ...also],
-            diagnosed,
-            reads: "own",
-            gives,
-            elements: [],
-            writes: false,
-          },
-          site,
-        )
-      : null;
+    codeAt(
+      {
+        code,
+        takes: [{ subject: holder, takes, held: false }, ...also],
+        diagnosed,
+        reads: "own",
+        holds: [at],
+        rulesOut: unlike(gives),
+        gives,
+        elements: [],
+        writes: false,
+      },
+      site,
+    );
+  // (code on the receiver, where it is written as a stable path)
+  const on = (
+    code: string,
+    takes: readonly ItemTag[],
+    gives: readonly ItemTag[],
+    also: readonly Takes[] = [],
+  ) => (named ? access(code, takes, gives, also) : null);
   if (!rule.member.startsWith(".")) return kind === "object" ? objectIndexFix(rule, text) : "";
   const method = rule.member.endsWith("()");
   const name = method ? rule.member.slice(1, -2) : rule.member.slice(1);
@@ -797,16 +1311,17 @@ function memberFix(
         : ` Use '${code}'.`;
     }
   }
+  // (each member has its own type, which the read's use may not take: named in words, Codex r4 on #1268)
   if (kind === "dict") {
     if (method)
       return name === "add"
         ? " Assign the value to a key of the dict instead."
-        : ` Use one of the dict's methods instead: ${either(Object.keys(DICT_METHODS).map((found) => `'${found}'`))}.`;
+        : ` Use one of the dict's methods instead: ${either(Object.keys(DICT_METHODS))}.`;
     // (a key's value is there only where the dict has the key when the script runs, which no fact here proves, Codex
     // r6: the key in words, for a read and a store)
     return rule.use === "store"
       ? " To store a value by its key, write the key in brackets."
-      : ` Use one of the dict's properties instead: ${either(Object.keys(DICT_PROPERTIES).map((found) => `'${found}'`))}.` +
+      : ` Use one of the dict's properties instead: ${either(Object.keys(DICT_PROPERTIES))}.` +
           ` To read a value by its key, write the key in brackets, where '${receiver}' has that key.`;
   }
   // (a property stored on a type without it: a read's repair is no place to store into)
@@ -838,31 +1353,50 @@ function memberFix(
         ? " Call the join method with parentheses."
         : " The join method joins only elements that can be shown as text, so select an element or a property first.";
   }
-  if (!method && kind === "absoluteDateTime" && hasTemporalField("datetime", name))
-    return named
-      ? ` Convert '${receiver}' first, as in '${receiver}.toDateTime().${name}'.`
-      : ` Convert '${receiver}' with 'toDateTime()' first.`;
-  if (kind !== "string" && VALUE_KINDS[kind].type === "scalar" && isTextMember(name))
-    return named
-      ? ` Convert '${receiver}' to text first, as in 'toString(${receiver})${method ? `.${name}(...)` : `.${name}`}'.`
-      : ` Convert '${receiver}' to text first with 'toString(...)'.`;
+  if (!method && kind === "absoluteDateTime" && hasTemporalField("datetime", name)) {
+    const code = on(
+      `${receiver}.toDateTime().${name}`,
+      ["absoluteDateTime"],
+      [TEMPORAL_FIELDS[name].result],
+    );
+    return code === null
+      ? ` Convert '${receiver}' with the toDateTime method first.`
+      : ` Convert '${receiver}' first, as in '${code}'.`;
+  }
+  // (a property read whole; another receiver converted in its place, which keeps a call's own arguments; a method's
+  // result is its own, which no fact here gives: words, #1268)
+  if (kind !== "string" && VALUE_KINDS[kind].type === "scalar" && isTextMember(name)) {
+    const code =
+      method || name !== "length"
+        ? null
+        : access(`toString(${receiver}).length`, SHOWN_KINDS_ALL, ["integer"]);
+    return code === null
+      ? " Convert the value to text first with the toString function."
+      : named
+        ? ` Convert '${receiver}' to text first, as in '${code}'.`
+        : ` Convert '${receiver}' to text first with 'toString(${receiver})'.`;
+  }
   if (!method && kind === "duration") {
     const unit = elapsedDurationUnit(name);
     if (unit !== undefined) {
       const single = name.length > 2 && name.endsWith("s") ? name.slice(0, -1) : name;
-      return named
-        ? ` Divide '${receiver}' by a unit, as in '${receiver} / 1 ${single}'.`
-        : ` Divide '${receiver}' by a unit, such as '1 ${single}'.`;
+      // (the division in place of the access, grouped as the access's place takes it, #1268)
+      const code = access(`${operandText(receiver)} / 1 ${single}`, ["duration"], ["number"]);
+      return code === null
+        ? " Divide the duration by a unit of time instead."
+        : named
+          ? ` Divide '${receiver}' by a unit, as in '${code}'.`
+          : ` Divide '${receiver}' by a unit, such as '1 ${single}'.`;
     }
   }
   if (!method && kind === "calendarDuration")
-    return ` Use ${either(Object.keys(CALENDAR_DURATION_PARTS).map((part) => `'${part}'`))}.`;
+    return ` Use one of its properties instead: ${either(Object.keys(CALENDAR_DURATION_PARTS))}.`;
   if (method && kind === "set" && listMethod(name)?.notOnSet !== undefined)
     return name === "get"
-      ? " Use 'contains(...)' instead."
-      : ` Copy '${receiver}' into a list with '${named ? `${receiver}.` : ""}toList()' first.`;
+      ? " Use the contains method instead."
+      : ` Copy '${receiver}' into a list with the toList method first.`;
   if (!method && kind === "list" && rule.use === "read")
-    return " Use 'length', 'first', 'last', or 'random'.";
+    return " Use one of its properties instead: length, first, last, or random.";
   return "";
 }
 
@@ -881,43 +1415,162 @@ function objectIndexFix(rule: Extract<DiagnosticRule, { rule: "member" }>, text:
 
 /**
  * The fix of a value that is not true or false where a condition needs one (#1195's decided text): its advice always,
- * its example only of a stable path (the lead after Astra r3).
+ * its example only of a stable path (the lead after Astra r3), in place of the value at `at`, where `codeAt` proves it
+ * there: every known type of the value one the comparison takes (Codex r4), and true or false where the condition, or
+ * the logic operator it is an operand of, takes it.
  */
-function conditionFix(text: string, kinds: readonly ItemTag[]): string {
+function conditionFix(
+  rule: Extract<DiagnosticRule, { rule: "boolean" }>,
+  text: string,
+  kinds: readonly ItemTag[],
+  at: SourceSite,
+  diagnosed: Diagnosed,
+): string {
   const kind = known(kinds)[0];
-  const example = (code: string): string => (stablePath(text) ? `, as in '${code}'.` : ".");
+  const example = (code: string, takes: readonly ItemTag[]): string => {
+    const proved = stablePath(text)
+      ? codeAt(
+          {
+            code,
+            takes: [{ subject: kinds, takes, held: false }],
+            diagnosed,
+            reads: "own",
+            holds: [at],
+            rulesOut: null,
+            gives: ["boolean"],
+            elements: [],
+            writes: false,
+          },
+          {
+            takes: ["boolean"],
+            binds: rule.operator === null ? "whole" : "operand",
+            elements: null,
+            divides: false,
+          },
+        )
+      : null;
+    return proved === null ? "." : `, as in '${proved}'.`;
+  };
   if (kind === "integer" || kind === "number")
-    return ` Compare it instead${example(`${text} > 0`)}`;
-  if (kind === "string") return ` Compare it instead${example(`${text} != ""`)}`;
+    return ` Compare it instead${example(`${text} > 0`, ["integer", "number"])}`;
+  if (kind === "string") return ` Compare it instead${example(`${text} != ""`, ["string"])}`;
   if (kind === "list" || kind === "set" || kind === "dict")
-    return ` Check its length instead${example(`${text}.length > 0`)}`;
+    return ` Check its length instead${example(`${text}.length > 0`, ["list", "set", "dict"])}`;
   return "";
 }
 
-/** The fix of a key that is not text: a number written as text, as the current checker gives it (`dict-operations.ts`). */
-function keyFix(text: string, kinds: readonly ItemTag[]): string {
+/**
+ * The fix of a key that is not text: a number written as text, as the current checker gives it (`dict-operations.ts`),
+ * in place of the key at `at` where `codeAt` proves it there: every known type of it one `${...}` shows (TABLE r4.162).
+ */
+function keyFix(
+  text: string,
+  kinds: readonly ItemTag[],
+  at: SourceSite,
+  diagnosed: Diagnosed,
+): string {
   if (!kinds.some((kind) => kind === "integer" || kind === "number")) return "";
-  return stablePath(text)
-    ? ` Write a number key as text, as in '"\${${text}}"'.`
-    : " Write a number key as text.";
+  const code = stablePath(text)
+    ? codeAt(
+        {
+          code: `"\${${text}}"`,
+          takes: [
+            {
+              subject: kinds,
+              takes: SHOWN_KINDS_ALL.filter((kind) => kind !== "null"),
+              held: false,
+            },
+          ],
+          diagnosed,
+          reads: "own",
+          holds: [at],
+          rulesOut: null,
+          gives: ["string"],
+          elements: [],
+          writes: false,
+        },
+        { takes: ["string"], binds: "whole", elements: null, divides: false },
+      )
+    : null;
+  return code === null
+    ? " Write a number key as text."
+    : ` Write a number key as text, as in '${code}'.`;
 }
 
-/** How `${...}` shows a value of each kind it cannot show, where one has a fix (#1195's decided texts). */
+/**
+ * How `${...}` shows a value of each kind it cannot show, where one has a fix (#1195's decided texts): code in place of
+ * the value at `at` inside its braces, where `codeAt` proves it there (#1268): an object's property that `${...}` shows
+ * (the consumer's `property`, whose every type it shows), a set's elements joined where `${...}` shows each (Codex r2);
+ * none for an element `${...}` selects from a list, whose text names the list.
+ */
 function shownFix(
   rule: Extract<DiagnosticRule, { rule: "shown" }>,
   text: string,
   kinds: readonly ItemTag[],
+  at: SourceSite,
+  diagnosed: Diagnosed,
 ): string {
   const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
-  const label = stablePath(text) ? text : null;
-  if (kind === "object")
-    return rule.property === null || label === null
+  const shown = (code: string, takes: readonly Takes[], gives: readonly ItemTag[]) => {
+    const proved = rule.element
+      ? null
+      : codeAt(
+          {
+            code,
+            takes,
+            diagnosed,
+            reads: "own",
+            holds: [at],
+            rulesOut: null,
+            gives,
+            elements: [],
+            writes: false,
+          },
+          SHOWN_SITE,
+        );
+    return proved === null ? null : `\${${proved}}`;
+  };
+  const receiver = receiverText(text);
+  if (kind === "object") {
+    const code =
+      rule.property === null
+        ? null
+        : shown(
+            `${receiver}.${rule.property}`,
+            [{ subject: kinds, takes: ["object"], held: false }],
+            SHOWN_KINDS_ALL,
+          );
+    return code === null
       ? "Show one of its properties instead."
-      : `Show one of its properties instead, as in '\${${label}.${rule.property}}'.`;
-  if (kind === "set")
-    return label === null
-      ? "Show its elements with 'toList().join()' instead."
-      : `Show all its elements with '\${${label}.toList().join()}'.`;
+      : `Show one of its properties instead, as in '${code}'.`;
+  }
+  if (kind === "dict" && !rule.element) {
+    const code = shown(
+      `${receiver}.values.join()`,
+      [
+        { subject: kinds, takes: ["dict"], held: false },
+        { subject: rule.elements, takes: SHOWN_KINDS_ALL, held: false },
+      ],
+      ["string"],
+    );
+    return (
+      "Select one value with a key, or show every value " +
+      (code === null ? "with the values and join methods." : `with '${code}'.`)
+    );
+  }
+  if (kind === "set") {
+    const code = shown(
+      `${receiver}.toList().join()`,
+      [
+        { subject: kinds, takes: ["set"], held: false },
+        { subject: rule.elements, takes: SHOWN_KINDS_ALL, held: false },
+      ],
+      ["string"],
+    );
+    return code === null
+      ? "Show its elements with the toList and join methods instead."
+      : `Show all its elements with '${code}'.`;
+  }
   return SHOWN_RULE;
 }
 
@@ -962,6 +1615,8 @@ function parsedExpression(
 function mixedSentence(
   rule: Extract<DiagnosticRule, { rule: "mixed" }>,
   kinds: readonly ItemTag[],
+  source: MessageSource,
+  diagnosed: Diagnosed,
 ): string {
   const { collection, path } = rule;
   const holds = `A ${collection} holds one type.`;
@@ -994,61 +1649,139 @@ function mixedSentence(
   const both = path.length === 0 ? typeText([...rule.type, ...kinds]) : null;
   if (both === null) return `${first} Use values of one type in it.`;
   const written = collectionText(collection, both);
-  const root = rule.root;
-  return root !== null && (root.kind === "let" || root.kind === "global")
-    ? `${first} To allow both, declare it as '${root.kind} ${root.name}: ${written} = ...'.`
-    : `${first} To allow both, declare it as '${written}'.`;
+  const { root } = rule;
+  const declared =
+    root?.kind === "let" || root?.kind === "global"
+      ? declaration(root, written, source, diagnosed)
+      : null;
+  const type = typeAt(written, diagnosed);
+  if (declared === null && type === null) return `${first} Use values of one type in it.`;
+  return `${first} To allow both, ${declared ?? `declare it as '${type}'`}.`;
 }
 
-/** The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). */
+/**
+ * The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). Each
+ * code form stands in place of the operation the diagnostic sits on (`at`), its value converted where it is a variable
+ * or a path and the other operand one or a literal, and is offered where `codeAt` proves it there: the operands of the
+ * kinds its conversions take, and its result, which the failed operation never gave, one the operation's place takes
+ * (`expects`, Codex r6); an operand's diagnostic proves nothing of the operation's place. Else the conversion in words.
+ */
 function temporalFix(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,
   kinds: readonly ItemTag[],
   source: MessageSource,
+  at: SourceSite,
+  expects: SiteExpectation,
+  diagnosed: Diagnosed,
 ): string {
   const [left, right] = rule.operands.map((site) => source.text(site));
   if (left === undefined || right === undefined) return "";
   const [a, b] = rule.operand ? [undefined, kinds[0]] : rule.pair;
   const { operator } = rule;
   const moves = operator === "+" || operator === "-";
-  // (an example only where the value it converts is a variable or a path, and the other operand one or a literal)
+  const compares = ["<", "<=", ">", ">="].includes(operator);
   const named =
     stablePath(left) &&
     (stablePath(right) || LITERAL_OPERAND.has(expressionKind(right) ?? "identifier"));
-  if (moves && a === "absoluteDateTime" && b === "calendarDuration")
-    return named
-      ? " An absolute date and time has no calendar. Convert it first, as in " +
-          `'(${left}.toDateTime() ${operator} ${right}).toAbsoluteDateTime()'.`
-      : " An absolute date and time has no calendar. Convert it with 'toDateTime()' first.";
+  // (the operation with its operands of the kinds the code's conversions take, one per operand)
+  // (an operand's diagnostic proves neither the other operand's kinds nor the operation's place: words)
+  const operation = (code: string, takes: readonly ItemTag[], gives: readonly ItemTag[]) =>
+    rule.operand || a === undefined || b === undefined
+      ? null
+      : codeAt(
+          {
+            code,
+            takes: [a, b].map((kind, index) => ({
+              subject: [kind],
+              takes: [takes[index]!],
+              held: false,
+            })),
+            diagnosed,
+            reads: "own",
+            holds: [at],
+            rulesOut: unlike(gives),
+            gives,
+            elements: [],
+            writes: false,
+          },
+          expects,
+        );
+  if (moves && a === "absoluteDateTime" && b === "calendarDuration") {
+    const code = named
+      ? operation(
+          `(${left}.toDateTime() ${operator} ${right}).toAbsoluteDateTime()`,
+          ["absoluteDateTime", "calendarDuration"],
+          ["absoluteDateTime"],
+        )
+      : null;
+    return code === null
+      ? " An absolute date and time has no calendar. Convert it with the toDateTime method first."
+      : ` An absolute date and time has no calendar. Convert it first, as in '${code}'.`;
+  }
   if (moves && a === "date" && b === "duration") {
     const amount = /^(\d+) ?(d|day|days|w|week|weeks)$/.exec(right);
-    if (amount === null) return " A date moves only by calendar units, such as '1 calendar day'.";
-    const unit = amount[2]!.startsWith("d") ? "day" : "week";
-    return ` A date moves only by calendar units. Write '${amount[1]!} calendar ${unit}${amount[1] === "1" ? "" : "s"}'.`;
+    const unit = amount?.[2]!.startsWith("d") ? "day" : "week";
+    const written =
+      amount === null ? null : `${amount[1]!} calendar ${unit}${amount[1] === "1" ? "" : "s"}`;
+    // (the amount in calendar units in the place of its own, a date's move giving a date or none)
+    const code =
+      written === null
+        ? null
+        : operation(
+            `${operandText(left)} ${operator} ${written}`,
+            ["date", "duration"],
+            ["date", "null"],
+          );
+    return code === null
+      ? " A date moves only by calendar units, such as calendar days."
+      : ` A date moves only by calendar units. Write '${written!}'.`;
   }
-  if (moves && a === "datetime" && b === "duration")
+  if (moves && a === "datetime" && b === "duration") {
+    const code = named
+      ? operation(
+          `(${left}.toAbsoluteDateTime() ${operator} ${right}).toDateTime()`,
+          ["datetime", "duration"],
+          ["datetime"],
+        )
+      : null;
     return (
       " A date and time has no time zone, so it cannot move by elapsed time. " +
-      (named
-        ? `Convert it first, as in '(${left}.toAbsoluteDateTime() ${operator} ${right}).toDateTime()', `
-        : "Convert it with 'toAbsoluteDateTime()' first, ") +
+      (code === null
+        ? "Convert it with the toAbsoluteDateTime method first, "
+        : `Convert it first, as in '${code}', `) +
       "or use calendar units to keep the clock time."
     );
-  if (operator === "-" && b === "datetime" && rule.domain.includes("calendarDuration"))
+  }
+  if (operator === "-" && b === "datetime" && rule.domain.includes("calendarDuration")) {
+    const code =
+      stablePath(left) && stablePath(right)
+        ? operation(
+            `toDate(${left}) - toDate(${right})`,
+            ["datetime", "datetime"],
+            ["calendarDuration"],
+          )
+        : null;
     return (
       " A date and time has no time zone, so one cannot be subtracted from another. Subtract their dates with " +
-      (stablePath(left) && stablePath(right)
-        ? `'toDate(${left}) - toDate(${right})'`
-        : "'toDate(...)'") +
-      ", or convert both with 'toAbsoluteDateTime()' for the elapsed time."
+      (code === null ? "the toDate function" : `'${code}'`) +
+      ", or convert both with the toAbsoluteDateTime method for the elapsed time."
     );
+  }
   if (moves && b === "time")
-    return " Arithmetic on a time is not available. Combine it with a date first, with 'toDateTime(...)'.";
-  const compares = ["<", "<=", ">", ">="].includes(operator);
-  if (compares && a === "date" && b === "datetime")
-    return stablePath(right)
-      ? ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`
-      : " A date compares only with another date. Compare its date, with 'toDate(...)'.";
+    return " Arithmetic on a time is not available. Combine it with a date first, with the toDateTime function.";
+  if (compares && a === "date" && b === "datetime") {
+    // (the other operand's date in its place)
+    const code = stablePath(right)
+      ? operation(
+          `${operandText(left)} ${operator} toDate(${right})`,
+          ["date", "datetime"],
+          ["boolean"],
+        )
+      : null;
+    return code === null
+      ? " A date compares only with another date. Compare its date with the toDate function."
+      : ` A date compares only with another date. Compare its date, as in 'toDate(${right})'.`;
+  }
   if ((compares || operator === "/") && a !== undefined && b !== undefined) {
     const pair = new Set([a, b]);
     if (pair.has("calendarDuration") && pair.has("duration"))
@@ -1091,6 +1824,7 @@ function listJoinFix(
   if (!listLeft && !(b === "list" && a !== "list" && a !== "string")) return "";
   // (an operand's diagnostic sits on the value beside the list, which the code replaces)
   if (rule.operand && atRight !== listLeft) return "";
+  const listSite = listLeft ? leftSite : rightSite;
   const [list, value] = listLeft
     ? [source.text(leftSite), source.text(rightSite)]
     : [source.text(rightSite), source.text(leftSite)];
@@ -1109,6 +1843,8 @@ function listJoinFix(
             takes: [holds],
             diagnosed,
             reads: "own",
+            holds: [site],
+            rulesOut: rule.operand ? null : unlike(["list"]),
             gives: ["list"],
             elements: rule.elements ?? "unproved",
             writes: false,
@@ -1138,6 +1874,8 @@ function listJoinFix(
             takes: [],
             diagnosed,
             reads: "added",
+            holds: [listSite],
+            rulesOut: null,
             gives: ["list"],
             elements: rule.elements,
             writes: false,
@@ -1152,11 +1890,13 @@ function listJoinFix(
             takes: [holds],
             diagnosed,
             reads: "added",
+            holds: [leftSite, rightSite],
+            rulesOut: null,
             gives: [],
             elements: [],
             writes: false,
           },
-          STATEMENT,
+          "statement",
         )
       : null;
   if (!listLeft)
@@ -1191,14 +1931,14 @@ function errorSentence(
           `${source.line(rule.brought)} brings ${described(kinds)} into that property. Use a separate property for a ` +
           "value of another type."
         );
-      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, diagnosed)}`;
+      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`;
     case "fallback": {
       // ADR 0021 rule 7.3: a written union of the place the value lands in directly holds both
       const both = typeText([...rule.type, ...kinds]);
       const declared =
         both === null || (rule.type.includes("integer") && kinds.includes("number"))
           ? null
-          : declaration(rule.root, both, `'${rule.root?.name ?? ""}'`);
+          : declaration(rule.root, both, source, diagnosed, `'${rule.root?.name ?? ""}'`);
       return (
         `The ${rule.fallback ? "fallback" : "default"} '${text}' is ${described(kinds)}, but the value it stands ` +
         `in for is ${described(rule.type)}. Use null or a value of that type instead` +
@@ -1211,7 +1951,7 @@ function errorSentence(
         return `'${rule.receiver}' is null here, so it has no ${noun}. Give '${rule.receiver}' a value first.`;
       if (kinds.includes("unknown"))
         return `'${rule.receiver}' has no ${noun}. Add it to the object first.`;
-      return `${capitalized(described(kinds))} has no ${noun}, so '${text}' cannot be used.${memberFix(rule, kinds, text, expects ?? UNPROVED, kinds, diagnosed)}`;
+      return `${capitalized(described(kinds))} has no ${noun}, so '${text}' cannot be used.${memberFix(rule, kinds, text, site, expects ?? UNPROVED, kinds, diagnosed)}`;
     }
     case "absent": {
       // (the properties it has, as the current checker names them: a misspelt name's fix, ADR 0021 rule 1.4)
@@ -1233,37 +1973,37 @@ function errorSentence(
     case "selection":
       return `'${rule.collection}' is empty here, so it has no element for '${rule.member}'.`;
     case "mixed":
-      return mixedSentence(rule, kinds);
+      return mixedSentence(rule, kinds, source, diagnosed);
     case "operator": {
       const join = joined(rule, text, kinds, [], source);
       if (join !== null)
-        return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join.operand)}`;
+        return `'+' joins text only with other text, not with ${described(join.other)}. ${joinFix(join, site, !rule.operand, expects ?? UNPROVED, diagnosed)}`;
       const fix =
-        temporalFix(rule, kinds, source) +
+        temporalFix(rule, kinds, source, site, expects ?? UNPROVED, diagnosed) +
         listJoinFix(rule, kinds, site, expects ?? UNPROVED, source, diagnosed);
       return rule.operand
-        ? `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${fix}`
+        ? `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${fix}`
         : `'${rule.operator}' cannot combine ${kinds.map((kind) => described([kind])).join(" and ")}.${fix}`;
     }
     case "shown": {
       const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
-      if (kind === "dict" && !rule.element)
-        return stablePath(text)
-          ? interpolatedDictMessage(text)
-          : "'${...}' cannot show a dict. Select one value with a key, or show every value with 'values.join()'.";
-      return `'\${...}' cannot show ${described(kinds)}. ${shownFix(rule, text, kinds)}`;
+      // (the operand in its own '${…}', #1268)
+      return (
+        `'\${${text}}' cannot show ${kind === "dict" && !rule.element ? "a dict" : described(kinds)}. ` +
+        shownFix(rule, text, kinds, site, diagnosed)
+      );
     }
     case "count":
       return (
-        `${operandRule(rule)}, but '${text}' is ${described(kinds)}.` +
+        `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.` +
         (kinds.includes("number") ? ROUND_COUNT_FIX : " Use a whole number here.")
       );
     case "boolean":
-      return `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${conditionFix(text, kinds)}`;
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${conditionFix(rule, text, kinds, site, diagnosed)}`;
     case "key":
-      return `${operandRule(rule)}, but '${text}' is ${described(kinds)}.${keyFix(text, kinds)}`;
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${keyFix(text, kinds, site, diagnosed)}`;
     default:
-      return `${operandRule(rule)}, but '${text}' is ${described(kinds)}.`;
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.`;
   }
 }
 
@@ -1307,14 +2047,39 @@ function joined(
 }
 
 /**
- * The text-join fix (#1195): the operand that is not text, in `${...}` as the source writes it (the owner's review), on
- * one line and without a comment; else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
+ * The text-join fix (#1195): the operand that is not text, in `${...}` as the source writes it (the owner's review),
+ * where `codeAt` proves the text it gives in place of the diagnosed site `at` (the operation, `whole`, or the operand
+ * an operand's diagnostic sits on): a value of a kind `${...}` shows, and text, which the failed operation never gave,
+ * one the place takes (`expects`, Codex r6); else the sentence alone. The chain around it is never rebuilt: a rebuilt chain
  * changed what some chains say (S8d's reviews r3 and r4).
  */
-function joinFix(operand: string | null): string {
-  return operand === null || !ownText(operand)
+function joinFix(
+  join: { readonly other: readonly ItemTag[]; readonly operand: string | null },
+  at: SourceSite,
+  whole: boolean,
+  expects: SiteExpectation,
+  diagnosed: Diagnosed,
+): string {
+  const code =
+    join.operand === null
+      ? null
+      : codeAt(
+          {
+            code: `"\${${join.operand}}"`,
+            takes: [{ subject: join.other, takes: SHOWN_KINDS_ALL, held: false }],
+            diagnosed,
+            reads: "own",
+            holds: [at],
+            rulesOut: whole ? unlike(["string"]) : null,
+            gives: ["string"],
+            elements: [],
+            writes: false,
+          },
+          expects,
+        );
+  return code === null
     ? "Put the value in the text instead."
-    : `Put the value in the text as '\${${operand}}' instead.`;
+    : `Put the value in the text as '\${${join.operand!}}' instead.`;
 }
 
 /** Whether a subject's own text may stand in a fix's code: on one line, and without a comment. */
@@ -1379,71 +2144,196 @@ function warningSentence(
       return `'${rule.collection}' may be empty here. If it is, ${STOPS}`;
     case "operator":
       return rule.operand
-        ? `${operandRule(rule)}, but '${text}' ${may}`
+        ? `${operandRule(rule, text)}, but '${text}' ${may}`
         : `'${rule.operator}' may not take the values in '${text}' here. If it does not, ${STOPS}`;
     case "absent":
     case "mixed":
       throw new Error(`The rule '${rule.rule}' gives errors only.`);
     default:
-      return `${operandRule(rule)}, but '${text}' ${may}`;
+      return `${operandRule(rule, text)}, but '${text}' ${may}`;
   }
 }
 
+/** The fallback a null check names beside it: code to write, a fallback of the value's type in words, or none. */
+type Fallback = { readonly code: string } | "words" | null;
+
 /**
- * The fallback a null check names beside it (ADR 0021 rule 1.9, owner decision on #850), of the kinds the value has
- * besides null: `0` for numbers, `""` for text, `false` for true or false, `...` for any other value; none for a handle,
- * which has no value to write.
+ * The fallback a null check names beside it (ADR 0021 rule 1.9, owner decisions on #850 and #1268), of the value's
+ * types that fit its use (`fits`), so that `otherwise` takes it (V30 §18) and the use too, else of the types the use
+ * takes: `0` for numbers, `""` for text, `false` for true or false. Where none can be written, as for a list, set, dict
+ * or object, or where the value has another type the use does not take (`besides`, a union) or another problem in its
+ * text (not `alone`), the words say to give one of the same type; none for a handle, which has no value to write.
  */
-function fallbackValue(kinds: readonly ItemTag[]): string | null {
+function fallbackValue(
+  kinds: readonly ItemTag[],
+  besides: readonly ItemTag[],
+  alone: boolean,
+): Fallback {
   const found = known(kinds).filter((kind) => kind !== "null");
   if (found.some((kind) => hasIdentity(kind))) return null;
+  // (a fallback for null alone leaves the use invalid beside another type the use does not take, as in a union, or
+  // beside another problem of the value there, another diagnostic in its text)
+  if (besides.length > 0 || !alone) return "words";
   const every = (...names: ItemTag[]): boolean =>
     found.length > 0 && found.every((kind) => names.includes(kind));
   return every("integer", "number")
-    ? "0"
+    ? { code: "0" }
     : every("string")
-      ? '""'
+      ? { code: '""' }
       : every("boolean")
-        ? "false"
-        : "...";
+        ? { code: "false" }
+        : "words";
+}
+
+/** A test a check makes of a value: as code of the value (`n != null`, `n is integer`), and in words (`is not null`). */
+interface Test {
+  readonly code: (value: string) => string;
+  readonly words: string;
+  /** Whether the test rules out a value of the type (`MessageSource.alone`). */
+  readonly rulesOut: (kind: ItemTag) => boolean;
+}
+
+const NOT_NULL: Test = {
+  code: (value) => `${value} != null`,
+  words: "is not null",
+  rulesOut: (kind) => kind === "null",
+};
+
+/** A length check, which rules out an empty collection. */
+const NOT_EMPTY: Test = {
+  code: (value) => `${value}.length > 0`,
+  words: "is not empty",
+  rulesOut: (kind) => kind === "empty",
+};
+
+/** The type test of `kinds` (ADR 0021 rule 3.5), where a written type names them; else `null`. */
+function typeTest(kinds: readonly ItemTag[]): Test | null {
+  const type = typeText(kinds);
+  return type === null
+    ? null
+    : {
+        code: (value) => `${value} is ${type}`,
+        words: `is ${described(kinds)}`,
+        rulesOut: (kind) => !kinds.includes(kind),
+      };
+}
+
+/** The use a check makes safe: the diagnostic's site and facts, and the source that finds the statement around it. */
+interface Use {
+  readonly source: MessageSource;
+  readonly site: SourceSite;
+  readonly diagnosed: Diagnosed;
+}
+
+/**
+ * The statement a check holds (#1268, TABLE r4.146): the statement of the use at `site` (`MessageSource.statement`),
+ * with the subject's read in it (`read`), and its text as the check holds it: with `value` in the place of `subject`
+ * where the fix keeps the subject in a new variable first and the statement reads it once (another read would stay
+ * unchecked); else `null`.
+ */
+function guarded(
+  source: MessageSource,
+  site: SourceSite,
+  subject: string,
+  kept: boolean,
+): { readonly statement: SourceSite; readonly read: SourceSite; readonly text: string } | null {
+  // (the subject the use reads: its first text inside the use's own, a receiver's or a collection's to the left)
+  const at = source.text(site).indexOf(subject);
+  if (at === -1) return null;
+  const read = { file: site.file, start: site.start + at, end: site.start + at + subject.length };
+  const statement = source.statement(site, read);
+  if (statement === null) return null;
+  const text = source.text(statement);
+  if (!kept) return { statement, read, text };
+  // (its only text in the statement)
+  const from = read.start - statement.start;
+  return text.indexOf(subject) !== from || text.includes(subject, from + 1)
+    ? null
+    : { statement, read, text: `${text.slice(0, from)}value${text.slice(from + subject.length)}` };
+}
+
+/**
+ * The check `test` of `subject` around the statement of the use (`guarded`), and where `kept` the subject's `let` on a
+ * line before it, which moves its read there: each where `codeAt` proves it in a statement's place, its text clear of
+ * the other diagnostics but those of only the types the test rules out (TABLE r4.162); else `null`, and the fix names
+ * the check in words. The statement's own reads stay where they stand, the kept one first of all it evaluates
+ * (`guards`), so a warning's reads are its own (TABLE r4.168).
+ */
+function guardForms(
+  use: Use,
+  subject: string,
+  kept: boolean,
+  test: Test,
+): { readonly check: string; readonly keep: string | null } | null {
+  const held = ownText(subject) ? guarded(use.source, use.site, subject, kept) : null;
+  if (held === null) return null;
+  const form = (code: string, holds: SourceSite): string | null =>
+    codeAt(
+      {
+        code,
+        takes: [],
+        diagnosed: use.diagnosed,
+        reads: "own",
+        holds: [holds],
+        rulesOut: test.rulesOut,
+        gives: [],
+        elements: [],
+        writes: false,
+      },
+      "statement",
+    );
+  const check = form(`if ${test.code(kept ? "value" : subject)} { ${held.text} }`, held.statement);
+  const keep = kept ? form(`let value = ${subject}`, held.read) : null;
+  return check === null || (kept && keep === null) ? null : { check, keep };
 }
 
 /**
  * The check that makes a use safe (ADR 0021 rules 1.9 and 3.5): of a variable directly, of any other value kept in a
- * variable first, since only a variable narrows (rule 5); for null with a fallback where it has one, written where its
- * site admits it (`codeAt`), else in words.
+ * variable first, since only a variable narrows (rule 5), around the use's statement where `codeAt` proves it there
+ * (`guardForms`), the kept value's `let` too, which moves its read; else in words, as where no test is written (`use`,
+ * `null`). For null with a fallback where it has one, written where `codeAt` proves it in the subject's place, else in
+ * words: of the same type where no value of one type makes the use valid (`words`, V30 §18).
  */
 function checkFix(
   text: string,
-  test: string,
+  test: Test,
   fallback: {
-    readonly value: string;
+    readonly value: Exclude<Fallback, null>;
     readonly site: SiteExpectation;
+    readonly at: SourceSite;
     readonly diagnosed: Diagnosed;
   } | null,
+  use: Use | null,
 ): string {
   const name = variable(text);
-  // (a value kept in a variable shows its `let`, where its own text may stand in code)
+  const forms = use === null ? null : guardForms(use, text, name === null, test);
   const check =
     name !== null
-      ? `Check '${name}' first, as in 'if ${name} ${test} { ... }'`
-      : ownText(text)
-        ? `Keep '${text}' in a new variable, as in 'let value = ${text}', and check it, as in 'if value ${test} { ... }'`
-        : `Keep '${text}' in a new variable and check the variable first, as in 'if value ${test} { ... }'`;
+      ? forms === null
+        ? `Check that '${name}' ${test.words} first`
+        : `Check '${name}' first, as in '${forms.check}'`
+      : forms === null
+        ? `Keep '${text}' in a new variable and check that it ${test.words} first`
+        : `Keep '${text}' in a new variable, as in '${forms.keep!}', and check it, as in '${forms.check}'`;
   if (fallback === null || !ownText(text)) return `${check}.`;
-  const { value, site, diagnosed } = fallback;
-  // (an operand of an operator takes a fallback in parentheses, as the parser asks of `otherwise`)
-  const code = `${operandText(text)} otherwise ${value}`;
-  // (#1213's placeholder `...` is left for #1273; a value the fix writes goes through the predicate)
-  const fix =
-    value === "..."
-      ? site.binds === "operand"
-        ? `(${code})`
-        : code
-      : codeAt(
-          { code, takes: [], diagnosed, reads: "own", gives: [], elements: [], writes: true },
-          site,
-        );
+  const { value, site, at, diagnosed } = fallback;
+  if (value === "words") return `${check}, or give a fallback of the same type with 'otherwise'.`;
+  // (a value the fix writes in the subject's place, in parentheses where an operand or a receiver binds tighter, and
+  // only where it does not divide: `codeAt`)
+  const fix = codeAt(
+    {
+      code: `${operandText(text)} otherwise ${value.code}`,
+      takes: [],
+      diagnosed,
+      reads: "own",
+      holds: [at],
+      rulesOut: null,
+      gives: [],
+      elements: [],
+      writes: true,
+    },
+    site,
+  );
   if (fix !== null) return `${check}, or give a fallback, as in '${fix}'.`;
   return site.divides === true
     ? `${check}, or give a fallback after 'otherwise' that does not lead to a division by zero.`
@@ -1487,9 +2377,11 @@ function warningFix(
   text: string,
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
+  besides: readonly ItemTag[],
   detail: ContextDetail,
   context: ContextWord,
   source: MessageSource,
+  site: SourceSite,
   expects: SiteExpectation | undefined,
   diagnosed: Diagnosed,
 ): string {
@@ -1502,7 +2394,15 @@ function warningFix(
         (rule.use === "call" &&
           (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
             dictMethod(rule.member.slice(1, -2))?.changes !== undefined)));
-    const fallback = changed ? null : fallbackValue(fits.length > 0 ? fits : ruleKinds(rule));
+    // (another diagnostic in the value's text is another problem of it at this use, beside which a fallback for null
+    // alone leaves the use invalid, as `besides` says of one at its own site: V30 §18's words of the same type)
+    const fallback = changed
+      ? null
+      : fallbackValue(
+          fits.length > 0 ? fits : ruleKinds(rule),
+          besides,
+          diagnosed.alone(site, null),
+        );
     // (a fallback of the value's own kinds that the rule takes, rule 1.9, fits where the value does: its site adds how
     // it binds there and whether the value divides)
     const binds =
@@ -1511,9 +2411,12 @@ function warningFix(
         : rule.rule === "member"
           ? "receiver"
           : "whole";
+    // (beside another type the use does not take, a null check alone leaves the use invalid: the type test of the
+    // value's types the use takes rules out both, else the check in words, #1268 after Codex r4)
+    const test = besides.every((kind) => fits.includes(kind)) ? NOT_NULL : typeTest(fits);
     return checkFix(
       subject,
-      "!= null",
+      test ?? NOT_NULL,
       fallback === null
         ? null
         : {
@@ -1524,55 +2427,69 @@ function warningFix(
               elements: "unproved",
               divides: expects?.divides ?? "unproved",
             },
+            at: site,
             diagnosed,
           },
+      test === null ? null : { source, site, diagnosed },
     );
   }
   switch (rule.rule) {
     case "selection": {
       // (a check of the collection itself only where reading it again gives the same one; any other is kept first, as
-      // `groups.random` or a call, so the check and the read see one selection, Astra r2)
+      // `groups.random` or a call, so the check and the read see one selection, Astra r2; around the read's statement
+      // where it holds there, #1268, the kept value's `let` with it)
       const { collection } = rule;
-      if (stablePath(collection))
-        return `Check '${collection}.length' first, as in 'if ${collection}.length > 0 { ... }'.`;
-      return ownText(collection)
-        ? `Keep '${collection}' in a new variable, as in 'let value = ${collection}', and check its length, as in ` +
-            "'if value.length > 0 { ... }'."
-        : `Keep '${collection}' in a new variable and check its length first.`;
+      const stable = stablePath(collection);
+      const forms = guardForms({ source, site, diagnosed }, collection, !stable, NOT_EMPTY);
+      if (stable)
+        return forms === null
+          ? `Check the length of '${collection}' first.`
+          : `Check '${collection}.length' first, as in '${forms.check}'.`;
+      return forms === null
+        ? `Keep '${collection}' in a new variable and check its length first.`
+        : `Keep '${collection}' in a new variable, as in '${forms.keep!}', and check its length, as in ` +
+            `'${forms.check}'.`;
     }
     case "count":
       if (kinds.includes("number")) return ROUND_COUNT_FIX.trimStart();
       break;
     case "store":
       if (rule.type.includes("integer") && kinds.includes("number"))
-        return storeFix(rule, kinds, text, diagnosed).trimStart();
+        return storeFix(rule, kinds, text, site, source, diagnosed).trimStart();
       break;
     case "operator": {
       // (the repairs of the error the values would be: a text join, a date and time conversion)
       const join = joined(rule, text, kinds, fits, source);
-      if (join !== null) return joinFix(join.operand);
-      const temporal = temporalFix(rule, kinds, source).trimStart();
+      if (join !== null) return joinFix(join, site, !rule.operand, expects ?? UNPROVED, diagnosed);
+      const temporal = temporalFix(
+        rule,
+        kinds,
+        source,
+        site,
+        expects ?? UNPROVED,
+        diagnosed,
+      ).trimStart();
       if (temporal !== "" || !rule.operand) return temporal;
       break;
     }
     case "member":
-      return memberWarningFix(rule, text, kinds, fits, detail, diagnosed);
+      return memberWarningFix(rule, text, kinds, fits, detail, source, site, diagnosed);
     default:
       break;
   }
   // (a value of a type the script cannot know: tested where a test can name the type; a literal is known, and a
   // property an object may lack fails at its read, before any test)
   if (kinds.includes("unknown") && fits.length === 0) {
-    const test = typeText(ruleKinds(rule));
+    const test = typeTest(ruleKinds(rule));
     return test === null || isLiteral(text) || context === "missing"
       ? ""
-      : checkFix(subject, `is ${test}`, null);
+      : checkFix(subject, test, null, { source, site, diagnosed });
   }
   // (no test where the read itself stops, a property an object may lack, nor of a literal, whose type is its own)
   if (isLiteral(text) || context === "missing") return "";
-  const test = typeText(fits);
-  if (test !== null) return checkFix(subject, `is ${test}`, null);
-  return errorFix(rule, text, kinds, diagnosed).trimStart();
+  const test = typeTest(fits);
+  if (test !== null) return checkFix(subject, test, null, { source, site, diagnosed });
+  return errorFix(rule, text, kinds, site, source, diagnosed).trimStart();
 }
 
 /** The fix of the error a value of `kinds` would be, for a warning whose value has no kind that fits. */
@@ -1580,15 +2497,17 @@ function errorFix(
   rule: DiagnosticRule,
   text: string,
   kinds: readonly ItemTag[],
+  site: SourceSite,
+  source: MessageSource,
   diagnosed: Diagnosed,
 ): string {
   switch (rule.rule) {
     case "store":
-      return storeFix(rule, kinds, text, diagnosed);
+      return storeFix(rule, kinds, text, site, source, diagnosed);
     case "boolean":
-      return conditionFix(text, kinds);
+      return conditionFix(rule, text, kinds, site, diagnosed);
     case "key":
-      return keyFix(text, kinds);
+      return keyFix(text, kinds, site, diagnosed);
     default:
       return "";
   }
@@ -1604,6 +2523,8 @@ function memberWarningFix(
   kinds: readonly ItemTag[],
   fits: readonly ItemTag[],
   detail: ContextDetail,
+  source: MessageSource,
+  site: SourceSite,
   diagnosed: Diagnosed,
 ): string {
   // (the warning's own reference kind: one warning per reference kind of a union)
@@ -1613,22 +2534,52 @@ function memberWarningFix(
   if (speaker && rule.member.startsWith(".")) {
     const name = rule.member.slice(1);
     if (rule.member.endsWith("()"))
-      return `A speaker has no methods. Use one of its properties instead, such as '${stablePath(rule.receiver) ? `${rule.receiver}.` : ""}title'.`;
+      // (no property named: a speaker has those its script gives it, Codex r4)
+      return "A speaker has no methods. Use one of its properties instead.";
     if (rule.use !== "read") return "";
-    return rule.receiver === PLAYER && PERSON_FIELDS.has(name)
-      ? "Copy the player profile before this line, as in 'player.copyFrom(playerProfile)' at the start of the " +
-          `script, or assign 'player.${name}' first.`
-      : stablePath(rule.receiver)
-        ? `Assign the property before this line, as in '${rule.receiver}.${name} = ...'.`
-        : "Assign the property before this line.";
+    // (the value to assign is the author's own: no placeholder, #1268; the copy on a line of its own, where the player
+    // and the player profile are always there)
+    const copy =
+      rule.receiver === PLAYER && PERSON_FIELDS.has(name)
+        ? codeAt(
+            {
+              code: "player.copyFrom(playerProfile)",
+              takes: [],
+              diagnosed: { ...diagnosed, present: true },
+              reads: "added",
+              holds: [],
+              rulesOut: null,
+              gives: [],
+              elements: [],
+              writes: false,
+            },
+            "statement",
+          )
+        : null;
+    if (rule.receiver === PLAYER && PERSON_FIELDS.has(name))
+      return copy === null
+        ? `Copy the player profile at the start of the script, or assign 'player.${name}' first.`
+        : `Copy the player profile before this line, as in '${copy}' at the start of the script, or assign ` +
+            `'player.${name}' first.`;
+    return stablePath(rule.receiver)
+      ? `Assign '${rule.receiver}.${name}' before this line.`
+      : "Assign the property before this line.";
   }
   // (a reference's own members are the runtime's: no test narrows them)
   const lacking = known(kinds);
   if (lacking.length === 0 || lacking.some((kind) => REFERENCE.has(kind))) return "";
-  const test = typeText(fits.filter((kind) => !kinds.includes(kind)));
+  const test = typeTest(fits.filter((kind) => !kinds.includes(kind)));
   return test !== null
-    ? checkFix(rule.receiver, `is ${test}`, null)
-    : memberFix(rule, kinds, text, UNPROVED, detail.receiver?.kinds ?? [], diagnosed).trimStart();
+    ? checkFix(rule.receiver, test, null, { source, site, diagnosed })
+    : memberFix(
+        rule,
+        kinds,
+        text,
+        site,
+        UNPROVED,
+        detail.receiver?.kinds ?? [],
+        diagnosed,
+      ).trimStart();
 }
 
 /** A place the stop names, with its lines: `'tally' (lines 3–9)`, `the top level of 'main.tease' (lines 1–40)`. */
@@ -1662,12 +2613,18 @@ function budgetMessage(diagnostic: BudgetStop | NotChecked, source: MessageSourc
 }
 
 /** V30 §13: a union that holds a whole collection beside another type, with V30's suggestion where it has one. */
-function writtenTypeMessage(error: WrittenTypeError, source: MessageSource): string {
+function writtenTypeMessage(
+  error: WrittenTypeError,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string {
+  // (the suggestion is a type at the type's position, TABLE r4.171)
+  const suggestion = error.suggestion === null ? null : typeAt(error.suggestion, diagnosed);
   return (
     `A union cannot hold a whole list, set, or dict beside another type, but '${source.text(error.union)}' does. ` +
-    (error.suggestion === null
+    (suggestion === null
       ? "Write the union inside the collection instead."
-      : `Write '${error.suggestion}' instead.`)
+      : `Write '${suggestion}' instead.`)
   );
 }
 

@@ -1491,7 +1491,7 @@ an equal or wider union always work; `${...}` and text fields need every member 
 
 ```text
 let points = reward + 1
-// 'reward' may be text (string). Check it first: if reward is integer { ... }
+// 'reward' may be text (string) here. Check that 'reward' is a whole number (integer) first.
 ```
 
 ### Type tests and narrowing
@@ -2723,16 +2723,22 @@ if file != null {
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
 error; a use with a check on every route that the compiler cannot keep compiles with a warning instead and is checked
-when the script runs ([§13](#type-tests-and-narrowing)). The message names the check to write, inside which `n` is an
-`integer`, and a fallback ([below](#fallback-with-otherwise)):
+when the script runs ([§13](#type-tests-and-narrowing)). The message names the check to write around the statement
+that uses `n`, inside which `n` is an `integer`, and a fallback ([below](#fallback-with-otherwise)):
 
 ```text
-'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0
+say n + 1
+// 'n' may be null here. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
 ```
 
-The fallback is `0` for a number, `""` for text, `false` for a boolean, and `...` for another value. The message names
-none for a value that an assignment or a method changes, such as `items` in `items.add(1)`, because a fallback gives a
-copy, nor for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
+Where that code is not proved to compile in the statement's place, the message names the check in words, as in
+`Check that 'n' is not null first`.
+
+The fallback is `0` for a number, `""` for text and `false` for a boolean, in parentheses where the value is an operand
+or has a property or method read, as in `(n otherwise 0) < 1`. For another value, or a value that may also have a type
+the use does not take, the message says to give a fallback of the same type with `otherwise`. The message names none for
+a value that an assignment or a method changes, such as `items` in `items.add(1)`, because a fallback gives a copy, nor
+for a handle, such as a timer's. A loaded value can instead get a default, as in `load("level", default: 1)`.
 
 ### Fallback with `otherwise`
 

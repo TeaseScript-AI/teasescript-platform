@@ -118,8 +118,9 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    shown always fails at compile time, because it fails whether the property is there or missing. A choice object
    written in the option is checked as written.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
-   error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
-   narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.
+   error whose message names the check around the statement that uses it, as in `if n != null { say n + 1 }`, or in
+   words where that code is not proved (owner decision of 2026-10-04 on #504; #1268). The check narrows the value
+   (rule 5.1). Places and operands that accept `null` themselves still take it.
 10. Valid code always compiles: a compile error names a violation of a syntax, type, or required-check rule. Where the
     compiler cannot prove at reasonable cost that a written check still holds, or a check is impractical at compile
     time, the check moves to the runtime, and the compiler warns at that place, saying how to let the compiler check it
@@ -178,8 +179,8 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    `integer[]?` stays. The compiler never infers a union; mixing types without a declared union stays an error whose
    message points to the union form.
 5. An operation on a union is allowed when every member supports it with a compatible result. Otherwise the error
-   names the test the author needs, for example `'reward' may be text (string). Check it first: if reward is integer
-   { ... }`.
+   names the test the author needs, for example for `say reward + 1`: `'reward' may be text (string) here. Check
+   'reward' first, as in 'if reward is integer { say reward + 1 }'.`
 
 ### 4. Type tests
 

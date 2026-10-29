@@ -461,7 +461,10 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
-  const source = messageSource(request.files.map((file) => file.source));
+  const source = messageSource(
+    request.files.map((file) => file.source),
+    answers.diagnostics,
+  );
   const sited = new Set<string>();
   const shown = new Set(reportedDiagnostics(answers));
   for (const diagnostic of answers.diagnostics) {

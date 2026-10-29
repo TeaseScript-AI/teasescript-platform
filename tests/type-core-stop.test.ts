@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compileSourceWithBackend } from "../src/compiler.js";
+import { compileProject, compileSourceWithBackend } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
@@ -1151,12 +1151,110 @@ test("a stop before admission settled checks a written store's literal parts at 
 });
 
 /**
+ * TABLE r4.162 at a stop (Astra r3 on #1273): a fix's code holds the author's text only where no other diagnostic lies
+ * in it, nor a region the stop left unchecked, its "not checked" mark's, where the checks it moved to the runtime stand
+ * unreported; and after a stop no fix fact is proved (`Consumers.withFacts`), so an error's code is words. So a stop
+ * never lets through code the unstopped analysis withholds: at stops across a grid of allowances (the setup,
+ * admission's passes, the walk), every check and declaration a published diagnostic offers compiles where it is
+ * pasted, one inside a marked region is words, also a check the stop publishes there, and a check just outside it
+ * keeps its code. Each source declares a sibling the stop may hide: in the same statement (`ns + 1`, a null-returning
+ * call), or elsewhere in its function.
+ */
+const UNCHECKED: readonly string[] = [
+  'function hide(n) { return n }\nlet v: integer = hostValue\nlet ns: integer? = hide(null)\nlet xs: integer set = set["wrong", ns + 1]\nexit\n',
+  'function bad { return null }\nlet v: integer = hostValue\nlet xs: integer set = set["wrong", bad() + 1]\nexit\n',
+  'function f(n) {\n  let ys: integer set = set["wrong"]\n  say n + 1\n  return ys\n}\nlet xs: integer set = set["wrong"]\nsay f(hostValue)\nexit\n',
+  'function f(n) {\n  let ys: integer set = set["wrong"]\n  say n + 1\n  return ys\n}\nlet ns = [1, null]\nsay ns[1] + 1\nsay f(hostValue)\nexit\n',
+  // (a null check a stop publishes inside the function's unchecked region: words, the mark covering the region)
+  "function f(n) {\n  let ms = [1, null]\n  say ms[1] + 1\n  say n + 1\n  return 1\n}\nsay f(hostValue)\nexit\n",
+];
+
+test("a stop's unchecked region gives words for a fix's code in it, never code it would hide (TABLE r4.162)", () => {
+  const globals = { globals: ["hostValue", "hostOther"] };
+  const phases = new Set<string>();
+  let inside = 0;
+  let warned = 0;
+  let outside = 0;
+  for (const source of UNCHECKED) {
+    const request = coreRequest([{ path: "main.tease", source }], globals.globals);
+    assert.ok(request !== null);
+    const errorsOf = (code: string): string[] =>
+      compileProject([{ path: "main.tease", source: code }], globals)
+        .diagnostics.filter((d) => d.severity === "error")
+        .map((d) => `${d.code}: ${d.message}`);
+    const before = errorsOf(source);
+    const pasted = new Map<string, string[]>();
+    const total = analyseCore(request).budget.total;
+    const analyses = [analyseCore(request)];
+    for (let point = 1; point < 128; point += 1)
+      analyses.push(
+        withTestAllowance(Math.max(1, Math.round((total * point) / 128)), () =>
+          analyseCore(request),
+        ),
+      );
+    for (const answers of analyses) {
+      if (answers.budget.stoppedIn !== null) phases.add(answers.budget.stoppedIn);
+      const text = messageSource([source], answers.diagnostics);
+      const regions = answers.diagnostics.flatMap((d) =>
+        d.class === "not-checked-budget" ? [d.place.lines] : [],
+      );
+      for (const d of answers.diagnostics) {
+        if (d.kind === "budget" || d.kind === "written-type") continue;
+        const message = coreMessage(d, text);
+        // (the text the form holds and replaces: a declaration's, else the line of the statement a check holds)
+        const root = d.rule.rule === "store" ? (d.rule.root?.site ?? null) : null;
+        const lineStart = source.lastIndexOf("\n", d.site.start - 1) + 1;
+        const lineEnd = source.indexOf("\n", d.site.start);
+        const held = root ?? { file: d.site.file, start: lineStart, end: lineEnd };
+        const declared = /declare it as '([^']*)'/.exec(message)?.[1];
+        const check = / as in '(if [^']*)'/.exec(message)?.[1];
+        const keep = /as in '(let value = [^']*)', and check/.exec(message)?.[1];
+        const form = root === null ? check : declared;
+        const where = `${source} @${answers.budget.allowance}: ${message}`;
+        const marked = regions.some((r) => r.start <= held.start && held.end <= r.end);
+        if (marked) assert.equal(form, undefined, where);
+        if (form === undefined) {
+          if (marked) inside += 1;
+          if (marked && d.class === "warning-runtime-check") warned += 1;
+          continue;
+        }
+        if (regions.length > 0) outside += 1;
+        const indent = /^\s*/.exec(source.slice(lineStart, lineEnd))![0];
+        const fixed =
+          root === null
+            ? source.slice(0, lineStart) +
+              indent +
+              (keep === undefined ? "" : `${keep}\n${indent}`) +
+              form +
+              source.slice(lineEnd)
+            : source.slice(0, root.start) + form + source.slice(root.end);
+        let errors = pasted.get(fixed);
+        if (errors === undefined) pasted.set(fixed, (errors = errorsOf(fixed)));
+        assert.deepEqual(
+          errors.filter((error) => !before.includes(error)),
+          [],
+          `${where}\n${fixed}`,
+        );
+      }
+    }
+  }
+  assert.ok(
+    ["setup", "admission", "walk"].every((phase) => phases.has(phase)),
+    [...phases].join(),
+  );
+  assert.ok(
+    inside > 0 && warned > 0 && outside > 0,
+    `${inside} inside, ${warned} of them warnings, ${outside} outside`,
+  );
+});
+
+/**
  * An error as a stop keeps it: the diagnostic and its message's first sentence, without the facts its fix's code forms
  * read (`expects`, `present`). A stop proves nothing of a fix's code, so the fix after that sentence may be words
  * (TABLE r4.162).
  */
 const kept = (answers: Answers, source: string) => {
-  const text = messageSource([source]);
+  const text = messageSource([source], answers.diagnostics);
   return answers.diagnostics
     .filter((d) => d.class === "compile-error")
     .map((d) => ({
@@ -1170,7 +1268,8 @@ const kept = (answers: Answers, source: string) => {
  * parts from the literal's syntax, never from the solver (TABLE r4.120, Codex r13's S1): a set's element, a dict's value,
  * a set inside a dict; and a stop changes no site, an error inside an add's literal staying at the add's argument
  * (TABLE r4.122 (d)). At a stop in the setup and at the last before admission settled, each error, its site, its rule's
- * steps and its sentence equal the unstopped ones (the analysis: a written set or dict is outside the candidate route).
+ * steps and its first sentence equal the unstopped ones (`kept`; the analysis: a written set or dict is outside the
+ * candidate route).
  */
 test("a stop before admission settled keeps a written store's errors whole, their collections and sites", () => {
   for (const source of [
