@@ -17,7 +17,6 @@ const ARENA = [
   "pathLastSteps",
   "pathChildren",
   "pathFirstSteps",
-  "pathTextLengths",
   "pathMembers",
 ] as const;
 

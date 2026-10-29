@@ -119,9 +119,6 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathLastSteps.push(step);
   // (G3 stage 1's metadata, each from its parent's and the step alone: `key-ids.ts`)
   contract.pathFirstSteps.push(parent === 0 ? step : contract.pathFirstSteps[parent]!);
-  contract.pathTextLengths.push(
-    parent === 0 ? step.length : contract.pathTextLengths[parent]! + 1 + step.length,
-  );
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   steps.set(step, id);
   return id;
