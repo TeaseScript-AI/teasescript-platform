@@ -248,13 +248,13 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "say toBoolean(value)\nexit",
       { value: "yes" },
       "TSR058",
-      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'value == "yes"\'.',
+      'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). The text must be "true" or "false". Compare the text instead, such as \'(value == "yes")\'.',
     ],
     [
       "say toBoolean(value)\nexit",
       { value: 1 },
       "TSR058",
-      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as 'value != 0'.",
+      "toBoolean(...) converts text and true or false (boolean), not the number 1. Compare the number instead, such as '(value != 0)'.",
     ],
     [
       "say toNumber(value)\nexit",
@@ -326,7 +326,7 @@ test("text the compiler can see fails as the runtime fails on it, with the runti
     assert.equal(failure.message.slice(0, message.length), message, name);
     assert.match(
       failure.message.slice(message.length),
-      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as 'value == "x"'\.)$/u,
+      /^ (?:Give a fallback with 'default:' if the value may not convert\.|Compare the text instead, such as '\(value == "x"\)'\.)$/u,
       name,
     );
   }
@@ -370,18 +370,24 @@ test("a conversion that the runtime refuses shows its fix with the argument as t
     'let n = dynamic(1)\nlet t = dynamic("yes")\nlet p = { items: dynamic([3]) }\n';
   const failed = (source: string) =>
     runValidSource(`${dynamic}${values}say ${source}\nexit`).snapshot.failure?.message;
-  // A name or a member: the code replaces the call, and runs.
+  // A name or a member: the code replaces the call, and runs, also next to another operator.
   for (const [call, fix] of [
     ["toString(items)", "items.join()"],
     ["toString(p.items)", "p.items.join()"],
     ["toString(tags)", "tags.toList().join()"],
     ["toString(prices)", "prices.values.join()"],
-    ["toBoolean(n)", "n != 0"],
-    ["toBoolean(t)", 't == "yes"'],
+    ["toBoolean(n)", "(n != 0)"],
+    ["toBoolean(t)", '(t == "yes")'],
   ] as const) {
-    assert.ok(failed(call)?.includes(`'${fix}'`), `${call}: ${failed(call)}`);
-    const pasted = runValidSource(`${dynamic}${values}say ${fix}\nexit`);
-    assert.equal(pasted.snapshot.failure, null, fix);
+    const text = fix.includes("join");
+    for (const site of text
+      ? ["#", '# + "!"', '"${#}"']
+      : ["#", "# == true", "false == #", "# and true"]) {
+      const source = site.replace("#", call);
+      assert.ok(failed(source)?.includes(`'${fix}'`), `${source}: ${failed(source)}`);
+      const pasted = runValidSource(`${dynamic}${values}say ${site.replace("#", fix)}\nexit`);
+      assert.equal(pasted.snapshot.failure, null, `${site}: ${fix}`);
+    }
   }
   // Another argument, such as a call: the fix in words.
   for (const [call, fix] of [
