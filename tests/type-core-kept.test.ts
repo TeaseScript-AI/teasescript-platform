@@ -309,8 +309,8 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
   ],
-  "consumers.ts #admittedStores side": [1, "a definition's id and two positions"],
-  "consumers.ts #operator key": [1, "an operand's index and a kind"],
+  "consumers/stores.ts admittedStores side": [1, "a definition's id and two positions"],
+  "consumers/operations.ts operatorUse key": [1, "an operand's index and a kind"],
   "contract/prefix-index.ts prefixWork root": [1, "a place's root key, `place|`"],
   "contract/marks.ts readGroups groupKey": [
     1,

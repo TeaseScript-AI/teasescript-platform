@@ -120,6 +120,7 @@ const LISTED_READS = [
     "the running unit's read checks taken back after a stop (D4 a′): truncated to a count",
   ],
   ["readChecks", "length", "consumers.ts", "how many read checks a unit made: a count"],
+  ["readChecks", "length", "stores.ts", "how many read checks a unit made: a count"],
   ["readChecks", "for-of", "answers.ts", "the published read checks, read after the walk"],
   [
     "newlyRejected",
@@ -133,7 +134,7 @@ const LISTED_READS = [
     "consumers.ts",
     "the stores this pass rejected, compared before a finishing walk",
   ],
-  ["newlyRejected", ".get", "consumers.ts", "whether a store was rejected: a test"],
+  ["newlyRejected", ".get", "fresh.ts", "whether a store was rejected: a test"],
   [
     "boundaries",
     ".clear",
@@ -145,10 +146,11 @@ const LISTED_READS = [
   [
     "rejections",
     "operand",
-    "consumers.ts",
+    "stores.ts",
     "a count of rejections, summed into a unit's emitted count",
   ],
   ["diagnostics", "length", "consumers.ts", "how many diagnostics a unit recorded: a count"],
+  ["diagnostics", "length", "stores.ts", "how many diagnostics a unit recorded: a count"],
   ["diagnostics", "spread", "answers.ts", "the recorded diagnostics, read after the walk"],
   ["deferred", "length", "answers.ts", "whether checks were deferred: a count"],
   ["deferred", "argument", "answers.ts", "the deferred checks, read after the walk"],
@@ -157,7 +159,7 @@ const LISTED_READS = [
   [
     "cycling",
     ".has",
-    "consumers.ts",
+    "stores.ts",
     "whether a store is in a rejection cycle (A6): the constructor's input, read",
   ],
   [
