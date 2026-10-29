@@ -31,7 +31,7 @@ import { HELD_REFERENCE, heldReference, hostAt, REFERENCE, unknownItem } from ".
 import { entryGroups, groupsAt, prefixLevels } from "./levels.js";
 import { annotated, marksAt } from "./marks.js";
 import type { PrefixEntry } from "./model.js";
-import { positionable, positioned } from "./positions.js";
+import { positionable, positioned, positionOf } from "./positions.js";
 import { termAt, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 import { members, memberStepOf } from "./value-kinds.js";
 
@@ -333,6 +333,13 @@ export function* contractRead(
 
 /** §3 step 1, F19a: a receiver on the key's path whose contract holds a reference kind (one object behind every alias). */
 export function* refReceiver(contract: Contract, key: Key): Work<boolean> {
+  // G3 3b: a positioned key's parent's walk, one receiver more (`advance`)
+  const path = keyPath(key);
+  if (path.length > 1 && positionable(contract, key, path)) {
+    const parent = keyOf(keyPlace(key), path.slice(0, -1));
+    const from = yield* positionOf(contract, { key: parent, length: path.length - 1 });
+    if (from !== null) return !from.noRef || heldReference(yield* contract.receiverKinds(parent));
+  }
   return (yield* receiverWalk(contract, key)).reference;
 }
 

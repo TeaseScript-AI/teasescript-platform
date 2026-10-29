@@ -159,3 +159,37 @@ test("a read through wrappers publishes the same from its position as from its r
   assert.equal(runs, 2 * 2 * VARIANTS.length * 4);
   assert.deepEqual(differing, []);
 });
+
+test("a read through wrappers makes its states one step at a time: the wrapper chain's demands and work grow with the source in both orders (G3 3a, 3b)", () => {
+  const source = (n: number): string => wrapped(n, "plain", "typed");
+  for (const reversed of [false, true]) {
+    const counts = [16, 32].map((n) => {
+      const request = coreRequest([{ path: "main.tease", source: source(n) }], GLOBALS)!;
+      const go = (): ReturnType<typeof analyseCore> => analyseCore(request);
+      const analysis = reversed
+        ? withConsumerOrder(
+            (list) => [...list].reverse(),
+            () => withSolverSeam({ reverseWorklist: true }, go),
+          )
+        : go();
+      assert.equal(analysis.outcome, "valid");
+      return {
+        frames: analysis.budget.counts.get("frames") ?? 0,
+        nodes: analysis.budget.counts.get("syntaxNodes") ?? 0,
+        total: analysis.budget.total,
+      };
+    });
+    const small = counts[0]!;
+    const large = counts[1]!;
+    const scale = large.nodes / small.nodes;
+    // (a root and residual walk per read was cubic: 1,275 → 4,059 frames and 39,530 → 184,741 units at these sizes)
+    assert.ok(
+      (2 * large.frames) / small.frames / scale < 2.2,
+      `frames ${small.frames} → ${large.frames}${reversed ? " (reversed)" : ""}`,
+    );
+    assert.ok(
+      (2 * large.total) / small.total / scale < 2.3,
+      `total ${small.total} → ${large.total}${reversed ? " (reversed)" : ""}`,
+    );
+  }
+});

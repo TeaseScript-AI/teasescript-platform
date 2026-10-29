@@ -147,7 +147,7 @@ function* advance(
  * key's (`length` steps), its own at a binding's root, else its proof; `null` for any other value or key, and outside
  * positions (`withoutPositions`).
  */
-function* positionOf(contract: Contract, owner: Owner): Work<Position | null> {
+export function* positionOf(contract: Contract, owner: Owner): Work<Position | null> {
   const { program, solver } = contract.pass;
   if (!positions()) return null;
   if ("key" in owner) {

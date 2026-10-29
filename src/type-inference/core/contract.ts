@@ -317,6 +317,8 @@ export class Contract {
   readonly pendingQuiet = new Map<Holder, boolean>();
   /** Per binding and step, its wrapper's step or `null` (`wrapperHop`), and per literal and step its read (`literalHop`). */
   readonly #hops = new Map<string, WrapperHop | null>();
+  /** Per projection, the key it copies, or `null` (`copiedKey`). */
+  readonly copiedKeys = new Map<PlaceId, Key | null>();
   /** Per value, its chain of property reads of a read, or `null` (`chainOf`). */
   readonly chains = new Map<PlaceId, ChainRoot | null>();
   readonly literalHops = new Map<string, LoneRead | null>();

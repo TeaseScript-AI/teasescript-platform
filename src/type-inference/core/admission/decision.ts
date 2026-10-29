@@ -476,12 +476,16 @@ function concreteSite(
   return first === undefined ? null : first.d.site;
 }
 
-/** Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4). */
+/**
+ * Whether no store on the path or a prefix of it was rejected (A6) or copies a written binding (A4): G3 3b, by the
+ * place's own such paths (`Admission.dirtyPaths`), each compared with the path's steps, never a key per prefix.
+ */
 function isClean(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
-  for (let length = 0; length <= path.length; length += 1) {
+  admission.pass.program.work.charge("checks");
+  for (const dirty of admission.dirtyPaths(root)) {
     admission.pass.program.work.charge("checks");
-    const at = keyOf(root, path.slice(0, length));
-    if (admission.rejectedKeys.has(at) || admission.a4Keys.has(at)) return false;
+    if (dirty.length <= path.length && dirty.every((step, index) => path[index] === step))
+      return false;
   }
   return true;
 }
