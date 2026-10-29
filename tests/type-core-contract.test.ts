@@ -3,7 +3,9 @@ import test from "node:test";
 
 import { analyseCore, coreResult, type Answers } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import type { ContractFacts } from "../src/type-inference/core/contract.js";
+import type { ContractFacts, PrefixStores } from "../src/type-inference/core/contract.js";
+import { keyOf } from "../src/type-inference/core/definitions.js";
+import { writerKey } from "../src/type-inference/core/items.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { coreRecord } from "../src/type-inference/core/result.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -439,4 +441,90 @@ test("two equal literals share a class whatever absent properties were asked of 
           );
       }
   assert.deepEqual(got, []);
+});
+
+/**
+ * G5 (5a, #1339): a cycle of whole copies is cut at its stops at once, so each member's whole stores are one answer
+ * whichever place enters the cycle first: its own entries, a copy of a member with more than one store an entry of that
+ * member's key, a member with one store (a copy of another) replaced by its source's entry, and none of them cut. Asked
+ * in fresh passes in three orders: the members in source order, reversed, and a copy outside the cycle first; the
+ * stores, each entry's source, writer and stores that brought it, compared whole.
+ */
+const RINGS: readonly [string, string][] = [
+  [
+    "a ring fed once",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3",
+  ],
+  [
+    "a ring fed at every member",
+    "let good = {p0: 1}\nlet other = {p0: 2}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "a1 = other\na2 = other\na3 = other",
+  ],
+  [
+    "a ring with chords",
+    "let good = {p0: 1, p1: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "a0 = a2\na1 = a3\na2 = a0\na3 = a1",
+  ],
+  [
+    "a ring whose members store their own properties",
+    "let good = {f0: 1, f1: 1, f2: 1, f3: 1}\nlet a0 = good\na0.f0 = 2\nlet a1 = a0\na1.f1 = 2\nlet a2 = a1\n" +
+      "a2.f2 = 2\nlet a3 = a2\na3.f3 = 2\na0 = a3",
+  ],
+  [
+    "two rings through one member",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a1\na1 = a2\na1 = a3\na0 = a2",
+  ],
+  [
+    "a ring with a guarded copy",
+    "let good = {p0: 1}\nlet a0 = good\nlet a1 = a0\nlet a2 = a1\nlet a3 = a2\na0 = a3\n" +
+      "if a3.p0 is integer { a1 = a3 }",
+  ],
+];
+
+test("each member of a cycle of whole copies has one answer whichever place enters the cycle first", () => {
+  const text = (stores: PrefixStores): string =>
+    JSON.stringify({
+      list: stores.list.map((entry) => ({
+        key: entry.key,
+        value: entry.value,
+        unk: entry.unk,
+        empty: entry.empty,
+        elem: entry.elem,
+        at: entry.at,
+        w: entry.w === null ? null : writerKey(entry.w),
+        ds: [...entry.ds].map((d) => d?.uid ?? -1).sort((a, b) => a - b),
+        guarded: entry.guarded,
+        ingress: entry.ingress !== undefined,
+      })),
+      subs: stores.subs !== null,
+      also: stores.also.length,
+      other: stores.other,
+      cut: stores.cut,
+    });
+  for (const [name, ring] of RINGS) {
+    const request = coreRequest([
+      { path: "main.tease", source: `${ring}\nlet outside = a2\nexit\n` },
+    ]);
+    assert.ok(request !== null, name);
+    const { places } = new CoreProgram(request);
+    const id = (named: string): number =>
+      places.find((place) => place.kind.kind === "binding" && place.kind.name === named)!.id;
+    const members = ["a0", "a1", "a2", "a3"].map(id);
+    const asked = (order: readonly number[]): string[] => {
+      const { contract } = narrowingPass(request);
+      for (const place of order) contract.prefixStores(keyOf(place, []));
+      return members.map((member) => text(contract.prefixStores(keyOf(member, []))));
+    };
+    const inSource = asked(members);
+    assert.deepEqual(asked([...members].reverse()), inSource, `${name}: reversed`);
+    assert.deepEqual(
+      asked([id("outside"), ...[...members].reverse()]),
+      inSource,
+      `${name}: from outside`,
+    );
+    assert.ok(
+      inSource.every((stores) => stores.endsWith('"cut":false}')),
+      `${name}: no member's stores cut`,
+    );
+  }
 });
