@@ -11,7 +11,7 @@ import type { PlaceId } from "../../graph.js";
 import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
-import { joinSteps, READ_DEPTH_LIMIT } from "../budget.js";
+import { keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -305,16 +305,18 @@ export function jsonArgument(
       }
       return;
     }
-    // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order)
+    // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order; each path
+    // charged as it is made, one step longer than its owner's)
     const below: (readonly string[])[] = [];
     if (items.some((item) => item.tag === "list" || item.tag === "set"))
-      below.push(joinSteps(path, ["element"]));
-    if (items.some((item) => item.tag === "dict")) below.push(joinSteps(path, ["entry"]));
+      below.push(keptSteps(program.work, path, ["element"]));
+    if (items.some((item) => item.tag === "dict"))
+      below.push(keptSteps(program.work, path, ["entry"]));
     if (items.some((item) => item.tag === "object"))
       for (const name of walk.asksNothing()
         ? []
         : propertyNames(walk.pass, (work) => walk.solve(work), { value, path }))
-        below.push(joinSteps(path, [propertyStep(name)]));
+        below.push(keptSteps(program.work, path, [propertyStep(name)]));
     for (let index = below.length - 1; index >= 0; index -= 1) pending.push(below[index]!);
   }
 }

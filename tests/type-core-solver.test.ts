@@ -224,24 +224,26 @@ test("a default in a cycle is chosen on its completed kinds, in either order and
  * (consumers × worklist) and the same answers from every component entry, its unknowns opaque.
  */
 const METHOD_CYCLES: readonly (readonly [string, string, string])[] = [
+  // (a list's `union`, a method whose result is the runtime's until S9b's result relations; text's methods have their
+  // declared results since S9b)
   [
     "a self-update",
-    'let s = "a"\nif askBoolean "f" { s = s.trimStart() }\nlet n: integer = s.trimEnd()\nexit',
-    "s.trimEnd()",
+    'let s = [1]\nif askBoolean "f" { s = s.union([2]) }\nlet n: integer = s.union([3])\nexit',
+    "s.union([3])",
   ],
   [
     "a record's field updated from itself",
-    'let r = {s: "a"}\nif askBoolean "f" { r.s = r.s.trimStart() }\nlet n: integer = r.s.trimEnd()\nexit',
-    "r.s.trimEnd()",
+    'let r = {s: [1]}\nif askBoolean "f" { r.s = r.s.union([2]) }\nlet n: integer = r.s.union([3])\nexit',
+    "r.s.union([3])",
   ],
   [
     "a loop",
-    'let s = "a"\nrepeat 3 { s = s.trimStart() }\nlet n: integer = s.trimEnd()\nexit',
-    "s.trimEnd()",
+    "let s = [1]\nrepeat 3 { s = s.union([2]) }\nlet n: integer = s.union([3])\nexit",
+    "s.union([3])",
   ],
   [
     "two functions",
-    'function f(x) {\nif x > 0 { return g(x - 1).trimStart() }\nreturn "a"\n}\nfunction g(x) { return f(x).trimEnd() }\nlet n: integer = f(3)\nexit',
+    "function f(x) {\nif x > 0 { return g(x - 1).union([1]) }\nreturn [1]\n}\nfunction g(x) { return f(x).union([2]) }\nlet n: integer = f(3)\nexit",
     "f(3)",
   ],
 ];

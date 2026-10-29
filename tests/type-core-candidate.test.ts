@@ -218,6 +218,9 @@ const STORE_CODES: readonly (string | null)[] = ["TSR058"];
  */
 const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
   "integer-use": ["TSR024", "TSR043"],
+  // (C13, S9b: a loop's own check of its source, a call's of its argument)
+  iteration: ["TSR044"],
+  argument: ["TSV043", "TSV042"],
   empty: ["TSR018", "TSR019"],
   member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
   fallback: ["TSR058"],

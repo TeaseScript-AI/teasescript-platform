@@ -155,8 +155,8 @@ test("a choice of written records is answered within the native stack", () => {
 });
 
 test("a choice record whose value holds host values is answered within the native stack", () => {
-  // `selectedAt`
-  assert.deepEqual(spreadCase("property"), ["warning-runtime-check", 1, 2]);
+  // `selectedAt`; a list as a button's value is TSV029's error since S9b, and the answer holds no list (TABLE r4.93)
+  assert.deepEqual(spreadCase("property"), ["compile-error", 1, 0]);
 });
 
 test("a choice of choices of many options is classed within the native stack", () => {

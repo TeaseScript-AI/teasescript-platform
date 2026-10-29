@@ -15,6 +15,7 @@ import type { SourceSpan } from "../../source.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
+import { methodCategory } from "./method-categories.js";
 import { BudgetExhausted } from "./budget.js";
 import {
   coreCheckResult,
@@ -312,8 +313,8 @@ type SliceCall =
  * A method of text, a list, a set or a dict that changes nothing in its receiver, and a list's `sort`, called with as
  * many positional arguments as one of its contracts takes and no named one: the methods whose arguments and elements C13
  * checks (`signatures.ts`); a call's shape is the argument rules' (TSV020, S9b). A method that adds to its receiver
- * stores its argument, whose check has no place in the plan yet; one that removes or reorders is the slice's when the
- * runs the route's tests derive follow it.
+ * stores its argument, whose check has no place in the plan yet; one that removes, reorders or copies the receiver's
+ * elements is the slice's when the runs the route's tests derive follow it.
  */
 function sliceMethod(call: CallExpression): boolean {
   if (call.callee.kind !== "propertyAccessExpression") return false;
@@ -322,6 +323,8 @@ function sliceMethod(call: CallExpression): boolean {
   const list = listMethod(name);
   const dict = dictMethod(name);
   if ((list?.changes !== undefined && name !== "sort") || dict?.changes !== undefined) return false;
+  // (a copy of the receiver's elements carries them, F10, which the runs the route's tests derive do not follow yet)
+  if (methodCategory(name)?.gives.kind === "copy") return false;
   const parameters = [
     isTextMethod(name) ? TEXT_METHODS[name].parameters : null,
     list === undefined || list.named !== undefined ? null : list.parameters,

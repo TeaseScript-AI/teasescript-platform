@@ -586,7 +586,11 @@ export function coreMessage(diagnostic: CheckedDiagnostic, source: MessageSource
   // a member's context is its receiver's: `value` in `value[0]` comes from outside the script; a selection's, its
   // collection's
   const name =
-    rule.rule === "member" ? rule.receiver : rule.rule === "selection" ? rule.collection : text;
+    rule.rule === "member" || rule.rule === "elements"
+      ? rule.receiver
+      : rule.rule === "selection"
+        ? rule.collection
+        : text;
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
     warningFix(
@@ -2344,7 +2348,7 @@ function warningSentence(
     case "elements":
       return rule.families.length > 1
         ? `${SORT_ONE_TYPE}, but '${rule.receiver}' may hold ${plural(rule.families)} here. If it does, ${STOPS}`
-        : `${operandRule(rule, text)}, but '${rule.receiver}' may hold ${plural(kinds)} here. If it does, ${STOPS}`;
+        : `${operandRule(rule, text)}, but '${rule.receiver}' may hold ${known(kinds).length > 0 ? plural(kinds) : "values of another type"} here. If it does, ${STOPS}`;
     case "absent":
     case "mixed":
       throw new Error(`The rule '${rule.rule}' gives errors only.`);

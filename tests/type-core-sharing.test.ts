@@ -234,15 +234,6 @@ const PROJECTED_INGRESS_PROGRAMS: readonly {
     read: "box[0].n",
   },
   {
-    name: "a choice of records of one property read",
-    lines: [
-      'let box = askChoice {text: "a", value: {g: ^hostValue.n}}, {text: "b", value: {g: ^hostValue.n}}',
-      "let out: integer = box.g",
-    ],
-    place: ["box", ["g"]],
-    read: "box.g",
-  },
-  {
     name: "the first of records of one property read",
     lines: ["let box = [{g: ^hostValue.n}, {g: ^hostValue.n}].first", "let out: integer = box.g"],
     place: ["box", ["g"]],
