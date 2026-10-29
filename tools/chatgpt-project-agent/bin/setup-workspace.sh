@@ -3,10 +3,10 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: setup-workspace.sh [--node 24|26] [--with-ts-morph] [--with-tiktoken]
+Usage: setup-workspace.sh [--with-ts-morph] [--with-tiktoken]
                           [--debug-verify-bootstrap] [--check] REPOSITORY
 
-Prepare an existing TeaseScript checkout using the installed Node runtimes and
+Prepare an existing TeaseScript checkout using the installed Node runtime and
 npm cache. TikToken and ts-morph are mandatory. The two --with-* flags remain
 accepted as compatibility no-ops.
 
@@ -15,17 +15,11 @@ installation. It is diagnostic, not a routine extra step.
 USAGE
 }
 
-node_major=24
 run_check=0
 debug_verify=0
 repo=
 while (($#)); do
   case "$1" in
-    --node)
-      (($# >= 2)) || { printf 'setup-workspace: FAIL: --node needs 24 or 26\n' >&2; exit 2; }
-      node_major=$2
-      shift 2
-      ;;
     --with-ts-morph|--with-tiktoken) shift ;;
     --debug-verify-bootstrap) debug_verify=1; shift ;;
     --check) run_check=1; shift ;;
@@ -39,10 +33,6 @@ while (($#)); do
   esac
 done
 
-[[ "$node_major" == 24 || "$node_major" == 26 ]] || {
-  printf 'setup-workspace: FAIL: --node must be 24 or 26\n' >&2
-  exit 2
-}
 [[ -n "$repo" ]] || { usage >&2; exit 2; }
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -62,10 +52,8 @@ git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   exit 1
 }
 
-case "$node_major" in
-  24) node_version=24.18.0 ;;
-  26) node_version=26.5.0 ;;
-esac
+node_major=26
+node_version=26.13.0
 node_dir="$bundle_dir/runtime/node-v${node_version}-linux-x64"
 cache_seed="$bundle_dir/npm-cache-seed"
 [[ -x "$node_dir/bin/node" && -x "$node_dir/bin/npm" ]] || {
@@ -123,15 +111,11 @@ export npm_config_fund=false
 export npm_config_update_notifier=false
 ACTIVATE
 }
-write_runner 24 24.18.0
-write_runner 26 26.5.0
+write_runner "$node_major" "$node_version"
 ln -sfn "run-node${node_major}" "$state_dir/run"
 ln -sfn "activate-node${node_major}.sh" "$state_dir/activate.sh"
 runner="$state_dir/run-node${node_major}"
 
-if [[ "$node_major" == 26 ]]; then
-  printf 'setup-workspace: INFO: Node 26 compatibility run; npm EBADENGINE warning is expected\n' >&2
-fi
 if ((debug_verify)); then
   printf 'setup-workspace: INFO: verifying the complete npm cache (diagnostic mode)\n' >&2
   "$runner" npm cache verify >/dev/null

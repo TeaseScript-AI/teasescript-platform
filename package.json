@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "24.18.0"
+    "node": "26.13.0"
   },
   "scripts": {
     "build": "npm run build:typescript && node tools/run-parallel.mjs typecheck:player build:player build:player-test-modules",

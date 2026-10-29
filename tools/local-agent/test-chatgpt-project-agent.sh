@@ -39,8 +39,7 @@ done
 runtime_parent="$tmp/runtime-source"
 runtime_root="$runtime_parent/chatgpt-project-agent"
 mkdir -p \
-  "$runtime_root/runtime/node-v24.18.0-linux-x64/bin" \
-  "$runtime_root/runtime/node-v26.5.0-linux-x64/bin" \
+  "$runtime_root/runtime/node-v26.13.0-linux-x64/bin" \
   "$runtime_root/npm-cache-seed/_cacache/content-v2" \
   "$runtime_root/dependencies/tiktoken-cp313-linux-x86_64/wheels" \
   "$runtime_root/dependencies/tiktoken-cp313-linux-x86_64/tokenizer" \
@@ -52,8 +51,8 @@ cat > "$runtime_root/RUNTIME-MANIFEST.json" <<'JSON'
   "bundle": "chatgpt-project-agent-runtime",
   "platform": "linux-x64",
   "installRoot": "chatgpt-project-agent",
-  "runtimeContract": 1,
-  "node": {"authoritative": "24.18.0", "compatibility": "26.5.0"},
+  "runtimeContract": 2,
+  "node": {"version": "26.13.0"},
   "tiktoken": {"version": "0.13.0", "pythonAbi": "cp313"},
   "tsMorph": {"version": "28.0.0"}
 }
@@ -62,22 +61,17 @@ printf 'synthetic-cache-seed\n' > "$runtime_root/CACHE-SEED-ID"
 printf '%s\n' '{"formatVersion":1,"packages":[]}' > "$runtime_root/PACKAGE-INVENTORY.json"
 printf 'cache fixture\n' > "$runtime_root/npm-cache-seed/_cacache/content-v2/fixture"
 
-for pair in '24.18.0 24' '26.5.0 26'; do
-  set -- $pair
-  version=$1
-  major=$2
-  cat > "$runtime_root/runtime/node-v${version}-linux-x64/bin/node" <<NODE
+cat > "$runtime_root/runtime/node-v26.13.0-linux-x64/bin/node" <<'NODE'
 #!/usr/bin/env bash
-printf 'v${version}\\n'
+printf 'v26.13.0\n'
 NODE
-  cat > "$runtime_root/runtime/node-v${version}-linux-x64/bin/npm" <<NODE
+cat > "$runtime_root/runtime/node-v26.13.0-linux-x64/bin/npm" <<'NODE'
 #!/usr/bin/env bash
-printf 'synthetic npm for Node ${major}\\n'
+printf 'synthetic npm for Node 26\n'
 NODE
-  chmod +x \
-    "$runtime_root/runtime/node-v${version}-linux-x64/bin/node" \
-    "$runtime_root/runtime/node-v${version}-linux-x64/bin/npm"
-done
+chmod +x \
+  "$runtime_root/runtime/node-v26.13.0-linux-x64/bin/node" \
+  "$runtime_root/runtime/node-v26.13.0-linux-x64/bin/npm"
 
 printf '%s\n' '{"formatVersion":1,"bundle":"synthetic-tiktoken"}' > \
   "$runtime_root/dependencies/tiktoken-cp313-linux-x86_64/MANIFEST.json"
@@ -264,7 +258,7 @@ import sys
 from pathlib import Path
 path = Path(sys.argv[1])
 value = json.loads(path.read_text())
-value["runtimeContract"] = 2
+value["runtimeContract"] = 1
 path.write_text(json.dumps(value))
 PY
 mismatch_runtime="$tmp/mismatch-runtime.tar.zst"
@@ -278,7 +272,7 @@ set -e
   printf 'test-chatgpt-project-agent: FAIL: incompatible runtime contract was accepted\n' >&2
   exit 1
 }
-grep -F "runtimeContract' must be 1" "$tmp/mismatch.err" >/dev/null
+grep -F "runtimeContract' must be 2" "$tmp/mismatch.err" >/dev/null
 
 malicious_tools="$tmp/path-traversal.tar.gz"
 python3 - "$malicious_tools" "$project_root/MANIFEST.json" <<'PY'
@@ -368,14 +362,14 @@ workspace_bundle="$tmp/workspace-bundle"
 cp -a "$install" "$workspace_bundle"
 setup_workspace="$workspace_bundle/bin/setup-workspace.sh"
 setup_calls="$tmp/setup-calls"
-node_bin="$workspace_bundle/runtime/node-v24.18.0-linux-x64/bin"
+node_bin="$workspace_bundle/runtime/node-v26.13.0-linux-x64/bin"
 # Resolve the real executable first: a version-manager shim on PATH can loop once setup prepends node_bin.
 real_node=$(node -p 'process.execPath')
 cat > "$node_bin/node" <<NODE
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ \${1-} == --version ]]; then
-  printf 'v24.18.0\\n'
+  printf 'v26.13.0\\n'
   exit 0
 fi
 exec $(printf '%q' "$real_node") "\$@"

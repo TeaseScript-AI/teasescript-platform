@@ -3,7 +3,7 @@
   "bundle": "chatgpt-project-agent-tools",
   "platform": "linux-x64",
   "installRoot": "chatgpt-project-agent",
-  "runtimeContract": 1,
+  "runtimeContract": 2,
   "normalEntryPoint": "bin/prepare-agent-workspace.sh",
   "requiredPaths": [
     "bin/prepare-agent-workspace.sh",

@@ -186,7 +186,7 @@ def require_manifest(manifest: dict[str, object], *, bundle: str) -> None:
         "bundle": bundle,
         "platform": "linux-x64",
         "installRoot": ROOT,
-        "runtimeContract": 1,
+        "runtimeContract": 2,
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
@@ -250,10 +250,8 @@ with tools, runtime:
         "RUNTIME-MANIFEST.json",
         "CACHE-SEED-ID",
         "PACKAGE-INVENTORY.json",
-        "runtime/node-v24.18.0-linux-x64/bin/node",
-        "runtime/node-v24.18.0-linux-x64/bin/npm",
-        "runtime/node-v26.5.0-linux-x64/bin/node",
-        "runtime/node-v26.5.0-linux-x64/bin/npm",
+        "runtime/node-v26.13.0-linux-x64/bin/node",
+        "runtime/node-v26.13.0-linux-x64/bin/npm",
         "dependencies/tiktoken-cp313-linux-x86_64/MANIFEST.json",
         "dependencies/tiktoken-cp313-linux-x86_64/SHA256SUMS",
         "dependencies/tiktoken-cp313-linux-x86_64/tokenizer/o200k_base.tiktoken",
@@ -298,8 +296,7 @@ for script in \
   bash -n -- "$script"
   bash "$script" --help >/dev/null
 done
-"$install_root/runtime/node-v24.18.0-linux-x64/bin/node" --version | grep -Fx 'v24.18.0' >/dev/null
-"$install_root/runtime/node-v26.5.0-linux-x64/bin/node" --version | grep -Fx 'v26.5.0' >/dev/null
+"$install_root/runtime/node-v26.13.0-linux-x64/bin/node" --version | grep -Fx 'v26.13.0' >/dev/null
 bash "$install_root/bin/install-tiktoken-offline.sh" --check-environment >/dev/null
 
 if [[ -e "$target" || -L "$target" ]]; then

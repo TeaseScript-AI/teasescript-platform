@@ -15,7 +15,7 @@ tools/          the single installed Python helper
 The external `chatgpt-project-agent-tools-linux-x64.tar.gz` is built from this directory by
 `tools/local-agent/build-chatgpt-project-agent-release.sh`. Generated archives are not committed. The separately
 maintained runtime archive overlays only heavy or rarely changed files at their final paths:
-Node 24/26, the npm cache seed, TikToken wheels/tokenizer data, ts-morph package tarballs, and runtime-owned metadata.
+the Node runtime, the npm cache seed, TikToken wheels/tokenizer data, ts-morph package tarballs, and runtime-owned metadata.
 
 `tools/setup-chatgpt-project-agent.sh` is deliberately outside this directory because it is uploaded as a separate
 project-folder file. It validates and combines both archives before replacing an installation. A repository-maintained

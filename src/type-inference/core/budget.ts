@@ -361,9 +361,9 @@ export class WorkLedger {
  * (`value[0][0]…`, `value.x.y…`, `value.first.first…`), each read by a generator inside the one before (`Contract`'s
  * `contractOfValue` and `#valueAt`, `Values`' `#valueAt`), so a deeper chain needs a deeper native stack. Past it the
  * analysis stops proving (`read-depth`) instead of overflowing that stack. A technical bound, not a language limit: on Node
- * 24.18.0's default stack (984 KiB) such a chain overflowed at 2,552 levels, alike on the laptop worker and the agent
- * host, for index, property, `.first`, deep-literal and untyped reads; 1,024 is about 40 % of that, leaving the stack
- * a compile is called from and a heavier level their room. `docs/RESOURCE-LIMITS.md` records it
+ * 26.13.0's default stack (984 KiB) such a chain overflowed at 2,448 levels for index, property and `.first` reads, as
+ * on 24.18.0 with the same build; 1,024 is about 40 % of that, leaving the stack a compile is called from and a heavier
+ * level their room. `docs/RESOURCE-LIMITS.md` records it
  * (`compiler.core-read-depth`). After a stop, a read past it is not settled (`Solver.enterRead`).
  */
 export const READ_DEPTH_LIMIT = 1_024;

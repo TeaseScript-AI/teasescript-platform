@@ -44,9 +44,9 @@ Git-maintained directory under one `chatgpt-project-agent/` root. The runtime ar
 files under the same root and final relative paths.
 
 The tools archive contains the maintained `README.md`, manifest, shell entrypoints, dependency guidance, installed
-guides, and `tools/prepare-source-review.py`. The runtime archive contains Node 24/26, npm cache seed, TikToken wheels
-and tokenizer data, ts-morph tarballs, upstream runtime licenses/documentation, and runtime-owned metadata. It contains
-no maintained `bin/`, `docs/`, or `tools/` files.
+guides, and `tools/prepare-source-review.py`. The runtime archive contains the Node runtime that `.nvmrc` pins, npm
+cache seed, TikToken wheels and tokenizer data, ts-morph tarballs, upstream runtime licenses/documentation, and
+runtime-owned metadata. It contains no maintained `bin/`, `docs/`, or `tools/` files.
 
 The installed directory intentionally has no `README-FIRST.md`; the project-folder wayfinder remains beside the
 archives, while the repository-root `README-FIRST.md` becomes authoritative after checkout. Git maintains a ChatGPT
@@ -56,8 +56,8 @@ the live Project Settings state. Any synchronization is a separate deliberate ow
 ## Runtime workspace entrypoint
 
 `bin/prepare-agent-workspace.sh` is the sole normal entrypoint. It verifies one exact source artifact, exposes a clean
-Git checkout, installs the locked dependency graph offline, prepares Node 24 and Node 26 runners, and installs and
-verifies mandatory ts-morph and TikToken tooling.
+Git checkout, installs the locked dependency graph offline, prepares the Node runner, and installs and verifies
+mandatory ts-morph and TikToken tooling.
 
 Example:
 
@@ -70,13 +70,12 @@ Example:
   --output /mnt/data/source-work
 ```
 
-Node 24 is the default. `--node 26` selects the compatibility runner. Both command runners are written under the
-checkout's `.git/teasescript-agent/` state. Pass the command to execute after the runner; the runner is not itself a
-Node executable alias:
+The command runner is written under the checkout's `.git/teasescript-agent/` state. Pass the command to execute after
+the runner; the runner is not itself a Node executable alias:
 
 ```bash
-.git/teasescript-agent/run-node24 node --version
-.git/teasescript-agent/run-node26 npm test
+.git/teasescript-agent/run node --version
+.git/teasescript-agent/run npm test
 ```
 
 TikToken uses the host CPython 3.13 interpreter, bundled `cp313` wheels, and a Git-local cache prepared from the
