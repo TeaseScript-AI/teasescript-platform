@@ -1,6 +1,7 @@
 import type {
   Expression,
   AngleExpression,
+  AngleUnit,
   CalendarDurationUnit,
   DurationLiteral,
   DurationUnit,
@@ -17,7 +18,11 @@ import {
   unitValue,
 } from "../duration.js";
 import {
+  ANGLE_UNIT_NAMES,
+  ANGLE_UNITS,
+  CALENDAR_DURATION_UNIT_NAMES,
   CALENDAR_DURATION_UNITS,
+  capitalizedUnit,
   DURATION_UNITS,
   mistakenDurationUnit,
 } from "../language-facts.js";
@@ -56,7 +61,7 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
     const exact = elapsedDurationUnit(token.lexeme);
     // A month or a year needs `calendar` here too, also as `mo` or `y`.
     const withoutCalendar = calendarDurationUnit(token.lexeme);
-    if (angleUnit(token.lexeme) !== undefined) {
+    if (angleUnitOf(token) !== undefined) {
       result = angleExpression(parser, expression, start);
     } else if (exact !== undefined) {
       parser.advance();
@@ -74,10 +79,15 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
       reportCalendarUnitWithoutCalendar(parser, amount, token, result);
     } else {
       const meant = mistakenDurationUnit(token.lexeme);
+      const calendar = capitalizedUnit(token.lexeme, CALENDAR_DURATION_UNIT_NAMES);
       // Read as the unit meant, so that its error is the only one.
       if (meant !== undefined) {
         result = withUnit({ calendar: false, unit: meant }, parser.advance());
         reportMistakenUnit(parser, expression, token, meant, result);
+      } else if (calendar !== undefined) {
+        const amount = parser.sourceText(start, parser.current);
+        result = withUnit({ calendar: true, unit: calendar }, parser.advance());
+        reportCalendarUnitWithoutCalendar(parser, amount, token, result);
       }
     }
   }
@@ -135,7 +145,8 @@ function reportUnitWithoutSpace(
 ): void {
   const unit = parser.tokens[first]!;
   if (unit.span.start.offset !== operand.span.end.offset) return;
-  const spaced = `${parser.sourceText(start, first)} ${parser.sourceText(first, parser.current)}`;
+  // A unit is written in lowercase, also one that has another error, as `calendar Months`.
+  const spaced = `${parser.sourceText(start, first)} ${parser.sourceText(first, parser.current).toLowerCase()}`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     calendar === undefined ? `${UNIT_WITHOUT_SPACE} Write '${spaced}'.` : UNIT_WITHOUT_SPACE,
@@ -146,6 +157,7 @@ function reportUnitWithoutSpace(
       diagnostic: parser.diagnostics.at(-1)!,
       calendar: spaced,
       spaced: true,
+      capitals: "",
     });
 }
 
@@ -189,20 +201,60 @@ export function knownAmount(amount: Expression): number | "deferred" | "unproved
   return "unproved";
 }
 
+/** The angle unit that `token` names, also with capitals, as `DEG` (see `angleExpression`). */
+function angleUnitOf(token: Token): AngleUnit | undefined {
+  return angleUnit(token.lexeme) ?? capitalizedUnit(token.lexeme, ANGLE_UNIT_NAMES);
+}
+
 /**
  * The angle unit that comes next after `operand`, which begins at `start`: the number before it as an angle, such as
- * `90 deg` or `(a + b) rad` (V30 §13).
+ * `90 deg` or `(a + b) rad` (V30 §13). A unit with capitals, as `90 DEG`, is read as the unit and is an error that
+ * names it in lowercase.
  */
 function angleExpression(parser: Parser, operand: Expression, start: number): AngleExpression {
   const token = parser.advance();
-  reportUnitWithoutSpace(parser, operand, start, parser.current - 1);
+  const unit = angleUnitOf(token)!;
+  if (angleUnit(token.lexeme) === undefined) reportCapitalAngle(parser, operand, token, unit);
+  else reportUnitWithoutSpace(parser, operand, start, parser.current - 1);
   return Object.freeze({
     kind: "angleExpression",
     operand,
-    unit: angleUnit(token.lexeme)!,
+    unit,
     unitSpan: copySpan(token.span),
     span: spanFrom(operand.span, token.span),
   });
+}
+
+/** The sentences on a unit `word` written with capitals, which no unit is written with. */
+function capitalsWords(word: Token): string {
+  return `'${word.lexeme}' is not a unit. ${LOWERCASE}`;
+}
+
+const LOWERCASE = "Units are written in lowercase.";
+
+/**
+ * An angle unit with capitals after `amount`, as `90 DEG`, which names the unit meant. A number with the unit is shown
+ * where the statement then parses (see `Parser.offerFix`). Whether another amount, such as a name, takes the unit only
+ * the type checker knows, so it keeps the words, as for a duration (see `reportMistakenUnit`).
+ */
+function reportCapitalAngle(
+  parser: Parser,
+  amount: Expression,
+  word: Token,
+  unit: AngleUnit,
+): void {
+  const message = (fix: string) =>
+    `${capitalsWords(word)} For ${unit === "deg" ? "degrees" : "radians"}, ${fix}. The units of an angle are ${ANGLE_UNITS.join(" and ")}.`;
+  parser.reportToken(
+    parserDiagnosticCode.unsupportedDurationUnit,
+    message(`use the unit ${unit}`),
+    word,
+  );
+  if (amount.kind !== "numberLiteral") return;
+  const fixed = `${amount.raw} ${unit}`;
+  parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
+    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
+  ]);
 }
 
 /**
@@ -216,7 +268,7 @@ export function parseDurationUnit(
 ): Expression {
   if (!parser.check(TokenKind.Identifier)) return amount;
   const token = parser.peek();
-  if (angleUnit(token.lexeme) !== undefined) return angleExpression(parser, amount, start);
+  if (angleUnitOf(token) !== undefined) return angleExpression(parser, amount, start);
   const literal = (
     unit:
       | { readonly calendar: false; readonly unit: DurationUnit }
@@ -243,15 +295,17 @@ export function parseDurationUnit(
     reportUnitWithoutSpace(parser, amount, start, parser.current - 1);
     return result;
   }
-  const calendar = calendarDurationUnit(token.lexeme);
-  if (calendar === undefined) {
-    const meant = mistakenDurationUnit(token.lexeme);
-    if (meant === undefined) return amount;
+  const meant = mistakenDurationUnit(token.lexeme);
+  if (meant !== undefined) {
     // Read as the unit meant, so that its error is the only one.
     const result = literal({ calendar: false, unit: meant }, parser.advance());
     reportMistakenUnit(parser, amount, token, meant, result);
     return result;
   }
+  const calendar =
+    calendarDurationUnit(token.lexeme) ??
+    capitalizedUnit(token.lexeme, CALENDAR_DURATION_UNIT_NAMES);
+  if (calendar === undefined) return amount;
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
   reportCalendarUnitWithoutCalendar(parser, amount.raw, token, result);
   return result;
@@ -288,7 +342,7 @@ function reportMistakenUnit(
 ): void {
   const lower = word.lexeme.toLowerCase();
   const why = lower === "m" ? ", because it could mean minutes or months" : "";
-  const lowercase = lower === word.lexeme ? "" : " Units are written in lowercase.";
+  const lowercase = lower === word.lexeme ? "" : ` ${LOWERCASE}`;
   const message = (fix: string) =>
     `'${word.lexeme}' is not a unit${why}.${lowercase} For ${MEANT_UNITS[meant]}, ${fix}. ${UNITS_OF_TIME}`;
   parser.reportToken(
@@ -312,14 +366,28 @@ function reportMistakenUnit(
  */
 function calendarUnit(parser: Parser, calendar: Token): CalendarDurationUnit | undefined {
   const next = parser.peek();
-  const unit = next.kind === TokenKind.Identifier ? calendarDurationUnit(next.lexeme) : undefined;
-  if (unit === undefined)
-    parser.reportToken(
-      parserDiagnosticCode.unsupportedDurationUnit,
-      "Expected a calendar unit after 'calendar': day, week, month, or year.",
-      calendar,
-    );
-  return unit;
+  if (next.kind !== TokenKind.Identifier) return reportNoCalendarUnit(parser, calendar);
+  const unit = calendarDurationUnit(next.lexeme);
+  if (unit !== undefined) return unit;
+  const capital = capitalizedUnit(next.lexeme, CALENDAR_DURATION_UNIT_NAMES);
+  if (capital === undefined) return reportNoCalendarUnit(parser, calendar);
+  // Read as the unit, written in lowercase where the statement then parses (see `Parser.offerFix`).
+  parser.reportToken(parserDiagnosticCode.unsupportedDurationUnit, capitalsWords(next), next);
+  const lower = next.lexeme.toLowerCase();
+  parser.offerFix(parser.diagnostics.length - 1, `${capitalsWords(next)} Write '${lower}'.`, [
+    { start: next.span.start.offset, end: next.span.end.offset, code: lower, expression: false },
+  ]);
+  return capital;
+}
+
+/** Reports that no calendar unit follows `calendar`, and gives `undefined`. */
+function reportNoCalendarUnit(parser: Parser, calendar: Token): undefined {
+  parser.reportToken(
+    parserDiagnosticCode.unsupportedDurationUnit,
+    "Expected a calendar unit after 'calendar': day, week, month, or year.",
+    calendar,
+  );
+  return undefined;
 }
 
 /** The advice for a month or a year without `calendar` that names both choices, wherever neither is known to fit. */
@@ -337,15 +405,19 @@ function reportCalendarUnitWithoutCalendar(
   unit: Token,
   duration: Expression,
 ): void {
+  // A unit with capitals, as `Months`, is also named in lowercase.
+  const lower = unit.lexeme.toLowerCase();
+  const capitals = lower === unit.lexeme ? "" : `${capitalsWords(unit)} `;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
-    calendarUnitWords(calendarDurationUnit(unit.lexeme) === "mo" ? "month" : "year"),
+    `${capitals}${calendarUnitWords(calendarDurationUnit(lower) === "mo" ? "month" : "year")}`,
     unit,
   );
   parser.calendarUnitErrors.set(duration, {
     diagnostic: parser.diagnostics.at(-1)!,
-    calendar: `${amount} calendar ${unit.lexeme}`,
+    calendar: `${amount} calendar ${lower}`,
     spaced: false,
+    capitals,
   });
 }
 
@@ -445,15 +517,16 @@ function adviseDuration(
       const advice = createDiagnostic(
         DiagnosticSeverity.Error,
         parserDiagnosticCode.unsupportedDurationUnit,
-        place !== "calendar"
-          ? `${place.exact} needs an exact length, and a ${unit} has none. ${exactFix}`
-          : error!.spaced
-            ? proved
-              ? `${UNIT_WITHOUT_SPACE} Write '${error!.calendar}'.`
-              : UNIT_WITHOUT_SPACE
-            : proved
-              ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
-              : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`,
+        error!.capitals +
+          (place !== "calendar"
+            ? `${place.exact} needs an exact length, and a ${unit} has none. ${exactFix}`
+            : error!.spaced
+              ? proved
+                ? `${UNIT_WITHOUT_SPACE} Write '${error!.calendar}'.`
+                : UNIT_WITHOUT_SPACE
+              : proved
+                ? `A ${unit} has no fixed length. Write '${error!.calendar}'.`
+                : `A ${unit} has no fixed length, and a calendar step needs whole months. Write the length in days or weeks.`),
         error!.diagnostic.span,
       );
       parser.diagnostics.set(index, advice);
