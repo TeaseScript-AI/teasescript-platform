@@ -94,7 +94,11 @@ export type WorkCounter =
   | "c1Visits"
   | "structureSteps"
   // the writers the result names
-  | "evidence";
+  | "evidence"
+  // what a decision's stop forgets by (#1403), counted apart (`countApart`): each demand's reader, each key a demand
+  // asked whether it stopped
+  | "readerRecords"
+  | "stopAsks";
 
 /**
  * The units a kept text of `length` UTF-16 code units costs (TABLE r4.58): about its size in 8-byte words, a header of
@@ -263,6 +267,8 @@ export class WorkLedger {
   /** Work counted as finishing work, the analysis not stopped (`finishing`'s callback). */
   #apart = false;
   #finishing = 0;
+  /** The finishing work by counter: `apart`'s and after the stop (`apartCounts`). */
+  readonly #apartCounts = new Map<WorkCounter, number>();
   /** Units charged while building an index the program shares (`shared`), outermost builds only. */
   #shared = 0;
   #sharing = false;
@@ -278,6 +284,7 @@ export class WorkLedger {
   public charge(counter: WorkCounter, units = 1): void {
     if (this.#stopped !== null || this.#apart) {
       this.#finishing += units;
+      this.#apartCounts.set(counter, (this.#apartCounts.get(counter) ?? 0) + units);
       return;
     }
     this.#counts.set(counter, (this.#counts.get(counter) ?? 0) + units);
@@ -329,14 +336,16 @@ export class WorkLedger {
 
   /**
    * Runs `callback` as finishing work without a stop: the checks of statements nested past the nesting limit after an
-   * analysis that ran to its end (D4 a′), counted apart and never stopping it.
+   * analysis that ran to its end (D4 a′), a diagnostic's fix facts, what a stop forgets by (`countApart`), counted apart
+   * and never stopping it. Inside another `apart` callback it stays apart to that callback's end.
    */
   public apart<T>(callback: () => T): T {
+    const outer = this.#apart;
     this.#apart = true;
     try {
       return callback();
     } finally {
-      this.#apart = false;
+      this.#apart = outer;
     }
   }
 
@@ -354,6 +363,16 @@ export class WorkLedger {
   public counts(): ReadonlyMap<WorkCounter, number> {
     return new Map(this.#counts);
   }
+
+  /** The finishing work's counters with their units (`apart`'s and after the stop), in the order first counted. */
+  public apartCounts(): ReadonlyMap<WorkCounter, number> {
+    return new Map(this.#apartCounts);
+  }
+}
+
+/** `units` charged to `counter` apart from the allowance (`WorkLedger.apart`): counted, never stopping the analysis. */
+export function countApart(work: WorkLedger, counter: WorkCounter, units = 1): void {
+  work.apart(() => work.charge(counter, units));
 }
 
 /**
