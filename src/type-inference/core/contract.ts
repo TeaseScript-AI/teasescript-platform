@@ -5,6 +5,7 @@ import type {
   ChoiceOptionEvidence,
   PlaceId,
   PlaceKind,
+  SourceSite,
   TypeTerm,
 } from "../graph.js";
 import type { CorePass } from "./answers.js";
@@ -546,25 +547,60 @@ export interface ChoiceGroup {
 
 /**
  * A member's class, its roles' writers and whether it is mixed (`Contract.classOf`, `classWriters`, `classMixed`), as
- * `roleMinima` reads them: the writers only where another member of its class compares them, by what they are read from
- * (#1357).
+ * `roleMinima` reads them: the writers only where another member of its class compares them, once per source of them
+ * (`Contract.#roleSource`, #1357).
  */
 export interface ValueClass {
   readonly cls: string | null;
   readonly writers: () => readonly (Writer | null)[];
   /** What the writers are read from (a value, a binding and its value, a label), the same text for the same writers. */
   readonly source: string;
+  /** The text its own writers lie in: a value's site, a binding's definition; none for a label. */
+  readonly span: () => SourceSite | null;
   /** What its values can differ by beside writers (`MIXED_LEAF`, `MIXED_FAN`), 0 for nothing. */
   readonly mixed: number;
 }
 
-const NO_CLASS: ValueClass = { cls: null, writers: () => [], source: "", mixed: 0 };
+const NO_CLASS: ValueClass = {
+  cls: null,
+  writers: () => [],
+  source: "",
+  span: () => null,
+  mixed: 0,
+};
 
-/** The role minima `roleMinima` made for one side, by their members' writers' sources, and the ledger they charge. */
-interface RoleSelections {
-  readonly made: Map<string, readonly number[]>;
-  readonly work: WorkLedger;
+/**
+ * A writers' source's role data (`Contract.#roleSource`), once per source and side: its writers, the text its own
+ * writers lie in, which of its roles lie there and the writers of the others, by a short id (#1357).
+ */
+interface RoleSource {
+  readonly id: number;
+  readonly writers: readonly (Writer | null)[];
+  readonly span: SourceSite | null;
+  readonly shape: RoleShape;
+  /** Its other roles' writers, by an id shared by the sources whose writers there compare alike. */
+  readonly others: number;
 }
+
+/** Which of a source's roles lie in its own text (`RoleSource.shape`), by an id: the first of them, and the others. */
+interface RoleShape {
+  readonly id: number;
+  /** The first role whose writer lies in the source's own text, -1 for none. */
+  readonly firstOwn: number;
+  readonly others: readonly number[];
+}
+
+/**
+ * A decision of a set of peers' roles (`Contract.#decisionsOf`), at the first role it decides: the peers whose writer is
+ * earliest there, and those with none, which leave the role to the first member, by their ids (`RoleSource.id`).
+ */
+interface PeerDecision {
+  readonly at: number;
+  readonly ties: readonly number[];
+  readonly nulls: ReadonlySet<number>;
+}
+
+const NO_NULLS: ReadonlySet<number> = new Set();
 
 /**
  * A value's class as `classOf` keeps it: its roles' writers (`classWriters`) are its own, then its parts' in turn, read
@@ -582,12 +618,18 @@ export interface KeptClass {
 const NO_KEPT_CLASS: KeptClass = { cls: null, mixed: 0, own: [], parts: [] };
 
 /**
- * A member's leaf roles' proofs (`#leafRoles`, `#othersLeaves`): per ingress node whether it holds every one of them, and
- * per node (none first) that node joined with each of them in turn.
+ * A member's leaf roles' proofs (`#leafRoles`, `#othersLeaves`), by the list's id: per ingress node whether it holds
+ * every one of them, and their union once asked.
  */
 interface LeafProofs {
+  readonly id: number;
   readonly held: Map<IngressNode, boolean>;
-  readonly joined: Map<IngressNode | undefined, IngressNode>;
+  union?: IngressNode;
+}
+
+/** Whether two writers stand at one place, which `firstWriter`'s order does not tell apart. */
+function sameWriter(a: Writer, b: Writer): boolean {
+  return a.file === b.file && a.start === b.start && a.kind === b.kind;
 }
 
 /** Whether an operation is a choice (`askChoice`, V30 §19). */
@@ -605,13 +647,14 @@ function isChoice(c: Extract<ValueConstraint, { readonly kind: "operation" }>): 
  * stands by itself. Per class in the order of its first member: the members read, each once and in role order (the
  * first member for a role no later one is earlier in), the others where the class is mixed (`Contract.classMixed`: read
  * where the read ones' answer holds a leaf or an operand's identity), and all. A class's members are chosen by their
- * writers alone, so each sequence of their sources is chosen once per side (`selections`), whichever site asks, and a
- * member alone in its class reads no writers: k sites of one class's long roles read them once, not k times (#1357).
+ * writers alone (`choose`, `Contract.#chosen`: once per set of their sources, whichever site asks, in whatever order),
+ * and a member alone in its class reads no writers: k sites of one class's long roles read them once, not k times
+ * (#1357).
  */
 function roleMinima(
   members: readonly ValueClass[],
   charge: () => void,
-  selections: RoleSelections,
+  choose: (group: readonly ValueClass[]) => readonly number[],
 ): readonly {
   readonly read: readonly number[];
   readonly rest: readonly number[];
@@ -631,48 +674,11 @@ function roleMinima(
   }
   return classes.map((all) => {
     const read =
-      all.length === 1
-        ? all
-        : chosen(
-            all.map((member) => members[member]!),
-            charge,
-            selections,
-          ).map((at) => all[at]!);
+      all.length === 1 ? all : choose(all.map((member) => members[member]!)).map((at) => all[at]!);
     const mixed = members[all[0]!]!.mixed;
     const reads = new Set(read);
     return { read, rest: mixed !== 0 ? all.filter((m) => !reads.has(m)) : [], all, mixed };
   });
-}
-
-/**
- * Of two or more members of one class (`roleMinima`), those it reads, by their places among them: per role the first
- * whose writer is earliest, each once in role order. Once per sequence of their writers' sources and side.
- */
-function chosen(
-  group: readonly ValueClass[],
-  charge: () => void,
-  { made, work }: RoleSelections,
-): readonly number[] {
-  // (no spread into a call: a class may hold as many members as the source has values)
-  const key = JSON.stringify(group.map((member) => member.source));
-  const known = made.get(key);
-  if (known !== undefined) return known;
-  const best = [...group[0]!.writers()];
-  const read = best.length === 0 ? [0] : best.map(() => 0);
-  for (let at = 1; at < group.length; at += 1)
-    for (const [role, mine] of group[at]!.writers().entries()) {
-      charge();
-      const first = best[role] ?? null;
-      if (mine !== null && first !== null && firstWriter(first, mine) !== first) {
-        best[role] = mine;
-        read[role] = at;
-      }
-    }
-  const out = [...new Set(read)];
-  keepText(work, key.length);
-  keep(work, 1 + out.length);
-  made.set(key, out);
-  return out;
 }
 
 /** Whether a store goes below a property named `value`, and one named `text` (V30 §19). */
@@ -895,11 +901,20 @@ export class Contract {
   /** Per value, its class on the contract side and on the value side (`classOf`); per class text, its short name. */
   readonly #valueClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
   readonly #classIds = new Map<string, string>();
-  /** Per side, the role minima of a class's members by their writers' sources (`roleMinima`), whichever site asks. */
-  readonly #roleSelections = [
-    new Map<string, readonly number[]>(),
-    new Map<string, readonly number[]>(),
+  /** Per side, each writers' source's role data (`#roleSource`), by its text and by its id. */
+  readonly #roleSources = [new Map<string, RoleSource>(), new Map<string, RoleSource>()];
+  readonly #roleSourceList: RoleSource[][] = [[], []];
+  /** Per role shape, and per sequence of other roles' writers, its id (`#roleSource`); the writers by their id. */
+  readonly #roleShapes = new Map<string, RoleShape>();
+  readonly #otherWriterIds = new Map<string, number>();
+  readonly #otherWriters: (readonly (Writer | null)[])[] = [];
+  /** Per side, each set of peers' decisions (`#decisionsOf`), by their sources' ids in increasing order. */
+  readonly #peerDecisions = [
+    new Map<string, readonly PeerDecision[]>(),
+    new Map<string, readonly PeerDecision[]>(),
   ];
+  /** Per shape and set of other roles' writer sequences, their decisions (`#otherDecisions`), by those sequences' ids. */
+  readonly #otherDecisionsOf = new Map<string, readonly PeerDecision[]>();
   /** Per value, its roles' writers on the contract side and on the value side (`classWriters`), where asked. */
   readonly #classWriters = [
     new Map<PlaceId, readonly (Writer | null)[] | null>(),
@@ -924,8 +939,10 @@ export class Contract {
     new Map<PlaceId, readonly IngressNode[] | null>(),
     new Map<PlaceId, readonly IngressNode[] | null>(),
   ];
-  /** Per list of leaves `#leafRoles` names, its proofs (`#proofsOf`). */
+  /** Per list of leaves `#leafRoles` names, its proofs (`#proofsOf`); per set of such lists, their union (`#joinedLeaves`). */
   readonly #leafProofs = new WeakMap<readonly IngressNode[], LeafProofs>();
+  #leafLists = 0;
+  readonly #leafSets = new Map<string, IngressNode>();
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`#othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of
@@ -2540,9 +2557,218 @@ export class Contract {
     return memo.get(value)!;
   }
 
-  /** The role minima `roleMinima` made on one side, and the ledger it charges. */
-  #minima(exact: boolean): RoleSelections {
-    return { made: this.#roleSelections[exact ? 1 : 0]!, work: this.#work };
+  /** How `roleMinima` chooses a class's members on one side (`#chosen`). */
+  #minima(exact: boolean): (group: readonly ValueClass[]) => readonly number[] {
+    return (group) => this.#chosen(group, exact);
+  }
+
+  /**
+   * Of two or more members of one class (`roleMinima`), those it reads, by their places among them: per role the first
+   * whose writer is earliest, each once in role order, and the first member for a role it has no writer for. The roles
+   * are decided once per set of the members' writers' sources and side (`#decisionsOf`), whatever order or repetition
+   * the members come in; their order enters only here, from each source's first place, a step per member and per tied
+   * peer: k sites of one set of peers, rotated, permuted or repeated, read their writers once (#1357).
+   */
+  #chosen(group: readonly ValueClass[], exact: boolean): readonly number[] {
+    const work = this.pass.program.work;
+    // (each source's first place among the members: the order an earliest writer's ties go by)
+    const first = new Map<number, number>();
+    const sources: RoleSource[] = [];
+    for (const [at, member] of group.entries()) {
+      work.charge("invSteps");
+      const source = this.#roleSource(member, exact);
+      if (first.has(source.id)) continue;
+      first.set(source.id, at);
+      sources.push(source);
+    }
+    const lead = sources[0]!;
+    const out: number[] = [];
+    const picked = new Set<number>();
+    for (const { at, ties, nulls } of this.#decisionsOf(sources, exact)) {
+      if (at >= lead.writers.length || picked.size === sources.length) break;
+      let winner = lead.id;
+      if (!nulls.has(lead.id)) {
+        let earliest = Infinity;
+        for (const id of ties) {
+          work.charge("invSteps");
+          const place = first.get(id)!;
+          if (place < earliest) [earliest, winner] = [place, id];
+        }
+      }
+      if (picked.has(winner)) continue;
+      picked.add(winner);
+      out.push(first.get(winner)!);
+    }
+    return out.length === 0 ? [0] : out;
+  }
+
+  /**
+   * A member's writers' source's role data (`#chosen`), once per source and side: its writers (`ValueClass.writers`,
+   * read here only), its own text, and which of its roles lie there (its shape), the others' writers by an id.
+   */
+  #roleSource(member: ValueClass, exact: boolean): RoleSource {
+    const memo = this.#roleSources[exact ? 1 : 0]!;
+    const known = memo.get(member.source);
+    if (known !== undefined) return known;
+    const list = this.#roleSourceList[exact ? 1 : 0]!;
+    const writers = member.writers();
+    const span = member.span();
+    let marks = "";
+    const others: (Writer | null)[] = [];
+    for (const writer of writers) {
+      this.pass.program.work.charge("invSteps");
+      const own =
+        writer !== null &&
+        span !== null &&
+        writer.file === span.file &&
+        writer.start >= span.start &&
+        writer.start < span.end;
+      marks += own ? "o" : "x";
+      if (!own) others.push(writer);
+    }
+    let shape = this.#roleShapes.get(marks);
+    if (shape === undefined) {
+      const rest: number[] = [];
+      for (let role = 0; role < marks.length; role += 1) if (marks[role] === "x") rest.push(role);
+      this.#keepText(marks.length);
+      this.#keep(2 + rest.length);
+      this.#roleShapes.set(
+        marks,
+        (shape = { id: this.#roleShapes.size, firstOwn: marks.indexOf("o"), others: rest }),
+      );
+    }
+    // (writers alike by `firstWriter`'s order: its file, start and kind)
+    const text = JSON.stringify(others.map((w) => (w === null ? null : [w.file, w.start, w.kind])));
+    let id = this.#otherWriterIds.get(text);
+    if (id === undefined) {
+      this.#keepText(text.length);
+      this.#otherWriterIds.set(text, (id = this.#otherWriters.length));
+      this.#otherWriters.push(others);
+    }
+    const source: RoleSource = { id: list.length, writers, span, shape, others: id };
+    this.#keep(3);
+    list.push(source);
+    memo.set(member.source, source);
+    return source;
+  }
+
+  /**
+   * The decisions of a set of peers' roles (`#chosen`), once per set of their sources and side, in the order of their
+   * first roles: one per distinct set of earliest peers and peers without a writer. Peers of one shape whose own texts
+   * lie apart decide every role in their own text by those texts' order alone, the earliest text's writer earliest in
+   * each, and their other roles by their writers' ids (`#otherDecisions`); any other set compares every role.
+   */
+  #decisionsOf(sources: readonly RoleSource[], exact: boolean): readonly PeerDecision[] {
+    const ids = sources.map(({ id }) => id).sort((a, b) => a - b);
+    const key = ids.join(",");
+    const memo = this.#peerDecisions[exact ? 1 : 0]!;
+    const known = memo.get(key);
+    if (known !== undefined) return known;
+    const list = this.#roleSourceList[exact ? 1 : 0]!;
+    const peers = ids.map((id) => list[id]!);
+    const out = this.#ownDecisions(peers) ?? this.#walkedDecisions(peers);
+    this.#keepText(key.length);
+    this.#keep(1 + out.reduce((units, { ties, nulls }) => units + 1 + ties.length + nulls.size, 0));
+    memo.set(key, out);
+    return out;
+  }
+
+  /** `#decisionsOf` for peers of one shape whose own texts lie apart, else `null`. */
+  #ownDecisions(peers: readonly RoleSource[]): readonly PeerDecision[] | null {
+    const { work } = this.pass.program;
+    const shape = peers[0]!.shape;
+    const out: PeerDecision[] = [];
+    if (shape.firstOwn >= 0) {
+      const spans: SourceSite[] = [];
+      for (const peer of peers) {
+        work.charge("invSteps");
+        if (peer.shape !== shape || peer.span === null) return null;
+        spans.push(peer.span);
+      }
+      const order = peers
+        .map((peer, at) => ({ peer, span: spans[at]! }))
+        .sort((a, b) => a.span.file - b.span.file || a.span.start - b.span.start);
+      for (let at = 1; at < order.length; at += 1) {
+        const [before, after] = [order[at - 1]!.span, order[at]!.span];
+        if (before.file === after.file && before.end > after.start) return null;
+      }
+      out.push({ at: shape.firstOwn, ties: [order[0]!.peer.id], nulls: NO_NULLS });
+    } else if (peers.some((peer) => peer.shape !== shape)) return null;
+    const bySequence = new Map<number, number[]>();
+    for (const peer of peers) {
+      work.charge("invSteps");
+      const same = bySequence.get(peer.others);
+      if (same === undefined) bySequence.set(peer.others, [peer.id]);
+      else same.push(peer.id);
+    }
+    const sequences = [...bySequence.keys()].sort((a, b) => a - b);
+    const of = (ids: Iterable<number>): number[] => [...ids].flatMap((id) => bySequence.get(id)!);
+    for (const { at, ties, nulls } of this.#otherDecisions(shape, sequences))
+      out.push({ at, ties: of(ties), nulls: nulls.size === 0 ? NO_NULLS : new Set(of(nulls)) });
+    return out.sort((a, b) => a.at - b.at);
+  }
+
+  /**
+   * The decisions of the roles outside their sources' own texts (`RoleShape.others`) for a set of their writers'
+   * sequences (`RoleSource.others`), by those ids: once per shape and set of sequences, whichever peers hold them.
+   */
+  #otherDecisions(shape: RoleShape, sequences: readonly number[]): readonly PeerDecision[] {
+    const key = `${shape.id}:${sequences.join(",")}`;
+    const known = this.#otherDecisionsOf.get(key);
+    if (known !== undefined) return known;
+    const { work } = this.pass.program;
+    const out: PeerDecision[] = [];
+    const seen = new Set<string>();
+    for (const [index, at] of shape.others.entries()) {
+      let earliest: Writer | null = null;
+      for (const id of sequences) {
+        work.charge("invSteps");
+        earliest = firstWriter(earliest, this.#otherWriters[id]![index]!);
+      }
+      const ties: number[] = [];
+      const nulls: number[] = [];
+      for (const id of sequences) {
+        const writer = this.#otherWriters[id]![index]!;
+        if (writer === null) nulls.push(id);
+        else if (sameWriter(writer, earliest!)) ties.push(id);
+      }
+      const decided = keptParts(this.#work, ties.join(","), nulls.join(","));
+      if (seen.has(decided)) continue;
+      seen.add(decided);
+      out.push({ at, ties, nulls: nulls.length === 0 ? NO_NULLS : new Set(nulls) });
+    }
+    this.#keepText(key.length);
+    this.#keep(1 + out.reduce((units, { ties, nulls }) => units + 1 + ties.length + nulls.size, 0));
+    this.#otherDecisionsOf.set(key, out);
+    return out;
+  }
+
+  /** `#decisionsOf` for any set of peers: each role's earliest writer among them, compared role by role. */
+  #walkedDecisions(peers: readonly RoleSource[]): readonly PeerDecision[] {
+    const { work } = this.pass.program;
+    const out: PeerDecision[] = [];
+    const seen = new Set<string>();
+    const roles = Math.max(...peers.map(({ writers }) => writers.length));
+    for (let at = 0; at < roles; at += 1) {
+      let earliest: Writer | null = null;
+      for (const { writers } of peers) {
+        work.charge("invSteps");
+        if (at < writers.length) earliest = firstWriter(earliest, writers[at]!);
+      }
+      const ties: number[] = [];
+      const nulls: number[] = [];
+      for (const { id, writers } of peers) {
+        if (at >= writers.length) continue;
+        const writer = writers[at]!;
+        if (writer === null) nulls.push(id);
+        else if (sameWriter(writer, earliest!)) ties.push(id);
+      }
+      const decided = keptParts(this.#work, ties.join(","), nulls.join(","));
+      if (seen.has(decided)) continue;
+      seen.add(decided);
+      out.push({ at, ties, nulls: nulls.length === 0 ? NO_NULLS : new Set(nulls) });
+    }
+    return out;
   }
 
   /** What a kept class's roles' writers are read from (`#writersOf`): its own writer and its parts, as a text. */
@@ -2852,6 +3078,7 @@ export class Contract {
         cls: key,
         writers: () => this.classWriters(entry.value, exact) ?? [],
         source: `v${entry.value}`,
+        span: () => program.places[entry.value]?.site ?? null,
         mixed: key === null ? 0 : this.classMixed(entry.value, exact),
       });
     }
@@ -2937,6 +3164,8 @@ export class Contract {
         cls: key,
         writers: () => this.#writersOf(bound, value) ?? [],
         source: key === null ? "" : this.#writersSource(bound),
+        // (a binding's definition: its own role's writer, its value's text)
+        span: () => bound.own[0] ?? null,
         mixed: key === null ? 0 : bound.mixed,
       });
     }
@@ -2981,6 +3210,7 @@ export class Contract {
             cls: keptParts(this.#work, "l", member.label!),
             writers: () => [],
             source: "l",
+            span: () => null,
             mixed: 0,
           };
         else if (cls !== null) {
@@ -2989,6 +3219,7 @@ export class Contract {
             cls: keptParts(this.#work, member.object ? "o" : "c", cls),
             writers: () => this.classWriters(place, exact) ?? [],
             source: `v${place}`,
+            span: () => program.places[place]?.site ?? null,
             mixed: this.classMixed(place, exact),
           };
         }
@@ -5467,18 +5698,16 @@ export class Contract {
         if (differsIn(item, group.mixed) && !this.#holdsLeaves(item.ingress, own)) return null;
     }
     if (this.#othersLeavesOf.has(group)) return this.#othersLeavesOf.get(group)!;
-    let leaves: IngressNode | undefined;
+    const lists: (readonly IngressNode[])[] = [];
     for (const entry of group.rest) {
       const own = this.#leafRoles(entry.value, exact);
-      if (own === null || own.length !== roles) {
-        leaves = undefined;
-        break;
-      }
-      leaves = this.#joinedLeaves(leaves, own);
+      if (own === null || own.length !== roles) break;
+      lists.push(own);
     }
+    const leaves = lists.length === group.rest.length ? this.#joinedLeaves(lists) : null;
     this.#keep(1);
-    this.#othersLeavesOf.set(group, leaves ?? null);
-    return leaves ?? null;
+    this.#othersLeavesOf.set(group, leaves);
+    return leaves;
   }
 
   /**
@@ -5488,8 +5717,8 @@ export class Contract {
   #proofsOf(leaves: readonly IngressNode[]): LeafProofs {
     let known = this.#leafProofs.get(leaves);
     if (known === undefined) {
-      this.#keep(1);
-      this.#leafProofs.set(leaves, (known = { held: new Map(), joined: new Map() }));
+      this.#keep(2);
+      this.#leafProofs.set(leaves, (known = { id: this.#leafLists++, held: new Map() }));
     }
     return known;
   }
@@ -5508,23 +5737,41 @@ export class Contract {
     return holds;
   }
 
-  /** An ingress node (none first) joined with each of a member's leaves in turn, once per node and list. */
-  #joinedLeaves(node: IngressNode | undefined, leaves: readonly IngressNode[]): IngressNode {
+  /**
+   * The leaves of a group's other members joined (`#othersLeaves`): each member's list's leaves once (`LeafProofs.union`),
+   * and each set of lists once, in the order of their ids, whatever order or repetition the members come in, so k sites
+   * of one set of peers, rotated or permuted, join their leaves once, not through k orders' intermediate nodes (#1357).
+   */
+  #joinedLeaves(lists: readonly (readonly IngressNode[])[]): IngressNode {
     const { scope } = this.pass.program;
-    scope.work.charge("mergeItems");
-    const { joined } = this.#proofsOf(leaves);
-    let out = joined.get(node);
-    if (out === undefined) {
-      let at = node;
-      for (const leaf of leaves) {
-        scope.work.charge("mergeItems");
-        at = scope.ingress.union(at, leaf);
+    const byId = new Map<number, LeafProofs>();
+    for (const leaves of lists) {
+      scope.work.charge("mergeItems");
+      const proofs = this.#proofsOf(leaves);
+      if (proofs.union === undefined) {
+        let union: IngressNode | undefined;
+        for (const leaf of leaves) {
+          scope.work.charge("mergeItems");
+          union = scope.ingress.union(union, leaf);
+        }
+        this.#keep(1);
+        proofs.union = union!;
       }
-      out = at!;
-      this.#keep(1);
-      joined.set(node, out);
+      byId.set(proofs.id, proofs);
     }
-    return out;
+    const ids = [...byId.keys()].sort((a, b) => a - b);
+    const key = ids.join(",");
+    let out = this.#leafSets.get(key);
+    if (out === undefined) {
+      for (const id of ids) {
+        scope.work.charge("mergeItems");
+        out = scope.ingress.union(out, byId.get(id)!.union);
+      }
+      this.#keepText(key.length);
+      this.#keep(1);
+      this.#leafSets.set(key, out!);
+    }
+    return out!;
   }
 
   /**

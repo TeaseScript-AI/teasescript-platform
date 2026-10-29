@@ -5767,6 +5767,104 @@ export const VALUE_SHARING_PROGRAMS: readonly {
 const parsed = (input: string, fallback: string | null = "seed"): string =>
   `fromJson(${input}${fallback === null ? "" : `, default: ${fallback}`}, files: false)`;
 
+const joined = (k: number, part: (index: number) => string, by = ""): string =>
+  Array.from({ length: k }, (_, index) => part(index)).join(by);
+
+/** The orders a list of m peers takes at its i-th site (`peerOrders`). */
+const PEER_ORDERS = {
+  fixed: (m: number): number[] => Array.from({ length: m }, (_, j) => j),
+  rotated: (m: number, i: number): number[] => Array.from({ length: m }, (_, j) => (i + j) % m),
+  shuffled: (m: number, i: number): number[] => {
+    const out = Array.from({ length: m }, (_, j) => j);
+    let seed = (i * 2654435761 + 12345) >>> 0;
+    for (let j = m - 1; j > 0; j -= 1) {
+      seed = (seed * 1103515245 + 12345) >>> 0;
+      const at = seed % (j + 1);
+      [out[j], out[at]] = [out[at]!, out[j]!];
+    }
+    return out;
+  },
+  // (three of them, a distinct set at each of up to m·(m-1) sites)
+  triple: (m: number, i: number): number[] => {
+    const a = i % m;
+    const b = (a + 1 + (Math.floor(i / m) % (m - 1))) % m;
+    return [a, b, [(b + 1) % m, (b + 2) % m].find((j) => j !== a)!];
+  },
+  // (one set in two orders, alternating)
+  twoOrders: (m: number, i: number): number[] =>
+    Array.from({ length: m }, (_, j) => (i % 2 === 0 ? j : m - 1 - j)),
+};
+
+/** k lists of m = k/16 peers of one class (`peer(j, m)`), read at a host index, their orders taken in turn from `forms`. */
+const peerOrders = (
+  k: number,
+  forms: readonly (keyof typeof PEER_ORDERS)[],
+  peer: (j: number, m: number) => string,
+  head = "",
+): readonly SourceFile[] => {
+  const m = k >> 4;
+  return main(
+    lines(
+      head,
+      rows(m, (j) => `let p${j} = ${peer(j, m)}`),
+      rows(k, (i) => {
+        const order = PEER_ORDERS[forms[i % forms.length]!](m, Math.floor(i / forms.length));
+        return `let xs${i} = [${order.map((j) => `p${j}`).join(", ")}]\nlet n${i}: integer = xs${i}[hostValue.i]`;
+      }),
+      "exit",
+    ),
+  );
+};
+
+/**
+ * #1357 (Astra's review r1 B1): k lists of k/16 peers of one class, in one order, rotated, shuffled, three of a distinct
+ * set and two orders of one set in turn, each peer a k/2-long `max` chain (roles in its own text), a choice of k/2 host
+ * reads (its leaves), or a k/2-long `max` chain over the peers' count of aliases of one value in its own rotation
+ * (roles read elsewhere). A class's choice reads each peer's writers once (`Contract.#roleSource`) and decides each
+ * set of peers once, whatever their order. Leaves are not shuffled, because admission walks each order's ingress union
+ * apart. Aliases are not read in distinct triples, because each set of their writers is compared once.
+ */
+export const PEER_ORDER_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "peer-orders-of-own-roles",
+    measures:
+      "#1357: a set of peers with long roles in their own text, decided once whatever their order",
+    program: (k) =>
+      peerOrders(
+        k,
+        ["fixed", "rotated", "shuffled", "triple", "twoOrders"],
+        () => `${"max(".repeat(k >> 1)}hostValue.n${joined(k >> 1, (i) => `, ${i})`)}`,
+      ),
+  },
+  {
+    name: "peer-orders-of-leaves",
+    measures:
+      "#1357: a set of peers with many leaves, their leaves joined once whatever their order",
+    program: (k) =>
+      peerOrders(
+        k,
+        ["fixed", "rotated", "triple", "twoOrders"],
+        () => `askChoice ${joined(k >> 1, (i) => `{text: "${i}", value: hostValue.p${i}}`, ", ")}`,
+      ),
+  },
+  {
+    name: "peer-orders-of-other-writers",
+    measures:
+      "#1357: a set of peers whose long roles read different aliases, decided once whatever their order",
+    program: (k) =>
+      peerOrders(
+        k,
+        ["fixed", "rotated", "shuffled", "twoOrders"],
+        (j, m) =>
+          `${"max(".repeat(k >> 1)}x${j % m}${joined(k >> 1, (r) => `, x${(j + r + 1) % m})`)}`,
+        lines(
+          "let base = 1",
+          rows(k >> 4, (j) => `let x${j} = base`),
+        ),
+      ),
+  },
+];
+
 /**
  * #1196's controls: values over reads of host data in one literal, choice or run of adds, each beside what a coarser
  * class would merge: a parse without a default (open) and a default with a field of host data, every form of input,

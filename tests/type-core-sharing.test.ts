@@ -19,6 +19,7 @@ import {
   REORDERING_SHARING_FAULTS,
   MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
+  PEER_ORDER_FAMILIES,
   READ_CHAIN_PRODUCTS,
   REPAIRED_SHARING_FAULTS,
   VALUE_CLASS_SITES,
@@ -439,7 +440,8 @@ test("the core's sharing of answers is output-neutral for every family, witness 
  * #1196: a read of a host global has a mixed class (`Contract.classOf`), so the values over it share their discovery
  * where their answer holds no external data and read every member where it does, each naming its own leaf (C9). A lost
  * leaf changes nothing the differential above publishes, so here every occurrence's answer, its items whole with their
- * leaves, is the same with the sharing on and off, in both orders, over #1196's controls and #1210's programs.
+ * leaves, is the same with the sharing on and off, in both orders, over #1196's controls, #1210's programs and #1357's
+ * peers in lists of every order.
  */
 test("every occurrence over host data names each ingress's leaf with the sharing on and off, in both orders (#1196)", () => {
   const itemText = ({ ingress, writer, ...rest }: Item): string =>
@@ -463,6 +465,8 @@ test("every occurrence over host data names each ingress's leaf with the sharing
     ...PROJECTED_INGRESS_PROGRAMS.map(({ name, lines }) =>
       one(`#1210 ${name}`, unmarked(lines).source),
     ),
+    // (#1357's peers in lists of every order, three of them)
+    ...PEER_ORDER_FAMILIES.map(({ name, program }) => ({ name, files: program(48) })),
   ]) {
     const request = coreRequest(files, GLOBALS);
     assert.ok(request !== null, `${name}: its files parse and resolve`);

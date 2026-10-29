@@ -23,6 +23,7 @@ import {
   MIXED_ADD_PRODUCTS,
   NARROWING_FAMILIES,
   ORACLE_PROGRAMS,
+  PEER_ORDER_FAMILIES,
   READ_CHAIN_PRODUCTS,
   VALUE_CLASS_SITES,
   VALUE_SHARING_PROGRAMS,
@@ -370,11 +371,12 @@ const named = (k: number, value: (index: number) => string): readonly SourceFile
  * lists ending in a list of another type, the class of each join naming the joins below it in full, also with each
  * prefix the property of an object of its own, each prefix's roles' writers listed though no peer compares them, and
  * three choices of k host reads, two or three of them read together in each of k lists, also beside a literal, each list
- * comparing their writers, walking their leaves and proving them against its answer again (#1357). A read of host data
- * compiles with its runtime check.
+ * comparing their writers, walking their leaves and proving them against its answer again, and k/16 such peers in k
+ * lists of other orders and sets (`PEER_ORDER_FAMILIES`), each order deciding them and joining their leaves again
+ * (#1357). A read of host data compiles with its runtime check.
  */
 const PRODUCTS: readonly (WorkFamily & {
-  readonly counter: WorkCounter;
+  readonly counter: WorkCounter | readonly WorkCounter[];
   /** A script that stops at run time, measured for its work alone, its outcome not pinned. */
   readonly stops?: true;
   readonly outcome?: Answers["outcome"];
@@ -799,6 +801,12 @@ const PRODUCTS: readonly (WorkFamily & {
       ];
     },
   },
+  // (#1357, Astra's review r1 B1: k sites of one set of peers in any order read their writers once, decide them once)
+  ...PEER_ORDER_FAMILIES.map((family) => ({
+    ...family,
+    counter: ["invSteps", "mergeItems"] as const,
+    outcome: "warning-runtime-check" as const,
+  })),
 ];
 
 /**
@@ -825,11 +833,11 @@ test("each product a repair removed grows with the program in either order (#119
       const name = `${family.name}${reversed ? " reversed" : ""}`;
       if (doubling(small!.total, large!.total) > DOUBLING)
         steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
-      const [before, after] = [small!, large!].map(
-        (budget) => budget.counts.get(family.counter) ?? 0,
-      );
-      if (doubling(before!, after!) > COUNTER_DOUBLING)
-        steep.push(`${name} ${family.counter}: ${doubling(before!, after!).toFixed(3)}`);
+      for (const counter of [family.counter].flat()) {
+        const [before, after] = [small!, large!].map((budget) => budget.counts.get(counter) ?? 0);
+        if (doubling(before!, after!) > COUNTER_DOUBLING)
+          steep.push(`${name} ${counter}: ${doubling(before!, after!).toFixed(3)}`);
+      }
     }
   }
   assert.deepEqual(steep, []);
