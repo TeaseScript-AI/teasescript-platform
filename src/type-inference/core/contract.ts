@@ -35,6 +35,8 @@ import {
   valueReceiver,
 } from "./contract/key-contract.js";
 import {
+  demandKey,
+  demandText,
   keyId,
   keyIdBelow,
   keyIdParent,
@@ -485,6 +487,14 @@ export class Contract {
 
   public receiverKindsOf(id: string): Work<readonly Item[]> {
     return receiverKindsOf(this, id);
+  }
+
+  public demandText(key: string): string {
+    return demandText(this, key);
+  }
+
+  public demandKey(text: string): string {
+    return demandKey(this, text);
   }
 
   public keyOfId(id: string): Key {

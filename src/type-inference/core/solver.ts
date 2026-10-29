@@ -225,13 +225,15 @@ export interface DemandWork {
  * The canonical order of two demands: their file, their offset, their kind, then their key, so that distinct demands
  * at one site still have one order.
  */
-function canonical(a: Demand | ProofDemand<Proof>, b: Demand | ProofDemand<Proof>): number {
-  return (
-    a.file - b.file ||
-    a.offset - b.offset ||
-    KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
-    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
-  );
+function canonical(
+  a: Demand | ProofDemand<Proof>,
+  b: Demand | ProofDemand<Proof>,
+  describe: (key: string) => string,
+): number {
+  const order = a.file - b.file || a.offset - b.offset || KIND_RANK[a.kind] - KIND_RANK[b.kind];
+  if (order !== 0) return order;
+  const [x, y] = [describe(a.key), describe(b.key)];
+  return x < y ? -1 : x > y ? 1 : 0;
 }
 
 /** A binary heap of positions, the least first. */
@@ -302,6 +304,11 @@ export class Solver {
   readonly #units: DemandWork[] = [];
   #counter = 0;
   #running = false;
+  /**
+   * A demand's key as its text, the same in every pass and order (G3's path cursors name some demands by a cursor of
+   * their pass's own, `Contract.demandText`): the order of a component's members, and the keys the solver reports.
+   */
+  public describe: (key: string) => string = (key) => key;
   /** The ledger's total past which the running demand stops (`demand`), or `null`. */
   #limit: number | null = null;
   /** The read chain the running frame's generators are inside: the levels of native calls a resumption runs through. */
@@ -420,7 +427,7 @@ export class Solver {
 
   /** The finished demands with the work each cost, in the order they finished. */
   public demandWork(): readonly DemandWork[] {
-    return this.#units;
+    return this.#units.map(({ key, units }) => ({ key: this.describe(key), units }));
   }
 
   #frame(
@@ -582,7 +589,9 @@ export class Solver {
     const { component } = solving;
     const reverse = this.#seam?.reverseWorklist === true;
     solving.members = [...component.members].sort((a, b) =>
-      reverse ? canonical(b.demand, a.demand) : canonical(a.demand, b.demand),
+      reverse
+        ? canonical(b.demand, a.demand, this.describe)
+        : canonical(a.demand, b.demand, this.describe),
     );
     solving.position = new Map(solving.members.map((member, at) => [member, at]));
     component.dependents.clear();
@@ -719,10 +728,14 @@ export class Solver {
     for (const member of solving.members) if (member.proof !== null) proofs += 1;
     keep(this.#work, proofs);
     this.#solving.pop();
-    const solved = solving.members.map((member) => ({
-      key: member.demand.key,
-      items: member.value,
-    }));
+    // (each member reported by its key's text, `describe`)
+    const solved =
+      this.#seam?.onComponent === undefined
+        ? []
+        : solving.members.map((member) => ({
+            key: this.describe(member.demand.key),
+            items: member.value,
+          }));
     for (const member of solving.members) {
       member.component = null;
       member.choice = null;

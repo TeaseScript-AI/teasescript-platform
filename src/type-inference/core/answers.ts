@@ -126,6 +126,8 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (the solver orders and reports demands by their keys' texts, `Contract.demandText`)
+  parts.solver.describe = (key) => contract.demandText(key);
   for (const key of stopped) contract.stop(key.place, key.path);
   return pass;
 }
@@ -432,8 +434,9 @@ export function solveDemands(
   const pass = createPass(program);
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
-    // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
-    const answer = pass.solver.answer(key);
+    // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's text
+    // names its demand by this pass's cursor (`Contract.demandKey`)
+    const answer = pass.solver.answer(pass.contract.demandKey(key));
     if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
     return answer;
   });

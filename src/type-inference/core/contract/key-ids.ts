@@ -67,6 +67,22 @@ export function rootId(place: PlaceId): string {
   return cursors() ? `${place}#0` : keyOf(place, []);
 }
 
+/** A demand's key as its text (`Solver.describe`): a contract demand named by a key's cursor (`keyId`), by its text. */
+export function demandText(contract: Contract, key: string): string {
+  const bar = key.indexOf("|");
+  const kind = key.slice(0, bar);
+  if ((kind !== "c" && kind !== "cp" && kind !== "rc") || !key.includes("#", bar)) return key;
+  return `${kind}|${contract.keyOfId(key.slice(bar + 1))}`;
+}
+
+/** The key this pass names a demand by, from its text (`demandText`'s inverse). */
+export function demandKey(contract: Contract, text: string): string {
+  const bar = text.indexOf("|");
+  const kind = text.slice(0, bar);
+  if (kind !== "c" && kind !== "cp" && kind !== "rc") return text;
+  return `${kind}|${contract.keyId(contract.keyOfId(text.slice(bar + 1)))}`;
+}
+
 /** The key a cursor names (`keyId`); a key's text names itself. */
 export function keyOfId(contract: Contract, id: string): Key {
   const hash = id.indexOf("#");
