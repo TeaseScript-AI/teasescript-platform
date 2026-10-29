@@ -61,7 +61,7 @@ const SPINES = new WeakMap<CoreProgram, Map<PlaceId, Spine | null>>();
  * (`null`, a literal at the path, a read of an inferred place, a projection, a call, an operation, a list's element)
  * proves nothing: `null`.
  */
-export function initialCopy(
+function initialCopy(
   admission: Admission,
   place: PlaceId,
   path: readonly string[],
