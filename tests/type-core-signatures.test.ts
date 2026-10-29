@@ -573,6 +573,21 @@ const SIGNATURE_FAMILIES: readonly {
     program: (k) => `let xs = [1, 2]\n${"for e in xs {}\n".repeat(k)}exit\n`,
   },
   {
+    name: "toJson of one unchanged object k fields wide, at 4 calls",
+    program: (k) =>
+      `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: 4 }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of one unchanged object 8 fields wide, at k calls",
+    program: (k) =>
+      `let root = {${Array.from({ length: 8 }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
+  },
+  {
+    name: "toJson of one unchanged object k fields wide, at k calls",
+    program: (k) =>
+      `let root = {${Array.from({ length: k }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `let j${i} = toJson(root)`).join("\n")}\nexit\n`,
+  },
+  {
     name: "k content checks of written host lists",
     program: (k) =>
       `${Array.from({ length: k }, (_, i) => `let x${i}: object[] = hostValue\nsay x${i}.join()\nsay toJson(x${i})`).join("\n")}\nexit\n`,
@@ -625,6 +640,41 @@ test("each new C13 consumer's work and counters grow with the program in all fou
               `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
             );
       }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * The re-proving control of `toJson`'s one proof per snapshot (the owner's review P1): a field stored before each of k
+ * calls makes each call a new snapshot, proved again, so the calls' own work (the program's less the same stores
+ * without the calls; k stores into one key sort their definitions, n log n, which is the stores' own) grows linearly in
+ * the calls, in all four modes.
+ */
+test("toJson re-proves after each store, and that work grows linearly with the calls", () => {
+  const stored = (k: number, calls: boolean): string =>
+    `let root = {${Array.from({ length: 8 }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `root.f0 = ${i}${calls ? `\nlet j${i} = toJson(root)` : ""}`).join("\n")}\nexit\n`;
+  const steep: string[] = [];
+  for (const reversed of [false, true])
+    for (const unshared of [false, true]) {
+      const total = (source: string): number => {
+        const request = coreRequest([{ path: "main.tease", source }]);
+        assert.ok(request !== null, source);
+        const analyse = () =>
+          reversed
+            ? withConsumerOrder(
+                (list) => [...list].reverse(),
+                () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
+              )
+            : analyseCore(request);
+        const { budget } = unshared ? withoutSharing(analyse) : analyse();
+        assert.equal(budget.exhausted, null, source);
+        return budget.total;
+      };
+      const [small, large] = [64, 128].map((k) => total(stored(k, true)) - total(stored(k, false)));
+      if (large! / small! > 2.15)
+        steep.push(
+          `${reversed ? "reversed " : ""}${unshared ? "unshared " : ""}${(large! / small!).toFixed(3)}`,
+        );
+    }
   assert.deepEqual(steep, []);
 });
 
@@ -1186,4 +1236,43 @@ test("a content check reads the written element type of a value from outside the
   }
   t.diagnostic(`${programs} programs, each in both orders`);
   assert.deepEqual(differing, []);
+});
+
+/**
+ * `toJson` proves one value's content once per snapshot (the owner's review P1): each call has its own diagnostic at
+ * its own argument; a store between calls, a copy, a guard and another value are proved again, so what changed between
+ * them is seen.
+ */
+test("toJson proves an unchanged value once and sees what changed between calls", () => {
+  const sites = (source: string): string[] =>
+    analysed(source)
+      .filter((d) => "rule" in d && d.rule.rule === "json")
+      .map((d) => `${d.class} ${source.slice(0, d.site.start).split("\n").length}`);
+  const regex = "[1].get(hostValue, default: /a/)";
+  // (each call its own warning; the value unchanged between them)
+  assert.deepEqual(
+    sites(`let root = {f0: ${regex}}\nlet a = toJson(root)\nlet b = toJson(root)\nexit\n`),
+    ["warning-runtime-check 2", "warning-runtime-check 3"],
+  );
+  // (a field stored between them, which decides its type: the earlier call owes the check, the later is the error)
+  assert.deepEqual(
+    sites(
+      `let root = {f0: hostValue}\nlet a = toJson(root)\nroot.f0 = 1..2\nlet b = toJson(root)\nexit\n`,
+    ),
+    ["warning-runtime-check 2", "compile-error 4"],
+  );
+  // (a copy changed after it is made, and the original: each its own)
+  assert.deepEqual(
+    sites(
+      `let root = {f0: hostValue}\nlet copy = root\ncopy.f0 = 1..2\nlet a = toJson(root)\nlet b = toJson(copy)\nexit\n`,
+    ),
+    ["compile-error 5"],
+  );
+  // (the whole value replaced between them)
+  assert.deepEqual(
+    sites(
+      `let root = {f0: hostValue}\nlet a = toJson(root)\nroot = {f0: 1..2}\nlet b = toJson(root)\nexit\n`,
+    ),
+    ["warning-runtime-check 2", "compile-error 4"],
+  );
 });
