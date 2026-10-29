@@ -583,35 +583,41 @@ test("a list's '+' mixes element types as a literal does, with the current check
  * beside text or a truth value; both orders, the sharing on and off. Each inline form errs as its kept form does, with
  * the same kinds; inline in an argument the join lands in the parameter's written union, which holds both (A1).
  */
+/**
+ * A source's compile errors, a list join's with its decided and offending kinds, the same in both orders with the
+ * sharing on and off.
+ */
+function joinAnswers(source: string): string[] {
+  const request = coreRequest(main(source));
+  assert.ok(request !== null, source);
+  const runs: string[][] = [];
+  for (const shared of [true, false])
+    for (const reversed of [false, true]) {
+      const go = () => analyseCore(request);
+      const ordered = reversed
+        ? () =>
+            withConsumerOrder(
+              (list) => [...list].reverse(),
+              () => withSolverSeam({ reverseWorklist: true }, go),
+            )
+        : go;
+      const answers = shared ? ordered() : withoutSharing(ordered);
+      runs.push(
+        [...reportedDiagnostics(answers)]
+          .filter((diagnostic) => diagnostic.class === "compile-error")
+          .map((diagnostic) =>
+            "rule" in diagnostic && diagnostic.rule.rule === "mixed"
+              ? `${diagnostic.code} ${JSON.stringify([diagnostic.rule.type, diagnostic.kinds])}`
+              : diagnostic.code,
+          ),
+      );
+    }
+  for (const run of runs) assert.deepEqual(run, runs[0], source);
+  return runs[0]!;
+}
+
 test("a list join answers the same inline as kept in a variable (#1272)", () => {
-  const answers = (source: string): string[] => {
-    const request = coreRequest(main(source));
-    assert.ok(request !== null, source);
-    const runs: string[][] = [];
-    for (const shared of [true, false])
-      for (const reversed of [false, true]) {
-        const go = () => analyseCore(request);
-        const ordered = reversed
-          ? () =>
-              withConsumerOrder(
-                (list) => [...list].reverse(),
-                () => withSolverSeam({ reverseWorklist: true }, go),
-              )
-          : go;
-        const answers = shared ? ordered() : withoutSharing(ordered);
-        runs.push(
-          [...reportedDiagnostics(answers)]
-            .filter((diagnostic) => diagnostic.class === "compile-error")
-            .map((diagnostic) =>
-              "rule" in diagnostic && diagnostic.rule.rule === "mixed"
-                ? `${diagnostic.code} ${JSON.stringify([diagnostic.rule.type, diagnostic.kinds])}`
-                : diagnostic.code,
-            ),
-        );
-      }
-    for (const run of runs) assert.deepEqual(run, runs[0], source);
-    return runs[0]!;
-  };
+  const answers = joinAnswers;
   const joins = { left: "typed + [1]", right: "[1] + typed", both: "typed + other" };
   const contexts = [
     (join: string, beside: string) => `let result = ${beside} + ${join}\nsay result.length`,
@@ -648,6 +654,105 @@ test("a list join answers the same inline as kept in a variable (#1272)", () => 
               name,
             );
         }
+});
+
+/**
+ * #1272 (Astra r2's B1 on #1310, ADR 0021 1.3, V30 §13 and §16, `joinedDomain`): an operand's element domain decides a
+ * join as it decides a variable holding the join. An open one (`list`, `list[]` with or without an element yet) leaves
+ * the join open there and below, whichever operand came first, so nothing beside it errs; one that holds only `null`
+ * (`null[]`, `null[][]`) decides nothing, so a join errs only where its other operands conflict among themselves; a
+ * strict written destination stays strict. Each domain (beside a concrete, a nullable written, a written union and a
+ * two-level one) as either operand of a join, alone or nested in either operand of another, beside whole numbers, text
+ * or `null`; a binding, a copy, a call with a written result, and a call returning it inferred (inline only, #1393);
+ * inline as kept, both orders, the sharing on and off.
+ */
+test("an open or null-only operand proves no conflict in a list join, inline as kept (#1272)", () => {
+  const domains = [
+    ["concrete", 1, "let d = [1]"],
+    ["nullable", 1, "let d: integer?[] = [1]"],
+    ["union", 1, "let d: (integer | string)[] = [1]"],
+    ["open", 1, "let d: list = [1]"],
+    ["null", 1, "let d: null[] = [null]"],
+    ["two-concrete", 2, "let d = [[1]]"],
+    ["two-open", 2, "let d: list[] = [[1]]"],
+    ["two-open-empty", 2, "let d: list[] = []"],
+    ["two-null", 2, "let d: null[][] = [[null]]"],
+  ] as const;
+  const neighbours = { I: "2", S: '"tail"', N: "null" } as const;
+  const positions = [
+    ["left", "X", (j: string) => j],
+    ["right", "X", (j: string) => j],
+    ["left of left", "XY", (j: string) => `${j} + Y`],
+    ["right of left", "XY", (j: string) => `${j} + Y`],
+    ["left of right", "XY", (j: string) => `Y + ${j}`],
+    ["right of right", "XY", (j: string) => `Y + ${j}`],
+  ] as const;
+  let checked = 0;
+  for (const [domain, depth, declaration] of domains) {
+    const wrap = (element: string) => "[".repeat(depth) + element + "]".repeat(depth);
+    const forms: (readonly [string, string, string])[] = [["binding", "", "d"]];
+    if (domain === "open" || domain === "null")
+      forms.push(
+        ["copy", "let c = d\n", "c"],
+        [
+          "written call",
+          `function make: ${domain === "open" ? "list" : "null[]"} {\n  return d\n}\n`,
+          "make()",
+        ],
+      );
+    if (domain === "open" || domain === "union")
+      forms.push(["inferred call", "function make {\n  return d\n}\n", "make()"]);
+    for (const [form, extra, d] of forms)
+      for (const [position, uses, outer] of positions)
+        for (const [x, y] of uses === "X"
+          ? (["I", "S", "N"] as const).map((x) => [x, "I"] as const)
+          : ([
+              ["I", "S"],
+              ["N", "S"],
+              ["S", "I"],
+            ] as const)) {
+          // (the other forms, and the controls beside them, at one neighbour each: whole numbers, text beside them)
+          const subject = domain.includes("open") || domain === "null" || domain === "two-null";
+          if (form !== "binding" && !(position === "left" || position === "right of left"))
+            continue;
+          if (!subject && x !== (uses === "X" ? "S" : "I")) continue;
+          const [X, Y] = [wrap(neighbours[x]), wrap(neighbours[y])];
+          const inner = position.startsWith("left") ? `${d} + ${X}` : `${X} + ${d}`;
+          const result = (join: string) => outer(join).replace("Y", Y);
+          const start = `${declaration}\n${extra}`;
+          const nested = uses === "XY";
+          const name = `${domain} ${form} ${position}: ${result(`(${inner})`)}`;
+          const inline = joinAnswers(
+            `${start}let result = ${nested ? result(`(${inner})`) : inner}\nsay result.length\nexit\n`,
+          );
+          checked += 1;
+          // (inline as kept; a variable holding an inferred call's result loses its written type: #1393)
+          if (nested && form !== "inferred call")
+            assert.deepEqual(
+              inline.toSorted(),
+              joinAnswers(
+                `${start}let held = ${inner}\nlet result = ${result("held")}\nsay result.length\nexit\n`,
+              ).toSorted(),
+              name,
+            );
+          // (open: nothing errs; only `null`: an error only where whole numbers meet text beside it)
+          if (domain.includes("open")) assert.deepEqual(inline, [], name);
+          if (domain === "null" || domain === "two-null")
+            assert.equal(
+              inline.some((answer) => answer.startsWith("TSV044")),
+              nested && new Set([x, y].filter((kind) => kind !== "N")).size === 2,
+              name,
+            );
+        }
+  }
+  assert.ok(checked > 120, `${checked} joins`);
+  // a strict written destination stays strict: a `+=` or a store back into a written `null[]` errs
+  for (const store of ["d += [1]", "d = d + [1]"])
+    assert.deepEqual(
+      joinAnswers(`let d: null[] = [null]\n${store}\nsay d.length\nexit\n`),
+      [`TSV044 ${JSON.stringify([["null"], ["integer"]])}`],
+      store,
+    );
 });
 
 /**

@@ -10,6 +10,7 @@ import {
   keptSteps,
   keptText,
   pathText,
+  stepText,
 } from "../budget.js";
 import { defaultOf, typeTags, type IndexNode } from "../contract.js";
 import {
@@ -38,7 +39,7 @@ import { admitsNumber, concrete, deciding, fits, NUMERIC } from "./kinds.js";
 import { inheritance, landedBelow } from "./landings.js";
 import type { Join, JoinDecided, OwnStructure } from "./model.js";
 import { ownOf } from "./own.js";
-import { permittedAt, unrestricted } from "./permitted.js";
+import { joinedDomain, permittedAt, unrestricted } from "./permitted.js";
 import { earliestDecider } from "./scan.js";
 import { literalLanding, pathsBelow, sharedPaths, valueStructure } from "./structure.js";
 import { touchCopy, touchesOf, touchOf, touchRead } from "./touches.js";
@@ -573,7 +574,8 @@ function conflictGroups(admission: Admission, list: readonly Definition[]): stri
  * the same inline as kept in a variable: an operand's own (`decidedAt`: a written copy by its type, a read or a call by
  * its place's decision, else its elements' kinds as a literal's earliest element decides them, `earliestDecider`); a
  * join's from its operands' in evaluation order, the earliest deciding there decides, a written type by itself, else
- * with the kinds of every operand the join holds. A right operand whose elements there are of one other family, none
+ * with the kinds of every operand the join holds; each operand's domain by `joinedDomain` (an open one leaves the join
+ * open, one holding only `null` decides nothing but at a strict written destination). A right operand whose elements there are of one other family, none
  * of whose kinds fits, is an error at its join, unless the written type the tree lands in directly holds both (A1), and
  * is rejected from that join (A6): the join then holds its left operand's elements alone. A right operand is compared
  * at the paths of its own structure, a join's at its list levels as a variable holding it is (`pathsBelow`); a join's
@@ -674,8 +676,26 @@ export function joinElements(
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
       return key === null ? null : { place: keyPlace(key), path: keyPath(key) };
     };
-    // what an operand's elements are at a path: a written copy's type (`open` where it leaves every kind), a read's
-    // place's decision, the earliest deciding value's kinds, else its own kinds of one family and no unknown
+    // (the left operand that reads the place the tree is stored into, a `+=`'s or `xs = xs + …`'s: a strict written
+    // destination, whose type holds only what it holds)
+    const destination = (operand: PlaceId): boolean => {
+      if (operand !== root.arguments[0]) return false;
+      if (stored(operand)) return true;
+      const read = placeOf(operand);
+      return (
+        read !== null &&
+        (definitions.byValue.get(root.result) ?? []).some(
+          (d) =>
+            d.kind === "whole" &&
+            d.place === read.place &&
+            pathText(d.path) === pathText(read.path),
+        )
+      );
+    };
+    // what an operand's elements are at a path, by `joinedDomain`: a written copy's type, a read's place's decision,
+    // the earliest deciding value's kinds, else its own kinds of one family and no unknown (a type holding only `null`
+    // decides nothing, its `null` `nullAt`'s, never an empty domain no kind fits, but at a strict written destination:
+    // Astra r2's B1b on #1310)
     const decidedAt = (
       operand: PlaceId,
       node: FlowNode,
@@ -684,7 +704,9 @@ export function joinElements(
       const at = joinSteps(["element"], path);
       const decider = drive(admission, earliestDecider(admission, operand, node, at, null));
       if (decider !== null && decider.term !== null) {
-        if (unrestricted(decider.term)) return "open";
+        const domain = joinedDomain(typeTags(decider.term));
+        if (domain === "open") return "open";
+        if (domain === "null" && !destination(operand)) return null;
         const tags = typeTags(decider.term).filter((tag) => tag !== "null");
         return {
           tags,
@@ -697,12 +719,15 @@ export function joinElements(
       const read = placeOf(operand);
       const place = read === null ? null : decided(admission, read.place, joinSteps(read.path, at));
       if (place?.tags !== null && place?.tags !== undefined) {
-        if (place.tags.includes("unknown")) return "open";
+        const domain = joinedDomain(place.tags);
+        if (domain === "open") return "open";
+        if (domain === "null" && !(place.byWritten && destination(operand))) return null;
+        const tags = place.tags.filter((tag) => tag !== "null");
         return {
-          tags: place.tags,
+          tags,
           written: place.byWritten,
           typed: place.byWritten,
-          own: place.tags,
+          own: tags,
           nullable: place.byWritten && place.nullable,
         };
       }
@@ -792,7 +817,9 @@ export function joinElements(
     // each value's element type per path, as a variable holding it is decided (`scanAt`): an operand's own at the paths
     // of its structure, a join's its operands' in evaluation order (its paths the earliest decider of each, the kinds of
     // every operand it holds there), the earliest operand deciding the element asked at any other path (its type may
-    // give it); read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310)
+    // give it); read once per operand, never by reading a join's tree again (Astra's B1, Codex r7's B1 and B3 on #1310).
+    // An operand open at a path (`list`, V30 §13: any list) leaves the join open there and below, whichever operand
+    // came first: no conflict is proved from it (Astra r2's B1a on #1310)
     interface Decider {
       readonly decided: JoinDecided | "open";
       readonly operand: PlaceId;
@@ -806,6 +833,8 @@ export function joinElements(
     }
     interface Held {
       readonly entries: Map<string, Entry>;
+      /** The paths an operand leaves open, each with that operand: open there and below. */
+      readonly opens: Map<string, PlaceId>;
       /** Its list levels: where a variable holding it is compared (`pathsBelow`). */
       readonly levels: Set<string>;
       head: {
@@ -820,7 +849,7 @@ export function joinElements(
     const leaf = (operand: PlaceId): Held | null => {
       const { node, position } = positions.get(operand)!;
       if (!isList(operand, node)) return null;
-      const held: Held = { entries: new Map(), levels: new Set(), head: null };
+      const held: Held = { entries: new Map(), opens: new Map(), levels: new Set(), head: null };
       const paths: (readonly string[])[] = [[]];
       for (const path of pathsBelow(admission, operand, []))
         if (path.length > 1 && path[0] === "element")
@@ -835,8 +864,22 @@ export function joinElements(
           kinds: new Set(ruled === null || ruled === "open" ? [] : ruled.own),
           nulls: nullAt(operand, node, path),
         });
+        if (ruled === "open") held.opens.set(at, operand);
         if (path.every((step) => step === "element")) held.levels.add(at);
         if (path.length === 0 && ruled !== null) held.head = { operand, node, position };
+      }
+      // (a type open at a list level below its value's levels, `list[]` holding no element yet, leaves the join open
+      // there too: each further level asked once while the one above holds lists)
+      let level: readonly string[] = [];
+      let above = held.entries.get("")?.first?.decided ?? null;
+      while (above !== null && above !== "open" && above.tags.includes("list")) {
+        program.work.charge("checks");
+        level = keptSteps(admission.work, level, ["element"]);
+        const at = keptText(admission.work, level);
+        const entry = held.entries.get(at);
+        above =
+          entry !== undefined ? (entry.first?.decided ?? null) : decidedAt(operand, node, level);
+        if (entry === undefined && above === "open") held.opens.set(at, operand);
       }
       return held;
     };
@@ -854,6 +897,15 @@ export function joinElements(
       readonly decider: PlaceId;
       readonly nulls: boolean;
     } | null => {
+      // (open at the path or above it: each prefix's text one step longer than the last)
+      if (held.opens.size > 0)
+        for (let depth = 0, text = ""; depth <= path.length; depth += 1) {
+          program.work.charge("checks");
+          if (depth > 0) text = depth === 1 ? path[0]! : stepText(text, path[depth - 1]!);
+          keepText(admission.work, text.length);
+          const opener = held.opens.get(text);
+          if (opener !== undefined) return { decided: "open", decider: opener, nulls: false };
+        }
       const entry = held.entries.get(at);
       let first = entry?.first ?? null;
       let kinds: ReadonlySet<ItemTag> = entry?.kinds ?? new Set();
@@ -909,6 +961,7 @@ export function joinElements(
         for (const kind of entry.kinds) known.kinds.add(kind);
         known.nulls ||= entry.nulls;
       }
+      for (const [at, opener] of from.opens) into.opens.set(at, opener);
       for (const at of from.levels) into.levels.add(at);
       if (from.head !== null && (into.head === null || from.head.position < into.head.position))
         into.head = from.head;

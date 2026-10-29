@@ -21,7 +21,7 @@ import type {
   Via,
   ViaChain,
 } from "./model.js";
-import { permittedAt } from "./permitted.js";
+import { joinedDomain, permittedAt } from "./permitted.js";
 import { transferredDecider } from "./transfers.js";
 import { inheritedInto } from "./waiting.js";
 import { compareKeys, expand, stopsOf, viaSignature } from "./walk.js";
@@ -227,9 +227,13 @@ export function* earliestDecider(
           ? permittedAt(stop.term!, rest)
           : yield* inheritedInto(admission, stop.from, rest, into);
       // (a written copy an operation carries decides only where the operation selects it: an operand it never gives
-      // is no copy of the place, while a selected copy keeps its whole written type, A4)
-      if (term !== null && (stop.via === null || selects(admission, stop)))
-        copy = { key: stop.key, term, stop };
+      // is no copy of the place, while a selected copy keeps its whole written type, A4; in a list join by
+      // `joinedDomain`: open whichever operand came first, nothing where it holds only `null`)
+      if (term !== null && (stop.via === null || selects(admission, stop))) {
+        const domain = stop.via?.joined === true ? joinedDomain(typeTags(term)) : "kinds";
+        if (domain === "open") return { term, site: siteOf(stop) };
+        if (domain === "kinds") copy = { key: stop.key, term, stop };
+      }
     }
   }
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end

@@ -100,6 +100,7 @@ function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaC
     combining:
       (COMBINING_ROLES.has(level.role) && program.hasOf.has(level.operand)) ||
       outer?.combining === true,
+    joined: level.role === "concatenation/operand" || outer?.joined === true,
   };
 }
 

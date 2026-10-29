@@ -336,6 +336,8 @@ export interface ViaChain {
   readonly typed: boolean;
   /** Whether some operation of the chain combines or removes a literal operand (`COMBINING_ROLES`). */
   readonly combining: boolean;
+  /** Whether some operation of the chain is a list join, its operand's elements the joined list's (`joinedDomain`). */
+  readonly joined: boolean;
 }
 
 /** A stored value's contributions by path (`stopsOf`): written copies, other whole values, and literals. */
