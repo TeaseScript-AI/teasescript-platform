@@ -23,6 +23,7 @@ import {
   writtenOf,
   type ContractFacts,
   type GatherSite,
+  type StoppedKey,
 } from "./contract.js";
 import {
   DefinitionIndex,
@@ -84,10 +85,14 @@ export interface CorePass {
   readonly solver: Solver;
 }
 
-/** One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6). */
+/**
+ * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
+ * `stopped` stopped from its start (TABLE r4.180).
+ */
 function createPass(
   program: CoreProgram,
   rejected: ReadonlyMap<number, unknown> = new Map(),
+  stopped: readonly StoppedKey[] = [],
 ): CorePass {
   const definitions = new DefinitionIndex(program);
   const parts: {
@@ -121,6 +126,7 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  for (const key of stopped) contract.stop(key.place, key.path);
   return pass;
 }
 
@@ -300,20 +306,27 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   const program = new CoreProgram(request);
   let analysed: { readonly pass: CorePass; readonly consumers: Consumers } | null = null;
   let rejected: ReadonlyMap<number, ReadonlySet<Key>> = new Map();
+  let stops: readonly StoppedKey[] = [];
   if (stopped !== undefined) program.work.stop(stopped);
   else
     try {
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
-      // whose changing stores stay possibilities
+      // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
+      // the next, from the same rejected set, starts with every stopped key stopped
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
       for (let last = false; ;) {
-        const pass = createPass(program, rejected);
+        const pass = createPass(program, rejected, stops);
         const consumers = new Consumers(pass, rejected, cycling, last);
         analysed = { pass, consumers };
         consumers.check();
         if (consumers.stopped !== null) break;
+        if (pass.contract.stoppedCount > stops.length) {
+          program.work.charge("stopPasses");
+          stops = pass.contract.stoppedKeys();
+          continue;
+        }
         const now = consumers.admission.newlyRejected;
         if (last || sameSet(now, rejected)) break;
         program.work.charge("rejectPasses");
@@ -380,7 +393,7 @@ function finished(
   const { pass, consumers } =
     standing ??
     (() => {
-      const pass = createPass(program, rejected);
+      const pass = createPass(program, rejected, analysed?.pass.contract.stoppedKeys());
       return { pass, consumers: new Consumers(pass, rejected, new Set(), true, true) };
     })();
   const phase = analysed?.consumers.stopPhase() ?? "setup";

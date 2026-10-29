@@ -773,6 +773,12 @@ export interface ContractFacts {
   decidedPaths: number;
 }
 
+/** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
+export interface StoppedKey {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+}
+
 export class Contract {
   readonly facts: ContractFacts = {
     prefixEntries: 0,
@@ -906,19 +912,32 @@ export class Contract {
 
   /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
   readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
+  #stoppedCount = 0;
 
   public constructor(readonly pass: CorePass) {}
 
   /**
    * TABLE B1, S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
-   * the reason `budget` for every read from then on, and every key's below it: `contractOf` and every value read of such
-   * a key (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it;
-   * what finished before the stop keeps its result, as a stopped demand's finished work does.
+   * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
+   * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
+   * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
+   * so no result read the key before its stop, in any order.
    */
   public stop(place: PlaceId, path: readonly string[]): void {
     const paths = this.#stopped.get(place);
     if (paths === undefined) this.#stopped.set(place, [path]);
     else paths.push(path);
+    this.#stoppedCount += 1;
+  }
+
+  /** The keys whose decision stopped (`stop`), the set the next pass starts with. */
+  public stoppedKeys(): readonly StoppedKey[] {
+    return [...this.#stopped].flatMap(([place, paths]) => paths.map((path) => ({ place, path })));
+  }
+
+  /** How many decisions stopped (`stop`). */
+  public get stoppedCount(): number {
+    return this.#stoppedCount;
   }
 
   /** Whether any decision stopped (`stop`). */

@@ -80,10 +80,12 @@ export type WorkCounter =
   | "mergeItems"
   | "sigItems"
   | "operatorSteps"
-  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6)
+  // the checks of consumers and admission, evaluated and skipped by the quiet path; admission's passes after the first (A6),
+  // and those after a pass in which a decision stopped (TABLE r4.180)
   | "checks"
   | "checksSkipped"
   | "rejectPasses"
+  | "stopPasses"
   // admission's copies (S6-CARRIERS §4): alias keys, signatures and groups; the eligibility index; the quiet proofs of a
   // class; the member visits a proof that is not quiet makes; the structure levels
   | "aliasSteps"

@@ -574,6 +574,8 @@ export class Consumers {
   readonly decisions: DecisionWork[] = [];
   /** The ledger's total past which the running admission decision stops (`#decide`), or `null`. */
   #deciding: number | null = null;
+  /** Whether a decision stopped in this pass (`#decide`): it is not settled (TABLE r4.180). */
+  #decisionStopped = false;
   #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
   readonly #order: <T>(list: readonly T[]) => T[];
@@ -1188,12 +1190,18 @@ export class Consumers {
    * decision's stores come from every call site, so its callable's nodes do not bound its work): past it the decision
    * stops between two solver steps, what it made of its key is taken back (`Admission.stopDecision`), and every read
    * of the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external
-   * data (C9). The solver keeps what the decision finished and forgets the rest, as for a read.
+   * data (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
+   * (TABLE r4.180).
    */
   #decide(root: PlaceId, path: readonly string[]): Decision | null {
     const ledger = this.pass.program.work;
     const before = ledger.own;
     const allowance = demandAllowanceFor(this.pass.program.flow.nodes.length);
+    // (a key whose decision stopped, in this pass or before it, or a key below one: undecided, no decision runs)
+    if (this.admission.decisionStopped(root, path)) {
+      this.decisions.push({ place: root, path, units: 0, allowance, stopped: true });
+      return null;
+    }
     // (its work is the decision's, not a consumer read's)
     this.#reading = null;
     this.#deciding = before + allowance;
@@ -1203,6 +1211,7 @@ export class Consumers {
     } catch (error) {
       if (!(error instanceof DemandExhausted)) throw error;
       stopped = true;
+      this.#decisionStopped = true;
       this.admission.stopDecision(root, path);
       return null;
     } finally {
@@ -1259,7 +1268,10 @@ export class Consumers {
       for (const { site, label } of this.admission.ingressStores()) this.#ingressMark(site, label);
       this.#rule = 3;
       this.admission.literalElements(this.#order, (site, found) => this.#mixed(site, found));
-      this.settled = this.#last || sameStores(this.admission.newlyRejected, this.#rejected);
+      // (a pass in which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
+      this.settled =
+        (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&
+        !this.#decisionStopped;
       // (admission's findings are the walk's before its first unit)
       this.#mark = {
         diagnostics: this.diagnostics.length,

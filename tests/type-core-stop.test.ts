@@ -1971,13 +1971,10 @@ test("an admission decision past its allowance stops: its key undecided, its rea
           .filter((d) => d.site.start === start)
           .map((d) => `${d.class} ${"provenance" in d ? d.provenance.context : "-"}`);
       const read = text.indexOf(count ? "b\nlet count" : "b\nsay");
-      // (its check owed either way: `budget` where the decision had stopped before the read, else the host value's
-      // own `unknown`, as where `n`'s check reads `b` before `b` is decided in the reversed order)
-      assert.deepEqual(
-        at(read),
-        [`warning-runtime-check ${reversed ? "unknown" : "budget"}`],
-        where,
-      );
+      // (`budget` in either order: the pass in which `b`'s decision stopped is not settled, and the next starts with `b`
+      // stopped, so `n`'s check, which reads `b` before `b` is decided in the reversed order, reads it stopped, TABLE
+      // r4.180)
+      assert.deepEqual(at(read), ["warning-runtime-check budget"], where);
       if (count) assert.deepEqual(at(text.indexOf("count {}")), ["compile-error -"], where);
       else {
         // the read's moved check stops a fraction before the next effect
@@ -2077,4 +2074,155 @@ test("a stopped decision stays undecided at every reader, also after a settled p
         );
     }
   }
+});
+
+/**
+ * TABLE r4.180: a pass in which a decision stops is not settled; the next, from the same rejections, starts with that
+ * key stopped (`Contract.stop`), so no result read the key before its stop, in any order. `pair`'s stored literal holds
+ * a read of `tally`; in the reversed order `pair` is decided before `tally`, and without the next pass `pair.first`
+ * kept the host value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass per pass in
+ * which a decision first stops, none without one: in the reversed order `box`'s root, which reads the values `box.n`'s
+ * stopped decision had finished, stops only once `box.n` is stopped from its pass's start, so two. A program stop in
+ * the pass where the decision first stopped is not settled: finishing marks the stores (r4.135), and the stop oracle
+ * holds, no boundary among it.
+ */
+test("a pass in which a decision stops is not settled: the next starts with its key stopped (TABLE r4.180)", () => {
+  const reversed = <T>(make: () => T): T =>
+    withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), make),
+    );
+  const modes: readonly (readonly [string, <T>(make: () => T) => T])[] = [
+    ["forward", (make) => make()],
+    ["reversed", reversed],
+    ["forward, unshared", (make) => withoutSharing(make)],
+    ["reversed, unshared", (make) => withoutSharing(() => reversed(make))],
+  ];
+  const globals = ["hostValue", "hostOther"];
+  const place = (source: string, name: string) => {
+    const request = coreRequest([{ path: "main.tease", source }], globals);
+    assert.ok(request !== null);
+    return {
+      request,
+      id: new CoreProgram(request).places.find(
+        ({ kind }) => kind.kind === "binding" && kind.name === name,
+      )!.id,
+    };
+  };
+  const passes = (answers: Answers): number => answers.budget.counts.get("stopPasses") ?? 0;
+  const items = (list: readonly { tag: string; reasons: number }[]) =>
+    list.map((item) => `${item.tag}/${item.reasons}`);
+  const dependent =
+    [
+      "let tally = 1",
+      ...Array.from({ length: 60 }, (_, i) => `tally = ${i + 2}`),
+      "tally = hostValue",
+      "let pair = [tally]",
+      "let count = 1",
+      "count = 0.5",
+      "repeat count {}",
+      "repeat pair.first {}",
+      "repeat tally {}",
+      'say "DONE"',
+      "exit",
+    ].join("\n") + "\n";
+  const tally = place(dependent, "tally");
+  for (const [mode, inMode] of modes) {
+    const unbounded = inMode(() => analyseCore(tally.request));
+    assert.equal(passes(unbounded), 0, mode);
+    const own = unbounded.budget.decisions.find(
+      (d) => d.place === tally.id && d.path.length === 0,
+    )!;
+    const capped = <T>(make: () => T): T =>
+      withTestDemandAllowance(Math.floor(own.units / 2), () => inMode(make));
+    const answers = capped(() => analyseCore(tally.request));
+    assert.ok(passes(answers) >= 1, mode);
+    const node = (text: string, kind: string) =>
+      answers.graph.nodes.find(
+        (each) =>
+          each.expression?.kind === kind && each.span?.start.offset === dependent.indexOf(text),
+      )!;
+    assert.deepEqual(
+      items(answers.at(node("pair.first", "propertyAccessExpression"))!.items),
+      ["unknown/16"],
+      mode,
+    );
+    assert.deepEqual(
+      items(answers.at(node("tally {}", "identifier"))!.items),
+      ["unknown/16"],
+      mode,
+    );
+    assert.deepEqual(
+      answers.diagnostics
+        .filter((d) => d.site.start === dependent.indexOf("count {}"))
+        .map((d) => d.class),
+      ["compile-error"],
+      mode,
+    );
+  }
+  // one decision stopping: one extra pass in either order; a program stop at the last unit of the pass where it stopped
+  const single =
+    [
+      "let tally = 1",
+      ...Array.from({ length: 12 }, (_, i) => `tally = ${i + 2}`),
+      "tally = hostValue",
+      "let picked: integer = tally",
+      "repeat tally {}",
+      'say "DONE"',
+      "exit",
+    ].join("\n") + "\n";
+  const scalar = place(single, "tally");
+  for (const [mode, inMode] of modes.slice(0, 2)) {
+    const own = inMode(() => analyseCore(scalar.request)).budget.decisions.find(
+      (d) => d.place === scalar.id && d.path.length === 0,
+    )!;
+    const capped = <T>(make: () => T): T =>
+      withTestDemandAllowance(Math.floor(own.units / 2), () => inMode(make));
+    const unstopped = capped(() => stopRun(single));
+    assert.equal(passes(unstopped.answers), 1, mode);
+    // (the lowest program allowance whose stop comes after the first pass: one below it, the first pass's last unit)
+    let [low, high] = [1, unstopped.answers.budget.total];
+    while (high - low > 1) {
+      const middle = (low + high) >> 1;
+      if (passes(capped(() => withTestAllowance(middle, () => analyseCore(scalar.request)))) >= 1)
+        high = middle;
+      else low = middle;
+    }
+    const stopped = capped(() => stopRun(single, low));
+    const { budget } = stopped.answers;
+    assert.equal(budget.exhausted, "work", mode);
+    assert.equal(budget.settled, false, mode);
+    assert.ok(
+      budget.deferred.some((mark) => mark.rule.rule === "store"),
+      mode,
+    );
+    assert.deepEqual(
+      capped(() =>
+        stopProblems({ unstopped, stopped, fitting: [host(2)], violating: [host(2.5)] }),
+      ),
+      [],
+      mode,
+    );
+  }
+  // a decision stopping only in the second pass: one more
+  const property =
+    [
+      "let box = {n: 1}",
+      ...Array.from({ length: 12 }, (_, i) => `box.n = ${i + 2} + ${i + 3}`),
+      "box = {n: 4}",
+      "repeat box.n {}",
+      'say "DONE"',
+      "exit",
+    ].join("\n") + "\n";
+  const box = place(property, "box");
+  const root = reversed(() => analyseCore(box.request)).budget.decisions.find(
+    (d) => d.place === box.id && d.path.length === 0,
+  )!;
+  const twice = withTestDemandAllowance(root.units + 3, () =>
+    reversed(() => analyseCore(box.request)),
+  );
+  assert.equal(passes(twice), 2);
+  assert.deepEqual(
+    twice.budget.decisions.filter((d) => d.place === box.id && d.stopped).map((d) => d.path),
+    [["n"], []],
+  );
 });
