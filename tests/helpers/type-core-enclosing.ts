@@ -449,7 +449,7 @@ const LEAVES: Readonly<Record<string, readonly SerializableRuntimeValue[]>> = {
   string: ["ok", 1],
   boolean: [true, "bad"],
   object: [object({ n: 1 }), "bad"],
-  list: [wrap("list", "x", 1), "bad"],
+  list: [wrap("list", "x"), "bad"],
 };
 
 /** #1440's written forms: each leaf bare and in a list, integers two and four deep, a nullable element and list. */
@@ -870,6 +870,34 @@ function termText(term: TypeTerm): string {
 }
 
 /**
+ * A type's text as `checkedText` and `termText` print it, compared as a type: each union's members in one order, and a
+ * written `object` as the plan prints it (`{}`) named `object`.
+ */
+function typeText(text: string): string {
+  const members: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let at = 0; at <= text.length; at += 1) {
+    const char = text[at];
+    if (char === "<") depth += 1;
+    else if (char === ">") depth -= 1;
+    else if ((char === "|" && depth === 0) || at === text.length) {
+      const member = text.slice(start, at);
+      const open = member.indexOf("<");
+      members.push(
+        open < 0
+          ? member === "{}"
+            ? "object"
+            : member
+          : `${member.slice(0, open)}<${typeText(member.slice(open + 1, -1))}>`,
+      );
+      start = at + 1;
+    }
+  }
+  return members.sort().join("|");
+}
+
+/**
  * The budget-context records at a site, shown or deferred, whose obligation is the destination's (`target`): the stop's
  * owned marks of the store there, not a decision's own warning at another level of its value.
  */
@@ -984,7 +1012,7 @@ export function enclosingProblems(
       const marks = marksAt(answers, c.site, target);
       if (!owned(marks)) problems.push(`${marks} owned marks at the store ${relation} the stop`);
       const required = answers.requirement(place, c.into.path);
-      if (required === null || termText(required) !== checkedText(c.form!))
+      if (required === null || typeText(termText(required)) !== typeText(checkedText(c.form!)))
         problems.push(`requirement ${required === null ? "none" : termText(required)}`);
     }
     problems.push(
@@ -1037,7 +1065,8 @@ export function enclosingProblems(
   if (plan !== null && judged === "domain" && c.form !== null) {
     const site = `${c.site.start}:${c.site.end}`;
     const planned = plannedStores(plan).find((store) => store.includes(` ${site} `));
-    if (planned !== undefined && !planned.endsWith(` ${checkedText(c.form)}`))
+    const type = planned?.slice(planned.lastIndexOf(" ") + 1);
+    if (type !== undefined && typeText(type) !== typeText(checkedText(c.form)))
       problems.push(`planned ${planned}, not ${checkedText(c.form)}`);
     if (planned === undefined && c.values.some((each) => !each.fits))
       problems.push(`no planned check at ${site}`);
@@ -1049,7 +1078,7 @@ export function enclosingProblems(
   }
   if (relation === "at" && judged === "domain") {
     const required = answers.requirement(place, c.into.path);
-    if (required === null || termText(required) !== checkedText(c.form!))
+    if (required === null || typeText(termText(required)) !== typeText(checkedText(c.form!)))
       problems.push(`requirement ${required === null ? "none" : termText(required)}`);
   }
   if (unsettledInferred && relation !== "at" && marksAt(answers, c.site, target) < 1)
