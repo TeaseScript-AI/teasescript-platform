@@ -397,6 +397,8 @@ export class Parser {
     Expression,
     { readonly diagnostic: Diagnostic; readonly calendar: string; readonly spaced: boolean }
   >();
+  /** The code that the error of a number with a word taken for a unit offers where its place proves it (`adviseDuration`). */
+  public readonly mistakenUnitFixes = new WeakMap<Expression, () => void>();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   public readonly shared: SharedParse;
 
@@ -638,7 +640,7 @@ export class Parser {
     const value = yield* parseChild(speculative.parseOr());
     if (value === null) return false;
     // A unit after the word itself, as in `say bubble() s` or `say skippable ms`, is the earlier modifier followed by
-    // text whose name is a unit word, also `calendar` or an angle unit.
+    // text whose name is a unit word, also `calendar`, an angle unit, or a word taken for a unit, as `hr`.
     if (unitAfterWord(value, this.peek(), speculative.unitlessCalendars)) return false;
 
     if (speculative.match(TokenKind.Comma)) {

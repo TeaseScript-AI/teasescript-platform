@@ -651,17 +651,30 @@ export const DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[nu
  * Words taken for a unit of time that are none, each with the exact unit meant: `m`, which could mean minutes or months
  * (V30 §35), and common short forms.
  */
-export const MISTAKEN_DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[number]> =
-  new Map([
-    ["m", "min"],
-    ["msec", "ms"],
-    ["msecs", "ms"],
-    ["sec", "s"],
-    ["secs", "s"],
-    ["mins", "min"],
-    ["hr", "h"],
-    ["hrs", "h"],
-  ]);
+const MISTAKEN_DURATION_UNIT_NAMES: ReadonlyMap<string, (typeof DURATION_UNITS)[number]> = new Map([
+  ["m", "min"],
+  ["msec", "ms"],
+  ["msecs", "ms"],
+  ["sec", "s"],
+  ["secs", "s"],
+  ["mins", "min"],
+  ["hr", "h"],
+  ["hrs", "h"],
+]);
+
+/**
+ * The exact unit meant by `word` after an amount where `word` is no unit: one of `MISTAKEN_DURATION_UNIT_NAMES`, or an
+ * exact unit or such a word with capitals, as `S` or `Min`, or `undefined`.
+ */
+export function mistakenDurationUnit(word: string): (typeof DURATION_UNITS)[number] | undefined {
+  const lower = word.toLowerCase();
+  return (
+    MISTAKEN_DURATION_UNIT_NAMES.get(word) ??
+    (lower === word
+      ? undefined
+      : (DURATION_UNIT_NAMES.get(lower) ?? MISTAKEN_DURATION_UNIT_NAMES.get(lower)))
+  );
+}
 
 /** Each name of a unit after `calendar`, short or long, and the unit it names. */
 export const CALENDAR_DURATION_UNIT_NAMES: ReadonlyMap<

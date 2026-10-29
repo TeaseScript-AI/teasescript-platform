@@ -19,7 +19,7 @@ import {
 import {
   CALENDAR_DURATION_UNITS,
   DURATION_UNITS,
-  MISTAKEN_DURATION_UNIT_NAMES,
+  mistakenDurationUnit,
 } from "../language-facts.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
@@ -72,6 +72,13 @@ export function parseUnitSuffix(parser: Parser, expression: Expression, start: n
       const amount = parser.sourceText(start, parser.current);
       result = withUnit({ calendar: true, unit: withoutCalendar }, parser.advance());
       reportCalendarUnitWithoutCalendar(parser, amount, token, result);
+    } else {
+      const meant = mistakenDurationUnit(token.lexeme);
+      // Read as the unit meant, so that its error is the only one.
+      if (meant !== undefined) {
+        result = withUnit({ calendar: false, unit: meant }, parser.advance());
+        reportMistakenUnit(parser, expression, token, meant, result);
+      }
     }
   }
   return reportSecondUnit(parser, result);
@@ -238,11 +245,11 @@ export function parseDurationUnit(
   }
   const calendar = calendarDurationUnit(token.lexeme);
   if (calendar === undefined) {
-    const meant = MISTAKEN_DURATION_UNIT_NAMES.get(token.lexeme);
+    const meant = mistakenDurationUnit(token.lexeme);
     if (meant === undefined) return amount;
     // Read as the unit meant, so that its error is the only one.
     const result = literal({ calendar: false, unit: meant }, parser.advance());
-    reportMistakenUnit(parser, amount, token, meant);
+    reportMistakenUnit(parser, amount, token, meant, result);
     return result;
   }
   const result = literal({ calendar: true, unit: calendar }, parser.advance());
@@ -251,11 +258,13 @@ export function parseDurationUnit(
 }
 
 /** The unit names a mistaken unit is written in, by the unit meant. */
-const MEANT_UNITS: Readonly<Record<string, string>> = {
+const MEANT_UNITS: Readonly<Record<DurationUnit, string>> = {
   ms: "milliseconds",
   s: "seconds",
   min: "minutes",
   h: "hours",
+  d: "days",
+  w: "weeks",
 };
 
 /** A list of units for a message, as in "d, w, mo, and y". */
@@ -265,27 +274,36 @@ const unitList = (units: readonly string[]) =>
 const UNITS_OF_TIME = `The units of time are ${unitList(DURATION_UNITS)}. After 'calendar', the units are ${unitList(CALENDAR_DURATION_UNITS)}.`;
 
 /**
- * A word after `amount` that is no unit, as in `5 m` or `30 sec`, whose error names the unit meant and every unit. It
- * shows the amount with the unit only where that compiles in the statement (see `Parser.offerFix`).
+ * A word after `amount` that is no unit, as in `5 m`, `n sec`, or `5 S` (`mistakenDurationUnit`), the `duration` it
+ * forms, whose error names the unit meant and every unit. A number with the unit is shown where the place of
+ * `duration` takes an exact duration (see `adviseDuration`) and the statement then parses (see `Parser.offerFix`).
+ * Whether another amount, such as a name, takes the unit only the type checker knows, so it keeps the words.
  */
 function reportMistakenUnit(
   parser: Parser,
-  amount: NumberLiteral,
+  amount: Expression,
   word: Token,
   meant: DurationUnit,
+  duration: Expression,
 ): void {
-  const why = word.lexeme === "m" ? ", because it could mean minutes or months" : "";
+  const lower = word.lexeme.toLowerCase();
+  const why = lower === "m" ? ", because it could mean minutes or months" : "";
+  const lowercase = lower === word.lexeme ? "" : " Units are written in lowercase.";
   const message = (fix: string) =>
-    `'${word.lexeme}' is not a unit${why}. For ${MEANT_UNITS[meant]!}, ${fix}. ${UNITS_OF_TIME}`;
+    `'${word.lexeme}' is not a unit${why}.${lowercase} For ${MEANT_UNITS[meant]}, ${fix}. ${UNITS_OF_TIME}`;
   parser.reportToken(
     parserDiagnosticCode.unsupportedDurationUnit,
     message(`use the unit ${meant}`),
     word,
   );
+  if (amount.kind !== "numberLiteral") return;
+  const index = parser.diagnostics.length - 1;
   const fixed = `${amount.raw} ${meant}`;
-  parser.offerFix(parser.diagnostics.length - 1, message(`write '${fixed}'`), [
-    { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
-  ]);
+  parser.mistakenUnitFixes.set(duration, () =>
+    parser.offerFix(index, message(`write '${fixed}'`), [
+      { start: amount.span.start.offset, end: word.span.end.offset, code: fixed, expression: true },
+    ]),
+  );
 }
 
 /**
@@ -341,13 +359,14 @@ export function requireExactDuration(parser: Parser, value: Expression, subject:
 
 /** `value` is where any value fits, such as the text of a `say`, so a month or a year without `calendar` gets it. */
 export function allowCalendarDuration(parser: Parser, value: Expression): void {
-  adviseDuration(parser, value, "calendar");
+  adviseDuration(parser, value, "calendar", true);
 }
 
 /**
  * `value` is that of a declaration with the written type `type`, or none: one that takes a calendar duration gets the
  * calendar fix, and one that holds exact durations and nothing else but `null` gets days or weeks. Any other type, such
- * as a list, keeps both choices in words.
+ * as a list, keeps both choices in words. A number with a word taken for a unit gets the unit meant where no written
+ * type or one with `duration` takes it.
  */
 export function adviseDeclaredDuration(
   parser: Parser,
@@ -356,7 +375,8 @@ export function adviseDeclaredDuration(
   subject: string,
 ): void {
   const names = type === null ? null : writtenNames(type);
-  if (names === null || names.has("calendarDuration")) adviseDuration(parser, value, "calendar");
+  if (names === null || names.has("calendarDuration"))
+    adviseDuration(parser, value, "calendar", names === null || names.has("duration"));
   else if (
     names.has("duration") &&
     [...names].every((name) => name === "duration" || name === "null")
@@ -387,16 +407,24 @@ function writtenNames(type: TypeAnnotation): ReadonlySet<string> {
  * where only an exact duration fits (in words after a sign), and the calendar unit or the space where any duration does
  * (also after a sign, and in words for a known amount that is not whole, as in `(1.5) month`). Inside `+`, `-`, `*`,
  * `/`, or `otherwise`, where it may be part of a ratio such as `(1 month / 1 calendar month) * 1 s`, and wherever no
- * place proves a fix, the error says the fix in words.
+ * place proves a fix, the error says the fix in words. A number with a word taken for a unit, as `5 m`, gets the unit
+ * meant as code in the same places where an exact duration fits (`exactFits` where a calendar one does), but not after
+ * a sign where only an exact duration fits, and elsewhere keeps it in words.
  */
 function adviseDuration(
   parser: Parser,
   value: Expression,
   place: { readonly exact: string } | "calendar",
+  exactFits = false,
 ): void {
   const pending = [{ node: value, signed: false }];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const { node, signed } = next;
+    const fix = parser.mistakenUnitFixes.get(node);
+    if (fix !== undefined && (place === "calendar" ? exactFits : !signed)) {
+      parser.mistakenUnitFixes.delete(node);
+      fix();
+    }
     const error = parser.calendarUnitErrors.get(node);
     const index = error === undefined ? -1 : parser.diagnostics.lastIndexOf(error.diagnostic);
     if (index !== -1 && (node.kind === "durationLiteral" || node.kind === "unitExpression")) {
