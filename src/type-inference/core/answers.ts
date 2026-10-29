@@ -313,20 +313,23 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
       program.index();
       // A6: the passes repeat, every memo recomputed, until the rejected set is stable; a set that repeats is a cycle,
       // whose changing stores stay possibilities. A pass in which a decision stops is not settled either (TABLE r4.180):
-      // the next, from the same rejected set, starts with every stopped key stopped
+      // the next, from the same rejected set, starts with every stopped key stopped, once per rejected set; a decision
+      // stopping in that pass again stops the analysis, as the work allowance does (TABLE r4.183)
       let cycling: ReadonlySet<number> = new Set();
       const sets: ReadonlyMap<number, ReadonlySet<Key>>[] = [rejected];
-      for (let last = false; ;) {
+      for (let last = false, restarted = false; ;) {
         const pass = createPass(program, rejected, stops);
-        const consumers = new Consumers(pass, rejected, cycling, last);
+        const consumers = new Consumers(pass, rejected, cycling, last, false, restarted);
         analysed = { pass, consumers };
         consumers.check();
         if (consumers.stopped !== null) break;
         if (pass.contract.stoppedCount > stops.length) {
           program.work.charge("stopPasses");
           stops = pass.contract.stoppedKeys();
+          restarted = true;
           continue;
         }
+        restarted = false;
         const now = consumers.admission.newlyRejected;
         if (last || sameSet(now, rejected)) break;
         program.work.charge("rejectPasses");

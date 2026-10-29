@@ -797,6 +797,11 @@ test("each product a repair removed grows with the program in either order (#119
  * root: the per-path questions, a design round), never k³ (each copy and each label reading every level from the root,
  * 7.45 per doubling before). The walk is uncharged work (`writtenTypeSteps` counts it), gated at its measured doubling.
  */
+/**
+ * Measured per pass (steps ÷ passes), as `c1Visits`'s bound divides by `rejectPasses`: at 64 levels `out`'s decision
+ * crosses its allowance (its cost is depth × copies, G6 in #1319's design-round list), and the pass that restarts it
+ * (TABLE r4.180, r4.183) walks the type again.
+ */
 test("copies of a deep written type walk the type once, not once per copy (#1194)", () => {
   const measured = (k: number): { steps: number; nodes: number } => {
     const source = [
@@ -809,10 +814,9 @@ test("copies of a deep written type walk the type once, not once per copy (#1194
     assert.ok(request !== null, `${k} levels: its file parses and resolves`);
     const before = writtenTypeSteps();
     const answers = analyseCore(request);
-    return {
-      steps: writtenTypeSteps() - before,
-      nodes: answers.budget.counts.get("syntaxNodes") ?? 0,
-    };
+    const { counts } = answers.budget;
+    const passes = 1 + (counts.get("rejectPasses") ?? 0) + (counts.get("stopPasses") ?? 0);
+    return { steps: (writtenTypeSteps() - before) / passes, nodes: counts.get("syntaxNodes") ?? 0 };
   };
   const [small, large] = [measured(32), measured(64)];
   const doubling = (2 * (large.steps / small.steps)) / (large.nodes / small.nodes);

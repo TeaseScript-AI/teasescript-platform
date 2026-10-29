@@ -2405,11 +2405,16 @@ test("admission decides from the start value, keeps written copies, rejects ever
     'function f(flag: boolean): string | boolean {\n  if flag { return "bad" }\n  return false\n}\n';
   const nest = (depth: number, value: string): string =>
     `${"[".repeat(depth)}${value}${"]".repeat(depth)}`;
-  const programs: readonly (readonly [
-    string,
-    string,
-    (at: (text: string) => number) => string[],
-  ])[] = [
+  // (a fourth part: what the reversed order gives where it differs)
+  const programs: readonly (
+    | readonly [string, string, (at: (text: string) => number) => string[]]
+    | readonly [
+        string,
+        string,
+        (at: (text: string) => number) => string[],
+        (at: (text: string) => number) => string[],
+      ]
+  )[] = [
     [
       "a start value after an earlier store in a function",
       'function change { n = "bad" }\nlet n = 1\nrepeat n {}\nexit',
@@ -2511,6 +2516,14 @@ test("admission decides from the start value, keeps written copies, rejects ever
       "a deep literal's element copying a written union",
       `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
       () => ["valid"],
+      // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
+      // list: one restart, then a stop in it stops the analysis, TABLE r4.183; the G6 repair returns it to `valid`)
+      (at) => [
+        "warning-runtime-check",
+        `budget not-checked-budget @${at("[")}`,
+        `budget warning-runtime-check @${at("[")}`,
+        `copy-type xs [unknown] @${at("[")}`,
+      ],
     ],
     [
       "a default's other kind beside the receiving union",
@@ -2647,11 +2660,11 @@ test("admission decides from the start value, keeps written copies, rejects ever
     ],
   ];
   const differing: string[] = [];
-  for (const [name, source, expect] of programs) {
+  for (const [name, source, expect, expectReversed = expect] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, `${name}: its source parses and resolves`);
-    const expected = expect((text) => source.indexOf(text)).sort();
     for (const reversed of [false, true]) {
+      const expected = (reversed ? expectReversed : expect)((text) => source.indexOf(text)).sort();
       const run = (): CompactRecord =>
         withSolverSeam({ reverseWorklist: reversed }, () => compactAnalysis(request));
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();

@@ -576,6 +576,8 @@ export class Consumers {
   #deciding: number | null = null;
   /** Whether a decision stopped in this pass (`#decide`): it is not settled (TABLE r4.180). */
   #decisionStopped = false;
+  /** Whether this pass restarted one whose decision stopped: a decision stopping here stops the analysis (TABLE r4.183). */
+  readonly #restarted: boolean;
   #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
   readonly #order: <T>(list: readonly T[]) => T[];
@@ -611,9 +613,11 @@ export class Consumers {
     cycling: ReadonlySet<number> = new Set(),
     last = false,
     finishing = false,
+    restarted = false,
   ) {
     this.#rejected = rejected;
     this.#last = last;
+    this.#restarted = restarted;
     // (a walk made for the finishing path asks nothing from its start: admission's own setup asks values too)
     this.#finishing = finishing;
     this.#order = consumerOrder ?? ((list) => [...list]);
@@ -1191,7 +1195,8 @@ export class Consumers {
    * stops between two solver steps, what it made of its key is taken back (`Admission.stopDecision`), and every read
    * of the key answers `unknown` with the reason `budget`, so each owes its check, with its warning, as for external
    * data (C9). The pass is then not settled: the next starts with the key stopped and runs no decision at or below it
-   * (TABLE r4.180).
+   * (TABLE r4.180); a decision stopping in that next pass stops the analysis there, as the work allowance does, so a
+   * pass's work at most doubles (TABLE r4.183).
    */
   #decide(root: PlaceId, path: readonly string[]): Decision | null {
     const ledger = this.pass.program.work;
@@ -1213,6 +1218,8 @@ export class Consumers {
       stopped = true;
       this.#decisionStopped = true;
       this.admission.stopDecision(root, path);
+      // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4, TABLE r4.183)
+      if (this.#restarted) throw new BudgetExhausted("work");
       return null;
     } finally {
       this.#deciding = null;

@@ -442,6 +442,12 @@ function stopRun(source: string, allowance?: number): StopRun {
   return { ...allowed(both), without: (omit) => allowed(() => withoutRecords(omit, both)) };
 }
 
+/** `stopRun` made inside `mode` (orders, allowances), its omissions run again inside it (`stopProblems` asks them). */
+function stopRunIn(mode: <T>(make: () => T) => T, source: string, allowance?: number): StopRun {
+  const run = mode(() => stopRun(source, allowance));
+  return { ...run, without: (omit, key) => mode(() => run.without(omit, key)) };
+}
+
 /** A source's settled phases, each with its lowest and highest stopping allowance (`phaseEnds`). */
 function settledEnds(source: string): Map<string, readonly [number, number]> {
   const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
@@ -2080,11 +2086,12 @@ test("a stopped decision stays undecided at every reader, also after a settled p
  * TABLE r4.180: a pass in which a decision stops is not settled; the next, from the same rejections, starts with that
  * key stopped (`Contract.stop`), so no result read the key before its stop, in any order. `pair`'s stored literal holds
  * a read of `tally`; in the reversed order `pair` is decided before `tally`, and without the next pass `pair.first`
- * kept the host value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass per pass in
- * which a decision first stops, none without one: in the reversed order `box`'s root, which reads the values `box.n`'s
- * stopped decision had finished, stops only once `box.n` is stopped from its pass's start, so two. A program stop in
- * the pass where the decision first stopped is not settled: finishing marks the stores (r4.135), and the stop oracle
- * holds, no boundary among it.
+ * kept the host value `tally` held then; `count`'s error is independent of `tally` and stays. One extra pass where a
+ * decision first stops, none without one, and at most one per rejected set (TABLE r4.183): in the reversed order `box`'s
+ * root, which reads the values `box.n`'s stopped decision had finished, stops once `box.n` is stopped from its pass's
+ * start, and that second stop stops the analysis as the work allowance does. A program stop in the pass where a
+ * decision first stopped is not settled: finishing marks the stores (r4.135), and the stop oracle holds, no boundary
+ * among it, as in #1194's witness below of a second stop.
  */
 test("a pass in which a decision stops is not settled: the next starts with its key stopped (TABLE r4.180)", () => {
   const reversed = <T>(make: () => T): T =>
@@ -2135,7 +2142,6 @@ test("a pass in which a decision stops is not settled: the next starts with its 
     const capped = <T>(make: () => T): T =>
       withTestDemandAllowance(Math.floor(own.units / 2), () => inMode(make));
     const answers = capped(() => analyseCore(tally.request));
-    assert.ok(passes(answers) >= 1, mode);
     const node = (text: string, kind: string) =>
       answers.graph.nodes.find(
         (each) =>
@@ -2151,13 +2157,22 @@ test("a pass in which a decision stops is not settled: the next starts with its 
       ["unknown/16"],
       mode,
     );
-    assert.deepEqual(
-      answers.diagnostics
-        .filter((d) => d.site.start === dependent.indexOf("count {}"))
-        .map((d) => d.class),
-      ["compile-error"],
-      mode,
-    );
+    // (the independent error stays; in the reversed unshared mode `pair`'s element decision, longer there than `tally`'s,
+    // stops too and then again in the restarted pass, which stops the analysis (TABLE r4.183): its check is marked)
+    assert.equal(passes(answers), 1, mode);
+    const count = dependent.indexOf("count {}");
+    if (mode === "reversed, unshared") {
+      assert.equal(answers.budget.exhausted, "work", mode);
+      assert.ok(
+        answers.budget.deferred.some((mark) => mark.site.start === count),
+        mode,
+      );
+    } else
+      assert.deepEqual(
+        answers.diagnostics.filter((d) => d.site.start === count).map((d) => d.class),
+        ["compile-error"],
+        mode,
+      );
   }
   // one decision stopping: one extra pass in either order; a program stop at the last unit of the pass where it stopped
   const single =
@@ -2203,7 +2218,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
       mode,
     );
   }
-  // a decision stopping only in the second pass: one more
+  // a decision stopping only in the restarted pass: the analysis stops there (TABLE r4.183)
   const property =
     [
       "let box = {n: 1}",
@@ -2217,14 +2232,14 @@ test("a pass in which a decision stops is not settled: the next starts with its 
   const root = reversed(() => analyseCore(box.request)).budget.decisions.find(
     (d) => d.place === box.id && d.path.length === 0,
   )!;
-  const twice = withTestDemandAllowance(root.units + 3, () =>
+  // (outside the candidate route's slice, `2 + 3`: its analysis alone; #1194's witness below runs the stop oracle)
+  const twice: Answers = withTestDemandAllowance(root.units + 3, () =>
     reversed(() => analyseCore(box.request)),
   );
-  assert.equal(passes(twice), 2);
-  assert.deepEqual(
-    twice.budget.decisions.filter((d) => d.place === box.id && d.stopped).map((d) => d.path),
-    [["n"], []],
-  );
+  assert.equal(passes(twice), 1);
+  assert.equal(twice.budget.exhausted, "work");
+  assert.equal(twice.budget.settled, false);
+  assert.ok(twice.budget.deferred.some((mark) => mark.rule.rule === "store"));
 });
 
 /**
@@ -2280,4 +2295,38 @@ test("a narrowed read of a stopped decision's key narrows its contract, the reas
       assert.deepEqual(read(source.indexOf("tally {}")), ["unknown/16"], where);
     }
   }
+});
+
+/**
+ * TABLE r4.183's recorded cost: a decision over a deep written type costs its depth × its copies (C1's per-copy visits,
+ * G6 in #1319's design-round list) against an allowance linear in the program's nodes, so `out`'s decisions cross it at
+ * 64 levels and copies, the deepest first in the reversed order: one restart, then the next path's decision stops in
+ * the restarted pass and stops the analysis there, its stores marked and the stop oracle holding. The G6 repair's
+ * acceptance: this returns to `valid` with no restart.
+ */
+test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed (TABLE r4.183)", () => {
+  const source = [
+    `let typed: integer${"[]".repeat(64)} = []`,
+    "let out = typed",
+    ...Array.from({ length: 64 }, () => "out = typed"),
+    "exit",
+  ].join("\n");
+  const reversed = <T>(make: () => T): T =>
+    withSolverSeam({ reverseWorklist: true }, () =>
+      withConsumerOrder((list) => [...list].reverse(), make),
+    );
+  // (the reference: no decision stops under a demand allowance the analysis never reaches)
+  const unstopped = stopRunIn(
+    (make) => withTestDemandAllowance(30_000_000, () => reversed(make)),
+    source,
+  );
+  assert.equal(unstopped.answers.budget.exhausted, null);
+  assert.equal(unstopped.result.diagnostics.length, 0);
+  const stopped = stopRunIn(reversed, source);
+  const { budget } = stopped.answers;
+  assert.equal(budget.counts.get("stopPasses"), 1);
+  assert.equal(budget.exhausted, "work");
+  assert.equal(budget.settled, false);
+  assert.ok(budget.deferred.some((mark) => mark.rule.rule === "store"));
+  assert.deepEqual(stopProblems({ unstopped, stopped, fitting: [], violating: [] }), []);
 });
