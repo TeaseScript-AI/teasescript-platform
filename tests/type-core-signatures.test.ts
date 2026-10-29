@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../src/compiler.js";
+import { compileSource, compileSourceWithBackend } from "../src/compiler.js";
+import { DICT_METHODS, dictMethod } from "../src/dict-operations.js";
+import { LIST_METHODS, listMethod } from "../src/list-methods.js";
+import { TEXT_METHODS } from "../src/text-operations.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { run } from "../src/runtime/engine.js";
 import {
@@ -10,14 +13,25 @@ import {
   type SerializableRuntimeValue,
 } from "../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { checkedResult } from "../src/type-inference/core/consumer.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
+import type { CompactRecord } from "./helpers/type-core-records.js";
+import { publishedAnswers } from "./helpers/type-core-standing.js";
+import {
+  derive,
+  evaluate,
+  syntaxOf,
+  Underivable,
+  type PredictedRun,
+} from "./helpers/type-core-derived.js";
+import { assignments, runGlobals } from "./helpers/type-core-route.js";
 import type { CheckedDiagnostic, DiagnosticRule } from "../src/type-inference/core/result.js";
 
 /*
@@ -163,6 +177,71 @@ const CONSUMERS: readonly Consumer[] = [
     at: (source) => {
       const start = source.lastIndexOf("{a: ");
       return [start, source.indexOf("})", start) + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a value toJson writes in a dict",
+    rule: "json",
+    program: (v) => `say toJson(dict{a: ${v}})`,
+    fit: "[1]",
+    misfit: "[1..2]",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("dict{a: ");
+      return [start, source.indexOf("})", start) + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a value toJson writes in a list",
+    rule: "json",
+    program: (v) => `say toJson([${v}])`,
+    fit: "[1]",
+    misfit: "[1..2]",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("toJson([") + "toJson(".length;
+      return [start, source.lastIndexOf("])") + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a held choice object's text, where it has no value",
+    rule: "choice",
+    program: (v) => `let w = {text: ${v}}\nlet c = askChoice w`,
+    fit: '"a"',
+    misfit: "{n: 1}",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("askChoice w") + "askChoice ".length;
+      return [start, start + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a held choice object's value",
+    rule: "choice",
+    program: (v) => `let w = {text: "t", value: ${v}}\nlet c = askChoice w`,
+    fit: "1",
+    misfit: "{n: 1}",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("askChoice w") + "askChoice ".length;
+      return [start, start + 1];
+    },
+    unknown: false,
+  },
+  {
+    name: "a held choice object's text as an element of a choice's list",
+    rule: "choice",
+    program: (v) => `let w = {text: ${v}}\nlet c = askChoice [w, "b"]`,
+    fit: '"a"',
+    misfit: "{n: 1}",
+    kind: "operator",
+    at: (source) => {
+      const start = source.lastIndexOf("askChoice [w") + "askChoice [".length;
+      return [start, start + 1];
     },
     unknown: false,
   },
@@ -316,7 +395,9 @@ test("a compound assignment owes what its binary form owes, for every operator, 
     for (const [setup, target] of [
       ["let x = 4\n", "x"],
       ["let o = {x: 4}\n", "o.x"],
+      ["let xs = [4]\n", "xs[0]"],
       ['let d = toDate("2026-08-11")\n', "d"],
+      ['let ds = [toDate("2026-08-11")]\n', "ds[0]"],
     ] as const)
       for (const operand of ["2", '"a"', "1 calendar day + 2 h", "null", "hostValue"]) {
         const compound = `${setup}${target} ${operator}= ${operand}\nexit\n`;
@@ -349,6 +430,22 @@ test("a compound assignment owes what its binary form owes, for every operator, 
             `${compound.replace(/\n/g, "; ")}: ${got.join(", ")} against ${expected.join(", ")}`,
           );
       }
+  // an element target's index is read as an operand of either form is: a known conversion error there stands at each
+  // copy of it (Sol r1 N1)
+  for (const operator of ["+", "-"]) {
+    const index = 'toInteger("bad", default: 0)';
+    const compound = `let xs = [4]\nxs[${index}] ${operator}= 1\nexit\n`;
+    const binary = `let xs = [4]\nxs[${index}] = xs[${index}] ${operator} 1\nexit\n`;
+    for (const source of [compound, binary]) {
+      const conversions = analysed(source)
+        .filter((d) => d.kind === "static" && d.rule.rule === "conversion")
+        .map((d) => d.site.start);
+      const copies = [...source.matchAll(/"bad"/g)].map((found) => found.index);
+      if (JSON.stringify(conversions) !== JSON.stringify(copies))
+        differing.push(`${source.replace(/\n/g, "; ")}: conversions at ${conversions.join(", ")}`);
+      pairs += 1;
+    }
+  }
   t.diagnostic(`${pairs} compound forms against their binary forms`);
   assert.deepEqual(differing, []);
 });
@@ -620,4 +717,384 @@ test("C13 decides an argument by every kind its receiver may be, and sort by eve
     own(`let xs = [[1].get(hostValue, default: 2)]\nxs.sort()\nexit\n`, "elements"),
     [],
   );
+});
+
+/** A value of each kind of a contract's parameter: one the parameter takes, and one it does not (`null`: it takes any). */
+const PARAMETER_VALUES: Readonly<Record<string, readonly [string, string | null]>> = {
+  text: ['"a"', "1"],
+  regex: ["/a/", '"a"'],
+  textOrRegex: ['"a"', "1"],
+  position: ["1", '"x"'],
+  count: ["1", '"x"'],
+  index: ["0", '"x"'],
+  list: ["[1]", "1"],
+  collection: ["[1]", "1"],
+  value: ["1", null],
+  key: ['"a"', "1"],
+};
+
+/** A positional parameter of a contract: its receiver as written, its method, its parameters' kinds and its position. */
+interface ContractParameter {
+  readonly receiver: string;
+  readonly name: string;
+  readonly kinds: readonly string[];
+  readonly position: number;
+}
+
+/**
+ * Every positional parameter of the contracts of text, lists, sets and dicts (`TEXT_METHODS`, `LIST_METHODS`,
+ * `DICT_METHODS`), on a receiver of each kind that has its method; a list's `get` is C2's with its `default:`.
+ */
+function contractParameters(): ContractParameter[] {
+  const found: ContractParameter[] = [];
+  const add = (receiver: string, name: string, kinds: readonly string[]): void =>
+    kinds.forEach((_, position) => found.push({ receiver, name, kinds, position }));
+  for (const method of Object.values(TEXT_METHODS))
+    add(
+      '"abc"',
+      method.name,
+      method.parameters.map((parameter) => parameter.kind),
+    );
+  for (const method of Object.keys(LIST_METHODS).map((name) => listMethod(name)!))
+    if (method.named === undefined)
+      for (const kind of method.receivers)
+        add(
+          kind === "list" ? "[1, 2]" : "[1, 2].toSet()",
+          method.name,
+          method.parameters.map((parameter) => parameter.kind),
+        );
+  for (const method of Object.keys(DICT_METHODS).map((name) => dictMethod(name)!))
+    if (method.named === undefined)
+      add(
+        "dict{a: 1}",
+        method.name,
+        method.parameters.map(() => "key"),
+      );
+  return found;
+}
+
+/** The call of a contract's method with each argument a value its parameter takes, and `argument` at `position`. */
+function contractCall(parameter: ContractParameter, argument: string): string {
+  const values = parameter.kinds.map((kind, position) =>
+    position === parameter.position ? argument : PARAMETER_VALUES[kind]![0],
+  );
+  return `${parameter.receiver}.${parameter.name}(${values.join(", ")})`;
+}
+
+/**
+ * C13 by construction over the contracts (Sol r1 B1): every positional parameter of every text, list, set and dict
+ * method that takes some kinds only rejects a definite misfit at the argument, in both orders, as the current checker
+ * does; one that takes any value has no misfit.
+ */
+test("every parameter of the text, list, set and dict contracts that takes some kinds rejects a misfit at its argument", (t) => {
+  const missing: string[] = [];
+  const stored: string[] = [];
+  let checked = 0;
+  for (const parameter of contractParameters()) {
+    const kind = parameter.kinds[parameter.position]!;
+    const misfit = PARAMETER_VALUES[kind]?.[1];
+    assert.ok(misfit !== undefined, `${parameter.name}: a parameter kind ${kind} with values`);
+    if (misfit === null) continue;
+    // (a list's `addAll` adds its argument's elements as a store, F5: the store's consumer's, outside the slice)
+    if (parameter.name === "addAll") {
+      stored.push(contractCall(parameter, misfit));
+      continue;
+    }
+    const call = contractCall(parameter, misfit);
+    const source = `${call}\nexit\n`;
+    // (the argument's offset: the call up to it, each argument before it a fitting value)
+    const at = contractCall(parameter, "\u0000").indexOf("\u0000");
+    const rejected = analysed(source).some(
+      (d) =>
+        d.class === "compile-error" && d.site.start === at && d.site.end === at + misfit.length,
+    );
+    const legacy = compileSource(source).diagnostics.some((d) => d.severity === "error");
+    checked += 1;
+    if (!rejected || !legacy)
+      missing.push(
+        `${call}: ${rejected ? "" : "no error at the argument"}${legacy ? "" : " (the current checker: none)"}`,
+      );
+  }
+  t.diagnostic(`${checked} parameters rejecting a misfit; a store's: ${stored.join(", ")}`);
+  assert.deepEqual(missing, []);
+  assert.deepEqual(stored, ["[1, 2].addAll(1)"]);
+});
+
+/**
+ * The derived oracle follows every admitted argument check (Sol r1 B5): each text, list and set method's parameter that
+ * takes some kinds, given host data on the candidate route, and the elements `join` shows and `sort` orders; every run
+ * of the plan under each host value is the run the oracle derives from the record and the source, and each discharge
+ * of an argument by the call's own check is violable: a host value stops the run at the call (removing the check
+ * would show here).
+ */
+test("every admitted argument check runs as the derived oracle predicts, and each such discharge stops a run at its call", (t) => {
+  const programs = [
+    ...contractParameters()
+      .filter((parameter) => !parameter.receiver.startsWith("dict"))
+      .filter((parameter) => PARAMETER_VALUES[parameter.kinds[parameter.position]!]?.[1] !== null)
+      .map((parameter) => `let r = ${contractCall(parameter, "hostValue")}\nsay "after"\nexit\n`),
+    'let xs = [hostValue otherwise [1]]\nsay xs.join()\nsay "after"\nexit\n',
+    'let xs = [hostValue]\nxs.sort()\nsay "after"\nexit\n',
+  ];
+  const differing: string[] = [];
+  let [planned, outside, discharges] = [0, 0, 0];
+  for (const source of programs) {
+    let result: ReturnType<typeof compileSourceWithBackend>;
+    try {
+      result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      outside += 1;
+      continue;
+    }
+    if (result.plan === null) {
+      differing.push(`${source}: no plan`);
+      continue;
+    }
+    planned += 1;
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    const derived = (() => {
+      try {
+        return derive(syntax, compactAnalysis(request));
+      } catch (error) {
+        if (error instanceof Underivable) return error.message;
+        throw error;
+      }
+    })();
+    if (typeof derived === "string") {
+      differing.push(`${source}: underivable: ${derived}`);
+      continue;
+    }
+    const failures: (string | null)[] = [];
+    for (const inputs of assignments(["hostValue"])) {
+      const ran = runGlobals(result.plan, inputs);
+      let predicted: PredictedRun | string;
+      try {
+        predicted = evaluate(syntax, derived.stores, inputs, false, derived.content).run;
+      } catch (error) {
+        if (!(error instanceof Underivable)) throw error;
+        predicted = `underivable: ${error.message}`;
+      }
+      if (JSON.stringify(ran) !== JSON.stringify(predicted))
+        differing.push(
+          `${source} with ${JSON.stringify(inputs)}: ran ${JSON.stringify(ran)}, derived ${JSON.stringify(predicted)}`,
+        );
+      failures.push(ran.failure);
+    }
+    for (const discharge of derived.discharges)
+      if (discharge.by === "native" && discharge.what === "argument") {
+        discharges += 1;
+        if (!failures.some((failure) => failure?.split("@")[1] === discharge.site))
+          differing.push(`${source}: the call's own check at ${discharge.site} stops no run`);
+      }
+  }
+  t.diagnostic(
+    `${planned} programs with a plan (${outside} outside the slice), ${discharges} argument discharges`,
+  );
+  assert.deepEqual(differing, []);
+});
+
+/**
+ * G3's seam at every reader and stop (Sol r1 B3): a check that owes the runtime nothing, an ordinary warning or an
+ * error, stands in the core's record (`compactAnalysis`), its publication (`publishedAnswers`) and the candidate route's
+ * diagnostics beside a retained runtime obligation; at every allowance, also one that stops a question after the
+ * finished analysis, each reader answers, and holds the check or the stop's warning.
+ */
+test("a check that owes the runtime nothing reaches every reader, and a stop after the finished analysis keeps the readers answering", () => {
+  const cases: readonly (readonly [string, "warning" | "compile-error", string])[] = [
+    ["let n: integer = hostValue\nfor i in 3..1 {}\nexit\n", "warning", "TSV046"],
+    ['repeat toInteger("-2", default: 0) {}\nexit\n', "compile-error", "TSV011"],
+    ['say toInteger("bad", default: 0)\nexit\n', "compile-error", "TSV043"],
+  ];
+  const failures: string[] = [];
+  for (const [source, wanted, code] of cases) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    const bindings = new CoreProgram(request).places
+      .filter(({ kind }) => kind.kind === "binding")
+      .map((place) => place.id);
+    const holds = (record: CompactRecord): boolean =>
+      record.diagnostics.some((d) => d.kind === "static" && d.class === wanted);
+    const stopped = (record: CompactRecord): boolean =>
+      record.diagnostics.some((d) => d.kind === "budget");
+    const record = compactAnalysis(request);
+    if (!holds(record)) failures.push(`${source}: the record lacks it`);
+    if (source.includes("hostValue") && record.checks.length === 0)
+      failures.push(`${source}: the record lacks the retained obligation`);
+    const published = JSON.parse(publishedAnswers(analyseCore(request), bindings, request).record);
+    if (
+      !published.serialized.diagnostics.some(
+        (d: { kind: string; class: string }) => d.kind === "static" && d.class === wanted,
+      )
+    )
+      failures.push(`${source}: the publication lacks it`);
+    const compiled = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
+    if (!compiled.diagnostics.some((d) => d.code === code))
+      failures.push(`${source}: the candidate route lacks it`);
+    const total = analyseCore(request).budget.total;
+    for (let allowance = 1; allowance <= total + 400; allowance += 1) {
+      let made: CompactRecord;
+      let codes: string[];
+      try {
+        made = withTestAllowance(allowance, () => compactAnalysis(request));
+        codes = withTestAllowance(allowance, () =>
+          compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND),
+        ).diagnostics.map((d) => d.code);
+      } catch (error) {
+        failures.push(`${source} at ${allowance}: ${String(error)}`);
+        break;
+      }
+      if (!holds(made) && !stopped(made)) {
+        failures.push(`${source} at ${allowance}: neither the check nor a stop`);
+        break;
+      }
+      if (!codes.includes(code) && !codes.includes("TSV076")) {
+        failures.push(`${source} at ${allowance}: the route has neither the check nor a stop`);
+        break;
+      }
+    }
+  }
+  assert.deepEqual(failures, []);
+});
+
+/**
+ * A content check over the contents a written type admits (the owner's review F2; ADR 0021 1.8, 1.10): where a value
+ * comes from outside the script (host data, a load, a parse) into a written collection type, directly or through a copy,
+ * an object holding it, an element of an outer list or a replacement of an empty one, the elements `join` shows, `sort`
+ * orders, `toJson` writes and a choice's list gives are its written element type's: one that does not fit owes the check
+ * at the use, a warning (a list may be empty, so never an error), and one that fits is quiet; the incoming check is no
+ * substitute. A known empty list is quiet. (A narrowing `is` test's element type narrows an element read, `v[0]`, not
+ * the element path these checks read: `narrowing.ts`'s, outside this family.)
+ */
+test("a content check reads the written element type of a value from outside the script: a misfit owes the use's check", (t) => {
+  const consumers: readonly {
+    readonly name: string;
+    readonly rule: DiagnosticRule["rule"];
+    readonly use: (receiver: string) => string;
+    readonly site: (source: string, receiver: string) => readonly [number, number];
+    readonly misfit: string;
+    readonly fit: string;
+  }[] = [
+    {
+      name: "join",
+      rule: "elements",
+      use: (r) => `let out = ${r}.join("|")`,
+      site: (source, r) => {
+        const start = source.lastIndexOf(`${r}.join(`);
+        return [start, start + `${r}.join("|")`.length];
+      },
+      misfit: "object[]",
+      fit: "string[]",
+    },
+    {
+      name: "sort",
+      rule: "elements",
+      use: (r) => `${r}.sort()`,
+      site: (source, r) => {
+        const start = source.lastIndexOf(`${r}.sort()`);
+        return [start, start + `${r}.sort()`.length];
+      },
+      misfit: "boolean[]",
+      fit: "integer[]",
+    },
+    {
+      name: "toJson",
+      rule: "json",
+      use: (r) => `say toJson(${r})`,
+      site: (source, r) => {
+        const start = source.lastIndexOf(`toJson(${r})`) + "toJson(".length;
+        return [start, start + r.length];
+      },
+      misfit: "regex[]",
+      fit: "integer[]",
+    },
+    {
+      name: "a choice's list",
+      rule: "choice",
+      use: (r) => `let c = askChoice ${r}`,
+      site: (source, r) => {
+        const start = source.lastIndexOf(`askChoice ${r}`) + "askChoice ".length;
+        return [start, start + r.length];
+      },
+      misfit: "integer[][]",
+      fit: "integer[]",
+    },
+  ];
+  const origins: readonly {
+    readonly name: string;
+    readonly source: (type: string, use: (receiver: string) => string) => readonly [string, string];
+  }[] = [
+    {
+      name: "host data",
+      source: (type, use) => [`let xs: ${type} = hostValue\n${use("xs")}\n`, "xs"],
+    },
+    {
+      name: "a copy of host data",
+      source: (type, use) => [`let xs: ${type} = hostValue\nlet ys = xs\n${use("ys")}\n`, "ys"],
+    },
+    {
+      name: "an object's property",
+      source: (type, use) => [
+        `let h: ${type} = hostValue\nlet o = {xs: h}\n${use("o.xs")}\n`,
+        "o.xs",
+      ],
+    },
+    {
+      name: "an element of an outer list",
+      source: (type, use) => [`let w: ${type}[] = hostValue\n${use("w[0]")}\n`, "w[0]"],
+    },
+    {
+      name: "a replaced empty list",
+      source: (type, use) => [`let xs: ${type} = []\nxs = hostValue\n${use("xs")}\n`, "xs"],
+    },
+    {
+      name: "a load",
+      source: (type, use) => [`let xs: ${type} = load("k", default: [])\n${use("xs")}\n`, "xs"],
+    },
+    {
+      name: "a parse",
+      source: (type, use) => [
+        `let xs: ${type} = fromJson(hostValue, default: [])\n${use("xs")}\n`,
+        "xs",
+      ],
+    },
+  ];
+  const differing: string[] = [];
+  let programs = 0;
+  for (const consumer of consumers) {
+    for (const origin of origins)
+      for (const [type, expected] of [
+        [consumer.misfit, "warning"],
+        [consumer.fit, "quiet"],
+      ] as const) {
+        const [body, receiver] = origin.source(type, consumer.use);
+        const source = `${body}exit\n`;
+        const site = consumer.site(source, receiver);
+        const own = analysed(source).filter((d) => "rule" in d && d.rule.rule === consumer.rule);
+        const got =
+          own.length === 0
+            ? "quiet"
+            : own.every(
+                  (d) =>
+                    d.class === "warning-runtime-check" &&
+                    d.kind !== "budget" &&
+                    d.site.start === site[0] &&
+                    d.site.end === site[1] &&
+                    d.obligation.kind === "operand",
+                )
+              ? "warning"
+              : own.map((d) => `${d.class} @${d.site.start}-${d.site.end}`).join(", ");
+        programs += 1;
+        if (got !== expected) differing.push(`${consumer.name}, ${origin.name}, ${type}: ${got}`);
+      }
+    // (a known empty list holds no element to misfit)
+    const empty = `let xs: ${consumer.misfit} = []\n${consumer.use("xs")}\nexit\n`;
+    programs += 1;
+    if (analysed(empty).some((d) => "rule" in d && d.rule.rule === consumer.rule))
+      differing.push(`${consumer.name}, a known empty list: not quiet`);
+  }
+  t.diagnostic(`${programs} programs, each in both orders`);
+  assert.deepEqual(differing, []);
 });
