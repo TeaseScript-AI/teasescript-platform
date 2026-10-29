@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { countApart, joinParts, keep, textUnits, type WorkLedger } from "./budget.js";
+import { countApart, keep, textUnits, type WorkLedger } from "./budget.js";
 import {
   aliasWriter,
   boundClass,
@@ -54,7 +54,8 @@ import {
   standsAlong,
 } from "./contract/literal-index.js";
 import { contractOfLiteral, indexItems } from "./contract/literal-items.js";
-import { marksNothing, newHolder } from "./contract/marks.js";
+import { wrapperShape, type KeyLane } from "./contract/lanes.js";
+import { newHolder } from "./contract/marks.js";
 import type {
   ChainRoot,
   ChoiceGroup,
@@ -96,7 +97,6 @@ import type {
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
 import { chainOf, literalHop, remember } from "./contract/positions.js";
 import { prefixStores, prefixWork, relevantSubs, subSources } from "./contract/prefix-index.js";
-import { writtenOf } from "./contract/terms.js";
 import {
   contractOfValue,
   contractOfValueAt,
@@ -234,6 +234,15 @@ export class Contract {
   readonly pathDepths: number[] = [0];
   readonly pathLastSteps: string[] = [""];
   readonly pathChildren: (Map<string, number> | undefined)[] = [];
+  /**
+   * G3 stage 1 (`key-ids.ts`): per path, made with it from its parent's in constant work, its first step and the
+   * nearest path at or above it whose last step a built-in value answers (`memberStep`), 0 for none.
+   */
+  readonly pathFirstSteps: string[] = [""];
+  readonly pathMembers: number[] = [0];
+  /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
+  readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
+  readonly pathStepLists = new Map<number, readonly string[]>();
   readonly signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
   readonly carrierIds = new Map<string, string>();
@@ -335,8 +344,16 @@ export class Contract {
   /** Per holder, whether it marks no path whatever the path (`marksNothing`), and its finding while its component is open. */
   readonly quiet = new Map<Holder, boolean>();
   readonly pendingQuiet = new Map<Holder, boolean>();
-  /** Per binding and step, its wrapper's step or `null` (`wrapperHop`), and per literal and step its read (`literalHop`). */
-  readonly #hops = new Map<string, WrapperHop | null>();
+  /**
+   * Per binding and step, its wrapper's step or `null` (`wrapperShape`), and those being found; per literal and step its
+   * read (`literalHop`).
+   */
+  readonly hops = new Map<string, WrapperHop | null>();
+  readonly shaping = new Set<string>();
+  /** Per binding and first step, the lane its keys take this pass (`keyLane`). */
+  readonly lanes = new Map<PlaceId, Map<string, KeyLane>>();
+  /** How many computations of the identity layer and collections of marks are running (`settle`, `collectMarks`). */
+  building = 0;
   /** Per projection, the key it copies, or `null` (`copiedKey`). */
   readonly copiedKeys = new Map<PlaceId, Key | null>();
   /** Per value, its chain of property reads of a read, or `null` (`chainOf`). */
@@ -527,7 +544,9 @@ export class Contract {
    * the prefix's one entry and marks nothing whatever the path; the literal holds at `step` one read, of a binding,
    * unguarded and naming no ingress, and nothing else there or below, and every object at its root has `step`; and the
    * read occurrence names no ingress. Every condition is a fact of the program and of the pass's live stores (and its
-   * stops, which forget every position made), so no read of a path below the step differs.
+   * stops, which forget every position made), so no read of a path below the step differs. G3 stage 1: the occurrence's
+   * and the stops' conditions are checked here, live; the program's and the live stores' are the binding's wrapper shape
+   * (`wrapperShape`), frozen for the pass.
    */
   public wrapperHop(read: PlaceId, step: string): WrapperHop | null {
     const { program } = this.pass;
@@ -536,80 +555,7 @@ export class Contract {
     if (occurrence !== undefined && (program.projOf.has(read) || this.ingressOf(read) !== null))
       return null;
     if (this.#stopped.has(binding)) return null;
-    const memoKey = joinParts(binding, step);
-    let hop = this.#hops.get(memoKey);
-    if (hop === undefined) {
-      this.keepText(memoKey.length);
-      hop = this.#hopOf(binding, step);
-      this.#hops.set(memoKey, hop);
-    }
-    return hop;
-  }
-
-  #hopOf(binding: PlaceId, step: string): WrapperHop | null {
-    const { program, definitions, lists, guards } = this.pass;
-    program.work.charge("invSteps");
-    const place = program.places[binding];
-    if (
-      place === undefined ||
-      place.kind.kind !== "binding" ||
-      writtenOf(place.kind) !== null ||
-      program.isHost(binding) ||
-      program.speakerPlaces.has(binding)
-    )
-      return null;
-    const root = keyOf(binding, []);
-    const defs = definitions.byKey.get(root) ?? [];
-    const d = defs[0];
-    if (
-      defs.length !== 1 ||
-      d === undefined ||
-      d.how !== "initializer" ||
-      d.kind !== "whole" ||
-      d.weak ||
-      d.value === undefined ||
-      d.orig !== undefined ||
-      d.loop !== undefined ||
-      !lists.live(d) ||
-      !program.live(d.node) ||
-      program.inBlockCode(d.node) ||
-      !program.hasOf.has(d.value) ||
-      definitions.keysBelow(root).length > 0 ||
-      definitions.loopAdds.has(root) ||
-      definitions.ownedAway(root) ||
-      !guards.untested(binding)
-    )
-      return null;
-    // its declaration's entry, alone and marking nothing, at its root
-    const stores = this.prefixStores(root);
-    const entry = stores.list[0];
-    if (
-      stores.list.length !== 1 ||
-      entry === undefined ||
-      entry.value !== d.value ||
-      entry.at !== undefined ||
-      entry.key !== undefined ||
-      entry.elem !== undefined ||
-      entry.unk !== undefined ||
-      entry.guarded ||
-      entry.ingress !== undefined ||
-      !marksNothing(this, entry.holder) ||
-      stores.subs !== null ||
-      stores.also.length > 0 ||
-      stores.other ||
-      stores.cut
-    )
-      return null;
-    const read = this.literalHop(d.value, step);
-    if (read === null) return null;
-    this.keep(3);
-    return {
-      decl: d,
-      literal: d.value,
-      read: read.read,
-      node: read.node ?? d.node,
-      writer: definitions.writerOf(d),
-    };
+    return wrapperShape(this, binding, step, "hop");
   }
 
   public literalHop(literal: PlaceId, step: string): LoneRead | null {
@@ -712,10 +658,15 @@ export class Contract {
   /** Runs a computation of the identity layer and those it needs on an explicit stack. */
   public settle(work: IdentityWork): void {
     const stack: IdentityWork[] = [work];
-    while (stack.length > 0) {
-      const step = stack.at(-1)!.next();
-      if (step.done === true) stack.pop();
-      else stack.push(step.value());
+    this.building += 1;
+    try {
+      while (stack.length > 0) {
+        const step = stack.at(-1)!.next();
+        if (step.done === true) stack.pop();
+        else stack.push(step.value());
+      }
+    } finally {
+      this.building -= 1;
     }
   }
 

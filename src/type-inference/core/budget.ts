@@ -331,6 +331,11 @@ export class WorkLedger {
     }
   }
 
+  /** Whether a `shared` build is running: its units count as shared once it ends (`own`). */
+  public get sharing(): boolean {
+    return this.#sharing;
+  }
+
   /** The analysis's units outside `shared` builds: what a demand's allowance measures (S3 §5). */
   public get own(): number {
     return this.#total - this.#shared;
