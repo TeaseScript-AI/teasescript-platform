@@ -186,12 +186,15 @@ interface SelectingStore {
  * own property where the receiver holds only objects (and null), the receiver's own steps settled first: by admission's
  * kinds there where it admits any (A2: an unknown or a rejected store after them takes nothing back), else by the
  * earliest deciding value that one of the shallower of these stores sets there by its target settled here, which this
- * pass's definitions still key as an element; a list's or a set's element otherwise, as a read takes it (F11).
+ * pass's definitions still key as an element; a list's or a set's element otherwise, as a read takes it (F11). Each
+ * receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own and bounded by the
+ * demand allowance, and a stopped one decides nothing there (S3 §5).
  */
 function storeTargets(
   program: CoreProgram,
   pass: CorePass,
   admission: Consumers["admission"],
+  decide: (root: PlaceId, path: readonly string[]) => void,
   stores: readonly SelectingStore[],
 ): StoreTargets {
   const out = new Map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>();
@@ -202,7 +205,7 @@ function storeTargets(
   for (const { into, value } of stores) {
     const target = program.targetRoot(into, true, (root, steps, length) => {
       const path = keptSlice(program.work, steps, 0, length);
-      admission.decide(root, path, true);
+      decide(root, path);
       const admitted = admission.admitted(root, path).filter((kind) => kind !== "null");
       return objects(admitted.length > 0 ? admitted : (settled.get(keyOf(root, path)) ?? []));
     });
@@ -427,10 +430,10 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
           last,
           false,
           restarted,
-          (admission) => {
+          (admission, decide) => {
             if (selecting.length === 0 || last) return true;
             used.add(targetsText(targets));
-            const next = storeTargets(program, pass, admission, selecting);
+            const next = storeTargets(program, pass, admission, decide, selecting);
             if (used.has(targetsText(next))) return true;
             asked.next = next;
             return false;

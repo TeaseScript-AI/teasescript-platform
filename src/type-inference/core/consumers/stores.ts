@@ -36,6 +36,8 @@ import {
   storeWarning,
 } from "./warnings.js";
 
+// The stores' obligations (C1): each admitted store's check, a key's decision on demand, a stopped key's marks.
+
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
 
@@ -49,7 +51,12 @@ const writerRank = (writer: Writer | null): number =>
  * pass's work at most doubles (TABLE r4.183). A stopped decision stands for its stores' obligations
  * (`stoppedStores`), whichever pass stopped it.
  */
-function decide(walk: Consumers, root: PlaceId, path: readonly string[]): Decision | null {
+export function decide(
+  walk: Consumers,
+  root: PlaceId,
+  path: readonly string[],
+  lazily = false,
+): Decision | null {
   const ledger = walk.pass.program.work;
   const before = ledger.own;
   const allowance = demandAllowanceFor(walk.pass.program.flow.nodes.length);
@@ -64,7 +71,7 @@ function decide(walk: Consumers, root: PlaceId, path: readonly string[]): Decisi
   walk.deciding = before + allowance;
   let stopped = false;
   try {
-    return walk.admission.decide(root, path);
+    return walk.admission.decide(root, path, lazily);
   } catch (error) {
     if (!(error instanceof DemandExhausted)) throw error;
     stopped = true;

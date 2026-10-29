@@ -26,7 +26,7 @@ import type {
 } from "./consumers/model.js";
 import { operations } from "./consumers/operations.js";
 import { receivers } from "./consumers/receivers.js";
-import { admittedStores } from "./consumers/stores.js";
+import { admittedStores, decide } from "./consumers/stores.js";
 import { cheapDecided } from "./consumers/syntax.js";
 import { speakers, uses } from "./consumers/uses.js";
 import { keyOf, type Definition, type Key } from "./definitions.js";
@@ -119,8 +119,14 @@ export class Consumers {
   finishing = false;
   readonly #last: boolean;
   readonly #rejected: ReadonlyMap<number, ReadonlySet<Key>>;
-  /** Whether the store targets the pass keys by are its admission's own (#1275), asked before the walk. */
-  readonly #ownTargets: (admission: Admission) => boolean;
+  /**
+   * Whether the store targets the pass keys by are its admission's own (#1275), asked before the walk: each receiver's
+   * decision a lazy one of this pass's own (`decide`), bounded by the demand allowance as every decision is.
+   */
+  readonly #ownTargets: (
+    admission: Admission,
+    decide: (root: PlaceId, path: readonly string[]) => void,
+  ) => boolean;
   /** Admission's decisions, rejections and boundary checks (§5, C9). */
   readonly admission: Admission;
   /** The values a consumer answered by the quiet path (§3.3). */
@@ -175,7 +181,10 @@ export class Consumers {
     last = false,
     finishing = false,
     restarted = false,
-    ownTargets: (admission: Admission) => boolean = () => true,
+    ownTargets: (
+      admission: Admission,
+      decide: (root: PlaceId, path: readonly string[]) => void,
+    ) => boolean = () => true,
   ) {
     this.#rejected = rejected;
     this.#last = last;
@@ -381,7 +390,9 @@ export class Consumers {
       this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
       // which a decision stopped is not settled either: the next starts with its key stopped, TABLE r4.180)
-      const own = this.#ownTargets(this.admission);
+      const own = this.#ownTargets(this.admission, (root, path) => {
+        decide(this, root, path, true);
+      });
       this.settled =
         own &&
         (this.#last || sameStores(this.admission.newlyRejected, this.#rejected)) &&
