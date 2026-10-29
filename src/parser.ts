@@ -268,6 +268,16 @@ interface ParsedPart {
   readonly recovered: boolean;
 }
 /**
+ * Whether two sets of storage delimiters hold the same ones: a compact `load` makes a new set each time it is read, so a
+ * part read again inside one is the same context (see `Parser.parseOnce`).
+ */
+function sameStorageDelimiters(
+  left: ReadonlySet<StorageDelimiter>,
+  right: ReadonlySet<StorageDelimiter>,
+): boolean {
+  return left === right || (left.size === right.size && [...left].every((each) => right.has(each)));
+}
+/**
  * The statement ranges from `from` up to `to` in `list`, which only grows. A parser that reuses a part lists its
  * segment rather than a copy of its ranges, so a part nested in others is not copied into each of them.
  */
@@ -430,7 +440,7 @@ export class Parser {
     this.shared = shared;
   }
 
-  /** The statement and command ranges, with those of each reused `say` value, read once without recursion. */
+  /** The statement and command ranges, with those of each part taken over (see `parseOnce`), read once without recursion. */
   public ranges(): {
     readonly statements: readonly StatementRange[];
     readonly commands: readonly CommandRange[];
@@ -720,7 +730,7 @@ export class Parser {
       (part) =>
         part.form === form &&
         part.insideDelimiters === this.insideDelimiters &&
-        part.storageDelimiters === this.storageDelimiters &&
+        sameStorageDelimiters(part.storageDelimiters, this.storageDelimiters) &&
         part.blockEndsCompactInteraction === this.blockEndsCompactInteraction &&
         part.recoveredAtStatementBoundary === this.recoveredAtStatementBoundary,
     );

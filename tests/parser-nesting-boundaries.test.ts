@@ -240,15 +240,25 @@ test("a value that a say parses ahead over is read once, however deeply such val
     const ratio = reads[1]! / reads[0]!;
     assert.ok(ratio < 2.5, `${name}: ${ratio.toFixed(2)} times the work for twice the levels`);
   }
-  // A `say` value inside another, without a block between them.
-  const values = (depth: number) =>
-    parseCountingReads(
-      `let m = ${"say bubble(color: toString(".repeat(depth)}"x"${')) "x"'.repeat(depth)}\n`,
-    );
-  const [small, large] = [values(6), values(12)];
-  assert.deepEqual(large.parsed.diagnostics, []);
-  const ratio = large.reads / small.reads;
-  assert.ok(ratio < 2.5, `say values: ${ratio.toFixed(2)} times the work for twice the levels`);
+  // A `say` value inside another without a block between them, also as the key of a compact `load`, which reads it with
+  // storage delimiters of its own.
+  const nestings = {
+    "say values": ["let m = ", "say bubble(color: toString(", '"x"', ')) "x"'],
+    "say values in loads": [
+      "let m = ",
+      "load say bubble(color: toString(",
+      '"red"',
+      ')) skippable ("red", instant).text, default: "red"',
+    ],
+  };
+  for (const [name, [start, open, inner, close]] of Object.entries(nestings)) {
+    const values = (depth: number) =>
+      parseCountingReads(`${start}${open!.repeat(depth)}${inner}${close!.repeat(depth)}\n`);
+    const [small, large] = [values(6), values(12)];
+    assert.deepEqual(large.parsed.diagnostics, [], name);
+    const ratio = large.reads / small.reads;
+    assert.ok(ratio < 2.5, `${name}: ${ratio.toFixed(2)} times the work for twice the levels`);
+  }
 });
 
 test("the errors in a value that a say parses ahead over are reported once, with their fixes", () => {
