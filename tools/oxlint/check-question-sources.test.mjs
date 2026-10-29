@@ -171,9 +171,10 @@ test("a forwarder that is not exact names its function as a reference (the split
 });
 
 /*
- * Identity (Codex r1 B1, N1 on #1371): a function's owner and a forwarder's target are the declarations their names
- * bind to, read lexically. Each case changes the clean split layout on one axis: the reports it must give (a file, or
- * a message's start), or none.
+ * Identity (Codex r1–r3 on #1371; TABLE r4.182's closed forms): a function's owner and a forwarder's target are proved
+ * only as a top-level declaration of their file, or an unrenamed import from the file declaring it; nothing further is
+ * followed. Each case changes the clean split layout on one axis: the reports it must give (a file, or a message's
+ * start), or none.
  */
 const withoutTypedRead = SPLIT_PART.replace(
   "export function typedRead(walk: Consumers): number {\n  return finishingRead(walk, 0);\n}\n",
@@ -297,6 +298,73 @@ const IDENTITY = [
         "export function wrap(): void {\n  class Consumers {\n    typedRead(): number {\n      return 0;\n    }\n  }\n  void Consumers;\n}\n",
     },
     ["class Consumers is declared 2 times"],
+  ],
+  // (exports, Codex r3 B1: a re-export, or a module's local binding exported under another name, proves nothing)
+  [
+    "a reader whose `Consumers` is another class a module exports under that name",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    {
+      [part("binding")]:
+        'import type { Consumers } from "../consumers.js";\nimport type { Other } from "../../review-other.js";\nexport type Keep = [Consumers, Other];\nexport type { Other as Consumers };\n',
+      [part("redirected")]: reader('import type { Consumers } from "./binding.js";\n'),
+    },
+    [
+      `${part("redirected")}: finishingRead is named only in`,
+      "FINISHING_READERS lists Consumers.typedRead",
+    ],
+  ],
+  [
+    "a reader whose `Consumers` a module re-exports",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    {
+      [part("forward")]: 'export type { Consumers } from "../consumers.js";\n',
+      [part("hop")]: reader('import type { Consumers } from "./forward.js";\n'),
+    },
+    [
+      `${part("hop")}: finishingRead is named only in`,
+      "FINISHING_READERS lists Consumers.typedRead",
+    ],
+  ],
+  [
+    "the facade's function re-exported",
+    SPLIT_CLASS.replace(
+      'import { finishedItems, finishingRead } from "./consumers/finishing.js";',
+      'import { finishingRead } from "./consumers/finishing.js";\nimport { finishedItems } from "./consumers/again.js";',
+    ),
+    SPLIT_PART,
+    { [part("again")]: 'export { finishedItems } from "./finishing.js";\n' },
+    [
+      `${CONSUMERS}: finishedItems is named only in`,
+      `${part("again")}: finishedItems is named only in`,
+    ],
+  ],
+  // (a function outside the class's files, its owner imported from the entry itself)
+  [
+    "a reader outside the class's files",
+    SPLIT_CLASS,
+    withoutTypedRead,
+    {
+      "src/type-inference/core/reader.ts": reader(
+        'import type { Consumers } from "./consumers.js";\n',
+      ).replace("./finishing.js", "./consumers/finishing.js"),
+    },
+    [
+      "src/type-inference/core/reader.ts: finishingRead is named only in",
+      "FINISHING_READERS lists Consumers.typedRead",
+    ],
+  ],
+  // (a property is no site, Codex r3 N1)
+  [
+    "a property reader beside the function of its name",
+    SPLIT_CLASS.replace(
+      "export class Consumers {",
+      "export class Consumers {\n  public typedRead = (value: number): number => finishingRead(this, value);",
+    ),
+    SPLIT_PART,
+    {},
+    [`${CONSUMERS}: finishingRead is named only in`],
   ],
   [
     "the finishing read imported from outside the sources",
