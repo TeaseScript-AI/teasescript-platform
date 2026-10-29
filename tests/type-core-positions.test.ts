@@ -3,13 +3,10 @@ import test from "node:test";
 
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
-import { ingressLeaves, type Item, writerKey } from "../src/type-inference/core/items.js";
 import { withoutPositions } from "../src/type-inference/core/positions.js";
-import { CoreProgram } from "../src/type-inference/core/program.js";
-import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
-import { publishedAnswers, publishedRoute } from "./helpers/type-core-standing.js";
+import { publication } from "./helpers/type-core-oracles.js";
 
 /*
  * G3 3a (TABLE r4.164, r4.178, r4.187): a read through wrappers (`a2 = {q: a1}`, `a2.q.q`) stands one step below its
@@ -79,64 +76,6 @@ const VARIANTS = [
   "every-depth",
 ];
 
-function itemText(item: Item): string {
-  return [
-    item.tag,
-    item.cert,
-    item.reasons,
-    item.writer === null ? "" : writerKey(item.writer),
-    item.context ?? "",
-    item.word ?? "",
-    item.guarded === true ? "g" : "",
-    item.called === true ? "c" : "",
-    item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join("+"),
-  ].join("|");
-}
-
-/** The observed answer at every flow node, with its element and properties where it holds a collection or an object. */
-function observed(analysis: ReturnType<typeof analyseCore>): string {
-  const out: string[] = [];
-  for (const node of analysis.graph.nodes) {
-    const at = analysis.at(node);
-    if (at === null) continue;
-    const tags = new Set(at.items.map((item) => item.tag));
-    out.push(
-      JSON.stringify([
-        node.id,
-        at.route,
-        at.place,
-        at.items.map(itemText),
-        tags.has("list") ? analysis.project(node, "element").map(itemText) : null,
-        tags.has("object")
-          ? [...analysis.properties(node)].map(([name, items]) => [name, items.map(itemText)])
-          : null,
-      ]),
-    );
-  }
-  return out.join("\n");
-}
-
-/** What one source publishes in one order: answers, admitted types, the plan or rejection, the observed answers. */
-function published(source: string, reversed: boolean): string {
-  const files = [{ path: "main.tease", source }];
-  const request = coreRequest(files, GLOBALS);
-  assert.ok(request !== null, "the source parses and resolves");
-  const bindings = new CoreProgram(request).places
-    .filter(({ kind }) => kind.kind === "binding")
-    .map((place) => place.id);
-  const inOrder = <T>(callback: () => T): T =>
-    reversed
-      ? withConsumerOrder(
-          (list) => [...list].reverse(),
-          () => withSolverSeam({ reverseWorklist: true }, callback),
-        )
-      : callback();
-  const analysis = inOrder(() => analyseCore(request));
-  const answers = publishedAnswers(analysis, bindings, ["main.tease"]);
-  const route = inOrder(() => publishedRoute(files, GLOBALS));
-  return [answers.text, route.text, observed(analysis)].join("\n");
-}
-
 test("a read through wrappers publishes the same from its position as from its root, for every variant, in both orders, with the sharing on and off (G3 3a)", () => {
   const differing: string[] = [];
   let runs = 0;
@@ -146,9 +85,11 @@ test("a read through wrappers publishes the same from its position as from its r
         const source = wrapped(depth, variant, leaf);
         for (const reversed of [false, true])
           for (const shared of [true, false]) {
-            const run = (): string => published(source, reversed);
-            const on = shared ? run() : withoutSharing(run);
-            const off = withoutPositions(() => (shared ? run() : withoutSharing(run)));
+            const files = [{ path: "main.tease", source }];
+            const mode = { reversed, unshared: !shared };
+            const on = publication(files, mode, GLOBALS);
+            assert.ok(on !== null, "the source parses and resolves");
+            const off = withoutPositions(() => publication(files, mode, GLOBALS));
             runs += 1;
             if (on !== off)
               differing.push(

@@ -50,7 +50,7 @@ import {
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`, TABLE r4.85) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
- * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-standing.ts`).
+ * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
  * Any difference fails the test. On CI (GitHub Actions sets `CI`) the fixtures' records and the written-domain matrices'
  * sources (whose own tests run each source in both orders) run in the source order only, every other program in both;
  * a local `npm run check` runs them all in both orders (the orchestrator's decision on the CI job's time, 2026-10-26,

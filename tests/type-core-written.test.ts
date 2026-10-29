@@ -46,7 +46,7 @@ import {
  * (not whether the route still leaves it out: the slice grows). Each exact source is analysed once per mode and planned
  * in each where its row is executable, else in the source order alone; the two orders' plans are compared whole, and
  * each distinct plan runs its host values once; every row that holds the source is compared with that. The same
- * analyses and plans give the sharing differential (TABLE r4.72, `type-core-standing.ts`) of the sources of the four
+ * analyses and plans give the sharing differential (TABLE r4.72, `type-core-oracles.ts`) of the sources of the four
  * matrices checked so, which `type-core-sharing.test.ts` runs for every other program.
  * V30 §13's union rule is a compile error with no plan: its examples in the decision layer and the candidate route's
  * rejection; `UNION_RULE_MATRIX` at the check of written types the analysis reports (`writtenTypeErrors`, which reads
