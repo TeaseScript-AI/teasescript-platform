@@ -287,7 +287,7 @@ test("a range given where a list is needed names toList in the fix", () => {
   );
   // A range the compiler cannot see fails with the same fix when the script runs.
   const join =
-    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a range. To add the numbers of a range, write list + range.toList().";
+    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a range. To add the numbers of a range to the list, convert the range with toList() first.";
   assert.deepEqual(failure(`${PICK}let x = [0]\nx += pick(1..=3)\nexit`)?.slice(0, 2), [
     "TSR009",
     join,
@@ -295,7 +295,7 @@ test("a range given where a list is needed names toList in the fix", () => {
   assert.deepEqual(failure(`${PICK}say [0] + pick(1..=3)\nexit`)?.slice(0, 2), ["TSR009", join]);
   assert.deepEqual(failure(`${PICK}say pick(1..=3) + [0]\nexit`)?.slice(0, 2), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are a range and a list. To add the numbers of a range, write range.toList() + list.",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are a range and a list. To add the numbers of a range to the list, convert the range with toList() first.",
   ]);
   assert.deepEqual(failure(`${PICK}let x = [0]\nx.addAll(pick(1..=3))\nexit`)?.slice(0, 2), [
     "TSV043",

@@ -394,11 +394,11 @@ test("+ on values known only when the script runs joins them or fails with the f
   );
   assert.deepEqual(failure(`${DYNAMIC}say "Score: " + dynamic(5)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a whole number (integer). Put the value in the text instead, as in \"${first}${second}\".",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are text (string) and a whole number (integer). Put the value in the text instead.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nsay items + dynamic(2)\nexit`), [
     "TSR009",
-    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, use add(value), or write list + [value] for a new list.",
+    "'+' joins two texts or two lists and adds numbers or durations, but these are a list and a whole number (integer). To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let items = [1]\nitems.addAll(dynamic(2))\nexit`), [
     "TSV043",
@@ -433,5 +433,54 @@ test("text and lists joined with += and addAll resume from every checkpoint", ()
       'say name + " " + queue.join()',
       "exit",
     ].join("\n"),
+  );
+});
+
+test("a fix that the runtime gives for '+' says it in words, as it knows the values but not how the source writes them", () => {
+  const base = "'+' joins two texts or two lists and adds numbers or durations, but these are";
+  const values = {
+    text: 'dynamic("a")',
+    number: "dynamic(5)",
+    list: "dynamic([1])",
+    range: "dynamic(1..3)",
+    set: "dynamic(set[1])",
+  } as const;
+  const fixes = {
+    text: " Put the value in the text instead.",
+    listFirst:
+      " To add one element, put the element in brackets for a new list, or call the add method on a line of its own.",
+    listLast: " Put the element in brackets for a new list.",
+    range: " To add the numbers of a range to the list, convert the range with toList() first.",
+    set: " Join sets with union(), or copy a set into a list with toList() first.",
+  };
+  // Each pair in both orders.
+  for (const [left, right, fix] of [
+    ["text", "number", fixes.text],
+    ["number", "text", fixes.text],
+    ["list", "number", fixes.listFirst],
+    ["number", "list", fixes.listLast],
+    ["list", "range", fixes.range],
+    ["range", "list", fixes.range],
+    ["list", "set", fixes.set],
+    ["set", "list", fixes.set],
+  ] as const) {
+    const source = `${DYNAMIC}say ${values[left]} + ${values[right]}\nexit`;
+    const [code, message] = failure(source);
+    assert.equal(code, "TSR009", source);
+    assert.ok(message?.startsWith(base) && message.endsWith(fix), `${source}\n${message}`);
+  }
+  // A date and time that moves by elapsed time, and an absolute one that moves by calendar units.
+  assert.deepEqual(failure(`${DYNAMIC}say dynamic(toDateTime("2026-09-07T16:45")) + 3 h\nexit`), [
+    "TSR009",
+    "A date and time has no time zone, so it cannot move by elapsed time. Convert the value with toAbsoluteDateTime() first and back with toDateTime() after, or use calendar units to keep the clock time.",
+  ]);
+  assert.deepEqual(
+    failure(
+      `${DYNAMIC}say dynamic(toAbsoluteDateTime("2026-10-04T12:00:00Z")) + 1 calendar day\nexit`,
+    ),
+    [
+      "TSR009",
+      "An absolute date and time has no calendar. Convert the value with toDateTime() first and back with toAbsoluteDateTime() after.",
+    ],
   );
 });

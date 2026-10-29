@@ -75,19 +75,21 @@ export function joinedValue(
   );
 }
 
-/** What to write instead of `+` on text or a list and a value of another kind; the left operand names what was meant. */
+/**
+ * What to write instead of `+` on text or a list and a value of another kind; the left operand names what was meant. The
+ * runtime knows the values but not how the source writes them, so the fix is in words.
+ */
 function joinFix(left: SerializableRuntimeValue, right: SerializableRuntimeValue): string {
   if (isSet(left) || isSet(right))
     return " Join sets with union(), or copy a set into a list with toList() first.";
-  if (isList(left) && isRange(right))
-    return " To add the numbers of a range, write list + range.toList().";
+  if ((isList(left) && isRange(right)) || (isRange(left) && isList(right)))
+    return " To add the numbers of a range to the list, convert the range with toList() first.";
   if (isList(left))
-    return " To add one element, use add(value), or write list + [value] for a new list.";
-  if (isRange(left) && isList(right))
-    return " To add the numbers of a range, write range.toList() + list.";
-  if (typeof left !== "string" && isList(right)) return " Write [value] + list for a new list.";
+    return " To add one element, put the element in brackets for a new list, or call the add method on a line of its own.";
+  if (typeof left !== "string" && isList(right))
+    return " Put the element in brackets for a new list.";
   return isVisibleScalar(typeof left === "string" ? right : left)
-    ? ' Put the value in the text instead, as in "${first}${second}".'
+    ? " Put the value in the text instead."
     : "";
 }
 

@@ -304,7 +304,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
     [list.snapshot.failure?.code, list.snapshot.failure?.message],
     [
       "TSR058",
-      "toString(...) cannot convert a list to text (string). Use .join() to combine its elements as text.",
+      "toString(...) cannot convert a list to text (string). Call join() on the list to combine its elements as text.",
     ],
   );
 });
@@ -361,4 +361,41 @@ test("conversions are checkpoint and resume equivalent", () => {
       "exit",
     ].join("\n"),
   );
+});
+
+test("a conversion that the runtime refuses shows its fix with the argument as the source writes it, and otherwise in words", () => {
+  const dynamic = "function dynamic(value) {\n    return value\n}\n";
+  const values =
+    'let items = dynamic([1, 2])\nlet tags = dynamic(set["a"])\nlet prices = dynamic(dict{"tea": 2})\n' +
+    'let n = dynamic(1)\nlet t = dynamic("yes")\nlet p = { items: dynamic([3]) }\n';
+  const failed = (source: string) =>
+    runValidSource(`${dynamic}${values}say ${source}\nexit`).snapshot.failure?.message;
+  // A name or a member: the code replaces the call, and runs.
+  for (const [call, fix] of [
+    ["toString(items)", "items.join()"],
+    ["toString(p.items)", "p.items.join()"],
+    ["toString(tags)", "tags.toList().join()"],
+    ["toString(prices)", "prices.values.join()"],
+    ["toBoolean(n)", "n != 0"],
+    ["toBoolean(t)", 't == "yes"'],
+  ] as const) {
+    assert.ok(failed(call)?.includes(`'${fix}'`), `${call}: ${failed(call)}`);
+    const pasted = runValidSource(`${dynamic}${values}say ${fix}\nexit`);
+    assert.equal(pasted.snapshot.failure, null, fix);
+  }
+  // Another argument, such as a call: the fix in words.
+  for (const [call, fix] of [
+    ["toString(dynamic([1]))", "Call join() on the list to combine its elements as text."],
+    [
+      'toString(dynamic(set["a"]))',
+      "Call toList() and then join() on the set to combine its elements as text.",
+    ],
+    [
+      'toString(dynamic(dict{"tea": 2}))',
+      "Call join() on the values of the dict to combine them as text.",
+    ],
+    ["toBoolean(dynamic(1))", "Compare the number with 0 instead."],
+    ['toBoolean(dynamic("yes"))', "Compare the text with '==' instead."],
+  ] as const)
+    assert.ok(failed(call)?.endsWith(` ${fix}`), `${call}: ${failed(call)}`);
 });
