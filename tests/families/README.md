@@ -60,6 +60,12 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
 - The made-units probe (`stops/uncharged-making/`) attributes code to source lines. Across trees whose line numbers
   differ, compare per site by a stable key (function name and step), not by line.
 
+## The oracle library's next step
+
+`tests/helpers/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
+library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.
+
 ## Inventory
 
 Default outputs retain complete driver construction; archived inputs that no longer resolve are omitted unless
