@@ -2,6 +2,8 @@ import { compileProjectWithBackend } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { type Answers, coreResult } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { ingressLeaves, type Item, writerKey } from "../../src/type-inference/core/items.js";
+import { propertyStep } from "../../src/type-inference/core/program.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
 import type { SourceFile } from "./type-core-analysis.js";
@@ -61,6 +63,54 @@ export function publishedAnswers(
     record: JSON.stringify({ record, serialized }),
     sited,
   };
+}
+
+/**
+ * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
+ * order of the items in an answer and of the kinds in an admitted type. Every binding's admitted type and decider site
+ * at its root and at each known property one level down, and every occurrence's answer (each item with its writer,
+ * context and ingress leaves), route, place and obligations.
+ */
+export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
+  const itemText = (item: Item): string =>
+    [
+      item.tag,
+      item.cert,
+      item.reasons,
+      item.writer === null ? "" : writerKey(item.writer),
+      item.context ?? "",
+      item.word ?? "",
+      `${item.guarded === true ? "g" : ""}${item.called === true ? "c" : ""}`,
+      item.fan ?? "",
+      item.ingress === undefined ? "" : ingressLeaves(item.ingress).map(writerKey).join("+"),
+    ].join("|");
+  const admitted = (place: PlaceId, path: readonly string[]): unknown => {
+    const type = answers.place(place, path).admitted;
+    return type.by === "decided"
+      ? {
+          by: type.by,
+          kinds: [...type.kinds].sort(),
+          decider: type.decider,
+          inherited: type.inherited,
+        }
+      : type.by === "written"
+        ? { by: type.by, kinds: [...type.kinds].sort() }
+        : type;
+  };
+  const places = bindings.map((place) => [
+    place,
+    admitted(place, []),
+    [...answers.placeProperties(place, [])]
+      .sort()
+      .map((name) => [name, admitted(place, [propertyStep(name)])]),
+  ]);
+  const occurrences = answers.graph.nodes.flatMap((node) => {
+    const at = answers.at(node);
+    return at === null
+      ? []
+      : [[node.id, at.route, at.place, at.items.map(itemText).sort(), at.obligations]];
+  });
+  return JSON.stringify({ places, occurrences });
 }
 
 /** The candidate route's part: its plan and diagnostics of `files`, or the construct it rejects them at (`text`). */
