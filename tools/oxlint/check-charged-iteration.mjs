@@ -58,7 +58,7 @@ const CONSTANT = [
   ...core("dict-operations.ts", ["dictMethod"]),
   ...core("list-methods.ts", ["listMethod"]),
   ...core("type-inference/core/budget.ts", ["WorkLedger.charge", "keepText", "textUnits"]),
-  ...core("type-inference/core/contract.ts", ["operatorOf"]),
+  ...core("type-inference/core/contract/operations.ts", ["operatorOf"]),
   ...core("type-inference/core/definitions.ts", [
     "DefinitionIndex.declaringCallable",
     "DefinitionIndex.keysBelow",

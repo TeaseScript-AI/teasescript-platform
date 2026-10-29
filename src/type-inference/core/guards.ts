@@ -654,7 +654,7 @@ export class GuardIndex {
 
   /**
    * Every step of a tested key's path: a read at a path none of them is on is marked (§3.2) as one at any other such
-   * path, so a selection answers an absent property by one of these alike (`Contract.#selectionPieces`, #1278).
+   * path, so a selection answers an absent property by one of these alike (`selectionPieces`, #1278).
    */
   public testedSteps(): ReadonlySet<string> {
     this.#relative();

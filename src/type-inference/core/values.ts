@@ -732,7 +732,7 @@ export class Values {
 
   /**
    * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
-   * root, where F19 gives host data whatever the path (`operationValue`; #1203: `Contract.#loadsBelow`).
+   * root, where F19 gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
    */
   *#operationItems(
     c: ValueConstraint,
