@@ -3,35 +3,40 @@ import { relative, resolve, sep } from "node:path";
 import { Project, ts } from "ts-morph";
 
 /**
- * The derivation inventory's guard (TABLE r4.138, r4.143), read from the syntax tree with its types. `OBLIGATION_SITES`
+ * The derivation inventory's guard (TABLE r4.138, r4.143), syntactic and scoped by name (TABLE r4.182). `OBLIGATION_SITES`
  * lists every derivation of admission's that creates an obligation; a stop before admission settled runs each in the
- * fresh pass. What a derivation of `Admission`'s or `Consumers`' is, is decided in one place, `derivationsOf`: a member
- * of the class with a body (a method, a getter and setter pair as one, a property holding a function), or a function of
- * the class's files (the entry, and the parts in the folder beside it) with a parameter whose type is the class or
- * names it (a union, an intersection, a type parameter's constraint), declared or held by a variable. A public method
- * that only forwards to the function of its name (`return f(this, a, b);` or `f(this, a, b);`, its own parameters in
- * order, none with an initializer, no decorator or other modifier) is that function. Wrappers that change nothing
- * (parentheses, `satisfies`, `as`, `!`) and a member's static name (quoted, or a computed literal) are seen through;
- * anything else the model has not shown is reported as unproved rather than exempted. The check rejects:
- * - a name that names more than one derivation, and a member holding a function under no static name;
- * - an `Admission` derivation that creates an obligation itself (a `boundaryCheck(…)` call, a push onto `readChecks`, a
- *   call of a parameter named `error`) and is not an inventory entry, and such a creation outside every derivation;
- * - a call from a consumer derivation that creates an obligation (one that records a diagnostic or a check through the
- *   instance, or calls one that does) into an `Admission` derivation, through the instance, directly, through an
- *   alias, `call` or `apply`, that is neither an inventory entry nor a read `READS` lists with why it creates none; and
- *   from such a consumer derivation, a call into the admission files that reaches no derivation, a call on the
- *   `Admission` instance the check cannot resolve, and a derivation of admission's read as a value; and any such call,
- *   or one handing the instance on, outside every consumer derivation;
- * - an inventory entry whose `runs` names no derivation, or one the fresh pass does not call;
+ * fresh pass. A derivation of `Admission`'s or `Consumers`' is a member of the class with a body (a method, a getter and
+ * setter pair as one, a property holding a function), or a function of its files (the entry, and the parts in the
+ * folder beside it) with a parameter typed as the class: a method whose body moved there, known by its declaration. A
+ * public method whose one statement forwards to the function of its name is that function. The check recognises a
+ * closed list of forms: a direct call of a derivation, `R.m(…)` or `f(…)` as written; inside a derivation of
+ * admission's, a push `R.readChecks.push(…)`, a call `boundaryCheck(…)` or a call of a parameter named `error` (each
+ * creating an obligation); inside a consumer derivation, a push onto a recording array (`diagnostics`, `deferred`,
+ * `checks`), a conditional of them included; admission's own code reading its own state; a dot read of a listed getter;
+ * and the reads `LISTED_READS` lists. Every other reference to a guarded member by its name (every `Admission` member,
+ * `readChecks` and the recording arrays among them, `boundaryCheck`, an `error` parameter, a derivation moved to a
+ * function: a destructuring, an element access, a value, an alias, a namespace member), anywhere in
+ * `src/type-inference/core/`, is reported as unproved, whatever flows from it. The check rejects:
+ * - a name that names more than one derivation;
+ * - an `Admission` derivation that creates an obligation and is not an inventory entry, and a creation outside every
+ *   derivation;
+ * - a call from a consumer derivation that creates an obligation (one that records a diagnostic or a check, or calls
+ *   one that does, directly) into an `Admission` derivation that is neither an inventory entry nor a read `READS` lists
+ *   with why it creates none; a call of an `Admission` member that is no derivation; a recording outside every consumer
+ *   derivation;
+ * - an inventory entry whose `runs` names other than one derivation across admission and the consumers, or one the
+ *   fresh pass does not call directly; a fresh pass that is not one derivation;
  * - an `AdmissionHost` member, inherited ones included, that is not a host read `HOST_READS` lists with why it creates
  *   no obligation (a derivation returns what it leaves open to the consumers, which record it), so no new callback
  *   records one for admission whatever its wiring (Codex r23, r24 T1).
- * A listed host read is trusted by its reason, as a listed read is: a side effect inside `read` or `run` that records an
- * obligation is a review matter against that reason, not this check's (TABLE r4.152 (3)). Data flow past these forms (a
- * function value passed on and called elsewhere) is outside a syntactic guard (TABLE r4.165), a review matter.
+ * A listed host read or read is trusted by its reason (TABLE r4.152 (3)). A reference the syntax does not name (an
+ * inherited member reached through an inferred wrapper, a generic receiver, a computed name, a value passed through an
+ * aggregate or a copy) is outside this check, a review matter against r4.182, as r4.165 states it for the question
+ * sources.
  */
 const ADMISSION = "src/type-inference/core/admission.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
+const CORE = "src/type-inference/core";
 
 /** A split file's files: the entry, which holds the class, and its parts in the folder beside it, where there is one. */
 function splitFiles(root, entry) {
@@ -91,6 +96,52 @@ export const HOST_READS = new Map([
   ["read", "the finishing read after a stop: an answer"],
 ]);
 
+/**
+ * The members read, not called, outside admission's own code, by the forms the inventory recognises (TABLE r4.182):
+ * [member, form, file, why it creates no obligation]. A form is `length` (its `.length`), `for-of` (iterated), `spread`
+ * (spread into an array), `operand` (an operand of arithmetic or a comparison), `variable` (a variable's whole initializer),
+ * `argument` (a call's argument), `property` (an object literal's property value), or `.<method>` (a call of the
+ * value's own method). `readChecks` and the recording arrays are listed here too: any other form of them is unproved.
+ */
+export const LISTED_READS = [
+  ["readChecks", "length", "admission.ts", "how many read checks a unit made: a count"],
+  ["readChecks", "length", "consumers.ts", "how many read checks a unit made: a count"],
+  ["readChecks", "for-of", "answers.ts", "the published read checks, read after the walk"],
+  [
+    "newlyRejected",
+    "variable",
+    "answers.ts",
+    "the stores this pass rejected, which A6's next pass takes",
+  ],
+  [
+    "newlyRejected",
+    "argument",
+    "consumers.ts",
+    "the stores this pass rejected, compared before a finishing walk",
+  ],
+  ["newlyRejected", ".get", "consumers.ts", "whether a store was rejected: a test"],
+  [
+    "boundaries",
+    ".clear",
+    "consumers.ts",
+    "the published boundary checks, dropped before a finishing walk",
+  ],
+  ["boundaries", ".values", "answers.ts", "the published boundary checks, read after the walk"],
+  ["boundaries", ".get", "answers.ts", "a key's published boundary checks, read after the walk"],
+  [
+    "rejections",
+    "operand",
+    "consumers.ts",
+    "a count of rejections, summed into a unit's emitted count",
+  ],
+  ["diagnostics", "length", "consumers.ts", "how many diagnostics a unit recorded: a count"],
+  ["diagnostics", "spread", "answers.ts", "the recorded diagnostics, read after the walk"],
+  ["deferred", "length", "answers.ts", "whether checks were deferred: a count"],
+  ["deferred", "argument", "answers.ts", "the deferred checks, read after the walk"],
+  ["deferred", ".map", "answers.ts", "the deferred checks, read after the walk"],
+  ["deferred", "property", "answers.ts", "the deferred checks, published after the walk"],
+];
+
 export function checkObligationInventory(root) {
   const project = new Project({
     tsConfigFilePath: resolve(root, "tsconfig.json"),
@@ -98,20 +149,26 @@ export function checkObligationInventory(root) {
   });
   const admission = admissionFiles(root);
   const consumers = consumersFiles(root);
-  for (const file of [...admission, ...consumers]) project.addSourceFileAtPath(resolve(root, file));
+  const core = readdirSync(resolve(root, CORE), { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".ts"))
+    .sort()
+    .map((name) => `${CORE}/${name.split(sep).join("/")}`);
+  for (const file of core) project.addSourceFileAtPath(resolve(root, file));
   project.resolveSourceFileDependencies();
   return obligationInventoryDiagnostics(project.getProgram().compilerObject, root, {
     admission,
     consumers,
+    scope: core,
     reads: READS,
     hostReads: HOST_READS,
+    listedReads: LISTED_READS,
   });
 }
 
 /**
  * @param {ts.Program} program
  * @param {string} root
- * @param {{ admission: readonly string[], consumers: readonly string[], reads: ReadonlyMap<string, string>, hostReads: ReadonlyMap<string, string> }} files
+ * @param {{ admission: readonly string[], consumers: readonly string[], scope?: readonly string[], reads: ReadonlyMap<string, string>, hostReads: ReadonlyMap<string, string>, listedReads?: readonly (readonly string[])[] }} files
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function obligationInventoryDiagnostics(program, root, files) {
@@ -143,6 +200,10 @@ export function obligationInventoryDiagnostics(program, root, files) {
   };
   const admissionFiles = files.admission.map(sourceOf);
   const consumerFiles = files.consumers.map(sourceOf);
+  const scopeFiles = [
+    ...new Set([...admissionFiles, ...consumerFiles, ...(files.scope ?? []).map(sourceOf)]),
+  ];
+  const listedReads = files.listedReads ?? LISTED_READS;
   const admissionClass = declarationIn(
     admissionFiles,
     (node) => ts.isClassDeclaration(node) && node.name?.text === "Admission",
@@ -154,39 +215,17 @@ export function obligationInventoryDiagnostics(program, root, files) {
     "class Consumers",
   );
 
-  // (wrappers that change nothing: parentheses, `satisfies`, `as`, a type assertion, `!`)
-  const unwrap = (node) => {
-    while (
-      node !== undefined &&
-      (ts.isParenthesizedExpression(node) ||
-        ts.isSatisfiesExpression(node) ||
-        ts.isAsExpression(node) ||
-        ts.isTypeAssertionExpression(node) ||
-        ts.isNonNullExpression(node))
-    )
-      node = node.expression;
-    return node;
-  };
-  // a literal's text, the static key of an element access or a computed name; else null (a variable's name is none)
-  const literalKey = (expression) => {
-    const key = unwrap(expression);
+  // a declaration's static name: an identifier's or a private name's, a quoted one or a computed literal's; else null
+  const nameOf = (declaration) => {
+    const name = declaration.name;
+    if (name === undefined) return ts.isConstructorDeclaration(declaration) ? "constructor" : null;
+    if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteralLike(name))
+      return name.text;
+    const key = ts.isComputedPropertyName(name) ? name.expression : undefined;
     return key !== undefined && (ts.isStringLiteralLike(key) || ts.isNumericLiteral(key))
       ? key.text
       : null;
   };
-  // a declared name's static key: an identifier's or a private name's text, a quoted one, or a computed literal's
-  const keyText = (name) => {
-    if (name === undefined) return null;
-    if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) return name.text;
-    return ts.isComputedPropertyName(name) ? literalKey(name.expression) : literalKey(name);
-  };
-  // a declaration's static name, else null
-  const nameOf = (declaration) =>
-    declaration.name === undefined
-      ? ts.isConstructorDeclaration(declaration)
-        ? "constructor"
-        : null
-      : keyText(declaration.name);
   const calls = (node) => {
     const out = [];
     const visit = (at) => {
@@ -199,7 +238,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
   // the function a declaration is or holds: a method's, an accessor's, a function's; a property's or a variable's value
   const functionOf = (declaration) => {
     if (ts.isPropertyDeclaration(declaration) || ts.isVariableDeclaration(declaration)) {
-      const value = unwrap(declaration.initializer);
+      const value = declaration.initializer;
       return value !== undefined && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))
         ? value
         : undefined;
@@ -219,92 +258,25 @@ export function obligationInventoryDiagnostics(program, root, files) {
   };
   const typedAs = (node, cls) =>
     node !== undefined && mentions(checker.getTypeAtLocation(node), cls);
-  const callable = (node) => checker.getTypeAtLocation(node).getCallSignatures().length > 0;
-
-  /**
-   * The member access an expression is, seen through wrappers and destructuring (`const { y: f } = x`): its object and
-   * its static key (`null` for a key no literal names), or `undefined` for no member access. (A local alias of an array
-   * is followed where it is pushed onto, `pushesOnto`; a value read is weighed where it is read.)
-   */
-  const accessOf = (expression, seen = new Set()) => {
-    const node = unwrap(expression);
-    if (node === undefined || seen.has(node)) return undefined;
-    seen.add(node);
-    if (ts.isPropertyAccessExpression(node))
-      return { object: node.expression, key: node.name.text, node };
-    if (ts.isElementAccessExpression(node))
-      return { object: node.expression, key: literalKey(node.argumentExpression), node };
-    if (!ts.isIdentifier(node)) return undefined;
-    const declaration = checker.getSymbolAtLocation(node)?.declarations?.[0];
-    if (declaration === undefined) return undefined;
-    if (
-      ts.isBindingElement(declaration) &&
-      ts.isObjectBindingPattern(declaration.parent) &&
-      ts.isVariableDeclaration(declaration.parent.parent) &&
-      declaration.parent.parent.initializer !== undefined
-    )
-      return {
-        object: declaration.parent.parent.initializer,
-        key: keyText(declaration.propertyName ?? declaration.name),
-        node: declaration,
-      };
-    return undefined;
-  };
-  // the callee a call invokes: its expression, past wrappers and a callable's own `call` or `apply`
-  const invoked = (call) => {
-    const callee = unwrap(call.expression);
-    const access =
-      ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
-        ? accessOf(callee)
-        : undefined;
-    return access !== undefined &&
-      (access.key === "call" || access.key === "apply") &&
-      callable(access.object)
-      ? unwrap(access.object)
-      : callee;
-  };
-  // whether an expression is called where it stands: a call's callee, or its `call` or `apply` called
-  const isCalled = (node) => {
-    let outer = node;
-    while (
-      outer.parent !== undefined &&
-      unwrap(outer.parent) === unwrap(node) &&
-      outer.parent !== node
-    )
-      outer = outer.parent;
-    const use = outer.parent;
-    if (use === undefined) return false;
-    if (ts.isCallExpression(use) && use.expression === outer) return true;
-    const access =
-      (ts.isPropertyAccessExpression(use) || ts.isElementAccessExpression(use)) &&
-      use.expression === outer
-        ? accessOf(use)
-        : undefined;
-    return (
-      access !== undefined &&
-      (access.key === "call" || access.key === "apply") &&
-      ts.isCallExpression(use.parent) &&
-      use.parent.expression === use
-    );
+  // the declaration a name stands for, an import followed to what it imports
+  const declarationOf = (name) => {
+    let symbol = checker.getSymbolAtLocation(name);
+    if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias)
+      symbol = checker.getAliasedSymbol(symbol);
+    return symbol?.declarations?.[0];
   };
 
   /**
-   * A class's derivations, each by its declaration (Codex r1 B1, r2 B1, B2, r3 B1, N1, r4 N1): a member of the class
-   * with a body (a method, a getter and setter pair as one, a property holding a function), or a function of its files
-   * with a parameter typed as the class, declared or held by a variable. A public method that only forwards to such a
-   * function of its name is that function. Anything not shown so is a derivation of its own; every name names one.
+   * A class's derivations, each by its declaration: a member of the class with a body (a method, a getter and setter
+   * pair as one, a property holding a function), or a function of its files with a parameter typed as the class (a
+   * method whose body moved there), declared or held by a variable. A public method whose one statement is
+   * `return f(this, a, b);` or `f(this, a, b);`, its own parameters in order, none with an initializer, no decorator or
+   * other modifier, `f` that function of its name, is that function. Every name names one derivation.
    */
   const derivationsOf = (cls, sourceFiles, label) => {
     const declarations = [];
     for (const member of cls.members)
-      if (functionOf(member) !== undefined) {
-        if (nameOf(member) === null)
-          report(
-            member,
-            `${label} holds a function under no static name: name it so the inventory can.`,
-          );
-        else declarations.push(member);
-      }
+      if (functionOf(member) !== undefined && nameOf(member) !== null) declarations.push(member);
     const consider = (declaration) => {
       const fn = functionOf(declaration);
       if (
@@ -321,30 +293,10 @@ export function obligationInventoryDiagnostics(program, root, files) {
           for (const declaration of node.declarationList.declarations) consider(declaration);
       });
     const known = new Set(declarations);
-    // the declarations a name or member access resolves to, followed through an import alias
-    const declarationAt = (node) => {
-      node = unwrap(node);
-      // (an element access names a member only by a literal key)
-      if (ts.isElementAccessExpression(node) && literalKey(node.argumentExpression) === null)
-        return [];
-      let symbol = checker.getSymbolAtLocation(
-        ts.isPropertyAccessExpression(node)
-          ? node.name
-          : ts.isElementAccessExpression(node)
-            ? unwrap(node.argumentExpression)
-            : node,
-      );
-      if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias)
-        symbol = checker.getAliasedSymbol(symbol);
-      return symbol?.declarations ?? [];
-    };
-    // (the forwarding is proved past wrappers and through a static name, its side-effect and parameter checks kept)
     const forwardsTo = (member) => {
       if (
         !ts.isMethodDeclaration(member) ||
-        member.parent !== cls ||
-        nameOf(member) === null ||
-        ts.isPrivateIdentifier(member.name) ||
+        !ts.isIdentifier(member.name) ||
         (ts.getModifiers(member) ?? []).some(
           (modifier) => modifier.kind !== ts.SyntaxKind.PublicKeyword,
         ) ||
@@ -361,15 +313,11 @@ export function obligationInventoryDiagnostics(program, root, files) {
       const only = statements.length === 1 ? statements[0] : undefined;
       const call =
         only !== undefined && (ts.isReturnStatement(only) || ts.isExpressionStatement(only))
-          ? unwrap(only.expression)
+          ? only.expression
           : undefined;
-      if (
-        call === undefined ||
-        !ts.isCallExpression(call) ||
-        !ts.isIdentifier(unwrap(call.expression))
-      )
+      if (call === undefined || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression))
         return undefined;
-      const [instance, ...rest] = call.arguments.map(unwrap);
+      const [instance, ...rest] = call.arguments;
       if (
         instance?.kind !== ts.SyntaxKind.ThisKeyword ||
         rest.length !== member.parameters.length ||
@@ -380,9 +328,9 @@ export function obligationInventoryDiagnostics(program, root, files) {
         )
       )
         return undefined;
-      const fn = declarationAt(call.expression).find((declaration) => known.has(declaration));
+      const fn = declarationOf(call.expression);
       const first = fn === undefined ? undefined : functionOf(fn)?.parameters[0];
-      return fn !== undefined &&
+      return known.has(fn) &&
         fn.parent !== cls &&
         nameOf(fn) === nameOf(member) &&
         first !== undefined &&
@@ -419,36 +367,48 @@ export function obligationInventoryDiagnostics(program, root, files) {
           `${label}.${nameOf(declaration)} names ${named.length} derivations: an inventory name names one, so rename all but one.`,
         );
     }
-    // the derivation a declaration is part of, its identity
-    const derivationOfDeclarations = (found) => {
-      const declaration = found.find((candidate) => known.has(candidate));
-      return declaration === undefined ? undefined : identity.get(declaration);
-    };
     return {
       derivations: [...parts.keys()],
-      // every derivation of a name
       namedAll: (name) => byName.get(name) ?? [],
-      // whether a node lies inside one of a derivation's declarations
-      within: (node) => {
-        for (let at = node; at !== undefined; at = at.parent) if (known.has(at)) return true;
-        return false;
+      // the derivation a declaration is part of
+      of: (declaration) => (known.has(declaration) ? identity.get(declaration) : undefined),
+      // the declaration of a derivation a node lies in, the innermost
+      around: (node) => {
+        for (let at = node; at !== undefined; at = at.parent) if (known.has(at)) return at;
+        return undefined;
       },
-      // the calls in a derivation's every declaration, a setter's beside its getter's
-      callsIn: (derivation) => parts.get(derivation).flatMap((declaration) => calls(declaration)),
       nodesIn: (derivation) => parts.get(derivation),
-      // the derivation a call invokes, through the instance or directly, an import alias, a static member name, `call`
-      // or `apply`, wrappers seen through; `undefined` for none
-      calleeOf: (call) => derivationOfDeclarations(declarationAt(invoked(call))),
-      // the derivation a name or member access denotes, wherever it stands
-      denoted: (node) => derivationOfDeclarations(declarationAt(node)),
-      declarationsAt: declarationAt,
+      parametersOf: (derivation) =>
+        parts.get(derivation).flatMap((declaration) => [...functionOf(declaration).parameters]),
+      callsIn: (derivation) => parts.get(derivation).flatMap((declaration) => calls(declaration)),
     };
   };
 
   const admission = derivationsOf(admissionClass, admissionFiles, "Admission");
   const consumer = derivationsOf(consumersClass, consumerFiles, "Consumers");
-  const admissionTyped = (node) => typedAs(node, admissionClass);
-  const consumersTyped = (node) => typedAs(node, consumersClass);
+  const admissionFileSet = new Set(admissionFiles);
+  // admission's own code: the class, and its derivations moved to functions
+  const inAdmissionCode = (node) =>
+    admission.around(node) !== undefined ||
+    (() => {
+      for (let at = node; at !== undefined; at = at.parent) if (at === admissionClass) return true;
+      return false;
+    })();
+
+  /**
+   * The direct callee of a call (TABLE r4.182's closed forms): `R.m(…)` or `f(…)`, the callee a member access or a
+   * name as written, no wrapper, no `call` or `apply`; the declaration it stands for, an unaliased import followed.
+   */
+  const directCallee = (call) => {
+    const callee = call.expression;
+    if (ts.isPropertyAccessExpression(callee)) return declarationOf(callee.name);
+    if (ts.isIdentifier(callee)) return declarationOf(callee);
+    return undefined;
+  };
+  const admissionDerivationOf = (declaration) =>
+    declaration === undefined ? undefined : admission.of(declaration);
+  const consumerDerivationOf = (declaration) =>
+    declaration === undefined ? undefined : consumer.of(declaration);
 
   // the inventory: OBLIGATION_SITES' entries, by their method and the derivation the fresh pass runs
   const entries = new Map();
@@ -457,7 +417,9 @@ export function obligationInventoryDiagnostics(program, root, files) {
       if (!ts.isVariableStatement(node)) return;
       for (const declaration of node.declarationList.declarations) {
         if (declaration.name.getText() !== "OBLIGATION_SITES") continue;
-        let list = unwrap(declaration.initializer);
+        let list = declaration.initializer;
+        while (list !== undefined && (ts.isAsExpression(list) || ts.isSatisfiesExpression(list)))
+          list = list.expression;
         if (list === undefined || !ts.isArrayLiteralExpression(list)) continue;
         for (const element of list.elements) {
           if (!ts.isObjectLiteralExpression(element)) continue;
@@ -477,210 +439,287 @@ export function obligationInventoryDiagnostics(program, root, files) {
     });
   if (entries.size === 0) report(admissionClass, "OBLIGATION_SITES lists no derivation.");
 
-  // a push onto an array an instance holds under one of `keys`, by any spelling: a literal key, a local alias, a
-  // conditional; an array or a method no literal names, on such an instance, counts too, unproved (`readChecks` on any
-  // object, as before)
-  const READ_CHECKS = ["readChecks"];
-  const pushesOnto = (call, keys, instanceTyped) => {
-    const method = accessOf(invoked(call));
-    if (method === undefined || (method.key !== "push" && method.key !== null)) return false;
-    const targets = [];
-    const collect = (target, seen = new Set()) => {
-      target = unwrap(target);
-      if (target === undefined || seen.has(target)) return;
-      seen.add(target);
-      if (ts.isConditionalExpression(target)) {
-        collect(target.whenTrue, seen);
-        collect(target.whenFalse, seen);
-        return;
-      }
-      if (ts.isIdentifier(target)) {
-        const declaration = checker.getSymbolAtLocation(target)?.declarations?.[0];
-        if (
-          declaration !== undefined &&
-          ts.isVariableDeclaration(declaration) &&
-          ts.isIdentifier(declaration.name) &&
-          declaration.initializer !== undefined
-        ) {
-          collect(declaration.initializer, seen);
-          return;
-        }
-      }
-      targets.push(target);
-    };
-    collect(method.object);
-    return targets.some((target) => {
-      const array = accessOf(target);
-      if (array === undefined) return false;
-      if (array.key === null) return instanceTyped(array.object);
-      return keys.includes(array.key) && (keys === READ_CHECKS || instanceTyped(array.object));
-    });
+  /*
+   * The guarded members, by symbol: every `Admission` member (`readChecks` the creation channel among them), and
+   * `Consumers`' recording arrays; `boundaryCheck`; a parameter named `error` of a function in admission's files; and
+   * every derivation of admission's moved to a function. Each reference to one, wherever it stands in the scope, is in
+   * a recognised form or is reported as unproved, by the name it contains, whatever flows from it (TABLE r4.182).
+   */
+  const RECORDS = ["diagnostics", "deferred", "checks"];
+  const guardedMember = (declaration) =>
+    declaration !== undefined &&
+    ((declaration.parent === admissionClass && nameOf(declaration) !== null) ||
+      (declaration.parent === consumersClass && RECORDS.includes(nameOf(declaration))));
+  const isBoundaryCheck = (declaration) =>
+    declaration !== undefined &&
+    ts.isFunctionDeclaration(declaration) &&
+    declaration.name?.text === "boundaryCheck" &&
+    admissionFileSet.has(declaration.getSourceFile());
+  const isErrorParameter = (declaration) =>
+    declaration !== undefined &&
+    ts.isParameter(declaration) &&
+    ts.isIdentifier(declaration.name) &&
+    declaration.name.text === "error" &&
+    admissionFileSet.has(declaration.getSourceFile());
+  const labelOf = (declaration) =>
+    declaration.parent === consumersClass
+      ? `Consumers.${nameOf(declaration)}`
+      : declaration.parent === admissionClass || admission.of(declaration) !== undefined
+        ? `Admission.${nameOf(declaration)}`
+        : isErrorParameter(declaration)
+          ? "an error parameter"
+          : nameOf(declaration);
+  const baseName = (sourceFile) => sourceFile.fileName.split("/").pop();
+  // the listed read form a dot reference `R.m` stands in, else null
+  const readForm = (access) => {
+    const parent = access.parent;
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === access)
+      return parent.name.text === "length"
+        ? "length"
+        : ts.isCallExpression(parent.parent) && parent.parent.expression === parent
+          ? `.${parent.name.text}`
+          : null;
+    if (ts.isForOfStatement(parent) && parent.expression === access) return "for-of";
+    if (ts.isSpreadElement(parent)) return "spread";
+    if (
+      ts.isBinaryExpression(parent) &&
+      [
+        ts.SyntaxKind.PlusToken,
+        ts.SyntaxKind.MinusToken,
+        ts.SyntaxKind.LessThanToken,
+        ts.SyntaxKind.GreaterThanToken,
+        ts.SyntaxKind.LessThanEqualsToken,
+        ts.SyntaxKind.GreaterThanEqualsToken,
+        ts.SyntaxKind.EqualsEqualsEqualsToken,
+        ts.SyntaxKind.ExclamationEqualsEqualsToken,
+      ].includes(parent.operatorToken.kind)
+    )
+      return "operand";
+    if (
+      ts.isVariableDeclaration(parent) &&
+      parent.initializer === access &&
+      ts.isIdentifier(parent.name)
+    )
+      return "variable";
+    if (ts.isCallExpression(parent) && parent.arguments.includes(access)) return "argument";
+    if (ts.isPropertyAssignment(parent) && parent.initializer === access) return "property";
+    return null;
+  };
+  const listed = (name, form, sourceFile) =>
+    listedReads.some(
+      ([member, at, file]) => member === name && at === form && file === baseName(sourceFile),
+    );
+  // a push onto `R.m`, or onto a conditional of such arrays: the push call, else undefined
+  const pushOf = (access) => {
+    let at = access;
+    while (ts.isConditionalExpression(at.parent) && at.parent.condition !== at) at = at.parent;
+    while (ts.isParenthesizedExpression(at.parent)) at = at.parent;
+    const method = at.parent;
+    return ts.isPropertyAccessExpression(method) &&
+      method.expression === at &&
+      method.name.text === "push" &&
+      ts.isCallExpression(method.parent) &&
+      method.parent.expression === method
+      ? method.parent
+      : undefined;
   };
 
-  // 1. an obligation created: a `boundaryCheck(…)` call, a push onto `readChecks`, a call of a parameter named `error`
-  const creates = (call) => {
-    const callee = invoked(call);
-    if (ts.isIdentifier(callee))
-      return (
-        callee.text === "boundaryCheck" ||
-        admission
-          .declarationsAt(callee)
-          .some((declaration) => ts.isParameter(declaration) && nameOf(declaration) === "error")
-      );
-    return pushesOnto(call, READ_CHECKS, admissionTyped);
-  };
+  // every reference in the scope, classified: what it creates or records, what it calls, or what is unproved
+  const creations = []; // [the call, the admission derivation around it, or undefined]
+  const recordings = []; // [the push, the consumer derivation around it, or undefined]
+  const admissionCalls = []; // [the call, the admission derivation called, the consumer derivation around it]
+  const readsAsked = new Set();
+  const unproved = (node, declaration, form) =>
+    report(
+      node,
+      `Unproved: ${labelOf(declaration)} is named in a form the inventory does not recognise (${form}): use a listed form, or list it.`,
+    );
+  for (const sourceFile of scopeFiles) {
+    const visit = (node) => {
+      if (ts.isTypeNode(node)) return;
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        const key = ts.isPropertyAccessExpression(node) ? node.name : node.argumentExpression;
+        const declaration = declarationOf(key);
+        // (a moved derivation or `boundaryCheck` reached as a namespace's member)
+        if (
+          declaration !== undefined &&
+          declaration.parent !== admissionClass &&
+          (admission.of(declaration) !== undefined || isBoundaryCheck(declaration))
+        )
+          unproved(node, declaration, "a namespace member");
+        else if (guardedMember(declaration)) {
+          const name = nameOf(declaration);
+          const callee = ts.isCallExpression(node.parent) && node.parent.expression === node;
+          const push = ts.isPropertyAccessExpression(node) ? pushOf(node) : undefined;
+          const form = ts.isElementAccessExpression(node)
+            ? "an element access"
+            : (readForm(node) ?? "a value");
+          if (ts.isElementAccessExpression(node)) unproved(node, declaration, form);
+          else if (declaration.parent === consumersClass) {
+            if (push !== undefined) recordings.push([push, consumer.around(node)]);
+            else if (!listed(name, form, sourceFile)) unproved(node, declaration, form);
+          } else if (name === "readChecks") {
+            if (push !== undefined) creations.push([push, admission.around(node)]);
+            else if (!listed(name, form, sourceFile)) unproved(node, declaration, form);
+          } else if (inAdmissionCode(node));
+          else if (callee) {
+            const derivation = admissionDerivationOf(declaration);
+            if (derivation === undefined)
+              report(
+                node,
+                `Unproved: Admission.${name} is called but is no derivation the inventory can name: make it one.`,
+              );
+            else admissionCalls.push([node.parent, derivation, consumer.around(node)]);
+          } else if (files.reads.has(name) && ts.isAccessor(declaration)) {
+            // (a listed getter read: a dot read of a listed read)
+            readsAsked.add(name);
+            admissionCalls.push([node, admission.of(declaration), consumer.around(node)]);
+          } else if (!listed(name, form, sourceFile)) unproved(node, declaration, form);
+        }
+        // (the object is visited; the member's name is this reference)
+        visit(node.expression);
+        if (ts.isElementAccessExpression(node)) visit(node.argumentExpression);
+        return;
+      }
+      if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+        const key = node.propertyName ?? node.name;
+        const literal = ts.isComputedPropertyName(key) ? key.expression : key;
+        const name =
+          ts.isIdentifier(literal) || ts.isStringLiteralLike(literal) ? literal.text : null;
+        const property =
+          name === null ? undefined : checker.getTypeAtLocation(node.parent).getProperty(name);
+        const declaration = property?.declarations?.[0];
+        if (guardedMember(declaration)) unproved(node, declaration, "a destructuring");
+      } else if (
+        ts.isIdentifier(node) &&
+        !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) &&
+        // (an aliased import is named once, by what it imports)
+        !(
+          ts.isImportSpecifier(node.parent) &&
+          node.parent.propertyName !== undefined &&
+          node.parent.name === node
+        )
+      ) {
+        const declaration = declarationOf(node);
+        const named =
+          isBoundaryCheck(declaration) ||
+          isErrorParameter(declaration) ||
+          (declaration !== undefined &&
+            admission.of(declaration) !== undefined &&
+            declaration.parent !== admissionClass);
+        const ownName =
+          declaration !== undefined &&
+          (declaration.name === node ||
+            (ts.isImportSpecifier(node.parent) && node.parent.propertyName === undefined));
+        if (named && !ownName) {
+          const callee = ts.isCallExpression(node.parent) && node.parent.expression === node;
+          if (callee && (isBoundaryCheck(declaration) || isErrorParameter(declaration)))
+            creations.push([node.parent, admission.around(node)]);
+          else if (callee)
+            admissionCalls.push([node.parent, admission.of(declaration), consumer.around(node)]);
+          else
+            unproved(
+              node,
+              declaration,
+              ts.isImportSpecifier(node.parent)
+                ? "an import alias"
+                : ts.isExportSpecifier(node.parent)
+                  ? "an export"
+                  : "a value",
+            );
+        }
+      }
+      node.forEachChild(visit);
+    };
+    visit(sourceFile);
+  }
+
+  // 1. an Admission derivation that creates an obligation itself must be listed; a creation outside every derivation
+  // is unproved
   const direct = new Map();
-  for (const derivation of admission.derivations) {
+  for (const [call, around] of creations) {
+    const derivation = around === undefined ? undefined : admission.of(around);
+    if (derivation === undefined) {
+      report(
+        call,
+        "An obligation is created outside every derivation of admission's: move it into one the inventory can name.",
+      );
+      continue;
+    }
     const name = nameOf(derivation);
-    if (!admission.callsIn(derivation).some(creates)) continue;
+    if (direct.has(name)) continue;
     direct.set(name, derivation);
     if (!entries.has(name))
       report(derivation, `Admission.${name} creates an obligation; list it in OBLIGATION_SITES.`);
   }
-  // (and outside every derivation: unproved, so no form is exempt)
-  for (const sourceFile of admissionFiles)
-    for (const call of calls(sourceFile))
-      if (creates(call) && !admission.within(call))
-        report(
-          call,
-          "An obligation is created outside every derivation of admission's: move it into one the inventory can name.",
-        );
-
   // (a listed read creates none directly)
   for (const name of files.reads.keys())
     if (direct.has(name))
       report(direct.get(name), `Admission.${name} creates an obligation; it is no read.`);
 
-  // 2. the consumer derivations that create an obligation: those that record a diagnostic or a check through the
-  // instance (`this`, a parameter or any alias of it typed as the class, a field of it by any spelling), and their
-  // callers
-  const RECORDS = ["diagnostics", "deferred", "checks"];
-  const recordsHere = (derivation) =>
-    consumer.callsIn(derivation).some((call) => pushesOnto(call, RECORDS, consumersTyped));
-  const creating = new Set(consumer.derivations.filter(recordsHere));
+  // 2. the consumer derivations that create an obligation: those that record a diagnostic or a check, and, through
+  // direct calls, their callers and the consumer derivations they call
+  const creating = new Set();
+  for (const [push, around] of recordings)
+    if (around === undefined)
+      report(
+        push,
+        "Unproved: a diagnostic or a check is recorded outside every consumer derivation: record it in one.",
+      );
+    else creating.add(consumer.of(around));
+  // (a consumer derivation's direct calls of others, and its dot reads of a getter, which run it)
+  const directCalls = (derivation) => {
+    const out = consumer
+      .callsIn(derivation)
+      .map((call) => consumerDerivationOf(directCallee(call)))
+      .filter((callee) => callee !== undefined);
+    for (const declaration of consumer.nodesIn(derivation)) {
+      const visit = (node) => {
+        if (ts.isPropertyAccessExpression(node)) {
+          const read = declarationOf(node.name);
+          if (read !== undefined && ts.isGetAccessorDeclaration(read)) {
+            const getter = consumerDerivationOf(read);
+            if (getter !== undefined) out.push(getter);
+          }
+        }
+        node.forEachChild(visit);
+      };
+      visit(declaration);
+    }
+    return out;
+  };
   for (let grown = true; grown;) {
     grown = false;
     for (const derivation of consumer.derivations)
       if (
         !creating.has(derivation) &&
-        consumer.callsIn(derivation).some((call) => creating.has(consumer.calleeOf(call)))
+        directCalls(derivation).some((callee) => creating.has(callee))
       ) {
         creating.add(derivation);
         grown = true;
       }
   }
-  // (and the consumer derivations those call, whatever records the obligation: `#decide` asks admission's decision)
   for (let grown = true; grown;) {
     grown = false;
     for (const derivation of [...creating])
-      for (const call of consumer.callsIn(derivation)) {
-        const callee = consumer.calleeOf(call);
-        if (callee !== undefined && !creating.has(callee)) {
+      for (const callee of directCalls(derivation))
+        if (!creating.has(callee)) {
           creating.add(callee);
           grown = true;
         }
-      }
   }
-
-  /**
-   * What a subtree does with admission, each by its node (the one place that classifies it): a call of an `Admission`
-   * derivation (`call`, with the derivation); and, unproved, a call on an `Admission` instance that reaches no
-   * derivation, though TypeScript may declare it (`opaque`), the instance handed to a call the model does not follow
-   * (`handed`), and an `Admission` callable read as a value: a derivation, or an instance's member, by any spelling
-   * (`value`).
-   */
-  const admissionUses = (root) => {
-    const out = [];
-    const visit = (node) => {
-      if (ts.isCallExpression(node)) {
-        const reached = admission.calleeOf(node);
-        const callee = invoked(node);
-        const access =
-          ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
-            ? accessOf(callee)
-            : undefined;
-        if (reached !== undefined) out.push({ node, kind: "call", derivation: reached });
-        else if (access !== undefined && admissionTyped(access.object))
-          out.push({ node, kind: "opaque", name: access.key ?? "[a computed key]" });
-        else if (
-          consumer.calleeOf(node) === undefined &&
-          node.arguments.some((argument) => admissionTyped(argument))
-        )
-          out.push({ node, kind: "handed" });
-      } else if (
-        (ts.isIdentifier(node) ||
-          ts.isPropertyAccessExpression(node) ||
-          ts.isElementAccessExpression(node)) &&
-        !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) &&
-        !ts.isImportSpecifier(node.parent) &&
-        !ts.isExportSpecifier(node.parent) &&
-        !isCalled(node)
-      ) {
-        const denoted = admission.denoted(node);
-        const access = ts.isIdentifier(node) ? undefined : accessOf(node);
-        // (a getter of admission's runs where it is read: a call of its derivation)
-        if (denoted !== undefined)
-          out.push(
-            ts.isAccessor(denoted)
-              ? { node, kind: "call", derivation: denoted }
-              : { node, kind: "value", name: nameOf(denoted) },
-          );
-        else if (
-          access !== undefined &&
-          admissionTyped(access.object) &&
-          (access.key === null || callable(node))
-        )
-          out.push({ node, kind: "value", name: access.key ?? "[a computed key]" });
-      } else if (
-        ts.isBindingElement(node) &&
-        ts.isObjectBindingPattern(node.parent) &&
-        ts.isVariableDeclaration(node.parent.parent) &&
-        admissionTyped(node.parent.parent.initializer)
-      ) {
-        const key = keyText(node.propertyName ?? node.name);
-        if (key === null || admission.namedAll(key).length > 0 || callable(node))
-          out.push({ node, kind: "value", name: key ?? "[a computed key]" });
-      }
-      node.forEachChild(visit);
-    };
-    visit(root);
-    return out;
-  };
-  const UNPROVED = {
-    opaque: (use) =>
-      `calls Admission.${use.name}, which is no derivation the inventory can weigh: make it one, or call one.`,
-    handed: () =>
-      "hands the Admission instance to a call the inventory cannot follow: call admission's derivation itself.",
-    value: (use) =>
-      `reads Admission.${use.name} as a value: call it so the inventory can see the call.`,
-  };
-  const asked = new Set();
-  for (const derivation of creating) {
-    const label = `Consumers.${nameOf(derivation)}`;
-    for (const declaration of consumer.nodesIn(derivation))
-      for (const use of admissionUses(declaration)) {
-        if (use.kind !== "call") {
-          report(use.node, `${label} ${UNPROVED[use.kind](use)}`);
-          continue;
-        }
-        const name = nameOf(use.derivation);
-        asked.add(name);
-        if (!entries.has(name) && !files.reads.has(name))
-          report(
-            use.node,
-            `${label} calls Admission.${name}: list it in OBLIGATION_SITES or as a read with why it creates no obligation.`,
-          );
-      }
+  const asked = new Set(readsAsked);
+  for (const [call, derivation, around] of admissionCalls) {
+    const from = around === undefined ? undefined : consumer.of(around);
+    if (from === undefined || !creating.has(from)) continue;
+    const name = nameOf(derivation);
+    asked.add(name);
+    if (!entries.has(name) && !files.reads.has(name))
+      report(
+        call,
+        `Consumers.${nameOf(from)} calls Admission.${name}: list it in OBLIGATION_SITES or as a read with why it creates no obligation.`,
+      );
   }
-
-  // (and outside every consumer derivation, anything it does with admission is unproved, so no form is exempt)
-  for (const sourceFile of consumerFiles)
-    for (const use of admissionUses(sourceFile))
-      if (!consumer.within(use.node))
-        report(
-          use.node,
-          "An Admission call or read is made outside every consumer derivation: make it in one the inventory can weigh.",
-        );
 
   // (a listed read the consumers no longer ask is stale)
   for (const name of files.reads.keys())
@@ -688,7 +727,7 @@ export function obligationInventoryDiagnostics(program, root, files) {
       report(admissionClass, `READS lists Admission.${name}, which no consumer method asks.`);
 
   // 3. the fresh pass calls each listed derivation: the one derivation `runs` names across admission and the
-  // consumers, by identity, through the instance or directly
+  // consumers, by identity, a direct call
   const freshes = [...consumer.namedAll("#freshStores"), ...consumer.namedAll("freshStores")];
   if (freshes.length !== 1)
     report(consumersClass, `The fresh pass is ${freshes.length} derivations: it must be one.`);
@@ -698,7 +737,11 @@ export function obligationInventoryDiagnostics(program, root, files) {
       ? []
       : consumer
           .callsIn(fresh)
-          .flatMap((call) => [consumer.calleeOf(call), admission.calleeOf(call)])
+          .map(directCallee)
+          .flatMap((declaration) => [
+            consumerDerivationOf(declaration),
+            admissionDerivationOf(declaration),
+          ])
           .filter((derivation) => derivation !== undefined),
   );
   for (const [method, { node, runs }] of entries) {
