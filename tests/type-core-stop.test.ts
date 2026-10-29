@@ -22,6 +22,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { keptErrors, stopIdentity } from "./helpers/type-core-oracles.js";
+import { runGlobals } from "./helpers/type-core-route.js";
 import {
   NAMED_EXCEPTIONS,
   stopProblems,
@@ -2391,6 +2392,65 @@ test("a stopped decision stays undecided at every reader, also after a settled p
         );
     }
   }
+});
+
+/**
+ * Astra r1's B2 on #1437: a stop changes nothing no mark of it names. Below a decision stopped at its demand allowance
+ * the unstopped publication owes no boundary, so the stopped one reads no further there (`againstOf`); and
+ * after a stop `toJson` owes the check of a value the stop left unread, its mark owning the one the unstopped walk made
+ * for the regex below each argument. Each mode's settled phase ends and its last stop before admission settled (whose
+ * fresh pass reads no property names: a literal argument, which it reads as an object), without a demand allowance and
+ * with the witness's
+ * 257, which stops a decision below `root`; where it stops the analysis itself (TABLE r4.183, the reversed orders) there
+ * is no unstopped analysis to compare. A host value fits where the unstopped plan runs it: without sharing, 257 decides
+ * the element `regex`, which C9 checks the host value against.
+ */
+test("a stop adds no boundary below a stopped decision and keeps toJson's checks (#1437)", () => {
+  const sources = [
+    "let root={value:{a:[hostValue otherwise /r/],b:1}}\nlet first=root\nlet second=first\n" +
+      "say toJson(first)\nsay toJson(second)\nsay toJson(root)\nexit\n",
+    "let n = 1\nsay toJson({a: [hostValue otherwise /r/], b: n})\nexit\n",
+  ];
+  let compared = 0;
+  for (const source of sources)
+    for (const demand of [null, 257])
+      for (const reversed of [false, true])
+        for (const sharing of [true, false]) {
+          const inMode = <T>(make: () => T): T => {
+            const ordered = (): T =>
+              reversed
+                ? withSolverSeam({ reverseWorklist: true }, () =>
+                    withConsumerOrder((list) => [...list].reverse(), make),
+                  )
+                : make();
+            const shared = (): T => (sharing ? ordered() : withoutSharing(ordered));
+            return demand === null ? shared() : withTestDemandAllowance(demand, shared);
+          };
+          const unstopped = stopRunIn(inMode, source);
+          if (unstopped.answers.budget.exhausted !== null) continue;
+          const inputs = [host(1), host(null)];
+          const fits = (globals: Globals): boolean =>
+            runGlobals(unstopped.result.plan!, globals).failure === null;
+          // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
+          const stops: (readonly [string, number])[] = [
+            ...inMode(() => settledEnds(source)),
+          ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
+          stops.push(["unsettled", inMode(() => lastUnsettled(source))]);
+          for (const [phase, allowance] of stops) {
+            compared += 1;
+            assert.deepEqual(
+              stopProblems({
+                unstopped,
+                stopped: stopRunIn(inMode, source, allowance),
+                fitting: inputs.filter(fits),
+                violating: inputs.filter((globals) => !fits(globals)),
+              }),
+              [],
+              `${source} demand: ${demand}, reversed: ${reversed}, sharing: ${sharing}, ${phase} @${allowance}`,
+            );
+          }
+        }
+  assert.equal(compared, 54);
 });
 
 /**

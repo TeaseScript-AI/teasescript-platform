@@ -13,7 +13,7 @@ import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
 import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import type { FlowNode } from "../flow-graph.js";
-import type { Item, ItemTag } from "../items.js";
+import { REASON, STOPPED, type Item, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import { propertyNames } from "../property-names.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
@@ -246,11 +246,25 @@ function writable(tag: ItemTag): boolean {
 }
 
 /**
+ * `writable` for an item the walk reads: after a stop, a value the stop left unread (`STOPPED`) owes its check, its
+ * mark owning the one the unstopped analysis may make there, as every consumer's (D4 a′, Astra r1's B2 on #1437).
+ */
+function writes(walk: Consumers, item: Item): boolean {
+  return walk.pass.program.work.stopped !== null &&
+    item.tag === "unknown" &&
+    (item.reasons & REASON.budget) !== 0
+    ? false
+    : writable(item.tag);
+}
+
+/**
  * What `toJson`'s walk found, the class's (Codex r6): the first path in it that holds a kind it cannot write; the items
  * there and the root's, with their writers, are each read's own, read where it stands.
  */
 interface JsonProof {
   readonly path: readonly string[];
+  /** After a stop, an object there whose properties the walk could not ask: its content is unread (`STOPPED`). */
+  readonly unread?: true;
 }
 
 /**
@@ -266,7 +280,8 @@ const JSON_PROOFS = new WeakMap<Consumers, Map<string, JsonProof | null>>();
  * C13, Astra's G1: what `toJson` writes, each value its argument holds at every depth, a list's and a set's elements, a
  * dict's values and an object's properties (V30 §13): the ordered predicate over the known kinds at each path, the first
  * path in the walk that offends, at the argument. An unknown is external data, which JSON held, or the runtime's to check
- * where it writes it, so it owes nothing here; a path past the read-depth limit is the runtime's too.
+ * where it writes it, so it owes nothing here, but for a value a stop left unread (`writes`); a path past the read-depth
+ * limit is the runtime's too.
  */
 export function jsonArgument(
   walk: Consumers,
@@ -300,9 +315,14 @@ export function jsonArgument(
   if (proof === null) return;
   const { path } = proof;
   const root = domainItems(walk, value, node, []);
-  const items = path.length === 0 ? root : domainItems(walk, value, node, path);
+  const items =
+    proof.unread === true
+      ? STOPPED
+      : path.length === 0
+        ? root
+        : domainItems(walk, value, node, path);
   const at = ownSpan(walk, value, c.site);
-  const bad = items.filter((item) => !writable(item.tag));
+  const bad = items.filter((item) => !writes(walk, item));
   if (bad.length === 0) return;
   // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
   const holders = path.length === 0 ? [] : [...new Set(root.map((item) => item.tag))];
@@ -336,7 +356,7 @@ export function jsonArgument(
         `check that toJson can write ${text} when it runs`,
       ),
       rule,
-      items.filter((found) => writable(found.tag)),
+      items.filter((found) => writes(walk, found)),
     );
 }
 
@@ -349,18 +369,22 @@ function jsonProof(walk: Consumers, value: PlaceId, node: FlowNode): JsonProof |
     if (path.length > READ_DEPTH_LIMIT) continue;
     program.work.charge("checks");
     const items = path.length === 0 ? root : domainItems(walk, value, node, path);
-    if (items.some((item) => !writable(item.tag))) return { path };
+    if (items.some((item) => !writes(walk, item))) return { path };
     // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order; each path
     // charged as it is made, one step longer than its owner's)
     const below: (readonly string[])[] = [];
     // (a dict's values are its `element`, as a list's)
     if (items.some((item) => item.tag === "list" || item.tag === "set" || item.tag === "dict"))
       below.push(keptSteps(program.work, path, ["element"]));
-    if (items.some((item) => item.tag === "object"))
+    if (items.some((item) => item.tag === "object")) {
+      // (a walk that asks nothing reads no property names: after a stop, before admission settled, the content is
+      // unread and owes its check, as `STOPPED` does; nested past the limit unstopped, it is the runtime's)
+      if (walk.asksNothing() && program.work.stopped !== null) return { path, unread: true };
       for (const name of walk.asksNothing()
         ? []
         : propertyNames(walk.pass, (work) => walk.solve(work), { value, path }))
         below.push(keptSteps(program.work, path, [propertyStep(name)]));
+    }
     for (let index = below.length - 1; index >= 0; index -= 1) pending.push(below[index]!);
   }
   return null;
