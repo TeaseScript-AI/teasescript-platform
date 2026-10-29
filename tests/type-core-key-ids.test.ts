@@ -265,6 +265,11 @@ test("a cursor outlives its pass's stops and forgets, its family's lane too, whi
   }
   solver.forget([named.key]);
   assert.equal(keyIdOf(contract, box, ["shell", "n"]), id);
+  // a pass that starts with the binding stopped (the pass after a stop): the lane the shape's, the answer vetoed
+  const next = narrowingPass(source);
+  next.contract.stop(box, ["shell"]);
+  assert.equal(keyLane(next.contract, box, "shell"), "cursor");
+  assert.equal(next.contract.wrapperHop(box, "shell"), null);
   // a path first asked now is a new id
   assert.ok(keyIdPath(keyIdOf(contract, box, ["shell", "fresh"])) >= made);
 });
