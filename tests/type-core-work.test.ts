@@ -1168,16 +1168,19 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
   const nest = (k: number, leaf: string): string =>
     Array.from({ length: k }).reduce<string>((inner) => `[${inner}, "other"][0]`, leaf);
   const program = (source: string): SourceFile[] => [{ path: "main.tease", source }];
-  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean])[] = [
+  // (each shape: its name, its program, whether its records grow linearly, whether it reads a variable's stop)
+  const shapes: readonly (readonly [string, (k: number) => SourceFile[], boolean, boolean])[] = [
     [
       "nested selections of a variable",
       (k) => program(`let seed = "origin"\nlet out = ${nest(k, "seed")}\nsay out\nexit\n`),
+      true,
       true,
     ],
     [
       "nested selections of a literal",
       (k) => program(`let out = ${nest(k, '"origin"')}\nsay out\nexit\n`),
       true,
+      false,
     ],
     [
       "a chain of wrappers read through every link",
@@ -1195,11 +1198,12 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
           ].join("\n") + "\n",
         ),
       false,
+      true,
     ],
   ];
   const apart: readonly WorkCounter[] = ["readerRecords", "stopAsks"];
   const over: string[] = [];
-  for (const [shape, make, linear] of shapes) {
+  for (const [shape, make, linear, asks] of shapes) {
     const sizes = linear ? [32, 64] : [8, 16];
     const family: WorkFamily = { name: shape, measures: shape, program: make };
     const at = sizes.map((k) => sized(family, k));
@@ -1220,6 +1224,7 @@ test("what a stop forgets by is counted apart: linear on nested selections, belo
           );
           const records = apart.map((counter) => budget.apart.get(counter) ?? 0);
           assert.ok(records[0]! > 0, `${where}: its readers are recorded`);
+          if (asks) assert.ok(records[1]! > 0, `${where}: its asks are recorded`);
           if (records[0]! + records[1]! > (budget.counts.get("yields") ?? 0))
             over.push(
               `${where}: ${records.join(" + ")} records, ${budget.counts.get("yields")} reads`,
