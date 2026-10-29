@@ -12,6 +12,7 @@ import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
 import { keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
+import { keptKey } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
@@ -279,8 +280,9 @@ export function jsonArgument(
     walk.skip(value);
     return;
   }
-  // (a read proved before with the same snapshot is looked up; any other value is proved where it stands)
-  const snapshot = walk.pass.contract.readSnapshot(value);
+  // (a read proved before with the same snapshot is looked up, an alias's by its source's; any other value is proved
+  // where it stands)
+  const snapshot = walk.pass.contract.readSnapshot(contentSource(walk, value));
   let proofs = JSON_PROOFS.get(walk);
   if (proofs === undefined) JSON_PROOFS.set(walk, (proofs = new Map()));
   const key = snapshot === null ? null : `${walk.asksNothing() ? "n" : ""}${snapshot}`;
@@ -328,6 +330,46 @@ export function jsonArgument(
       rule,
       items.filter((found) => writable(found.tag)),
     );
+}
+
+/**
+ * The read whose content a value is (the owner's review P1, aliases): through a variable's one store, a whole copy of
+ * another read that dominates every read of it and that nothing at or below the variable changes (`let copy = root`, no
+ * store into `copy` or below it), to that read, as often as the copies chain; any other value is its own. A read the
+ * script narrows or guards is its own, its answer not its source's.
+ */
+function contentSource(walk: Consumers, value: PlaceId): PlaceId {
+  const { program, definitions, guards, values } = walk.pass;
+  let current = value;
+  for (;;) {
+    program.work.charge("checks");
+    const binding = program.occurrenceOf.get(current);
+    const node = program.occNode.get(current) ?? null;
+    if (
+      binding === undefined ||
+      node === null ||
+      program.places[binding]?.kind.kind !== "binding" ||
+      program.isHost(binding) ||
+      guards.guardedRead(current) ||
+      values.narrowingMark(current) !== ""
+    )
+      return current;
+    const key = keptKey(program.work, binding, []);
+    const stores = definitions.byKey.get(key) ?? [];
+    const store = stores.length === 1 ? stores[0]! : null;
+    if (
+      store === null ||
+      store.kind !== "whole" ||
+      store.weak ||
+      store.value === undefined ||
+      store.how !== "initializer" ||
+      !program.dom.dominates(store.node, node) ||
+      definitions.keysBelow(key).some((below) => (definitions.byKey.get(below)?.length ?? 0) > 0) ||
+      !program.occurrenceOf.has(store.value)
+    )
+      return current;
+    current = store.value;
+  }
 }
 
 /** `toJson`'s walk of a value at `node` (`jsonArgument`): its first offending path, or `null` where it writes all. */
