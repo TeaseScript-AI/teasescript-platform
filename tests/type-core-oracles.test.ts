@@ -14,19 +14,20 @@ import { MODES, stoppedRecord, stopSet } from "./helpers/type-core-oracles.js";
 
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
 
-test("the stop-set comparison reports a change confined to a stopped analysis's diagnostic code", () => {
+test("the stop-set comparison reports a change confined to a stopped diagnostic's code", () => {
   const source = 'let counts: integer[] = ["red", "blue"]\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null);
   const stopped = withTestDemandAllowance(16, () => analyseCore(request));
   assert.ok((stopped.budget.counts.get("stopPasses") ?? 0) > 0, "the analysis stops at 16");
-  const error = stopped.diagnostics.find((d) => d.code === "TSV041");
-  assert.ok(error !== undefined && error.class === "compile-error");
-  const recoded = { ...error, code: "TSV044" as const };
-  // (the same answers but that one error's code: what a defect confined to the stop would publish)
+  const deferred = stopped.diagnostics.find((d) => d.code === "TSV041");
+  assert.ok(deferred !== undefined, "the stop defers the store's check");
+  // EVIDENCE: invariant: only the code changes; the diagnostic keeps the shape the analysis gave it.
+  const recoded = { ...deferred, code: "TSV044" } as typeof deferred;
+  // (the same answers but that one diagnostic's code: what a defect confined to the stop would publish)
   const changed: Answers = {
     ...stopped,
-    diagnostics: stopped.diagnostics.map((d) => (d === error ? recoded : d)),
+    diagnostics: stopped.diagnostics.map((d) => (d === deferred ? recoded : d)),
   };
   assert.notEqual(stoppedRecord(changed, ["main.tease"]), stoppedRecord(stopped, ["main.tease"]));
 });
