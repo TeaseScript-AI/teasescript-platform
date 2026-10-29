@@ -34,6 +34,17 @@ export const checks = ["publication", "stops"]; // default ["publication"]
 
 Sources may use the host globals `hostValue`, `hostOther` and `hostInit`.
 
+## Kept outside the repository
+
+Data, indexed here and not imported: run each from its own folder on the desktop worker.
+
+- `desktop:~/work/evidence/corpus/copies/astra-1423/`: Astra's r1 of #1423 (G3 part 2). It holds generators
+  (`cases.mjs`, `families.mjs`, `stop-cases.mjs`, `route-cases.mjs`, `growth.mjs`), fixed case lists, and their
+  publication, stop-set and growth harnesses. Its `README.md` gives the pins.
+- `desktop:~/work/evidence/corpus/stops/owner-s8/`: the owner's independent S8 reviews. It holds the 75-source
+  domain matrix, the every-allowance sweeps, the cache lifecycle probe and the JSON and load matrix. It is untrusted
+  input, never imported into a build.
+
 ## Inventory
 
 Per area, each file: what it generates; the PR and review it came from; its original path (`R/` is
