@@ -28,6 +28,7 @@ import {
   unknownItem,
 } from "./kinds.js";
 import { contractOfOp } from "./operations.js";
+import { projected } from "./positions.js";
 import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
 
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
@@ -226,23 +227,11 @@ export function* contractOfValue(contract: Contract, value: PlaceId): Work<reado
         return yield* contractIteration(contract, projection.owner, []);
       if (measuresLength(projection.step))
         return yield* contractLength(contract, projection.owner, projection.step, []);
-      if (!selectsElement(projection.step)) {
+      if (!selectsElement(projection.step))
         // G3 (TABLE r4.164): a property or index read's contract once per occurrence, its owner's one step down,
         // whatever asks: a chain of k such reads of nested literals asks each link once, never once per read above
         // (and once per stop: `stop` forgets it)
-        const at = program.places[value]?.site ?? null;
-        const step: Demand = {
-          key: joinParts("cpv", value),
-          kind: "contract",
-          file: at?.file ?? -1,
-          offset: at?.start ?? -1,
-          make: () => {
-            contract.occurrences.push(value);
-            return contract.contractOfValueAt(projection.owner, [stepName(projection.step)]);
-          },
-        };
-        return yield step;
-      }
+        return yield projected(contract, value, projection);
       // S6c: a selection reads its owner twice, at its step and whole, so once per value, whatever asks: a chain of k
       // `.first` reads each link once whole, never each link 2^k times
       const site = program.places[value]?.site ?? null;

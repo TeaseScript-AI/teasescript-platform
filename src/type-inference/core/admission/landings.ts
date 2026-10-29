@@ -1,7 +1,9 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import {
+  joinParts,
   joinSteps,
+  keepText,
   keptParts,
   keptSplit,
   keptSteps,
@@ -20,6 +22,7 @@ import type {
   WholeCycle,
 } from "./model.js";
 import { levelsOf } from "./permitted.js";
+import { positions } from "../positions.js";
 
 // A4 through copies' landings: where copies land in each place, the copy forest places answer through, cycles of copies.
 
@@ -546,6 +549,109 @@ export function copiesOf(admission: Admission, place: PlaceId): readonly Inherit
  * their strips, on an explicit stack, each place and path asked once.
  */
 export function landed(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+  // (G3 3a: a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
+  if (path.length > 1 && positions()) {
+    const frontier = landedFrontier(admission, place, path);
+    if (frontier.place !== place)
+      return landedOwn(admission, frontier.place, admission.pass.contract.pathSteps(frontier.rest));
+  }
+  return landedOwn(admission, place, path);
+}
+
+/**
+ * G3 3a: where a place's path lands past wrappers (`landingHop`): each wrapper whose path goes on below its step lands
+ * there what its read's binding lands at the rest; the binding and the rest (a path id) where no wrapper follows. Once
+ * per place and path, from its parent's.
+ */
+function landedFrontier(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+): { readonly place: PlaceId; readonly rest: number } {
+  const { contract } = admission.pass;
+  const ids: number[] = [contract.pathIdOf(path)];
+  for (let id = ids[0]!; !admission.landedFrontiers.has(joinParts(place, id)) && id > 0; ) {
+    id = contract.pathParent(id);
+    ids.push(id);
+  }
+  for (let index = ids.length - 1; index >= 0; index -= 1) {
+    const id = ids[index]!;
+    const memoKey = joinParts(place, id);
+    if (admission.landedFrontiers.has(memoKey)) continue;
+    keepText(admission.work, memoKey.length);
+    if (id === 0) {
+      admission.landedFrontiers.set(memoKey, { place, rest: 0 });
+      continue;
+    }
+    const above = admission.landedFrontiers.get(joinParts(place, contract.pathParent(id)))!;
+    const step = path[contract.pathDepth(id) - 1]!;
+    // (a rest of one step goes on below it: its wrapper hands the path on, keeping the new step)
+    const hop =
+      contract.pathDepth(above.rest) === 1
+        ? landingHop(admission, above.place, contract.pathLast(above.rest))
+        : null;
+    admission.landedFrontiers.set(
+      memoKey,
+      hop === null
+        ? { place: above.place, rest: contract.pathStep(above.rest, step) }
+        : { place: hop, rest: contract.pathStep(0, step) },
+    );
+  }
+  return admission.landedFrontiers.get(joinParts(place, ids[0]!))!;
+}
+
+/**
+ * G3 3a: a wrapper's step as `landed` reads it, or `null`: the place answers through no copy above it and stands in no
+ * cycle of copies; of the copies landing in it, one alone lies along a path through `step`, a copy of the wrapper's read
+ * at `step` exactly, at its root (`Contract.wrapperHop`); no copy of a written type, and no copy of its own, lands
+ * strictly below `step`. So a path through `step` and below it lands in the place as its rest lands in the read's
+ * binding (`landedOwn`'s frames). Once per place and step.
+ */
+function landingHop(admission: Admission, place: PlaceId, step: string): PlaceId | null {
+  const memoKey = joinParts(place, step);
+  const known = admission.landingHops.get(memoKey);
+  if (known !== undefined) return known;
+  keepText(admission.work, memoKey.length);
+  const { program, contract } = admission.pass;
+  const { seeds, owned, cycleOf, fed, wholes } = inheritance(admission);
+  program.work.charge("indexSteps");
+  const hop = contract.wrapperHop(place, step);
+  const binding = hop === null ? undefined : program.occurrenceOf.get(hop.read);
+  let found: PlaceId | null = null;
+  if (
+    binding !== undefined &&
+    !cycleOf.has(place) &&
+    !fed.has(place) &&
+    !wholes.has(place) &&
+    passThrough(admission, place, [step]) === place
+  ) {
+    const along = copiesOf(admission, place).filter(
+      (copy) => copy.path.length === 0 || copy.path[0] === step,
+    );
+    const below = `${step}.`;
+    const deeper = (texts: Iterable<string> | undefined): boolean => {
+      for (const text of texts ?? []) {
+        program.work.charge("indexSteps");
+        if (text.startsWith(below)) return true;
+      }
+      return false;
+    };
+    if (
+      along.length === 1 &&
+      along[0]!.path.length === 1 &&
+      along[0]!.strip.length === 0 &&
+      along[0]!.from === binding &&
+      !deeper(seeds.get(place)?.keys()) &&
+      !deeper(owned.get(place))
+    )
+      found = binding;
+  }
+  admission.landingHops.set(memoKey, found);
+  return found;
+}
+
+/** `landed` itself, for a place and path. */
+function landedOwn(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   const { seeds, owned, cycleOf, cycles, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
   const memo = admission.landedPaths;

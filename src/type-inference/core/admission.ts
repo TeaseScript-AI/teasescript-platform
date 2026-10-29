@@ -36,6 +36,7 @@ import type {
   CopyForest,
   Decided,
   Decision,
+  Frontier,
   HeldOwn,
   IngressStop,
   Inheritance,
@@ -173,6 +174,15 @@ export class Admission {
   readonly whole = new Map<string, Definition[]>();
   readonly #fields = new WeakMap<TypeTerm, Map<string, TypeTerm>>();
   readonly stops = new Map<PlaceId, Stops>();
+  /** G3 3a: per place and path id, where it lands past wrappers (`landedFrontier`); per place and step, its wrapper's. */
+  readonly landedFrontiers = new Map<string, { readonly place: PlaceId; readonly rest: number }>();
+  readonly landingHops = new Map<string, PlaceId | null>();
+  /** G3 3a: per place and path id, its frontier past wrappers (`wrappedFrontier`); per place and step, its wrapper's step. */
+  readonly frontiers = new Map<string, Frontier>();
+  readonly scanHops = new Map<
+    string,
+    { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null
+  >();
   readonly everyStop = new Map<PlaceId, Stops>();
   /**
    * A representative store's later equivalent ones (`grouped`), each recorded once per pass with its representative

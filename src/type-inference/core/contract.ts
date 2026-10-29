@@ -42,13 +42,19 @@ import {
   literalSignature,
   loneRead,
   namesPart,
+  pathDepth,
   pathIdOf,
+  pathLast,
+  pathParent,
+  pathStep,
+  pathSteps,
   signatureWork,
   standsAlong,
 } from "./contract/literal-index.js";
 import { contractOfLiteral, indexItems } from "./contract/literal-items.js";
-import { newHolder } from "./contract/marks.js";
+import { marksNothing, newHolder } from "./contract/marks.js";
 import type {
+  ChainRoot,
   ChoiceGroup,
   ClassGroup,
   ContractFacts,
@@ -63,6 +69,7 @@ import type {
   LevelGroup,
   LiteralIndex,
   LiteralObject,
+  LoneRead,
   NodeShape,
   OtherGroup,
   PrefixEntry,
@@ -82,9 +89,12 @@ import type {
   SubSource,
   ValueClass,
   ValueEntry,
+  WrapperHop,
 } from "./contract/model.js";
 import { choiceOptions, plusRepeatOf } from "./contract/others.js";
+import { chainOf, literalHop, remember } from "./contract/positions.js";
 import { prefixStores, prefixWork, relevantSubs, subSources } from "./contract/prefix-index.js";
+import { writtenOf } from "./contract/terms.js";
 import {
   contractOfValue,
   contractOfValueAt,
@@ -93,7 +103,7 @@ import {
   landsIn,
   onlyNull,
 } from "./contract/value-kinds.js";
-import { keptPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
+import { keyOf, keptPath, keyPlace, sortCost, type Definition, type Key } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
 import type { ContextWord, IngressNode, Item, Writer } from "./items.js";
 import type { ValueConstraint } from "./program.js";
@@ -110,23 +120,27 @@ export {
   ONLY_NULL,
   OPAQUE_MEMBER,
   OWN_SELECTION,
+  propertyOnly,
   REFERENCE,
   typedDefault,
   unknownItem,
 } from "./contract/kinds.js";
 export type {
+  ChainRoot,
   ChoiceGroup,
   ChoicePart,
   ContractFacts,
   GatherSite,
   IndexNode,
   LiteralIndex,
+  LoneRead,
   PrefixStores,
   StoppedKey,
   StoredChoiceKeys,
   SubSource,
   TypeAt,
   ValueClass,
+  WrapperHop,
 } from "./contract/model.js";
 export { operatorOf, plusElements } from "./contract/operations.js";
 export {
@@ -206,8 +220,8 @@ export class Contract {
    */
   readonly pathParents: number[] = [-1];
   readonly pathDepths: number[] = [0];
-  readonly pathLast: string[] = [""];
-  readonly pathSteps: (Map<string, number> | undefined)[] = [];
+  readonly pathLastSteps: string[] = [""];
+  readonly pathChildren: (Map<string, number> | undefined)[] = [];
   readonly signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
   readonly carrierIds = new Map<string, string>();
@@ -293,8 +307,19 @@ export class Contract {
   /** The paths whose admission decision stopped at its demand allowance, by place (`stop`). */
   readonly #stopped = new Map<PlaceId, (readonly string[])[]>();
   #stoppedCount = 0;
-  /** The property and index reads whose occurrence answers were made since the last stop (`contractOfValue`, `stop`). */
-  readonly occurrences: PlaceId[] = [];
+  /**
+   * The demands of the property and index reads' occurrence answers and of the positions (`positions.ts`) made since the
+   * last stop (`contractOfValue`, `stop`).
+   */
+  readonly occurrences: string[] = [];
+  /** Per holder, whether it marks no path whatever the path (`marksNothing`), and its finding while its component is open. */
+  readonly quiet = new Map<Holder, boolean>();
+  readonly pendingQuiet = new Map<Holder, boolean>();
+  /** Per binding and step, its wrapper's step or `null` (`wrapperHop`), and per literal and step its read (`literalHop`). */
+  readonly #hops = new Map<string, WrapperHop | null>();
+  /** Per value, its chain of property reads of a read, or `null` (`chainOf`). */
+  readonly chains = new Map<PlaceId, ChainRoot | null>();
+  readonly literalHops = new Map<string, LoneRead | null>();
 
   public constructor(readonly pass: CorePass) {}
 
@@ -303,16 +328,21 @@ export class Contract {
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
    * pass in which a decision stops is not settled (TABLE r4.180): the next starts with the key stopped (`analyseCore`),
-   * so no result read the key before its stop, in any order. A property or index read's occurrence answer kept before
-   * the stop is forgotten, so its next read reaches `contractOf` again (TABLE r4.186).
+   * so no result read the key before its stop, in any order. A property or index read's occurrence answer and every
+   * position (`positions.ts`) kept before the stop are forgotten, so its next read reaches `contractOf` again (TABLE
+   * r4.186), and no position stands past a wrapper of a stopped place (`wrapperHop`).
    */
   public stop(place: PlaceId, path: readonly string[]): void {
     const paths = this.#stopped.get(place);
     if (paths === undefined) this.#stopped.set(place, [path]);
     else paths.push(path);
     this.#stoppedCount += 1;
-    for (const value of this.occurrences) this.pass.solver.forget(joinParts("cpv", value));
+    for (const made of this.occurrences) this.pass.solver.forget(made);
     this.occurrences.length = 0;
+  }
+
+  public remember(demand: string): void {
+    remember(this, demand);
   }
 
   /** The keys whose decision stopped (`stop`), the set the next pass starts with. */
@@ -399,6 +429,128 @@ export class Contract {
 
   public contractOfValue(value: PlaceId): Work<readonly Item[]> {
     return contractOfValue(this, value);
+  }
+
+  public chainOf(value: PlaceId): ChainRoot | null {
+    return chainOf(this, value);
+  }
+
+  public pathStep(parent: number, step: string): number {
+    return pathStep(this, parent, step);
+  }
+
+  public pathLast(id: number): string {
+    return pathLast(this, id);
+  }
+
+  public pathDepth(id: number): number {
+    return pathDepth(this, id);
+  }
+
+  public pathParent(id: number): number {
+    return pathParent(this, id);
+  }
+
+  public pathSteps(id: number): string[] {
+    return pathSteps(this, id);
+  }
+
+  /**
+   * G3 3a: a wrapper's step (`positions.ts`), or `null`. A read `read` of a binding (or the binding's key itself) is
+   * passed at `step` to the one read its value holds there, a wrapper's, when every read of the binding at a path through
+   * `step` is that read's at the rest of the path with the binding's writer, whatever the rest: the binding is a plain
+   * unwritten `let` whose one definition anywhere at or below it is its declaration, live, outside block code, storing a
+   * literal; no test names a key of it, no other callable stores it, no decision of it stopped; its declaration's entry is
+   * the prefix's one entry and marks nothing whatever the path; the literal holds at `step` one read, of a binding,
+   * unguarded and naming no ingress, and nothing else there or below, and every object at its root has `step`; and the
+   * read occurrence names no ingress. Every condition is a fact of the program and of the pass's live stores (and its
+   * stops, which forget every position made), so no read of a path below the step differs.
+   */
+  public wrapperHop(read: PlaceId, step: string): WrapperHop | null {
+    const { program } = this.pass;
+    const occurrence = program.occurrenceOf.get(read);
+    const binding = occurrence ?? read;
+    if (occurrence !== undefined && (program.projOf.has(read) || this.ingressOf(read) !== null))
+      return null;
+    if (this.#stopped.has(binding)) return null;
+    const memoKey = joinParts(binding, step);
+    let hop = this.#hops.get(memoKey);
+    if (hop === undefined) {
+      this.keepText(memoKey.length);
+      hop = this.#hopOf(binding, step);
+      this.#hops.set(memoKey, hop);
+    }
+    return hop;
+  }
+
+  #hopOf(binding: PlaceId, step: string): WrapperHop | null {
+    const { program, definitions, lists, guards } = this.pass;
+    program.work.charge("invSteps");
+    const place = program.places[binding];
+    if (
+      place === undefined ||
+      place.kind.kind !== "binding" ||
+      writtenOf(place.kind) !== null ||
+      program.isHost(binding) ||
+      program.speakerPlaces.has(binding)
+    )
+      return null;
+    const root = keyOf(binding, []);
+    const defs = definitions.byKey.get(root) ?? [];
+    const d = defs[0];
+    if (
+      defs.length !== 1 ||
+      d === undefined ||
+      d.how !== "initializer" ||
+      d.kind !== "whole" ||
+      d.weak ||
+      d.value === undefined ||
+      d.orig !== undefined ||
+      d.loop !== undefined ||
+      !lists.live(d) ||
+      !program.live(d.node) ||
+      program.inBlockCode(d.node) ||
+      !program.hasOf.has(d.value) ||
+      definitions.keysBelow(root).length > 0 ||
+      definitions.loopAdds.has(root) ||
+      definitions.ownedAway(root) ||
+      !guards.untested(binding)
+    )
+      return null;
+    // its declaration's entry, alone and marking nothing, at its root
+    const stores = this.prefixStores(root);
+    const entry = stores.list[0];
+    if (
+      stores.list.length !== 1 ||
+      entry === undefined ||
+      entry.value !== d.value ||
+      entry.at !== undefined ||
+      entry.key !== undefined ||
+      entry.elem !== undefined ||
+      entry.unk !== undefined ||
+      entry.guarded ||
+      entry.ingress !== undefined ||
+      !marksNothing(this, entry.holder) ||
+      stores.subs !== null ||
+      stores.also.length > 0 ||
+      stores.other ||
+      stores.cut
+    )
+      return null;
+    const read = this.literalHop(d.value, step);
+    if (read === null) return null;
+    this.keep(3);
+    return {
+      decl: d,
+      literal: d.value,
+      read: read.read,
+      node: read.node ?? d.node,
+      writer: definitions.writerOf(d),
+    };
+  }
+
+  public literalHop(literal: PlaceId, step: string): LoneRead | null {
+    return literalHop(this, literal, step);
   }
 
   public expectedOf(c: ValueConstraint, rest: readonly string[]): Work<readonly Item[] | null> {

@@ -443,6 +443,34 @@ export interface ContractFacts {
 }
 
 /** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
+/** G3 3a: a chain of property reads of a read, by its read and its first step (`Contract.chainOf`). */
+export interface ChainRoot {
+  readonly root: PlaceId;
+  readonly first: string;
+}
+
+/** G3 3a: a literal's one read at a step and the node its value side reads it at (`Contract.literalHop`). */
+export interface LoneRead {
+  readonly read: PlaceId;
+  readonly node: FlowNode | null;
+}
+
+/**
+ * G3 3a: a wrapper's step (`Contract.wrapperHop`): the declaration of the binding read, its literal, the one read the
+ * literal holds at the step, and the declaration's writer, which every read through the step takes.
+ */
+export interface WrapperHop {
+  readonly decl: Definition;
+  readonly literal: PlaceId;
+  readonly read: PlaceId;
+  /** The node the value side reads it at (`gatherAt`: its exact entry's definition's, else the declaration's). */
+  readonly node: FlowNode;
+  readonly writer: Writer | null;
+}
+
+/** What a read's position is asked of (`positionOf`): a value, or a key with its path's length. */
+export type Owner = { readonly value: PlaceId } | { readonly key: Key; readonly length: number };
+
 export interface StoppedKey {
   readonly place: PlaceId;
   readonly path: readonly string[];
