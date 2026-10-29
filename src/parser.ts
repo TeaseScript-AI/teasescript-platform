@@ -389,10 +389,13 @@ export class Parser {
   public insideDelimiters = false;
   /** The values before a `calendar` without a unit, so that after a `say` mode or skip word, `calendar` is the text. */
   public readonly unitlessCalendars = new WeakSet<Expression>();
-  /** The error of each month or year without `calendar`, which a place that takes only an exact duration rewords. */
+  /**
+   * The error of each month or year without `calendar`, and of each calendar duration without a space before its unit
+   * (`spaced`), which its place rewords (see `adviseDuration`): `calendar` is its code where a calendar duration fits.
+   */
   public readonly calendarUnitErrors = new WeakMap<
     Expression,
-    { readonly diagnostic: Diagnostic; readonly calendar: string }
+    { readonly diagnostic: Diagnostic; readonly calendar: string; readonly spaced: boolean }
   >();
   /** What every parser over these tokens shares: a speculative parser computes none of it again. */
   public readonly shared: SharedParse;

@@ -246,6 +246,44 @@ test("a unit follows a number, a name, a member, a call, or parentheses, and bin
     ],
   );
   assert.notEqual(compileSource("wait (1..5) min\nexit").plan, null);
+  // The range in parentheses is shown only where the range rules hold for the bounds the parser knows: a whole number
+  // written as it is, which a wait or timer counts from 0, or a repeating timer from 1, and at least one number. A value
+  // that the known-value fold gives may have decimals by its type, and a name is the type checker's to check.
+  const words =
+    "A unit after a range belongs to its end alone. Put the range in parentheses, with the unit after the closing parenthesis.";
+  for (const [statement, range, shown] of [
+    ["wait # s", "0..5", true],
+    ["wait # s", "1..n", true],
+    ["timer(duration: # s, repeat: true, async: true)", "1..=n", true],
+    ["wait # s", "1..5.5", false],
+    ["timer # s", "1.5..5", false],
+    ["wait # s", "1..(11 / 2)", false],
+    ["wait # s", "(4 / 2)..n", false],
+    ["wait # s", "-1..n", false],
+    ["timer # s", "5..5", false],
+    ["timer(duration: # s, repeat: true, async: true)", "0..5", false],
+    // A bound with a name is the type checker's to check, and one that the fold cannot give is no proved number.
+    ["wait # s", "n + 1..5", true],
+    ["wait # s", "true..3", false],
+    ["wait # s", "1..(1 / 0)", false],
+    ["timer(duration: # s, repeat: true, async: true)", "1 calendar month..3", false],
+  ] as const) {
+    const source = `let n = 3\n${statement.replace("#", range)}\nexit`;
+    const command = statement.startsWith("timer(")
+      ? "duration:"
+      : statement.slice(0, statement.indexOf(" "));
+    assert.deepEqual(
+      compileSource(source).diagnostics.map(({ message }) => message),
+      [
+        shown
+          ? `A unit after a range belongs to its end alone. Put the range in parentheses, as in '${command} (${range}) s'.`
+          : words,
+      ],
+      source,
+    );
+    const pasted = source.replace(`${range} s`, `(${range}) s`);
+    assert.equal(compileSource(pasted).plan !== null, shown, pasted);
+  }
   // A word that is no unit and not taken for one, and a unit, keep their meaning.
   assert.deepEqual(
     compileSource("wait 5 foo\nexit").diagnostics.map(({ code }) => code),
