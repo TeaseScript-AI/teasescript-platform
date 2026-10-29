@@ -20,6 +20,14 @@ import { REASON, type Item } from "../src/type-inference/core/items.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
+import {
+  heldFamily,
+  heldProblems,
+  heldStops,
+  heldUnstopped,
+  HELD_MODES,
+  phaseEnds,
+} from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
 import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
@@ -285,33 +293,6 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
   hostValue,
   hostOther,
 });
-
-/**
- * A mode's settled phases, each with its lowest and highest stopping allowance, found by bisection: below the analysis's
- * total `phaseOf` (an analysis stopped at the allowance: its phase where admission had settled, else `null`) names
- * contiguous ranges, the publication's above the walk's, down to the first stop that is not settled. A phase found twice
- * is not contiguous and fails.
- */
-function phaseEnds(
-  total: number,
-  phaseOf: (allowance: number) => string | null,
-): Map<string, readonly [number, number]> {
-  const ends = new Map<string, readonly [number, number]>();
-  for (let high = total - 1; high > 0;) {
-    const phase = phaseOf(high);
-    if (phase === null) break;
-    assert.ok(!ends.has(phase), `${phase} again below ${high + 1}`);
-    let low = 1;
-    for (let top = high; low < top;) {
-      const middle = (low + top) >> 1;
-      if (phaseOf(middle) === phase) top = middle;
-      else low = middle + 1;
-    }
-    ends.set(phase, [low, high]);
-    high = low - 1;
-  }
-  return ends;
-}
 
 /**
  * TABLE r4.90, r4.99, r4.108: what a phase settled is never discarded by a later one, and a stop changes nothing of the
@@ -2057,6 +2038,32 @@ test("the named exception for #1216 stands at its counted stops", () => {
     for (let allowance = low; allowance <= high; allowance += 1)
       if (has(analyse(allowance))) count += 1;
   assert.equal(count, exception.settled);
+});
+
+/**
+ * #1432, #1415 (S3 §5; S8's mark-ownership rule; TABLE r4.113): after a settled program stop, a read the finishing walk
+ * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
+ * check (a mark carrying the unstopped obligation) and the store's boundary forms. The generated family's anchors
+ * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every fifth stop of each
+ * settled phase and its last, forward with the sharing and reversed without it; the whole family runs outside CI.
+ */
+test("a settled stop keeps the checks of the host data a place's stores hold (#1432, #1415)", () => {
+  for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!])
+    for (const c of heldFamily(true)) {
+      const { run: unstopped, problems } = heldUnstopped(c, mode);
+      assert.deepEqual(problems, [], `${c.name}, ${mode.name}`);
+      const stops = heldStops(c, mode, 5);
+      assert.ok(
+        stops.some((stop) => stop.phase === "walk"),
+        `${c.name}, ${mode.name}`,
+      );
+      for (const { allowance, phase } of stops)
+        assert.deepEqual(
+          heldProblems(c, mode, allowance, unstopped),
+          [],
+          `${c.name}, ${mode.name}, ${phase} @${allowance}`,
+        );
+    }
 });
 
 /**

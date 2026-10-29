@@ -1,13 +1,31 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import { concrete, isExternal } from "../admission.js";
+import { expand, partOf } from "../admission/walk.js";
+import type { Expansion } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
-import { joinSteps, keptParts, keptSlice } from "../budget.js";
+import { joinSteps, keptParts, keptSlice, keptSteps, NESTING_LIMIT } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
-import { keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
+import {
+  keptKey,
+  keptKeyBelow,
+  keptPath,
+  keyPath,
+  keyPlace,
+  type Definition,
+  type Key,
+} from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { EMPTY, makeItem, REASON, STOPPED, type Item, type ItemTag } from "../items.js";
+import {
+  EMPTY,
+  makeItem,
+  REASON,
+  STOPPED,
+  type IngressNode,
+  type Item,
+  type ItemTag,
+} from "../items.js";
 import { conversionCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import type { Work } from "../solver.js";
@@ -227,12 +245,140 @@ function laterSources(
   // together
   const tags =
     typedTags ?? (retained.length > 0 ? retained : (syntaxRead(walk, value, rest) ?? []));
+  // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
   if (requirement) return required(tags);
-  if (tags.length === 0 || tags.includes("unknown")) return STOPPED;
-  const items = tags.map((tag) => makeItem(tag, null, { cert: "pos" }));
+  // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
+  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415)
+  const host = typedTags === null && term === null ? heldIngress(walk, value, rest) : [];
+  if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
+  const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos" })), ...host];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
   const step = rest.at(-1) ?? walk.pass.program.projOf.get(value)?.step;
   return step !== undefined && stepName(step) === "element" ? [...items, EMPTY] : items;
+}
+
+/** Per walk, the host data each key holds by its stores' structure (`heldIngress`), `null` for none. */
+const heldByKey = new WeakMap<Consumers, Map<Key, IngressNode | null>>();
+
+/**
+ * At a settled program stop, the host data a read's key may hold over all its stores (S3 §5 revision 16: a domain is
+ * what the key may hold over all its stores; TABLE r4.113: ingress is structural): the read's own host ingress, and each
+ * host read a store into the key or a key above it holds at the read's path, through the literals and carriers that
+ * hold it (admission's store walk, `expand`) and the copies of other places, as one external item naming those reads;
+ * none where no store holds host data there, nor at a key whose decision stopped. Each key once a walk, its copies'
+ * keys first (a cycle of copies answered again where it is met, as `resolve` does); a path past the nesting limit is not
+ * followed.
+ */
+function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): readonly Item[] {
+  const { program } = walk.pass;
+  if (!walk.settled || program.work.stopped === null) return [];
+  const key = readKey(walk, value);
+  if (key === null) return [];
+  const top = keptKeyBelow(program.work, key, rest);
+  const path = keptPath(program.work, top);
+  // (a read of a key whose decision stopped answers that stop alone, as unstopped: S3 §5, r4.186)
+  if (walk.admission.decisionStopped(keyPlace(top), path)) return [];
+  let memo = heldByKey.get(walk);
+  if (memo === undefined) heldByKey.set(walk, (memo = new Map()));
+  const ingress = program.scope.ingress;
+  const own = hostIngress(walk, value)?.[0]?.ingress;
+  const frames: {
+    readonly key: Key;
+    readonly copies: readonly (readonly [PlaceId, readonly string[]])[];
+    next: number;
+    node: IngressNode | undefined;
+    cyclic: boolean;
+  }[] = [];
+  const open = new Set<Key>();
+  const enter = (at: Key, place: PlaceId, steps: readonly string[]): void => {
+    open.add(at);
+    const { node, copies } = heldBy(walk, place, steps);
+    frames.push({ key: at, copies, next: 0, node, cyclic: false });
+  };
+  let found = memo.get(top);
+  if (found === undefined) {
+    enter(top, keyPlace(top), path);
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      program.work.charge("checks");
+      if (frame.next < frame.copies.length) {
+        const [place, steps] = frame.copies[frame.next++]!;
+        if (steps.length > NESTING_LIMIT) continue;
+        const at = keptKey(program.work, place, steps);
+        const done = memo.get(at);
+        if (done !== undefined) frame.node = ingress.union(frame.node, done ?? undefined);
+        else if (open.has(at)) frame.cyclic = true;
+        else enter(at, place, steps);
+        continue;
+      }
+      frames.pop();
+      open.delete(frame.key);
+      if (!frame.cyclic) memo.set(frame.key, frame.node ?? null);
+      const parent = frames.at(-1);
+      if (parent === undefined) found = frame.node ?? null;
+      else {
+        parent.node = ingress.union(parent.node, frame.node);
+        parent.cyclic ||= frame.cyclic;
+      }
+    }
+  }
+  const node = ingress.union(own, found ?? undefined);
+  return node === undefined ? [] : [{ ...unknownItem(REASON.external), ingress: node }];
+}
+
+/**
+ * What the stores into a place at a path or above it hold there, by admission's own store walk along the path (a
+ * literal's cell at its step, a carrier's operands and own contribution at the same path): the host reads' ingress, and
+ * the copies of other places, each with the path read into it; nothing at a key whose decision stopped.
+ */
+function heldBy(
+  walk: Consumers,
+  place: PlaceId,
+  path: readonly string[],
+): {
+  readonly node: IngressNode | undefined;
+  readonly copies: readonly (readonly [PlaceId, readonly string[]])[];
+} {
+  const { program, definitions, lists } = walk.pass;
+  let node: IngressNode | undefined;
+  const copies: [PlaceId, readonly string[]][] = [];
+  // (a copy of a key whose decision stopped reads that stop, as unstopped: S3 §5, r4.186)
+  if (walk.admission.decisionStopped(place, path)) return { node, copies };
+  for (const { key, depth } of definitions.stored.along(place, path, true))
+    for (const d of definitions.byKey.get(key) ?? []) {
+      program.work.charge("checks");
+      if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined || !lists.live(d))
+        continue;
+      // (an add stores at its receiver's element; an `addAll`'s value is a list of the elements it adds)
+      const from = depth + (d.kind === "add" && d.how !== "elements" ? 1 : 0);
+      if (from > depth && path[depth] !== "element") continue;
+      const below = keptSlice(program.work, path, from);
+      const tasks: [Expansion, number][] = [[expand(walk.admission, d.value, d.node, []), 0]];
+      while (tasks.length > 0) {
+        const [task, at] = tasks.pop()!;
+        program.work.charge("checks");
+        if (task.stop?.list === "values") {
+          const host = hostIngress(walk, task.value);
+          const copied = host === null ? readKey(walk, task.value) : null;
+          if (host !== null) node = program.scope.ingress.union(node, host[0]?.ingress);
+          else if (copied !== null)
+            copies.push([
+              keyPlace(copied),
+              keptSteps(
+                program.work,
+                keptPath(program.work, copied),
+                task.stop.strip,
+                keptSlice(program.work, below, at),
+              ),
+            ]);
+        }
+        for (const part of task.parts)
+          if (part.step === null) tasks.push([partOf(walk.admission, part), at]);
+          else if (at < below.length && part.step === below[at])
+            tasks.push([partOf(walk.admission, part), at + 1]);
+      }
+    }
+  return { node, copies };
 }
 
 /**
