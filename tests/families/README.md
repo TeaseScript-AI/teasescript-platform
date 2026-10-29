@@ -22,6 +22,10 @@ stalled, and the runner goes on with the next. It prints one JSON line per gener
 stalled, modes, runs, differences), and exits 1 when any run differs or any source stalls. Run large sizes as one
 capped job per area or shard on a worker.
 
+A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
+mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
+"killed", the same way identical exceptions on both trees are not agreement (#1439).
+
 ## A generator
 
 A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
