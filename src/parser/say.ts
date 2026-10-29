@@ -246,49 +246,9 @@ export function* parseSayParts(parser: Parser, statement: boolean): ParseTask<Sa
   });
 }
 
-/** A `say` used as a value, parsed once per position and context (see `SharedParse.sayValues`). */
+/** A `say` used as a value, parsed once per position and context (see `Parser.parseOnce`). */
 export function* parseSayValue(parser: Parser): ParseTask<SayParts | null> {
-  const start = parser.current;
-  const parsed = parser.shared.sayValues.get(start) ?? [];
-  const known = parsed.find(
-    (value) =>
-      value.insideDelimiters === parser.insideDelimiters &&
-      value.storageDelimiters === parser.storageDelimiters &&
-      value.blockEndsCompactInteraction === parser.blockEndsCompactInteraction &&
-      value.recoveredAtStatementBoundary === parser.recoveredAtStatementBoundary,
-  );
-  if (known !== undefined) {
-    parser.diagnostics.push(...known.diagnostics);
-    parser.unclosedLiterals += known.unclosedLiterals;
-    parser.regexStarts.push(...known.regexStarts);
-    parser.statementRanges.push(known.ranges);
-    parser.current = known.end;
-    parser.recoveredAtStatementBoundary = known.recovered;
-    return known.parts;
-  }
-  const context = {
-    insideDelimiters: parser.insideDelimiters,
-    storageDelimiters: parser.storageDelimiters,
-    blockEndsCompactInteraction: parser.blockEndsCompactInteraction,
-    recoveredAtStatementBoundary: parser.recoveredAtStatementBoundary,
-  };
-  const diagnosticCount = parser.diagnostics.length;
-  const unclosedLiterals = parser.unclosedLiterals;
-  const regexStartCount = parser.regexStarts.length;
-  const rangeCount = parser.statementRanges.length;
-  const parts = yield* parseChild(parseSayParts(parser, false));
-  parsed.push({
-    ...context,
-    parts,
-    end: parser.current,
-    diagnostics: parser.diagnostics.slice(diagnosticCount),
-    unclosedLiterals: parser.unclosedLiterals - unclosedLiterals,
-    regexStarts: parser.regexStarts.slice(regexStartCount),
-    ranges: { list: parser.statementRanges, from: rangeCount, to: parser.statementRanges.length },
-    recovered: parser.recoveredAtStatementBoundary,
-  });
-  parser.shared.sayValues.set(start, parsed);
-  return parts;
+  return yield* parseChild(parser.parseOnce("sayValue", parseSayParts(parser, false)));
 }
 
 /** The parentheses of a bounded `say`: its text, then optionally its pacing, until `)`. */
