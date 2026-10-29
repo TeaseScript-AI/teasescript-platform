@@ -15,8 +15,8 @@ import { coreRequest } from "./type-core-analysis.js";
  * reads take it, also in a compound assignment). A pasted form compiles with both checkers and runs; a declaration
  * form under the new core alone where the current checker's recorded difference from the accepted text is its only
  * rejection (#1412: a list join whose written destination admits every operand), as the checker whose message offers it
- * decides (the lead's ruling on #1310). The parity test runs a sample of it; the whole family is the step's evidence,
- * run outside CI.
+ * decides (the lead's ruling on #1310): the join in the declaration's own text, and no other (Codex r12 on #1310). The
+ * parity test runs a sample of it; the whole family is the step's evidence, run outside CI.
  */
 
 /** An erroneous expression a fix offers code for, with the lines before it that make it so. */
@@ -449,11 +449,11 @@ export function pasteCases(sample = false): PasteCase[] {
   return cases;
 }
 
-/** A pasted form: the code a fix offered, and the source with it pasted at its position; whether it is a declaration. */
+/** A pasted form: the code a fix offered, and the source with it pasted at its position; a declaration's span there. */
 export interface Pasted {
   readonly code: string;
   readonly source: string;
-  readonly declaration?: true;
+  readonly declared?: { readonly start: number; readonly end: number };
 }
 
 /** A code form in a fix sentence, by the words that offer it; a statement's `on a line of its own`. */
@@ -523,7 +523,17 @@ export function pastedForms(
       // (its written type up to its `=`, or a parameter's up to the list's next `,` or `)`)
       const typed = start === "" ? "(?:: [^=,)\\n]+)?" : "(?:: [^=\\n]+?)?";
       const own = new RegExp(`(?<![\\w.])${literally(head!)}${typed}${literally(start)}(?![\\w])`);
-      forms.push({ code: code!, source: source.replace(own, code!), declaration: true });
+      const found = own.exec(source);
+      forms.push(
+        found === null
+          ? { code: code!, source }
+          : {
+              code: code!,
+              source:
+                source.slice(0, found.index) + code + source.slice(found.index + found[0].length),
+              declared: { start: found.index, end: found.index + code!.length },
+            },
+      );
     }
     for (const [, code, statement] of fixes.matchAll(CODE)) {
       if (statement === undefined) {
@@ -551,33 +561,43 @@ export function pastedForms(
 }
 
 /**
- * The current checker without its recorded difference from the accepted text (#1412): a list join's error where the
- * join's written destination admits every operand, as the new core proves where it is quiet.
+ * The current checker without its recorded difference from the accepted text (#1412): a list join's error inside a
+ * pasted declaration, whose written type is the join's destination and admits every operand, as the new core proves
+ * where it is quiet. A join error anywhere else stands (Codex r12 on #1310: #1383's missing core check).
  */
-const RECORDED: TypeAnalysisBackend = {
-  name: "legacy",
-  analyze(request) {
-    const outcome = LEGACY_BACKEND.analyze(request);
-    const diagnostics = outcome.checked.diagnostics.map((file) =>
-      file.filter(
-        (diagnostic) =>
-          diagnostic.code !== "TSV044" || !/^'\+=?' would mix /.test(diagnostic.message),
-      ),
-    );
-    return { checked: { ...outcome.checked, diagnostics }, facts: () => outcome.facts() };
-  },
-};
+function recorded(declared: { readonly start: number; readonly end: number }): TypeAnalysisBackend {
+  return {
+    name: "legacy",
+    analyze(request) {
+      const outcome = LEGACY_BACKEND.analyze(request);
+      const diagnostics = outcome.checked.diagnostics.map((file) =>
+        file.filter(
+          ({ code, message, span }) =>
+            code !== "TSV044" ||
+            !/^'\+=?' would mix /.test(message) ||
+            span.start.offset < declared.start ||
+            span.end.offset > declared.end,
+        ),
+      );
+      return { checked: { ...outcome.checked, diagnostics }, facts: () => outcome.facts() };
+    },
+  };
+}
 
 /**
  * Why a pasted source fails: its compile errors, the new core's among them (Codex r9), or its run's failure; `null`
- * where it compiles and runs. A `declaration`'s compile errors leave out the current checker's recorded difference
- * (#1412), which the new core decides.
+ * where it compiles and runs. A pasted declaration's (`declared`) compile errors leave out the current checker's recorded
+ * difference at its own join (#1412), which the new core decides.
  */
-export function pasteFailure(source: string, declaration = false): string | null {
+export function pasteFailure(
+  source: string,
+  declared?: { readonly start: number; readonly end: number },
+): string | null {
   const files = [{ path: "main.tease", source }];
-  const compiled = declaration
-    ? compileProjectWithBackend(files, {}, RECORDED)
-    : compileProject(files);
+  const compiled =
+    declared === undefined
+      ? compileProject(files)
+      : compileProjectWithBackend(files, {}, recorded(declared));
   const errors = compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0)
     return errors.map((error) => `${error.code}: ${error.message}`).join(" | ");

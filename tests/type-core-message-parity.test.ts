@@ -1416,12 +1416,28 @@ test("every code form a fix offers compiles and runs where pasted, on the paste 
     if (!diagnosed) failures.push(`${name}: no error at the expression`);
     for (const form of forms) {
       pasted += 1;
-      const failure = pasteFailure(form.source, form.declaration);
+      const failure = pasteFailure(form.source, form.declared);
       if (failure !== null) failures.push(`${name}: '${form.code}': ${failure}`);
     }
   }
   assert.deepEqual(failures, []);
   assert.ok(pasted > 0, `${pasted} forms pasted`);
+});
+
+test("a join's pasted declaration is checked under the core alone at its own join, and the current checker's other join errors stand (#1412, Codex r12 on #1310)", () => {
+  const pasted = (source: string): string | null => {
+    const forms = pastedForms(source, 24, 34).forms.filter((form) => form.declared !== undefined);
+    assert.equal(forms.length, 1, source);
+    return pasteFailure(forms[0]!.source, forms[0]!.declared);
+  };
+  assert.equal(pasted('let xs = [1]\nlet both = xs + ["x"]\nexit\n'), null);
+  // (a join of objects whose property differs, which the core misses, #1383)
+  assert.match(
+    pasted(
+      'let xs = [1]\nlet both = xs + ["x"]\nlet a = [{n: 1}]\nlet b = [{n: "x"}]\nsay (a + b).length\nexit\n',
+    ) ?? "",
+    /^TSV044: '\+' would mix objects/,
+  );
 });
 
 test("what a site takes is read through a long chain of untyped copies or calls, and a wide literal (#1241, Codex r8, r13)", () => {
