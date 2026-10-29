@@ -117,10 +117,14 @@ export function requiredStores(
   if (requirement !== null && unrestricted(requirement)) return;
   if (requirement !== null)
     walk.requirements.set(keptKey(walk.pass.program.work, place, path), requirement);
-  // (what the marks name, the destination's, made once for all its stores: Codex r1's N1 on #1434)
+  // (what the marks name, the destination's, made once for all its stores: Codex r1's N1 on #1434; a store at or below
+  // the stop names it per store from the contract, as #1310's marks did, so the stops a later decision meets are
+  // unchanged)
   let names: MarkNames | undefined;
   const named = (): MarkNames =>
-    (names ??= markNames(walk, place, path, stepsOf(walk, place, path)));
+    stopped
+      ? markNames(walk, place, path)
+      : (names ??= markNames(walk, place, path, stepsOf(walk, place, path)));
   for (const d of stores)
     // (a store this pass rejected has its error, which stands: A6)
     if (d.value === undefined || walk.admission.refused.has(d.uid)) continue;
@@ -135,8 +139,8 @@ export function requiredStores(
  * prefix a copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or
  * A3 settled the prefix by, else labelled a list, conservatively, where this pass retains no collection name for it
  * (its contract may hold a set or a dict there, Codex r3: the label names no type and changes no message). Each
- * prefix's key is made once, one step longer than the one before, only while no written type names the steps. An
- * exact target's prefixes may be stopped (`stoppedStores`): their element steps are named alike, a label only.
+ * prefix's key is made once, one step longer than the one before, only while no written type names the steps. No
+ * prefix is stopped: a destination lies above its stop, and no other stop lies at or above it (`outermost`).
  */
 function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): StoreStep[] {
   const work = walk.pass.program.work;
