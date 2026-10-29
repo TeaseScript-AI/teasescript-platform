@@ -30,7 +30,8 @@ Labels, described on GitHub:
 - while a question the owner has not yet decided is open: `owner: blocking` (work waits) or `owner: input` (nothing
   waits), plus `owner: parked` when the owner has said not now. An issue without one can be finished without asking
   the owner; a task that only waits on a decision issue says "Depends on #N" instead;
-- `in progress` while an agent works on it;
+- `in progress` while an agent works on it. Closing an issue removes `in progress` and every `owner:` label
+  (`.github/workflows/issue-state-labels.yml`);
 - `spare capacity` for work that must be done but can wait: ready, no owner input, and no more expensive later because
   nothing upcoming builds on it; a small fix (a sentence or a few lines of code) gets no label and is done directly;
 - `needs triage` until an orchestrator is assigned.
