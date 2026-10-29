@@ -18,10 +18,11 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * context: against its destination's complete type where that is known without new solving (`storeRequirement`: the
  * written type, or the one a copy decides it by), that type carried into the plan whole (`requirements`); else marked
  * with its type undecided (`storeMark`); a store the pass rejected keeps its error alone. A store at or below a stopped
- * key is that key's own (#1275), a sibling's path no store of the stop's. Found by one walk down each stopped path that no other stop lies above (`outermost`), through the
- * stored keys' trie (`Admission.stored`), each destination resolved once a pass whatever number of stops lie below it.
- * Run after the pass's decisions, in every pass that carries a stop: a restarted pass rebuilds it from the stopped set
- * (TABLE r4.180), the fresh pass from the written types alone (`freshStores`).
+ * key is that key's own (#1275), a sibling's path no store of the stop's. Found by one walk down each stopped path that
+ * no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination resolved
+ * once a pass whatever number of stops lie below it. Run after the pass's decisions, in every pass that carries a stop:
+ * a restarted pass rebuilds it from the stopped set (TABLE r4.180), the fresh pass from the written types alone
+ * (`freshStores`).
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;
@@ -56,7 +57,7 @@ export function enclosingStores(walk: Consumers): void {
   }
 }
 
-/** A step of the stopped paths placed so far (`outermost`): the steps below it, and whether a stop's path ends there. */
+/** A step of the stopped paths placed so far (`outermost`): its steps below, and whether a stop's path ends there. */
 interface StopNode {
   readonly below: Map<string, StopNode>;
   stop: boolean;

@@ -29,12 +29,12 @@ import {
  * deep, a nullable element, a nullable list, text leaves), each tried with the values the form's own predicate (`fits`)
  * sorts, never the implementation's matcher; judged at every allowance around each decision's work in the eight orders
  * (`enclosingProblems`). The forms the candidate route does not take (S10: an argument, a dead call's argument, a
- * return, an add or `addAll`, a dict's or a set's element type) are judged at the analysis: the mark at the store and the
- * complete type its check carries (`Answers.requirement`). CI runs anchors of it; the whole family is a worker run
+ * return, an add or `addAll`, a dict's or a set's element type) are judged at the analysis: the mark at the store and
+ * the complete type its check carries (`Answers.requirement`). CI runs anchors of it; the whole family is a worker run
  * outside CI.
  */
 
-/** A store's destination: its binding, parameter or function's result (`result`), and the path below it, in key steps. */
+/** A store's destination: its binding, parameter or function's result (`result`), and its path below, in key steps. */
 export interface Destination {
   readonly binding: string;
   readonly result?: boolean;
