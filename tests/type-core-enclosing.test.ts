@@ -37,6 +37,7 @@ function witness(
     written: !source.includes(`let ${binding} =`),
     values: values.map((each) => ({ value: each, fits: fits(form, each) })),
     host: value === "hostValue",
+    slice: true,
   };
 }
 
@@ -94,31 +95,38 @@ test("a store above a stopped decision is checked against its destination's whol
 
 /**
  * #1416's family (`enclosingFamily`) at its anchors: each origin's host replacement trying every value of `integer[][]`,
- * and a forbidden nested leaf stored as a literal, a written one's declaration too, at every allowance around the
- * work of each decision of the store's binding in source order. Each origin reaches a stop below the store's own path, a sibling's alone included,
- * and no verdict has a problem: a forbidden value rejected before the next effect and a fitting one played, the whole
- * type planned, one owned mark at the store (an object a literal decides: its mark).
+ * and a forbidden nested leaf stored as a literal, a written one's declaration too; at the analysis an argument, a dead
+ * call's argument and a return of `integer[][]`, and a written dict's and set's replacement (an add's levels part only in
+ * the worker's reversed orders). Each at every allowance around the work of each decision of the store's binding, in
+ * source order. Each origin reaches a stop below the store's own path, a sibling's alone included, and no verdict has a
+ * problem: a forbidden value rejected before the next effect and a fitting one played, the whole type planned or
+ * recorded, one owned mark at the store (an object a literal decides: its mark).
  */
 test("every store above a stopped decision keeps its check whole or its owned mark (#1416)", () => {
+  const forbidden =
+    /(literal|declaration) (\[\["bad"\]\]|\{items: \[\["bad"\]\]\}|\["bad"\]|dict\{a: \["bad"\]\}|set\[\["bad"\]\])$/u;
   const anchors = enclosingFamily(true).filter(
     (c) =>
-      c.name.includes(", integer[][], ") &&
-      (c.host || c.name.endsWith(' [["bad"]]') || c.name.endsWith(' {items: [["bad"]]}')),
+      (c.host || forbidden.test(c.name)) &&
+      (c.slice
+        ? c.name.includes(", integer[][], ")
+        : /^((dead )?argument|return), integer\[\]\[\], |^written collection, /u.test(c.name)),
   );
   const reached = new Map<string, Set<Relation | "sibling">>();
-  const [mode] = MODES;
   for (const c of anchors) {
     const origin = c.name.slice(0, c.name.indexOf(","));
+    const mode = MODES[0]!;
     const relations = reached.get(origin) ?? new Set();
     reached.set(origin, relations);
-    for (const allowance of [null, ...allowancesOf(c, mode!, true)]) {
-      const verdict = enclosingProblems(c, allowance, mode!);
+    for (const allowance of [null, ...allowancesOf(c, mode, true)]) {
+      const verdict = enclosingProblems(c, allowance, mode);
       assert.deepEqual(verdict.problems, [], `${c.name} at ${allowance}`);
       relations.add(
         verdict.relation === "none" && verdict.stops.length > 0 ? "sibling" : verdict.relation,
       );
     }
   }
+  assert.equal(reached.size, 11);
   for (const [origin, relations] of reached)
     assert.ok(relations.has("above"), `${origin} reaches no stop below its store`);
   assert.ok(reached.get("sibling property")!.has("sibling"));

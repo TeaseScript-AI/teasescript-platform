@@ -1,5 +1,6 @@
 import { compileSourceWithBackend, type CompilationResult } from "../../src/compiler.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+import type { TypeTerm } from "../../src/type-inference/graph.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
@@ -27,12 +28,16 @@ import {
  * site (a declaration, a replacement with a literal or with a host value), the written form (lists one, two and four
  * deep, a nullable element, a nullable list, text leaves), each tried with the values the form's own predicate (`fits`)
  * sorts, never the implementation's matcher; judged at every allowance around each decision's work in the eight orders
- * (`enclosingProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
+ * (`enclosingProblems`). The forms the candidate route does not take (S10: an argument, a dead call's argument, a
+ * return, an add or `addAll`, a dict's or a set's element type) are judged at the analysis: the mark at the store and the
+ * complete type its check carries (`Answers.requirement`). CI runs anchors of it; the whole family is a worker run
+ * outside CI.
  */
 
-/** A store's destination: its binding and the path below it, in key steps. */
+/** A store's destination: its binding, parameter or function's result (`result`), and the path below it, in key steps. */
 export interface Destination {
   readonly binding: string;
+  readonly result?: boolean;
   readonly path: readonly string[];
 }
 
@@ -52,12 +57,10 @@ export interface EnclosingCase {
   /** The values a run tries: each a host value, or the one the source stores (`host` false), with whether it fits. */
   readonly values: readonly { readonly value: SerializableRuntimeValue; readonly fits: boolean }[];
   readonly host: boolean;
+  /** Whether the candidate route compiles it (S10): else it is judged at the analysis. */
+  readonly slice: boolean;
 }
 
-const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
-  kind: "list",
-  items,
-});
 const object = (
   properties: Readonly<Record<string, SerializableRuntimeValue>>,
 ): SerializableRuntimeValue => ({
@@ -69,9 +72,25 @@ const object = (
 function literalText(value: SerializableRuntimeValue): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (value.kind === "list") return `[${value.items.map(literalText).join(", ")}]`;
+  if (value.kind === "set") return `set[${value.items.map(literalText).join(", ")}]`;
+  if (value.kind === "dict")
+    return `dict{${value.entries.map((e) => `${e.key}: ${literalText(e.value)}`).join(", ")}}`;
   if (value.kind === "object")
     return `{${value.properties.map((p) => `${p.name}: ${literalText(p.value)}`).join(", ")}}`;
   throw new Error(`No literal of a ${value.kind}.`);
+}
+
+/** A collection of `kind` holding `items` (a dict's under the keys `a`, `b`, …). */
+function wrap(
+  kind: "list" | "set" | "dict",
+  ...items: SerializableRuntimeValue[]
+): SerializableRuntimeValue {
+  if (kind === "dict")
+    return {
+      kind: "dict",
+      entries: items.map((value, index) => ({ key: String.fromCharCode(97 + index), value })),
+    };
+  return { kind, items };
 }
 
 const listOf = (of: Form, depth: number): Form =>
@@ -88,20 +107,20 @@ const FORMS: readonly Form[] = [
   listOf(name("string"), 2),
 ];
 
-/** A form's lists' nesting and its leaf's fitting and forbidden values. */
+/** A form's collections from the outermost in, and its leaf's fitting and forbidden values. */
 function spine(form: Form): {
-  depth: number;
+  kinds: ("list" | "set" | "dict")[];
   good: SerializableRuntimeValue;
   bad: SerializableRuntimeValue;
 } {
-  let depth = 0;
+  const kinds: ("list" | "set" | "dict")[] = [];
   let at = form.kind === "optional" ? form.of : form;
   while (at.kind === "collection") {
-    depth += 1;
+    kinds.push(at.collection);
     at = at.of.kind === "optional" ? at.of.of : at.of;
   }
   const text = at.kind === "name" && at.name === "string";
-  return { depth, good: text ? "ok" : 1, bad: text ? 1 : "bad" };
+  return { kinds, good: text ? "ok" : 1, bad: text ? 1 : "bad" };
 }
 
 /**
@@ -110,13 +129,23 @@ function spine(form: Form): {
  * as its leaf; `few` keeps the fitting one, the forbidden leaf, the sibling and the innermost wrong container.
  */
 function valuesOf(form: Form, few: boolean): SerializableRuntimeValue[] {
-  const { depth, good, bad } = spine(form);
-  const nest = (levels: number, inner: SerializableRuntimeValue): SerializableRuntimeValue =>
-    levels === 0 ? inner : list(nest(levels - 1, inner));
-  const out = [nest(depth, good), nest(depth, bad), nest(depth - 1, list(good, bad))];
+  const { kinds, good, bad } = spine(form);
+  const depth = kinds.length;
+  // (`levels` collections from the outermost in around `inner`, or around `items` at the innermost of them)
+  const nest = (
+    levels: number,
+    inner: SerializableRuntimeValue | readonly SerializableRuntimeValue[],
+    at = 0,
+  ): SerializableRuntimeValue =>
+    levels === 0
+      ? (inner as SerializableRuntimeValue)
+      : levels === 1 && Array.isArray(inner)
+        ? wrap(kinds[at]!, ...inner)
+        : wrap(kinds[at]!, nest(levels - 1, inner, at + 1));
+  const out = [nest(depth, good), nest(depth, bad), nest(depth, [good, bad])];
   if (few) out.push(nest(depth - 1, bad));
   else {
-    for (let level = 0; level < depth; level += 1) out.push(nest(level, bad), nest(level, list()));
+    for (let level = 0; level < depth; level += 1) out.push(nest(level, bad), nest(level + 1, []));
     out.push(null, nest(depth, null));
   }
   const seen = new Set<string>();
@@ -230,6 +259,7 @@ export function enclosingFamily(few = false): EnclosingCase[] {
           written: origin === "written",
           values,
           host: site === "host",
+          slice: true,
         });
       };
       add(
@@ -244,6 +274,151 @@ export function enclosingFamily(few = false): EnclosingCase[] {
       }
     }
   }
+  return [...cases, ...analysisFamily(few)];
+}
+
+/**
+ * The forms the candidate route leaves out (S10), each into a written destination: an argument to a written parameter,
+ * one of a dead call, a return into a written result, an add and an `addAll` into a written list of the form, and a
+ * replacement of a written dict or set of lists; a literal per value (`few` in the anchors) and a host value.
+ */
+/** Whole replacements of `xs` before an add: each costs a deeper decision more, so an allowance stops those alone. */
+const REPLACED = (seed: string): string[] => Array.from({ length: 40 }, () => `xs = [${seed}]`);
+
+function analysisFamily(few: boolean): EnclosingCase[] {
+  const cases: EnclosingCase[] = [];
+  const forms = [
+    ...FORMS,
+    collection("dict", listOf(integer, 1)),
+    collection("set", listOf(integer, 1)),
+  ];
+  const shapes: readonly {
+    readonly name: string;
+    readonly lines: (type: string, value: string, seed: string) => readonly string[];
+    readonly into: Destination;
+    /** The written type of the destination's place: the form's, or a list of it (an add's). */
+    readonly holds: (form: Form) => Form;
+    /** The stored value's text for a value of the form (an `addAll`'s list of it). */
+    readonly stored: (value: string) => string;
+    readonly collections: boolean;
+  }[] = [
+    {
+      name: "argument",
+      lines: (type, value) => [
+        `function f(xs: ${type}) {`,
+        '  say "CALLEE"',
+        "}",
+        'say "BEFORE"',
+        `f(${value})`,
+        'say "AFTER"',
+      ],
+      into: { binding: "xs", path: [] },
+      holds: (form) => form,
+      stored: (value) => value,
+      collections: false,
+    },
+    {
+      name: "dead argument",
+      lines: (type, value) => [
+        `function f(xs: ${type}) {`,
+        '  say "CALLEE"',
+        "}",
+        'say "BEFORE"',
+        "exit",
+        `f(${value})`,
+      ],
+      into: { binding: "xs", path: [] },
+      holds: (form) => form,
+      stored: (value) => value,
+      collections: false,
+    },
+    {
+      name: "return",
+      lines: (type, value) => [
+        `function g(n): ${type} {`,
+        `  return ${value}`,
+        "}",
+        'say "BEFORE"',
+        "let r = g(1)",
+        'say "AFTER"',
+      ],
+      into: { binding: "g", result: true, path: [] },
+      holds: (form) => form,
+      stored: (value) => value,
+      collections: false,
+    },
+    {
+      name: "add",
+      lines: (type, value, seed) => [
+        `let xs: ${type} = [${seed}]`,
+        ...REPLACED(seed),
+        'say "BEFORE"',
+        `xs.add(${value})`,
+        'say "AFTER"',
+      ],
+      into: { binding: "xs", path: ["element"] },
+      holds: (form) => collection("list", form),
+      stored: (value) => value,
+      collections: false,
+    },
+    {
+      name: "addAll",
+      lines: (type, value, seed) => [
+        `let xs: ${type} = [${seed}]`,
+        ...REPLACED(seed),
+        'say "BEFORE"',
+        `xs.addAll(${value})`,
+        'say "AFTER"',
+      ],
+      into: { binding: "xs", path: ["element"] },
+      holds: (form) => collection("list", form),
+      stored: (value) => `[${value}]`,
+      collections: false,
+    },
+    {
+      name: "written collection",
+      lines: (type, value, seed) => [
+        `let t: ${type} = ${seed}`,
+        'say "BEFORE"',
+        `t = ${value}`,
+        'say "AFTER"',
+      ],
+      into: { binding: "t", path: [] },
+      holds: (form) => form,
+      stored: (value) => value,
+      collections: true,
+    },
+  ];
+  for (const form of forms)
+    for (const shape of shapes) {
+      // (a dict's or a set's element type at a written replacement alone; a list's in every other shape)
+      if (shape.collections !== (form.kind === "collection" && form.collection !== "list"))
+        continue;
+      const type = formText(shape.holds(form));
+      const seed = literalText(valuesOf(form, true)[0]!);
+      const add = (value: string, values: EnclosingCase["values"]): void => {
+        const stored = shape.stored(value);
+        const source = [...shape.lines(type, stored, seed), "exit"].join("\n") + "\n";
+        const start = source.lastIndexOf(stored);
+        cases.push({
+          name: `${shape.name}, ${type}, ${value === "hostValue" ? "host" : `literal ${value}`}`,
+          source,
+          into: shape.into,
+          site: { start, end: start + stored.length },
+          form,
+          written: true,
+          values,
+          host: value === "hostValue",
+          slice: false,
+        });
+      };
+      add(
+        "hostValue",
+        valuesOf(form, false).map((value) => ({ value, fits: fits(form, value) })),
+      );
+      for (const value of valuesOf(form, few))
+        add(literalText(value), [{ value, fits: fits(form, value) }]);
+    }
   return cases;
 }
 
@@ -305,11 +480,33 @@ export function allowancesOf(c: EnclosingCase, mode: Mode, own = false): number[
   return [...out].sort((a, b) => a - b);
 }
 
-/** The place of a case's destination binding. */
+/** The place of a case's destination: its binding or parameter, or its function's result. */
 function placeOf(request: NonNullable<ReturnType<typeof coreRequest>>, c: EnclosingCase): number {
-  return new CoreProgram(request).places.find(
-    ({ kind }) => kind.kind === "binding" && kind.name === c.into.binding,
+  const program = new CoreProgram(request);
+  if (c.into.result === true) program.index();
+  return program.places.find(({ kind }) =>
+    c.into.result === true
+      ? kind.kind === "result" && program.functionOf(kind.fn).name === c.into.binding
+      : (kind.kind === "binding" || kind.kind === "parameter") && kind.name === c.into.binding,
   )!.id;
+}
+
+/** A complete type as `checkedText` prints a form. */
+function termText(term: TypeTerm): string {
+  switch (term.kind) {
+    case "atom":
+      return term.name;
+    case "list":
+    case "set":
+    case "dict":
+      return `${term.kind}<${termText(term.element)}>`;
+    case "union":
+      return term.members.map(termText).join("|");
+    case "dynamic":
+      return "any";
+    default:
+      return term.kind;
+  }
 }
 
 /** The budget-context records at a site, shown or deferred: the stop's owned marks there. */
@@ -343,9 +540,6 @@ export function enclosingProblems(
   const capped = <T>(make: () => T): T =>
     mode.run(() => (allowance === null ? make() : withTestDemandAllowance(allowance, make)));
   const answers = capped(() => analyseCore(request));
-  const compiled: CompilationResult = capped(() =>
-    compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
-  );
   const stopped = answers.budget.decisions
     .filter((d) => d.stopped && d.place === place)
     .map((d) => d.path);
@@ -368,6 +562,33 @@ export function enclosingProblems(
   const judged =
     relation === "at" ? "exact" : c.form === null || unsettledInferred ? "mark" : "domain";
   const problems: string[] = [];
+  if (!c.slice) {
+    // (at the analysis: a literal's error uncapped, and above a stop the mark and the complete type its check carries)
+    const errors = answers.diagnostics.filter(
+      (d) =>
+        d.class === "compile-error" && d.site.start >= c.site.start && d.site.end <= c.site.end,
+    ).length;
+    if (phase === "unstopped" && !c.host && errors > 0 !== !c.values[0]!.fits)
+      problems.push(`${errors} errors at the store of ${JSON.stringify(c.values[0]!.value)}`);
+    if (relation === "above" && judged === "domain") {
+      const marks = marksAt(answers, c.site);
+      if (marks !== 1) problems.push(`${marks} owned marks at the store above the stop`);
+      const required = answers.requirement(place, c.into.path);
+      if (required === null || termText(required) !== checkedText(c.form!))
+        problems.push(`requirement ${required === null ? "none" : termText(required)}`);
+    }
+    return {
+      allowance,
+      stops: stopped.map((path) => path.join(".")),
+      relation,
+      phase,
+      judged,
+      problems,
+    };
+  }
+  const compiled: CompilationResult = capped(() =>
+    compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
+  );
   const plan = compiled.plan;
   const within = (d: CompilationResult["diagnostics"][number]): boolean =>
     d.span.start.offset >= c.site.start && d.span.end.offset <= c.site.end;
