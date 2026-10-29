@@ -10,6 +10,7 @@ import {
   countProblem,
   LIST_METHODS,
   listArgumentMessage,
+  SORT_RULE,
   type ListKind,
   type ListMethod,
 } from "../../list-methods.js";
@@ -62,11 +63,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
   for (const item of items) {
     const itemKind = orderedFamily(valueKindOf(item));
     if (itemKind === undefined)
-      throw fault(
-        "TSV043",
-        `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeValue(item)}.`,
-        span,
-      );
+      throw fault("TSV043", `${SORT_RULE}, not ${describeValue(item)}.`, span);
     if (kind !== undefined && itemKind !== kind)
       throw fault(
         "TSR060",

@@ -80,6 +80,7 @@ import {
   listArgumentMessage,
   listMethod,
   missingListMethodMessage,
+  SORT_RULE,
   type ListKind,
   type ListMethod,
   type ListParameterKind,
@@ -1339,8 +1340,7 @@ function sortProblem(element: StaticType): string | undefined {
     return kind === undefined ? undefined : orderedFamily(kind);
   };
   const unsortable = candidates.find((candidate) => familyOfType(candidate) === undefined);
-  if (unsortable !== undefined)
-    return `sort() sorts numbers, text, durations, angles, or date and time values, not ${describeKind(unsortable)}.`;
+  if (unsortable !== undefined) return `${SORT_RULE}, not ${describeKind(unsortable)}.`;
   const families = new Set(candidates.map(familyOfType));
   return families.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...families].map((family) => VALUE_KINDS[family!].plural).join(" and ")}.`

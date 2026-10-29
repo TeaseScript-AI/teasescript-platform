@@ -21,7 +21,7 @@ import {
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit, localCalendarOffsetMessage, UNIT_OPERANDS } from "../../duration.js";
 import { expressionParts, statementExpressions } from "../../expression-children.js";
-import { listDraw, listMethod } from "../../list-methods.js";
+import { listDraw, listMethod, SORT_RULE } from "../../list-methods.js";
 import {
   FOR_SOURCE_RULE,
   REPEAT_COUNT_RULE,
@@ -32,6 +32,7 @@ import {
 import { cannotConvert, describeShownValue } from "../../runtime/values/value-types.js";
 import { LIST_INDEX_RULE, logicalOperandRule } from "../../operand-rules.js";
 import { misspelledPropertyHint, nameList } from "../../object-properties.js";
+import { JOIN_FIX, JOIN_RULE } from "../../shown-text-rules.js";
 import { PERSON_FIELDS, PLAYER } from "../../speaker-terms.js";
 import {
   CALENDAR_DURATION_PARTS,
@@ -846,16 +847,6 @@ function capitalized(text: string): string {
 const SHOWN_RULE =
   "It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and " +
   "regexes, and selects one element of a list.";
-
-/** C13: what `join` shows of a list's elements, as its runtime check says (`shown-text-rules.ts`). */
-const JOIN_RULE =
-  "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script " +
-  "references, and regexes";
-
-const JOIN_FIX = "Select an element or a property first.";
-
-/** C13: what `sort` orders. */
-const SORT_RULE = "sort() sorts numbers, text, durations, angles, or date and time values";
 
 const SORT_ONE_TYPE = "sort() sorts elements of one type";
 

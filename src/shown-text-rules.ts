@@ -30,7 +30,12 @@ export const EMPTY_INTERPOLATED_LIST_MESSAGE =
 export const INTERPOLATED_LIST_MESSAGE =
   "An interpolated list may contain only text, numbers, true, false, null, durations, angles, date and time values, script references, and regexes, because one element is shown as text.";
 
+/** What `join()` shows of a list's elements, and the fix for an element it cannot show. */
+export const JOIN_RULE =
+  "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes";
+export const JOIN_FIX = "Select an element or a property first.";
+
 /** `join()` of a list with an element it cannot show, of `kind` where it is one kind. */
 export function joinElementMessage(kind: ValueKind | undefined): string {
-  return `join() can only join text, numbers, true or false, null, durations, angles, date and time values, script references, and regexes${kind === undefined ? "" : `, not ${VALUE_KINDS[kind].description}`}. Select an element or a property first.`;
+  return `${JOIN_RULE}${kind === undefined ? "" : `, not ${VALUE_KINDS[kind].description}`}. ${JOIN_FIX}`;
 }
