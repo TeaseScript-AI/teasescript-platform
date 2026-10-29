@@ -1385,6 +1385,13 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
       ],
     ],
     [
+      "TSV043 sort mixed three types",
+      'let ys:(integer|string|duration)[]=[2,"a",1 s]\nys.sort()\nexit\n',
+      [
+        "W TSV043: sort() sorts elements of one type, but 'ys' may hold numbers, text, and durations here. If it does, the Tease stops with an error at this line.",
+      ],
+    ],
+    [
       "TSV043 toJson nested",
       "say toJson({a: [1..2]})\n",
       [

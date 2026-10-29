@@ -221,7 +221,9 @@ export function methodElements(
   const earliest = families(items.map((item) => item.tag))[0];
   const offending: readonly Item[] =
     unfit.length > 0 ? unfit : items.filter((item) => families([item.tag])[0] !== earliest);
-  for (const { item } of offendingKinds(offending.length > 0 ? offending : items))
+  // (of ordered types alone, one warning: its sentence names them all)
+  const warned = offendingKinds(offending.length > 0 ? offending : items);
+  for (const { item } of unfit.length === 0 ? warned.slice(0, 1) : warned)
     warning(
       walk,
       "member-read",
