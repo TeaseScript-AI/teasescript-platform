@@ -121,6 +121,7 @@ import {
   type SerializableRuntimeValue,
   type TemporalContext,
 } from "../../../src/index.js";
+import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/checkpoint.js";
 import { serializableEquals } from "../../../src/runtime/values/serializable-values.js";
 import { IMAGE_SKIP_TEXT } from "../../../src/image-input.js";
 import { silence } from "./generatedAudio";
@@ -1320,7 +1321,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const count = events.length;
     const added = events.slice(from, count);
     const last = events[count - 1] ?? null;
-    const planJson = kept.plan && from > 0 ? null : JSON.stringify(current.plan);
+    const planJson = kept.plan && from > 0 ? null : serializeValidatedRuntimeJson(current.plan);
     const marks = { editedWhileDebugging: debugEdits.value, rewoundWhileDebugging: rewound.value };
     const references = capturedMediaReferencesIn(snapshotJson, added);
     const inDebugRoom = room.value === "debug";
@@ -1455,7 +1456,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const explain = !found.events.some(
       (event) => event.kind === "exit" || event.kind === "runtimeFailure",
     );
-    if (found.planJson !== JSON.stringify(plan)) {
+    if (found.planJson !== serializeValidatedRuntimeJson(plan)) {
       // After a Player update the same script compiles to a plan of another revision; the plan has no runtime error.
       const revisions = explain ? revisionChange(found.planJson, INSTRUCTION_PLAN_VERSION) : null;
       return revisions === null
@@ -1663,7 +1664,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           for (const photo of capturedMedia.sessionRecords(references))
             await keptSessions.media.add(photo);
           await keptSessions.publish(scope, {
-            planJson: JSON.stringify(plan),
+            planJson: serializeValidatedRuntimeJson(plan),
             snapshotJson: review.snapshotJson,
             eventsFrom: 0,
             events: transfer.session.events,

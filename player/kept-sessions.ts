@@ -4,6 +4,7 @@ import {
   type InterpreterEvent,
   type RuntimeScriptStorageEntrySnapshot,
 } from "../src/index.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/snapshot/checkpoint.js";
 import {
   storableCapturedMedia,
   type CapturedMediaRecord,
@@ -135,16 +136,18 @@ export function keptPhotoReferences(store: KeptSessionStore | undefined): MediaI
 
 /**
  * The captured-media references in session data, such as photos a session shows or holds in variables: the references in
- * its JSON, written one field of a record and one element of a list at a time rather than as one text. JSON decides
- * everything else, as for the whole: a value it leaves out has none, and one it cannot write, such as a cycle, throws.
- * A text is searched as it is, since a reference has no character JSON escapes.
+ * its JSON, written one field of a record and one element of a list at a time rather than as one text, by the engine's
+ * writer, which also writes values nested deeper than native JSON can. JSON decides everything else, as for the whole: a
+ * value it leaves out has none, and one it cannot write, such as a cycle, throws. A text is searched as it is, since a
+ * reference has no character JSON escapes.
  */
 export function capturedMediaReferencesIn(...data: readonly unknown[]): Set<string> {
   const found = new Set<string>();
   const search = (value: unknown): void => {
-    const json = typeof value === "string" ? value : JSON.stringify(value);
-    if (json !== undefined)
-      for (const [reference] of json.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
+    // JSON leaves out a value it cannot write, which has none.
+    if (value === undefined || typeof value === "function" || typeof value === "symbol") return;
+    const json = typeof value === "string" ? value : serializeValidatedRuntimeJson(value);
+    for (const [reference] of json.matchAll(REFERENCES_IN_TEXT)) found.add(reference);
   };
   const searchElements = (value: unknown): void => {
     if (!Array.isArray(value)) search(value);
