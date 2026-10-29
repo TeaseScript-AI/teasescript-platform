@@ -14,7 +14,7 @@ import type { SourceSpan } from "../source.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
-import { copySpan, delimiterClosers, isPropertyName, spanFrom } from "./tokens.js";
+import { copySpan, isPropertyName, spanFrom } from "./tokens.js";
 import { allowCalendarDuration, requireExactDuration } from "./units.js";
 
 // Speakers and `say`: speaker declarations and properties, and a message's parts, mode, and pacing.
@@ -319,8 +319,7 @@ export function peekAfterSayMode(parser: Parser): Token | null {
     !(isPropertyName(parser.peek(first)) && parser.peek(first + 1).kind === TokenKind.Colon)
   )
     return null;
-  parser.shared.closers ??= delimiterClosers(parser.tokens);
-  const closer = parser.shared.closers.get(parser.current + 1);
+  const closer = parser.closerOf(parser.current + 1);
   return closer === undefined ? null : parser.peek(closer + 1 - parser.current);
 }
 

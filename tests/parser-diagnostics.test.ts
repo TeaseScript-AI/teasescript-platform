@@ -61,12 +61,147 @@ test("recovers a missing closing brace before a valid statement", () => {
   });
 });
 
+/**
+ * Typing mistakes and the blocks they are in: `@` holds the mistake. Each gives its errors on its own line, and every
+ * other statement stays. A statement's own skip stops at the `}` of its block (`Parser.atBraceCloser`), in every block;
+ * a group left open ends where a statement starts its line (`Parser.atGroupEnd`), so those mistakes are tested where
+ * one follows. Inside a value a `}` does not end a group: which group it closes cannot be told while recovering (#1147).
+ * The places are: top level, a multi-line block, a one-line block, a one-line block in a block, and the one-line blocks
+ * of a permanent button, media, and a media cue.
+ */
+const RECOVERY_MISTAKES: readonly (readonly [string, number, "every place" | "statement after"])[] =
+  [
+    ["goto", 1, "every place"],
+    ["let m = (1 + 2", 1, "every place"],
+    ["if (true", 1, "every place"],
+    ["let m = [1, 2", 1, "every place"],
+    ["let m = (", 1, "every place"],
+    ["let m = before[", 1, "every place"],
+    ["let m = [", 1, "statement after"],
+    ["let m = set[", 1, "statement after"],
+    ["let m = max(1,", 1, "statement after"],
+    // An element that fails where its list must end also misses the list's `]`.
+    ["let m = [2, (1", 2, "statement after"],
+  ];
+const RECOVERY_BLOCKS = [
+  "@",
+  "if true {\n  let a = 1\n  @\n  let b = 2\n}",
+  "if true { @ }",
+  "if true {\n  if true { @ }\n  let b = 2\n}",
+  'showPermanentButton "Go" { @ }',
+  'playAudio "a.mp3" { @ }',
+  'playAudio "a.mp3" { at 1 s { @ } }',
+];
+
+test("recovery from a typing mistake keeps the closers and statements around it", () => {
+  const kept = (node: unknown, names: string[] = []): string[] => {
+    if (Array.isArray(node)) for (const item of node) kept(item, names);
+    else if (typeof node === "object" && node !== null) {
+      // EVIDENCE: invariant: the parser builds every node as an object with its `kind`, and a `let` with its `name`.
+      const { kind, name } = node as { kind?: string; name?: { name?: string } };
+      if (kind === "letStatement") names.push(name?.name ?? "");
+      if (kind === "exitStatement") names.push("exit");
+      for (const [key, child] of Object.entries(node)) if (key !== "span") kept(child, names);
+    }
+    return names;
+  };
+  for (const [mistake, errors, places] of RECOVERY_MISTAKES)
+    for (const block of places === "every place" ? RECOVERY_BLOCKS : RECOVERY_BLOCKS.slice(0, 2)) {
+      const source = `let before = 0\n${block.replace("@", () => mistake)}\nlet after = 3\nexit\n`;
+      const result = parse(source);
+      const line = source.split("\n").findIndex((text) => text.includes(mistake));
+      assert.deepEqual(
+        result.diagnostics.map((diagnostic) => diagnostic.span.start.line),
+        Array.from({ length: errors }, () => line),
+        source,
+      );
+      // Every statement as written but the one with the mistake.
+      const written = [...source.matchAll(/let (\w+)/gu)].map((match) => match[1]);
+      assert.deepEqual(
+        kept(result.program).filter((name) => name !== "m"),
+        [...written.filter((name) => name !== "m"), "exit"],
+        source,
+      );
+    }
+  // Closers that recovery must leave as main does: one that the mistake's own group opened, also after a line break or
+  // a returned group; a stray or mistyped one followed by its group's closer, also on the next line. Each keeps main's
+  // errors, the later elements, and the statements.
+  const numbers = (node: unknown, found: number[] = []): number[] => {
+    if (Array.isArray(node)) for (const item of node) numbers(item, found);
+    else if (typeof node === "object" && node !== null) {
+      // EVIDENCE: invariant: the parser builds every node as an object with its `kind`, and a number with its `value`.
+      const { kind, value } = node as { kind?: string; value?: number };
+      if (kind === "numberLiteral") found.push(value!);
+      for (const [key, child] of Object.entries(node)) if (key !== "span") numbers(child, found);
+    }
+    return found;
+  };
+  for (const [source, codes, kept, statements] of [
+    ["let v = [(1 +\n)\n, 3]", ["TSP012"], [3], ["let", "exit"]],
+    ["let v = [(1\n]", ["TSP017"], [], ["let", "exit"]],
+    ["let v = [(1 +, 3]", ["TSP012"], [3], ["let", "exit"]],
+    ["let v = dict{[1\n}", ["TSP017"], [], ["let", "exit"]],
+    ["let v = [{a [1,\n2]\n}, 3]", ["TSP005", "TSP017", "TSP001"], [2], ["let", "exit"]],
+    ["if true { let v = { a: 1) }", ["TSP017", "TSP002"], [1], ["if", "exit"]],
+    ["let v = [dict{[1]]:3}, 4]", ["TSP005"], [4], ["let", "exit"]],
+    [
+      'let v = [showPermanentButton "A" { save f(1] as "key" }, 3]',
+      ["TSP017", "TSP036"],
+      [3],
+      ["let", "exit"],
+    ],
+    ["let v = f([(1 +\n)\n, 3], 4)", ["TSP012"], [3, 4], ["let", "exit"]],
+    ["let v = [dict{[1]]:3\n}, 4]", ["TSP005"], [4], ["let", "exit"]],
+    [
+      'let v = [showPermanentButton "A" { save f(1] as "key"\n}, 3]',
+      ["TSP017", "TSP036"],
+      [3],
+      ["let", "exit"],
+    ],
+    ["if true { let v = [(1+2}, 3] }", ["TSP017"], [3], ["if", "exit"]],
+    ["if true { let v = [(1}\n, 3]\n}", ["TSP017"], [3], ["if", "exit"]],
+    // A command's skip inside an object or dict stops at its `}`, as on main.
+    ["let v = [{a: playAudio }, 4]", ["TSP012"], [4], ["let", "exit"]],
+    ["let v = [dict{a: playAudio }, 4]", ["TSP012"], [4], ["let", "exit"]],
+    // Commands whose skip stops at any `}`, also outside a counted brace, as on main.
+    ["let v = [playAudio }, 4]", ["TSP012"], [4], ["let", "exit"]],
+    [
+      'let v: (media | integer)[] = [playVideo(async: true, file: "v"}, 4]',
+      ["TSP017"],
+      [4],
+      ["let", "exit"],
+    ],
+    ["let v = [playAudio(file: }, 4]", ["TSP012", "TSP017"], [4], ["let", "exit"]],
+    ["let v = [[playAudio }, 4], 5]", ["TSP012"], [4, 5], ["let", "exit"]],
+    ["switch 1 { case playAudio }", ["TSP012"], [1], ["switch", "exit"]],
+    [
+      "speaker actor { textColor: playAudio }",
+      ["TSP012", "TSP006"],
+      [],
+      ["speakerDeclaration", "exit"],
+    ],
+  ] as const) {
+    const result = parse(`${source}\nexit`);
+    assert.deepEqual(
+      [
+        result.diagnostics.map((diagnostic) => diagnostic.code),
+        numbers(result.program),
+        statementKinds(result).map((kind) => kind.replace("Statement", "")),
+      ],
+      [codes, kept, statements],
+      source,
+    );
+  }
+});
+
 test("a missing closing delimiter is reported where its line ends, and the next line still parses", () => {
   for (const line of [
     'f("a"',
     'let v = load("k"',
     "let v = (1 + 2",
     "let v = [1, 2",
+    "let v = [",
+    "let v = set[",
     'let v = dict{ "a": 1',
     'say("a", instant',
     "function g(a, b",
@@ -89,21 +224,6 @@ test("a missing closing delimiter is reported where its line ends, and the next 
     );
     assert.equal(statementKinds(result).at(-1), "exitStatement", line);
   }
-  // A list left open also misses its first element, which the next line's statement cannot be.
-  for (const line of ["let v = [", "let v = set["])
-    assert.deepEqual(
-      parse(`${line}\nlet = 5\nexit`).diagnostics.map((diagnostic) => [
-        diagnostic.code,
-        diagnostic.span.start.line,
-        diagnostic.span.start.column,
-      ]),
-      [
-        ["TSP012", 1, 0],
-        ["TSP017", 0, line.length],
-        ["TSP013", 1, 4],
-      ],
-      line,
-    );
   // A line that starts with a value or a property named like a statement keyword stays in the literal.
   for (const source of ['let v = [\n    say "x"\n]\nexit', "let v = {\n    let: 1\n}\nexit"])
     assert.deepEqual(parse(source).diagnostics, [], source);

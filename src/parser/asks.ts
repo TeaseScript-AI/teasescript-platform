@@ -12,7 +12,7 @@ import type { SourceSpan } from "../source.js";
 import { TokenKind, type Token } from "../token.js";
 import type { Parser } from "../parser.js";
 import { parserDiagnosticCode } from "./diagnostic-codes.js";
-import { copySpan, delimiterClosers, isExpressionStart, spanFrom } from "./tokens.js";
+import { copySpan, isExpressionStart, spanFrom } from "./tokens.js";
 import { requireExactDuration } from "./units.js";
 import { atSayModeBeforeBoundedText, parseSayPresentation, peekAfterSayMode } from "./say.js";
 
@@ -594,8 +594,7 @@ function atQuestionPresentation(parser: Parser): boolean {
  */
 export function* parseAskImageWithPresentation(parser: Parser): ParseTask<CallExpression | null> {
   const command = parser.advance();
-  parser.shared.closers ??= delimiterClosers(parser.tokens);
-  const closer = parser.shared.closers.get(parser.current + 1);
+  const closer = parser.closerOf(parser.current + 1);
   const withOptions =
     parser.peek(1).kind === TokenKind.LeftParenthesis &&
     closer !== undefined &&
