@@ -1,6 +1,6 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinSteps, keep, keepText, keptParts, keptSteps, keptText, stepText } from "../budget.js";
+import { joinSteps, keep, keepText, keptParts, keptSteps, keptText } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import { keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -192,14 +192,27 @@ interface Entry {
 /**
  * A decider group's region: its members' tasks and the cells of the literals among them, at any depth, by the path
  * each stands at below the group's (as a walk's stops are listed, `stopsOf`), each path's entries in their key's order:
- * its values with the groups of the operands of its carriers, its literals, and its written copies.
+ * its values with the groups of the operands of its carriers, its literals, and its written copies. A path is a node
+ * one step below its parent's, never an array or a text, so a literal nested k deep is k nodes, not k paths of up to k
+ * steps each (#1438); a decided path's rest is followed step by step (`forEachPath`).
  */
 interface Region {
-  readonly values: ReadonlyMap<string, readonly Entry[]>;
-  readonly literals: ReadonlyMap<string, readonly Entry[]>;
-  readonly written: ReadonlyMap<string, readonly Entry[]>;
-  /** Per path, its values with each snapshot or class once (`distinctAt`). */
-  readonly distinct: Map<string, readonly Entry[]>;
+  readonly root: RegionPath;
+  /** Whether a written copy stands at any of its paths (`holdsWritten`). */
+  readonly written: boolean;
+  /** The groups of its carriers' operands, at any of its paths (`holdsWritten`). */
+  readonly bound: readonly DeciderGroup[];
+}
+
+/** One path of a region: its entries and the paths one step longer, by step. */
+interface RegionPath {
+  readonly values: Entry[];
+  readonly literals: Entry[];
+  readonly written: Entry[];
+  readonly below: Map<string, RegionPath>;
+  /** Its values with each snapshot or class once (`distinctAt`), above a decided path's end and at it. */
+  distinct: readonly Entry[] | null;
+  distinctAtEnd: readonly Entry[] | null;
 }
 
 /**
@@ -275,14 +288,17 @@ function writtenResult(admission: Admission, value: PlaceId): boolean {
 function regionOf(admission: Admission, group: DeciderGroup): Region {
   if (group.region !== null) return group.region;
   const work = admission.pass.program.work;
-  const values = new Map<string, Entry[]>();
-  const literals = new Map<string, Entry[]>();
-  const written = new Map<string, Entry[]>();
-  const put = (map: Map<string, Entry[]>, text: string, entry: Entry): void => {
-    const list = map.get(text);
-    if (list === undefined) map.set(text, [entry]);
-    else list.push(entry);
-  };
+  const emptyPath = (): RegionPath => ({
+    values: [],
+    literals: [],
+    written: [],
+    below: new Map(),
+    distinct: null,
+    distinctAtEnd: null,
+  });
+  const root = emptyPath();
+  let paths = 1;
+  const bound: DeciderGroup[] = [];
   interface Item {
     readonly member: number;
     readonly task: Expansion;
@@ -291,8 +307,7 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
   }
   interface Frame {
     readonly items: readonly Item[];
-    readonly path: readonly string[];
-    readonly text: string;
+    readonly path: RegionPath;
     positions:
       | readonly {
           readonly step: string | null;
@@ -314,14 +329,15 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
         deep: member.deep,
         single: member.single,
       })),
-      path: [],
-      text: "",
+      path: root,
       positions: null,
       next: 0,
     },
   ];
+  let written = false;
   while (stack.length > 0) {
     const frame = stack.at(-1)!;
+    const here = frame.path;
     if (frame.positions === null) {
       const byPosition = new Map<
         string,
@@ -337,19 +353,20 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
       >();
       for (const item of frame.items) {
         const entry = (): Entry => ({ ...item, rank: rank++, bound: null });
-        if (item.task.inherits !== null) put(written, frame.text, entry());
+        if (item.task.inherits !== null) here.written.push(entry());
         const stop = item.task.stop;
         if (stop !== null)
-          put(
-            stop.list === "written" ? written : stop.list === "literals" ? literals : values,
-            frame.text,
-            entry(),
-          );
+          (stop.list === "written"
+            ? here.written
+            : stop.list === "literals"
+              ? here.literals
+              : here.values
+          ).push(entry());
         const above = group.members[item.member]!;
         // (a call a list join carries is read by its written result, as a written copy is, so the scan of the stops
         // answers there: F20, `earliestDecider`)
         if (stop?.list === "values" && above.joined && writtenResult(admission, item.task.value))
-          put(written, frame.text, { ...entry(), call: true });
+          here.written.push({ ...entry(), call: true });
         for (const [index, part] of item.task.parts.entries()) {
           work.charge("checks");
           const key = `${part.position}:${part.step ?? ""}`;
@@ -389,6 +406,7 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
           at.roles.push(part.role);
         }
       }
+      written ||= here.written.length > 0;
       const positions = [...byPosition.values()];
       work.charge("checks", sortCost(positions.length));
       positions.sort((a, b) => a.position - b.position);
@@ -396,36 +414,32 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
     }
     if (frame.next < frame.positions.length) {
       const at = frame.positions[frame.next++]!;
-      if (at.bound.length > 0)
-        put(values, frame.text, {
+      if (at.bound.length > 0) {
+        const operands = groupOf(admission, at.bound);
+        bound.push(operands);
+        here.values.push({
           rank: rank++,
           member: at.from[0]!,
           task: at.bound[0]!.task,
           deep: at.bound[0]!.deep,
           single: at.bound[0]!.single,
-          bound: {
-            group: groupOf(admission, at.bound),
-            from: at.from,
-            through: at.through,
-            roles: at.roles,
-          },
+          bound: { group: operands, from: at.from, through: at.through, roles: at.roles },
         });
+      }
       if (at.items.length > 0) {
-        const path = keptSteps(admission.work, frame.path, [at.step!]);
-        stack.push({
-          items: at.items,
-          path,
-          text: keptText(admission.work, path),
-          positions: null,
-          next: 0,
-        });
+        let next = here.below.get(at.step!);
+        if (next === undefined) {
+          here.below.set(at.step!, (next = emptyPath()));
+          paths += 1;
+        }
+        stack.push({ items: at.items, path: next, positions: null, next: 0 });
       }
       continue;
     }
     stack.pop();
   }
-  keep(admission.work, 1 + rank);
-  group.region = { values, literals, written, distinct: new Map() };
+  keep(admission.work, paths + rank + bound.length);
+  group.region = { root, written, bound };
   return group.region;
 }
 
@@ -437,26 +451,19 @@ function regionOf(admission: Admission, group: DeciderGroup): Region {
  * never read where the first decides nothing (`classFirsts`, `distinctStops`); so too of the operands at one position
  * of operations of one class, member by member. Once per group, path and end.
  */
-function distinctAt(
-  admission: Admission,
-  region: Region,
-  text: string,
-  end: boolean,
-): readonly Entry[] {
-  const name = end ? `${text}\u0000` : text;
-  const known = region.distinct.get(name);
-  if (known !== undefined) return known;
+function distinctAt(admission: Admission, path: RegionPath, end: boolean): readonly Entry[] {
+  const known = end ? path.distinctAtEnd : path.distinct;
+  if (known !== null) return known;
+  const remember = (list: readonly Entry[]): readonly Entry[] =>
+    end ? (path.distinctAtEnd = list) : (path.distinct = list);
   // (at the path's end a value below an operation decides nothing: neither it nor a group of such operands is read)
-  const all = region.values.get(text) ?? [];
+  const all = path.values;
   const list = end
     ? all.filter((entry) =>
         entry.bound === null ? !entry.deep : entry.bound.group.members.some((m) => !m.deep),
       )
     : all;
-  if (!sharing() || list.length < 2) {
-    region.distinct.set(name, list);
-    return list;
-  }
+  if (!sharing() || list.length < 2) return remember(list);
   const { contract } = admission.pass;
   const seen = new Set<string>();
   const out: Entry[] = [];
@@ -528,19 +535,13 @@ function distinctAt(
     out.push(entry);
   }
   keep(admission.work, 1 + out.length);
-  region.distinct.set(name, out);
-  return out;
+  return remember(out);
 }
 
 /** Whether a written copy stands in a group's region or in a group below it (`writtenOn` asks only there), once. */
 function holdsWritten(admission: Admission, root: DeciderGroup): boolean {
   if (root.holdsWritten !== null) return root.holdsWritten;
-  const bounds = (group: DeciderGroup): readonly DeciderGroup[] => {
-    const out: DeciderGroup[] = [];
-    for (const list of regionOf(admission, group).values.values())
-      for (const entry of list) if (entry.bound !== null) out.push(entry.bound.group);
-    return out;
-  };
+  const bounds = (group: DeciderGroup): readonly DeciderGroup[] => regionOf(admission, group).bound;
   const stack: {
     readonly group: DeciderGroup;
     readonly below: readonly DeciderGroup[];
@@ -548,7 +549,7 @@ function holdsWritten(admission: Admission, root: DeciderGroup): boolean {
   }[] = [{ group: root, below: bounds(root), next: 0 }];
   while (stack.length > 0) {
     const frame = stack.at(-1)!;
-    if (frame.next === 0 && regionOf(admission, frame.group).written.size > 0) {
+    if (frame.next === 0 && regionOf(admission, frame.group).written) {
       frame.group.holdsWritten = true;
       stack.pop();
       continue;
@@ -677,16 +678,20 @@ function restIds(admission: Admission, at: readonly string[]): number[] {
   return ids;
 }
 
-/** Each prefix of a decided path's rest from `rest`, its text and length, the empty one first. */
-function forEachPrefix(
+/**
+ * Each of a region's paths along a decided path's rest from `rest`, with its length, the region's own first; a prefix
+ * no path of the region stands at, nor any longer one, holds nothing.
+ */
+function forEachPath(
+  region: Region,
   at: readonly string[],
   rest: number,
-  visit: (text: string, length: number) => void,
+  visit: (path: RegionPath, length: number) => void,
 ): void {
-  let text = "";
-  for (let length = 0; rest + length <= at.length; length += 1) {
-    if (length > 0) text = length === 1 ? at[rest]! : stepText(text, at[rest + length - 1]!);
-    visit(text, length);
+  let path: RegionPath | undefined = region.root;
+  for (let length = 0; path !== undefined; length += 1) {
+    visit(path, length);
+    path = rest + length < at.length ? path.below.get(at[rest + length]!) : undefined;
   }
 }
 
@@ -729,14 +734,13 @@ function writtenOn(
         answer = known ?? false;
         continue;
       }
-      const region = regionOf(admission, group);
       let asks = false;
       const below: { group: DeciderGroup; rest: number }[] = [];
-      forEachPrefix(at, rest, (text, length) => {
+      forEachPath(regionOf(admission, group), at, rest, (path, length) => {
         admission.pass.program.work.charge("checks");
-        for (const entry of region.written.get(text) ?? [])
+        for (const entry of path.written)
           asks ||= asksType(admission, group, entry, rest + length === at.length);
-        for (const entry of region.values.get(text) ?? [])
+        for (const entry of path.values)
           if (entry.bound !== null) below.push({ group: entry.bound.group, rest: rest + length });
       });
       if (asks) {
@@ -812,13 +816,12 @@ function firstValue(
         answer = known;
         continue;
       }
-      const region = regionOf(admission, group);
       const lists: { list: readonly Entry[]; length: number }[] = [];
-      forEachPrefix(at, rest, (text, length) => {
-        const list = distinctAt(admission, region, text, rest + length === at.length);
+      forEachPath(regionOf(admission, group), at, rest, (path, length) => {
+        const end = rest + length === at.length;
+        const list = distinctAt(admission, path, end);
         if (list.length > 0) lists.push({ list, length });
-        const ends = rest + length === at.length ? region.literals.get(text) : undefined;
-        if (ends !== undefined) lists.push({ list: ends, length });
+        if (end && path.literals.length > 0) lists.push({ list: path.literals, length });
       });
       top.lists = lists;
       top.positions = lists.map(() => 0);
