@@ -495,6 +495,8 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
       }
     }
   }
+  // (the stores above a decision that stopped, the pass's decisions taken: #1416)
+  walk.enclosingStores();
   // (the member-answer oracle's paths the copies land and no decision took)
   admission.compareLanded();
 }

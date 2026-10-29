@@ -365,6 +365,11 @@ export interface Answers {
   at(node: FlowNode): OccurrenceAnswer | null;
   place(id: PlaceId, path?: readonly string[]): PlaceAnswer;
   /**
+   * The complete type a store into a place at a path is checked against where a decision below the path stopped (S3 §5,
+   * #1416: `enclosingStores`), its levels below the path whole; `null` elsewhere.
+   */
+  requirement(id: PlaceId, path: readonly string[]): TypeTerm | null;
+  /**
    * These answers stopped at `limit` after the analysis ran to its end (a question after it spent the allowance): its
    * findings and decisions stand, its warning says so, and what is asked from then on answers `STOPPED` (D4 a′).
    */
@@ -1347,6 +1352,10 @@ class CoreAnswers implements Answers {
         });
       },
     };
+  }
+
+  public requirement(id: PlaceId, path: readonly string[]): TypeTerm | null {
+    return this.#consumers.requirements.get(keyOf(id, path)) ?? null;
   }
 
   #admitted(id: PlaceId, path: readonly string[], term: TypeTerm | null): AdmittedType {

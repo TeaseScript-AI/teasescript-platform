@@ -75,9 +75,17 @@ export const READS = new Map([
   ["cellSited", "C9's site for an item a store brings: a site, read"],
   ["compareLanded", "the member-answer oracle's comparison, a test seam inert outside it"],
   ["contributionSited", "C1's site for an item an add brings: a site, read"],
+  [
+    "copiedAt",
+    "the written type a copy decides a key by: a decision's answer, recorded by `decide`",
+  ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
   ["groups", "the places and paths `decide` decides: its inputs"],
   ["ingressSiteOf", "C1's site for external data a store brings: a site, read"],
+  [
+    "kindsAt",
+    "the kinds a key's decision decided or settled it by: a decision's answer, recorded by `decide`",
+  ],
   ["literalChildren", "a literal's children at a step: syntax"],
   ["namedExternalSite", "where a store's named external data enters: a site, read"],
   ["offendingAt", "the innermost offending expression of a contribution: a site, read"],
@@ -90,6 +98,10 @@ export const READS = new Map([
   [
     "stopDecision",
     "takes back what a decision stopped at its demand allowance made of its key: each read of the key owes its own check",
+  ],
+  [
+    "storeRequirement",
+    "the complete type a store above a stopped decision is checked against: a decision's answer, recorded by `decide`",
   ],
   ["storesAt", "the stores reaching a key: `decide`'s inputs"],
   ["takeBackReadChecks", "takes the running unit's read checks back at a stop: creates none"],
@@ -136,6 +148,12 @@ const LISTED_READS = [
   ],
   ["newlyRejected", ".get", "fresh.ts", "whether a store was rejected: a test"],
   [
+    "refused",
+    ".has",
+    "enclosing.ts",
+    "whether the pass rejected a store above a stop, whose error stands: a test",
+  ],
+  [
     "boundaries",
     ".clear",
     "consumers.ts",
@@ -169,6 +187,12 @@ const LISTED_READS = [
     "the site that decided an answer, read where the answer asks it",
   ],
   ["inheritsWritten", "call", "answers.ts", "whether a copy decides an answer, read with it"],
+  [
+    "stored",
+    ".along",
+    "enclosing.ts",
+    "the keys whole stores and adds reach above a stopped key: the stores the stop stands for, read",
+  ],
 ];
 
 export function checkObligationInventory(root) {

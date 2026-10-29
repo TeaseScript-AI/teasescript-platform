@@ -43,7 +43,7 @@ import type {
   SolvedTypeFacts,
   TypeCheckResult,
 } from "../backend.js";
-import type { PlaceId, SourceSite } from "../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { closedType, type Answers } from "./answers.js";
 import { joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
@@ -873,18 +873,24 @@ class Contracts {
     private readonly lets: ReadonlyMap<PlaceId, LetStatement>,
   ) {}
 
-  /** The check of a store: the destination's written type, or else its contract at the stored path (A1–A9). */
+  /**
+   * The check of a store: the destination's written type, else the complete type a stop below its path left it to check
+   * whole (`Answers.requirement`, #1416), else its contract at the stored path (A1–A9).
+   */
   public stored(store: Store): TypeCheckPlan | null {
     const declaration = declarationOf(this.answers, this.index, this.lets, store);
     const value = store.kind === "letStatement" ? store.initializer : store.value;
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
+    const required = place === null ? null : this.answers.requirement(place.id, place.path);
     const type =
       whole && declaration.typeAnnotation !== null
         ? typePlan(typeFromAnnotation(declaration.typeAnnotation))
-        : place === null
-          ? null
-          : runCompileTask(this.#contractTask(place.id, place.path, value, [value]));
+        : required !== null
+          ? typePlan(runCompileTask(termTask(required)))
+          : place === null
+            ? null
+            : runCompileTask(this.#contractTask(place.id, place.path, value, [value]));
     if (type === null) return null;
     const name = [
       declaration.name.name,
@@ -1454,6 +1460,30 @@ const COLLECTIONS: ReadonlySet<ItemTag> = new Set(["list", "set", "dict"]);
  * collection at this depth is outside the slice (`backend.ts` rejects it), so no fact is cut short.
  */
 export const SLICE_DEPTH = 256;
+
+/**
+ * A written type's term as the type a check takes (V30 §13: an unwritten part and a written `object`'s properties take
+ * every value), level by level as written; a compile task, as an annotation's conversion is.
+ */
+function* termTask(term: TypeTerm): CompileTask<StaticType> {
+  switch (term.kind) {
+    case "atom":
+      return closedType(term.name) ?? UNKNOWN_TYPE;
+    case "list":
+    case "set":
+    case "dict":
+      return { kind: term.kind, element: yield* compileChild(termTask(term.element)) };
+    case "union": {
+      const types: StaticType[] = [];
+      for (const member of term.members) types.push(yield* compileChild(termTask(member)));
+      return union(types);
+    }
+    case "object":
+    default:
+      // (a written `object` is any object; a written term holds no other part, and an open one restricts nothing)
+      return term.kind === "object" ? { kind: "object", properties: null } : UNKNOWN_TYPE;
+  }
+}
 
 /** A place's type at a path: its contract's kinds, and a collection's elements' below it, built from the deepest up. */
 function placeType(answers: Answers, id: PlaceId, path: readonly string[]): StaticType {

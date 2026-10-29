@@ -8,7 +8,15 @@ import {
   publish,
   takeBackReadChecks,
 } from "./admission/boundaries.js";
-import { compareLanded, decide, decisionStopped, stopDecision } from "./admission/decision.js";
+import {
+  compareLanded,
+  copiedAt,
+  decide,
+  kindsAt,
+  decisionStopped,
+  stopDecision,
+  storeRequirement,
+} from "./admission/decision.js";
 import { groups, stores } from "./admission/groups.js";
 import { atCopy } from "./admission/held.js";
 import {
@@ -120,6 +128,11 @@ export class Admission {
   readonly decided = new Map<Key, readonly ItemTag[]>();
   /** The stores rejected in this pass, by their definitions' order, with the places and paths they are rejected at (A6). */
   readonly newlyRejected = new Map<number, Set<Key>>();
+  /**
+   * Every store and argument C1 rejected in this pass, by their definitions' order: its error stands for its value, so a
+   * stop below it owes no mark there (`enclosingStores`); an argument's rejection takes no effect in the next pass (F21).
+   */
+  readonly refused = new Set<number>();
   /** The boundary checks of the ingress stores, by the key each enters (C9), published after the consumers ran. */
   readonly boundaries = new Map<Key, Obligation[]>();
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
@@ -462,6 +475,7 @@ export class Admission {
 
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
     this.rejections += 1;
+    this.refused.add(d.uid);
     if (d.how === "argument") return;
     let keys = this.newlyRejected.get(d.uid);
     if (keys === undefined) this.newlyRejected.set(d.uid, (keys = new Set()));
@@ -563,6 +577,18 @@ export class Admission {
 
   public decide(root: PlaceId, path: readonly string[], lazily?: boolean): Decision | null {
     return decide(this, root, path, lazily);
+  }
+
+  public storeRequirement(place: PlaceId, path: readonly string[]): TypeTerm | null {
+    return storeRequirement(this, place, path);
+  }
+
+  public copiedAt(key: Key): TypeTerm | null {
+    return copiedAt(this, key);
+  }
+
+  public kindsAt(key: Key): readonly ItemTag[] | null {
+    return kindsAt(this, key);
   }
 
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {

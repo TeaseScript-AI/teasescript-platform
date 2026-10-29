@@ -19,7 +19,7 @@ import { positions } from "../positions.js";
  * copy (S6-CARRIERS §4.2: a `null` before the written decider, a literal's `null` element), so a copy of the place keeps
  * that too (Astra's F2 on #1049).
  */
-function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm | null {
+export function optionalOf(term: TypeTerm | null, nullable: boolean): TypeTerm | null {
   if (term === null || !nullable || typeTags(term).includes("null")) return term;
   return { kind: "union", members: [term, { kind: "atom", name: "null" }] };
 }

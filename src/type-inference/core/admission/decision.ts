@@ -8,7 +8,7 @@ import { marked } from "../guards.js";
 import { ingressLeaves, writerKey, type Item, type ItemTag } from "../items.js";
 import { addRest, aliasKeyAt, covers } from "./classes.js";
 import { hostRead, takeable, wholeOf } from "./eligibility.js";
-import { drive, inheritedAt, openAbove } from "./inherited.js";
+import { drive, inheritedAt, openAbove, optionalOf } from "./inherited.js";
 import {
   admitsNumber,
   concrete,
@@ -65,6 +65,8 @@ const NOTHING = {
   decider: null,
   site: null,
   published: false,
+  copied: null,
+  settled: null,
 } as const;
 
 /**
@@ -105,6 +107,37 @@ export function decisionStopped(
   path: readonly string[],
 ): boolean {
   return admission.pass.contract.stopped(place, path);
+}
+
+/**
+ * The complete type a store into `place` at `path` is checked against where a decision below the path stopped (S3 §5,
+ * #1416), without new solving: the place's written type there (A1), else the written type a copy decides the path by,
+ * whole below it (A4, this pass's decision: a pass in which a decision stops is restarted with it stopped, TABLE r4.180,
+ * so that decision never read what the stop took back); `null` where neither decides the path.
+ */
+export function storeRequirement(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+): TypeTerm | null {
+  const written = writtenOf(admission.pass.program.place(place).kind);
+  const term = written === null ? null : permittedAt(written, path);
+  if (term !== null) return term;
+  return copiedAt(admission, keptKey(admission.work, place, path));
+}
+
+/** The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`. */
+export function copiedAt(admission: Admission, key: Key): TypeTerm | null {
+  return admission.decisions.get(key)?.copied ?? null;
+}
+
+/** The kinds this pass's decision of a key decided it by, or A3 settled it by (`Decided.settled`), or `null`. */
+export function kindsAt(admission: Admission, key: Key): readonly ItemTag[] | null {
+  return (
+    admission.decided.get(key) ??
+    admission.decisions.get(key)?.settled?.map((item) => item.tag) ??
+    null
+  );
 }
 
 /**
@@ -290,7 +323,7 @@ function decision(
       family(kinds.map((item) => item.tag))
     ) {
       work.charge("checksSkipped");
-      return { ...NOTHING, ...none };
+      return { ...NOTHING, ...none, settled: kinds };
     }
   }
   const writtenTags = term === null ? null : typeTags(term);
@@ -302,6 +335,7 @@ function decision(
   let decider: Definition | null = null;
   let deciderSite: SourceSite | null = null;
   let published = false;
+  let copied: TypeTerm | null = null;
   // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
   if (tags === null && path.length === 0 && !admission.a4Keys.has(keyOf(root, []))) {
     let plain = true;
@@ -335,9 +369,10 @@ function decision(
   }
   if (tags === null) {
     const found = drive(admission, scanAt(admission, direct, prefixes, key));
-    if (found !== null)
+    if (found !== null) {
       ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
-    else {
+      copied = optionalOf(found.copied, found.nullable);
+    } else {
       // C9 r4.12, r4.50 (1): where no contribution decides, but the contract holds kinds beside external data, those
       // kinds are the type the place is published with, so external data a store brings into it owes its check
       // there, named as well as inline (`published`)
@@ -370,6 +405,8 @@ function decision(
     decider,
     site: deciderSite,
     published,
+    copied,
+    settled: null,
   };
 }
 

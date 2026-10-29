@@ -7,7 +7,7 @@ import { STOPPED } from "../items.js";
 import { pathPhrase } from "../messages.js";
 import { Laminar } from "../narrowing.js";
 import { siteKey } from "../program.js";
-import { targetName } from "../result.js";
+import { targetName, type StoreRoot, type StoreStep } from "../result.js";
 import { mixed, mixedJoin } from "./mixed.js";
 import { admittedStores } from "./stores.js";
 import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
@@ -78,26 +78,57 @@ export function stands(walk: Consumers, d: Definition): boolean {
   );
 }
 
-/** A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once. */
-export function storeMark(walk: Consumers, d: Definition, path: readonly string[]): void {
+/** What a mark names of its destination: its target, its place's words, its root and its path's steps. */
+export interface MarkNames {
+  readonly label: string;
+  readonly into: string;
+  readonly root: StoreRoot | null;
+  readonly steps: readonly StoreStep[];
+}
+
+/** A destination's `MarkNames`, its steps given or the contract's above each element step (`storeSteps`). */
+export function markNames(
+  walk: Consumers,
+  place: PlaceId,
+  path: readonly string[],
+  steps: readonly StoreStep[] = storeSteps(walk, place, path),
+): MarkNames {
+  return {
+    label: targetName(walk.pass.program.place(place).label, path),
+    into: placeText(walk, place, path),
+    root: storeRoot(walk, place),
+    steps,
+  };
+}
+
+/**
+ * A store into a place the fresh pass leaves undecided: marked at its site, its type undecided (r4.100), once; `names`
+ * where the caller made them once for every store into the destination.
+ */
+export function storeMark(
+  walk: Consumers,
+  d: Definition,
+  path: readonly string[],
+  names?: () => MarkNames,
+): void {
   if (walk.marked.has(d.uid)) return;
   walk.marked.add(d.uid);
-  const { program } = walk.pass;
+  const { label, into, root, steps } = names?.() ?? markNames(walk, d.place, path);
   storeWarning(
     walk,
     d.site,
-    targetName(program.place(d.place).label, path),
+    label,
     STOPPED[0]!,
     ["unknown"],
     {
       rule: "store",
-      into: placeText(walk, d.place, path),
+      into,
       type: ["unknown"],
       written: false,
       decider: null,
       brought: null,
-      root: storeRoot(walk, d.place),
-      steps: storeSteps(walk, d.place, path),
+      root,
+      steps,
     },
     [],
   );

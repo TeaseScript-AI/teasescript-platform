@@ -2,7 +2,7 @@ import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { CarrierRole } from "../carriers.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
-import type { ItemTag } from "../items.js";
+import type { Item, ItemTag } from "../items.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
 
@@ -485,6 +485,13 @@ export interface Decided {
   readonly decider: Definition | null;
   readonly site: SourceSite | null;
   readonly published: boolean;
+  /**
+   * Where a copy decides the path (A4): the written type it copies there, the decision's `null` added (`optionalOf`),
+   * whole below the path, so a store above a stopped decision is checked against it (`storeRequirement`, #1416).
+   */
+  readonly copied: TypeTerm | null;
+  /** Where A3 settled the path without a scan: the one family of kinds its contract holds, which names it (`kindsAt`). */
+  readonly settled: readonly Item[] | null;
 }
 
 /** A list `+` (`joinElements`). */
