@@ -231,6 +231,17 @@ const MEMBER_FORMS = [
     `public probeDestructured(): void {\n    const { readChecks } = this;\n    readChecks.push(${PUSHED});\n  }`,
     1,
   ],
+  // (an assignment's destructuring, and a for-of's, Codex r6 B1)
+  [
+    "probeAssignedArray",
+    `public probeAssignedArray(): void {\n    let readChecks: unknown[] = [];\n    ({ readChecks } = this);\n    readChecks.push(${PUSHED});\n  }`,
+    1,
+  ],
+  [
+    "probeAssignedFor",
+    `public probeAssignedFor(): void {\n    let checks: unknown[] = [];\n    for ({ readChecks: checks } of [this]) checks.push(${PUSHED});\n  }`,
+    1,
+  ],
 ];
 /** `error` parameters in other forms, members and top-level functions: each unproved. */
 const ERROR_FORMS = [
@@ -430,6 +441,45 @@ const VALUES = [
   ["Admission.probeKnown", `const { probeKnown } = ${SELF}.admission;\n    void probeKnown;`],
   // (a listed read's form in a file it is not listed for)
   ["Admission.readChecks", `for (const check of ${SELF}.admission.readChecks) void check;`],
+  // (assignments' destructurings: shorthand, quoted, nested, a for-of's, Codex r6 B1)
+  [
+    "Admission.groups",
+    `let groups: unknown;\n    ({ groups } = ${SELF}.admission);\n    void groups;`,
+  ],
+  [
+    "Admission.cellSited",
+    `let cell: unknown;\n    ({ "cellSited": cell } = ${SELF}.admission);\n    void cell;`,
+  ],
+  [
+    "Admission.contributionSited",
+    `let contribution: unknown;\n    ({ admission: { contributionSited: contribution } } = ${SELF});\n    void contribution;`,
+  ],
+  [
+    "Admission.compareLanded",
+    `let landed: unknown;\n    for ({ compareLanded: landed } of [${SELF}.admission]) void landed;`,
+  ],
+  // (a namespace's shorthand binding of a moved derivation, Codex r6 B1)
+  [
+    "Admission.probeShorthand",
+    `{\n      const { probeShorthand } = probe;\n      probeShorthand(${SELF}.admission);\n    }`,
+  ],
+  // (a constructor's parameter property, Codex r6 B2)
+  ["Admission.host", `const host = ${SELF}.admission.host;\n    void host;`],
+  // (an overloaded derivation read as a value, Codex r6 B3)
+  ["Admission.probeOverloaded", "const overloaded = probeOverloaded;\n    void overloaded;"],
+  // (a setter alone, though listed, Codex r6 B4)
+  [
+    "Admission.probeSetOnly",
+    `${SELF}.admission.probeSetOnly = 1;\n    void ${SELF}.admission.probeSetOnly;`,
+  ],
+  // (a shorthand property's value)
+  ["Admission.routeDirect", "const bag = { routeDirect };\n    void bag;"],
+];
+/** Writes of a listed getter: each unproved (Codex r6 B4). */
+const WRITES = [
+  `${SELF}.admission.probeKnown = 1;`,
+  `${SELF}.admission.probeKnown++;`,
+  `${SELF}.admission.probeKnown += 1;`,
 ];
 /** Consumers by how they record, each calling its own unlisted derivation: [the consumer, the derivation, the body, creating]. */
 const RECORDING = [
@@ -454,6 +504,14 @@ const RECORDING = [
     "const { diagnostics } = walk;\n  void diagnostics.length;",
     false,
   ],
+  // (an assignment's destructuring of the array, Codex r6 B1; a getter read after its setter, B3)
+  [
+    "probeAssignedRecord",
+    "routeAssignedRecord",
+    `let found: unknown[] = [];\n  ({ diagnostics: found } = walk);\n  found.push(${PUSHED});`,
+    false,
+  ],
+  ["probeSetterFirstReader", "routeSetterFirst", "void walk.probeRecorded;", true],
   [
     "probeQuiet",
     "routeQuiet",
@@ -482,7 +540,9 @@ test("a creating consumer's direct calls must be listed; every other form of a g
               ),
               // (callables no derivation is)
               "  probeOpaque = (() => () => 0)();\n\n  probeMaybe: (() => number) | undefined = (() => () => 0)();\n\n",
-              "  get probeKnown(): number {\n    return 0;\n  }\n\n",
+              "  get probeKnown(): number {\n    return 0;\n  }\n\n  set probeKnown(value: number) {\n    void value;\n  }\n\n",
+              "  set probeSetOnly(value: number) {\n    void value;\n  }\n\n",
+              "  probeUnionRead = 0;\n\n",
             ].join("") + MEMBERS,
           ),
       ],
@@ -499,7 +559,7 @@ test("a creating consumer's direct calls must be listed; every other form of a g
         (text) =>
           text.replace(
             CONSUMER_MEMBERS,
-            `  get probeRecording(): number {\n    this.diagnostics.push(${PUSHED});\n    return 0;\n  }\n\n${CONSUMER_MEMBERS}`,
+            `  get probeRecording(): number {\n    this.diagnostics.push(${PUSHED});\n    return 0;\n  }\n\n  set probeRecorded(value: number) {\n    void value;\n  }\n\n  get probeRecorded(): number {\n    this.diagnostics.push(${PUSHED});\n    return 0;\n  }\n\n${CONSUMER_MEMBERS}`,
           ),
       ],
       [
@@ -514,13 +574,14 @@ test("a creating consumer's direct calls must be listed; every other form of a g
               "routeCall",
               "routeApply",
               "freshAliased as runAliased",
+              "probeOverloaded",
             ],
             `${FRESH_TO_ADMISSION}/probe.js`,
           ) +
           `import * as probe from "${FRESH_TO_ADMISSION}/probe.js";\n` +
           text.replace(
             FRESH_START,
-            `${FRESH_START}${[...ROUTES, ...VALUES].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
+            `${FRESH_START}${[...ROUTES, ...VALUES, ...WRITES.map((write) => [, write])].map(([, statement]) => `    ${statement}\n`).join("")}    ${SELF}.admission.probeOpaque();\n    void ${SELF}.admission.probeKnown;\n    probeOverloaded(${SELF}.admission);\n    runAliased(${SELF}.admission);\n    freshDecoy();\n    freshShared(${SELF});\n`,
           ) +
           // (an unrecognised decoy; a recognised one of a derivation's name)
           "\nfunction freshDecoy(): void {}\nfunction freshShared(walk: Consumers): void {\n  void walk;\n}\n" +
@@ -530,7 +591,9 @@ test("a creating consumer's direct calls must be listed; every other form of a g
           "interface ProbeView {\n  admission: Admission;\n}\n" +
           "export function probeOutsideRead(view: ProbeView): void {\n  const read = view.admission.routeSelf;\n  void read;\n}\n" +
           "export function probeOutsideCall(view: ProbeView): void {\n  view.admission.routeSelf();\n}\n" +
-          "export function probeOutsideBinding({ probeOpaque }: Admission): void {\n  probeOpaque();\n}\n",
+          "export function probeOutsideBinding({ probeOpaque }: Admission): void {\n  probeOpaque();\n}\n" +
+          // (a union's member, its symbol made of the class's)
+          "export function probeUnionReader(view: Admission | { probeUnionRead: number }): void {\n  void view.probeUnionRead;\n}\n",
       ],
     ),
     {
@@ -540,12 +603,15 @@ test("a creating consumer's direct calls must be listed; every other form of a g
         "freshAliased",
         "freshDecoy",
         "freshShared",
+        "probeShorthand",
       ]
         .filter((name, index, list) => list.indexOf(name) === index)
         .map(unlisted)
-        .join("\n\n")}\n`,
+        .join(
+          "\n\n",
+        )}\n\n// (an overloaded derivation, Codex r6 B3)\nexport function probeOverloaded(admission: Admission): number;\nexport function probeOverloaded(admission: Admission): number {\n  void admission;\n  return 0;\n}\n`,
     },
-    new Map([...READS, ["probeKnown", "a getter read"]]),
+    new Map([...READS, ["probeKnown", "a getter read"], ["probeSetOnly", "a setter alone"]]),
   );
   for (const [name, , gives] of ROUTES) {
     expectStart(messages, `${FRESH_LABEL} calls Admission.${name}:`, gives === "calls");
@@ -555,14 +621,23 @@ test("a creating consumer's direct calls must be listed; every other form of a g
   for (const [label] of VALUES) expectStart(messages, UNPROVED_AT(label));
   expectStart(messages, "Unproved: Admission.probeOpaque is called but is no derivation");
   assert.equal(count(messages, UNPROVED_AT("Admission.probeOpaque")), 2, messages.join("\n"));
-  // (the listed getter's dot read is quiet, as a listed read; its destructuring is not)
-  assert.equal(count(messages, UNPROVED_AT("Admission.probeKnown")), 1, messages.join("\n"));
+  // (the listed getter's dot read is quiet, as a listed read; its destructuring and its writes are not)
+  assert.equal(
+    count(messages, UNPROVED_AT("Admission.probeKnown")),
+    1 + WRITES.length,
+    messages.join("\n"),
+  );
   expectStart(messages, `${FRESH_LABEL} calls Admission.probeKnown:`, false);
+  // (an overloaded derivation's call reaches it, Codex r6 B3)
+  expectStart(messages, `${FRESH_LABEL} calls Admission.probeOverloaded:`);
   for (const [name, route, , creating] of RECORDING)
     expectStart(messages, `Consumers.${name} calls Admission.${route}:`, creating);
-  // (the quoted, destructured, aliased and parameter forms of a recording array, and the read alone)
-  assert.equal(count(messages, UNPROVED_AT("Consumers.diagnostics")), 5, messages.join("\n"));
+  // (the quoted, destructured, assigned, aliased and parameter forms of a recording array, and the read alone)
+  assert.equal(count(messages, UNPROVED_AT("Consumers.diagnostics")), 6, messages.join("\n"));
   expectStart(messages, UNPROVED_AT("Admission.routeSelf"));
+  expectStart(messages, UNPROVED_AT("Admission.probeUnionRead"));
+  // (a setter alone is written and read: each unproved)
+  assert.equal(count(messages, UNPROVED_AT("Admission.probeSetOnly")), 2, messages.join("\n"));
   expectStart(
     messages,
     "Unproved: Admission.routeSelf is called outside every consumer derivation",
