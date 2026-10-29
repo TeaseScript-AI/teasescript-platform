@@ -32,7 +32,8 @@ export const shapes = { "<shape>": (n) => "<source>" }; // or (n) => [{ path, so
 export const checks = ["publication", "stops"]; // default ["publication"]
 ```
 
-Sources may use the host globals `hostValue`, `hostOther` and `hostInit`.
+Sources may use the host globals `hostValue`, `hostOther`, `hostInit` and `otherHost`; a generator whose sources
+need other names exports `globals`, the full list.
 
 ## Kept outside the repository
 

@@ -13,7 +13,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 
-const GLOBALS = ["hostValue", "hostOther", "hostInit"];
+/** The host globals a source may read, unless its generator exports its own `globals`. */
+const GLOBALS = ["hostValue", "hostOther", "hostInit", "otherHost"];
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -38,17 +39,17 @@ if (!isMainThread) {
   // the worker: each source's runs in the four modes on both trees
   const { baseRoot, headRoot, allowances } = workerData;
   const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
-  parentPort.on("message", ({ files, checks }) => {
+  parentPort.on("message", ({ files, checks, globals }) => {
     const reply = { runs: 0, parsed: true, differences: [] };
     for (const mode of head.MODES) {
       const runs = [];
       if (checks.includes("publication"))
-        runs.push(["publication", (oracle) => oracle.publication(files, mode, GLOBALS)]);
+        runs.push(["publication", (oracle) => oracle.publication(files, mode, globals)]);
       if (checks.includes("stops"))
         for (const allowance of allowances)
           runs.push([
             `stops ${allowance ?? "natural"}`,
-            (oracle) => oracle.stopSet(files, mode, GLOBALS, allowance),
+            (oracle) => oracle.stopSet(files, mode, globals, allowance),
           ]);
       for (const [check, run] of runs) {
         const [was, is] = [attempt(() => run(base)), attempt(() => run(head))];
@@ -144,11 +145,12 @@ if (!isMainThread) {
   for (const name of generators) {
     const generator = await import(pathToFileURL(path.join(folder, name)).href);
     const checks = generator.checks ?? ["publication"];
+    const globals = generator.globals ?? GLOBALS;
     const row = { generator: name, sources: 0, unparsed: 0, stalled: 0, runs: 0, differences: 0 };
     const sources = sourcesOf(generator).filter((_, index) => index % shards === shard);
     for (const source of sources) {
       row.sources += 1;
-      const reply = await analysed({ files: source.files, checks });
+      const reply = await analysed({ files: source.files, checks, globals });
       if ("stalled" in reply) {
         row.stalled += 1;
         record({
