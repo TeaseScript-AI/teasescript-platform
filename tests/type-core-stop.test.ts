@@ -21,7 +21,7 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { keptErrors, stopIdentity } from "./helpers/type-core-oracles.js";
+import { inMode, keptErrors, MODES, stopIdentity } from "./helpers/type-core-oracles.js";
 import { runGlobals } from "./helpers/type-core-route.js";
 import {
   NAMED_EXCEPTIONS,
@@ -2414,42 +2414,33 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
   let compared = 0;
   for (const source of sources)
     for (const demand of [null, 257])
-      for (const reversed of [false, true])
-        for (const sharing of [true, false]) {
-          const inMode = <T>(make: () => T): T => {
-            const ordered = (): T =>
-              reversed
-                ? withSolverSeam({ reverseWorklist: true }, () =>
-                    withConsumerOrder((list) => [...list].reverse(), make),
-                  )
-                : make();
-            const shared = (): T => (sharing ? ordered() : withoutSharing(ordered));
-            return demand === null ? shared() : withTestDemandAllowance(demand, shared);
-          };
-          const unstopped = stopRunIn(inMode, source);
-          if (unstopped.answers.budget.exhausted !== null) continue;
-          const inputs = [host(1), host(null)];
-          const fits = (globals: Globals): boolean =>
-            runGlobals(unstopped.result.plan!, globals).failure === null;
-          // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
-          const stops: (readonly [string, number])[] = [
-            ...inMode(() => settledEnds(source)),
-          ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
-          stops.push(["unsettled", inMode(() => lastUnsettled(source))]);
-          for (const [phase, allowance] of stops) {
-            compared += 1;
-            assert.deepEqual(
-              stopProblems({
-                unstopped,
-                stopped: stopRunIn(inMode, source, allowance),
-                fitting: inputs.filter(fits),
-                violating: inputs.filter((globals) => !fits(globals)),
-              }),
-              [],
-              `${source} demand: ${demand}, reversed: ${reversed}, sharing: ${sharing}, ${phase} @${allowance}`,
-            );
-          }
+      for (const mode of MODES) {
+        const inDemand = <T>(make: () => T): T =>
+          inMode(mode, () => (demand === null ? make() : withTestDemandAllowance(demand, make)));
+        const unstopped = stopRunIn(inDemand, source);
+        if (unstopped.answers.budget.exhausted !== null) continue;
+        const inputs = [host(1), host(null)];
+        const fits = (globals: Globals): boolean =>
+          runGlobals(unstopped.result.plan!, globals).failure === null;
+        // (each settled phase's ends, and the last stop before admission settled, whose fresh pass asks nothing)
+        const stops: (readonly [string, number])[] = [
+          ...inDemand(() => settledEnds(source)),
+        ].flatMap(([phase, ends]) => ends.map((allowance) => [phase, allowance] as const));
+        stops.push(["unsettled", inDemand(() => lastUnsettled(source))]);
+        for (const [phase, allowance] of stops) {
+          compared += 1;
+          assert.deepEqual(
+            stopProblems({
+              unstopped,
+              stopped: stopRunIn(inDemand, source, allowance),
+              fitting: inputs.filter(fits),
+              violating: inputs.filter((globals) => !fits(globals)),
+            }),
+            [],
+            `${source} demand: ${demand}, ${JSON.stringify(mode)}, ${phase} @${allowance}`,
+          );
         }
+      }
   assert.equal(compared, 54);
 });
 

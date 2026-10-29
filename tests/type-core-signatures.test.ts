@@ -17,14 +17,11 @@ import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { checkedResult } from "../src/type-inference/core/consumer.js";
 import { withTestAllowance } from "../src/type-inference/core/budget.js";
-import { withConsumerOrder } from "../src/type-inference/core/consumers.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
-import { withoutSharing } from "../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import type { CompactRecord } from "./helpers/type-core-records.js";
-import { publishedAnswers } from "./helpers/type-core-standing.js";
+import { inMode, inOrder, MODES, publishedAnswers } from "./helpers/type-core-oracles.js";
 import {
   derive,
   evaluate,
@@ -58,12 +55,7 @@ function analysed(source: string, allowance?: number): readonly CheckedDiagnosti
   const allowed = <T>(make: () => T): T =>
     allowance === undefined ? make() : withTestAllowance(allowance, make);
   const forward = allowed(() => compactAnalysis(request));
-  const reversed = withSolverSeam({ reverseWorklist: true }, () =>
-    withConsumerOrder(
-      (list) => [...list].reverse(),
-      () => allowed(() => compactAnalysis(request)),
-    ),
-  );
+  const reversed = inOrder(true, () => allowed(() => compactAnalysis(request)));
   assert.deepEqual(reversed, forward, `${source}: both orders`);
   return allowed(() => checkedResult(analyseCore(request), request)).diagnostics;
 }
@@ -636,39 +628,32 @@ const SIGNATURE_FAMILIES: readonly {
 test("each new C13 consumer's work and counters grow with the program in all four modes", () => {
   const steep: string[] = [];
   for (const family of SIGNATURE_FAMILIES)
-    for (const reversed of [false, true])
-      for (const unshared of [false, true]) {
-        const [small, large] = [64, 128].map((k) => {
-          const request = coreRequest([{ path: "main.tease", source: family.program(k) }]);
-          assert.ok(request !== null, `${family.name} at ${k}`);
-          const analyse = () =>
-            reversed
-              ? withConsumerOrder(
-                  (list) => [...list].reverse(),
-                  () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
-                )
-              : analyseCore(request);
-          const { budget } = unshared ? withoutSharing(analyse) : analyse();
-          assert.equal(budget.exhausted, null, `${family.name} at ${k}: within the allowance`);
-          return budget;
-        });
-        const scale =
-          (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
-        const doubling = (before: number, after: number): number =>
-          (2 * (after / Math.max(1, before))) / scale;
-        const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
-        if (doubling(small!.total, large!.total) > 2.15)
-          steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
-        for (const [counter, after] of large!.counts)
-          if (
-            counter !== "syntaxNodes" &&
-            after >= 200 &&
-            doubling(small!.counts.get(counter) ?? 0, after) > 2.35
-          )
-            steep.push(
-              `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
-            );
-      }
+    for (const mode of MODES) {
+      const { reversed, unshared } = mode;
+      const [small, large] = [64, 128].map((k) => {
+        const request = coreRequest([{ path: "main.tease", source: family.program(k) }]);
+        assert.ok(request !== null, `${family.name} at ${k}`);
+        const { budget } = inMode(mode, () => analyseCore(request));
+        assert.equal(budget.exhausted, null, `${family.name} at ${k}: within the allowance`);
+        return budget;
+      });
+      const scale =
+        (large!.counts.get("syntaxNodes") ?? 0) / (small!.counts.get("syntaxNodes") ?? 1);
+      const doubling = (before: number, after: number): number =>
+        (2 * (after / Math.max(1, before))) / scale;
+      const name = `${family.name}${reversed ? " reversed" : ""}${unshared ? " unshared" : ""}`;
+      if (doubling(small!.total, large!.total) > 2.15)
+        steep.push(`${name}: ${doubling(small!.total, large!.total).toFixed(3)}`);
+      for (const [counter, after] of large!.counts)
+        if (
+          counter !== "syntaxNodes" &&
+          after >= 200 &&
+          doubling(small!.counts.get(counter) ?? 0, after) > 2.35
+        )
+          steep.push(
+            `${name} ${counter}: ${doubling(small!.counts.get(counter) ?? 0, after).toFixed(3)}`,
+          );
+    }
   assert.deepEqual(steep, []);
 });
 
@@ -682,28 +667,21 @@ test("toJson re-proves after each store, and that work grows linearly with the c
   const stored = (k: number, calls: boolean): string =>
     `let root = {${Array.from({ length: 8 }, (_, i) => `f${i}: ${i}`).join(", ")}}\n${Array.from({ length: k }, (_, i) => `root.f0 = ${i}${calls ? `\nlet j${i} = toJson(root)` : ""}`).join("\n")}\nexit\n`;
   const steep: string[] = [];
-  for (const reversed of [false, true])
-    for (const unshared of [false, true]) {
-      const total = (source: string): number => {
-        const request = coreRequest([{ path: "main.tease", source }]);
-        assert.ok(request !== null, source);
-        const analyse = () =>
-          reversed
-            ? withConsumerOrder(
-                (list) => [...list].reverse(),
-                () => withSolverSeam({ reverseWorklist: true }, () => analyseCore(request)),
-              )
-            : analyseCore(request);
-        const { budget } = unshared ? withoutSharing(analyse) : analyse();
-        assert.equal(budget.exhausted, null, source);
-        return budget.total;
-      };
-      const [small, large] = [64, 128].map((k) => total(stored(k, true)) - total(stored(k, false)));
-      if (large! / small! > 2.15)
-        steep.push(
-          `${reversed ? "reversed " : ""}${unshared ? "unshared " : ""}${(large! / small!).toFixed(3)}`,
-        );
-    }
+  for (const mode of MODES) {
+    const { reversed, unshared } = mode;
+    const total = (source: string): number => {
+      const request = coreRequest([{ path: "main.tease", source }]);
+      assert.ok(request !== null, source);
+      const { budget } = inMode(mode, () => analyseCore(request));
+      assert.equal(budget.exhausted, null, source);
+      return budget.total;
+    };
+    const [small, large] = [64, 128].map((k) => total(stored(k, true)) - total(stored(k, false)));
+    if (large! / small! > 2.15)
+      steep.push(
+        `${reversed ? "reversed " : ""}${unshared ? "unshared " : ""}${(large! / small!).toFixed(3)}`,
+      );
+  }
   assert.deepEqual(steep, []);
 });
 
@@ -733,13 +711,7 @@ test("record-valued nested choices compose no record: below their literal analog
     const budget = (source: string) => {
       const request = coreRequest([{ path: "main.tease", source }]);
       assert.ok(request !== null);
-      const analyse = () => analyseCore(request);
-      const { budget: spent } = reversed
-        ? withConsumerOrder(
-            (list) => [...list].reverse(),
-            () => withSolverSeam({ reverseWorklist: true }, analyse),
-          )
-        : analyse();
+      const { budget: spent } = inOrder(reversed, () => analyseCore(request));
       assert.equal(spent.exhausted, null);
       return spent;
     };
@@ -1310,17 +1282,7 @@ test("toJson proves an unchanged value once and sees what changed between calls"
             .diagnostics.filter((d) => "rule" in d && d.rule.rule === "json")
             .map((d) => `${d.class} ${source.slice(0, d.site.start).split("\n").length}`),
         );
-      const modes = [false, true].flatMap((unshared) =>
-        [false, true].map((reversed) => {
-          const run = (): string =>
-            reversed
-              ? withSolverSeam({ reverseWorklist: true }, () =>
-                  withConsumerOrder((list) => [...list].reverse(), once),
-                )
-              : once();
-          return unshared ? withoutSharing(run) : run();
-        }),
-      );
+      const modes = MODES.map((mode) => inMode(mode, once));
       assert.equal(new Set(modes).size, 1, `${name}: ${modes.join(" | ")}`);
       const found: string[] = JSON.parse(modes[0]!);
       const [inLine, plainLine] = guardedFirst ? [2, 3] : [3, 2];
@@ -1342,17 +1304,7 @@ test("toJson proves an unchanged value once and sees what changed between calls"
           .diagnostics.filter((d) => "rule" in d && d.rule.rule === "json")
           .map((d) => `${d.class} ${source.slice(0, d.site.start).split("\n").length}`),
       );
-    const modes = [false, true].flatMap((unshared) =>
-      [false, true].map((reversed) => {
-        const run = (): string =>
-          reversed
-            ? withSolverSeam({ reverseWorklist: true }, () =>
-                withConsumerOrder((list) => [...list].reverse(), once),
-              )
-            : once();
-        return unshared ? withoutSharing(run) : run();
-      }),
-    );
+    const modes = MODES.map((mode) => inMode(mode, once));
     assert.equal(new Set(modes).size, 1, `${source}: ${modes.join(" | ")}`);
     return modes[0]!;
   };
@@ -1389,17 +1341,7 @@ test("toJson proves an unchanged value once and sees what changed between calls"
             (d.provenance?.writers ?? []).map((writer) => line(Number(writer.split(":").at(-1)))),
           ]),
       );
-    const modes = [false, true].flatMap((unshared) =>
-      [false, true].map((reversed) => {
-        const run = (): string =>
-          reversed
-            ? withSolverSeam({ reverseWorklist: true }, () =>
-                withConsumerOrder((list) => [...list].reverse(), once),
-              )
-            : once();
-        return unshared ? withoutSharing(run) : run();
-      }),
-    );
+    const modes = MODES.map((mode) => inMode(mode, once));
     assert.deepEqual(
       modes,
       Array(4).fill(
