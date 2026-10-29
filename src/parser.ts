@@ -1161,7 +1161,7 @@ export class Parser {
         this.advance();
         this.skipContinuationNewlines();
         // The chain has its error already, so a `not` here, as in `a == b == not c`, is read without another one.
-        while (this.matchNot()) this.skipContinuationNewlines();
+        for (let first = true; this.matchNot(first); first = false) this.skipContinuationNewlines();
         yield* parseChild(this.#parseOtherwise());
       }
     }
@@ -1182,7 +1182,7 @@ export class Parser {
     report: (operators: readonly Token[], value: Expression, quotable: boolean) => void,
   ): ParseTask<Expression | null> {
     const operators: Token[] = [];
-    while (this.matchNot()) {
+    while (this.matchNot(operators.length === 0)) {
       operators.push(this.previous());
       this.skipContinuationNewlines();
     }
@@ -2509,18 +2509,32 @@ export class Parser {
     else this.current = closer + 1;
   }
 
-  /** `not`, or `!`, which is reported and read as `not` (V30 §39). */
-  public matchNot(): boolean {
-    return this.match(TokenKind.KeywordNot) || this.#matchSymbol(TokenKind.Bang, "one") !== null;
+  /**
+   * `not`, or `!`, which is reported and read as `not` (V30 §39). Right after an operator that `not` cannot follow, as
+   * the `==` of `a == !b` (`afterOperator`), the message for a `!` names no code to paste in its place.
+   */
+  public matchNot(afterOperator = false): boolean {
+    return (
+      this.match(TokenKind.KeywordNot) ||
+      this.#matchSymbol(
+        TokenKind.Bang,
+        "one",
+        afterOperator ? "! after an operator" : undefined,
+      ) !== null
+    );
   }
 
   /**
    * A symbol that other languages use for a word operator, such as `&&` for `and`: reports the word once
    * (`FOREIGN_FORMS`) and returns the symbol's span, so that parsing continues as with the word (V30 §5, §39), or returns
    * `null` when it does not come next. The symbol is one token of `kind`, as `!`, one or two, as `|` or `||`, or two
-   * that touch, as `??`, which is not the `?` of a type.
+   * that touch, as `??`, which is not the `?` of a type. The message is that of `written`, or else of the symbol.
    */
-  #matchSymbol(kind: TokenKind, form: "one" | "oneOrTwo" | "two"): SourceSpan | null {
+  #matchSymbol(
+    kind: TokenKind,
+    form: "one" | "oneOrTwo" | "two",
+    written?: string,
+  ): SourceSpan | null {
     const first = this.peek();
     const second = this.peek(1);
     if (first.kind !== kind) return null;
@@ -2530,7 +2544,11 @@ export class Parser {
     const last = form !== "one" && second.kind === kind ? this.advance() : first;
     const symbol = last === first ? first.lexeme : first.lexeme + last.lexeme;
     const span = spanFrom(first.span, last.span);
-    this.reportSpan(parserDiagnosticCode.foreignForm, FOREIGN_FORMS.get(symbol)!.message, span);
+    this.reportSpan(
+      parserDiagnosticCode.foreignForm,
+      FOREIGN_FORMS.get(written ?? symbol)!.message,
+      span,
+    );
     return span;
   }
 
