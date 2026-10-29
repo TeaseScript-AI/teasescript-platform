@@ -122,6 +122,7 @@ export class Reachability {
         stays?: Staying;
         staying?: StayingBlocks;
         again?: Uint8Array;
+        frames?: BlockFrames;
       }
     | undefined;
 
@@ -331,11 +332,13 @@ export class Reachability {
    * whose handle the script does not keep once that time has passed, which it only does while code waits; any other
    * timer, and a media block, may be due at any boundary (see {@link #startsAnywhere}). While a block runs, others wait
    * for it, so a block also starts where one that may start anywhere returns to, and where one that may leave the code
-   * it interrupts (see {@link #leavingBlocks}) leaves to. While a called file runs, a call waits. A block starts only while
+   * it interrupts (see {@link #blockFrames}) leaves to. While a called file runs, a call waits. A block starts only while
    * it stays, on the ways from its creation that {@link #staying} follows. Its `end` ends the file running where it
    * starts, so it has a call to return to when one waits at every such place and no other block that may leave stays
    * there, nor another copy of it (see {@link #single}); and so it has when it belongs to a file entry that a call waits
-   * below wherever it is created, as the block goes with that entry. The block's code then runs with calls waiting, and else as code
+   * below wherever it is created, as the block goes with that entry, unless it is created in a block's frame, which
+   * belongs to that block's entry. A block's `goto` to a label goes on in its own entry, so a block that may jump runs as
+   * code that may have no call waiting unless that entry has one. The block's code then runs with calls waiting, and else as code
    * that may have none, by the instruction that created it (`hidden`). `interrupted` tells where a block that may leave
    * the code it interrupts may start.
    */
@@ -346,6 +349,7 @@ export class Reachability {
     const count = this.plan.instructions.length;
     const code = count + ways.hubs.length;
     const { stays, staying, interrupted } = this.#blocksStaying(ways);
+    const frames = this.#blockFrames(ways);
     // The nodes: the code, where the blocks start that each place leads to as one that stays on, by whether they
     // outlive their file entry, and each block where an instruction creates it.
     const runs = (outlives: boolean): number => code + (outlives ? stays.nodeCount : 0);
@@ -436,15 +440,18 @@ export class Reachability {
               const starts = this.#startsAnywhere(creator) ? state.run.anywhere : state.run.due;
               if (starts === null) return null;
               // A block of a file entry that a call waits below whenever it is created starts only while that entry
-              // stays, so while the call waits.
-              const kept = !state.uncalled && !this.#outlivesItsFile(creator);
+              // stays, so while the call waits; one created in a block's frame belongs to that block's entry.
+              const outside = frames.inBlocks[creator] === 0;
+              const kept = !state.uncalled && outside && !this.#outlivesItsFile(creator);
               const alone =
                 starts.leavers === null ||
                 (starts.leavers === block && this.#single(creator, ways));
+              // A `goto` to a label goes on in the entry the block belongs to, with the calls that wait below it.
+              const jumps = frames.jumping.has(block) && (state.uncalled || !outside);
               return {
                 kind: "calls",
                 none: null,
-                hidden: !kept && (starts.unsafe || !alone) ? creator : null,
+                hidden: jumps || (!kept && (starts.unsafe || !alone)) ? creator : null,
                 waiting: true,
               };
             }
@@ -458,7 +465,7 @@ export class Reachability {
           { kind: "calls", none: SESSION_START, hidden: null, waiting: false },
         ],
         // Once a block returns, the code it interrupted goes on, wherever that was.
-        ...stays.blockReturns.flatMap((index) =>
+        ...stays.unknown.flatMap((index) =>
           [false, true].map(
             (outlives) =>
               [runs(outlives) + index, { kind: "runs", anywhere: unknown, due: unknown }] as const,
@@ -612,18 +619,20 @@ export class Reachability {
    * leaves (V30 §27, §28), so it stays on the ways on in that entry: past a file call to what follows it, which the
    * called file's `end` returns to, and from a function's return to what follows each call of it. A block that
    * outlives its file entry (see {@link #outlivesItsFile}) also stays on a `goto`, into the files of a computed `goto`,
-   * and from an `end` to what follows each file call. A block returns to wherever it interrupted the code, so its
-   * returns, `blockReturns`, lead anywhere.
+   * and from an `end` to what follows each file call. A block returns to wherever it interrupted the code, and a
+   * transfer in a block's frame (see {@link #blockFrames}) leaves the file that runs, not the entry the block belongs to,
+   * so after such a place, in `unknown`, a block may stay anywhere.
    */
   #staying(ways: ComputedWays): Staying {
     const count = this.plan.instructions.length;
+    const { inBlocks } = this.#blockFrames(ways);
     const ended = count + ways.hubs.length;
     const nodeCount = ended + 1;
     // For each node, the ways on which every block stays, and those on which only one that outlives its file does.
     const all: number[][] = Array.from({ length: nodeCount }, () => []);
     const outliving: number[][] = Array.from({ length: nodeCount }, () => []);
     const resumes = new Map<number, number[]>();
-    const blockReturns: number[] = [];
+    const unknown: number[] = [];
     this.plan.instructions.forEach((instruction, index) => {
       if (instruction.kind === "callFunction") {
         const list = resumes.get(instruction.functionId) ?? [];
@@ -635,7 +644,16 @@ export class Reachability {
     for (let index = 0; index < count; index += 1) {
       const instruction = this.plan.instructions[index]!;
       const call = instruction.kind === "transfer" && instruction.mode === "call";
-      for (const { node, edge } of this.#ways(index))
+      for (const { node, edge } of this.#ways(index)) {
+        if (
+          inBlocks[index] === 1 &&
+          (edge === "goto" ||
+            edge === "end" ||
+            ((edge === "transfer" || edge === "computed") && !call))
+        ) {
+          unknown.push(index);
+          continue;
+        }
         switch (edge) {
           case "transfer":
           case "computed":
@@ -655,7 +673,7 @@ export class Reachability {
           case "return": {
             const definition = this.#flow.functionOf(index);
             if (definition?.handler !== null && definition?.handler !== undefined)
-              blockReturns.push(index);
+              unknown.push(index);
             else
               for (const resume of resumes.get(definition?.id ?? -1) ?? [])
                 all[index]!.push(resume);
@@ -664,6 +682,7 @@ export class Reachability {
           default:
             if (node !== null) all[index]!.push(node);
         }
+      }
     }
     ways.hubs.forEach((entries, hub) => outliving[count + hub]!.push(...entries));
     const before = (lists: readonly number[][]): number[][] => {
@@ -679,19 +698,18 @@ export class Reachability {
       outlives: outliving,
       staysBefore: before(all),
       outlivesBefore: before(outliving),
-      blockReturns,
+      unknown,
     };
   }
 
   /**
    * Which blocks stay at each place (see {@link #staying}), as far as the checks need: `leavers`, those that may leave the
-   * code they interrupt (see {@link #leavingBlocks}), `null` for none, the one block's function, or `SEVERAL_LEAVERS`,
+   * code they interrupt (see {@link #blockFrames}), `null` for none, the one block's function, or `SEVERAL_LEAVERS`,
    * also those that the instruction creates where it may wait, as a media that is waited for may run its blocks then. `anywhere`, whether one that may start at any boundary stays (see {@link #startsAnywhere}), and
    * `leavesAnywhere`, whether one that does both. Once such a block stays where a block returns, which may be anywhere,
    * every place has several.
    */
-  #blocksStayingAt(stays: Staying): StayingBlocks {
-    const leaving = this.#leavingBlocks();
+  #blocksStayingAt(stays: Staying, leaving: ReadonlySet<number>): StayingBlocks {
     const seeds: (readonly [number, BlocksStaying])[] = [];
     this.plan.instructions.forEach((_, index) => {
       if (this.#reached[index] === 0) return;
@@ -734,7 +752,7 @@ export class Reachability {
       },
       seeds,
     );
-    const everywhere = stays.blockReturns.some((index) => states[index] !== null);
+    const everywhere = stays.unknown.some((index) => states[index] !== null);
     const at = (index: number): Stay => {
       const state = states[index];
       return state === null || state === undefined
@@ -756,35 +774,99 @@ export class Reachability {
   }
 
   /**
-   * The timer, media, and button blocks, by function, whose own code may leave the code they interrupt: by a `goto`, an
-   * `end`, or an `exit`, also in a function they call. A file they call returns into them.
+   * What the code of each timer, media, and button block does in its own frame, also in the functions it calls, found once
+   * for `ways`: `leaving`, the blocks, by function, that may leave the code they interrupt, by a `goto`, an `end`, or an
+   * `exit`, or by a file call whose file may end the session (a called file otherwise returns into the block); `jumping`,
+   * those that may `goto` a label, which goes on in the file entry the block belongs to (V30 §29); and `inBlocks`, for
+   * each instruction, whether it may run in a block's frame, where a block it creates belongs to the entry of that block,
+   * not to the file that runs.
    */
-  #leavingBlocks(): ReadonlySet<number> {
-    const leaves = solveBackward<true, string>({
-      nodeCount: this.plan.instructions.length,
+  #blockFrames(ways: ComputedWays): BlockFrames {
+    const facts = this.#transfers?.ways === ways ? this.#transfers : undefined;
+    if (facts?.frames !== undefined) return facts.frames;
+    const count = this.plan.instructions.length;
+    // Whether the code from each node on may end the session, also through the files it calls and the blocks it creates.
+    const exits = solveBackward<true, string>({
+      nodeCount: count + ways.hubs.length,
+      successors: (node) =>
+        node < count && this.plan.instructions[node]!.kind === "exit"
+          ? [{ node: null, edge: "exit" }]
+          : this.#computedSuccessors(ways, node),
+      join: () => true,
+      equals: () => true,
+      transfer: (_, edge, state) => (edge === "exit" ? true : state),
+    });
+    // The ways in a block's frame: into the functions it calls and past the files it calls.
+    const frame = (index: number): { node: number | null; edge: string }[] => {
+      const instruction = this.plan.instructions[index]!;
+      if (instruction.kind === "transfer" && instruction.mode === "call")
+        return this.#ways(index).filter(({ edge }) => edge === "resume");
+      return this.#ways(index);
+    };
+    const does = solveBackward<FrameEffects, string>({
+      nodeCount: count,
       successors: (index) => {
         const instruction = this.plan.instructions[index]!;
+        if (instruction.kind === "goto") return [{ node: null, edge: "jumps" }];
         if (
           instruction.kind === "end" ||
           instruction.kind === "exit" ||
-          instruction.kind === "goto" ||
           (instruction.kind === "transfer" && instruction.mode === "goto")
         )
           return [{ node: null, edge: "leaves" }];
-        const call = instruction.kind === "transfer";
-        return this.#ways(index).filter(
-          ({ edge }) => !(call && (edge === "transfer" || edge === "computed")),
-        );
+        const out = frame(index);
+        if (
+          instruction.kind === "transfer" &&
+          this.#ways(index).some(({ node, edge }) => {
+            const target =
+              edge === "transfer"
+                ? node
+                : edge === "computed"
+                  ? (ways.targets.get(index)?.node ?? null)
+                  : null;
+            return (
+              (edge === "transfer" || edge === "computed") &&
+              (target === null || exits[target] === true)
+            );
+          })
+        )
+          out.push({ node: null, edge: "leaves" });
+        return out;
       },
-      join: () => true,
-      equals: () => true,
-      transfer: (_, edge, state) => (edge === "leaves" ? true : state),
+      join: (left, right) => ({
+        leaves: left.leaves || right.leaves,
+        jumps: left.jumps || right.jumps,
+      }),
+      equals: (left, right) => left.leaves === right.leaves && left.jumps === right.jumps,
+      transfer: (_, edge, state) =>
+        edge === "jumps"
+          ? { leaves: true, jumps: true }
+          : edge === "leaves"
+            ? { leaves: true, jumps: false }
+            : state,
     });
-    const blocks = new Set<number>();
-    for (const definition of this.plan.functions)
-      if (definition.handler !== null && leaves[definition.entryInstruction] === true)
-        blocks.add(definition.id);
-    return blocks;
+    const leaving = new Set<number>();
+    const jumping = new Set<number>();
+    const inBlocks = new Uint8Array(count);
+    const work: number[] = [];
+    for (const definition of this.plan.functions) {
+      if (definition.handler === null) continue;
+      const effects = does[definition.entryInstruction];
+      if (effects?.leaves === true) leaving.add(definition.id);
+      if (effects?.jumps === true) jumping.add(definition.id);
+      inBlocks[definition.entryInstruction] = 1;
+      work.push(definition.entryInstruction);
+    }
+    // A transfer ends the block's frame: what follows runs in the file it leads to, or the entry the block belongs to.
+    for (let index = work.pop(); index !== undefined; index = work.pop())
+      for (const { node, edge } of frame(index))
+        if (node !== null && edge !== "transfer" && edge !== "goto" && inBlocks[node] === 0) {
+          inBlocks[node] = 1;
+          work.push(node);
+        }
+    const frames = { leaving, jumping, inBlocks };
+    if (facts !== undefined) facts.frames = frames;
+    return frames;
   }
 
   /**
@@ -973,7 +1055,7 @@ export class Reachability {
   } {
     const facts = this.#transfers?.ways === ways ? this.#transfers : undefined;
     const stays = facts?.stays ?? this.#staying(ways);
-    const staying = facts?.staying ?? this.#blocksStayingAt(stays);
+    const staying = facts?.staying ?? this.#blocksStayingAt(stays, this.#blockFrames(ways).leaving);
     if (facts !== undefined) {
       facts.stays = stays;
       facts.staying = staying;
@@ -1793,7 +1875,8 @@ function joinLeavers(left: number | null, right: number | null): number | null {
 
 /**
  * The ways on which a block stays (see `Reachability.#staying`), by node: those of every block, `stays`, and those of
- * a block that outlives its file entry only, `outlives`, each also backwards; and the returns of blocks.
+ * a block that outlives its file entry only, `outlives`, each also backwards; and the places after which a block may
+ * stay anywhere, `unknown`.
  */
 interface Staying {
   readonly nodeCount: number;
@@ -1801,7 +1884,20 @@ interface Staying {
   readonly outlives: readonly (readonly number[])[];
   readonly staysBefore: readonly (readonly number[])[];
   readonly outlivesBefore: readonly (readonly number[])[];
-  readonly blockReturns: readonly number[];
+  readonly unknown: readonly number[];
+}
+
+/** What the code of a block may do in its own frame (see `Reachability.#blockFrames`). */
+interface FrameEffects {
+  readonly leaves: boolean;
+  readonly jumps: boolean;
+}
+
+/** What the timer, media, and button blocks do in their frames (see `Reachability.#blockFrames`). */
+interface BlockFrames {
+  readonly leaving: ReadonlySet<number>;
+  readonly jumping: ReadonlySet<number>;
+  readonly inBlocks: Uint8Array;
 }
 
 /** The start of the session, which runs `main.tease` with no call waiting. */

@@ -391,6 +391,16 @@ test("a call whose file only the run decides warns, and fails when it starts the
     );
     assert.deepEqual(said(files, { warnings: ["TSV073"] }), outcome);
   }
+  // A block that calls a file which ends the session may leave first, so the call only warns (#1402 review r1).
+  assert.deepEqual(
+    warned(
+      project('timer async 1 s { call "stop.tease" }\nwait 2 s\nvisit()\nexit', {
+        "lib.tease": 'global function visit { call "main.tease" }',
+        "stop.tease": 'say "stopped", instant\nexit',
+      }),
+    ).map((line) => line.split(" ", 2).join(" ")),
+    ["main.tease TSV073", "lib.tease TSV073"],
+  );
   // Where every way through the file runs the global function up to its call of that file, the call fails whenever the
   // file runs, which is an error (#1146).
   for (const [main, lib] of [
@@ -496,6 +506,28 @@ test("a block runs later, so its end and its call of a file only warn and are ch
         .diagnostics.filter((diagnostic) => diagnostic.code === "TSV071")
         .map((diagnostic) => diagnostic.path),
       [Object.keys(others).length === 1 ? "scene.tease" : "main.tease"],
+      main,
+    );
+  // A block created in a block's frame, also by a global function the block calls, belongs to the entry of that block,
+  // which may stay after the called file ended. A block's goto to a label goes on in its own entry, here main.tease,
+  // where no call waits (#1402 review r1).
+  for (const [main, others, warned] of [
+    [
+      'global function spawn {\n    timer async 0 s { end }\n}\ntimer async 1 s {\n    spawn()\n    end\n}\ncall "scene.tease"\nexit',
+      { "scene.tease": "wait 5 s\nend" },
+      ["main.tease TSV071 2", "main.tease TSV071 6"],
+    ],
+    [
+      'let skip = showPermanentButton "Skip" { goto later }\ncall "scene.tease"\nexit\nlabel later\nsay "later"\nend',
+      scene,
+      ["main.tease TSV071 6"],
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileProject(project(main, others)).diagnostics.map(
+        (diagnostic) => `${diagnostic.path} ${diagnostic.code} ${diagnostic.span.start.line + 1}`,
+      ),
+      warned,
       main,
     );
   // One with a length written out whose handle is not kept is due only once the called file waited.
@@ -733,6 +765,18 @@ test("an end with no call to return to is an error where code that runs without 
       "room",
       "exit",
     ]);
+  // Also a block that calls a file which ends the session (#1402 review r1).
+  assert.deepEqual(
+    said(
+      project('global byCall = true\ncall "room.tease"\nbyCall = false\ngoto "room.tease"', {
+        "room.tease":
+          'if not byCall {\n    timer async 1 s { call "stop.tease" }\n}\nwait 2 s\nend',
+        "stop.tease": 'say "stopped", instant\nexit',
+      }),
+      { warnings: ["TSV073", "TSV071"] },
+    ),
+    ["stopped", "exit"],
+  );
   // A block may run while the code waits and leave first: here a timer that the goto does not stop.
   assert.deepEqual(
     said(
