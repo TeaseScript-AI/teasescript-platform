@@ -161,6 +161,32 @@ export type DiagnosticRule =
     }
   /** C12: a dict key. */
   | { readonly rule: "key" }
+  /**
+   * C13: an argument of a built-in method, `parameter` of `callee`, with the kinds it takes there (its contract's, on
+   * every kind its receiver may be) and what its contract calls them (`takes`), which a fix converts to.
+   */
+  | {
+      readonly rule: "argument";
+      readonly callee: string;
+      readonly parameter: string;
+      readonly domain: readonly ItemTag[];
+      readonly takes: "text" | "regex" | "textOrRegex" | "list" | "collection";
+    }
+  /**
+   * C13 (Astra's G1): the elements of `receiver` that `callee` reads, `join` each one `${...}` shows, `sort` of one
+   * ordered type (`orderedFamily`); `families`, the ordered types they may hold where they mix them.
+   */
+  | {
+      readonly rule: "elements";
+      readonly callee: "join" | "sort";
+      readonly receiver: string;
+      readonly families: readonly ItemTag[];
+    }
+  /**
+   * TSV029 (V30 §19, TABLE r4.93): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
+   * or an element of a list or set option (`element`).
+   */
+  | { readonly rule: "choice"; readonly part: "value" | "option" | "element" }
   /** C13: the iterable of a `for`, with a key and a value variable (`entries`) or one. */
   | { readonly rule: "iterable"; readonly entries: boolean }
   /** C5a–c, F19a, ADR 1.5: a member of `receiver` (`.n`, `.add()`, `[...]`) at a read, a call or a store. */
@@ -285,7 +311,7 @@ export type StaticRule =
 
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
 export type CoreCode =
-  "TSV011" | "TSV012" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
+  "TSV011" | "TSV012" | "TSV029" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
 
 /** A place the analysis counts work to and names: a function, or a file's top level, with its lines' site. */
 export interface WorkPlace {

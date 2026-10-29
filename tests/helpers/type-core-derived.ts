@@ -25,6 +25,8 @@ import {
   presentTime,
 } from "../../src/temporal.js";
 import { binaryFromBase64, binaryFromDataUrl } from "../../src/runtime/host-data/stored-files.js";
+import { callStringMethod } from "../../src/runtime/values/string-operations.js";
+import { joinedText } from "../../src/runtime/values/value-text.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { CompactRecord } from "./type-core-records.js";
 
@@ -1589,8 +1591,32 @@ export function evaluate(
           return checkedFallback(expression, fallback);
         };
         if (callee.kind === "propertyAccessExpression") {
-          if (callee.property.name !== "get")
-            throw new Underivable(`the method ${callee.property.name}`);
+          if (callee.property.name !== "get") {
+            // a method of the slice that keeps its receiver (S9b): text's as the runtime calls it, a list's `join`
+            const method = callee.property.name;
+            const from = new Set([
+              ...receiver!.from,
+              ...positional.flatMap((operand) => [...operand.from]),
+            ]);
+            const texts = positional.map((operand) => operand.v);
+            if (typeof receiver!.v === "string" && texts.every((text) => typeof text === "string"))
+              return { v: callStringMethod(receiver!.v, method, texts, expression.span), from };
+            const list = receiver!.v;
+            if (
+              method === "join" &&
+              typeof list === "object" &&
+              list !== null &&
+              list.kind === "list" &&
+              texts.every((text) => typeof text === "string")
+            )
+              return {
+                v: list.items
+                  .map((item) => joinedText(item, expression.span, DEFAULT_TEMPORAL_CONTEXT))
+                  .join(typeof texts[0] === "string" ? texts[0] : ", "),
+                from,
+              };
+            throw new Underivable(`the method ${method}`);
+          }
           const index = positional[0]!;
           const list = receiver!;
           const isList = typeof list.v === "object" && list.v !== null && list.v.kind === "list";
@@ -1866,7 +1892,50 @@ export function evaluate(
               ? [statement.elseBlock]
               : statement.elseBlock.statements,
           );
-      } else if (statement.kind === "sayStatement") {
+      } else if (statement.kind === "forStatement") {
+        // (the loop's own check of its source, TSR044, then each element, key or entry as the loop visits them)
+        const source = value(statement.iterable);
+        const iterated = source.v;
+        const pair = statement.valueVariable !== null;
+        const kind = typeof iterated === "object" && iterated !== null ? iterated.kind : null;
+        const iterable = pair
+          ? kind === "dict"
+          : kind === "list" || kind === "set" || kind === "dict" || kind === "range";
+        fail(
+          "TSR044",
+          unwrap(statement.iterable).span.start.offset,
+          unwrap(statement.iterable).span.end.offset,
+          source.from,
+          iterable,
+        );
+        if (!iterable || typeof iterated !== "object" || iterated === null) continue;
+        const visits: [SerializableRuntimeValue, SerializableRuntimeValue | null][] =
+          iterated.kind === "list" || iterated.kind === "set"
+            ? iterated.items.map((item) => [item, null])
+            : iterated.kind === "dict"
+              ? iterated.entries.map((entry) => [entry.key, entry.value])
+              : iterated.kind === "range"
+                ? Array.from(
+                    {
+                      length: Math.max(
+                        0,
+                        iterated.end - iterated.start + (iterated.inclusive ? 1 : 0),
+                      ),
+                    },
+                    (_, at) => [iterated.start + at, null],
+                  )
+                : [];
+        for (const [element, entry] of visits) {
+          env.set(statement.variable.name, { v: structuredClone(element), from: source.from });
+          if (pair)
+            env.set(statement.valueVariable!.name, {
+              v: structuredClone(entry),
+              from: source.from,
+            });
+          run(statement.body.statements);
+        }
+      } else if (statement.kind === "expressionStatement") value(statement.expression);
+      else if (statement.kind === "sayStatement") {
         const text = value(statement.value);
         said.push({
           text:

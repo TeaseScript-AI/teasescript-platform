@@ -10,11 +10,13 @@ import {
 import type { SourceSpan } from "../../source.js";
 import type { SourceSite } from "../graph.js";
 import { angleUnit } from "../../angle.js";
+import { CHOICE_ELEMENT_RULE, CHOICE_OPTION_RULE, CHOICE_VALUE_RULE } from "../../choice-rules.js";
+import { choiceValueFix } from "../../choice-values.js";
 import { CONVERSIONS, conversionTo } from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit, UNIT_OPERANDS } from "../../duration.js";
 import { expressionParts, statementExpressions } from "../../expression-children.js";
-import { listDraw, listMethod } from "../../list-methods.js";
+import { listDraw, listMethod, RANGE_LIST_FIX } from "../../list-methods.js";
 import {
   FOR_SOURCE_RULE,
   REPEAT_COUNT_RULE,
@@ -33,6 +35,7 @@ import {
   TEMPORAL_FIELDS,
 } from "../../temporal-builtins.js";
 import {
+  argumentFix,
   isTextMember,
   isTextMethod,
   TEXT_METHODS,
@@ -479,6 +482,10 @@ export function codeOf(rule: DiagnosticRule): CoreCode {
       return "TSV012";
     case "mixed":
       return "TSV044";
+    case "choice":
+      return "TSV029";
+    case "elements":
+      return rule.callee === "join" ? "TSV042" : "TSV043";
     default:
       return "TSV043";
   }
@@ -791,6 +798,48 @@ const SHOWN_RULE =
   "It shows text, numbers, true, false, null, durations, angles, date and time values, script references, and " +
   "regexes, and selects one element of a list.";
 
+/** C13: what `join` shows of a list's elements, as its runtime check says (`shown-text-rules.ts`). */
+const JOIN_RULE =
+  "join() can only join text, numbers, true or false, null, durations, angles, date and time values, script " +
+  "references, and regexes";
+
+const JOIN_FIX = "Select an element or a property first.";
+
+/** C13: what `sort` orders. */
+const SORT_RULE = "sort() sorts numbers, text, durations, angles, or date and time values";
+
+const SORT_ONE_TYPE = "sort() sorts elements of one type";
+
+/**
+ * C13: the conversion that turns an argument of one known kind into what its method takes (the text methods' own fix,
+ * `argumentFix`), or a set or a range into a list.
+ */
+function argumentFixOf(
+  rule: Extract<DiagnosticRule, { rule: "argument" }>,
+  kinds: readonly ItemTag[],
+): string {
+  const kind = known(kinds).length === 1 ? known(kinds)[0] : undefined;
+  const { takes } = rule;
+  if (kind === undefined) return "";
+  if (takes === "list" || takes === "collection")
+    return kind === "range"
+      ? RANGE_LIST_FIX
+      : kind === "set" && takes === "list"
+        ? " Copy a set into a list with toList() first."
+        : "";
+  // (a regex from text in words: its call needs the author's own default, #1268)
+  if (takes === "regex")
+    return kind === "string"
+      ? " Write a regex such as /[0-9]+/ instead, or make one from the text with the toRegex function."
+      : "";
+  return argumentFix(
+    { name: rule.parameter, kind: takes },
+    kind === "string" || kind === "integer" || kind === "number" || kind === "boolean"
+      ? kind
+      : null,
+  );
+}
+
 /** The rule an operand's kinds break: the first part of its consumer's sentence; `text`, the operand as written. */
 function operandRule(rule: DiagnosticRule, text: string): string {
   switch (rule.rule) {
@@ -814,6 +863,16 @@ function operandRule(rule: DiagnosticRule, text: string): string {
       return rule.entries
         ? "A 'for' loop with a key and a value goes through a dict"
         : FOR_SOURCE_RULE;
+    case "argument":
+      return `${rule.callee}() needs ${described(rule.domain)} for '${rule.parameter}'`;
+    case "elements":
+      return rule.callee === "join" ? JOIN_RULE : SORT_RULE;
+    case "choice":
+      return rule.part === "value"
+        ? CHOICE_VALUE_RULE
+        : rule.part === "option"
+          ? CHOICE_OPTION_RULE
+          : CHOICE_ELEMENT_RULE;
     // (the operand in its own '${…}', which is no placeholder, #1268)
     case "shown":
       return rule.element
@@ -2074,6 +2133,17 @@ function errorSentence(
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${conditionFix(rule, text, kinds, site, diagnosed)}`;
     case "key":
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${keyFix(text, kinds, site, diagnosed)}`;
+    case "argument":
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${argumentFixOf(rule, kinds)}`;
+    case "elements":
+      return rule.families.length > 1
+        ? `${SORT_ONE_TYPE}, but '${rule.receiver}' holds ${plural(rule.families)}.`
+        : `${operandRule(rule, text)}, but '${rule.receiver}' holds ${plural(kinds)}.${rule.callee === "join" ? ` ${JOIN_FIX}` : ""}`;
+    case "choice": {
+      // (a value no button returns: the buttons return text or numbers, from which the answer picks it)
+      const kind = rule.part === "value" && known(kinds).length === 1 ? known(kinds)[0] : undefined;
+      return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.${kind === undefined ? "" : ` ${choiceValueFix(kind)}`}`;
+    }
     default:
       return `${operandRule(rule, text)}, but '${text}' is ${described(kinds)}.`;
   }
@@ -2218,6 +2288,10 @@ function warningSentence(
       return rule.operand
         ? `${operandRule(rule, text)}, but '${text}' ${may}`
         : `'${rule.operator}' may not take the values in '${text}' here. If it does not, ${STOPS}`;
+    case "elements":
+      return rule.families.length > 1
+        ? `${SORT_ONE_TYPE}, but '${rule.receiver}' may hold ${plural(rule.families)} here. If it does, ${STOPS}`
+        : `${operandRule(rule, text)}, but '${rule.receiver}' may hold ${plural(kinds)} here. If it does, ${STOPS}`;
     case "absent":
     case "mixed":
       throw new Error(`The rule '${rule.rule}' gives errors only.`);
@@ -2580,6 +2654,14 @@ function errorFix(
       return conditionFix(rule, text, kinds, site, diagnosed);
     case "key":
       return keyFix(text, kinds, site, diagnosed);
+    case "argument":
+      return argumentFixOf(rule, kinds);
+    case "elements":
+      return rule.callee === "join" ? ` ${JOIN_FIX}` : "";
+    case "choice": {
+      const kind = rule.part === "value" && known(kinds).length === 1 ? known(kinds)[0] : undefined;
+      return kind === undefined ? "" : ` ${choiceValueFix(kind)}`;
+    }
     default:
       return "";
   }

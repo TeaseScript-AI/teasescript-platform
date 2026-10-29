@@ -20,9 +20,10 @@ import { obligation, propertiesOf, warning } from "./warnings.js";
 
 // A projection's consumers: a `for` loop's iterable (C13), an element selection (C6), a member access.
 
-const ITERABLE: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "range"]);
+/** What a `for` loop goes through (C13, TABLE r4.81 (2)): a list, set, dict or range; a dict with a key and a value. */
+const ITERABLE = ["list", "set", "dict", "range"] as const;
 
-const DICT: ReadonlySet<ItemTag> = new Set(["dict"]);
+const DICT = ["dict"] as const;
 
 /** A projection: a `for` loop's iterable (C13), an element selection (C6), a member read (C5a–c, F11, F19a). */
 export function projection(
@@ -32,17 +33,18 @@ export function projection(
 ): void {
   const { contract } = walk.pass;
   if (c.step === "iteration" || c.step === "entry") {
+    // C13 (TABLE r4.81 (2)): an operand of the loop, at the iterable, against the domain it tests, which the runtime's
+    // own check of the loop's source applies
+    const domain = c.step === "entry" ? DICT : ITERABLE;
     consume(
       walk,
       c.owner,
       node,
       c.site,
-      c.step === "entry" ? DICT : ITERABLE,
+      new Set(domain),
       "the iterable of for",
       { rule: "iterable", entries: c.step === "entry" },
-      ["list", "set", "dict"],
-      "member-read",
-      "null-check",
+      domain,
     );
     return;
   }

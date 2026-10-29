@@ -13,7 +13,9 @@ import { builtinResult, conversionCategory } from "../method-categories.js";
 import { OPERATOR_ROWS, operatorRow, type Operator } from "../operator-table.js";
 import type { ValueConstraint } from "../program.js";
 import type { DiagnosticRule, RequiredKind } from "../result.js";
+import { choiceValues } from "../checks/interactions.js";
 import { error } from "./diagnostics.js";
+import { methodArguments, methodElements } from "./signatures.js";
 import { fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
@@ -146,6 +148,8 @@ function operation(
   node: FlowNode,
 ): void {
   const { family, name } = c.contract;
+  // TSV029: what a choice's buttons return
+  if (family === "interaction" && c.evidence?.kind === "choice") choiceValues(walk, c, node);
   if (c.receiver !== null && family !== "operator") {
     // C2: a position or a count, where the receiver may have the method (any other's is its member check's, C5b)
     if (
@@ -187,6 +191,11 @@ function operation(
     if (name === "removeFirst" || name === "removeLast")
       selection(walk, c.receiver, node, c.site, `.${name}()`);
     methodReceiver(walk, c.site, node, c.receiver, name);
+    // C13: what the method's contract takes of its arguments and its elements
+    if (family === "method") {
+      methodArguments(walk, c, node);
+      methodElements(walk, c, node);
+    }
     return;
   }
   // C3

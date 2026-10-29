@@ -24,7 +24,12 @@ export function isInteractionChoiceValue(value: unknown): value is InteractionCh
 export function unreturnableChoiceMessage(kind: ValueKind): string | undefined {
   const { choice, shown, description } = VALUE_KINDS[kind];
   if (choice || shown === null) return undefined;
-  return `A button cannot return ${description}. Give the buttons text or number values, and pick ${description.replace(/^an? /u, "the ")} from the answer.`;
+  return `A button cannot return ${description}. ${choiceValueFix(kind)}`;
+}
+
+/** What to do where a button would return a value of `kind`, which no button returns. */
+export function choiceValueFix(kind: ValueKind): string {
+  return `Give the buttons text or number values, and pick ${VALUE_KINDS[kind].description.replace(/^an? /u, "the ")} from the answer.`;
 }
 
 export function cloneInteractionChoiceValue(value: InteractionChoiceValue): InteractionChoiceValue {

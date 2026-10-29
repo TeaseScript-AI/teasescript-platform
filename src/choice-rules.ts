@@ -14,6 +14,18 @@ export function buttonBackgroundMessage(shown: string | null): string {
   return `A button background must be an opaque CSS colour, such as "#336699"${shown === null ? "" : `, but this is ${shown}`}.`;
 }
 
+/** What a button returns (V30 §19): the value of a choice object, or its text without one, or an option itself. */
+export const CHOICE_VALUE_RULE =
+  "A choice value must be text, a number, true, false, null, a duration, an angle, or a date or time value";
+
+/** What an option of `askChoice` is. */
+export const CHOICE_OPTION_RULE =
+  "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set";
+
+/** What an element of a list or set option is. */
+export const CHOICE_ELEMENT_RULE =
+  "A choice list element must be a value or a choice object { value?, text, background? }";
+
 export const EMPTY_CHOICE_MESSAGE =
   "A choice needs at least one button, but its option lists are empty.";
 

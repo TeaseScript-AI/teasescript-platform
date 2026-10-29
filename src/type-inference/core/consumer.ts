@@ -131,6 +131,8 @@ export class SliceIndex {
   /** The expressions a store brings whole into its place: its value, and the elements of a list literal there. */
   readonly #whole = new Set<Expression>();
   readonly #role = new Map<Expression, "count" | "index">();
+  /** The iterables of the `for` loops. */
+  readonly #iterables = new Set<Expression>();
 
   /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
   public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
@@ -189,6 +191,11 @@ export class SliceIndex {
             case "sayStatement":
               this.shown.push(statement.value);
               pending.push({ expression: statement.value, store: null, whole: false });
+              break;
+            case "forStatement":
+              this.#iterables.add(statement.iterable);
+              statements(statement.body.statements);
+              pending.push({ expression: statement.iterable, store: null, whole: false });
               break;
             default: {
               // any other statement (outside the candidate's slice, `backend.ts`): its blocks and its own expressions
@@ -362,6 +369,11 @@ export class SliceIndex {
     return this.#whole.has(expression);
   }
 
+  /** Whether `expression` is a `for` loop's iterable. */
+  public iterates(expression: Expression): boolean {
+    return this.#iterables.has(expression);
+  }
+
   /** Whether `expression` is a `repeat` count or an index. */
   public roleOf(expression: Expression): "count" | "index" | undefined {
     return this.#role.get(expression);
@@ -424,8 +436,8 @@ export class SliceIndex {
 }
 
 /**
- * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's and a `repeat`'s its
- * count's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
+ * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's, a `repeat`'s its
+ * count's and a `for`'s its iterable's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
  * expression inside them).
  */
 export function nodeOf(
@@ -437,6 +449,8 @@ export function nodeOf(
   for (;;)
     if (current.kind === "ifStatement") current = current.condition;
     else if (current.kind === "repeatStatement") current = current.count;
+    else if (current.kind === "forStatement") current = current.iterable;
+    else if (current.kind === "expressionStatement") current = current.expression;
     else if (current.kind === "parenthesizedExpression") current = current.expression;
     else break;
   const site = index.site(current);
@@ -506,9 +520,6 @@ export function coreCheckResult(
   request: CoreAnalysisRequest,
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
-  for (const diagnostic of answers.diagnostics)
-    if (diagnostic.kind === "operator")
-      throw new Error(`The slice has no ${diagnostic.kind} diagnostic.`);
   const { checks, core } = runtimeChecks(answers, index, request);
   const known = knownValues(answers, index, (call) => core.expected.get(call));
   const result = checkedOf(answers, index, known);
@@ -781,6 +792,9 @@ function runtimeChecks(
     const store = index.storeOf(expression);
     if (store === undefined) {
       if (obligation.boundary && typed.has(expression)) continue;
+      // (a loop variable's check has no place in the plan yet: its loop stays outside the slice)
+      for (let at: Expression | undefined = expression; at !== undefined; at = index.parentOf(at))
+        if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       throw new Error("A check of the slice belongs to no store.");
     }
     if (checks.has(store)) continue;

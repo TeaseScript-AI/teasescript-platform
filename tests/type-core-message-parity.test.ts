@@ -196,6 +196,11 @@ const PORTS: readonly Port[] = [
     from: /^Keep it in a variable and check it first, as in: if value (!= null|is .+) \{ \.\.\. \}$/,
     to: ([, test], { subject, statement }) => exact(`${checkForm(subject, test!, statement)}.`),
   },
+  // C13 (S9b): a method argument's conversion, in the words of its contract's own fix (`argumentFix`)
+  {
+    from: /^Convert the (value|number|text) with the (toString|toInteger) function(, which drops the fraction)?\.$/,
+    to: (found) => exact(found[0]),
+  },
   // #1195's decided texts; a condition's advice always, its example only of a stable path (Astra r3)
   {
     from: /^Compare it instead, such as '(.+)'\.$/,

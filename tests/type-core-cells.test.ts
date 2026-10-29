@@ -46,13 +46,13 @@ test("the core gives the expected record for every record of the cells it comple
     if (reason !== null) held.set(reason, (held.get(reason) ?? 0) + 1);
   }
   assert.deepEqual(Object.fromEntries(held), {
-    "the adapters' records (S9b)": 9,
+    "the adapters' records (S9b)": 3,
     "stage 3b's cells (S10)": 653,
     "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
     "S9b's F18 shapes (r4.81 (1))": 32,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
   });
-  assert.equal(asserted.length, 1_317);
+  assert.equal(asserted.length, 1_323);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -795,17 +795,17 @@ test("external data in a choice's options or in a literal is warned at its own e
       "null-check@63",
     ],
   );
+  // (an object as a button's value is TSV029's error at the value, and the answer holds no object to read: TABLE r4.93)
   assert.deepEqual(
     sited(
       "let chosen: integer = (askChoice {text: hostValue.label, value: {text: hostValue.field}}).text\nexit",
     ),
     [
-      "warning-runtime-check",
+      "compile-error",
       "member-read@40",
-      "written-target@71",
+      "operator@64",
       "member-read@71",
       "null-check@40",
-      "copy-type@71",
       "null-check@71",
     ],
   );
@@ -814,12 +814,11 @@ test("external data in a choice's options or in a literal is warned at its own e
       "let chosen: integer = (askChoice [{text: hostValue.label, value: {text: hostValue.field}}]).text\nexit",
     ),
     [
-      "warning-runtime-check",
+      "compile-error",
       "member-read@41",
-      "written-target@72",
+      "operator@65",
       "member-read@72",
       "null-check@41",
-      "copy-type@72",
       "null-check@72",
     ],
   );
@@ -866,8 +865,11 @@ test("a choice's option reached through index and property projections is select
       const record = reversed ? withConsumerOrder((list) => [...list].reverse(), run) : run();
       return [
         record.outcome,
+        // (C1's, and TSV029's at a button's value that is no choice value, TABLE r4.93)
         ...record.diagnostics
-          .filter((diagnostic) => diagnostic.kind === "written-target")
+          .filter(
+            (diagnostic) => diagnostic.kind === "written-target" || diagnostic.kind === "operator",
+          )
           .map((diagnostic) => `${diagnostic.kind}@${diagnostic.site.offset}`),
         ...record.checks
           .filter((check) => check.kind === "copy-type" && !check.boundary)
@@ -882,20 +884,22 @@ test("a choice's option reached through index and property projections is select
     `written-target@${offset}`,
     `copy-type@${offset}`,
   ];
-  // an option inside an index or a property projection, with and without a projection of the result
+  // an option inside an index or a property projection, with and without a projection of the result; an object as the
+  // button's value is TSV029's error at the option, and the answer holds no object to read (TABLE r4.93)
+  const rejected = (offset: number): string[] => ["compile-error", `operator@${offset}`];
   assert.deepEqual(
     sites("(askChoice [{text: hostValue.label, value: {text: hostValue.field}}][0]).text"),
-    at(72),
+    rejected(33),
   );
   assert.deepEqual(
     sites(
       "(askChoice {option: {text: hostValue.label, value: {text: hostValue.field}}}.option).text",
     ),
-    at(80),
+    rejected(33),
   );
   assert.deepEqual(
     sites('(askChoice [{text: "A", value: {text: hostValue.field}}][0]).text'),
-    at(60),
+    rejected(33),
   );
   assert.deepEqual(sites('askChoice [{text: "A", value: hostValue.field}][0]'), at(52));
   assert.deepEqual(sites('askChoice {option: {text: "A", value: hostValue.field}}.option'), at(60));
@@ -907,11 +911,11 @@ test("a choice's option reached through index and property projections is select
     sites(
       '(askChoice [(askChoice {text: "inner", value: {text: hostValue.label, value: {text: hostValue.field}}})]).text',
     ),
-    at(75),
+    rejected(68),
   );
   assert.deepEqual(
     sites('(askChoice [(askChoice {text: "inner", value: {text: hostValue.label}})]).length'),
-    ["compile-error", "written-target@22", "copy-type@22"],
+    rejected(68),
   );
   // the controls: the literal analogues and the direct choice object
   assert.deepEqual(
@@ -924,7 +928,7 @@ test("a choice's option reached through index and property projections is select
   );
   assert.deepEqual(
     sites("(askChoice {text: hostValue.label, value: {text: hostValue.field}}).text"),
-    at(71),
+    rejected(64),
   );
 });
 
@@ -990,6 +994,7 @@ test("C1's site follows a choice's selection as its value does, over options, wr
   ];
   const differing: string[] = [];
   let external = 0;
+  let rejected = 0;
   for (const [option, select, isExternal] of kinds)
     for (const wrap of wrappers)
       for (const [choice, analogue] of nestings)
@@ -1003,6 +1008,24 @@ test("C1's site follows a choice's selection as its value does, over options, wr
             expected.length > 0
           )
             external += 1;
+          // (a choice object as the inner choice's value is no choice value: TSV029's error, where its analogue's
+          // object is read; the answer holds no object, TABLE r4.93)
+          if (choice === nestings[2]![0] && option.startsWith("{")) {
+            const request = coreRequest([
+              { path: "main.tease", source: `let chosen: integer = ${chosen}\nexit` },
+            ]);
+            const record = compactAnalysis(request!);
+            if (
+              record.outcome !== "compile-error" ||
+              !record.diagnostics.some(
+                (diagnostic) =>
+                  diagnostic.kind === "operator" && diagnostic.class === "compile-error",
+              )
+            )
+              differing.push(`${chosen}: no TSV029 error`);
+            rejected += 1;
+            continue;
+          }
           const got = sites(chosen);
           if (JSON.stringify(got) !== JSON.stringify(expected))
             differing.push(
@@ -1010,6 +1033,7 @@ test("C1's site follows a choice's selection as its value does, over options, wr
             );
         }
   assert.deepEqual(differing, []);
+  assert.equal(rejected, 36);
   // every external option's analogue sites C1 at its own external expression: 4 kinds × 4 wrappers × 3 × 3, less the 20
   // where the third nesting returns a choice object whole (TABLE r4.93): `{text: "A", value: hostValue.field}` at each
   // path and `{text: hostValue.label}` whole and at its length, in each wrapper
@@ -1459,7 +1483,11 @@ test("a choice object's value is selected by its key, and a dict's values and ke
  * a copied record below the list's element step takes its contract (F12 r4.7), with the read's word and the copy
  * check, in both orders.
  */
-test("a choice's written list element reads below the list's element step, as its literal analogue", () => {
+/**
+ * F12 r4.7 and TABLE r4.93: a written list element's choice object whose value is an object is TSV029's error at the
+ * value, and the answer holds no object to read below; its literal analogue reads below the list's element step.
+ */
+test("a choice's written list element whose value is an object is TSV029's error, and its literal analogue reads below the element step", () => {
   const recordOf = (source: string): CompactRecord => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
@@ -1473,24 +1501,21 @@ test("a choice's written list element reads below the list's element step, as it
   };
   for (const store of ["rec.f = 2.5", 'showPermanentButton "b" { rec.f = 2.5 }']) {
     const head = `let rec = {f: 1}\n${store}\nlet n: integer = `;
-    const choice = recordOf(`${head}(askChoice [{text: "A", value: rec}]).f\nexit`);
-    // (the analogue's value expression is longer, so its sites start alike and end later)
-    const starts = (record: CompactRecord): CompactRecord => ({
-      ...record,
-      diagnostics: record.diagnostics.map((d) => ({
-        ...d,
-        site: { ...d.site, end: d.site.offset },
-      })),
-      checks: record.checks.map((c) => ({ ...c, site: { ...c.site, end: c.site.offset } })),
-    });
-    assert.deepEqual(
-      starts(choice),
-      starts(recordOf(`${head}[{text: "A", value: rec}][0].value.f\nexit`)),
-    );
+    const source = `${head}(askChoice [{text: "A", value: rec}]).f\nexit`;
+    const choice = recordOf(source);
     assert.deepEqual(
       [
         choice.outcome,
-        ...choice.diagnostics.map((d) => `${d.kind} ${d.context} @${d.site.offset}`),
+        ...choice.diagnostics.map((d) => `${d.kind} ${d.class} @${d.site.offset}`),
+        ...choice.checks.filter((check) => !check.boundary).map((check) => check.kind),
+      ],
+      ["compile-error", `operator compile-error @${source.indexOf("rec", head.length)}`],
+    );
+    const analogue = recordOf(`${head}[{text: "A", value: rec}][0].value.f\nexit`);
+    assert.deepEqual(
+      [
+        analogue.outcome,
+        ...analogue.diagnostics.map((d) => `${d.kind} ${d.context} @${d.site.offset}`),
       ],
       ["warning-runtime-check", `written-target member @${head.length}`],
     );
@@ -1499,8 +1524,8 @@ test("a choice's written list element reads below the list's element step, as it
 
 /**
  * §3.2 (review round 5 on #1027): a held choice object's button value keeps the mark of a test of the key it selects,
- * through copies, a list's element, a parameter and a path below it, as the keyed read does; a test of the other key
- * marks neither. Per program its record in both orders against the same program with the keyed read in its place, the
+ * through copies, a list's element and a parameter, as the keyed read does; a test of the other key marks neither. (A
+ * path below a button's value holds nothing: an object there is TSV029's error, TABLE r4.93.) Per program its record in both orders against the same program with the keyed read in its place, the
  * checks' targets aside.
  */
 test("a held choice object's button value is marked by a test of its selected key, as the keyed read is", () => {
@@ -1526,13 +1551,6 @@ test("a held choice object's button value is marked by a test of its selected ke
       'let o = {text: "unused", value: 2.0}\nif o.value is integer {\nlet p = o\nlet q = p\nrepeat READ {}\n}\nexit',
       "askChoice q",
       "q.value",
-      "warning-runtime-check",
-    ],
-    [
-      "a path below its value",
-      'let o = {text: "unused", value: {n: 2.0}}\nif o.value.n is integer { repeat READ {} }\nexit',
-      "(askChoice o).n",
-      "o.value.n",
       "warning-runtime-check",
     ],
     [
@@ -2315,46 +2333,48 @@ test("a range's list holds its whole numbers, maybe none", () => {
 });
 
 /**
- * TABLE r4.47 (1), F15, §3.4 (Astra's D1 on #1028): a method without a category answers the runtime's opaque `unknown`
- * on a receiver of a known kind, and on what the core cannot know keeps that value's own reasons, so a chain of such
- * methods stays opaque (the word `unmodelled`), with no external data and no boundary; a modelled method in the chain
- * gives its declared result. Both orders.
+ * TABLE r4.47 (1), F15, §3.4 (Astra's D1 on #1028): a method without a category (a list's `union`, whose result is the
+ * runtime's until the result relations, S9b) answers the runtime's opaque `unknown` on a receiver of a known kind, and on
+ * what the core cannot know keeps that value's own reasons, so a chain of such methods stays opaque (the word
+ * `unmodelled`), with no external data and no boundary; a modelled method in the chain gives its declared result. Both
+ * orders.
  */
 test("a chain of methods without a category stays opaque", () => {
   const cases: readonly (readonly [string, string, readonly string[], readonly string[]])[] = [
     [
       "two methods without a category",
-      'let n: integer = "  alpha  ".trimStart().trimEnd()\nexit',
+      "let n: integer = [1].union([2]).union([3])\nexit",
       [
         "copy-type n [integer] @17",
-        'null-check "  alpha  ".trimStart() [non-null] @17',
+        "null-check [1].union([2]) [non-null] @17",
         "warning-runtime-check",
       ],
       ["written-target warning-runtime-check unmodelled @17"],
     ],
     [
       "a modelled method, then one without a category",
-      'let n: integer = "  alpha  ".uppercase().trimStart()\nexit',
+      "let n: integer = [1, 2].take(1).union([2])\nexit",
       ["copy-type n [integer] @17", "warning-runtime-check"],
       ["written-target warning-runtime-check unmodelled @17"],
     ],
     [
       "one without a category, then a modelled method",
-      'let n: integer = "  alpha  ".trimStart().uppercase()\nexit',
-      ["compile-error", 'null-check "  alpha  ".trimStart() [non-null] @17'],
+      "let n: integer = [1].union([2]).join()\nexit",
+      ["compile-error", "null-check [1].union([2]) [non-null] @17"],
       ["written-target compile-error null @17"],
     ],
     [
       "a receiver of a known kind or an opaque answer",
-      'let s = "a"\nlet t = s\nif askBoolean "f" { t = s.trimStart() }\nlet n: integer = t.trimEnd()\nexit',
-      // (the opaque answer stored into `t`, decided a text by its start value, owes its check there: A5, C1)
+      'let s = [1]\nlet t = s\nif askBoolean "f" { t = s.union([2]) }\nlet n: integer = t.union([3])\nexit',
+      // (the opaque answer stored into `t`, decided a list by its start value, owes its check there: A5, C1)
       [
-        "copy-type n [integer] @79",
-        "copy-type t [string] @46",
-        "null-check t [non-null] @79",
+        "copy-type n [integer] @78",
+        "copy-type t [list] @46",
+        "copy-type t.element [integer] @46",
+        "null-check t [non-null] @78",
         "warning-runtime-check",
       ],
-      ["written-target warning-runtime-check unmodelled @79"],
+      ["written-target warning-runtime-check unmodelled @78"],
     ],
   ];
   const differing: string[] = [];
@@ -4307,9 +4327,9 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a
  * computed and a projected list, in a literal beside the same carrier over another list (A8), stored before and after
  * its source changes (A2), and carrying host data with no consumer (C1, C9); in both orders. A carrier that gives
- * possible elements (a removal, a choice's answer) decides nothing (A2), yet its elements are published with the
- * literal's whole numbers, so named host data it carries owes its check, a choice's as a removal's (A7, A8, TABLE r4.67
- * (1): the round's `valid` for the choice was an artifact of a source dropped past the longest key); a load or a parse
+ * possible elements (a removal) decides nothing (A2), yet its elements are published with the literal's whole numbers,
+ * so named host data it carries owes its check (A7, A8, TABLE r4.67 (1)); a choice's answer carries no list, which no
+ * button returns (TSV029, TABLE r4.93); a load or a parse
  * typed by its default alone validates the loaded value by the default's own kinds, so host data the default holds
  * leaves the elements' kind open, C1's beside the call's boundary (TABLE r4.66 (3)).
  */
@@ -4320,7 +4340,7 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * prove plan and run in `type-core-candidate.test.ts` (the projections of a literal, the endpoint matrix, the cell
  * sample).
  */
-test("a value any carrier gives brings its elements' types, decided and checked as a literal's, a choice's published as a removal's, in both orders (round 11, TABLE r4.67 (1))", () => {
+test("a value any carrier gives brings its elements' types, decided and checked as a literal's, a removal's published as possible, in both orders (round 11, TABLE r4.67 (1))", () => {
   const carriers: readonly (readonly [string, (value: string) => string])[] = [
     ["projection", (value) => `[${value}][0]`],
     ["otherwise", (value) => `${value} otherwise ${value}`],
@@ -4333,9 +4353,8 @@ test("a value any carrier gives brings its elements' types, decided and checked 
     ["toSet", (value) => `${value}.toSet()`],
     ["removeFirst", (value) => `[${value}].removeFirst()`],
     ["+", (value) => `${value} + []`],
-    ["a choice", (value) => `askChoice [{text: "A", value: ${value}}]`],
   ];
-  const possible = new Set(["removeFirst", "a choice"]);
+  const possible = new Set(["removeFirst"]);
   // a list (a set for `toList`) of one element, and how the matrix's kinds of value hold it
   const list = (carrier: string, element: string): string =>
     carrier === "toList" ? `set[${element}]` : `[${element}]`;
@@ -4403,7 +4422,7 @@ test("a value any carrier gives brings its elements' types, decided and checked 
       (diagnostic) =>
         diagnostic.kind === "written-target" && diagnostic.class === "warning-runtime-check",
     );
-    // (a removal's or a choice's possible element decides nothing, F7, yet the elements are published with the
+    // (a removal's possible element decides nothing, F7, yet the elements are published with the
     // literal's whole numbers, so the named host data owes its check: C9 r4.12, r4.50 (1), TABLE r4.67 (1))
     if (carried.outcome !== "warning-runtime-check" || !warned)
       differing.push(`${carrier}, host data: ${carried.outcome}`);

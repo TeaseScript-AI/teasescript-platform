@@ -1,4 +1,4 @@
-import type { ValueKind } from "../../../value-kinds.js";
+import { VALUE_KINDS, type ValueKind } from "../../../value-kinds.js";
 import type { ChoiceObjectEvidence, ChoiceOptionEvidence, PlaceId } from "../../graph.js";
 import { joinSteps } from "../budget.js";
 import { SELECTED_TEXT, SELECTED_VALUE } from "../definitions.js";
@@ -66,6 +66,21 @@ export function* choiceItems(
   const out: Item[] = [];
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
+  // a button's value is a choice value, a scalar (V30 §19, TSV029, TABLE r4.93): a value of another type is no answer,
+  // as the run stops at it (`choiceValues`' error or check), and nothing stands below a scalar but an unknown's own
+  // parts, so no record a button holds is ever composed into the answer
+  const buttonValue = function* (
+    place: PlaceId,
+    path: readonly string[],
+    element?: true,
+  ): Work<Item[]> {
+    const value = withoutEmpty(yield* read(place, path, element));
+    if (rest.length === 0) return value.filter(returned);
+    if (!value.some((item) => item.tag === "unknown")) return [];
+    return withoutEmpty(yield* read(place, joinSteps(path, rest), element)).filter(
+      (item) => item.tag === "unknown",
+    );
+  };
   // a choice object the options hold without writing it: per record alternative its `value` or its `text`; a key with a
   // store below it by its key: the `value` as its key gives it, the `text` of every record where some lacks the `value`,
   // possible where some has one
@@ -76,14 +91,16 @@ export function* choiceItems(
         : [];
     const lacking = value.some(isMissing);
     const present = withoutMissing(value);
-    if (!stored.value) out.push(...(yield* read(option, joinSteps(at, [SELECTED_VALUE], rest))));
+    if (!stored.value) out.push(...(yield* buttonValue(option, joinSteps(at, [SELECTED_VALUE]))));
     else if (present.length > 0 || !lacking)
       out.push(
-        ...(rest.length === 0 ? present : yield* read(option, joinSteps(at, ["value"], rest))),
+        ...(rest.length === 0
+          ? present.filter(returned)
+          : yield* buttonValue(option, joinSteps(at, ["value"]))),
       );
-    if (!stored.text) out.push(...(yield* read(option, joinSteps(at, [SELECTED_TEXT], rest))));
+    if (!stored.text) out.push(...(yield* buttonValue(option, joinSteps(at, [SELECTED_TEXT]))));
     else if (lacking) {
-      const text = yield* read(option, joinSteps(at, ["text"], rest));
+      const text = yield* buttonValue(option, joinSteps(at, ["text"]));
       out.push(...(present.length > 0 ? weaken(text) : text));
     }
   };
@@ -97,14 +114,14 @@ export function* choiceItems(
     if (object !== null && selected !== null) {
       // an element of a written list or set reads as its literal analogue, below the list's element step (F12 r4.7)
       const key = object.value !== null ? "value" : "text";
-      const reading = element ? read(place, joinSteps([key], rest), true) : read(selected, rest);
-      out.push(...(yield* reading));
+      out.push(...(yield* element ? buttonValue(place, [key], true) : buttonValue(selected, [])));
       return;
     }
     const items = withoutEmpty(yield* read(place, []));
     if (items.some((item) => item.tag === "object")) yield* held(place, []);
     for (const item of items)
-      if (item.tag !== "object" && (rest.length === 0 || item.tag === "unknown")) out.push(item);
+      if (item.tag !== "object" && (rest.length === 0 ? returned(item) : item.tag === "unknown"))
+        out.push(item);
   };
   const option = function* (index: number): Work<void> {
     const argument = c.arguments[index]!;
@@ -132,7 +149,7 @@ export function* choiceItems(
         );
       if (objects)
         for (const step of [SELECTED_VALUE, SELECTED_TEXT])
-          out.push(...(yield* read(argument, joinSteps(["element", step], rest))));
+          out.push(...(yield* buttonValue(argument, ["element", step])));
       else if (part.wide !== undefined && content.elements.length > WIDE)
         out.push(...(yield* part.wide(index, content.elements.length, rest)));
       else
@@ -144,11 +161,11 @@ export function* choiceItems(
     if (items.some((item) => item.tag === "list" || item.tag === "set"))
       for (const item of withoutEmpty(yield* read(argument, ["element"])))
         if (item.tag === "object") yield* held(argument, ["element"]);
-        else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+        else if (rest.length === 0 ? returned(item) : item.tag === "unknown") out.push(item);
     if (items.some((item) => item.tag === "object")) yield* held(argument, []);
     for (const item of items)
       if (item.tag === "list" || item.tag === "set" || item.tag === "object") continue;
-      else if (rest.length === 0 || item.tag === "unknown") out.push(item);
+      else if (rest.length === 0 ? returned(item) : item.tag === "unknown") out.push(item);
   };
   // (a wide written list's elements of [lo, hi), `Values.choiceElements`)
   if (part.elements !== undefined) {
@@ -167,6 +184,10 @@ export function* choiceItems(
   }
   return out;
 }
+
+/** Whether an answer may hold this item: a choice value a button returns, or an unknown the run checks. */
+const returned = (item: Item): boolean =>
+  item.tag === "unknown" || (item.tag !== "empty" && VALUE_KINDS[item.tag].choice);
 
 /** A property read that found no such property. */
 const isMissing = (item: Item): boolean =>

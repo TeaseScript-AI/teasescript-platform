@@ -8,6 +8,9 @@ import type {
   TypeAnnotation,
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
+import { dictMethod } from "../../dict-operations.js";
+import { listMethod } from "../../list-methods.js";
+import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
 import type { SourceSite } from "../graph.js";
@@ -32,18 +35,20 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
- * a count, `say` of plain text or of a value, and `exit`; number, boolean, null and plain text literals, variables, host
- * values, list and object literals, index and property reads, `otherwise`, a list's `get` with its `default:`, the
- * conversions of a value with their `default:`, `fromJson`, `fileFromBase64`, `decryptText` and `decryptFile`, a
- * `load` of a key written as text once in the project with a default that is no `null`, and parentheses (S7: the
- * constructs of the discharge map's new rows). Its consumers are C1 (a store into a place with a written or decided
- * type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat count, an index), C5 (a member of
- * a receiver at a read or a store) and C10 (a fallback or a default); its ingresses are a host value, a load and a
- * parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
+ * a count, `for` with one or two variables, `say` of plain text or of a value, a call as a statement, and `exit`;
+ * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
+ * property reads, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
+ * changes nothing in its receiver and a list's `sort`, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
+ * `decryptText` and `decryptFile`, a `load` of a key written as text once in the project with a default that is no
+ * `null`, and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
+ * place with a written or decided type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat
+ * count, an index), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
+ * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
+ * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a warning about a possible `null` (narrowing's required
  * check, S10), a property read of a value that may be no object, a value `say` may not show, an argument of another
- * kind than its built-in takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A stop of
- * the analysis is no exclusion: the program compiles with the stop's warning and its checks at runtime (D4 a′).
+ * kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A
+ * stop of the analysis is no exclusion: the program compiles with the stop's warning and its checks at runtime (D4 a′).
  */
 
 /** Test-only: a program outside the candidate's slice, at its first construct outside it (see above). */
@@ -206,6 +211,9 @@ function outsideSyntax(files: readonly CoreFile[], globals: ReadonlySet<string>)
         case "repeatStatement":
           push([node.count, node.body]);
           break;
+        case "forStatement":
+          push([node.iterable, node.body]);
+          break;
         case "sayStatement":
           if (
             node.presentation !== null ||
@@ -218,10 +226,17 @@ function outsideSyntax(files: readonly CoreFile[], globals: ReadonlySet<string>)
             return outside(node.span, "this say");
           if (node.value.kind !== "stringLiteral") push([node.value]);
           break;
+        case "expressionStatement":
+          // (a call for what it does, such as `xs.sort()`)
+          if (node.expression.kind !== "callExpression")
+            return outside(node.span, "this expression statement");
+          push([node.expression]);
+          break;
         case "exitStatement":
         case "numberLiteral":
         case "booleanLiteral":
         case "nullLiteral":
+        case "regexLiteral":
           break;
         case "stringLiteral":
           if (node.parts.some((part) => part.kind !== "stringText"))
@@ -287,7 +302,36 @@ function unwrapped(expression: Expression): Expression {
 }
 
 /** The calls of the slice, by what each is (see the module's comment); `null` for any other call. */
-type SliceCall = "get" | "conversion" | "fromJson" | "fileFromBase64" | "decrypt";
+type SliceCall = "get" | "conversion" | "fromJson" | "fileFromBase64" | "decrypt" | "method";
+
+/**
+ * A method of text, a list, a set or a dict that changes nothing in its receiver, and a list's `sort`, called with as
+ * many positional arguments as one of its contracts takes and no named one: the methods whose arguments and elements C13
+ * checks (`signatures.ts`); a call's shape is the argument rules' (TSV020, S9b). A method that adds to its receiver
+ * stores its argument, whose check has no place in the plan yet; one that removes or reorders is the slice's when the
+ * runs the route's tests derive follow it.
+ */
+function sliceMethod(call: CallExpression): boolean {
+  if (call.callee.kind !== "propertyAccessExpression") return false;
+  const name = call.callee.property.name;
+  if (call.arguments.some((argument) => argument.kind === "namedArgument")) return false;
+  const list = listMethod(name);
+  const dict = dictMethod(name);
+  if ((list?.changes !== undefined && name !== "sort") || dict?.changes !== undefined) return false;
+  const parameters = [
+    isTextMethod(name) ? TEXT_METHODS[name].parameters : null,
+    list === undefined || list.named !== undefined ? null : list.parameters,
+    dict === undefined || dict.named !== undefined ? null : dict.parameters,
+  ];
+  return parameters.some(
+    (taken) =>
+      taken !== null &&
+      call.arguments.length <= taken.length &&
+      call.arguments.length >=
+        taken.filter((parameter) => !("optional" in parameter && parameter.optional === true))
+          .length,
+  );
+}
 
 /**
  * A call of the slice: a list's `get` with an index and its `default:`; a conversion of a value with its `default:`;
@@ -301,10 +345,11 @@ function sliceCall(call: CallExpression): SliceCall | null {
       argument.kind === "namedArgument" ? [[argument.name.name, argument.value] as const] : [],
     ),
   );
+  if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name !== "get")
+    return sliceMethod(call) ? "method" : null;
   if (positional.length !== 1 || !named.has("default")) return null;
   const others = [...named.keys()].filter((name) => name !== "default");
-  if (call.callee.kind === "propertyAccessExpression")
-    return call.callee.property.name === "get" && others.length === 0 ? "get" : null;
+  if (call.callee.kind === "propertyAccessExpression") return others.length === 0 ? "get" : null;
   if (call.callee.kind !== "identifier") return null;
   const name = call.callee.name;
   if (name === "fromJson") {
@@ -355,6 +400,8 @@ function argumentKinds(call: CallExpression, argument: CallArgument): readonly s
   if (named === "default") return null;
   if (named === "files") return ["boolean"];
   if (kind === "get") return named === null ? null : [];
+  // (a method's arguments are C13's, `signatures.ts`)
+  if (kind === "method") return null;
   return ["string", "unknown"];
 }
 
@@ -363,7 +410,7 @@ function describe(kind: string): string {
   return kind.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`);
 }
 
-/** The names a file's `let` statements declare, at any depth. */
+/** The names a file's `let` statements and `for` loops declare, at any depth. */
 function letNames(program: Program): Set<string> {
   const names = new Set<string>();
   const pending: (readonly Statement[])[] = [program.statements];
@@ -385,6 +432,11 @@ function letNames(program: Program): Set<string> {
         case "repeatStatement":
           pending.push(statement.body.statements);
           break;
+        case "forStatement":
+          names.add(statement.variable.name);
+          if (statement.valueVariable !== null) names.add(statement.valueVariable.name);
+          pending.push(statement.body.statements);
+          break;
       }
   return names;
 }
@@ -400,7 +452,12 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     index.spanAt(site);
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "budget") continue;
-    if (diagnostic.kind === "operator")
+    // (C13's operands of the slice: a `for` loop's iterable, a method's argument)
+    if (
+      diagnostic.kind === "operator" &&
+      diagnostic.rule.rule !== "iterable" &&
+      diagnostic.rule.rule !== "argument"
+    )
       return { file: diagnostic.site.file, span: at(diagnostic.site), what: "this operand" };
     // a possible `null` needs narrowing's required check (S10); a member a receiver may lack is C5's own
     if (

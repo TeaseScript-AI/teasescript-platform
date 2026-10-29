@@ -22,7 +22,10 @@ import {
 } from "../src/runtime/snapshot/checkpoint.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/snapshot/snapshot-construction.js";
 import type { RuntimeSnapshot } from "../src/runtime/snapshot/state.js";
-import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
+import {
+  createCapturedSerializableList,
+  type SerializableRuntimeValue,
+} from "../src/runtime/values/serializable-values.js";
 import type { TypeAnalysisRequest, TypeCheckResult } from "../src/type-inference/backend.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../src/type-inference/core/backend.js";
@@ -240,7 +243,9 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
 const RECORD_CODES: Readonly<Record<string, readonly string[]>> = {
   "written-target": ["TSV041", "TSV044"],
   "integer-use": ["TSV011", "TSV043"],
-  "member-read": ["TSV043"],
+  // (C13: a `for` loop's iterable, a method's argument; the elements a `join` or a `sort` reads are a member's)
+  operator: ["TSV012", "TSV043"],
+  "member-read": ["TSV042", "TSV043"],
 };
 
 type ExpectedDiagnostic = ReturnType<typeof readFixture>[number]["expected"]["diagnostics"][number];
@@ -2077,9 +2082,11 @@ test("every carrier kind leaves an obligation for the external data it gives a p
               continue;
             }
             const [result, { checks }] = compiled;
+            // (the checked store, a loop body's after its indentation)
+            const statement = holder + /^ */.exec(source.slice(holder))![0].length;
             assert.deepEqual(
               checks,
-              [`${holder}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
+              [`${statement}:${end} ${endpoint === "scalar" ? "integer" : "list<integer>"}`],
               name,
             );
             const plan = result.plan!;
@@ -2619,7 +2626,7 @@ test("a checkpoint after a passed check resumes with the same state, and the lat
 test("a program outside the slice throws at its first construct outside it", () => {
   for (const [source, offset] of [
     // a statement outside the slice
-    ["let total = 0\nfor value in [1, 2] {\n  total = value\n}\nexit\n", 14],
+    ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
     // a possible null, whose required check comes with narrowing (S10)
@@ -2760,6 +2767,63 @@ test("a check that owes the runtime nothing is published in the record and by th
     messages[2]!,
     /^toNumber\(\.\.\.\) cannot convert text \(string\) "1,5" to a number/,
   );
+});
+
+/**
+ * C13's iterable (TABLE r4.81 (2)): an operand of the loop at its iterable, against the domain it tests, a list, set,
+ * dict or range, a pair loop's a dict: an error where no run can go through it; else a warning whose operand check is
+ * the runtime's own check of the loop's source (TSR044), at the iterable before the body runs, so the plan holds none.
+ */
+test("a for loop's iterable is an operand of the loop: an error, or a warning the loop's own check discharges at the iterable (C13)", () => {
+  for (const [source, operand] of [
+    ["for n in 1 {}\nexit\n", "1"],
+    ["for k, v in [1] {}\nexit\n", "[1]"],
+    ['let xs = ["a"]\nfor k, v in xs {}\nexit\n', "xs"],
+  ] as const) {
+    const result = inBothOrders(() => candidate(source));
+    assert.equal(result.plan, null, source);
+    assert.deepEqual(sited(result), [`error TSV012@${source.indexOf(operand, 5)}`], source);
+  }
+  for (const [source, against] of [
+    ['for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["list", "set", "dict", "range"]],
+    ['for k, v in hostValue {\n  say "in"\n}\nsay "after"\nexit\n', ["dict"]],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null);
+    const record = inBothOrders(() => compactAnalysis(request));
+    const at = source.indexOf("hostValue");
+    assert.deepEqual(
+      record.diagnostics.map((d) => [d.kind, d.class, d.site.offset]),
+      [["operator", "warning-runtime-check", at]],
+    );
+    assert.deepEqual(
+      record.checks.filter((check) => !check.boundary).map((check) => [check.kind, check.against]),
+      [["operand", against]],
+    );
+    const result = inBothOrders(() => candidate(source));
+    assert.deepEqual(sited(result), [`warning TSV012@${at}`]);
+    // (the loop's own check: a value it cannot go through stops the run at the iterable, before the body)
+    assert.deepEqual(runWith(result.plan!, 1), {
+      status: "failed",
+      says: [],
+      failure: `TSR044@${at}:${at + "hostValue".length}`,
+    });
+  }
+  const list = createCapturedSerializableList([1, 2]);
+  const loop = inBothOrders(() =>
+    candidate('for n in hostValue {\n  say "in"\n}\nsay "after"\nexit\n'),
+  );
+  assert.deepEqual(runWith(loop.plan!, list), {
+    status: "halted",
+    says: ["in", "in", "after"],
+    failure: null,
+  });
+  // the controls: what a loop goes through is quiet
+  for (const source of [
+    'let xs = [1, 2]\nfor n in xs {\n  say "in"\n}\nexit\n',
+    "let xs: integer[] = [1]\nfor n in xs {}\nexit\n",
+  ])
+    assert.deepEqual(sited(inBothOrders(() => candidate(source))), [], source);
 });
 
 /**
