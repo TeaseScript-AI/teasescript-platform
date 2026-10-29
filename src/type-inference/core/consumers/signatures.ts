@@ -11,10 +11,12 @@ import type { PlaceId } from "../../graph.js";
 import { isExternal, isOpaque, requiredKind } from "../admission.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE } from "../contract.js";
+import { joinSteps, READ_DEPTH_LIMIT } from "../budget.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
-import type { ValueConstraint } from "../program.js";
+import { propertyStep, type ValueConstraint } from "../program.js";
+import { propertyNames } from "../property-names.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { hasMethod } from "./kinds.js";
@@ -209,9 +211,11 @@ export function methodElements(
   }
   const label = `${keyLabel(walk, receiver)}.element`;
   const against = VALUE_KIND_NAMES.filter(fits).map(requiredKind);
-  // (beside the elements of another type, each that may be of a second ordered type)
+  // (two ordered types: the elements of a type other than the earliest element's, each the type a sort cannot compare
+  // with it)
+  const earliest = families(items.map((item) => item.tag))[0];
   const offending: readonly Item[] =
-    unfit.length > 0 ? unfit : items.filter((item) => item.cert === "pos");
+    unfit.length > 0 ? unfit : items.filter((item) => families([item.tag])[0] !== earliest);
   for (const { item } of offendingKinds(offending.length > 0 ? offending : items))
     warning(
       walk,
@@ -229,3 +233,91 @@ export function methodElements(
       items.filter((found) => fits(found.tag)),
     );
 }
+
+/** Whether `toJson` writes a value of this kind itself (`VALUE_KINDS`' `json`); a collection's or an object's content is
+ * written too, each of its values checked below it. */
+function writable(tag: ItemTag): boolean {
+  return tag === "empty" || tag === "unknown" || VALUE_KINDS[tag].json !== null;
+}
+
+/**
+ * C13, Astra's G1: what `toJson` writes, each value its argument holds at every depth, a list's and a set's elements, a
+ * dict's values and an object's properties (V30 §13): the ordered predicate over the known kinds at each path, the first
+ * path in the walk that offends, at the argument. An unknown is external data, which JSON held, or the runtime's to check
+ * where it writes it, so it owes nothing here; a path past the read-depth limit is the runtime's too.
+ */
+export function jsonArgument(
+  walk: Consumers,
+  c: Extract<ValueConstraint, { kind: "operation" }>,
+  node: FlowNode,
+): void {
+  const value = c.arguments[0];
+  if (c.contract.family !== "conversion" || c.contract.name !== "toJson" || value === undefined)
+    return;
+  const { program } = walk.pass;
+  const quiet = quietKinds(walk, value);
+  if (quiet !== null && quiet.every((tag) => writable(tag) && !STRUCTURED.has(tag))) {
+    walk.skip(value);
+    return;
+  }
+  const at = ownSpan(walk, value, c.site);
+  const root = withoutEmpty(walk.valueItems(value, node, []));
+  const pending: (readonly string[])[] = [[]];
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    if (path.length > READ_DEPTH_LIMIT) continue;
+    program.work.charge("checks");
+    const items = path.length === 0 ? root : withoutEmpty(walk.valueItems(value, node, path));
+    const bad = items.filter((item) => !writable(item.tag));
+    if (bad.length > 0) {
+      // (the value that holds it, where one kind holds it: the runtime's own sentence names it)
+      const holders = path.length === 0 ? [] : [...new Set(root.map((item) => item.tag))];
+      const rule: DiagnosticRule = {
+        rule: "json",
+        holder: holders.length === 1 && holders[0] !== "unknown" ? holders[0]! : null,
+        nested: path.length > 0,
+      };
+      if (bad.length === items.length && items.every((item) => item.cert === "def"))
+        error(
+          walk,
+          "operator",
+          at,
+          rule,
+          items.map((item) => item.tag),
+        );
+      else {
+        const text = program.textAt(at);
+        for (const { item } of offendingKinds(bad))
+          warning(
+            walk,
+            "operator",
+            at,
+            item,
+            obligation(
+              "operand",
+              at,
+              text,
+              VALUE_KIND_NAMES.filter(writable).map(requiredKind),
+              `check that toJson can write ${text} when it runs`,
+            ),
+            rule,
+            items.filter((found) => writable(found.tag)),
+          );
+      }
+      return;
+    }
+    // (deeper: a collection's values, an object's properties, last to first so the walk visits them in order)
+    const below: (readonly string[])[] = [];
+    if (items.some((item) => item.tag === "list" || item.tag === "set"))
+      below.push(joinSteps(path, ["element"]));
+    if (items.some((item) => item.tag === "dict")) below.push(joinSteps(path, ["entry"]));
+    if (items.some((item) => item.tag === "object"))
+      for (const name of walk.asksNothing()
+        ? []
+        : propertyNames(walk.pass, (work) => walk.solve(work), { value, path }))
+        below.push(joinSteps(path, [propertyStep(name)]));
+    for (let index = below.length - 1; index >= 0; index -= 1) pending.push(below[index]!);
+  }
+}
+
+/** The kinds whose content `toJson` writes below them. */
+const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object"]);

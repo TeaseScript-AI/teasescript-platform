@@ -25,6 +25,8 @@ import {
   presentTime,
 } from "../../src/temporal.js";
 import { binaryFromBase64, binaryFromDataUrl } from "../../src/runtime/host-data/stored-files.js";
+import { RuntimeFault } from "../../src/runtime/errors.js";
+import { jsonText } from "../../src/runtime/values/json-base64.js";
 import { callStringMethod } from "../../src/runtime/values/string-operations.js";
 import { joinedText } from "../../src/runtime/values/value-text.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
@@ -1492,6 +1494,21 @@ export function evaluate(
           from: new Set(items.flatMap((item) => [...item.from])),
         };
       }
+      case "rangeExpression": {
+        // (a range of whole-number bounds; any other is the runtime's to reject)
+        const [start, end] = [value(expression.start), value(expression.end)];
+        if (!Number.isInteger(start.v) || !Number.isInteger(end.v))
+          throw new Underivable("a range of other bounds");
+        return {
+          v: {
+            kind: "range",
+            start: Number(start.v),
+            end: Number(end.v),
+            inclusive: expression.inclusive,
+          },
+          from: new Set([...start.from, ...end.from]),
+        };
+      }
       case "objectLiteral": {
         const properties = expression.properties.map((property) => ({
           name: property.name.name,
@@ -1642,6 +1659,23 @@ export function evaluate(
         const name = callee.name;
         const input = positional[0] ?? named("value") ?? named("text");
         if (input === undefined) throw new Underivable(`the argument of ${name}`);
+        if (name === "toJson") {
+          // (the runtime's own writing, and its own check of what it writes, TSV043 at the call)
+          let written: string | null = null;
+          try {
+            written = jsonText(input.v, () => [], expression.span);
+          } catch (error) {
+            if (!(error instanceof RuntimeFault)) throw error;
+          }
+          fail(
+            "TSV043",
+            expression.span.start.offset,
+            expression.span.end.offset,
+            input.from,
+            written !== null,
+          );
+          return { v: written, from: input.from };
+        }
         if (name === "fromJson") {
           if (typeof input.v !== "string") return useDefault();
           let parsed: SerializableRuntimeValue;

@@ -37,8 +37,8 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
  * a count, `for` with one or two variables, `say` of plain text or of a value, a call as a statement, and `exit`;
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
- * property reads, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
- * changes nothing in its receiver and a list's `sort`, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
+ * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
+ * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
  * `decryptText` and `decryptFile`, a `load` of a key written as text once in the project with a default that is no
  * `null`, and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
  * place with a written or decided type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat
@@ -252,6 +252,9 @@ function outsideSyntax(files: readonly CoreFile[], globals: ReadonlySet<string>)
         case "indexExpression":
           push([node.object, node.index]);
           break;
+        case "rangeExpression":
+          push([node.start, node.end]);
+          break;
         case "parenthesizedExpression":
           push([node.expression]);
           break;
@@ -302,7 +305,8 @@ function unwrapped(expression: Expression): Expression {
 }
 
 /** The calls of the slice, by what each is (see the module's comment); `null` for any other call. */
-type SliceCall = "get" | "conversion" | "fromJson" | "fileFromBase64" | "decrypt" | "method";
+type SliceCall =
+  "get" | "conversion" | "fromJson" | "fileFromBase64" | "decrypt" | "method" | "toJson";
 
 /**
  * A method of text, a list, a set or a dict that changes nothing in its receiver, and a list's `sort`, called with as
@@ -347,6 +351,9 @@ function sliceCall(call: CallExpression): SliceCall | null {
   );
   if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name !== "get")
     return sliceMethod(call) ? "method" : null;
+  // `toJson` of a value, whose files the slice writes as their text (C13: what it writes, `signatures.ts`)
+  if (call.callee.kind === "identifier" && call.callee.name === "toJson")
+    return positional.length === 1 && named.size === 0 ? "toJson" : null;
   if (positional.length !== 1 || !named.has("default")) return null;
   const others = [...named.keys()].filter((name) => name !== "default");
   if (call.callee.kind === "propertyAccessExpression") return others.length === 0 ? "get" : null;
@@ -400,8 +407,8 @@ function argumentKinds(call: CallExpression, argument: CallArgument): readonly s
   if (named === "default") return null;
   if (named === "files") return ["boolean"];
   if (kind === "get") return named === null ? null : [];
-  // (a method's arguments are C13's, `signatures.ts`)
-  if (kind === "method") return null;
+  // (a method's arguments and what `toJson` writes are C13's, `signatures.ts`)
+  if (kind === "method" || kind === "toJson") return null;
   return ["string", "unknown"];
 }
 
@@ -452,11 +459,12 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     index.spanAt(site);
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "budget") continue;
-    // (C13's operands of the slice: a `for` loop's iterable, a method's argument)
+    // (C13's operands of the slice: a `for` loop's iterable, a method's argument, what `toJson` writes)
     if (
       diagnostic.kind === "operator" &&
       diagnostic.rule.rule !== "iterable" &&
-      diagnostic.rule.rule !== "argument"
+      diagnostic.rule.rule !== "argument" &&
+      diagnostic.rule.rule !== "json"
     )
       return { file: diagnostic.site.file, span: at(diagnostic.site), what: "this operand" };
     // a possible `null` needs narrowing's required check (S10); a member a receiver may lack is C5's own

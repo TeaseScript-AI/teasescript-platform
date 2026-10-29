@@ -1,3 +1,4 @@
+import type { StoredCalendarDuration } from "../../duration.js";
 import type { ConversionName } from "../../language-facts.js";
 import type { ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
@@ -183,6 +184,11 @@ export type DiagnosticRule =
       readonly families: readonly ItemTag[];
     }
   /**
+   * C13, Astra's G1: a value `toJson` cannot write (`VALUE_KINDS`' `json`), its argument's own or one it holds below it
+   * (`nested`), in a value of one kind (`holder`), which the runtime's sentence names.
+   */
+  | { readonly rule: "json"; readonly holder: ItemTag | null; readonly nested: boolean }
+  /**
    * TSV029 (V30 §19, TABLE r4.93): what a button returns, a choice value (`value`), an option of `askChoice` (`option`)
    * or an element of a list or set option (`element`).
    */
@@ -307,11 +313,40 @@ export type StaticRule =
   /** A `repeat` count whose known value is no whole number of at least 0 (`loop-rules.ts`). */
   | { readonly rule: "repeat-count"; readonly value: number }
   /** A conversion of known text it cannot convert (V30 §13, #1105), `default:` or not. */
-  | { readonly rule: "conversion"; readonly conversion: ConversionName; readonly text: string };
+  | { readonly rule: "conversion"; readonly conversion: ConversionName; readonly text: string }
+  /**
+   * ADR 0026 §5 (the lead's decision 6 on #1072): a date or a local date and time moved by a known calendar duration
+   * with an exact offset, `+` or `-`, compound or not, beside the operation's own operand check (F16).
+   */
+  | {
+      readonly rule: "calendar-offset";
+      readonly target: "date" | "datetime";
+      readonly duration: StoredCalendarDuration;
+    }
+  /**
+   * V30 §6: a range written with whole-number literals that holds no number, as a `for` loop's iterable (`loop`) or
+   * `toList()`'s receiver (`list`): its bounds as written, an ordinary warning.
+   */
+  | {
+      readonly rule: "empty-range";
+      readonly use: "loop" | "list";
+      readonly start: string;
+      readonly end: string;
+      readonly inclusive: boolean;
+    };
 
 /** The registry codes the core's diagnostics carry (D3: a rule's one code, with both severities where it warns). */
 export type CoreCode =
-  "TSV011" | "TSV012" | "TSV029" | "TSV041" | "TSV042" | "TSV043" | "TSV044" | "TSV075" | "TSV076";
+  | "TSV011"
+  | "TSV012"
+  | "TSV029"
+  | "TSV041"
+  | "TSV042"
+  | "TSV043"
+  | "TSV044"
+  | "TSV046"
+  | "TSV075"
+  | "TSV076";
 
 /** A place the analysis counts work to and names: a function, or a file's top level, with its lines' site. */
 export interface WorkPlace {

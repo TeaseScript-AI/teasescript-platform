@@ -906,11 +906,12 @@ const INTENDED: readonly Intended[] = [
           form?.test(pair.message) === true || words[index]?.test(pair.message) === true,
       );
     },
-    // (the fix in words where its code is not)
+    // (the fix in words where its code is not; one more since S9b's compound operations, G2: a compound assignment's
+    // target is the place it stores into, which no kept value replaces)
     replacement: (pair) =>
       unproved(pair)[pair.forms.findIndex(({ form }) => form?.test(pair.message) !== true)] ??
       /(?!)/,
-    count: 17,
+    count: 18,
   },
   {
     rule:

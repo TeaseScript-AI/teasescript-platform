@@ -14,6 +14,7 @@ import type {
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "../../diagnostics.js";
 import { isRepeatCount } from "../../loop-rules.js";
+import { literalRange } from "../../switch-cases.js";
 import {
   repairedObject,
   type TypeCheckPlan,
@@ -27,7 +28,8 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "../../source.js";
-import { KnownValues, type KnownValue } from "../../static-evaluation.js";
+import { isStaticDuration, KnownValues, type KnownValue } from "../../static-evaluation.js";
+import { isCalendar } from "../../duration.js";
 import { members, openType, union, UNKNOWN_TYPE, type StaticType } from "../../static-types.js";
 import { typeFromAnnotation } from "../../static-types/annotations.js";
 import { typeKey } from "../../storage-types.js";
@@ -621,7 +623,8 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
 /**
  * The checks of known values that owe the runtime nothing (S3 §2, group V), each where the core finds its value's kinds
  * fine (no diagnostic of the analysis at its site): a `repeat` count's known value outside its domain (`loop-rules.ts`),
- * and a conversion of known text it cannot convert (V30 §13, #1105).
+ * a conversion of known text it cannot convert (V30 §13, #1105), and a written range that holds no number (V30 §6, an
+ * ordinary warning).
  */
 function staticDiagnostics(
   answers: Answers,
@@ -648,6 +651,92 @@ function staticDiagnostics(
     const conversion = knownConversionError(answers, index, call);
     if (conversion !== null) report(index.site(conversion.value), conversion.rule);
   }
+  // V30 §6: a written range that holds no number, an ordinary warning where a loop or `toList()` reads it
+  const empty = (range: Expression, use: "loop" | "list"): void => {
+    const bounds = literalRange(range);
+    if (
+      bounds === undefined ||
+      ![bounds.startText, bounds.endText].every((text) => /^-?\d+$/.test(text)) ||
+      (bounds.inclusive ? bounds.end >= bounds.start : bounds.end > bounds.start)
+    )
+      return;
+    found.push({
+      class: "warning",
+      kind: "static",
+      code: "TSV046",
+      site: index.site(range),
+      rule: {
+        rule: "empty-range",
+        use,
+        start: bounds.startText,
+        end: bounds.endText,
+        inclusive: bounds.inclusive,
+      },
+    });
+  };
+  // ADR 0026 §5, decision 6 on #1072: a date or a local date and time moved by a known calendar duration with an exact
+  // offset, beside the operation's own check (F16), the binary form at its operation and the compound one at its statement
+  const offset = (target: readonly ItemTag[], operand: Expression, site: SourceSite): void => {
+    const kinds = target.filter((tag) => tag !== "empty");
+    const moved =
+      kinds.length > 0 && kinds.every((tag) => tag === "date")
+        ? "date"
+        : kinds.length > 0 && kinds.every((tag) => tag === "datetime")
+          ? "datetime"
+          : null;
+    const value = known(operand);
+    if (
+      moved === null ||
+      !isStaticDuration(value) ||
+      !isCalendar(value) ||
+      value.milliseconds === 0
+    )
+      return;
+    report(site, { rule: "calendar-offset", target: moved, duration: value });
+  };
+  for (const expression of index.expressions)
+    if (
+      expression.kind === "binaryExpression" &&
+      (expression.operator === "+" || expression.operator === "-")
+    )
+      offset(
+        (answers.at(nodeOf(answers, index, expression.left))?.items ?? []).map((item) => item.tag),
+        expression.right,
+        index.site(expression),
+      );
+  for (const statement of index.statements)
+    if (statement.kind === "assignmentStatement" && statement.operator !== "=") {
+      // (the target's current value, read before the operand as the compound operation reads it, `collector.ts`: a
+      // variable's read, or its root's value below its properties and elements)
+      const file = index.fileOf(statement);
+      const steps: string[] = [];
+      let root: Expression = statement.target;
+      for (;;)
+        if (root.kind === "propertyAccessExpression") {
+          steps.unshift(propertyStep(root.property.name));
+          root = root.object;
+        } else if (root.kind === "indexExpression") {
+          steps.unshift("element");
+          root = root.object;
+        } else if (root.kind === "parenthesizedExpression") root = root.expression;
+        else break;
+      const read = answers.graph.expressionAt({
+        file,
+        start: root.span.start.offset,
+        end: root.span.end.offset,
+      });
+      if (read !== undefined)
+        offset(
+          answers.valueAt(read, steps).items.map((item) => item.tag),
+          statement.value,
+          index.site(statement),
+        );
+    }
+  for (const statement of index.statements)
+    if (statement.kind === "forStatement") empty(statement.iterable, "loop");
+  for (const call of index.calls)
+    if (call.callee.kind === "propertyAccessExpression" && call.callee.property.name === "toList")
+      empty(call.callee.object, "list");
   return found;
 }
 

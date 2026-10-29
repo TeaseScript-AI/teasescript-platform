@@ -47,6 +47,7 @@ import { analyzeTypes } from "../src/type-inference/index.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { VALUE_KIND_NAMES } from "../src/value-kinds.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+import { toMonacoMarkers } from "../src/editor/monaco-mapping.js";
 import { compactAnalysis, coreRequest } from "./helpers/type-core-analysis.js";
 import {
   companions,
@@ -1536,12 +1537,28 @@ test("a store into an object's own first, last or random sets that property and 
   for (const source of [
     "let a = {first: 1, n: 2}\nif a.n > 1 {\n  a.first = 3\n}\nexit\n",
     "let a = {last: 1}\nfunction f {\n  a.last = 4\n}\nf()\nexit\n",
-    "let a = {random: 1}\na.random += 2\nexit\n",
   ]) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     assert.deepEqual(analyseCore(request).diagnostics, [], source);
   }
+  // a compound store reads the own property first, as its binary form does (F11's own selection, opaque: Astra's G2)
+  const operands = (source: string): string[] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    return compactAnalysis(request)
+      .checks.filter((check) => check.kind === "operand")
+      .map((check) => `${check.target} [${check.against.join(", ")}] @${check.site.offset}`);
+  };
+  assert.deepEqual(operands("let a = {random: 1}\na.random += 2\nexit\n"), [
+    "a.random [integer, number] @20",
+  ]);
+  assert.deepEqual(
+    operands("let a = {random: 1}\na.random += 2\nexit\n"),
+    operands("let a = {random: 1}\na.random = a.random + 2\nexit\n").map((check) =>
+      check.replace("@31", "@20"),
+    ),
+  );
   const wrong = candidate('let a = {first: 1}\na.first = "bad"\nexit\n');
   assert.deepEqual(sited(wrong), ["error TSV041@29"]);
   assert.match(
@@ -2766,6 +2783,58 @@ test("a check that owes the runtime nothing is published in the record and by th
   assert.match(
     messages[2]!,
     /^toNumber\(\.\.\.\) cannot convert text \(string\) "1,5" to a number/,
+  );
+});
+
+/**
+ * The seam's ordinary warning (decision 3 on #1072): a check that owes the runtime nothing but warns, here V30 §6's
+ * written range that holds no number, is a warning in the record and the compiler alike, the outcome `warning` alone and
+ * a runtime check's warning beside it the worse; it owes no check, so the plan's checks are the other warning's, and the
+ * editor marks it a warning as any other.
+ */
+test("an ordinary warning owes no check: its record, its compile, its plan and its editor marker (decision 3 on #1072)", () => {
+  const alone = "for i in 3..1 {\n  say i\n}\nexit\n";
+  const request = coreRequest([{ path: "main.tease", source: alone }]);
+  assert.ok(request !== null);
+  const record = coreRecord(checkedResult(analyseCore(request), request), ["main.tease"]);
+  assert.deepEqual(record, {
+    outcome: "warning",
+    diagnostics: [
+      { class: "warning", kind: "static", site: { file: "main.tease", offset: 9, end: 13 } },
+    ],
+    runtimeChecks: [],
+  });
+  const beside = `${alone.replace("exit\n", "")}let m: integer = hostValue\nsay "after"\nexit\n`;
+  const besideRequest = coreRequest([{ path: "main.tease", source: beside }]);
+  assert.ok(besideRequest !== null);
+  const both = coreRecord(checkedResult(analyseCore(besideRequest), besideRequest), ["main.tease"]);
+  assert.equal(both.outcome, "warning-runtime-check");
+  assert.deepEqual(
+    both.runtimeChecks.map((check) => `${check.kind} ${check.target}`),
+    ["copy-type m", "copy-type m"],
+  );
+  const compiled = inBothOrders(() => candidate(beside));
+  assert.deepEqual(sited(compiled), [
+    "warning TSV046@9",
+    `warning TSV041@${beside.indexOf("hostValue")}`,
+  ]);
+  assert.equal(
+    compiled.diagnostics[0]!.message,
+    "This range contains no numbers, so the loop never runs: a range never counts down. Write '1..3' to count up.",
+  );
+  assert.deepEqual(checksOf(compiled.plan!), [
+    `${beside.indexOf("let m")}:${beside.indexOf("\nsay")} integer`,
+  ]);
+  assert.deepEqual(runWith(compiled.plan!, 2), {
+    status: "halted",
+    says: ["after"],
+    failure: null,
+  });
+  assert.deepEqual(
+    toMonacoMarkers(compiled.diagnostics, { Error: 8, Warning: 4, Info: 2 }).map(
+      (marker) => `${marker.code} ${marker.severity}`,
+    ),
+    ["TSV046 4", "TSV041 4"],
   );
 });
 

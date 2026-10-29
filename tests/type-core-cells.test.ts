@@ -2291,18 +2291,22 @@ test("a range's list holds its whole numbers, maybe none", () => {
     [
       "an empty range's first",
       "let xs = (3..1).toList()\nrepeat xs.first {}\nexit",
+      // (beside V30 §6's ordinary warning at the written range that holds no number, S9b)
       [
         "empty-check xs [list] @32",
         "member-read warning-runtime-check @32",
+        "static warning @9",
         "warning-runtime-check",
       ],
     ],
     [
       "an empty range's removal",
       "let xs = (3..1).toList()\nrepeat xs.removeFirst() {}\nexit",
+      // (beside V30 §6's ordinary warning at the written range that holds no number, S9b)
       [
         "empty-check xs [list] @32",
         "member-read warning-runtime-check @32",
+        "static warning @9",
         "warning-runtime-check",
       ],
     ],

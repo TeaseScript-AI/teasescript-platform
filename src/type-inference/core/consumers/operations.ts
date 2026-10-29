@@ -15,7 +15,7 @@ import type { ValueConstraint } from "../program.js";
 import type { DiagnosticRule, RequiredKind } from "../result.js";
 import { choiceValues } from "../checks/interactions.js";
 import { error } from "./diagnostics.js";
-import { methodArguments, methodElements } from "./signatures.js";
+import { jsonArgument, methodArguments, methodElements } from "./signatures.js";
 import { fallbackFits } from "./fallbacks.js";
 import { BOOLEAN, hasMethod, operandDomain, SHOWN, TEXT } from "./kinds.js";
 import { keyLabel, kindsOf, ownSpan, quietKinds } from "./names.js";
@@ -274,6 +274,8 @@ function operation(
       selection(walk, value, node, c.site, "${...}");
     return;
   }
+  // C13, Astra's G1: what `toJson` writes
+  if (family === "conversion") jsonArgument(walk, c, node);
   const operator = operatorOf(c);
   if (operator !== null) operatorUse(walk, c, operator, node);
 }

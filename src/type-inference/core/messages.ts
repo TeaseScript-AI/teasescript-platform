@@ -12,9 +12,14 @@ import type { SourceSite } from "../graph.js";
 import { angleUnit } from "../../angle.js";
 import { CHOICE_ELEMENT_RULE, CHOICE_OPTION_RULE, CHOICE_VALUE_RULE } from "../../choice-rules.js";
 import { choiceValueFix } from "../../choice-values.js";
-import { CONVERSIONS, conversionTo } from "../../conversions.js";
+import {
+  CONVERSIONS,
+  conversionTo,
+  unwritableJsonMessage,
+  WRITABLE_JSON_FIX,
+} from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
-import { elapsedDurationUnit, UNIT_OPERANDS } from "../../duration.js";
+import { elapsedDurationUnit, localCalendarOffsetMessage, UNIT_OPERANDS } from "../../duration.js";
 import { expressionParts, statementExpressions } from "../../expression-children.js";
 import { listDraw, listMethod, RANGE_LIST_FIX } from "../../list-methods.js";
 import {
@@ -92,6 +97,8 @@ export interface MessageSource {
    * every type `rulesOut` rules out (beside a null check a type test, beside a form's value the replaced value's own).
    * `codeAt`'s "no other diagnostic" fact.
    */
+  /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
+  readonly target: (site: SourceSite) => boolean;
   readonly alone: (
     self: CheckedDiagnostic,
     held: SourceSite,
@@ -123,6 +130,20 @@ interface LineStatements {
 /** Whether a span holds a site. */
 const holds = ({ start, end }: SourceSpan, site: SourceSite): boolean =>
   start.offset <= site.start && site.end <= end.offset;
+
+/**
+ * Whether a site is an assignment's target or a receiver on its path: the place the store changes, which a check or a
+ * fallback may not replace (an index or a key the target reads is a value of its own).
+ */
+function inTarget(statement: Statement, site: SourceSite): boolean {
+  if (statement.kind !== "assignmentStatement") return false;
+  for (let at: Expression = statement.target; ;) {
+    if (at.span.start.offset === site.start && at.span.end.offset === site.end) return true;
+    if (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") at = at.object;
+    else if (at.kind === "parenthesizedExpression") at = at.expression;
+    else return false;
+  }
+}
 
 /** A site's key among a statement's nodes. */
 const spanKey = (start: number, end: number): string => `${start}:${end}`;
@@ -434,6 +455,10 @@ export function messageSource(
   };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
+    target: (site) =>
+      statementsOf(site.file)
+        .get(line(site) - 1)
+        ?.statements.some((statement) => inTarget(statement, site)) === true,
     line,
     column: (site) => site.start - linesOf(site.file)[lineIndex(site)]!,
     statement,
@@ -501,6 +526,10 @@ export function staticCode(rule: StaticRule): CoreCode {
       return "TSV011";
     case "conversion":
       return "TSV043";
+    case "empty-range":
+      return "TSV046";
+    case "calendar-offset":
+      return "TSV043";
   }
 }
 
@@ -513,6 +542,18 @@ function staticMessage(rule: StaticRule): string {
       const conversion = CONVERSIONS[rule.conversion];
       if (conversion.takes !== "value") throw new Error(`${rule.conversion} converts no value.`);
       return cannotConvert(rule.conversion, conversion, rule.text);
+    }
+    case "calendar-offset":
+      return localCalendarOffsetMessage(rule.target, rule.duration);
+    case "empty-range": {
+      // (the current checker's sentence, V30 §6)
+      const { start, end, inclusive } = rule;
+      const operator = inclusive ? "..=" : "..";
+      const reason =
+        start === end
+          ? `'${start}${operator}${end}' excludes its end. Write '${start}..=${end}' for the single number ${start}.`
+          : `a range never counts down. Write '${end}${operator}${start}' to count up.`;
+      return `This range contains no numbers, so ${rule.use === "loop" ? "the loop never runs" : "toList() returns []"}: ${reason}`;
     }
   }
 }
@@ -2139,6 +2180,16 @@ function errorSentence(
       return rule.families.length > 1
         ? `${SORT_ONE_TYPE}, but '${rule.receiver}' holds ${plural(rule.families)}.`
         : `${operandRule(rule, text)}, but '${rule.receiver}' holds ${plural(kinds)}.${rule.callee === "join" ? ` ${JOIN_FIX}` : ""}`;
+    case "json": {
+      // (the runtime's own sentence: one message for the compile-time and the runtime check, V30 §13)
+      const kind = known(kinds)[0];
+      if (kind === undefined) return `toJson(...) cannot write '${text}'. ${WRITABLE_JSON_FIX}`;
+      const holder =
+        rule.holder === null || rule.holder === "empty" || rule.holder === "unknown"
+          ? null
+          : rule.holder;
+      return rule.nested ? unwritableJsonMessage(kind, holder) : unwritableJsonMessage(kind);
+    }
     case "choice": {
       // (a value no button returns: the buttons return text or numbers, from which the answer picks it)
       const kind = rule.part === "value" && known(kinds).length === 1 ? known(kinds)[0] : undefined;
@@ -2288,6 +2339,8 @@ function warningSentence(
       return rule.operand
         ? `${operandRule(rule, text)}, but '${text}' ${may}`
         : `'${rule.operator}' may not take the values in '${text}' here. If it does not, ${STOPS}`;
+    case "json":
+      return `'${text}' may ${rule.nested ? "hold" : "be"} ${described(kinds)} here, which toJson(...) cannot write. If it ${rule.nested ? "does" : "is"}, ${STOPS}`;
     case "elements":
       return rule.families.length > 1
         ? `${SORT_ONE_TYPE}, but '${rule.receiver}' may hold ${plural(rule.families)} here. If it does, ${STOPS}`
@@ -2391,6 +2444,8 @@ function guarded(
   if (statement === null) return null;
   const text = source.text(statement);
   if (!kept) return { statement, read, text };
+  // (the place a store changes, a compound assignment's target among them, is no value a kept one may replace: G2)
+  if (source.target(read)) return null;
   // (its only text in the statement)
   const from = read.start - statement.start;
   return text.indexOf(subject) !== from || text.includes(subject, from + 1)
@@ -2533,13 +2588,15 @@ function warningFix(
 ): string {
   const subject = rule.rule === "member" ? rule.receiver : text;
   if (kinds.includes("null")) {
-    // (no fallback for a value a store or a method changes in place: the change would be lost)
+    // (no fallback for a value a store or a method changes in place, a compound assignment's target among them: the
+    // change would be lost)
     const changed =
-      rule.rule === "member" &&
-      (rule.use === "store" ||
-        (rule.use === "call" &&
-          (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
-            dictMethod(rule.member.slice(1, -2))?.changes !== undefined)));
+      source.target(site) ||
+      (rule.rule === "member" &&
+        (rule.use === "store" ||
+          (rule.use === "call" &&
+            (listMethod(rule.member.slice(1, -2))?.changes !== undefined ||
+              dictMethod(rule.member.slice(1, -2))?.changes !== undefined))));
     // (another diagnostic in the value's text is another problem of it at this use, beside which a fallback for null
     // alone leaves the use invalid, as `besides` says of one at its own site: V30 §18's words of the same type)
     const fallback = changed
@@ -2658,6 +2715,8 @@ function errorFix(
       return argumentFixOf(rule, kinds);
     case "elements":
       return rule.callee === "join" ? ` ${JOIN_FIX}` : "";
+    case "json":
+      return ` ${WRITABLE_JSON_FIX}`;
     case "choice": {
       const kind = rule.part === "value" && known(kinds).length === 1 ? known(kinds)[0] : undefined;
       return kind === undefined ? "" : ` ${choiceValueFix(kind)}`;

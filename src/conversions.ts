@@ -360,7 +360,9 @@ export function filesOptionMessage(call: string, given: string): string {
   return `'files:' of ${call}(...) takes true or false (boolean), not ${given}.`;
 }
 
-const WRITABLE_JSON_FIX = "Write plain values, such as text, numbers, lists, or dicts, instead.";
+/** What to write in place of a value `toJson` cannot write. */
+export const WRITABLE_JSON_FIX =
+  "Write plain values, such as text, numbers, lists, or dicts, instead.";
 
 /**
  * `toJson` of a value of `kind` that JSON cannot hold, or of a value that holds one, of kind `holder`, or `null` for a
