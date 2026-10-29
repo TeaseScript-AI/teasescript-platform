@@ -108,7 +108,7 @@ export class KeyTrie {
     const steps = key.slice(key.indexOf("|") + 1);
     this.work.charge(this.counter);
     if (node.key !== null && (self || steps !== "")) found.push(node.key);
-    for (let at = 0; at < steps.length && node !== undefined; ) {
+    for (let at = 0; at < steps.length && node !== undefined;) {
       const dot = steps.indexOf(".", at);
       const end = dot < 0 ? steps.length : dot;
       node = node.children.get(steps.slice(at, end));
@@ -178,7 +178,7 @@ export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[
 }
 
 /** The number of steps of a key's path (`keyPath(key).length`), made nothing. */
-export function keyDepth(key: Key): number {
+function keyDepth(key: Key): number {
   const bar = key.indexOf("|");
   if (bar === key.length - 1) return 0;
   let depth = 1;
@@ -365,7 +365,10 @@ export class DefinitionIndex {
 
   public constructor(readonly program: CoreProgram) {
     const work = program.work;
-    this.stored = new KeyTrie(work, "rdWalk", () => [...this.byKey.keys(), ...this.loopAdds.keys()]);
+    this.stored = new KeyTrie(work, "rdWalk", () => [
+      ...this.byKey.keys(),
+      ...this.loopAdds.keys(),
+    ]);
     this.foreign = new KeyTrie(work, "ownerSteps", () => this.#foreignAt);
     const parameterDefaults = new Map<
       PlaceId,

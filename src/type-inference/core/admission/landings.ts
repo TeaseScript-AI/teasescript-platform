@@ -571,7 +571,7 @@ function landedFrontier(
 ): { readonly place: PlaceId; readonly rest: number } {
   const { contract } = admission.pass;
   const ids: number[] = [contract.pathIdOf(path)];
-  for (let id = ids[0]!; !admission.landedFrontiers.has(joinParts(place, id)) && id > 0; ) {
+  for (let id = ids[0]!; !admission.landedFrontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
     ids.push(id);
   }
