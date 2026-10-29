@@ -727,7 +727,7 @@ test("a stop whose own entries merge into one publishes main's records, its answ
             ),
           ];
           return {
-            exact: `${publishedAnswers(answers, ids, ["main.tease"]).record}\n${route.text}`,
+            exact: `${publishedAnswers(answers, ids, request).record}\n${route.text}`,
             identity: mergedIdentity(answers, route.text),
             upToOrder: publishedUpToOrder(answers, ids),
             compact,

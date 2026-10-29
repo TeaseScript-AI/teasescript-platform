@@ -16,8 +16,8 @@ import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } fr
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
 import { methodCategory } from "./method-categories.js";
-import { BudgetExhausted } from "./budget.js";
 import {
+  asked,
   coreCheckResult,
   coreFacts,
   nodeOf,
@@ -82,15 +82,8 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
       core.files.map((file) => file.program),
       request.onFile,
     );
-    const answers = analyseCore(core);
-    try {
-      return outcomeOf(answers, index, core);
-    } catch (error) {
-      // the questions after the analysis spend the same allowance (TABLE §8): one past it stops there, the finished
-      // analysis's findings and decisions standing, and what is asked from then on answers `STOPPED` (D4 a′)
-      if (!(error instanceof BudgetExhausted)) throw error;
-      return outcomeOf(answers.stoppedAt(error.limit), index, core);
-    }
+    // (the questions after the analysis spend the same allowance: `asked`)
+    return asked(analyseCore(core), (answers) => outcomeOf(answers, index, core));
   },
 };
 

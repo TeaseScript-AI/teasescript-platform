@@ -163,7 +163,7 @@ function observe(c: WrittenCase, planned: boolean) {
           ),
         ),
       ].sort(),
-      published: publishedAnswers(answers, bindings, ["main.tease"]),
+      published: publishedAnswers(answers, bindings, request),
     };
   })();
   const route = planned

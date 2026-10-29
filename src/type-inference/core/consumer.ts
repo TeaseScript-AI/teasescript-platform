@@ -51,7 +51,7 @@ import type {
 } from "../backend.js";
 import type { PlaceId, SourceSite, TypeTerm } from "../graph.js";
 import { closedType, coreResult, type Answers } from "./answers.js";
-import { joinSteps } from "./budget.js";
+import { BudgetExhausted, joinSteps } from "./budget.js";
 import { typedDefault as defaultKinds } from "./contract.js";
 import { leftOutCheck, leftOutWarning } from "./consumers.js";
 import { literalRounds, literalTruth, type FlowNode } from "./flow-graph.js";
@@ -74,9 +74,8 @@ import {
  * answers, which makes what the compiler consumes, `TypeCheckResult`, and the facts the analysis settled on. Here for
  * the slice `CORE_BACKEND` accepts (`backend.ts`): the core's C1 and C2 diagnostics with their codes, the runtime checks
  * their obligations and C9's boundary checks owe, the ways and the code that never runs from the flow graph's literal
- * facts (P7), the known values, and the kept checks the slice reaches (a `say`'s markup colours, a known repeat
- * count, a known value a conversion cannot convert). The slice has no form, speaker property or storage key, so those
- * outputs are empty.
+ * facts (P7), the known values, and the checks that owe the runtime nothing (`staticDiagnostics`). The slice has no
+ * form, speaker property or storage key, so those outputs are empty.
  */
 
 /** The store statement of the slice that brings an expression into its place. */
@@ -175,6 +174,10 @@ export class SliceIndex {
                 this.#write(statement.target.property.name, file, statement.target.property.span);
                 for (const held of operands(statement.target.object))
                   this.#storeOfReceiver.set(held, statement);
+                pending.push({ expression: statement.target.object, store: null, whole: false });
+              } else if (statement.target.kind === "indexExpression") {
+                // an element store reads its receiver and its index
+                pending.push({ expression: statement.target.index, store: null, whole: false });
                 pending.push({ expression: statement.target.object, store: null, whole: false });
               }
               break;
@@ -596,28 +599,59 @@ function checkedOf(
   index: SliceIndex,
   known: (expression: Expression) => KnownValue | undefined,
 ): CoreResult {
-  const diagnostics = [...answers.diagnostics, ...staticDiagnostics(answers, index, known)];
+  // (each in the analysis's site order, before the first diagnostic of a later site: a record's lists are in source
+  // order, r4.86 (1))
+  const found = staticDiagnostics(answers, index, known).sort((a, b) => siteOrder(a.site, b.site));
+  const diagnostics: CheckedDiagnostic[] = [];
+  let next = 0;
+  for (const diagnostic of answers.diagnostics) {
+    while (next < found.length && siteOrder(found[next]!.site, diagnostic.site) < 0)
+      diagnostics.push(found[next++]!);
+    diagnostics.push(diagnostic);
+  }
+  diagnostics.push(...found.slice(next));
   return { outcome: outcomeOf(diagnostics), diagnostics, checks: coreResult(answers).checks };
+}
+
+/** Two sites in source order: by file, start and end. */
+function siteOrder(a: SourceSite, b: SourceSite): number {
+  return a.file - b.file || a.start - b.start || a.end - b.end;
+}
+
+/**
+ * What `ask` makes of a finished analysis's answers, its questions spending the analysis's allowance (TABLE §8): one past
+ * it stops there, the finished analysis's findings and decisions standing, and what is asked from then on answers
+ * `STOPPED` (D4 a′). The backend's outcome and the test-only checked result (`checkedResult`) both ask so.
+ */
+export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
+  try {
+    return ask(answers);
+  } catch (error) {
+    if (!(error instanceof BudgetExhausted)) throw error;
+    return ask(answers.stoppedAt(error.limit));
+  }
 }
 
 /**
  * Test-only: the core's result for a request, with its checks that owe the runtime nothing, as the compiler reads it
- * (`checkedOf`), also for a program outside the candidate's slice: a typed parse the slice does not follow there reads
- * its JSON without its expected type.
+ * (`checkedOf`, `asked`), also for a program outside the candidate's slice: a typed parse the slice does not follow
+ * there reads its JSON without its expected type.
  */
 export function checkedResult(answers: Answers, request: CoreAnalysisRequest): CoreResult {
   const index = new SliceIndex(request.files.map((file) => file.program));
-  let contracts: Contracts | null = null;
-  const expected = (call: CallExpression): TypePlan | undefined => {
-    contracts ??= new Contracts(answers, index, declarations(answers, index));
-    try {
-      return contracts.expected(call) ?? undefined;
-    } catch (error) {
-      if (error instanceof OutsideContract) return undefined;
-      throw error;
-    }
-  };
-  return checkedOf(answers, index, knownValues(answers, index, expected));
+  return asked(answers, (answers) => {
+    let contracts: Contracts | null = null;
+    const expected = (call: CallExpression): TypePlan | undefined => {
+      contracts ??= new Contracts(answers, index, declarations(answers, index));
+      try {
+        return contracts.expected(call) ?? undefined;
+      } catch (error) {
+        if (error instanceof OutsideContract) return undefined;
+        throw error;
+      }
+    };
+    return checkedOf(answers, index, knownValues(answers, index, expected));
+  });
 }
 
 /**

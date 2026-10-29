@@ -374,7 +374,7 @@ function published(
   const answers = publishedAnswers(
     inOrder(reversed, () => analyseCore(request)),
     bindings,
-    program.files.map((file) => file.path),
+    request,
   );
   const route = inOrder(reversed, () => publishedRoute(program.files, GLOBALS));
   return { text: `${answers.text}\n${route.text}`, record: answers.record, sited: answers.sited };
