@@ -22,16 +22,38 @@ import { resultOf } from "./value-kinds.js";
 /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
 export function copiedKey(contract: Contract, value: PlaceId): Key | null {
   const { program } = contract.pass;
-  const steps: string[] = [];
+  const binding = program.occurrenceOf.get(value);
+  if (binding !== undefined) return keyOf(binding, []);
+  // (G3 3b: a projection's key is its owner's and its step, once per projection, never its whole chain again)
+  const known = contract.copiedKeys.get(value);
+  if (known !== undefined) return known;
+  const pending: PlaceId[] = [];
   let current = value;
-  while (!program.occurrenceOf.has(current)) {
+  let below: Key | null = null;
+  for (;;) {
     const projection = program.projOf.get(current);
-    if (projection === undefined || projection.step === "iteration") return null;
+    if (projection === undefined || projection.step === "iteration") {
+      below = null;
+      break;
+    }
     program.work.charge("invSteps");
-    steps.push(stepName(projection.step));
+    pending.push(current);
+    const owner = program.occurrenceOf.get(projection.owner);
+    const memo = owner === undefined ? contract.copiedKeys.get(projection.owner) : undefined;
+    if (owner !== undefined || memo !== undefined) {
+      below = owner !== undefined ? keyOf(owner, []) : memo!;
+      break;
+    }
     current = projection.owner;
   }
-  return keyOf(program.occurrenceOf.get(current)!, steps.reverse());
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    const at = pending[index]!;
+    if (below !== null)
+      below = keptKeyBelow(contract.work, below, [stepName(program.projOf.get(at)!.step)]);
+    contract.keep(1);
+    contract.copiedKeys.set(at, below);
+  }
+  return pending.length === 0 ? null : (contract.copiedKeys.get(value) ?? null);
 }
 
 /** A call's result read further (`snapshot()`, `snapshot().data`): the callee's result key (F20), else `null`. */

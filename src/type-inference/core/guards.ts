@@ -4,12 +4,12 @@ import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
 import { joinSteps, keepText, keptText } from "./budget.js";
 import {
+  KeyTrie,
   keptKey,
   keptPrefixes,
   keyOf,
   keyPath,
   keyPlace,
-  prefixesOf,
   recordKey,
   sortCost,
   type Key,
@@ -84,6 +84,8 @@ export class GuardIndex {
   readonly #operands = new Map<Key, Map<number, Regions<OperandRegion>>>();
   /** Per tested key, the callables its operand regions stand in (W40, r4.33). */
   readonly #operandCallables = new Map<Key, Set<Callable | null>>();
+  /** G3 3b: the tested keys (`narrowed`), as a trie. */
+  readonly #tested: KeyTrie;
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2 r4.15). */
   readonly belowTested = new Set<Key>();
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
@@ -106,6 +108,9 @@ export class GuardIndex {
   public constructor(readonly program: CoreProgram) {
     const work = program.work;
     const flow = program.flow;
+    this.#tested = new KeyTrie(work, "eventSteps", () =>
+      new Set([...this.#branches.keys(), ...this.#operands.keys()]),
+    );
     const branches = new Map<Key, Map<Callable | null, FlowNode[]>>();
     for (const [uses, conditions] of [
       [flow.conditionUses, true],
@@ -525,7 +530,8 @@ export class GuardIndex {
     const program = this.program;
     if (!program.reached(node)) return false;
     const asked = recordKey(key);
-    for (const tested of [asked, ...prefixesOf(asked)]) {
+    // (G3 3b: the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
+    for (const tested of this.#tested.above(asked, true)) {
       program.work.charge("eventSteps");
       const branches = this.#branches.get(tested)?.get(program.callableAt(node));
       if (

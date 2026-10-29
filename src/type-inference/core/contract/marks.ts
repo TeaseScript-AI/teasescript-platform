@@ -432,6 +432,8 @@ export function marksAt(
 ): boolean {
   if (holder === null) return false;
   collectMarks(contract);
+  // G3 3b: a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
+  if (marksNothing(contract, holder)) return false;
   const work = contract.pass.program.work;
   const tested = contract.pass.guards.testedSteps();
   const stack: {

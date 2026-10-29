@@ -57,12 +57,14 @@ import type {
 import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
-import { joinSteps, keptSteps, stepText, type WorkLedger } from "./budget.js";
+import { joinSteps, keep, keptSteps, stepText, type WorkLedger } from "./budget.js";
 import { carried, keepsOwn, type CarrierRole, type Dispatch } from "./carriers.js";
 import { heldReference, termAt, typeTags, writtenOf } from "./contract.js";
 import {
   keptKey,
   keyOf,
+  keyPath,
+  keyPlace,
   SELECTED_TEXT,
   SELECTED_VALUE,
   type Definition,
@@ -183,6 +185,14 @@ export class Admission {
     string,
     { readonly binding: PlaceId; readonly read: PlaceId; readonly decl: Definition } | null
   >();
+  /** Per walk, the deepest path its stops stand at (`earliestDecider`). */
+  readonly stopDepths = new WeakMap<
+    Stops,
+    { readonly written: number; readonly values: number; readonly literals: number }
+  >();
+  /** Per place, its rejected (A6) and written-copy (A4) paths (`dirtyPaths`), and its stored prefixes (`storedPrefixes`). */
+  readonly #dirtyPaths = new Map<PlaceId, (readonly string[])[]>();
+  #storedPrefixes: Map<PlaceId, { readonly key: Key; readonly path: readonly string[] }[]> | null = null;
   readonly everyStop = new Map<PlaceId, Stops>();
   /**
    * A representative store's later equivalent ones (`grouped`), each recorded once per pass with its representative
@@ -376,6 +386,58 @@ export class Admission {
     for (const { path, term } of this.a4Copies)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
     for (const { path } of this.a4Inherits) this.reach += path.length;
+  }
+
+  /**
+   * G3 3b: a place's paths a store was rejected at (A6) or a copy of a written binding lands at (A4), which `isClean`
+   * compares a path with: both sets are made with the admission, once per place.
+   */
+  public dirtyPaths(place: PlaceId): readonly (readonly string[])[] {
+    let paths = this.#dirtyPaths.get(place);
+    if (paths === undefined) {
+      if (this.#dirtyPaths.size === 0)
+        for (const key of [...this.rejectedKeys, ...this.a4Keys]) {
+          this.work.charge("indexSteps");
+          const at = keyPlace(key);
+          let list = this.#dirtyPaths.get(at);
+          if (list === undefined) this.#dirtyPaths.set(at, (list = []));
+          list.push(keyPath(key));
+          keep(this.work, 1 + list.at(-1)!.length);
+        }
+      paths = this.#dirtyPaths.get(place) ?? [];
+      if (!this.#dirtyPaths.has(place)) this.#dirtyPaths.set(place, paths);
+    }
+    return paths;
+  }
+
+  /**
+   * G3 3b: a place's keys that whole stores or adds (or dead arguments) reach, shortest first (`inputsOf`), every place's
+   * once per admission, from the program's definitions.
+   */
+  public storedPrefixes(
+    place: PlaceId,
+  ): readonly { readonly key: Key; readonly path: readonly string[] }[] {
+    if (this.#storedPrefixes === null) {
+      const { definitions } = this.pass;
+      const byPlace = new Map<PlaceId, { readonly key: Key; readonly path: readonly string[] }[]>();
+      const add = (key: Key): void => {
+        this.work.charge("indexSteps");
+        const at = keyPlace(key);
+        let list = byPlace.get(at);
+        if (list === undefined) byPlace.set(at, (list = []));
+        const path = keyPath(key);
+        keep(this.work, 1 + path.length);
+        list.push({ key, path });
+      };
+      for (const [key, list] of definitions.byKey)
+        if (list.some((d) => d.kind === "whole" || d.kind === "add")) add(key);
+      for (const key of definitions.deadArguments.keys())
+        if (!(definitions.byKey.get(key) ?? []).some((d) => d.kind === "whole" || d.kind === "add"))
+          add(key);
+      for (const list of byPlace.values()) list.sort((a, b) => a.path.length - b.path.length);
+      this.#storedPrefixes = byPlace;
+    }
+    return this.#storedPrefixes.get(place) ?? [];
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
