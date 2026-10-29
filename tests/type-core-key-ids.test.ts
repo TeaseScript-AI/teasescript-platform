@@ -28,6 +28,7 @@ import {
   rootId,
   stepsOfId,
   type KeyId,
+  type KeyPacket,
 } from "../src/type-inference/core/contract/key-ids.js";
 import {
   keyLane,
@@ -621,56 +622,62 @@ test("what each cursor conversion walks and makes grows no faster than what it c
 
 /**
  * Each conversion at its boundary inputs (a place's own key, one step, three; a span from the start, the middle and the
- * end, an empty one), cold and made once before, each on a pass of its own (Astra r1 B1: a cold empty span read the arena
- * and charged nothing). The parts (`keyIdParent`, `keyIdStep`, …) are constant reads, no conversion.
+ * end, an empty one), on a pass of its own in each state: cold; repeated, the same call made before on the same
+ * contracts; and for a span, cached, the whole path's steps kept first. Its cursor and packet are made before it is
+ * measured, so the units are the call's alone, each at least the nodes and lookups any conversion of its input must
+ * inspect (Astra r1 B1: a cold empty span charged nothing; Codex r3 H1: setup charges hid such a call). The parts
+ * (`keyIdParent`, `keyIdStep`, …) are constant reads, no conversion.
  */
-test("every cursor conversion that reads the arena charges its inspection, at every boundary, cold and warm, a span walk at least the nodes it must inspect", () => {
+test("every cursor conversion charges at least what it must inspect, alone, at every boundary, cold, repeated and cached", () => {
   const source = request("let x = 1\nexit\n");
   const problems: string[] = [];
   for (const depth of [0, 1, 3]) {
     const steps = Array.from({ length: depth }, (_, k) => (k === 1 ? "values" : `s${k}`));
-    const spans = [0, depth >> 1, depth];
-    for (const warm of [false, true]) {
-      const calls: (readonly [string, (contract: Contract, fresh: Contract) => void, number])[] = [
-        ["keyIdBelow", (contract) => keyIdBelow(contract, keyIdOf(contract, 5, steps), "n"), 1],
-        ["keyIdOf", (contract) => keyIdOf(contract, 6, steps), depth === 0 ? 0 : 1],
-        ["keyIdOfText", (contract) => keyIdOfText(contract, keyOf(6, steps)), 1],
-        ["keyOfId", (contract) => keyOfId(contract, keyIdOf(contract, 5, steps)), 1],
-        ...spans.map(
+    const text = keyOf(6, steps);
+    for (const state of ["cold", "repeated", "cached"] as const) {
+      // (per call: its name, its call on the prepared cursor and packet, and its least inspection in this state)
+      const calls: (readonly [
+        string,
+        (contract: Contract, fresh: Contract, id: KeyId, packet: KeyPacket) => void,
+        number,
+      ])[] = [
+        ["keyIdBelow", (contract, _, id) => keyIdBelow(contract, id, "n"), 1],
+        ["keyIdOf", (contract) => keyIdOf(contract, 6, steps), depth],
+        ["keyIdOfText", (contract) => keyIdOfText(contract, text), 1 + depth],
+        ["keyOfId", (contract, _, id) => keyOfId(contract, id), state === "cold" ? depth + 1 : 1],
+        ...[0, depth >> 1, depth].map(
           (from) =>
             [
               `stepsOfId @${from}`,
-              (contract: Contract) => stepsOfId(contract, keyIdOf(contract, 5, steps), from),
-              warm && from === 0 ? 1 : depth - from + 1,
+              (contract: Contract, _: Contract, id: KeyId) => stepsOfId(contract, id, from),
+              state === "cached" || (state === "repeated" && from === 0) ? 1 : depth - from + 1,
             ] as const,
         ),
-        ...spans.map(
+        ...[0, depth].map(
           (from) =>
             [
               `memberStepIn @${from}`,
-              (contract: Contract) => memberStepIn(contract, keyIdOf(contract, 5, steps), from),
+              (contract: Contract, _: Contract, id: KeyId) => memberStepIn(contract, id, from),
               1,
             ] as const,
         ),
-        ["exportKeyIds", (contract) => exportKeyIds(contract, [keyIdOf(contract, 5, steps)]), 1],
-        [
-          "importKeyIds",
-          (contract, fresh) =>
-            importKeyIds(fresh, exportKeyIds(contract, [keyIdOf(contract, 5, steps)])),
-          1,
-        ],
+        ["exportKeyIds", (contract, _, id) => exportKeyIds(contract, [id]), depth + 1],
+        ["importKeyIds", (_, fresh, __, packet) => importKeyIds(fresh, packet), depth + 1],
       ];
       for (const [name, call, least] of calls) {
+        if (state === "cached" && !name.startsWith("stepsOfId")) continue;
         const [contract, fresh] = [narrowingPass(source).contract, narrowingPass(source).contract];
-        // (the cursor and the packet made outside the measured call)
-        keyIdOf(contract, 5, steps);
-        if (warm) call(contract, narrowingPass(source).contract);
-        const measured = name === "importKeyIds" ? fresh : contract;
-        const { work } = probeMade(measured, () => call(contract, fresh));
+        const id = keyIdOf(contract, 5, steps);
+        const packet = exportKeyIds(contract, [id]);
+        if (state === "repeated") call(contract, fresh, id, packet);
+        if (state === "cached") stepsOfId(contract, id, 0);
+        const { work } = probeMade(name === "importKeyIds" ? fresh : contract, () =>
+          call(contract, fresh, id, packet),
+        );
         const inspected = work.counters.invSteps ?? 0;
-        if (work.visits > 0 && inspected < Math.max(1, least))
+        if (inspected < least)
           problems.push(
-            `${name}, ${depth} steps, ${warm ? "warm" : "cold"}: ${work.visits} reads, ${inspected} charged`,
+            `${name}, ${depth} steps, ${state}: ${inspected} charged, at least ${least}`,
           );
       }
     }
