@@ -351,7 +351,7 @@ test("a call whose file only the run decides warns, and fails when it starts the
         'global function visit(alreadyThere: boolean) {\n    if not alreadyThere { call "b.tease" }\n}',
     });
   assert.deepEqual(warned(guard("true")), [
-    "lib.tease TSV073 This call starts 'b.tease', which runs global function 'visit', so the compiler cannot tell whether 'b.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
+    "lib.tease TSV073 This call starts 'b.tease', which runs global function 'visit', so the compiler cannot tell whether 'b.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from files other than 'b.tease'.",
   ]);
   assert.deepEqual(said(guard("true"), { warnings: ["TSV073"] }), ["b", "back", "exit"]);
   assert.deepEqual(failure(guard("false")), [message("b.tease")]);
@@ -360,9 +360,21 @@ test("a call whose file only the run decides warns, and fails when it starts the
       'global function visit {\n    call "main.tease"\n    return "done"\n}\nglobal function display(text = visit()) { say text }',
   });
   assert.deepEqual(warned(supplied), [
-    "lib.tease TSV073 This call starts 'main.tease', which runs global function 'visit', so the compiler cannot tell whether 'main.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from other files.",
+    "lib.tease TSV073 This call starts 'main.tease', which runs global function 'visit', so the compiler cannot tell whether 'main.tease' is already running when the call runs. If it is, the call fails. If that can happen, run 'visit' only from files other than 'main.tease'.",
   ]);
   assert.deepEqual(said(supplied, { warnings: ["TSV073"] }), ["provided", "exit"]);
+  assert.deepEqual(
+    warned(
+      project("visit()\nexit", {
+        "b.tease": "end",
+        "lib.tease":
+          'global function visit {\n    let rooms = [script("main.tease"), script("b.tease")]\n    call (rooms[1])\n}',
+      }),
+    ),
+    [
+      "lib.tease TSV073 This call's file is known only when it runs, so the compiler cannot tell whether it is 'main.tease', which runs global function 'visit'. If it is, and 'main.tease' is running then, the call fails. If that can happen, run 'visit' only from files other than 'main.tease'.",
+    ],
+  );
   // So does a call of the global function whose run a file's own code decides.
   const visit = 'global function visit {\n    call "main.tease"\n    return "done"\n}';
   for (const [files, outcome] of [

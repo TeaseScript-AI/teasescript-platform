@@ -1426,7 +1426,7 @@ export class Reachability {
               DiagnosticSeverity.Error,
               "TSV072",
               made
-                ? `This call starts '${path(certain)}', which is already running, because '${path(certain)}' always runs global function '${global!}' up to this call. ${call.form === "path" ? `Run '${global!}' only from files other than '${path(certain)}'.` : calledFileFix(path(certain), call.form, global)}`
+                ? `This call starts '${path(certain)}', which is already running, because '${path(certain)}' always runs global function '${global!}' up to this call. ${calledFileFix(path(certain), call.form, global)}`
                 : calledFileMessage(path(certain), call.form),
               call.span,
             )
@@ -1990,7 +1990,7 @@ function calledFileFix(path: string, form: FileCall["form"], global: string | nu
       ? `Leave '${path}' out with 'from:', or with a tag that it does not have.`
       : global === null
         ? "To run a part of it and come back, put that part in a function and write the function's name with '()' instead. To continue at a label without coming back, write 'goto' and the label."
-        : `Run '${global}' only from other files.`;
+        : `Run '${global}' only from files other than '${path}'.`;
 }
 
 /** Why a call may not start `path`, the file it stands in (V30 §29): that file is already running. */
@@ -2004,7 +2004,7 @@ function calledFileMessage(path: string, form: FileCall["form"]): string {
  */
 function guardedCallMessage(path: string, form: FileCall["form"], global: string): string {
   return form === "path"
-    ? `This call starts '${path}', which runs global function '${global}', so the compiler cannot tell whether '${path}' is already running when the call runs. If it is, the call fails. If that can happen, run '${global}' only from other files.`
+    ? `This call starts '${path}', which runs global function '${global}', so the compiler cannot tell whether '${path}' is already running when the call runs. If it is, the call fails. If that can happen, ${lowerFirst(calledFileFix(path, form, global))}`
     : `This call can pick '${path}', which runs global function '${global}', so the compiler cannot tell whether that file is already running when this call picks it. If it is, the call fails. If that can happen, ${lowerFirst(calledFileFix(path, form, global))}`;
 }
 
@@ -2019,7 +2019,7 @@ function pickedFileMessage(path: string, form: FileCall["form"], global: string 
       : `This call's tags depend on a value known only when it runs, so the compiler cannot tell whether it can pick '${path}', which runs global function '${global}'. If it picks '${path}' while that file is running, the call fails. ${calledFileFix(path, form, global)}`;
   return global === null
     ? `This call's file is known only when it runs, so the compiler cannot tell whether it is its own file, '${path}', which is already running. If it is, the call fails. If it can be, put the part to run in a function and write the function's name with '()' instead.`
-    : `This call's file is known only when it runs, so the compiler cannot tell whether it is '${path}', which runs global function '${global}'. If it is, and '${path}' is running then, the call fails. If it can be '${path}', run '${global}' only from other files.`;
+    : `This call's file is known only when it runs, so the compiler cannot tell whether it is '${path}', which runs global function '${global}'. If it is, and '${path}' is running then, the call fails. If that can happen, ${lowerFirst(calledFileFix(path, form, global))}`;
 }
 
 /**
