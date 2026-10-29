@@ -140,6 +140,12 @@ const LISTED_READS = [
   ],
   ["newlyRejected", ".get", "fresh.ts", "whether a store was rejected: a test"],
   [
+    "refused",
+    ".has",
+    "enclosing.ts",
+    "whether the pass rejected a store above a stop, whose error stands: a test",
+  ],
+  [
     "boundaries",
     ".clear",
     "consumers.ts",

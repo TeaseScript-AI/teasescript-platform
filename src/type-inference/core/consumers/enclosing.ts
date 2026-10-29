@@ -17,8 +17,8 @@ import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
  * checks nothing below that path. Each such store owes its check when the script runs, at its own site with the stop's
  * context: against its destination's complete type where that is known without new solving (`storeRequirement`: the
  * written type, or the one a copy decides it by), that type carried into the plan whole (`requirements`); else marked
- * with its type undecided (`storeMark`). A store at or below a stopped key is that key's own (#1275), a sibling's path no
- * store of the stop's. Found by one walk down each stopped path that no other stop lies above (`outermost`), through the
+ * with its type undecided (`storeMark`); a store the pass rejected keeps its error alone. A store at or below a stopped
+ * key is that key's own (#1275), a sibling's path no store of the stop's. Found by one walk down each stopped path that no other stop lies above (`outermost`), through the
  * stored keys' trie (`Admission.stored`), each destination resolved once a pass whatever number of stops lie below it.
  * Run after the pass's decisions, in every pass that carries a stop: a restarted pass rebuilds it from the stopped set
  * (TABLE r4.180), the fresh pass from the written types alone (`freshStores`).
@@ -104,7 +104,8 @@ function resolve(
   if (requirement !== null)
     walk.requirements.set(keptKey(walk.pass.program.work, place, path), requirement);
   for (const d of stores)
-    if (d.value === undefined) continue;
+    // (a store this pass rejected has its error, which stands: A6)
+    if (d.value === undefined || walk.admission.refused.has(d.uid)) continue;
     else if (requirement === null) storeMark(walk, d, path);
     else requiredMark(walk, d, path, requirement);
 }
