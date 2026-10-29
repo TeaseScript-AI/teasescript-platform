@@ -131,9 +131,10 @@ an intentional implementation change legitimately changes it.
 Type-core tests compare analyses through the projections in `tests/helpers/type-core-oracles.ts`: the diagnostics'
 identity a stop keeps, what a program publishes in the four modes (both orders, sharing on and off), and which
 decisions stop and when. A test that needs another projection adds it there instead of keeping a private copy.
-Generators that reviewers and builders used as evidence, and that are not CI gates, live in `tests/families/<area>/`
-outside CI. Before a type-core review round, the builder runs the affected areas against the base and head builds
-(`tests/families/README.md`) and reports the counts.
+Generators that reviewers and builders used as evidence, and that are not CI gates, belong in
+`tests/families/<area>/`, outside CI. The modules are rebuilt there from their recorded evidence commands (#1446).
+Until then they stay on the desktop corpus. Before a type-core review round, the builder runs the affected areas
+against the base and head builds (`tests/families/README.md`) and reports the counts.
 
 ## Test layers
 
