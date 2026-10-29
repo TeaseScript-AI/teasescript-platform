@@ -447,8 +447,9 @@ test("two equal literals share a class whatever absent properties were asked of 
  * G5 (5a, #1339): a cycle of whole copies is cut at its stops at once, so each member's whole stores are one answer
  * whichever place enters the cycle first: its own entries, a copy of a member with more than one store an entry of that
  * member's key, a member with one store (a copy of another) replaced by its source's entry, and none of them cut. Asked
- * in fresh passes in three orders: the members in source order, reversed, and a copy outside the cycle first; the
- * stores, each entry's source, writer and stores that brought it, compared whole.
+ * in fresh passes in three orders: the members in source order, reversed, and a copy outside the cycle first; each
+ * entry's source, path, writer, holder, guard, ingress and the stores that brought it compared, and whether the stores
+ * hold layers, hold more than copies, and are cut.
  */
 const RINGS: readonly [string, string][] = [
   [
@@ -493,6 +494,7 @@ test("each member of a cycle of whole copies has one answer whichever place ente
         at: entry.at,
         w: entry.w === null ? null : writerKey(entry.w),
         ds: [...entry.ds].map((d) => d?.uid ?? -1).sort((a, b) => a - b),
+        holder: entry.holder?.id ?? null,
         guarded: entry.guarded,
         ingress: entry.ingress !== undefined,
       })),
