@@ -1344,7 +1344,7 @@ class Contracts {
    * record's field that some of its sources lack (`missing`) has the kinds the others give, and a missing one is the
    * default's. The program leaves the slice where the plan cannot carry the core's answer exactly: where the place the
    * call lands in types such an open level (the core answers the call and the place differently there), where records
-   * of a list lack fields no default supplies, and deeper than the slice follows.
+   * of a list a parse reads lack fields no default supplies, and deeper than the slice follows.
    */
   *#answerTask(
     at: AnsweredCall,
@@ -1367,7 +1367,9 @@ class Contracts {
         if (item.reasons !== REASON.missing) held.add("unknown");
       } else if (item.tag !== "empty") held.add(item.tag);
     }
-    if (lacking && path.includes("element"))
+    // (a load's stored reader takes a listed field of an element where the element has it, `matchesValueType`, so a
+    // field its elements may lack is the plan's as it is; JSON's requires every listed field: #1458)
+    if (lacking && path.includes("element") && at.call.kind !== "loadExpression")
       throw new OutsideContract(at.call, "a value whose structure the slice does not follow");
     if (held.has("number")) held.delete("integer");
     // an unknown, or an empty collection's elements, is open; a known `null` is the `null` type

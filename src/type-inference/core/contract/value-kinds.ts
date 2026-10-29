@@ -347,7 +347,8 @@ function* contractLength(
 
 /**
  * F18: a load's or `fromJson`'s expected type, possible: the declared type, or the written type of the place its
- * value lands in directly (V30 §12); `null` without one.
+ * value lands in directly (V30 §12); an untyped load's at a property below a collection, its default's kinds beside
+ * `missing`; `null` without one.
  */
 export function* expectedOf(
   contract: Contract,
@@ -355,6 +356,17 @@ export function* expectedOf(
   rest: readonly string[],
 ): Work<readonly Item[] | null> {
   const written = (c.kind === "load" ? c.receiver : null) ?? contract.landsIn(c.result, []);
+  // (a stored value's reader keeps an element of a collection that fits as it is, `matchesValueType`, so it may lack
+  // a property the default's element has; the root object and the objects nested in it take it from the default, and
+  // JSON's reader every level: #1458, the lead's ruling on Codex r3's N2)
+  if (
+    written === null &&
+    c.kind === "load" &&
+    c.fallback !== null &&
+    rest.includes("element") &&
+    rest.at(-1) !== "element"
+  )
+    return [...(yield* contract.defaultKinds(c.fallback, rest)), unknownItem(REASON.missing)];
   if (written === null) return null;
   const term = termAt(written, rest);
   const fallback = c.kind === "load" ? (c.fallback ?? undefined) : defaultOf(c);

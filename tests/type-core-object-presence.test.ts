@@ -245,10 +245,11 @@ test("the access stops an object without the property before the next effect and
 });
 
 /**
- * The lead's ruling on Codex r2's B1 (#1436): a typed load's or parse's default proves a property only where its reader
- * takes a missing key from the default. JSON's reader does at every level; a stored value's in its root object, never in
- * an element of a collection, which it keeps as it is when it fits. Each source is read and stored, with the script's
- * storage or the JSON holding an element or an object without the property, in the four modes and run.
+ * The lead's rulings on Codex r2's B1 (#1436) and r3's N2 (#1458): a load's or parse's default, written or not, proves a
+ * property only where its reader takes a missing key from the default. JSON's reader does at every level; a stored
+ * value's in its root object, never in an element of a collection, which it keeps as it is when it fits. Each source is
+ * read and stored, with the script's storage or the JSON holding an element or an object without the property, in the
+ * four modes, planned by the candidate and run.
  */
 const READERS: readonly (readonly [
   name: string,
@@ -285,6 +286,42 @@ const READERS: readonly (readonly [
     "never",
     { stored: { kind: "object", properties: [] } },
   ],
+  // (#1458: a load without a written type reads its stored value by its default's type the same way)
+  [
+    "an untyped stored list's element",
+    'let seed = load("seed", default: [{n: 1}])',
+    "seed[0]",
+    "possible",
+    { stored: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+  ],
+  [
+    "an element of an untyped stored object's list",
+    'let seed = load("seed", default: {items: [{n: 1}]})',
+    "seed.items[0]",
+    "possible",
+    {
+      stored: {
+        kind: "object",
+        properties: [
+          { name: "items", value: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+        ],
+      },
+    },
+  ],
+  [
+    "an element of an untyped stored list whose default's records differ",
+    'let seed = load("seed", default: [{n: 1}, {m: 2}])',
+    "seed[0]",
+    "possible",
+    { stored: { kind: "list", items: [{ kind: "object", properties: [] }] } },
+  ],
+  [
+    "an untyped stored root object",
+    'let seed = load("seed", default: {n: 1})',
+    "seed",
+    "never",
+    { stored: { kind: "object", properties: [] } },
+  ],
   [
     "a JSON list's element",
     "let seed: object[] = fromJson(hostText, default: [{n: 1}])",
@@ -301,7 +338,7 @@ const READERS: readonly (readonly [
   ],
 ];
 
-test("a typed load's or parse's default proves a property only where its reader fills it from the default (#1436)", () => {
+test("a load's or parse's default proves a property only where its reader fills it from the default (#1436, #1458)", () => {
   const wrong: string[] = [];
   const globals = ["hostValue", "hostText"];
   for (const [name, declare, receiver, absent, read] of READERS)
