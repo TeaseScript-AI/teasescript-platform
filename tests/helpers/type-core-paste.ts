@@ -451,9 +451,7 @@ export function pastedForms(
         rule.rule === "member"
           ? rule.receiver
           : source.slice(diagnostic.site.start, diagnostic.site.end);
-      // (#1213's placeholder fallback `...`, which is no code to paste and is left for #1273: the fallback value itself,
-      // not an ellipsis inside its subject, Codex r15)
-      if (fallback !== undefined && !/ otherwise \.\.\.\)?$/.test(fallback))
+      if (fallback !== undefined)
         forms.push({
           code: fallback,
           source:
@@ -465,8 +463,6 @@ export function pastedForms(
     }
     const fixes = message.slice(message.indexOf(". ") + 2);
     for (const [, code, statement] of fixes.matchAll(CODE)) {
-      // (#1213's decided sentence for a value shown as text, 'put it in a text with '${...}'', which the rulings keep)
-      if (code === "${...}") continue;
       if (statement === undefined) {
         forms.push({
           code: code!,
