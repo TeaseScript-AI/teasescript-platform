@@ -43,11 +43,7 @@ import {
   isTemporal,
 } from "../../src/runtime/values/value-predicates.js";
 import { joinedText } from "../../src/runtime/values/value-text.js";
-import type {
-  SerializableRuntimeList,
-  SerializableRuntimeSet,
-  SerializableRuntimeValue,
-} from "../../src/runtime/values/serializable-values.js";
+import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import type { CompactRecord } from "./type-core-records.js";
 
 /*
@@ -1709,37 +1705,33 @@ export function evaluate(
           if (method !== "get") {
             if (target !== null && isRange(target) && method === "toList")
               throw new Underivable("a range's toList");
-            const kind =
-              target !== null && isRuntimeList(target)
-                ? "list"
-                : target !== null && isSet(target)
-                  ? "set"
-                  : null;
+            const collection =
+              target !== null && (isRuntimeList(target) || isSet(target)) ? target : null;
+            const kind = collection === null ? null : collection.kind;
             const contract = listMethod(method);
             if (contract?.changes !== undefined && method !== "sort" && kind !== null)
               throw new Underivable(`the method ${method}, which changes its receiver`);
             return called(() => {
-              if (kind === null || contract === undefined || !hasListMethod(kind, method))
+              if (
+                collection === null ||
+                kind === null ||
+                contract === undefined ||
+                !hasListMethod(kind, method)
+              )
                 return fault("TSR016");
               const required = contract.parameters.filter(
                 (parameter) => !("optional" in parameter && parameter.optional === true),
               ).length;
               if (values.length < required || values.length > contract.parameters.length)
                 return fault("TSR028");
-              if (method === "sort" && isRuntimeList(target)) {
-                const items = [...target.items];
+              if (method === "sort") {
+                const items = [...collection.items];
                 const order = sortOrder(items, span);
-                target.items.splice(0, items.length, ...order.map((index) => items[index]!));
+                collection.items.splice(0, items.length, ...order.map((index) => items[index]!));
                 return null;
               }
-              return readCollection(
-                target as SerializableRuntimeList | SerializableRuntimeSet,
-                method,
-                values,
-                {},
-                false,
-                span,
-                (item) => joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
+              return readCollection(collection, method, values, {}, false, span, (item) =>
+                joinedText(item, span, DEFAULT_TEMPORAL_CONTEXT),
               );
             });
           }
