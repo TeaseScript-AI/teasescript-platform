@@ -1,6 +1,6 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinSteps, keepText, keptParts, keptSlice, keptSteps, keptText } from "../budget.js";
+import { joinSteps, keep, keepText, keptParts, keptSlice, keptSteps, keptText } from "../budget.js";
 import {
   keptKey,
   keptKeyBelow,
@@ -49,7 +49,9 @@ export function valueStructure(admission: Admission, value: PlaceId): Structure 
   const id = `v${value}`;
   let structure = admission.structures.get(id);
   if (structure === undefined) {
-    structure = collect(admission, [{ value, at: [], strip: [] }]);
+    const own = composed(admission, value, [], false);
+    structure = own.listed ?? collect(admission, [{ value, at: [], strip: [] }]);
+    if (!own.empty) own.listed = structure;
     admission.structures.set(id, structure);
   }
   return structure;
@@ -117,9 +119,8 @@ function keyStructure(admission: Admission, key: Key): Structure {
 
 /**
  * The structure of values standing at paths below a value or key: each root's value standing at `at`, read below
- * `strip` (a key's path below a prefix's store, a carrier's step into its value): their literals' fields and elements,
- * walked as their literals nest (below a key its elements only), through the values they carry, and the source key of
- * each value no literal holds, with the levels of the keys below with stores.
+ * `strip` (a key's path below a prefix's store, a carrier's step into its value), with the levels of the keys below
+ * with stores, each root's from its own value's (`composed`), in order, each path and source once.
  */
 function collect(
   admission: Admission,
@@ -127,62 +128,228 @@ function collect(
   levels: readonly (readonly string[])[] = [],
   elements = false,
 ): Structure {
-  const { program, definitions } = admission.pass;
   const paths = new Map<string, readonly string[]>();
   const sources = new Map<string, { readonly below: readonly string[]; readonly key: Key }>();
   // (each path's text charged by its size before it is made, TABLE r4.58)
-  const path = (at: readonly string[]): void => {
-    if (at.length === 0) return;
-    const text = keptText(admission.work, at);
-    if (!paths.has(text)) paths.set(text, at);
-  };
   for (const at of levels)
-    for (let length = 1; length <= at.length; length += 1)
-      path(keptSlice(admission.work, at, 0, length));
-  const pending: (readonly [PlaceId, readonly string[], readonly string[]])[] = [];
-  for (let index = roots.length - 1; index >= 0; index -= 1)
-    pending.push([roots[index]!.value, roots[index]!.at, roots[index]!.strip]);
-  while (pending.length > 0) {
-    const [current, at, strip] = pending.pop()!;
-    program.work.charge("indexSteps");
-    if (!program.hasOf.has(current)) {
-      // a source stands at `at`, read at the rest of the path (a source read at a path no key or read of the program
-      // reaches is a recursion: cut); any other value through the values it carries
-      const source = sourceOf(admission, current);
+    for (let length = 1; length <= at.length; length += 1) {
+      const path = keptSlice(admission.work, at, 0, length);
+      const text = keptText(admission.work, path);
+      if (!paths.has(text)) paths.set(text, path);
+    }
+  for (const { value, at, strip } of roots)
+    joinInto(admission, paths, sources, composed(admission, value, strip, elements), at);
+  return { paths: [...paths.values()], sources: [...sources.values()] };
+}
+
+/**
+ * A value's own structure at its path, read below a strip (`composed`): its own paths and sources below that path, and
+ * its parts' structures where each stands, by reference, in the walk's order; listed at the root that asks it
+ * (`joinInto`), never copied into each value around it, and kept listed where a value's own structure asked it
+ * (`valueStructure`), so a value around it takes that list instead of walking its parts again.
+ */
+export interface Composed {
+  readonly entries: readonly (
+    | { readonly path: readonly string[] }
+    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly part: Composed; readonly at: readonly string[] }
+  )[];
+  readonly empty: boolean;
+  listed: Structure | null;
+}
+
+const NO_STRUCTURE: Composed = { entries: [], empty: true, listed: null };
+
+/**
+ * A composed structure's paths and sources below `at`, put in `paths` and `sources` where they are not yet, in the
+ * walk's order (on an explicit stack; a part met again at the same place lists nothing new).
+ */
+function joinInto(
+  admission: Admission,
+  paths: Map<string, readonly string[]>,
+  sources: Map<string, { readonly below: readonly string[]; readonly key: Key }>,
+  from: Composed,
+  at: readonly string[],
+): void {
+  const work = admission.pass.program.work;
+  const visited = new Map<Composed, Set<readonly string[]>>();
+  const stack: { readonly node: Composed; readonly at: readonly string[]; next: number }[] = [
+    { node: from, at, next: 0 },
+  ];
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    if (frame.next >= frame.node.entries.length) {
+      stack.pop();
+      continue;
+    }
+    const entry = frame.node.entries[frame.next++]!;
+    work.charge("checks");
+    if ("path" in entry) {
+      const below =
+        frame.at.length === 0 ? entry.path : keptSteps(admission.work, frame.at, entry.path);
+      const name = keptText(admission.work, below);
+      if (!paths.has(name)) paths.set(name, below);
+    } else if ("source" in entry) {
+      const { below: within, key } = entry.source;
+      const below = frame.at.length === 0 ? within : keptSteps(admission.work, frame.at, within);
+      const name = keptParts(admission.work, below, key);
+      if (!sources.has(name)) sources.set(name, { below, key });
+    } else if (!entry.part.empty) {
+      const below =
+        entry.at.length === 0
+          ? frame.at
+          : frame.at.length === 0
+            ? entry.at
+            : keptSteps(admission.work, frame.at, entry.at);
+      let seen = visited.get(entry.part);
+      if (seen === undefined) visited.set(entry.part, (seen = new Set()));
+      if (seen.has(below)) continue;
+      seen.add(below);
+      const listed = entry.part.listed;
+      if (listed === null) {
+        stack.push({ node: entry.part, at: below, next: 0 });
+        continue;
+      }
+      for (const path of listed.paths) {
+        work.charge("checks");
+        const at = below.length === 0 ? path : keptSteps(admission.work, below, path);
+        const name = keptText(admission.work, at);
+        if (!paths.has(name)) paths.set(name, at);
+      }
+      for (const { below: within, key } of listed.sources) {
+        work.charge("checks");
+        const at = below.length === 0 ? within : keptSteps(admission.work, below, within);
+        const name = keptParts(admission.work, at, key);
+        if (!sources.has(name)) sources.set(name, { below: at, key });
+      }
+    }
+  }
+}
+
+/**
+ * The structure of one value standing at a path and read below `strip`, relative to that path (F2), once per value,
+ * strip and side (`elements`: below a key its elements only), from its parts' (G3 2c: a carrier nested in carriers is
+ * walked once, never again for each value around it). A literal read whole is walked with the literals nested in it as
+ * cells, each one's fields as it is met, its cells after them, the last cell first; a literal read into by its cells
+ * on the path; a value no literal holds through the values it carries, or the source key it reads (a source read at a
+ * path no key or read of the program reaches is a recursion: cut). Each part's structure, any other value a literal
+ * holds among them, joins in the walk's order where it stands.
+ */
+function composed(
+  admission: Admission,
+  value: PlaceId,
+  strip: readonly string[],
+  elements: boolean,
+): Composed {
+  const { program, definitions } = admission.pass;
+  const work = program.work;
+  const name = (of: PlaceId, at: readonly string[]): string =>
+    keptParts(admission.work, of, elements, at);
+  const root = name(value, strip);
+  const known = admission.structureParts.get(root);
+  if (known !== undefined) return known;
+  type Entry =
+    | { readonly path: readonly string[] }
+    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly part: number; readonly at: readonly string[] };
+  interface Frame {
+    readonly name: string;
+    /** Its own paths, its source and its parts where each stands, in the walk's order. */
+    readonly entries: readonly Entry[];
+    readonly parts: readonly {
+      readonly name: string;
+      readonly value: PlaceId;
+      readonly strip: readonly string[];
+    }[];
+    next: number;
+  }
+  const open = (of: PlaceId, below: readonly string[], key: string): Frame => {
+    work.charge("indexSteps");
+    const entries: Entry[] = [];
+    const parts: Frame["parts"][number][] = [];
+    const part = (at: readonly string[], carried: PlaceId, rest: readonly string[]): void => {
+      entries.push({ part: parts.length, at });
+      parts.push({ name: name(carried, rest), value: carried, strip: rest });
+    };
+    if (!program.hasOf.has(of)) {
+      const source = sourceOf(admission, of);
       if (source !== null) {
         // (read past the longest key, it is cut there, never dropped: whether a literal holds a source, and so which
         // obligations its paths owe, never depends on the keys elsewhere in the program, TABLE r4.67 (1))
         const room = Math.max(0, longestKey(admission) - keyPath(source).length);
-        const key = keptKeyBelow(admission.work, source, strip.slice(0, room));
-        sources.set(keptParts(admission.work, at, key), { below: at, key });
+        const read = keptKeyBelow(admission.work, source, below.slice(0, room));
+        entries.push({ source: { below: [], key: read } });
+      } else for (const [carried, rest] of admission.carriersOf(of, below)) part([], carried, rest);
+      return { name: key, entries, parts, next: 0 };
+    }
+    if (below.length > 0) {
+      // (read into, only the field on the path, its literal's fields indexed once; its cells' tasks share one rest of
+      // the strip, charged as kept)
+      const cells: PlaceId[] = [];
+      for (const has of program.hasOf.get(of)!) {
+        const on = admission.termAt(has.type, below[0]!);
+        work.charge("indexSteps");
+        if (on?.kind === "ref")
+          for (const d of definitions.cellDefs.get(on.place) ?? []) cells.push(d.value!);
+      }
+      const rest = cells.length === 0 ? below : keptSlice(admission.work, below, 1);
+      for (let index = cells.length - 1; index >= 0; index -= 1) part([], cells[index]!, rest);
+      return { name: key, entries, parts, next: 0 };
+    }
+    // (read whole: its fields, then its cells, the last first, a literal among them walked here too)
+    const pending: (readonly [PlaceId, readonly string[]])[] = [[of, []]];
+    while (pending.length > 0) {
+      const [current, at] = pending.pop()!;
+      if (!program.hasOf.has(current)) {
+        part(at, current, []);
         continue;
       }
-      const carried = admission.carriersOf(current, strip);
-      for (let index = carried.length - 1; index >= 0; index -= 1)
-        pending.push([carried[index]![0], at, carried[index]![1]]);
+      if (current !== of) work.charge("indexSteps");
+      const cells: (readonly [PlaceId, readonly string[]])[] = [];
+      for (const has of program.hasOf.get(current)!)
+        for (const [field, term] of fieldsOf(has.type)) {
+          work.charge("indexSteps");
+          if (elements && field !== "element") continue;
+          const step = keptSteps(admission.work, at, [field]);
+          entries.push({ path: step });
+          if (term.kind === "ref")
+            for (const d of definitions.cellDefs.get(term.place) ?? [])
+              cells.push([d.value!, step]);
+        }
+      for (const cell of cells) pending.push(cell);
+    }
+    return { name: key, entries, parts, next: 0 };
+  };
+  // (each value after its parts, on an explicit stack: a nest of any depth never deepens the native one)
+  const stack: Frame[] = [open(value, strip, root)];
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    if (frame.next < frame.parts.length) {
+      const part = frame.parts[frame.next++]!;
+      if (!admission.structureParts.has(part.name))
+        stack.push(open(part.value, part.strip, part.name));
       continue;
     }
-    // (its cells' tasks share one rest of the strip, charged as kept)
-    let rest: readonly string[] | null = null;
-    for (const has of program.hasOf.get(current)!) {
-      // while reading into it only the field on the path (its literal's fields indexed once), then every field
-      const on = strip.length > 0 ? admission.termAt(has.type, strip[0]!) : undefined;
-      const fields: readonly (readonly [string, TypeTerm])[] =
-        strip.length === 0 ? fieldsOf(has.type) : on === undefined ? [] : [[strip[0]!, on]];
-      for (const [name, term] of fields) {
-        program.work.charge("indexSteps");
-        if (strip.length === 0 && elements && name !== "element") continue;
-        const step = strip.length === 0 ? keptSteps(admission.work, at, [name]) : at;
-        if (strip.length === 0) path(step);
-        if (term.kind === "ref")
-          for (const d of definitions.cellDefs.get(term.place) ?? []) {
-            rest ??= strip.length === 0 ? strip : keptSlice(admission.work, strip, 1);
-            pending.push([d.value!, step, rest]);
-          }
+    stack.pop();
+    // (one part's structure at the value's own path, the value adding nothing: taken whole)
+    const entries: Composed["entries"][number][] = [];
+    for (const entry of frame.entries)
+      if (!("part" in entry)) entries.push(entry);
+      else {
+        const part = admission.structureParts.get(frame.parts[entry.part]!.name)!;
+        if (!part.empty) entries.push({ part, at: entry.at });
       }
+    let made: Composed;
+    const [lone] = entries;
+    if (entries.length === 0) made = NO_STRUCTURE;
+    else if (entries.length === 1 && "part" in lone! && lone.at.length === 0) made = lone.part;
+    else {
+      keep(admission.work, 1 + entries.length);
+      made = { entries, empty: false, listed: null };
     }
+    admission.structureParts.set(frame.name, made);
   }
-  return { paths: [...paths.values()], sources: [...sources.values()] };
+  return admission.structureParts.get(root)!;
 }
 
 /** The longest path of a key with stores or of a read's or a call's projections in the program. */

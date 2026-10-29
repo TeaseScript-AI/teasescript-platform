@@ -36,6 +36,7 @@ import type {
   CopyForest,
   Decided,
   Decision,
+  Expansion,
   Frontier,
   HeldOwn,
   IngressStop,
@@ -55,6 +56,8 @@ import type {
   ViaChain,
 } from "./admission/model.js";
 import { levelsOf, permittedAt } from "./admission/permitted.js";
+import type { Composed } from "./admission/structure.js";
+import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, stepText, type WorkLedger } from "./budget.js";
@@ -206,6 +209,18 @@ export class Admission {
   #dirty: KeyTrie | null = null;
   #stored: KeyTrie | null = null;
   readonly everyStop = new Map<PlaceId, Stops>();
+  /** The store walk's tasks by value, node, strip and whether a carrier's own (`expand`): each task's recipe once. */
+  readonly expansions = new Map<string, Expansion>();
+  /**
+   * The carriers' transfers over those recipes (`admission/transfers.ts`): A2's held input per task and lane, the
+   * decider's groups by their members, and per operation link its answers and the kinds it holds at a path.
+   */
+  readonly heldInputs = new Map<string, HeldInput>();
+  readonly deciders = new Map<string, DeciderGroup>();
+  readonly linkTests = new Map<string, boolean>();
+  readonly linkKinds = new Map<string, Set<ItemTag>>();
+  /** The ids of decided paths' rests (`restIds`), by the id of the rest one step shorter and the step. */
+  readonly restIds = new Map<string, number>();
   /**
    * A representative store's later equivalent ones (`grouped`), each recorded once per pass with its representative
    * (`representative`), and the bindings defined by one whole store.
@@ -229,6 +244,8 @@ export class Admission {
   readonly classIds = new Map<string, number>();
   /** The own structure of each stored value (`v`) and source key (`k`), and each source key's element depth, F2. */
   readonly structures = new Map<string, Structure>();
+  /** Each value's own structure read below a strip, per side (`composed`), from its parts'. */
+  readonly structureParts = new Map<string, Composed>();
   readonly depths = new Map<Key, number>();
   keyBound: number | null = null;
   below: Map<Key, (readonly string[])[]> | null = null;

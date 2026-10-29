@@ -344,6 +344,49 @@ export interface Stops {
   readonly literals: Map<string, Stop[]>;
 }
 
+/**
+ * One task of the store walk by its value, node and strip alone (`expand`), its own recipe: what it stands as at its
+ * own path and the parts the walk takes below it, each a task of its own, whatever reached it. A walk (`stopsOf`) and
+ * every transfer read over it (`admission/transfers.ts`) take a task's recipe once per pass.
+ */
+export interface Expansion {
+  readonly id: number;
+  readonly value: PlaceId;
+  readonly node: FlowNode;
+  readonly strip: readonly string[];
+  /** A copy of an unwritten place that may inherit a written type: a written copy too, beside what it stands as. */
+  readonly inherits: { readonly from: PlaceId; readonly strip: readonly string[] } | null;
+  /** Its own stop, where it is one (no literal read into, no carrier): its list, written type and strip. */
+  readonly stop: {
+    readonly list: "written" | "values" | "literals";
+    readonly term: TypeTerm | null;
+    readonly strip: readonly string[];
+  } | null;
+  /** Its parts in the walk's order: a literal's cells, or a carrier's operands and then its own contribution. */
+  readonly parts: readonly Part[];
+}
+
+/** A part of a walk's task (`Expansion.parts`): a value standing in it, and how the walk enters it. */
+export interface Part {
+  readonly value: PlaceId;
+  readonly node: FlowNode;
+  /** A literal's own cell: the step it stands at below the task's path; else `null`, at the task's own path. */
+  readonly step: string | null;
+  readonly strip: readonly string[];
+  /** An operand stands below its operation (`true`), a literal's own cell at its step (`false`); `null` keeps the task's. */
+  readonly deep: boolean | null;
+  /** Whether it keeps the task's `single` (`Stop.single`): not one of several cells of a literal read into. */
+  readonly single: boolean;
+  /** Its evaluation key's position below the task's: an operand's, a cell's start, the carrier's own last. */
+  readonly position: number;
+  /** The carrier's own contribution, after what it carries. */
+  readonly after: boolean;
+  /** The role of an operand of an operation (a carrier no projection is): a link of its chain (`Via`). */
+  readonly role: CarrierRole | null;
+  /** Its own task's recipe, made when first asked (`partOf`). */
+  expansion: Expansion | null;
+}
+
 /** A store's stops at one key (`keyStops`): the selected ones in evaluation order, its sitings and named data. */
 export interface KeyStops {
   readonly selected: readonly Stop[];

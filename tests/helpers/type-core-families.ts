@@ -2554,9 +2554,9 @@ export const HOT_CANDIDATE_FAMILIES: readonly WorkFamily[] = [
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
  * replacement's misfits, the boundary checks of a literal's external cells, and the structure named elements bring to
  * a literal (projections of one record's lists, literals of one record's copies, or of the values operations carry of
- * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), and k
- * copies of one nested preset joined into one place, each storing its own property below one step (#1078); each at size
- * k, linear.
+ * it, added to a list), k method results or conversions of one class beside an object in one literal (#1078), k
+ * copies of one nested preset joined into one place, each storing its own property below one step (#1078), and k
+ * selections or choices nested in literals of two (r4.93, G3 2c); each at size k, linear.
  */
 /**
  * G5 (5a, #1339): cycles of whole copies, each member read, whose every entry walked the cycle again: a cycle of k
@@ -3245,7 +3245,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
-  // TABLE r4.93 (#1106): the menus a script writes, beside the nested choices of `ADMISSION_KNOWN_PRODUCTS`: one choice
+  // TABLE r4.93 (#1106): the menus a script writes, beside the nested choices (`I1106-nested-choices`): one choice
   // of k choice objects, and a list of k parenthesised choices of one each, every answer read; 13,675 / 27,371 and
   // 37,542 / 75,150 units at k = 64, 128 in both orders (2.0080, 2.0066; `main` alike, the list 23 units more)
   {
@@ -3331,6 +3331,51 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
+  // TABLE r4.93's witnesses (#1106), known products until #1417 and G3 2c: a list literal of k choices, which nests
+  // them, each the last option of the one before (28,228 / 85,185 units at k = 64, 128 in both orders, 3.0550, each
+  // choice's options' class text holding the ones inside, until #1417's short class ids), and the chain of k choices
+  // with each option a list of two (review r1 B1; 45,550 / 156,845, 3.461, each literal's element structure walking
+  // its nest, until G3 2c); and, G3 2c (TABLE r4.178), a selection or a choice nested k deep around one variable, each
+  // level a literal of two whose first element is the level inside; each literal's elements read their carriers'
+  // transfers, each carrier's once (158,451 / 598,132 and 143,253 / 550,393 units at k = 64, 128 while each element
+  // walked its whole nest)
+  {
+    name: "I1106-nested-choices",
+    measures:
+      'TABLE r4.93: `[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
+    program: (k) =>
+      main(
+        lines(
+          `let box = [${Array.from({ length: k }, (_, i) => `askChoice "${i}"`).join(", ")}]`,
+          "say box[0]",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "I1106-nested-choice-lists",
+    measures:
+      'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
+    program: (k) => {
+      let expression = 'askChoice "seed"';
+      for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
+      return main(lines(`let box = ${expression}`, "say box", "exit"));
+    },
+  },
+  ...(
+    [
+      ["selections", (inner: string) => `[${inner}, "other"][0]`],
+      ["choices", (inner: string) => `askChoice [(${inner}), "other"]`],
+    ] as const
+  ).map(([shape, wrap]) => ({
+    name: `G3-nested-${shape}`,
+    measures: `G3 2c: k nested ${shape} around one variable, read`,
+    program: (k: number) => {
+      let value = shape === "choices" ? "askChoice seed" : "seed";
+      for (let i = shape === "choices" ? 1 : 0; i < k; i += 1) value = wrap(value);
+      return main(lines('let seed = "origin"', `let out = ${value}`, "say out", "exit"));
+    },
+  })),
   ...INHERITED_FIELD_FAMILIES,
 ];
 
@@ -3354,8 +3399,7 @@ function nestedOwn(variant: string, wrap: (inner: string, i: number) => string):
  * at k = 64 → 128 as measured, re-measured and proposed with its counts on a change to admission's passes, never
  * retuned; its trigger, a realistic script reaching the allowance through cascading rejections. Beside it, copies
  * interleaved with conditional stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form
- * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71). Last, k nested
- * choices (direct, and in lists of two), accepted in the same form (TABLE r4.93).
+ * (TABLE r4.69 (1)), and copies separated by calls storing their source, accepted in it too (r4.71).
  */
 export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
@@ -3423,41 +3467,6 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
           "exit",
         ),
       ),
-  },
-  // A witness of TABLE r4.93's product (#1106): a list literal of k choices, which nests them, each the last option of
-  // the one before; a choice's answer is a scalar button, so each walk reaches each choice once. Its stops' carrier
-  // chains and evaluation keys are kept once since #1230 (4.4841 before); what stays is the contract's class of each
-  // choice's options (`literalUnits` 3.62): 28,228 / 85,185 units at k = 64, 128 in both orders (3.0550)
-  {
-    name: "I1106-nested-choices",
-    measures:
-      'TABLE r4.93: `[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
-    measured: 3.06,
-    program: (k) =>
-      main(
-        lines(
-          `let box = [${Array.from({ length: k }, (_, i) => `askChoice "${i}"`).join(", ")}]`,
-          "say box[0]",
-          "exit",
-        ),
-      ),
-  },
-  // The same chain with each choice's option a list of two (review r1 B1): k literals, each its own literal-element
-  // check, which asked its element's stops for a written copy even where its structure holds no source (a list or a set
-  // alike): 67,884 / 287,275 units at k = 64, 128 in both orders (4.2538; before 475,178 / 5,304,426, 11.22, the
-  // allowance at k = 224); 45,725 / 157,148 (3.4546) since #1230, the literal-element checks' structures what stays;
-  // 45,355 / 156,458 (3.4675) with S8's stop (#1063): fewer index steps at both sizes (25,209 / 91,385 against 25,579 /
-  // 92,075), more of them saved at 64 than at 128
-  {
-    name: "I1106-nested-choice-lists",
-    measures:
-      'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
-    measured: 3.47,
-    program: (k) => {
-      let expression = 'askChoice "seed"';
-      for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;
-      return main(lines(`let box = ${expression}`, "say box", "exit"));
-    },
   },
 ];
 
