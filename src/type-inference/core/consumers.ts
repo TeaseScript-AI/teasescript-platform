@@ -12,9 +12,9 @@ import {
   type BudgetLimit,
 } from "./budget.js";
 import { withFacts } from "./consumers/diagnostics.js";
-import { enclosingStores } from "./consumers/enclosing.js";
+import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
-import { freshStores, ingressMark, storeMark } from "./consumers/fresh.js";
+import { freshStores, ingressMark } from "./consumers/fresh.js";
 import { mixed, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
@@ -321,11 +321,13 @@ export class Consumers {
   }
 
   /**
-   * The stores and transfers at a key whose decision stopped (S3 §5): the stop stands for their obligations, as a stop
-   * before admission settled does for every store into an inferred place (TABLE r4.100, r4.111), so each is marked at its
-   * site, its type undecided, its value checked when the script runs (C9); a key below it is asked on its own (Codex
-   * r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores). Each key once a pass (Codex
-   * r11's N2: every receiver asking it again scanned its stores again).
+   * The stores and transfers at a key whose decision stopped (S3 §5): the stop stands for their obligations, so each
+   * owes its check at its site when the script runs (C9), against its destination's complete type where admission
+   * proves it apart from the stopped decision (#1440: the written type, or the one the declaration's start value copies
+   * there), else marked with its type undecided, as a stop before admission settled marks every store into an inferred
+   * place (TABLE r4.100, r4.111): `requiredStores`, as for the stores above a stop. A key below it is asked on its own
+   * (Codex r10's B1 on #1310: a key a restarted pass carried stopped kept no check of its stores). Each key once a pass
+   * (Codex r11's N2: every receiver asking it again scanned its stores again).
    */
   public stoppedStores(root: PlaceId, path: readonly string[]): void {
     const { program, definitions } = this.pass;
@@ -338,13 +340,15 @@ export class Consumers {
       lists.push(
         definitions.byKey.get(keyOf(root, keptSlice(program.work, path, 0, path.length - 1))) ?? [],
       );
+    const stores: Definition[] = [];
     for (const list of lists)
       for (const d of list) {
         program.work.charge("checks");
         if (d.value === undefined || (d.kind !== "whole" && d.kind !== "add")) continue;
         const stored = d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
-        if (keyOf(d.place, stored) === at) storeMark(this, d, stored);
+        if (keyOf(d.place, stored) === at) stores.push(d);
       }
+    requiredStores(this, root, path, true, stores);
   }
 
   readonly #stoppedKeys = new Set<Key>();

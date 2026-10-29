@@ -10,20 +10,19 @@ import { unrestricted } from "../admission/permitted.js";
 import { markNames, storeMark, type MarkNames } from "./fresh.js";
 import { storeWarning } from "./warnings.js";
 
-// The stores above a stopped decision (S3 §5, #1416): each one's obligation kept whole, or its value marked.
+// The stores at, below and above a stopped decision (S3 §5, #1416, #1440): each one's obligation kept whole, or its
+// value marked.
 
 /**
  * A decision that stopped stands for its obligations (S3 §5), the stores' above its key among them: a whole store, an
  * argument or an add into the same place at a path above the key, whose value holds it, and whose own path's decision
  * checks nothing below that path. Each such store owes its check when the script runs, at its own site with the stop's
- * context: against its destination's complete type where that is known without new solving (`storeRequirement`: the
- * written type, or the one a copy decides it by), that type carried into the plan whole (`requirements`); else marked
- * with its type undecided (`storeMark`); a store the pass rejected keeps its error alone. A store at or below a stopped
- * key is that key's own (#1275), a sibling's path no store of the stop's. Found by one walk down each stopped path that
- * no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination resolved
- * once a pass whatever number of stops lie below it. Run after the pass's decisions, in every pass that carries a stop:
- * a restarted pass rebuilds it from the stopped set (TABLE r4.180), the fresh pass from the written types alone
- * (`freshStores`).
+ * context, as `requiredStores` resolves it. A store at or below a stopped key is that key's own (#1275,
+ * `stoppedStores`, resolved alike), a sibling's path no store of the stop's. Found by one walk down each stopped path
+ * that no other stop lies above (`outermost`), through the stored keys' trie (`Admission.stored`), each destination
+ * resolved once a pass whatever number of stops lie below it. Run after the pass's decisions, in every pass that
+ * carries a stop: a restarted pass rebuilds it from the stopped set (TABLE r4.180), the fresh pass from the written
+ * types alone (`freshStores`).
  */
 export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;
@@ -39,7 +38,7 @@ export function enclosingStores(walk: Consumers): void {
     for (const { key, depth } of walk.admission.stored.along(place, path, false)) {
       if (!walk.enclosed.has(key)) {
         walk.enclosed.add(key);
-        resolve(walk, place, keptSlice(work, path, 0, depth), [
+        requiredStores(walk, place, keptSlice(work, path, 0, depth), false, [
           ...(definitions.byKey.get(key) ?? []).filter((d) => d.kind === "whole"),
           ...(definitions.deadArguments.get(key) ?? []),
         ]);
@@ -47,10 +46,11 @@ export function enclosingStores(walk: Consumers): void {
       // (an add stores at its receiver's element: above the stop where the path goes on below that element)
       if (path[depth] === "element" && depth + 1 < path.length && !walk.enclosedAdds.has(key)) {
         walk.enclosedAdds.add(key);
-        resolve(
+        requiredStores(
           walk,
           place,
           keptSlice(work, path, 0, depth + 1),
+          false,
           (definitions.byKey.get(key) ?? []).filter((d) => d.kind === "add"),
         );
       }
@@ -91,16 +91,28 @@ function outermost(
   return true;
 }
 
-/** The stores into `place` at `path` above a stop: their destination's complete type, or each one's mark. */
-function resolve(
+/**
+ * The stores into `place` at `path`, a stop at or above the path (`stopped`, #1440: `Consumers.stoppedStores`) or
+ * below it: each checked against its destination's complete type where admission proves it apart from the stopped
+ * decisions (`storeRequirement`), that type carried into the plan whole (`requirements`), else marked with its type
+ * undecided; a store the pass rejected keeps its error alone. Once a destination and pass, by its callers.
+ */
+export function requiredStores(
   walk: Consumers,
   place: PlaceId,
   path: readonly string[],
+  stopped: boolean,
   stores: readonly Definition[],
 ): void {
   if (stores.length === 0) return;
   walk.pass.program.work.charge("checks", stores.length);
-  const requirement = walk.admission.storeRequirement(place, path);
+  // (the fresh pass after a stop before admission settled decides no inferred place: TABLE r4.135)
+  const requirement = walk.admission.storeRequirement(
+    place,
+    path,
+    stopped,
+    !walk.finishing || walk.settled,
+  );
   // (an unrestricted written part, or a copy's, admits every value: no store owes it anything)
   if (requirement !== null && unrestricted(requirement)) return;
   if (requirement !== null)
@@ -123,8 +135,8 @@ function resolve(
  * prefix a copy decides retained (A4: the copied type is the place's below it), else by the kinds this pass decided or
  * A3 settled the prefix by, else labelled a list, conservatively, where this pass retains no collection name for it
  * (its contract may hold a set or a dict there, Codex r3: the label names no type and changes no message). Each
- * prefix's key is made once, one step longer than the one before, only while no written type names the steps. No
- * prefix is stopped: a destination lies above its stop, and no other stop lies at or above it (`outermost`).
+ * prefix's key is made once, one step longer than the one before, only while no written type names the steps. An
+ * exact target's prefixes may be stopped (`stoppedStores`): their element steps are named alike, a label only.
  */
 function stepsOf(walk: Consumers, place: PlaceId, path: readonly string[]): StoreStep[] {
   const work = walk.pass.program.work;

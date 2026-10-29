@@ -15,7 +15,6 @@ import {
   kindsAt,
   decisionStopped,
   stopDecision,
-  storeRequirement,
 } from "./admission/decision.js";
 import { groups, stores } from "./admission/groups.js";
 import { atCopy } from "./admission/held.js";
@@ -66,6 +65,7 @@ import type {
   ViaChain,
 } from "./admission/model.js";
 import { levelsOf, permittedAt } from "./admission/permitted.js";
+import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
 import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
@@ -579,8 +579,13 @@ export class Admission {
     return decide(this, root, path, lazily);
   }
 
-  public storeRequirement(place: PlaceId, path: readonly string[]): TypeTerm | null {
-    return storeRequirement(this, place, path);
+  public storeRequirement(
+    place: PlaceId,
+    path: readonly string[],
+    stopped: boolean,
+    standing: boolean,
+  ): TypeTerm | null {
+    return storeRequirement(this, place, path, stopped, standing);
   }
 
   public copiedAt(key: Key): TypeTerm | null {
