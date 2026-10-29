@@ -3,6 +3,7 @@ import test from "node:test";
 import type { SerializableRuntimeValue } from "../src/runtime/values/serializable-values.js";
 import {
   allowancesOf,
+  certificateFamily,
   enclosingFamily,
   enclosingProblems,
   MODES,
@@ -131,4 +132,44 @@ test("every store above a stopped decision keeps its check whole or its owned ma
   for (const [origin, relations] of reached)
     assert.ok(relations.has("above"), `${origin} reaches no stop below its store`);
   assert.ok(reached.get("sibling property")!.has("sibling"));
+});
+
+/**
+ * #1440 (TABLE r4.200), `certificateFamily`'s anchors through the candidate's compile and run, at every allowance
+ * around the work of each decision of the store's binding: where the decision of a store's own destination stops, the
+ * store is checked against the complete type the source proves apart from it, the one its declaration's start value
+ * copies there through object literal properties (the root's own, one or two levels down, a property named `element` or
+ * `entry`, one beside others, one of many stores) or its written one, whole and inside a literal, before the next
+ * effect, a fitting value playing on; the first copy decides, never a later one, in every order. Where the source
+ * proves nothing (an earlier literal, `null` before the copy, a copy of an inferred or a copied place, a selected
+ * element, a list literal's element or one an earlier index store decides) the store keeps its mark, beside no
+ * requirement.
+ */
+test("a store at a stopped decision is checked against the type the source proves apart from it (#1440)", () => {
+  const anchors = certificateFamily(true).filter(
+    (c) =>
+      c.name.startsWith("a later ") ||
+      (c.host && /, integer\[\], (host|inline host)$/u.test(c.name)) ||
+      (!c.slice && c.name.endsWith(", integer[][], host")),
+  );
+  const reached = new Map<string, Set<string>>();
+  for (const c of anchors) {
+    const spine = c.name.slice(0, c.name.indexOf(","));
+    const judged = reached.get(spine) ?? new Set();
+    reached.set(spine, judged);
+    for (const mode of c.name.startsWith("a later ") ? MODES : [MODES[0]!])
+      for (const allowance of allowancesOf(c, mode, true)) {
+        const verdict = enclosingProblems(c, allowance, mode);
+        assert.deepEqual(verdict.problems, [], `${c.name}, ${mode.name}, ${allowance}`);
+        if (verdict.relation === "at") judged.add(verdict.judged);
+      }
+  }
+  assert.equal(reached.size, 20);
+  // (a binding's root, written or a copy's, is decided without a demand: its index stores reach the stop at the store)
+  const rooted = new Set(["root copy", "written", "copy of a copy", "indexed copy"]);
+  for (const c of anchors) {
+    const spine = c.name.slice(0, c.name.indexOf(","));
+    const expected = rooted.has(spine) ? [] : [c.certified === true ? "domain" : "exact"];
+    assert.deepEqual([...reached.get(spine)!], expected, spine);
+  }
 });

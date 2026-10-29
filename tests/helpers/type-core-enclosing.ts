@@ -21,17 +21,18 @@ import {
 } from "./type-core-written.js";
 
 /*
- * The stores above a stopped decision (#1416; S3 §5, ADR 0021 rule 1.10): a store or argument whose value holds a key
- * whose decision stopped at its demand allowance keeps that key's obligation, its check against its destination's
- * complete type or its value marked. A generated family over the destination's origin (written, a copy, a copy of a
- * copy, a property a copy decides, one named `element`, an object a literal decides, a sibling property), the store's
- * site (a declaration, a replacement with a literal or with a host value), the written form (lists one, two and four
- * deep, a nullable element, a nullable list, text leaves), each tried with the values the form's own predicate (`fits`)
- * sorts, never the implementation's matcher; judged at every allowance around each decision's work in the eight orders
- * (`enclosingProblems`). The forms the candidate route does not take (S10: an argument, a dead call's argument, a
- * return, an add or `addAll`, a dict's or a set's element type) are judged at the analysis: the mark at the store and
- * the complete type its check carries (`Answers.requirement`). CI runs anchors of it; the whole family is a worker run
- * outside CI.
+ * The stores at, below and above a stopped decision (#1416, #1440; S3 §5, ADR 0021 rule 1.10): a store or argument
+ * whose value holds a key whose decision stopped at its demand allowance keeps that key's obligation, its check against
+ * its destination's complete type or its value marked. A generated family over the destination's origin (written, a
+ * copy, a copy of a copy, a property a copy decides, one named `element`, an object a literal decides, a sibling
+ * property), the store's site (a declaration, a replacement with a literal or with a host value), the written form
+ * (lists one, two and four deep, a nullable element, a nullable list, text leaves), each tried with the values the
+ * form's own predicate (`fits`) sorts, never the implementation's matcher; judged at every allowance around each
+ * decision's work in the eight orders (`enclosingProblems`). The forms the candidate route does not take (S10: an
+ * argument, a dead call's argument, a return, an add or `addAll`, a dict's or a set's element type) are judged at the
+ * analysis: the mark at the store and the complete type its check carries (`Answers.requirement`). A store at or below
+ * the stop is judged on the same domain where the source proves it apart from the stop (`certificateFamily`). CI runs
+ * anchors of it; the whole family is a worker run outside CI.
  */
 
 /** A store's destination: its binding, parameter or function's result (`result`), and its path below, in key steps. */
@@ -54,6 +55,13 @@ export interface EnclosingCase {
   readonly form: Form | null;
   /** Whether the destination's binding is written (`let t: F`): its type known in every phase. */
   readonly written: boolean;
+  /**
+   * Whether the source proves `form` at the destination apart from every decision, a stopped one at it included
+   * (#1440, TABLE r4.200): the binding is written, or its declaration's start value holds, through one object literal
+   * property per step, a read of a written binding at the destination or above it. Else a stop at or above the
+   * destination leaves the store its mark, its type undecided.
+   */
+  readonly certified?: boolean;
   /** The values a run tries: each a host value, or the one the source stores (`host` false), with whether it fits. */
   readonly values: readonly { readonly value: SerializableRuntimeValue; readonly fits: boolean }[];
   readonly host: boolean;
@@ -434,6 +442,343 @@ function analysisFamily(few: boolean): EnclosingCase[] {
   return cases;
 }
 
+/** A leaf's values, the fitting one first; the form's own predicate sorts them (`fits`). */
+const LEAVES: Readonly<Record<string, readonly SerializableRuntimeValue[]>> = {
+  integer: [1, "bad", 2.5],
+  number: [1.5, "bad"],
+  string: ["ok", 1],
+  boolean: [true, "bad"],
+  object: [object({ n: 1 }), "bad"],
+  list: [wrap("list", "x", 1), "bad"],
+};
+
+/** #1440's written forms: each leaf bare and in a list, integers two and four deep, a nullable element and list. */
+const CERTIFIED_FORMS: readonly Form[] = [
+  ...["integer", "number", "string", "boolean", "object"].flatMap((leaf) => [
+    name(leaf),
+    listOf(name(leaf), 1),
+  ]),
+  listOf(integer, 2),
+  listOf(integer, 4),
+  collection("list", optional(integer)),
+  optional(listOf(integer, 1)),
+  name("list"),
+];
+
+/** A form's lists from the outside in and its leaf name, through its optionals. */
+function shapeOf(form: Form): { readonly depth: number; readonly leaf: string } {
+  let depth = 0;
+  let at = form;
+  while (at.kind === "optional" || at.kind === "collection") {
+    if (at.kind === "collection") depth += 1;
+    at = at.of;
+  }
+  return { depth, leaf: at.kind === "name" ? at.name : "object" };
+}
+
+const nested = (depth: number, value: SerializableRuntimeValue): SerializableRuntimeValue =>
+  depth === 0 ? value : wrap("list", nested(depth - 1, value));
+
+/**
+ * A form's whole values: the fitting one, each forbidden leaf, a fitting and a forbidden leaf side by side, a leaf
+ * where a list stands, an empty list, `null` and a `null` leaf; `few`: the fitting one, a forbidden leaf, the pair.
+ */
+function wholeValues(form: Form, few: boolean): SerializableRuntimeValue[] {
+  const { depth, leaf } = shapeOf(form);
+  const [good, ...bad] = LEAVES[leaf]!;
+  const mixed = depth > 0 ? [nested(depth - 1, wrap("list", good!, bad[0]!))] : [];
+  if (few) return [nested(depth, good!), nested(depth, bad[0]!), ...mixed];
+  const out = [nested(depth, good!), ...bad.map((each) => nested(depth, each)), ...mixed];
+  if (depth > 0) out.push(nested(depth - 1, good!), wrap("list"), nested(depth, null));
+  out.push(null);
+  return out;
+}
+
+/** A form's leaf values for a literal holding host data at its innermost element (`[[hostValue]]`). */
+function leafValues(form: Form): SerializableRuntimeValue[] {
+  return [...LEAVES[shapeOf(form).leaf]!, null];
+}
+
+/** Where a start value holds the copy (`certified`), or the forms that leave the destination unproved. */
+type Spine =
+  | "root copy"
+  | "property"
+  | "nested property"
+  | "property named element"
+  | "property named entry"
+  | "property beside another"
+  | "written"
+  | "many landings"
+  | "many stores at one landing"
+  | "earlier literal"
+  | "null before the copy"
+  | "inferred copy"
+  | "copy of a copy"
+  | "indexed copy";
+
+const CERTIFIED_SPINES: ReadonlySet<Spine> = new Set([
+  "root copy",
+  "property",
+  "nested property",
+  "property named element",
+  "property named entry",
+  "property beside another",
+  "written",
+  "many landings",
+  "many stores at one landing",
+]);
+
+/** A spine's lines before the store, the store's target, its destination and its complete type by the source. */
+function spineOf(
+  spine: Spine,
+  form: Form,
+): {
+  readonly lines: readonly string[];
+  readonly target: string;
+  readonly into: Destination;
+  readonly form: Form;
+} {
+  const type = formText(form);
+  const seed = literalText(wholeValues(form, true)[0]!);
+  const written = `let seed: ${type} = ${seed}`;
+  const box = (properties: string, target: string, path: readonly string[]) => ({
+    lines: [written, `let box = {${properties}}`],
+    target,
+    into: { binding: "box", path: path.map(propertyStep) },
+    form,
+  });
+  switch (spine) {
+    case "root copy":
+      return {
+        lines: [written, "let t = seed"],
+        target: "t",
+        into: { binding: "t", path: [] },
+        form,
+      };
+    case "property":
+      return box("slot: seed", "box.slot", ["slot"]);
+    case "nested property":
+      return box("outer: {slot: seed}", "box.outer.slot", ["outer", "slot"]);
+    case "property named element":
+      return box("element: seed", "box.element", ["element"]);
+    case "property named entry":
+      return box("entry: seed", "box.entry", ["entry"]);
+    case "property beside another":
+      return box('slot: seed, other: "ok"', "box.slot", ["slot"]);
+    case "written":
+      return {
+        lines: [`let t: ${type} = ${seed}`],
+        target: "t",
+        into: { binding: "t", path: [] },
+        form,
+      };
+    case "many landings":
+      return box("a: seed, b: seed, c: seed, d: seed", "box.c", ["c"]);
+    case "many stores at one landing": {
+      const at = box("slot: seed", "box.slot", ["slot"]);
+      return { ...at, lines: [...at.lines, ...Array.from({ length: 4 }, () => "box.slot = seed")] };
+    }
+    case "earlier literal":
+      return {
+        ...box(`slot: ${seed}`, "box.slot", ["slot"]),
+        lines: [written, `let box = {slot: ${seed}}`, "box.slot = seed"],
+      };
+    case "null before the copy":
+      return {
+        ...box("slot: null", "box.slot", ["slot"]),
+        lines: [written, "let box = {slot: null}", "box.slot = seed"],
+        form: form.kind === "optional" ? form : optional(form),
+      };
+    case "inferred copy":
+      return {
+        ...box("slot: seed", "box.slot", ["slot"]),
+        lines: [`let seed = ${seed}`, "let box = {slot: seed}"],
+      };
+    case "copy of a copy":
+      return {
+        lines: [written, "let mid = seed", "let t = mid"],
+        target: "t",
+        into: { binding: "t", path: [] },
+        form,
+      };
+    case "indexed copy":
+      return {
+        lines: [`let seeds: ${formText(collection("list", form))} = [${seed}]`, "let t = seeds[0]"],
+        target: "t",
+        into: { binding: "t", path: [] },
+        form,
+      };
+  }
+}
+
+/** The spines whose source decides their destination by its own literal's kinds: integer lists alone keep `form`. */
+const LITERAL_DECIDED: ReadonlySet<Spine> = new Set(["earlier literal", "inferred copy"]);
+
+/**
+ * #1440's family (TABLE r4.200): a store at a destination whose decision stops, at or below it, the destination's
+ * complete type proved by the source apart from that decision (`certified`: its written type, or a read of a written
+ * binding its declaration's start value holds through object literal properties, the root's own, one, two levels
+ * down, a property named `element` or `entry`, one beside another, one of many, one of many stores) or not (an earlier
+ * literal, `null` before the copy, a copy of an inferred or a copied place, a selected element). Each over the forms
+ * (every leaf bare and in a list, integers two and four deep, a nullable element and list, an open `list`), stored as
+ * a host value whole and inside literals and as a literal per value (`few` in the anchors), and the wrong-choice
+ * controls: a later `integer[]` after a first `number[]`, a later open `list` after a first `integer[]`. The index
+ * stores the candidate route leaves out (S10) are judged at the analysis: a written list's element, a root copy's, a
+ * list literal's and one an earlier index store decides.
+ */
+export function certificateFamily(few = false): EnclosingCase[] {
+  const cases: EnclosingCase[] = [];
+  const add = (
+    title: string,
+    lines: readonly string[],
+    store: string,
+    value: string,
+    c: Pick<EnclosingCase, "into" | "form" | "written" | "values" | "host" | "slice" | "certified">,
+  ): void => {
+    const source = [...lines, 'say "BEFORE"', store, 'say "AFTER"', "exit"].join("\n") + "\n";
+    const start = source.lastIndexOf(store) + store.length - value.length;
+    cases.push({ name: title, source, site: { start, end: start + value.length }, ...c });
+  };
+  for (const form of CERTIFIED_FORMS)
+    for (const spine of [
+      ...CERTIFIED_SPINES,
+      ...([
+        "earlier literal",
+        "null before the copy",
+        "inferred copy",
+        "copy of a copy",
+        "indexed copy",
+      ] as const),
+    ]) {
+      if (
+        LITERAL_DECIDED.has(spine) &&
+        !(
+          shapeOf(form).leaf === "integer" &&
+          form.kind === "collection" &&
+          form.of.kind !== "optional"
+        )
+      )
+        continue;
+      const at = spineOf(spine, form);
+      const type = formText(form);
+      const shared = {
+        into: at.into,
+        form: at.form,
+        written: spine === "written",
+        slice: true,
+        certified: CERTIFIED_SPINES.has(spine),
+      };
+      const { depth } = shapeOf(form);
+      add(`${spine}, ${type}, host`, at.lines, `${at.target} = hostValue`, "hostValue", {
+        ...shared,
+        host: true,
+        values: wholeValues(form, false).map((value) => ({ value, fits: fits(at.form, value) })),
+      });
+      // (host data inside literals of the form's lists: its leaf checked where the literal lands)
+      const lists = form.kind === "collection" && form.of.kind !== "optional" && depth > 0;
+      if (lists) {
+        const inline = `${"[".repeat(depth)}hostValue${"]".repeat(depth)}`;
+        add(`${spine}, ${type}, inline host`, at.lines, `${at.target} = ${inline}`, inline, {
+          ...shared,
+          host: true,
+          values: leafValues(form).map((value) => ({
+            value,
+            fits: fits(at.form, nested(depth, value)),
+          })),
+        });
+      }
+      for (const value of wholeValues(form, true).slice(few ? 1 : 0, few ? 2 : undefined)) {
+        const text = literalText(value);
+        add(`${spine}, ${type}, literal ${text}`, at.lines, `${at.target} = ${text}`, text, {
+          ...shared,
+          host: false,
+          values: [{ value, fits: fits(at.form, value) }],
+        });
+      }
+    }
+  // the wrong-choice controls: the first copy decides, a later one never does
+  const controls: readonly (readonly [
+    string,
+    readonly string[],
+    Form,
+    readonly SerializableRuntimeValue[],
+  ])[] = [
+    [
+      "a later integer[] after a first number[]",
+      [
+        "let first: number[] = [1.5]",
+        "let later: integer[] = [1]",
+        "let box = {slot: first}",
+        "box.slot = later",
+      ],
+      listOf(name("number"), 1),
+      [wrap("list", 1.5), wrap("list", 1), wrap("list", "bad"), "bad"],
+    ],
+    [
+      "a later open list after a first integer[]",
+      [
+        "let first: integer[] = [1]",
+        "let later: list = []",
+        "let box = {slot: first}",
+        "box.slot = later",
+      ],
+      listOf(integer, 1),
+      [wrap("list", 1), wrap("list", "bad"), wrap("list", 1.5), "bad"],
+    ],
+  ];
+  for (const [title, lines, form, values] of controls)
+    add(title, lines, "box.slot = hostValue", "hostValue", {
+      into: { binding: "box", path: [propertyStep("slot")] },
+      form,
+      written: false,
+      slice: true,
+      certified: true,
+      host: true,
+      values: values.map((value) => ({ value, fits: fits(form, value) })),
+    });
+  // the index stores, at the analysis: a written list's, a root copy's, a list literal's, one an earlier store decides
+  for (const form of [listOf(integer, 1), listOf(integer, 2), listOf(name("string"), 1)]) {
+    const type = formText(form);
+    const seed = literalText(wholeValues(form, true)[0]!);
+    const many = formText(collection("list", form));
+    const shapes: readonly (readonly [string, readonly string[], string, boolean, boolean])[] = [
+      ["written list's element", [`let t: ${many} = [${seed}]`], "t", true, true],
+      [
+        "root copy's element",
+        [`let seeds: ${many} = [${seed}]`, "let t = seeds"],
+        "t",
+        false,
+        true,
+      ],
+      [
+        "list literal's element",
+        [`let seed: ${type} = ${seed}`, "let t = [seed]"],
+        "t",
+        false,
+        false,
+      ],
+      [
+        "element an earlier index store decides",
+        [`let seeds: ${many} = [${seed}]`, "let t = hostValue", `t[0] = ${seed}`, "t = seeds"],
+        "t",
+        false,
+        false,
+      ],
+    ];
+    for (const [title, lines, target, written, certified] of shapes)
+      add(`${title}, ${type}, host`, lines, `${target}[0] = hostValue`, "hostValue", {
+        into: { binding: target, path: ["element"] },
+        form,
+        written,
+        slice: false,
+        certified,
+        host: true,
+        values: wholeValues(form, few).map((value) => ({ value, fits: fits(form, value) })),
+      });
+  }
+  return cases;
+}
+
 /** An order of the analysis: the consumers' and the solver's worklist forward or reversed, the sharing on or off. */
 export interface Mode {
   readonly name: string;
@@ -469,7 +814,10 @@ export interface EnclosingVerdict {
   readonly relation: Relation;
   /** `unsettled`: a program stop before admission settled, which marks every store into an inferred place (#1252). */
   readonly phase: "settled" | "unsettled" | "unstopped";
-  /** What the oracle judged: the full domain, an owned mark, or nothing (the exact-target family, #1275). */
+  /**
+   * What the oracle judged: the full domain, an owned mark, or at a stop at or above the store's path its mark and no
+   * requirement where `certified` is `false` (#1440), nothing for a case that does not say (#1275).
+   */
   readonly judged: "domain" | "mark" | "exact";
   readonly problems: readonly string[];
 }
@@ -538,12 +886,38 @@ function marksAt(answers: Answers, site: EnclosingCase["site"], target: string):
 }
 
 /**
+ * #1440: a store at or below a stop the source leaves unproved (`EnclosingCase.certified`) keeps its mark, its type
+ * undecided, beside no requirement; so does a store at or above a stop into an inferred place before admission settled
+ * (#1252, TABLE r4.135: the fresh pass decides no inferred place). Nothing such a store owes is invented.
+ */
+function unprovedProblems(
+  answers: Answers,
+  c: EnclosingCase,
+  relation: Relation,
+  unproved: boolean,
+  unsettledInferred: boolean,
+  rejects: boolean,
+  target: string,
+  place: number,
+): string[] {
+  const problems: string[] = [];
+  if (relation === "at" && unproved && marksAt(answers, c.site, target) < 1 && !rejects)
+    problems.push("no mark at an unproved store at the stop");
+  if ((relation === "at" && unproved) || (relation === "above" && unsettledInferred)) {
+    const required = answers.requirement(place, c.into.path);
+    if (required !== null) problems.push(`unproved requirement ${termText(required)}`);
+  }
+  return problems;
+}
+
+/**
  * The oracle at one allowance (`null`: uncapped) in one mode. Every fitting value reaches `AFTER`. Where the
- * destination's complete type is the source's (`form`) and the store is no exact target of a stop (#1275) nor into an
- * inferred place before admission settled (#1252, whose mark stands for its value), every forbidden value is rejected
- * before `AFTER`, by the compile or at its store, the plan checks the store against the whole form, and a store above a
- * stop has exactly one owned mark at its own site; where an object literal decides the destination, a store above a
- * stop has that mark.
+ * destination's complete type is the source's (`form`) and the store is neither an exact target of a stop the source
+ * does not prove it apart from (`certified`, #1440; #1275) nor into an inferred place before admission settled (#1252,
+ * whose mark stands for its value), every forbidden value is rejected before `AFTER`, by the compile or at its store,
+ * the plan checks the store against the whole form, and a store at or above a stop has exactly one owned mark at its
+ * own site and the form as its requirement; where an object literal decides the destination, or the source leaves it
+ * unproved, a store above a stop has that mark, and one at the stop the mark beside no requirement.
  */
 export function enclosingProblems(
   c: EnclosingCase,
@@ -580,8 +954,17 @@ export function enclosingProblems(
         ? "settled"
         : "unsettled";
   const unsettledInferred = phase === "unsettled" && !c.written;
+  // (#1440: a store at or below a stop is judged on its whole domain where the source proves it apart from the stop
+  // and the pass's results stand; one the source leaves unproved keeps its mark, its type undecided, above a stop too)
+  const unproved = c.certified === false || (c.certified === true && unsettledInferred);
   const judged =
-    relation === "at" ? "exact" : c.form === null || unsettledInferred ? "mark" : "domain";
+    relation === "at"
+      ? c.certified === true && !unsettledInferred && c.form !== null
+        ? "domain"
+        : "exact"
+      : c.form === null || unsettledInferred || (relation === "above" && unproved)
+        ? "mark"
+        : "domain";
   const problems: string[] = [];
   const inside = (d: { readonly site: EnclosingCase["site"] }): boolean =>
     d.site.start >= c.site.start && d.site.end <= c.site.end;
@@ -597,13 +980,25 @@ export function enclosingProblems(
     // (at the analysis: a literal's error uncapped, and above a stop the mark and the complete type its check carries)
     if (phase === "unstopped" && !c.host && errors > 0 !== !c.values[0]!.fits)
       problems.push(`${errors} errors at the store of ${JSON.stringify(c.values[0]!.value)}`);
-    if (relation === "above" && judged === "domain") {
+    if (relation !== "none" && judged === "domain") {
       const marks = marksAt(answers, c.site, target);
-      if (!owned(marks)) problems.push(`${marks} owned marks at the store above the stop`);
+      if (!owned(marks)) problems.push(`${marks} owned marks at the store ${relation} the stop`);
       const required = answers.requirement(place, c.into.path);
       if (required === null || termText(required) !== checkedText(c.form!))
         problems.push(`requirement ${required === null ? "none" : termText(required)}`);
     }
+    problems.push(
+      ...unprovedProblems(
+        answers,
+        c,
+        relation,
+        unproved,
+        unsettledInferred,
+        rejects,
+        target,
+        place,
+      ),
+    );
     return {
       allowance,
       stops: stopped.map((path) => path.join(".")),
@@ -627,13 +1022,15 @@ export function enclosingProblems(
     );
   for (const { value, fits: fitting } of c.values) {
     const what = JSON.stringify(value);
+    // (a fitting value plays whatever is judged: a mark with its type undecided rejects none, #1440's family)
+    const judgesFitting = judged !== "exact" || c.certified !== undefined;
     if (plan === null) {
-      if (fitting && judged !== "exact") problems.push(`fitting ${what} rejected by the compile`);
+      if (fitting && judgesFitting) problems.push(`fitting ${what} rejected by the compile`);
       continue;
     }
     const ran = runGlobals(plan, { hostValue: c.host ? value : null });
     const after = ran.said.some((said) => said.text === "AFTER");
-    if (fitting && !after && judged !== "exact")
+    if (fitting && !after && judgesFitting)
       problems.push(`fitting ${what} stopped: ${ran.failure ?? ran.status}`);
     if (!fitting && after && judged === "domain") problems.push(`forbidden ${what} reached AFTER`);
   }
@@ -645,13 +1042,21 @@ export function enclosingProblems(
     if (planned === undefined && c.values.some((each) => !each.fits))
       problems.push(`no planned check at ${site}`);
   }
-  if (relation === "above") {
+  if (relation === "above" || (relation === "at" && judged === "domain")) {
     const marks = marksAt(answers, c.site, target);
     if (judged === "domain" ? !owned(marks) : marks < 1 && !rejects)
-      problems.push(`${marks} owned marks at the store above the stop`);
+      problems.push(`${marks} owned marks at the store ${relation} the stop`);
+  }
+  if (relation === "at" && judged === "domain") {
+    const required = answers.requirement(place, c.into.path);
+    if (required === null || termText(required) !== checkedText(c.form!))
+      problems.push(`requirement ${required === null ? "none" : termText(required)}`);
   }
   if (unsettledInferred && relation !== "at" && marksAt(answers, c.site, target) < 1)
     problems.push("no mark at a store into an inferred place before admission settled");
+  problems.push(
+    ...unprovedProblems(answers, c, relation, unproved, unsettledInferred, rejects, target, place),
+  );
   return {
     allowance,
     stops: stopped.map((path) => path.join(".")),
