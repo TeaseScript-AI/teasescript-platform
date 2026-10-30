@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { globSync, readdirSync } from "node:fs";
+import { fstatSync, globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { costlyTestFiles } from "./costly-test-files.mjs";
 
@@ -9,6 +9,33 @@ function isPassingTestLine(line) {
   const plain = line.replace(ANSI_ESCAPE_PATTERN, "").trimStart();
   return /^✔(?:\s|$)/u.test(plain);
 }
+
+async function refuse(text) {
+  // Exiting at once could cut off diagnostics that a pipe has not taken yet.
+  await new Promise((resolve) => process.stderr.write(text, resolve));
+  process.exit(1);
+}
+
+const usage =
+  "test-output-filter: this tool runs the tests itself and takes no standard input, so do not pipe into it.\n" +
+  "Usage: node tools/test-output-filter.mjs [--full-output] [test file ...]\n";
+
+// The filter runs tests and never filters its standard input, so data piped in, most likely another command's output,
+// would be ignored while the tests ran, without arguments the whole suite. Only data counts: a GitHub Actions step's
+// standard input is a pipe that ends at once, and one from ssh or from a parent's default `spawn` can stay open without
+// data.
+function standardInput() {
+  try {
+    const stats = fstatSync(0);
+    if (stats.isFile()) return stats.size > 0 ? "data" : "none";
+    return stats.isFIFO() || stats.isSocket() ? "stream" : "none";
+  } catch {
+    // Standard input is closed.
+    return "none";
+  }
+}
+const input = standardInput();
+if (input === "data") await refuse(usage);
 
 const arguments_ = process.argv.slice(2);
 const fullOutput = arguments_[0] === "--full-output";
@@ -40,10 +67,9 @@ const unmatched = arguments_.filter((path, index) => {
   );
 });
 if (unmatched.length > 0) {
-  const lines = unmatched.map((path) => `test-output-filter: no test file matches '${path}'.\n`);
-  // Exiting at once could cut off diagnostics that a pipe has not taken yet.
-  await new Promise((resolve) => process.stderr.write(lines.join(""), resolve));
-  process.exit(1);
+  await refuse(
+    unmatched.map((path) => `test-output-filter: no test file matches '${path}'.\n`).join(""),
+  );
 }
 
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
@@ -55,10 +81,24 @@ const child = spawn(process.execPath, nodeArguments, {
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
 });
 
+// Data can arrive on a pipe at any time, so it also stops a run that has started: both runners cancel on SIGTERM.
+let refused = false;
+if (input === "stream") {
+  process.stdin.once("data", () => {
+    refused = true;
+    process.exitCode = 1;
+    process.stderr.write(usage);
+    child.kill("SIGTERM");
+  });
+  // Neither a read error nor a pipe that stays open keeps the filter from ending with its tests.
+  process.stdin.on("error", () => {}).unref();
+}
+
 let pending = "";
 if (!fullOutput) {
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
+    if (refused) return;
     pending += chunk;
 
     let newline;
@@ -70,7 +110,7 @@ if (!fullOutput) {
   });
 
   child.stdout.on("end", () => {
-    if (pending.length > 0 && !isPassingTestLine(pending)) {
+    if (!refused && pending.length > 0 && !isPassingTestLine(pending)) {
       process.stdout.write(pending);
     }
   });
@@ -82,6 +122,7 @@ child.on("error", (error) => {
 });
 
 child.on("close", (code, signal) => {
+  if (refused) return;
   if (signal !== null) {
     process.kill(process.pid, signal);
   } else {

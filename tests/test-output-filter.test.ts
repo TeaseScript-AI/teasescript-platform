@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -255,6 +264,117 @@ test(
       assert.doesNotMatch(stderr, /Error/);
     } finally {
       if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+const pipedInput = /takes no standard input, so do not pipe into it/;
+
+test("filter refuses data piped or redirected to its standard input", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  const testFile = resolve(directory, "passing.test.mjs");
+  writeFileSync(testFile, 'import test from "node:test";\ntest("passing test", () => {});\n');
+  const log = resolve(directory, "log.txt");
+  writeFileSync(log, "output of another command\n");
+  const logFile = openSync(log, "r");
+  try {
+    const inputs: SpawnSyncOptions[] = [
+      { input: "output of another command\n" },
+      { stdio: [logFile, "pipe", "pipe"] },
+    ];
+    for (const input of inputs) {
+      const result = spawnSync(process.execPath, [filterPath, testFile], {
+        ...input,
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, pipedInput);
+      assert.doesNotMatch(result.stdout, /ℹ tests/);
+    }
+  } finally {
+    closeSync(logFile);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a pipe on standard input that stays open without data does not stop the filter", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  const testFile = resolve(directory, "passing.test.mjs");
+  writeFileSync(testFile, 'import test from "node:test";\ntest("passing test", () => {});\n');
+  // The other tests give a pipe that ends at once, as a GitHub Actions step does. This one stays open, as from ssh.
+  const filter = spawn(process.execPath, [filterPath, testFile], { env: environment });
+  let stdout = "";
+  filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+  try {
+    const closed = once(filter, "close", { signal: AbortSignal.timeout(30_000) });
+    assert.deepEqual(await closed, [0, null]);
+    assert.match(stdout, /ℹ pass 1/);
+  } finally {
+    if (filter.exitCode === null && filter.signalCode === null) filter.kill("SIGKILL");
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "data that arrives on standard input during the full suite stops it",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    const environment = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const started = resolve(directory, "started");
+    mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+    writeFileSync(
+      resolve(directory, "dist/tests/running.test.js"),
+      `require("node:test")("running", () => {
+         require("node:fs").writeFileSync(${JSON.stringify(started)}, String(process.pid));
+         return new Promise(() => setInterval(() => {}, 1000));
+       });`,
+    );
+    // In a process group of its own, so that a failure leaves nothing running.
+    const filter = spawn(process.execPath, [filterPath], {
+      cwd: directory,
+      env: environment,
+      detached: true,
+    });
+    const group = filter.pid;
+    assert.ok(group !== undefined);
+    let stdout = "";
+    let stderr = "";
+    filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+    const closed = once(filter, "close", { signal: AbortSignal.timeout(30_000) });
+    try {
+      for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
+      assert.ok(existsSync(started), stderr);
+      filter.stdin.write("output of another command\n");
+      assert.deepEqual(await closed, [1, null]);
+      assert.match(stderr, pipedInput);
+      assert.doesNotMatch(stdout, /ℹ tests/);
+
+      // The test's process stops too.
+      const pid = Number(readFileSync(started, "utf8"));
+      const running = () => {
+        try {
+          return process.kill(pid, 0);
+        } catch {
+          return false;
+        }
+      };
+      for (let wait = 0; wait < 500 && running(); wait++) await delay(10);
+      assert.equal(running(), false);
+    } finally {
+      try {
+        process.kill(-group, "SIGKILL");
+      } catch {
+        // The whole group has ended.
+      }
       rmSync(directory, { recursive: true, force: true });
     }
   },
