@@ -63,9 +63,48 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   each input came from: a case file its own review wrote stays, and a program the driver derived from a fixture row
   (a pasted fix) stays, even one equal to another row. The module's first comment names what its run also read.
 
+## A property family
+
+`tests/families/property/` holds the S8 stopped-store family of #1442: 90 sources generated over declared dimensions
+(`families/s8-stores.mjs`), a predicate of what fits each written type that reads no compiler code (`lib/model.mjs`),
+and a tool that compiles and runs each source in eight modes (the consumers' and the solver's order apart, the sharing
+on and off) at each of its profile's allowances. A run fails when a fitting value does not reach `AFTER`, a forbidden
+one is not rejected at the store before it, the plan's check at the store is not the complete type, the host's input
+changes, or a store above a stop lacks its one owned mark. Which stop a store meets is read from the compiler's own
+decisions. Besides PASS and FAIL a row is UNSUPPORTED (the candidate route rejects the source), OUT_OF_SCOPE (a stop at
+or above the store's own path, #1440, or a store into an inferred place before admission settled, #1252: only its
+fitting runs and the host's input are judged), ERROR, TIMEOUT, CANCELLED or NOT_RUN; a campaign with any row but PASS
+and FAIL is INCOMPLETE, never green. `s8-stores.mjs` is the family's sources as a module of this corpus, which
+`check.mjs` checks and `run.mjs property` compares; the behavioural verdict stays the tool's. Its runs are not in CI.
+
+A pair of commits, from the repository root on a worker, as one capped job:
+
+```sh
+node tests/families/property/bin/prepost.mjs <repository> <pre> <post> <new folder> [--profile quick|focused|deep] \
+  [--seed 1442] [--case-timeout-ms 15000] [--library 7ef341030]
+```
+
+It builds both commits from the repository's objects with its `node_modules` (`bin/prepare-build.mjs`), runs the
+profile on each (`bin/pilot.mjs plan` and `run`), compares the rows (`bin/compare.mjs`) and, where both trees hold the
+oracle library, runs `run.mjs property` on the same builds; `--library` adds the library from that commit to a tree
+before #1427. It writes `report.json` and `report.md` and exits 0 when the family tells the pair apart (at least one
+failure on the first, each run to PASS on the second, no failure on the second, and no ERROR, TIMEOUT, CANCELLED or
+NOT_RUN row on either), 1 when it does not, 2 on an error. `quick` runs 12 sources in two modes at four allowances,
+`focused` (the default) all 90 in eight modes at nine, `deep` at 23. On the desktop worker (Node 26.13, shared with
+other jobs; #1477) a build took 3–5 s, a campaign 2–3 s (`quick`), 52–57 s (`focused`) or 109–124 s (`deep`) per
+build, the runner over the same sources 10–12 s, a whole job at most 1.8 GB: `quick` suits a builder's loop in the
+stops area, `focused` the run before a review round there, `deep` a change to where or how the budget stops.
+`bin/canaries.mjs <build> <out>` checks that 12 mutants of clean plans fail; `bin/shrink.mjs`, `bin/merge.mjs` (shards)
+and `bin/metrics.mjs` print their usage. The tool's own tests: `node --test tests/families/property/test/`.
+
 ## Kept outside the repository
 
 Data, indexed here and not imported: run each from its own folder on the desktop worker.
+
+- `desktop:~/work/evidence/corpus/tooling/property-families/`: the owner's reviewer's property-family pilot (#1442;
+  `property-family-pilot.zip`, sha256 `59ea4c55…`), whose portable parts are `tests/families/property/`. It also holds
+  the pilot's phase-A evidence, its JSON schemas and its five historical calibrations (`calibration/`, not blinded;
+  #1411's is test infrastructure). It is untrusted input, never imported into a build.
 
 - `desktop:~/work/evidence/corpus/copies/astra-1423/`: Astra's r1 of #1423 (G3 part 2). It holds generators
   (`cases.mjs`, `families.mjs`, `stop-cases.mjs`, `route-cases.mjs`, `growth.mjs`), fixed case lists, and their

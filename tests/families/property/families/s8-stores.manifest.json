@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "s8-stores",
+  "area": "stops",
+  "status": "test tooling outside CI",
+  "authority": [
+    "docs/decisions/0021-static-types.md (accepted type and copy rules)",
+    "docs/RESOURCE-LIMITS.md (compiler.core-demand-allowance; #1416 enclosing-store scope)"
+  ],
+  "generator": "families/s8-stores.mjs",
+  "adapter": "adapters/compiler.mjs",
+  "oracle": {
+    "kind": "independent-bounded-type-and-effect",
+    "scope": "Scalar/list written and inherited requirements at stopped stores; runtime model does not import implementation matchers",
+    "notIndependent": [
+      "compiler plan inspection",
+      "budget phase/relation classification"
+    ]
+  },
+  "dimensions": {
+    "leaf": ["integer", "string", "boolean"],
+    "depth": [1, 2],
+    "nullable": ["none", "leaf", "root"],
+    "carrier": ["written", "copy", "chain", "field", "index"]
+  },
+  "interactions": [
+    ["leaf", "depth"],
+    ["nullable", "carrier"],
+    ["depth", "nullable", "carrier"]
+  ],
+  "modes": ["consumer-order", "solver-order", "sharing"],
+  "exclusions": [
+    "CandidateOutsideSlice is UNSUPPORTED",
+    "Exact/ancestor stop and unsettled inherited decisions are OUT_OF_SCOPE, not PASS"
+  ],
+  "profiles": {
+    "quick": "12 sources; two paired modes; four policies; incomplete declared interactions reported",
+    "focused": "90 sources; eight independent modes; nine policies",
+    "deep": "90 sources; eight modes; adjacent sampled allowances, not exhaustive every-unit sweep"
+  },
+  "resources": {
+    "requiredCompilerNode": "26.13.0",
+    "workers": 1,
+    "queue": "one capped job per pre/post pair or campaign through the worker's sx-queue; no internal scheduler"
+  },
+  "mutationCanaries": [
+    "deleted assignment typeCheck",
+    "outer list check only",
+    "wrong nested leaf kind",
+    "wrong fault site",
+    "identical adapter exceptions are ERROR",
+    "timeout is never PASS"
+  ],
+  "cost": {
+    "desktopMeasured": true,
+    "notes": "Measured per phase on the desktop worker with Node 26.13 by #1442's integration; its evidence holds the measured manifest"
+  },
+  "externalHoldouts": {
+    "imported": false,
+    "runnerExecutesArchives": false,
+    "evaluation": "Astra runs an unseen holdout set blind before the integration merges (#1442); owner bundles remain external data"
+  },
+  "notCovered": [
+    "Scalar destinations without lists",
+    "sets/dicts/union domains",
+    "function arguments/returns and mutation methods",
+    "all stop allowances or lifecycle phases",
+    "full graph provenance or canonical publication equality",
+    "unseen future bug families"
+  ]
+}
