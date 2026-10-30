@@ -29,6 +29,7 @@ import { SHOWN } from "./kinds.js";
 import { leftOutWarning } from "./left-out.js";
 import { proveOrigin, type StoreOrigin } from "./origins.js";
 import { kindsOf } from "./names.js";
+import { type CanonicalKey } from "../contract/key-ids.js";
 
 // The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
 
@@ -465,10 +466,20 @@ export function propertiesOf(
   walk: Consumers,
   of: { readonly key: Key } | { readonly value: PlaceId },
 ): readonly string[] {
-  const place = "key" in of ? of.key : (walk.pass.contract.copiedKey(of.value) ?? of.value);
+  const { contract } = walk.pass;
+  let place: CanonicalKey | PlaceId;
+  let start: PropertyNamesTask;
+  if ("key" in of) {
+    // (a key in its identity, as the names are held and asked by it: G3 stage 1)
+    const key = contract.canonicalKey(of.key);
+    place = key;
+    start = { key };
+  } else {
+    place = contract.copiedKey(of.value) ?? of.value;
+    start = { value: of.value, path: [] };
+  }
   let found = walk.names.get(place);
   if (found === undefined) {
-    const start: PropertyNamesTask = "key" in of ? of : { value: of.value, path: [] };
     // (a finishing walk that asks nothing knows no property: `run`'s rule)
     found = walk.asksNothing()
       ? []

@@ -11,7 +11,7 @@ import {
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
-import { restSteps } from "./contract/key-ids.js";
+import { type CanonicalKey, restSteps } from "./contract/key-ids.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -537,7 +537,7 @@ export class Consumers {
   /** `readsTakeTask`'s answer per place. */
   readonly placeExpectations = new Map<PlaceId, SiteExpectation>();
 
-  readonly names = new Map<Key | PlaceId, readonly string[]>();
+  readonly names = new Map<CanonicalKey | PlaceId, readonly string[]>();
 
   readonly shown = new Map<Key | PlaceId, string | null>();
 
