@@ -84,6 +84,7 @@ test("an analysis run inside a consumer-order callback leaves the stop trace of 
 });
 
 const main = (source: string): SourceFile[] => [{ path: "main.tease", source }];
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 const SMALL = [
   'let box = {n: 1, m: "a"}\nbox.n = 2\nsay box.m\nexit\n',
   "let xs = [1, 2]\nxs.add(3)\nfor x in xs { say x }\nexit\n",
@@ -144,16 +145,63 @@ test("a publication is its parts joined, byte for byte as the whole was written 
     // (the runner's form: each part's hash, the same texts)
     const parts = publicationParts(files, MODES[0]!, GLOBALS);
     assert.ok(parts !== null);
-    assert.deepEqual(
-      publicationHashes(files, MODES[0]!, GLOBALS),
-      [parts.answers, parts.record, ...parts.occurrences, parts.route].map((text) =>
-        createHash("sha256").update(text).digest("hex"),
-      ),
-    );
+    assert.deepEqual(publicationHashes(files, MODES[0]!, GLOBALS), {
+      parts: [parts.answers, parts.record, ...parts.occurrences, parts.route].map(sha256),
+      unanswered: 0,
+    });
   }
   assert.equal(publicationParts(main("let = 1\n"), MODES[0]!, GLOBALS), null);
   assert.equal(publicationHashes(main("let = 1\n"), MODES[0]!, GLOBALS), null);
   assert.equal(publication(main("let = 1\n"), MODES[0]!, GLOBALS), null);
+});
+
+test("the oracle's own stop leaves the occurrences from it on unanswered, apart from the parts (#1499)", () => {
+  const files = main(SMALL[0]!);
+  const request = coreRequest(files, GLOBALS);
+  assert.ok(request !== null);
+  const total = analyseCore(request).budget.total;
+  const full = publicationParts(files, MODES[0]!, GLOBALS);
+  assert.ok(full !== null && full.unanswered === 0);
+  const at = (allowance: number) =>
+    withTestAllowance(allowance, () => publicationParts(files, MODES[0]!, GLOBALS)!);
+  const answered = (allowance: number): boolean =>
+    JSON.stringify(at(allowance)) === JSON.stringify(full);
+  // (the least allowance that answers it all: every lower one stops a question past the analysis's own total)
+  let above = 1;
+  while (!answered(total + above)) {
+    above *= 2;
+    assert.ok(above < 2 ** 24, "some allowance answers it all");
+  }
+  let [low, high] = [total, total + above];
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (answered(middle)) high = middle;
+    else low = middle;
+  }
+  // (one unit less: the analysis, its answers and the route finish, and the occurrences' questions stop)
+  const stopped = at(high - 1);
+  assert.equal(
+    withTestAllowance(high - 1, () => analyseCore(request).budget.exhausted),
+    null,
+  );
+  assert.deepEqual(
+    [stopped.answers, stopped.record, stopped.route],
+    [full.answers, full.record, full.route],
+  );
+  assert.ok(stopped.unanswered > 0, "the occurrences' questions stop");
+  assert.deepEqual(stopped.occurrences, full.occurrences.slice(0, stopped.occurrences.length));
+  assert.ok(stopped.occurrences.length < full.occurrences.length, "an occurrence stays unanswered");
+  // (the count stays apart from the hashes, and the joined text never equals one answered in full)
+  withTestAllowance(high - 1, () => {
+    assert.deepEqual(publicationHashes(files, MODES[0]!, GLOBALS), {
+      parts: [stopped.answers, stopped.record, ...stopped.occurrences, stopped.route].map(sha256),
+      unanswered: stopped.unanswered,
+    });
+    assert.equal(
+      publication(files, MODES[0]!, GLOBALS),
+      `[${stopped.answers},${stopped.record},[${stopped.occurrences.join(",")}],${stopped.route},{"unanswered":${stopped.unanswered}}]`,
+    );
+  });
 });
 
 test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {

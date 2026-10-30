@@ -27,9 +27,12 @@ process and its pipes to close, so a descendant holding its stderr delays the ne
 spawns one). A run that throws on either tree is an exception, never compared, because identical exceptions on both
 trees are not agreement (#1439): the runner prints it on stderr with its source, mode and check, writes it with each
 stack to `--out` and counts it apart from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in
-CI). It prints one JSON line per generator and a total (sources, unparsed, stalled, exceptions, modes, runs,
-differences), and exits 1 when any run differs or throws or any source stalls. Run large sizes as one capped job per
-area or shard on a worker.
+CI). A publication is had only up to the oracle's own stop: where its questions after a finished analysis pass the
+allowance, the nodes from that one on stay unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on
+either tree is neither compared nor an exception: the runner writes it to `--out` and counts it apart. It prints one
+JSON line per generator and a total (sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences), and
+exits 1 when any run differs, throws or leaves nodes unanswered, or any source stalls. Run large sizes as one capped job
+per area or shard on a worker.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
