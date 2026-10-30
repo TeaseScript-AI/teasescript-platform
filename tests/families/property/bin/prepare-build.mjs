@@ -59,12 +59,16 @@ try {
   }
   symlinkSync(join(resolve(repo), "node_modules"), join(resolve(out), "node_modules"), "dir");
   const prepareMs = performance.now() - prepareStart;
+  // (the repository's own `tsc` command, the `@typescript/native` alias its build runs, under this Node)
+  const tsc = join(resolve(repo), "node_modules/.bin/tsc");
+  const typescript = exec(process.execPath, [tsc, "--version"]).toString().trim();
   const start = performance.now();
-  const built = spawnSync(
-    process.execPath,
-    [join(resolve(repo), "node_modules/typescript/lib/tsc.js")],
-    { cwd: resolve(out), encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 180000 },
-  );
+  const built = spawnSync(process.execPath, [tsc], {
+    cwd: resolve(out),
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 180000,
+  });
   writeFileSync(
     join(resolve(out), "pilot-build.log"),
     `${built.stdout ?? ""}${built.stderr ?? ""}`,
@@ -82,7 +86,8 @@ try {
     distHash: directoryHash(join(resolve(out), "dist")),
     buildNode: process.versions.node,
     requiredNode: JSON.parse(readFileSync(join(resolve(out), "package.json"), "utf8")).engines.node,
-    buildCommand: "node <locked local typescript>/lib/tsc.js",
+    buildCommand: "node node_modules/.bin/tsc",
+    typescript,
     prepareMs,
     buildMs: performance.now() - start,
     sourceOrigin: "git archive from verified local repository",
