@@ -146,6 +146,14 @@ export interface AdmissionHost {
   read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
 }
 
+/** A cursor decision's path read from its pass's packet (`decisionWork`), nothing charged: the analysis's output. */
+function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
+  const { nodes, keys } = packet;
+  const steps: string[] = [];
+  for (let at = keys[index]![1]; at >= 0; at = nodes[at]![0]) steps.push(nodes[at]![1]);
+  return steps.reverse();
+}
+
 /**
  * A public method whose body lives in `admission/` delegates to the function of its name there; the members those
  * functions read are public for them, and internal to admission.
@@ -676,24 +684,17 @@ export class Admission {
     if (at.key === undefined) return { place: at.root, path: at.path, units, allowance, stopped };
     // (its path's nodes the packet lacks added, charged, as its record is made: one packet a pass, each node once)
     const index = appendKeyId(this.pass.contract, this.decisionPacket, at.key);
-    const self = this;
+    // (the record holds the packet alone, never the admission: the analysis's output)
+    const packet = this.decisionPacket;
     return {
       place: at.root,
       get path(): readonly string[] {
-        return self.decisionPath(index);
+        return packetPath(packet, index);
       },
       units,
       allowance,
       stopped,
     };
-  }
-
-  /** A cursor decision's path read from the pass's packet (`decisionWork`), nothing charged: the analysis's output. */
-  decisionPath(index: number): readonly string[] {
-    const { nodes, keys } = this.decisionPacket;
-    const steps: string[] = [];
-    for (let at = keys[index]![1]; at >= 0; at = nodes[at]![0]) steps.push(nodes[at]![1]);
-    return steps.reverse();
   }
 
   /** A decided path's steps, made: a cursor's through the charged boundary (`stepsOfId`), for a stop's stores. */
