@@ -71,6 +71,7 @@ import {
   keyOfId,
   memberStepIn,
   spanRef,
+  type PathRef,
   type Rest,
   stepsOfId,
   type CanonicalKey,
@@ -268,6 +269,8 @@ export class Contract {
    * and per path, a path's steps followed by another's (`joinedId`), each found from its parent's and kept.
    */
   readonly spanIds = new Map<number, Map<number, number>>();
+  /** Per wrapper's own literal and array rest, by its legacy demand name's text, its span (`canonicalRest`). */
+  readonly literalSpans = new Map<string, PathRef>();
   /** Per demand name holding a cursor, the logical name it orders as (`compareDemandNames`). */
   readonly logicalNames = new Map<string, string>();
   readonly prefixIds = new Map<number, Map<number, number>>();

@@ -283,7 +283,8 @@ export function canonicalKey(contract: Contract, key: Key): CanonicalKey {
 
 /**
  * A literal's rest in its identity (the `cl|` demand's name): an array asked of a wrapper family's own declaration
- * literal is its cursor's span, made once and charged; any other rest, a span among them, stands as asked.
+ * literal is its cursor's span, made once per literal and rest, charged and kept, and found again by the text the
+ * legacy lane names its demand by; any other rest, a span among them, stands as asked.
  */
 export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest): Rest {
   // (an array or a view of one: a span stands as asked)
@@ -293,7 +294,15 @@ export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest):
     (each) => each.how === "initializer" && each.kind === "whole" && each.path.length === 0,
   );
   if (d === undefined || keyLane(contract, d.place, steps[0]!) !== "cursor") return rest;
-  return spanRef(contract, keyIdPath(keyIdOf(contract, d.place, steps)));
+  // (a member chain asks one literal and rest again at every level: converted at every ask, it grows by the chain)
+  const asked = joinParts(literal, steps);
+  let span = contract.literalSpans.get(asked);
+  if (span === undefined) {
+    span = spanRef(contract, keyIdPath(keyIdOf(contract, d.place, steps)));
+    contract.keepText(asked.length);
+    contract.literalSpans.set(asked, span);
+  }
+  return span;
 }
 
 /**

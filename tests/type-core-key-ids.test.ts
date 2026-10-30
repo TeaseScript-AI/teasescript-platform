@@ -841,7 +841,10 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     3,
     "a demand name with its cursors' texts, charged and kept once per name (`compareDemandNames`); a component's names for a replay and back (`exportNames`, `importNames`, the solver's test seam)",
   ],
-  "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
+  "key-ids.ts joinParts": [
+    3,
+    "two places' decimal texts with their bar (`compareKeyIds`); a wrapper literal's array rest, the legacy demand name's text, kept once (`canonicalRest`)",
+  ],
   "lanes.ts joinParts": [
     2,
     "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",
