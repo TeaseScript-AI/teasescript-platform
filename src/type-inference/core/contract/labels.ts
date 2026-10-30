@@ -53,7 +53,9 @@ export function labelText(contract: Contract, label: Label): string {
   const made = label.text === null;
   const text = shown(contract, label);
   const pass = passOf(contract);
-  recorded.records.push({ kind: "text", pass, text, made, ...since(contract.work, before) });
+  // (the frames above the caller: where a consumer's closure shows the label, the call that publishes it)
+  const site = recorded.sites ? (new Error().stack ?? "").split("\n").slice(2, 4).join(" <") : null;
+  recorded.records.push({ kind: "text", pass, text, made, site, ...since(contract.work, before) });
   return text;
 }
 
@@ -75,7 +77,15 @@ function shown(contract: Contract, label: Label): string {
 export function labelPlainText(label: Label): string {
   const made = label.text === null;
   const text = made ? pathText(partsOf(label)) : label.text!;
-  recorded?.records.push({ kind: "text", pass: null, text, made, counters: {}, apart: {} });
+  recorded?.records.push({
+    kind: "text",
+    pass: null,
+    text,
+    made,
+    site: null,
+    counters: {},
+    apart: {},
+  });
   return text;
 }
 
@@ -101,12 +111,15 @@ export type LabelRecord =
       readonly pass: number | null;
       readonly text: string;
       readonly made: boolean;
+      /** With `sites`, the calls that showed it, else `null`. */
+      readonly site: string | null;
       readonly counters: Readonly<Partial<Record<WorkCounter, number>>>;
       readonly apart: Readonly<Partial<Record<WorkCounter, number>>>;
     };
 
 let recorded: {
   readonly records: LabelRecord[];
+  readonly sites: boolean;
   readonly passes: WeakMap<Contract, number>;
   next: number;
 } | null = null;
@@ -119,14 +132,17 @@ function passOf(contract: Contract): number {
   return pass;
 }
 
-/** Test and evidence only: `run`, with every recipe asked and every text shown inside it recorded (`LabelRecord`). */
-export function withLabelRecords<T>(run: () => T): {
-  readonly result: T;
-  readonly records: readonly LabelRecord[];
-} {
+/**
+ * Test and evidence only: `run`, with every recipe asked and every text shown inside it recorded (`LabelRecord`), and
+ * with `sites` the calls that showed each.
+ */
+export function withLabelRecords<T>(
+  run: () => T,
+  sites = false,
+): { readonly result: T; readonly records: readonly LabelRecord[] } {
   if (recorded !== null) throw new Error("Label records are already being recorded.");
   const records: LabelRecord[] = [];
-  recorded = { records, passes: new WeakMap(), next: 0 };
+  recorded = { records, sites, passes: new WeakMap(), next: 0 };
   try {
     return { result: run(), records };
   } finally {
