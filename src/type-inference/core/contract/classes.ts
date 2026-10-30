@@ -53,7 +53,7 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
       : keptParts(
           contract.work,
           read,
-          lists.readSignature(copied, node),
+          lists.readSignature(contract.keyText(copied), node),
           handlers.afterSomeCreation(node) ? "h" : "",
         );
   contract.snapshots.set(value, snapshot);

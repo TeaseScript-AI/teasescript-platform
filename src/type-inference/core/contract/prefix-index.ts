@@ -1,15 +1,16 @@
 import type { PlaceId } from "../../graph.js";
+import {
+  isKeyId,
+  keptKeyBelowIn,
+  keyDepthIn,
+  keyStepsIn,
+  restRef,
+  restSteps,
+  type Rest,
+} from "./key-ids.js";
 import { keepText, keptParts, keptSteps, keptText, pathText, stepText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import {
-  keptKey,
-  keptKeyBelow,
-  keyOf,
-  keyPath,
-  keyPlace,
-  type Definition,
-  type Key,
-} from "../definitions.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { firstWriter, REASON } from "../items.js";
 import { copyOnly, subFirstOf } from "./identity.js";
 import { ingressLeafOf } from "./ingress.js";
@@ -40,7 +41,8 @@ function copiedRoot(contract: Contract, d: Definition): PlaceId | null {
       return null;
   }
   const copied = contract.copiedKey(d.value!);
-  if (copied === null || keyPath(copied).length > 0 || guards.guardedRead(d.value!)) return null;
+  if (copied === null || keyDepthIn(contract, copied) > 0 || guards.guardedRead(d.value!))
+    return null;
   return copyOnly(contract, keyPlace(copied)) ? keyPlace(copied) : null;
 }
 
@@ -274,7 +276,7 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
       else {
         yield* adding(contract, f, {
           ...(e.key !== undefined
-            ? { key: keptKeyBelow(contract.work, e.key, projection) }
+            ? { key: keptKeyBelowIn(contract, e.key, projection) }
             : { value: e.value!, at: keptSteps(contract.work, e.at ?? [], projection) }),
           ...(e.guarded ? { guarded: true } : {}),
           ingress: e.ingress,
@@ -359,11 +361,12 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
       }
       // §3.2 (r4.15, r4.23): a copy of a record with a tested key below it is a mark of its source's holder
       // (collected once), looked up at the read of each path; the entry stays its source's
-      const path = keyPath(copied);
+      const path = keyStepsIn(contract, copied);
       if (path.length > 0) {
         const root = keyOf(keyPlace(copied), []);
         let direct = false;
-        for (let length = 1; length <= path.length && !direct; length += 1) {
+        // (a cursor's keys below its place's own key hold no definition: its family's shape requires it, G3 stage 1)
+        for (let length = 1; length <= path.length && !direct && !isKeyId(copied); length += 1) {
           work.charge("invSteps");
           if (
             (definitions.byKey.get(keyOf(keyPlace(copied), path.slice(0, length))) ?? []).length > 0
@@ -557,11 +560,13 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
 export function relevantSubs(
   contract: Contract,
   stores: PrefixStores,
-  rest: readonly string[],
+  asked: Rest,
 ): readonly SubSource[] {
-  if (rest.length === 0) return [];
+  // (a cursor's span read one step at a time; its steps made only for a layer that walks them)
+  const ref = restRef(contract, asked);
+  if (ref.length === 0) return [];
   const work = contract.pass.program.work;
-  const step = rest[0]!;
+  const step = ref.at(0);
   let bySteps = contract.stepLayers.get(stores);
   if (bySteps === undefined) contract.stepLayers.set(stores, (bySteps = new Map()));
   // (the layers it inherits or joins, by position: the one it inherits first, then those it joins)
@@ -586,7 +591,7 @@ export function relevantSubs(
         if (listed === undefined) own.set(sub, [at]);
         else listed.push(at);
       }
-      if (walkLayer(contract, top, defs, step, rest, found)) deep.push(at);
+      if (walkLayer(contract, top, defs, step, restSteps(asked), found)) deep.push(at);
     }
     contract.keep(1 + deep.length);
     bySteps.set(step, { own, deep });
@@ -594,9 +599,9 @@ export function relevantSubs(
     const { own, deep } = known;
     const walked = new Set(deep);
     let text = "";
-    for (let length = 1; length <= rest.length && own.size > 0; length += 1) {
+    for (let length = 1; length <= ref.length && own.size > 0; length += 1) {
       work.charge("invSteps");
-      text = length === 1 ? step : stepText(text, rest[length - 1]!);
+      text = length === 1 ? step : stepText(text, ref.at(length - 1));
       const having = contract.subsByPath.get(text);
       if (having === undefined) continue;
       if (having.size <= own.size)
@@ -613,7 +618,7 @@ export function relevantSubs(
     work.charge("invSteps", walked.size);
     for (const at of [...walked].sort((a, b) => a - b)) {
       const { layer, defs } = topAt(at);
-      walkLayer(contract, layer, defs, step, rest, found);
+      walkLayer(contract, layer, defs, step, restSteps(asked), found);
     }
   }
   return [...found]

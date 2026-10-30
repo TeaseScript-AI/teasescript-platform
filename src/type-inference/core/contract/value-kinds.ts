@@ -27,6 +27,16 @@ import {
   typedDefault,
   unknownItem,
 } from "./kinds.js";
+import {
+  keyAtRef,
+  keyIdAt,
+  memberStepIn,
+  restPart,
+  restRef,
+  restSteps,
+  type PathRef,
+  type Rest,
+} from "./key-ids.js";
 import { contractOfOp } from "./operations.js";
 import { projected } from "./positions.js";
 import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
@@ -53,7 +63,7 @@ export function memberStepOf(contract: Contract, path: readonly string[], from: 
 export function contractOfValueAt(
   contract: Contract,
   value: PlaceId,
-  rest: readonly string[],
+  rest: Rest,
 ): Work<readonly Item[]> {
   return through(contract, value, rest, 0);
 }
@@ -69,7 +79,7 @@ export function contractOfValueAt(
 function through(
   contract: Contract,
   value: PlaceId,
-  rest: readonly string[],
+  rest: Rest,
   from: number,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
@@ -82,9 +92,20 @@ function through(
     program.callOutOf.has(value)
   )
     return valueAt(contract, value, rest);
-  const at = memberStepOf(contract, rest, from);
+  // (a span's member step from the arena's nearest member, `memberStepIn`, its span's offset taken off)
+  const ref = restRef(contract, rest);
+  const at =
+    ref.kind === "span"
+      ? spanMemberStep(contract, ref, from)
+      : memberStepOf(contract, restSteps(rest), from);
   if (at < 0) return valueAt(contract, value, rest);
-  return listsAt(contract, value, rest, at, from);
+  return listsAt(contract, value, restSteps(rest), at, from);
+}
+
+/** `memberStepOf` for a span: its first member step from `from` on, from the arena (`memberStepIn`), by index. */
+function spanMemberStep(contract: Contract, ref: PathRef, from: number): number {
+  const id = keyIdAt(0, ref.id());
+  return memberStepIn(contract, id, from);
 }
 
 /** `through` at the step `at`, the first of `rest` from `from` on that is a dict's `values` or `keys`. */
@@ -147,45 +168,50 @@ export function* members(
 }
 
 /** The kinds at a path of a value, by the value's kind. */
-function* valueAt(
-  contract: Contract,
-  value: PlaceId,
-  rest: readonly string[],
-): Work<readonly Item[]> {
+function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly Item[]> {
   if (!contract.pass.solver.enterRead()) return STOPPED;
   try {
-    if (rest.length === 0) return yield* contract.contractOfValue(value);
+    // (a cursor's span read by its path's id, its key a cursor and a literal's demand named by it: G3 stage 1)
+    const ref = restRef(contract, rest);
+    if (ref.length === 0) return yield* contract.contractOfValue(value);
     const { program, guards } = contract.pass;
     program.work.charge("invSteps");
     if (program.speakerPlaces.has(value)) return [unknownItem(REASON.opaque)];
     const binding = program.occurrenceOf.get(value);
     if (binding !== undefined) {
-      const items = contract.entered(value, yield* contract.contractOf(keyOf(binding, rest)));
-      // §3.2: the mark travels with the value (r4.6)
-      return guards.guardedRead(value, rest) ? marked(items) : items;
+      const items = contract.entered(
+        value,
+        yield* contract.contractOf(keyAtRef(contract, binding, ref)),
+      );
+      // §3.2: the mark travels with the value (r4.6): none of a binding no test names
+      return !guards.untested(binding) && guards.guardedRead(value, ref.steps())
+        ? marked(items)
+        : items;
     }
     const projection = program.projOf.get(value);
     if (projection !== undefined) {
       if (projection.step === "iteration")
-        return yield* contractIteration(contract, projection.owner, rest);
+        return yield* contractIteration(contract, projection.owner, ref.steps());
       if (measuresLength(projection.step))
-        return yield* contractLength(contract, projection.owner, projection.step, rest);
+        return yield* contractLength(contract, projection.owner, projection.step, ref.steps());
       const elements = yield* contract.contractOfValueAt(
         projection.owner,
-        joinSteps([stepName(projection.step)], rest),
+        ref.kind === "span"
+          ? ref.after([stepName(projection.step)])
+          : joinSteps([stepName(projection.step)], ref.steps()),
       );
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
       return withOwnSelection(elements, owners, contract.pass);
     }
     if (program.callOutOf.has(value))
-      return yield* contract.contractOf(keyOf(resultOf(contract, value), rest));
+      return yield* contract.contractOf(keyAtRef(contract, resultOf(contract, value), ref));
     // a literal's contract at a path once per literal and path, whatever asks: a selection nested k deep reads each
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
     if (program.hasOf.has(value) || program.cellOwner.has(value)) {
       const site = program.places[value]?.site ?? null;
       const demand: Demand = {
-        key: joinParts("cl", value, rest),
+        key: joinParts("cl", value, restPart(rest)),
         kind: "contract",
         file: site?.file ?? -1,
         offset: site?.start ?? -1,
@@ -204,15 +230,15 @@ function* valueAt(
     ) {
       const site = program.places[value]?.site ?? operation.site;
       const demand: Demand = {
-        key: rest.length === 0 ? joinParts("cop", value) : joinParts("cop", value, rest),
+        key: joinParts("cop", value, restPart(rest)),
         kind: "contract",
         file: site.file,
         offset: site.start,
-        make: () => contractOfOp(contract, operation, rest),
+        make: () => contractOfOp(contract, operation, ref.steps()),
       };
       return contract.entered(value, yield demand);
     }
-    return contract.entered(value, yield* contractOfOp(contract, operation, rest));
+    return contract.entered(value, yield* contractOfOp(contract, operation, ref.steps()));
   } finally {
     contract.pass.solver.leaveRead();
   }

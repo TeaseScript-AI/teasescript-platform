@@ -1,7 +1,8 @@
 import type { PlaceId } from "../../graph.js";
 import { joinParts, joinSteps, keptParts } from "../budget.js";
+import { keyBelowRef, restRef, type Rest } from "./key-ids.js";
 import type { Contract } from "../contract.js";
-import { keyBelow, type Key } from "../definitions.js";
+import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
 import { EMPTY, firstWriter, type Item } from "../items.js";
 import { stepName } from "../program.js";
@@ -25,40 +26,39 @@ import type {
 export function* entryAt(
   contract: Contract,
   entry: PrefixEntry,
-  rest: readonly string[],
+  rest: Rest,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
+  // (a cursor's span read one step at a time, its path's id where a key or a value takes it whole, G3 stage 1)
+  const ref = restRef(contract, rest);
   if (entry.unk !== undefined) return [unknownItem(entry.unk, entry.w)];
   // F6, F7: the contract's M is open
-  if (entry.empty === true) return rest.length === 1 && rest[0] === "element" ? [EMPTY] : [];
+  if (entry.empty === true) return ref.length === 1 && ref.at(0) === "element" ? [EMPTY] : [];
   // F5: an add's element; an `addAll` contributes kinds, never emptiness (M unchanged)
   if (entry.elem !== undefined) {
-    if (rest[0] !== "element") return [];
-    const at = joinSteps(entry.at ?? [], rest.slice(1));
+    if (ref.length === 0 || ref.at(0) !== "element") return [];
+    const at = ref.from(1).after(entry.at ?? []);
     const items = annotated(
       contract,
       entry,
       at,
       withWriter(yield* contract.contractOfValueAt(entry.elem, at), entry.w),
     );
-    return rest.length === 1 ? withoutEmpty(items) : items;
+    return ref.length === 1 ? withoutEmpty(items) : items;
   }
   // §3.2: a copy read under a guard; a tested child's mark by the entry's holder at the path (r4.15)
   if (entry.key !== undefined)
     return annotated(
       contract,
       entry,
-      rest,
-      withWriter(yield* contract.contractOf(keyBelow(entry.key, rest)), entry.w),
+      ref,
+      withWriter(yield* contract.contractOf(keyBelowRef(contract, entry.key, ref)), entry.w),
     );
   return annotated(
     contract,
     entry,
-    rest,
-    withWriter(
-      yield* contract.contractOfValueAt(entry.value!, joinSteps(entry.at ?? [], rest)),
-      entry.w,
-    ),
+    ref,
+    withWriter(yield* contract.contractOfValueAt(entry.value!, ref.after(entry.at ?? [])), entry.w),
   );
 }
 

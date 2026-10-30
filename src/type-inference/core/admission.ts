@@ -13,7 +13,7 @@ import {
   copiedAt,
   decide,
   kindsAt,
-  decisionStopped,
+  decisionStoppedAt,
   stopDecision,
 } from "./admission/decision.js";
 import { groups, stores } from "./admission/groups.js";
@@ -43,6 +43,7 @@ import type {
   ChainEnd,
   CopyForest,
   Decided,
+  DecidedAt,
   Decision,
   Expansion,
   Frontier,
@@ -71,8 +72,33 @@ import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
-import { carried, keepsOwn, type CarrierRole, type Dispatch } from "./carriers.js";
+import {
+  arrayStrip,
+  carried,
+  carriedBy,
+  keepsOwn,
+  type CarrierRole,
+  type Dispatch,
+  type StepsStrip,
+  type Strip,
+} from "./carriers.js";
 import { heldReference, termAt, typeTags, writtenOf } from "./contract.js";
+import type { DecisionWork } from "./answers.js";
+import {
+  appendKeyId,
+  keyIdParent,
+  keyIdPath,
+  keyIdPlace,
+  keyIdStep,
+  keyPacket,
+  keyParentIn,
+  restRef,
+  restSteps,
+  stepsOfId,
+  type KeyId,
+  type KeyPacketMaking,
+  type Rest,
+} from "./contract/key-ids.js";
 import { labelBelow, labelPlainText, labelRoot, type Label } from "./contract/labels.js";
 import {
   KeyTrie,
@@ -94,7 +120,7 @@ export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
 export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./admission/kinds.js";
-export type { Candidate, Decision } from "./admission/model.js";
+export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
 
 /*
  * Admission (checkpoint 9, TABLE §5) and the boundary checks of external data (C9). A place's type is decided once,
@@ -144,6 +170,8 @@ export class Admission {
   readonly a4Keys = new Set<Key>();
   /** The places `a4Keys` lands copies in, each with `openAbove`'s walk down its paths from its root. */
   readonly a4Places = new Map<PlaceId, OpenStep | null>();
+  /** Per place, each cursor's path's step of `openAbove`'s walk (`openAboveKey`, G3 stage 1). */
+  readonly openSteps = new Map<PlaceId, Map<number, OpenStep>>();
   /** The parameters with a default (ADR 0021 1.5). */
   readonly #defaulted = new Set<PlaceId>();
   readonly a4Copies: {
@@ -316,7 +344,14 @@ export class Admission {
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
-  groupList: { readonly root: PlaceId; readonly path: readonly string[] }[] | null = null;
+  groupList: DecidedAt[] | null = null;
+  /**
+   * The cursors decision records name, as one packet of their paths made as each record is (`decisionWork`): Sol §4's
+   * compact records, each path's node once, never a path per record, and no arena id past the pass.
+   */
+  readonly decisionPacket: KeyPacketMaking = keyPacket();
+  /** Per decided cursor, its label's recipe (`labelOfKey`). */
+  readonly keyLabels = new Map<KeyId, Label>();
   /** A4 through copies' landings (`inheritance`), and per place and path whether its copies land it (`landed`). */
   inherits: Inheritance | null = null;
   readonly landedPaths = new Map<string, boolean>();
@@ -512,15 +547,16 @@ export class Admission {
   }
 
   /** A store's value at the path below its destination, by §3 at its node. */
-  public valueAt(d: Definition, at: readonly string[]): Item[] {
+  public valueAt(d: Definition, at: Rest): Item[] {
     this.pass.program.work.charge("checks");
-    if (d.kind === "const") return at.length === 0 ? [...(d.items ?? [])] : [];
+    if (d.kind === "const")
+      return restRef(this.pass.contract, at).length === 0 ? [...(d.items ?? [])] : [];
     return this.items(d.value!, d.node, at);
   }
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
-  public items(value: PlaceId, node: FlowNode, at: readonly string[]): Item[] {
-    const finished = this.host.read?.(value, node, at) ?? null;
+  public items(value: PlaceId, node: FlowNode, at: Rest): Item[] {
+    const finished = this.host.read?.(value, node, restSteps(at)) ?? null;
     return withoutEmpty(finished ?? this.run(this.pass.values.valueItems(value, node, at)));
   }
 
@@ -552,6 +588,39 @@ export class Admission {
     return label;
   }
 
+  /**
+   * `labelOf` for a decided cursor (G3 stage 1): its parent's recipe one step on, each cursor's once (`keyLabels`),
+   * an element step's kinds asked of its parent's key as `labelOf` asks them, shallowest first; its place is unwritten
+   * (its family's shape requires it).
+   */
+  public labelOfKey(key: KeyId): Label {
+    const { contract } = this.pass;
+    const way: KeyId[] = [];
+    let at: KeyId | null = key;
+    for (
+      ;
+      at !== null && keyIdPath(at) !== 0 && !this.keyLabels.has(at);
+      at = keyIdParent(contract, at)
+    )
+      way.push(at);
+    let label =
+      at === null || keyIdPath(at) === 0
+        ? labelRoot(contract, keyIdPlace(key))
+        : this.keyLabels.get(at)!;
+    for (let index = way.length - 1; index >= 0; index -= 1) {
+      const id = way[index]!;
+      const step = keyIdStep(contract, id);
+      if (step !== "element") label = labelBelow(label, step);
+      else {
+        const parent = keyParentIn(contract, id)!;
+        const tags = withoutEmpty(this.run(contract.contractOf(parent))).map((item) => item.tag);
+        label = labelBelow(label, elementStep(tags));
+      }
+      this.keyLabels.set(id, label);
+    }
+    return label;
+  }
+
   /** `labelOf`'s text made plain, for a check that charges the text it keeps itself (`labelPlainText`). */
   public pathLabel(
     place: PlaceId,
@@ -567,7 +636,7 @@ export class Admission {
 
   storeList: readonly Definition[] | null = null;
 
-  public groups(): readonly { readonly root: PlaceId; readonly path: readonly string[] }[] {
+  public groups(): readonly DecidedAt[] {
     return groups(this);
   }
 
@@ -575,16 +644,61 @@ export class Admission {
     compareLanded(this);
   }
 
-  public stopDecision(root: PlaceId, path: readonly string[]): void {
-    stopDecision(this, root, path);
+  /** `stopDecision` of a decided path in its identity (`DecidedAt`: a cursor's key alone, G3 stage 1). */
+  public stopDecision(at: DecidedAt): void {
+    stopDecision(this, at);
+  }
+
+  /** `decisionStopped` of a decided path in its identity. */
+  public decisionStoppedAt(at: DecidedAt): boolean {
+    return decisionStoppedAt(this, at);
   }
 
   public decisionStopped(place: PlaceId, path: readonly string[]): boolean {
-    return decisionStopped(this, place, path);
+    return this.decisionStoppedAt({ root: place, path });
   }
 
-  public decide(root: PlaceId, path: readonly string[], lazily?: boolean): Decision | null {
-    return decide(this, root, path, lazily);
+  /** The decision of a decided path in its identity (`DecidedAt`: a cursor's key alone, its steps never made). */
+  public decide(at: DecidedAt, lazily?: boolean): Decision | null {
+    return decide(this, at, lazily);
+  }
+
+  /**
+   * A decision's work record (`consumers/stores.ts`): a cursor's path not made but named by its key, its steps exported
+   * with every other cursor decision's of the pass through one packet (`exportDecisionPaths`), read only from it.
+   */
+  public decisionWork(
+    at: DecidedAt,
+    units: number,
+    allowance: number,
+    stopped: boolean,
+  ): DecisionWork {
+    if (at.key === undefined) return { place: at.root, path: at.path, units, allowance, stopped };
+    // (its path's nodes the packet lacks added, charged, as its record is made: one packet a pass, each node once)
+    const index = appendKeyId(this.pass.contract, this.decisionPacket, at.key);
+    const self = this;
+    return {
+      place: at.root,
+      get path(): readonly string[] {
+        return self.decisionPath(index);
+      },
+      units,
+      allowance,
+      stopped,
+    };
+  }
+
+  /** A cursor decision's path read from the pass's packet (`decisionWork`), nothing charged: the analysis's output. */
+  decisionPath(index: number): readonly string[] {
+    const { nodes, keys } = this.decisionPacket;
+    const steps: string[] = [];
+    for (let at = keys[index]![1]; at >= 0; at = nodes[at]![0]) steps.push(nodes[at]![1]);
+    return steps.reverse();
+  }
+
+  /** A decided path's steps, made: a cursor's through the charged boundary (`stepsOfId`), for a stop's stores. */
+  public stepsAt(at: DecidedAt): readonly string[] {
+    return at.key === undefined ? at.path : stepsOfId(this.pass.contract, at.key);
   }
 
   public storeRequirement(
@@ -597,11 +711,12 @@ export class Admission {
   }
 
   public copiedAt(key: Key): TypeTerm | null {
-    return copiedAt(this, key);
+    // (a key in its identity, as `decide` records it: a wrapper family's its cursor, G3 stage 1)
+    return copiedAt(this, this.pass.contract.canonicalKey(key));
   }
 
   public kindsAt(key: Key): readonly ItemTag[] | null {
-    return kindsAt(this, key);
+    return kindsAt(this, this.pass.contract.canonicalKey(key));
   }
 
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
@@ -643,6 +758,19 @@ export class Admission {
     strip: readonly string[],
   ): readonly (readonly [PlaceId, readonly string[], CarrierRole, number])[] {
     return carried(this.pass.program, value, strip, this.#dispatch);
+  }
+
+  /** `carriersOf` of a `Strip`, each operand's strip in its form (`copySources`). */
+  public carriersBy<S extends Strip<S>>(
+    value: PlaceId,
+    strip: S,
+  ): readonly (readonly [PlaceId, S, CarrierRole, number])[] {
+    return carriedBy(this.pass.program, value, strip, this.#dispatch);
+  }
+
+  /** An array of steps as a `Strip` (`carried`'s). */
+  public arrayStrip(steps: readonly string[]): StepsStrip {
+    return arrayStrip(this.pass.program, steps);
   }
 
   /** Whether the receiver's or the key's decision leaves a value's operation its own value (F19a, F19: `keepsOwn`). */

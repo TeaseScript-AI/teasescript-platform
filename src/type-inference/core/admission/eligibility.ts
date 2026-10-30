@@ -1,7 +1,9 @@
 import type { PlaceId } from "../../graph.js";
+import { keyWalk, type Rest } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { joinParts, keepText, keptSlice, type WorkLedger } from "../budget.js";
 import {
+  isCursor,
   keptKey,
   keptPrefixes,
   prefixesOf,
@@ -54,7 +56,7 @@ export function wholeOf(admission: Admission, key: Key, add: boolean): Definitio
 export function eligibleOf(
   admission: Admission,
   prefix: Key,
-  below: readonly string[],
+  below: Rest,
   add = false,
 ): Definition[] {
   const list = wholeOf(admission, prefix, add);
@@ -89,11 +91,12 @@ function eligibleAt(
   admission: Admission,
   representative: Definition,
   prefix: Key,
-  rest: readonly string[],
+  rest: Rest,
 ): Definition | null {
   const { guards } = admission.pass;
-  const at = aliasKeyAt(admission.aliases.get(representative)!, rest);
-  const full = at === null ? null : recordKey(at);
+  const at = aliasKeyAt(admission.pass.contract, admission.aliases.get(representative)!, rest);
+  // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+  const full = at === null || isCursor(at) ? null : recordKey(at);
   let deepest = "";
   for (const key of full === null ? [] : [full, ...prefixesOf(full)]) {
     admission.pass.program.work.charge("eligibility");
@@ -148,10 +151,12 @@ function eligibility(
     )
       continue;
     const at = aliasKeyAt(
+      admission.pass.contract,
       alias,
       representative.kind === "add" ? addRest(representative, demanded) : demanded,
     );
-    if (at === null) continue;
+    // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
+    if (at === null || isCursor(at)) continue;
     const full = recordKey(at);
     let parent = "";
     for (const key of [...keptPrefixes(admission.work, full).reverse(), full]) {
@@ -307,15 +312,22 @@ function walkGuards(
 function demandsOf(admission: Admission, prefix: Key): readonly (readonly string[])[] {
   if (admission.demands === null) {
     const demands = new Map<Key, (readonly string[])[]>();
-    for (const { root, path } of admission.groups())
+    for (const group of admission.groups()) {
+      // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
+      const path = admission.stepsAt(group);
+      const walk = group.key === undefined ? null : keyWalk(admission.pass.contract, group.key);
       for (let length = 0; length < path.length; length += 1) {
         admission.pass.program.work.charge("eligibility");
-        const key = keptKey(admission.work, root, path.slice(0, length));
+        const key =
+          walk === null
+            ? keptKey(admission.work, group.root, path.slice(0, length))
+            : walk.prefix(length);
         const rest = keptSlice(admission.work, path, length);
         const list = demands.get(key);
         if (list === undefined) demands.set(key, [rest]);
         else list.push(rest);
       }
+    }
     admission.demands = demands;
   }
   return admission.demands.get(prefix) ?? [];

@@ -22,9 +22,9 @@ import {
   type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
+import { isSteps, spanRef, type Rest } from "./contract/key-ids.js";
 import {
   keptKey,
-  keptKeyBelow,
   keyOf,
   keyPath,
   keyPlace,
@@ -166,7 +166,7 @@ export class Values {
       route("contract");
       return { items: yield* contract.contractOf(key), def: null, guardable: false };
     }
-    const answer = exact.exactPath(key, node, before);
+    const answer = exact.exactPath(contract.keyText(key), node, before);
     // F5a: the loop ran only over a held iterable, and nothing between the add and the body's end may change the
     // collection: X6's events, a call into a callable that stores it included
     let loop = false;
@@ -174,7 +174,9 @@ export class Values {
       const facts = answer.def.loop;
       loop =
         !(yield* this.#iterableHeld(facts)) ||
-        facts.backs.some((back) => lists.eventBetween(key, answer.def.orig!.node, back) !== null);
+        facts.backs.some(
+          (back) => lists.eventBetween(contract.keyText(key), answer.def.orig!.node, back) !== null,
+        );
     }
     const items =
       "def" in answer && !loop
@@ -439,11 +441,10 @@ export class Values {
   }
 
   /** The value of a place at a node, read at the path `rest` below it. */
-  public valueItems(
-    value: PlaceId,
-    node: FlowNode | null,
-    rest: readonly string[],
-  ): Work<readonly Item[]> {
+  public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
+    // (G3 stage 1: a cursor's span read by its path's id)
+    if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
+    const rest = isSteps(asked) ? asked : asked.steps();
     // G3 3a: a read at a path of property steps stands one step below its parent's position
     if (rest.length > 0 && positions() && rest.every(propertyOnly) && this.#rooted(value, rest[0]!))
       return this.#positioned(value, node, rest);
@@ -479,11 +480,33 @@ export class Values {
       this.#rooted(value, rest[0]!)
     ) {
       const { items, proof } = yield* this.pass.solver.proven(
-        this.#position(value, node, this.pass.contract.pathIdOf(rest), rest),
+        this.#position(value, node, this.pass.contract.pathIdOf(rest)),
       );
       return { items, proof: proof instanceof Position ? proof : null };
     }
     return { items: yield* this.#through(value, node, rest, 0), proof: null };
+  }
+
+  /** `valuePosition` at the path of a path id (G3 stage 1: a decided cursor's), from the arena's metadata. */
+  public *valuePositionAt(
+    value: PlaceId,
+    node: FlowNode | null,
+    path: number,
+  ): Work<{ readonly items: readonly Item[]; readonly proof: Position | null }> {
+    const { contract } = this.pass;
+    if (
+      path > 0 &&
+      positions() &&
+      contract.pathProperties[path]! &&
+      this.#rooted(value, contract.pathFirstSteps[path]!)
+    ) {
+      const { items, proof } = yield* this.pass.solver.proven(this.#position(value, node, path));
+      return { items, proof: proof instanceof Position ? proof : null };
+    }
+    return {
+      items: yield* this.#through(value, node, spanRef(contract, path).steps(), 0),
+      proof: null,
+    };
   }
 
   *#positioned(
@@ -491,19 +514,36 @@ export class Values {
     node: FlowNode | null,
     rest: readonly string[],
   ): Work<readonly Item[]> {
-    return yield this.#position(value, node, this.pass.contract.pathIdOf(rest), rest);
+    return yield this.#position(value, node, this.pass.contract.pathIdOf(rest));
+  }
+
+  /**
+   * `valueItems` at the path of a path id (G3 stage 1: a decided cursor's path, or a span of it): positioned where its
+   * steps are property steps and its first passes a wrapper, from the arena's metadata; else its steps made (uncharged,
+   * as a caller's array was) for the read's own computation.
+   */
+  public valueItemsAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
+    const { contract } = this.pass;
+    if (
+      path > 0 &&
+      positions() &&
+      contract.pathProperties[path]! &&
+      this.#rooted(value, contract.pathFirstSteps[path]!)
+    )
+      return this.#positionedAt(value, node, path);
+    // (no position: its steps made through the charged boundary)
+    return this.#through(value, node, spanRef(contract, path).steps(), 0);
+  }
+
+  *#positionedAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
+    return yield this.#position(value, node, path);
   }
 
   /**
    * G3 3a: a value at a node and a path of property steps as a demand that proves its position (`positions.ts`): its
    * parent's (one step up, at its root its own) advanced one step (`#advance`).
    */
-  #position(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): ProofDemand<Proof> {
+  #position(value: PlaceId, node: FlowNode | null, path: number): ProofDemand<Proof> {
     const { contract, program } = this.pass;
     const site = program.places[value]?.site ?? null;
     const key = joinParts("vq", value, node?.id ?? "-", path);
@@ -515,7 +555,7 @@ export class Values {
       proves: true,
       make: () => {
         contract.remember(key);
-        return this.#advance(value, node, path, rest);
+        return this.#advance(value, node, path);
       },
     };
   }
@@ -528,16 +568,13 @@ export class Values {
    * the exact path answers its key at the step from its declaration. A read through no wrapper, and wherever a receiver
    * fails, is the read's own computation from its root, which every read answers outside positions.
    */
-  *#advance(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): Work<Proven<Proof>> {
+  *#advance(value: PlaceId, node: FlowNode | null, path: number): Work<Proven<Proof>> {
     const { contract, program } = this.pass;
-    const step = rest.at(-1)!;
-    const own = (): Work<readonly Item[]> => this.#through(value, node, rest, 0);
-    const from = yield* this.#positionOf(value, node, contract.pathParent(path), rest.slice(0, -1));
+    const step = contract.pathLast(path);
+    // (the read's own computation takes its path's steps, made where it runs: a position carries its path's id alone)
+    const own = (): Work<readonly Item[]> =>
+      this.#through(value, node, contract.pathSteps(path), 0);
+    const from = yield* this.#positionOf(value, node, contract.pathParent(path));
     const hop =
       from !== null && from.rest === 0 ? yield* this.#hop(from.read, from.node, step) : null;
     if (from === null || (!from.hopped && hop === null))
@@ -563,7 +600,8 @@ export class Values {
           program.scope,
         )
       : yield* own();
-    const outer = from.outer === null ? null : keptKeyBelow(program.work, from.outer, [step]);
+    // (the receiver's key one step down in its identity: a wrapper's family's its cursor's child)
+    const outer = from.outer === null ? null : contract.keptKeyBelowIn(from.outer, [step]);
     return {
       items,
       proof:
@@ -595,12 +633,7 @@ export class Values {
    * A value's position at a path (`#advance`): a read's or a literal's own at no path, a property read's its owner's one
    * step down; else its demand's proof; `null` for any other value, and outside positions.
    */
-  *#positionOf(
-    value: PlaceId,
-    node: FlowNode | null,
-    path: number,
-    rest: readonly string[],
-  ): Work<Position | null> {
+  *#positionOf(value: PlaceId, node: FlowNode | null, path: number): Work<Position | null> {
     const { program, solver, contract } = this.pass;
     if (!positions()) return null;
     if (path === 0) {
@@ -629,10 +662,9 @@ export class Values {
         projection.owner,
         projection.node ?? node,
         contract.pathStep(0, step),
-        [step],
       );
     }
-    const { proof } = yield* solver.proven(this.#position(value, node, path, rest));
+    const { proof } = yield* solver.proven(this.#position(value, node, path));
     return proof instanceof Position ? proof : null;
   }
 

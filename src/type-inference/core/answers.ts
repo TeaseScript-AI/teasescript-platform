@@ -16,6 +16,8 @@ import {
 } from "./budget.js";
 import { Consumers, STOP_RULE, typedCall } from "./consumers.js";
 import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import { compareDemandNames, exportNames, importNames } from "./contract/key-ids.js";
+import { selectLanes } from "./contract/lanes.js";
 import {
   Contract,
   typedDefault,
@@ -139,6 +141,11 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (G3 stage 1: the families reads start choose their keys' lane first, before anything is built; demands holding a
+  // cursor order by their logical texts)
+  selectLanes(contract);
+  parts.solver.names = (a, b) => compareDemandNames(contract, a, b);
+  parts.solver.replayOf = (names) => exportNames(contract, names);
   for (const key of stopped) contract.stop(key.place, key.path);
   return pass;
 }
@@ -565,15 +572,24 @@ export function coreResult(answers: Answers): CoreResult {
  */
 export function solveDemands(
   request: CoreAnalysisRequest,
-  keys: readonly string[],
+  asked: readonly string[],
+  packet?: unknown,
 ): (readonly Item[])[] {
   const program = new CoreProgram(request);
   program.index();
   const pass = createPass(program);
+  // (names holding cursors came with their packet, made here and asked in this pass's identity: #1422 B1)
+  const keys = packet === undefined ? asked : importNames(pass.contract, asked, packet);
   return keys.map((key) => {
     pass.solver.run(demandWork(pass, key));
-    // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store)
-    const answer = pass.solver.answer(key);
+    // the demand's own answer, not what its reader makes of it (a value's contract as it enters its store); a key's
+    // contract by its key in this pass's identity (a wrapper's family's its cursor's)
+    const [kind, ...parts] = key.split("|");
+    const answer =
+      pass.solver.answer(key) ??
+      (kind === "c" || kind === "rc"
+        ? pass.solver.answer(joinParts(kind, pass.contract.canonicalKey(parts.join("|"))))
+        : undefined);
     if (answer === undefined) throw new Error(`The demand '${key}' did not finish.`);
     return answer;
   });

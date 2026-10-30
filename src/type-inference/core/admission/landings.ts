@@ -1,4 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
+import { isKeyId, keyIdPath, stepsOfId, type KeyId } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import {
   joinParts,
@@ -128,6 +129,12 @@ function cyclesOf(
  * answers as its nearest member with a store on the path, or its top. Each copy storing its own field asks that member
  * directly, never every copy above it (the reviewer's control of a copy's own contribution, TABLE r4.80).
  */
+/** `passThrough` of a cursor: a place no copy forest holds answers itself; else its steps made (`stepsOfId`). */
+export function passThroughKey(admission: Admission, place: PlaceId, key: KeyId): PlaceId {
+  if (!copyForest(admission).parent.has(place)) return place;
+  return passThrough(admission, place, stepsOfId(admission.pass.contract, key));
+}
+
 export function passThrough(
   admission: Admission,
   place: PlaceId,
@@ -549,10 +556,25 @@ export function copiesOf(admission: Admission, place: PlaceId): readonly Inherit
  * Whether copies land a path in a place (`Inheritance`): its own landings, else its copies' sources' landings below
  * their strips, on an explicit stack, each place and path asked once.
  */
+/**
+ * `landed` of a key in its identity: a cursor's past wrappers from its path's id (`landedFrontier`), its steps made only
+ * where no wrapper is passed (G3 stage 1).
+ */
+export function landedKey(admission: Admission, place: PlaceId, key: Key): boolean {
+  const { contract } = admission.pass;
+  if (!isKeyId(key)) return landed(admission, place, keyPath(key));
+  if (contract.pathDepths[keyIdPath(key)]! > 1 && positions()) {
+    const frontier = landedFrontier(admission, place, keyIdPath(key));
+    if (frontier.place !== place)
+      return landedOwn(admission, frontier.place, contract.pathSteps(frontier.rest));
+  }
+  return landedOwn(admission, place, stepsOfId(contract, key));
+}
+
 export function landed(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   // (G3 3a: a path past wrappers lands as its frontier's rest lands in the frontier's read's binding, `landedFrontier`)
   if (path.length > 1 && positions()) {
-    const frontier = landedFrontier(admission, place, path);
+    const frontier = landedFrontier(admission, place, admission.pass.contract.pathIdOf(path));
     if (frontier.place !== place)
       return landedOwn(admission, frontier.place, admission.pass.contract.pathSteps(frontier.rest));
   }
@@ -567,10 +589,10 @@ export function landed(admission: Admission, place: PlaceId, path: readonly stri
 function landedFrontier(
   admission: Admission,
   place: PlaceId,
-  path: readonly string[],
+  path: number,
 ): { readonly place: PlaceId; readonly rest: number } {
   const { contract } = admission.pass;
-  const ids: number[] = [contract.pathIdOf(path)];
+  const ids: number[] = [path];
   for (let id = ids[0]!; !admission.landedFrontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
     ids.push(id);
@@ -585,7 +607,7 @@ function landedFrontier(
       continue;
     }
     const above = admission.landedFrontiers.get(joinParts(place, contract.pathParent(id)))!;
-    const step = path[contract.pathDepth(id) - 1]!;
+    const step = contract.pathLast(id);
     // (a rest of one step goes on below it: its wrapper hands the path on, keeping the new step)
     const hop =
       contract.pathDepth(above.rest) === 1

@@ -8,6 +8,7 @@ import { selectsElement } from "../method-categories.js";
 import { Position, positions, UNPOSITIONED } from "../positions.js";
 import { stepName } from "../program.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
+import { isKeyId, keyDepthIn, keyIdFirst, keyIdPath, keyLastIn, keyParentIn } from "./key-ids.js";
 import { heldReference, holdsBelow, propertyOnly } from "./kinds.js";
 import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
@@ -49,12 +50,12 @@ export function projected(
 /**
  * A key's contract as a demand that proves its position (G3 3a, `advance`): a key of a binding by property steps
  * whose first step passes a wrapper (`wrapperHop`), so a key `k·s` stands one step below `k`'s; its own computation
- * (`keyThrough`) where it does not.
+ * (`keyThrough`) where it does not. `path`: a text key's steps; a cursor's parent, depth and step are the arena's.
  */
 export function positioned(
   contract: Contract,
   key: Key,
-  path: readonly string[],
+  path: readonly string[] | null,
 ): ProofDemand<Proof> {
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
@@ -65,20 +66,38 @@ export function positioned(
     proves: true,
     make: () => {
       contract.remember(joinParts("cp", key));
-      const parent = keyOf(keyPlace(key), path.slice(0, -1));
-      return advance(contract, { key: parent, length: path.length - 1 }, path.at(-1)!, () =>
-        contract.keyThrough(key, 0),
-      );
+      const owner: Owner =
+        path === null || isKeyId(key)
+          ? { key: keyParentIn(contract, key)!, length: keyDepthIn(contract, key) - 1 }
+          : { key: keyOf(keyPlace(key), path.slice(0, -1)), length: path.length - 1 };
+      const step = path === null || isKeyId(key) ? keyLastIn(contract, key)! : path.at(-1)!;
+      return advance(contract, owner, step, () => contract.keyThrough(key, 0));
     },
   };
 }
 
 /**
  * Whether a key's contract stands at a position (`positioned`): a binding's key whose steps are all property steps,
- * the first passing a wrapper (`wrapperHop`), outside `withoutPositions`.
+ * the first passing a wrapper (`wrapperHop`), outside `withoutPositions`. `path`: a text key's steps; a cursor's depth,
+ * first step and property steps are the arena's.
  */
-export function positionable(contract: Contract, key: Key, path: readonly string[]): boolean {
+export function positionable(
+  contract: Contract,
+  key: Key,
+  path: readonly string[] | null,
+): boolean {
   const place = keyPlace(key);
+  if (path === null) {
+    if (!isKeyId(key)) return false;
+    const id = key;
+    return (
+      positions() &&
+      keyIdPath(id) !== 0 &&
+      contract.pass.program.places[place]?.kind.kind === "binding" &&
+      contract.pathProperties[keyIdPath(id)]! &&
+      contract.wrapperHop(place, keyIdFirst(contract, id)!) !== null
+    );
+  }
   return (
     positions() &&
     path.length > 0 &&
@@ -152,7 +171,7 @@ export function* positionOf(contract: Contract, owner: Owner): Work<Position | n
   if ("key" in owner) {
     const { key, length } = owner;
     if (length === 0) return new Position(keyPlace(key), 0, null, false, null, true, true);
-    const path = keyPath(key);
+    const path = isKeyId(key) ? null : keyPath(key);
     if (!positionable(contract, key, path)) return null;
     const { proof } = yield* solver.proven(positioned(contract, key, path));
     return proof instanceof Position ? proof : null;

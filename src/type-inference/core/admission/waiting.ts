@@ -1,6 +1,7 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { keyOf, type Key } from "../definitions.js";
+import { type Key } from "../definitions.js";
+import { keyAtRef, restRef, type Rest } from "../contract/key-ids.js";
 import type { Inheriting } from "./model.js";
 import { permittedAt } from "./permitted.js";
 
@@ -13,13 +14,16 @@ import { permittedAt } from "./permitted.js";
 function* inheritedSteps(
   admission: Admission,
   from: PlaceId,
-  path: readonly string[],
+  asked: Rest,
 ): Inheriting<TypeTerm | null> {
+  // (a cursor's span read by its paths' ids: its key a cursor, its prefix and rest views, G3 stage 1)
+  const { contract } = admission.pass;
+  const path = restRef(contract, asked);
   if (path.length > admission.reach) {
-    const above = yield* inheritedSteps(admission, from, path.slice(0, admission.reach));
-    return above === null ? null : permittedAt(above, path.slice(admission.reach));
+    const above = yield* inheritedSteps(admission, from, path.to(admission.reach));
+    return above === null ? null : permittedAt(above, path.from(admission.reach));
   }
-  const key = keyOf(from, path);
+  const key = keyAtRef(contract, from, path);
   const known = admission.inherited.get(key);
   return known !== undefined ? known : yield key;
 }
@@ -31,11 +35,17 @@ function* inheritedSteps(
 export function* inheritedInto(
   admission: Admission,
   from: PlaceId,
-  path: readonly string[],
+  asked: Rest,
   into: Key | null,
 ): Inheriting<TypeTerm | null> {
   // (past the deepest path a written type reaches, the place's path there is what it waits on, `inheritedAt`)
-  const source = keyOf(from, path.length > admission.reach ? path.slice(0, admission.reach) : path);
+  const { contract } = admission.pass;
+  const path = restRef(contract, asked);
+  const source = keyAtRef(
+    contract,
+    from,
+    path.length > admission.reach ? path.to(admission.reach) : path,
+  );
   if (into !== null && cut(admission, into, source)) return null;
   const term = yield* inheritedSteps(admission, from, path);
   return into !== null && cut(admission, into, source) ? null : term;

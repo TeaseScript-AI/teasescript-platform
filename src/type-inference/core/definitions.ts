@@ -27,7 +27,9 @@ import { siteKey, type CoreProgram } from "./program.js";
  * A key: a place and a path of steps below it (`state.party.element.hp`), written `place|steps`. The collector's place
  * and the path are its identity; the place's label only shows it. A key, its path or its prefixes that a structure
  * keeps are made through the kept helpers below (`keptKey`, `keptPath`, …), which charge their text first (TABLE r4.58);
- * `keyOf` and its kin make the ones a step only looks up or passes on.
+ * `keyOf` and its kin make the ones a step only looks up or passes on. G3 stage 1: a key of a wrapper's family is its
+ * cursor instead (`place#id`, `contract/key-ids.ts`), never its text; the helpers here read a key's text alone and
+ * refuse a cursor (`barOf`), except `keyPlace`, which reads both.
  */
 export type Key = string;
 
@@ -35,12 +37,26 @@ export function keyOf(place: PlaceId, path: readonly string[]): Key {
   return `${place}|${path.join(".")}`;
 }
 
+/** Where a key's text puts its `|`; a cursor has none, and is refused: its path is the arena's (`key-ids.ts`). */
+function barOf(key: Key): number {
+  const bar = key.indexOf("|");
+  if (bar < 0) throw new Error(`The key cursor '${key}' was read as a key's text.`);
+  return bar;
+}
+
+/** Whether a key is a cursor (`place#id`, `contract/key-ids.ts`), not a key's text. */
+export function isCursor(key: Key): boolean {
+  return key.indexOf("|") < 0;
+}
+
+/** A key's place: a text's up to its `|`, a cursor's up to its `#`. */
 export function keyPlace(key: Key): PlaceId {
-  return Number(key.slice(0, key.indexOf("|")));
+  const bar = key.indexOf("|");
+  return Number(key.slice(0, bar < 0 ? key.indexOf("#") : bar));
 }
 
 export function keyPath(key: Key): string[] {
-  const steps = key.slice(key.indexOf("|") + 1);
+  const steps = key.slice(barOf(key) + 1);
   return steps === "" ? [] : steps.split(".");
 }
 
@@ -105,7 +121,7 @@ export class KeyTrie {
     let node = roots.get(keyPlace(key));
     const found: Key[] = [];
     if (node === undefined) return found;
-    const steps = key.slice(key.indexOf("|") + 1);
+    const steps = key.slice(barOf(key) + 1);
     this.work.charge(this.counter);
     if (node.key !== null && (self || steps !== "")) found.push(node.key);
     for (let at = 0; at < steps.length && node !== undefined;) {
@@ -126,7 +142,7 @@ export class KeyTrie {
    */
   public along(
     place: PlaceId,
-    steps: readonly string[],
+    steps: { readonly length: number; at(index: number): string | undefined },
     self: boolean,
   ): { readonly key: Key; readonly depth: number }[] {
     const roots = (this.#roots ??= this.work.shared(() => this.#build()));
@@ -136,7 +152,7 @@ export class KeyTrie {
     this.work.charge(this.counter);
     if (node.key !== null && (self || steps.length > 0)) found.push({ key: node.key, depth: 0 });
     for (let depth = 1; depth <= steps.length; depth += 1) {
-      node = node.children.get(steps[depth - 1]!);
+      node = node.children.get(steps.at(depth - 1)!);
       if (node === undefined) break;
       this.work.charge(this.counter);
       if (node.key !== null && (self || depth < steps.length)) found.push({ key: node.key, depth });
@@ -178,8 +194,8 @@ export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[
 }
 
 /** The number of steps of a key's path (`keyPath(key).length`), made nothing. */
-function keyDepth(key: Key): number {
-  const bar = key.indexOf("|");
+export function keyDepth(key: Key): number {
+  const bar = barOf(key);
   if (bar === key.length - 1) return 0;
   let depth = 1;
   for (let at = key.indexOf(".", bar + 1); at >= 0; at = key.indexOf(".", at + 1)) depth += 1;
@@ -194,6 +210,7 @@ export function keptPath(work: WorkLedger, key: Key): string[] {
 
 /** The key `rest` below `key` (what `keyOf(keyPlace(key), [...keyPath(key), ...rest])` gives). */
 export function keyBelow(key: Key, rest: readonly string[]): Key {
+  barOf(key);
   if (rest.length === 0) return key;
   return key.endsWith("|") ? `${key}${rest.join(".")}` : `${key}.${rest.join(".")}`;
 }
@@ -206,7 +223,7 @@ export function keptKeyBelow(work: WorkLedger, key: Key, rest: readonly string[]
 
 /** A key's path as text (what `keyPath(key).join(".")` gives). */
 export function keyPathText(key: Key): string {
-  return key.slice(key.indexOf("|") + 1);
+  return key.slice(barOf(key) + 1);
 }
 
 /** `keyPathText`, charged before it is made (`keepText`). */
@@ -225,8 +242,8 @@ export function keyOfText(place: PlaceId, text: string): Key {
  * before it is made; `null` at a place's own key.
  */
 export function keptParent(work: WorkLedger, key: Key): Key | null {
-  if (key.endsWith("|")) return null;
-  const bar = key.indexOf("|");
+  const bar = barOf(key);
+  if (bar === key.length - 1) return null;
   const dot = key.lastIndexOf(".");
   const end = dot > bar ? dot : bar + 1;
   keepText(work, end);
@@ -1254,6 +1271,18 @@ export class DefinitionLists {
   /** The word of the first own event of a key strictly after `a` and not after `b`, or `null`. */
   public eventBetween(key: Key, a: FlowNode, b: FlowNode): ContextWord | null {
     return this.eventIn(key, this.spanBetween(a, b));
+  }
+
+  /**
+   * `eventBetween` for a key below a place whose own key is its one prefix with definitions and no definition stands at
+   * or below it, no callable but its owner storing it (a wrapper's family's cursor, G3 stage 1: its shape requires it):
+   * the place's own key's stores, a prefix's events.
+   */
+  public eventBelowRoot(place: PlaceId, a: FlowNode, b: FlowNode): ContextWord | null {
+    const span = this.spanBetween(a, b);
+    return this.#firstIn(this.definitionsOf(keyOf(place, [])).eventPositions, span) < Infinity
+      ? "branch"
+      : null;
   }
 
   /** R: a receiver is certain when no own event of its key lies between its preparation and the effect. */

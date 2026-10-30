@@ -1,12 +1,24 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, keptArray } from "../budget.js";
+import { joinParts, joinSteps, keptArray, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import { keptKey, keptKeyBelow, type Key } from "../definitions.js";
+import {
+  keptKey,
+  keptKeyBelow,
+  keptParent,
+  keptPath,
+  keyBelow,
+  keyDepth,
+  keyOf,
+  keyPath,
+  keyPlace,
+  type Key,
+} from "../definitions.js";
+import { keyLane } from "./lanes.js";
 import { pathAt } from "./literal-index.js";
 
 // G3 stage 1 (TABLE r4.196): a key as a cursor, made one step from its parent's, and the one charged boundary between
-// cursors and the texts and step arrays of keys. No answer reads them yet: the literal indexes' `pathIdOf` and `stepsOf`
-// stay the legacy lanes', charged as before.
+// cursors and the texts and step arrays of keys; and the one place that decides a key's identity (`keyAt`, `keyBelowIn`,
+// `canonicalKey`): a cursor where its family's lane is cursors (`keyLane`), else its text, made and charged as before.
 
 /**
  * A key's cursor: its place and its path's id in the pass's one path arena (`pathAt`, which the literal indexes' paths
@@ -61,6 +73,403 @@ export function keyIdDepth(contract: Contract, id: KeyId): number {
 export function keyIdFirst(contract: Contract, id: KeyId): string | null {
   const path = keyIdPath(id);
   return path === 0 ? null : contract.pathFirstSteps[path]!;
+}
+
+/** Whether a key is a cursor (`place#id`), not a key's text (`place|path`, `definitions.ts`). */
+export function isKeyId(key: Key): key is KeyId {
+  return key.indexOf("|") < 0;
+}
+
+/**
+ * The key of `place` at the path `steps` (an array-born key) in its family's identity (`keyLane`, by its first step):
+ * its cursor where that lane is cursors, each step inspected and charged (`keyIdOf`); else its text, made plain
+ * (`keyOf`; `keptKeyAt` charges it, `keptKey`). A place's own key is its text.
+ */
+export function keyAt(contract: Contract, place: PlaceId, steps: readonly string[]): Key {
+  return keyAtWith(contract, place, steps, false);
+}
+
+/** `keyAt`, its text charged before it is made where it is text (`keptKey`). */
+export function keptKeyAt(contract: Contract, place: PlaceId, steps: readonly string[]): Key {
+  return keyAtWith(contract, place, steps, true);
+}
+
+function keyAtWith(
+  contract: Contract,
+  place: PlaceId,
+  steps: readonly string[],
+  kept: boolean,
+): Key {
+  if (steps.length > 0 && keyLane(contract, place, steps[0]!) === "cursor")
+    return keyIdOf(contract, place, steps);
+  return kept ? keptKey(contract.work, place, steps) : keyOf(place, steps);
+}
+
+/**
+ * The key `rest` below `key`, in the identity of its family's lane: a cursor's children one step each (`keyIdBelow`); a
+ * place's own key's in the lane of its first step's family; else a text below a text, made plain (`keyBelow`).
+ */
+export function keyBelowIn(contract: Contract, key: Key, rest: readonly string[]): Key {
+  return keyBelowWith(contract, key, rest, false);
+}
+
+/** `keyBelowIn`, a text below a text charged before it is made (`keptKeyBelow`). */
+export function keptKeyBelowIn(contract: Contract, key: Key, rest: readonly string[]): Key {
+  return keyBelowWith(contract, key, rest, true);
+}
+
+function keyBelowWith(contract: Contract, key: Key, rest: readonly string[], kept: boolean): Key {
+  if (rest.length === 0) return key;
+  let id: KeyId | null = isKeyId(key) ? key : null;
+  if (id === null && key.endsWith("|") && keyLane(contract, keyPlace(key), rest[0]!) === "cursor")
+    id = rootId(keyPlace(key));
+  if (id === null) return kept ? keptKeyBelow(contract.work, key, rest) : keyBelow(key, rest);
+  for (const step of rest) id = keyIdBelow(contract, id, step);
+  return id;
+}
+
+/**
+ * A key's parent in its identity, `null` at a place's own key: a cursor's from the arena (a step's visit charged), a
+ * place's own key's text above a first step; a text's text, made plain.
+ */
+export function keyParentIn(contract: Contract, key: Key): Key | null {
+  return parentWith(contract, key, false);
+}
+
+/** `keyParentIn`, a text's parent charged before it is made (`keptParent`). */
+export function keptParentIn(contract: Contract, key: Key): Key | null {
+  return parentWith(contract, key, true);
+}
+
+function parentWith(contract: Contract, key: Key, kept: boolean): Key | null {
+  if (!isKeyId(key)) {
+    if (kept) return keptParent(contract.work, key);
+    const steps = keyPath(key);
+    return steps.length === 0 ? null : keyOf(keyPlace(key), steps.slice(0, -1));
+  }
+  convert(contract, 1, 0, 0);
+  const parent = keyIdParent(contract, key);
+  return parent === null || keyIdPath(parent) === 0 ? keyOf(keyIdPlace(key), []) : parent;
+}
+
+/** A key's number of steps, made nothing: a cursor's the arena's, a text's counted (`keyDepth`). */
+export function keyDepthIn(contract: Contract, key: Key): number {
+  return isKeyId(key) ? keyIdDepth(contract, key) : keyDepth(key);
+}
+
+/** A key's last step, `null` at a place's own key: a cursor's the arena's, a text's after its last dot. */
+export function keyLastIn(contract: Contract, key: Key): string | null {
+  if (isKeyId(key)) return keyIdPath(key) === 0 ? null : keyIdStep(contract, key);
+  const steps = keyPath(key);
+  return steps.length === 0 ? null : steps.at(-1)!;
+}
+
+/** A key's steps, made: a cursor's through the charged boundary (`stepsOfId`), a text's plain (`keyPath`). */
+export function keyStepsIn(contract: Contract, key: Key): readonly string[] {
+  return isKeyId(key) ? stepsOfId(contract, key) : keyPath(key);
+}
+
+/** `keyStepsIn`, a text's steps charged by its text before they are made (`keptPath`). */
+export function keptStepsIn(contract: Contract, key: Key): readonly string[] {
+  return isKeyId(key) ? stepsOfId(contract, key) : keptPath(contract.work, key);
+}
+
+/** A key's whole path and its prefixes' keys, for a question that reads them all (`keyWalk`). */
+export interface KeyWalk {
+  readonly place: PlaceId;
+  readonly path: readonly string[];
+  /** The key of the prefix of `length` steps, in the key's identity. */
+  prefix(length: number): Key;
+}
+
+/**
+ * A key's path and its prefixes in its identity, for a question that reads its whole path: a text's as the legacy sites
+ * made them (`keyPath`, each prefix `keyOf`); a cursor's steps through the charged boundary (`stepsOfId`), its prefixes
+ * its ancestors, climbed once where first asked, each a visit charged (a place's own key its text).
+ */
+export function keyWalk(contract: Contract, key: Key): KeyWalk {
+  return walkWith(contract, key, false);
+}
+
+/** `keyWalk`, a text's steps charged by its text before they are made (`keptPath`). */
+export function keptKeyWalk(contract: Contract, key: Key): KeyWalk {
+  return walkWith(contract, key, true);
+}
+
+function walkWith(contract: Contract, key: Key, kept: boolean): KeyWalk {
+  const place = keyPlace(key);
+  if (!isKeyId(key)) {
+    const path = kept ? keptPath(contract.work, key) : keyPath(key);
+    return { place, path, prefix: (length) => keyOf(place, path.slice(0, length)) };
+  }
+  const path = stepsOfId(contract, key);
+  let above: KeyId[] | null = null;
+  return {
+    place,
+    path,
+    prefix: (length) => {
+      if (length === 0) return keyOf(place, []);
+      if (above === null) {
+        above = [];
+        convert(contract, path.length, 0, 0);
+        for (
+          let at: KeyId | null = key;
+          at !== null && keyIdPath(at) !== 0;
+          at = keyIdParent(contract, at)
+        )
+          above.push(at);
+        above.reverse();
+      }
+      return above[length - 1]!;
+    },
+  };
+}
+
+/**
+ * A key in its family's identity: a cursor as it is; a text of a family whose lane is cursors as its cursor, its text
+ * scanned once and charged (`keyIdOfText`), so no map holds one key in both forms; any other text as it is. Where a key
+ * enters the contract or admission from outside them (a consumer's key made of its own path).
+ */
+export function canonicalKey(contract: Contract, key: Key): Key {
+  if (isKeyId(key)) return key;
+  const bar = key.indexOf("|");
+  if (bar === key.length - 1) return key;
+  const dot = key.indexOf(".", bar + 1);
+  const first = key.slice(bar + 1, dot < 0 ? key.length : dot);
+  return keyLane(contract, Number(key.slice(0, bar)), first) === "cursor"
+    ? keyIdOfText(contract, key)
+    : key;
+}
+
+/**
+ * The id of the path of `path`'s steps from its step `from` on (a span's own path: `q.r.s` from 1 is `r.s`), found down
+ * from the nearest of its ancestors whose span from `from` is known, each one step below its parent's (`pathAt`), its
+ * visit and entry charged and kept: so the spans of one offset of k nested paths cost k steps, never k² (G3 stage 1).
+ */
+function spanId(contract: Contract, path: number, from: number): number {
+  if (from === 0) return path;
+  const { pathDepths: depths, pathParents: parents, pathLastSteps: steps } = contract;
+  let byPath = contract.spanIds.get(from);
+  if (byPath === undefined) contract.spanIds.set(from, (byPath = new Map()));
+  const way: number[] = [];
+  let at = path;
+  for (; depths[at]! > from && !byPath.has(at); at = parents[at]!) way.push(at);
+  let id = depths[at]! <= from ? 0 : byPath.get(at)!;
+  convert(contract, way.length + 1, 0, way.length);
+  for (let index = way.length - 1; index >= 0; index -= 1) {
+    id = pathAt(contract, id, steps[way[index]!]!);
+    byPath.set(way[index]!, id);
+  }
+  return id;
+}
+
+/**
+ * The id of the prefix of `path` of `length` steps (`length` at most its depth), found from the nearest of its
+ * ancestors whose prefix of that length is known, kept and charged as `spanId`'s: so the prefixes of one length of k
+ * nested paths cost k steps, never k².
+ */
+export function prefixId(contract: Contract, path: number, length: number): number {
+  const { pathDepths: depths, pathParents: parents } = contract;
+  if (depths[path]! <= length) return path;
+  let byPath = contract.prefixIds.get(length);
+  if (byPath === undefined) contract.prefixIds.set(length, (byPath = new Map()));
+  const way: number[] = [];
+  let at = path;
+  for (; depths[at]! > length && !byPath.has(at); at = parents[at]!) way.push(at);
+  const id = depths[at]! === length ? at : byPath.get(at)!;
+  convert(contract, way.length + 1, 0, way.length);
+  for (const node of way) byPath.set(node, id);
+  return id;
+}
+
+/**
+ * The id of the path of `base`'s steps followed by `rest`'s (`joinSteps` of the two), found down from the nearest of
+ * `rest`'s ancestors whose join with `base` is known, one step each, charged and kept as `spanId`'s.
+ */
+function joinedId(contract: Contract, base: number, rest: number): number {
+  if (base === 0) return rest;
+  const { pathParents: parents, pathLastSteps: steps } = contract;
+  let byRest = contract.joinedIds.get(base);
+  if (byRest === undefined) contract.joinedIds.set(base, (byRest = new Map()));
+  const way: number[] = [];
+  let at = rest;
+  for (; at !== 0 && !byRest.has(at); at = parents[at]!) way.push(at);
+  let id = at === 0 ? base : byRest.get(at)!;
+  convert(contract, way.length + 1, 0, way.length);
+  for (let index = way.length - 1; index >= 0; index -= 1) {
+    id = pathAt(contract, id, steps[way[index]!]!);
+    byRest.set(way[index]!, id);
+  }
+  return id;
+}
+
+/**
+ * A path a decision reads below a key (G3 stage 1): a legacy array of steps, read as before, or a span of the arena (a
+ * decided cursor's path from one of its steps on), read one step at a time from its spans' paths (`spanId`), its steps
+ * never made but at the charged boundary (`steps`). A decided cursor's scan reads its paths so, never an array per
+ * prefix.
+ */
+export interface PathRef extends Iterable<string> {
+  /** An array's steps, or a span of the arena. */
+  readonly kind: "steps" | "span";
+  readonly length: number;
+  /** The step at `index`. */
+  at(index: number): string;
+  /** The steps from `from` on, a view. */
+  from(from: number): PathRef;
+  /** Its first `length` steps, a view. */
+  to(length: number): PathRef;
+  /** Its steps made: an array's itself; a span's through the charged boundary (`stepsOfId`). */
+  steps(): readonly string[];
+  /** The text of its first `length` steps (`pathText`), made. */
+  text(length: number): string;
+  /** Its path's id in the arena: a span's own (`spanId`); an array's by its steps (`pathIdOf`, as before). */
+  id(): number;
+  /** A short name for a memo: an array's text, a span's id after a dot (no path's text starts with one). */
+  name(): string;
+  /** The steps of `strip`, then its own (`joinSteps`). */
+  after(strip: readonly string[]): PathRef;
+  /** It as a composite key's part (`joinParts`): an array's steps, a span's name. */
+  part(): readonly string[] | string;
+}
+
+/** A path as a legacy site passes it, an array of steps, or as a cursor's scan does, a `PathRef`. */
+export type Rest = readonly string[] | PathRef;
+
+/** A `Rest` as a `PathRef`. */
+export function restRef(contract: Contract, rest: Rest): PathRef {
+  return isRef(rest) ? rest : arrayRef(contract, rest);
+}
+
+function isRef(rest: Rest): rest is PathRef {
+  return !isSteps(rest);
+}
+
+/** Whether a `Rest` is an array of steps. */
+export function isSteps(rest: Rest): rest is readonly string[] {
+  return Array.isArray(rest);
+}
+
+/** Whether a demand name's token is a cursor (`place#id`). */
+function isCursorToken(token: string): token is KeyId {
+  return CURSOR.test(token);
+}
+
+/** A `Rest`'s steps: an array as it is, a `PathRef`'s made (a span's through the charged boundary). */
+export function restSteps(rest: Rest): readonly string[] {
+  return isRef(rest) ? rest.steps() : rest;
+}
+
+/** A `Rest` as a composite key's part (`joinParts`): an array's steps, a span's name. */
+export function restPart(rest: Rest): readonly string[] | string {
+  return isRef(rest) ? rest.part() : rest;
+}
+
+/**
+ * The key of `place` at `rest` in its family's identity: below a cursor's family the cursor of its path's id, a visit
+ * charged (a span's path its own, `spanId`, never its steps); else as `keyAt` makes it from the steps.
+ */
+export function keyAtRef(contract: Contract, place: PlaceId, rest: Rest): Key {
+  return keyAtRefWith(contract, place, rest, false);
+}
+
+/** `keyAtRef`, a text charged before it is made (`keptKey`). */
+export function keptKeyAtRef(contract: Contract, place: PlaceId, rest: Rest): Key {
+  return keyAtRefWith(contract, place, rest, true);
+}
+
+function keyAtRefWith(contract: Contract, place: PlaceId, rest: Rest, kept: boolean): Key {
+  const ref = restRef(contract, rest);
+  if (ref.kind === "span" && ref.length > 0 && keyLane(contract, place, ref.at(0)) === "cursor") {
+    convert(contract, 1, 0, 0);
+    return keyIdAt(place, ref.id());
+  }
+  return keyAtWith(contract, place, ref.steps(), kept);
+}
+
+/** The key `rest` below `key` in its identity: a span below a cursor or a cursor family's root, by path ids alone. */
+export function keyBelowRef(contract: Contract, key: Key, rest: Rest): Key {
+  return keyBelowRefWith(contract, key, rest, false);
+}
+
+function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean): Key {
+  const ref = restRef(contract, rest);
+  if (ref.length === 0) return key;
+  if (ref.kind === "span") {
+    if (isKeyId(key)) {
+      convert(contract, 1, 0, 0);
+      return keyIdAt(keyIdPlace(key), joinedId(contract, keyIdPath(key), ref.id()));
+    }
+    if (key.endsWith("|")) return keyAtRefWith(contract, keyPlace(key), ref, kept);
+  }
+  return keyBelowWith(contract, key, ref.steps(), kept);
+}
+
+/** An array as a `PathRef`, read as the legacy sites read it. */
+export function arrayRef(contract: Contract, steps: readonly string[]): PathRef {
+  // (each view made as the legacy sites made it: a slice or a join of the steps, plain, uncharged as before)
+  const view = (made: readonly string[]): PathRef => arrayRef(contract, made);
+  const below = (from: number): PathRef => (from === 0 ? view(steps) : view(steps.slice(from)));
+  const above = (length: number): PathRef => view(steps.slice(0, length));
+  const text = (length: number): string =>
+    pathText(length === steps.length ? steps : steps.slice(0, length));
+  const after = (strip: readonly string[]): PathRef =>
+    strip.length === 0 ? view(steps) : view(joinSteps(strip, steps));
+  const id = (): number => {
+    let at = 0;
+    for (const step of steps) at = pathAt(contract, at, step);
+    return at;
+  };
+  return {
+    kind: "steps",
+    length: steps.length,
+    at: (index) => steps[index]!,
+    from: below,
+    to: above,
+    steps: () => steps,
+    text,
+    id,
+    name: () => pathText(steps),
+    after,
+    part: () => steps,
+    [Symbol.iterator]: () => steps[Symbol.iterator](),
+  };
+}
+
+/** The span of the arena's path `path` from its step `from` on, as a `PathRef`. */
+export function spanRef(contract: Contract, path: number, from = 0): PathRef {
+  const length = contract.pathDepths[path]! - from;
+  const ref: PathRef = {
+    kind: "span",
+    length,
+    at: (index) => contract.pathFirstSteps[spanId(contract, path, from + index)]!,
+    from: (more) => (more === 0 ? ref : spanRef(contract, path, from + more)),
+    to: (count) =>
+      count >= length
+        ? ref
+        : spanRef(contract, prefixId(contract, spanId(contract, path, from), count)),
+    steps: () => stepsOfId(contract, keyIdAt(0, path), from),
+    text: (count) => {
+      const parts: string[] = [];
+      for (let index = 0; index < count; index += 1) parts.push(ref.at(index));
+      return pathText(parts);
+    },
+    id: () => spanId(contract, path, from),
+    name: () => `.${spanId(contract, path, from)}`,
+    after: (strip) => {
+      if (strip.length === 0) return ref;
+      convert(contract, strip.length, 0, 0);
+      let base = 0;
+      for (const step of strip) base = pathAt(contract, base, step);
+      return spanRef(contract, joinedId(contract, base, spanId(contract, path, from)));
+    },
+    part: () => ref.name(),
+    // (one step at a time, as far as the reader goes)
+    *[Symbol.iterator]() {
+      for (let index = 0; index < length; index += 1) yield ref.at(index);
+    },
+  };
+  return ref;
 }
 
 /**
@@ -231,6 +640,91 @@ function compareSteps(
   return !moreY || dot < x.charCodeAt(at) ? 1 : -1;
 }
 
+/** A cursor token of a demand's name (`place#id`), and a span's name (`.id`, `PathRef.name`). */
+const CURSOR = /^\d+#\d+$/;
+const SPAN = /^\.\d+$/;
+
+/**
+ * Two demands' names in the order of their logical texts (#1398, the solver's `canonical`): a name holding a cursor
+ * (`place#id`) or a span's name (`.id`) compares as the name its key's text or its path's would make, made through the
+ * charged boundary once per name (`keyOfId`, `stepsOfId`) and kept, never by its ids; any other name as itself.
+ */
+export function compareDemandNames(contract: Contract, a: string, b: string): number {
+  if (a === b) return 0;
+  const [x, y] = [logicalName(contract, a), logicalName(contract, b)];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+function logicalName(contract: Contract, name: string): string {
+  if (!name.includes("#") && !name.includes("|.")) return name;
+  const known = contract.logicalNames.get(name);
+  if (known !== undefined) return known;
+  const tokens = name.split("|");
+  if (!tokens.some((token) => CURSOR.test(token) || SPAN.test(token))) return name;
+  const text = tokens
+    .map((token) =>
+      isCursorToken(token)
+        ? keyOfId(contract, token)
+        : SPAN.test(token)
+          ? pathText(stepsOfId(contract, keyIdAt(0, Number(token.slice(1)))))
+          : token,
+    )
+    .join("|");
+  convert(contract, 0, 0, 1);
+  contract.keepText(text.length);
+  contract.logicalNames.set(name, text);
+  return text;
+}
+
+/**
+ * Demands' names as another pass replays them (#1422 B1, `solveDemands`): each cursor's and span's token replaced by
+ * its index in one packet of their paths (`exportKeyIds`), made while this pass holds them, never their ids; `null`
+ * where no name holds one.
+ */
+export function exportNames(
+  contract: Contract,
+  names: readonly string[],
+): { readonly names: readonly string[]; readonly packet: KeyPacket } | null {
+  const ids: KeyId[] = [];
+  const index = new Map<string, number>();
+  const token = (part: string): string => {
+    const cursor = isCursorToken(part) ? part : null;
+    if (cursor === null && !SPAN.test(part)) return part;
+    let at = index.get(part);
+    if (at === undefined) {
+      index.set(part, (at = ids.length));
+      ids.push(cursor ?? keyIdAt(0, Number(part.slice(1))));
+    }
+    return cursor !== null ? `${keyIdPlace(cursor)}#${at}` : `.${at}`;
+  };
+  const made = names.map((name) => name.split("|").map(token).join("|"));
+  return ids.length === 0 ? null : { names: made, packet: exportKeyIds(contract, ids) };
+}
+
+/**
+ * Names a packet came with (`exportNames`) in this pass: its paths made here, parent first (`importKeyIds`), each
+ * cursor's token its key's text and each span's its path's, so this pass asks each demand in its own identity.
+ */
+export function importNames(
+  contract: Contract,
+  names: readonly string[],
+  packet: unknown,
+): string[] {
+  const ids = importKeyIds(contract, packet);
+  return names.map((name) =>
+    name
+      .split("|")
+      .map((part) =>
+        isCursorToken(part)
+          ? keyOfId(contract, ids[keyIdPath(part)]!)
+          : SPAN.test(part)
+            ? pathText(stepsOfId(contract, ids[Number(part.slice(1))]!))
+            : part,
+      )
+      .join("|"),
+  );
+}
+
 /**
  * Cursors as a JSON-safe packet any pass reads back (`importKeyIds`), never their ids: each path node once, after its
  * parent, as its parent's index (-1 the empty path) and its step, and each key as its place and its path's node (-1 the
@@ -243,24 +737,41 @@ export interface KeyPacket {
 }
 
 export function exportKeyIds(contract: Contract, ids: readonly KeyId[]): KeyPacket {
-  const index = new Map<number, number>([[0, -1]]);
-  const nodes: (readonly [number, string])[] = [];
-  const keys: (readonly [PlaceId, number])[] = [];
-  for (const id of ids) {
-    const path = keyIdPath(id);
-    // (the path's nodes not in the packet yet, the deepest first)
-    const way: number[] = [];
-    for (let at = path; !index.has(at); at = contract.pathParents[at]!) way.push(at);
-    convert(contract, way.length + 1, 0, way.length + 1);
-    for (let at = way.length - 1; at >= 0; at -= 1) {
-      const node = way[at]!;
-      const step = contract.pathLastSteps[node]!;
-      index.set(node, nodes.length);
-      nodes.push([index.get(contract.pathParents[node]!)!, step]);
-    }
-    keys.push([keyIdPlace(id), index.get(path)!]);
+  const packet = keyPacket();
+  for (const id of ids) appendKeyId(contract, packet, id);
+  return packet;
+}
+
+/** A packet made one cursor at a time (`appendKeyId`), its nodes' indexes by path id kept with it. */
+export interface KeyPacketMaking extends KeyPacket {
+  readonly index: Map<number, number>;
+  readonly nodes: (readonly [number, string])[];
+  readonly keys: (readonly [PlaceId, number])[];
+}
+
+export function keyPacket(): KeyPacketMaking {
+  return { index: new Map([[0, -1]]), nodes: [], keys: [] };
+}
+
+/**
+ * One cursor more in a packet (`exportKeyIds`): its path's nodes not in it yet, parent first, each node and the key an
+ * entry charged; its key's index in the packet.
+ */
+export function appendKeyId(contract: Contract, packet: KeyPacketMaking, id: KeyId): number {
+  const { index, nodes, keys } = packet;
+  const path = keyIdPath(id);
+  // (the path's nodes not in the packet yet, the deepest first)
+  const way: number[] = [];
+  for (let at = path; !index.has(at); at = contract.pathParents[at]!) way.push(at);
+  convert(contract, way.length + 1, 0, way.length + 1);
+  for (let at = way.length - 1; at >= 0; at -= 1) {
+    const node = way[at]!;
+    const step = contract.pathLastSteps[node]!;
+    index.set(node, nodes.length);
+    nodes.push([index.get(contract.pathParents[node]!)!, step]);
   }
-  return { nodes, keys };
+  keys.push([keyIdPlace(id), index.get(path)!]);
+  return keys.length - 1;
 }
 
 /** A packet's entry as its two parts, unread, or `null` (`importKeyIds`). */

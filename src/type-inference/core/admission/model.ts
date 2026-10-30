@@ -1,6 +1,7 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { CarrierRole } from "../carriers.js";
 import type { Label } from "../contract/labels.js";
+import type { KeyId, PathRef } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -445,7 +446,8 @@ export interface Candidate {
 /** What decides a place (§5): the kinds, by a written type, a written copy's (A4) or the first definite store's. */
 export interface Decision {
   readonly root: PlaceId;
-  readonly path: readonly string[];
+  /** Its path's steps; `null` for a cursor's (G3 stage 1: its steps the arena's, never made). */
+  readonly path: readonly string[] | null;
   /** Its path's label, as a recipe: its text made only where a diagnostic or a check shows it (`labelText`). */
   readonly label: Label;
   readonly tags: readonly ItemTag[];
@@ -466,11 +468,19 @@ export interface Decision {
   readonly published: boolean;
 }
 
-/** A path's stores: the direct ones and the prefixes whole stores or adds reach (`inputsOf`). */
+/** A path's stores: the direct ones and the prefixes whole stores or adds reach (`inputsOf`), each with its rest. */
 export type Inputs = {
   readonly direct: readonly Candidate[];
-  readonly prefixes: readonly { readonly key: Key; readonly rest: readonly string[] }[];
+  readonly prefixes: readonly { readonly key: Key; readonly rest: PathRef }[];
 };
+
+/**
+ * A path admission decides (`groups`): a place and the steps below it; or, where its family is a wrapper's (`keyLane`),
+ * its key's cursor alone, whose steps are the arena's and never made (G3 stage 1).
+ */
+export type DecidedAt =
+  | { readonly root: PlaceId; readonly path: readonly string[]; readonly key?: undefined }
+  | { readonly root: PlaceId; readonly path?: undefined; readonly key: KeyId };
 
 /** A decision before it is recorded and its candidates taken (`decided`). */
 export interface Decided {

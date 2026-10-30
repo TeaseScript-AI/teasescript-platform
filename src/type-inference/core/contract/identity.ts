@@ -1,15 +1,8 @@
 import type { PlaceId } from "../../graph.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import {
-  keptKey,
-  keptKeyBelow,
-  keyBelow,
-  keyOf,
-  keyPath,
-  keyPlace,
-  type Key,
-} from "../definitions.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
+import { isKeyId, keptKeyBelowIn, keyBelowIn, keyStepsIn } from "./key-ids.js";
 import { methodCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import { holderAt, holderOfKey, newHolder } from "./marks.js";
@@ -48,8 +41,9 @@ export function copiedKey(contract: Contract, value: PlaceId): Key | null {
   }
   for (let index = pending.length - 1; index >= 0; index -= 1) {
     const at = pending[index]!;
+    // (a wrapper's family's key its owner's cursor's child: `keyBelowIn`)
     if (below !== null)
-      below = keptKeyBelow(contract.work, below, [stepName(program.projOf.get(at)!.step)]);
+      below = keptKeyBelowIn(contract, below, [stepName(program.projOf.get(at)!.step)]);
     contract.keep(1);
     contract.copiedKeys.set(at, below);
   }
@@ -183,7 +177,7 @@ function rootOfPlace(
   for (let index = chain.length - 1; index >= 0; index -= 1) {
     const link = chain[index]!;
     top = {
-      key: keptKeyBelow(contract.work, top.key, keyPath(link.up)),
+      key: keptKeyBelowIn(contract, top.key, keyStepsIn(contract, link.up)),
       guarded: top.guarded || link.guarded,
     };
     contract.aliases.set(link.place, top);
@@ -218,7 +212,11 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
     });
     program.work.charge("invSteps");
     const top = rootOfPlace(contract, keyPlace(at));
-    const rooted = keptKeyBelow(contract.work, top.key, keyPath(at));
+    // (a cursor of a place that is no alias is its own rooted key; any other key's steps below its place's root)
+    const rooted =
+      isKeyId(at) && top.key === keyOf(keyPlace(at), [])
+        ? at
+        : keptKeyBelowIn(contract, top.key, keyStepsIn(contract, at));
     keepText(contract.work, rooted.length + 1);
     let identity: Identity = {
       id: `k${rooted}`,
@@ -249,9 +247,9 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
         stores.also.length === 0
           ? stores.list[0]!
           : null;
-      const path = keyPath(rooted);
+      const path = keyStepsIn(contract, rooted);
       if (entry !== null && entry.key !== undefined) {
-        inner = keyBelow(entry.key, path);
+        inner = keyBelowIn(contract, entry.key, path);
         chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
       } else if (entry !== null && entry.value !== undefined) {
         // (the lifted holder's reference keeps it as its shift, charged as kept)

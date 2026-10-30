@@ -18,6 +18,7 @@ import { gatherAt, gatherCount, selectionPiece } from "./gather.js";
 import { OPAQUE_MEMBER, unknownItem } from "./kinds.js";
 import { nodeAt, pathAt } from "./literal-index.js";
 import type { GatherSite, IndexNode, IndexSite, LiteralIndex } from "./model.js";
+import { restPart, restRef, restSteps, type Rest } from "./key-ids.js";
 import { selectionOf, selectionPieces } from "./selections.js";
 
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
@@ -54,12 +55,14 @@ function lackingAt(
 export function* indexItems(
   contract: Contract,
   literal: PlaceId,
-  rest: readonly string[],
+  asked: Rest,
   node: FlowNode | null,
   exact: boolean,
   below = false,
 ): Work<readonly Item[]> {
   const { program } = contract.pass;
+  // (a cursor's span read one step at a time as far as the index goes, its rests views: G3 stage 1)
+  const rest = restRef(contract, asked);
   const index = contract.literalIndex(literal);
   // an element cell, or a literal read as one (`below`): every path below lies below an element step
   const inElement = below || program.cellOwner.get(literal)?.kind === "cell";
@@ -75,12 +78,12 @@ export function* indexItems(
   ];
   for (let length = 0; length < rest.length; length += 1) {
     const above = paths[length]!;
-    const at = above?.at.children.get(rest[length]!);
-    paths.push(
-      above === null || at === undefined
-        ? null
-        : { id: pathAt(contract, above.id, rest[length]!), at },
-    );
+    const at = above === null ? undefined : above.at.children.get(rest.at(length));
+    if (above === null || at === undefined) {
+      paths.push(null);
+      break;
+    }
+    paths.push({ id: pathAt(contract, above.id, rest.at(length)), at });
   }
   for (const [tag, token] of paths[rest.length]?.at.terms ?? []) {
     out.push(makeItem(tag, token));
@@ -89,13 +92,14 @@ export function* indexItems(
   let elementAbove = inElement;
   for (let length = 0; length <= rest.length; length += 1) {
     program.work.charge("invSteps");
-    if (length > 0 && rest[length - 1] === "element") elementAbove = true;
+    if (length > 0 && rest.at(length - 1) === "element") elementAbove = true;
     const prefix = paths[length];
     if (prefix === null || prefix === undefined) break;
     const path = prefix.id;
     // (the rest below the path, made only for an entry that stands there)
-    let tail: readonly string[] | undefined;
-    const after = (): readonly string[] => (tail ??= rest.slice(length));
+    let tail: Rest | undefined;
+    const after = (): Rest =>
+      (tail ??= rest.kind === "span" ? rest.from(length) : restSteps(asked).slice(length));
     if (!exact) {
       // (each kind read one by one, or past `WIDE` of them as a tree of demands, so a ring of copies through a wide
       // literal changes only the nodes above each changed read, never the whole literal, #1229)
@@ -128,7 +132,7 @@ export function* indexItems(
       sources += (copies ?? prefix.at.exact).length + prefix.at.others.length;
     }
     // V30 §19, r4.46 (1): a choice object's button value, per record alternative here
-    const step = rest[length];
+    const step = length < rest.length ? rest.at(length) : undefined;
     if (step === SELECTED_VALUE || step === SELECTED_TEXT) {
       const selected = yield* selectedAt(
         contract,
@@ -136,7 +140,7 @@ export function* indexItems(
         index,
         path,
         step === SELECTED_VALUE,
-        rest.slice(length + 1),
+        restSteps(asked).slice(length + 1),
         node,
         exact,
         elementAbove,
@@ -149,7 +153,7 @@ export function* indexItems(
     }
     if (length === rest.length) break;
     // F11: an object here without the next step contributes `missing`; a reference, an opaque member (F19a)
-    const lacking = lackingAt(contract, index, path, rest[length]!);
+    const lacking = lackingAt(contract, index, path, rest.at(length));
     if (lacking !== null)
       out.push(
         exact
@@ -159,7 +163,7 @@ export function* indexItems(
     if (prefix.at.reference) out.push(exact ? OPAQUE_MEMBER : unknownItem(REASON.opaque));
     // an empty collection on the way holds no element (the contract's M below it; the value's at its end)
     if (
-      rest[length] === "element" &&
+      rest.at(length) === "element" &&
       paths[length + 1]?.at.empty === true &&
       (!exact || length === rest.length - 1)
     )
@@ -167,7 +171,7 @@ export function* indexItems(
   }
   // S3 §1's route: past an element step over a copy the contract answered (F12)
   if (exact && overCopy)
-    contract.overCopy.add(contract.kept(joinParts(literal, rest, node?.id ?? "-")));
+    contract.overCopy.add(contract.kept(joinParts(literal, restPart(asked), node?.id ?? "-")));
   // §3.4 r4.11: the X word is the read's (`member` past an element step over a copy), shared by every known-kind
   // item, definite ones included, whatever its writer; an unknown keeps its reason's word. Past an element step that
   // gathers several elements the element read makes each kind only possible: its word too, by the precedence
@@ -175,7 +179,7 @@ export function* indexItems(
     return out.map((item) =>
       item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
     );
-  return exact && sources > 1 && (inElement || rest.includes("element"))
+  return exact && sources > 1 && (inElement || restSteps(asked).includes("element"))
     ? out.map((item) =>
         item.tag === "unknown" || item.tag === "empty"
           ? item
@@ -232,7 +236,7 @@ function* selectedAt(
 export function* contractOfLiteral(
   contract: Contract,
   literal: PlaceId,
-  rest: readonly string[],
+  rest: Rest,
 ): Work<readonly Item[]> {
   const { program, definitions } = contract.pass;
   if (!program.hasOf.has(literal) && (definitions.cellDefs.get(literal) ?? []).length === 0)

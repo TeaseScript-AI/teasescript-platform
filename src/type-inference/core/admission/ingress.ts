@@ -1,7 +1,8 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, joinSteps, keepText, pathText, stepText } from "../budget.js";
-import { keyBelow, sortCost, type Definition } from "../definitions.js";
+import { keyBelowIn } from "../contract/key-ids.js";
+import { sortCost, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item } from "../items.js";
 import { concrete, isExternal } from "./kinds.js";
@@ -256,7 +257,7 @@ export function namedExternalSite(
     const source = sourceOf(admission, stop.value);
     if (source === null || inline.has(stop.value)) continue;
     const path = joinSteps(stop.strip, rest);
-    const key = keyBelow(source, path);
+    const key = keyBelowIn(contract, source, path);
     if (withoutEmpty(admission.run(contract.contractOf(key))).some(concrete)) continue;
     if (admission.run(values.valueItems(stop.value, stop.node, path)).some(isExternal))
       // (an operation's own read: the destination's check at the store's value, TABLE r4.63 (3))

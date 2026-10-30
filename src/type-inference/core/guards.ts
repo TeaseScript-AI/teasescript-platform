@@ -4,6 +4,7 @@ import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
 import { joinSteps, keepText, keptText } from "./budget.js";
 import {
+  isCursor,
   KeyTrie,
   keptKey,
   keptPrefixes,
@@ -531,6 +532,12 @@ export class GuardIndex {
   public narrowed(key: Key, node: FlowNode): boolean {
     const program = this.program;
     if (!program.reached(node)) return false;
+    // (G3 stage 1: a wrapper's key is its cursor, and no test names a key of a wrapper's binding: `wrapperShape`)
+    if (isCursor(key)) {
+      const place = keyPlace(key);
+      if (this.untested(program.occurrenceOf.get(place) ?? place)) return false;
+      throw new Error(`The key cursor '${key}' was asked of a tested binding's guards.`);
+    }
     const asked = recordKey(key);
     // (G3 3b: the tested keys at or above it, by one walk of its steps; an untested one guards nothing)
     for (const tested of this.#tested.above(asked, true)) {
@@ -652,6 +659,8 @@ export class GuardIndex {
     const binding = program.occurrenceOf.get(current);
     const node = program.occNode.get(current);
     if (binding === undefined || node === undefined || node === null) return false;
+    // (a binding no test names guards no read of it, at whatever path: no key made, G3 stage 1)
+    if (this.untested(binding)) return false;
     return this.narrowed(keyOf(binding, joinSteps(steps.reverse(), rest)), node);
   }
 

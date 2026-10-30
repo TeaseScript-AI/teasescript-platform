@@ -12,13 +12,13 @@ import {
   pathText,
   stepText,
 } from "../budget.js";
+import { keyStepsIn } from "../contract/key-ids.js";
 import { defaultOf, typeTags, type IndexNode } from "../contract.js";
 import {
   joinedOperand,
   keptKey,
   keptPath,
   keyOf,
-  keyPath,
   keyPlace,
   SELECTED_TEXT,
   SELECTED_VALUE,
@@ -777,7 +777,8 @@ export function joinElements(
     ): { readonly place: PlaceId; readonly path: readonly string[] } | null => {
       if (stored(operand)) return target!;
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
-      return key === null ? null : { place: keyPlace(key), path: keyPath(key) };
+      // (a cursor's steps through the charged boundary, G3 stage 1)
+      return key === null ? null : { place: keyPlace(key), path: keyStepsIn(contract, key) };
     };
     // (the left operand that reads the place the tree is stored into, a `+=`'s or `xs = xs + …`'s: a strict written
     // destination, whose type holds only what it holds)

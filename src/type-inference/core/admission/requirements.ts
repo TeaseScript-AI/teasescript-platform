@@ -2,7 +2,7 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { keep, keptSlice } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey } from "../definitions.js";
+import { keptKeyAt } from "../contract/key-ids.js";
 import { propertyName, propertyStep, type CoreProgram } from "../program.js";
 import { copiedAt } from "./decision.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
@@ -31,7 +31,9 @@ export function storeRequirement(
   const written = writtenOf(admission.pass.program.place(place).kind);
   const term = written === null ? null : permittedAt(written, path);
   if (term !== null) return term;
-  const copied = stopped ? null : copiedAt(admission, keptKey(admission.work, place, path));
+  const copied = stopped
+    ? null
+    : copiedAt(admission, keptKeyAt(admission.pass.contract, place, path));
   return copied ?? (written === null && standing ? initialCopy(admission, place, path) : null);
 }
 

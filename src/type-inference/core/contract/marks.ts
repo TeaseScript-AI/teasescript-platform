@@ -1,21 +1,14 @@
 import type { PlaceId } from "../../graph.js";
 import { joinParts, joinSteps, keptText, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import {
-  keptKey,
-  keyBelow,
-  keyOf,
-  keyPath,
-  keyPlace,
-  recordPath,
-  sortCost,
-  type Key,
-} from "../definitions.js";
+import { keptKey, keyBelow, recordPath, sortCost, type Key } from "../definitions.js";
 import type { Callable } from "../flow-graph.js";
 import { marked } from "../guards.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { ABSENT } from "./kinds.js";
+import type { Rest } from "./key-ids.js";
+import { wrapperFacts } from "./wrapper-facts.js";
 import { indexPaths, pathBelow } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
 import { addSource, unionOf } from "./selections.js";
@@ -141,14 +134,10 @@ export function holderOfKey(contract: Contract, key: Key): Holder {
   const known = contract.holders.get(`k${key}`);
   if (known !== undefined) return known;
   const holder = newHolder(contract, `k${key}`);
-  const path = keyPath(key);
-  if (path.length > 0)
-    refer(
-      contract,
-      holder,
-      holderOfKey(contract, keyOf(keyPlace(key), path.slice(0, -1))),
-      path.slice(-1),
-    );
+  // (a cursor's parent and last step from the arena, G3 stage 1)
+  const parent = contract.keyParent(key);
+  if (parent !== null)
+    refer(contract, holder, holderOfKey(contract, parent), [contract.keyLast(key)!]);
   return holder;
 }
 
@@ -353,6 +342,9 @@ function collectAll(contract: Contract): void {
   for (const d of stores) {
     program.work.charge("invSteps");
     if (d.value === undefined || !lists.live(d)) continue;
+    // (G3 stage 1: a copy of a read of a binding no test names, which may be a wrapper, marks nothing: its key, never in
+    // `belowTested`, is not made here, while the marks are built, before its family's lane may be known: `keyLane`)
+    if (copiesUntested(contract, d.value)) continue;
     const copied = contract.copiedKey(d.value);
     if (copied === null || !guards.belowTested.has(copied)) continue;
     const holder = contract.identityOf(d.value).holder;
@@ -373,6 +365,29 @@ function collectAll(contract: Contract): void {
         if (entry.holder !== null) refer(contract, holder, entry.holder, [], path);
       }
   }
+}
+
+/**
+ * Whether a value copies a key of a binding that may be a wrapper (`wrapperFacts`) and that no test names
+ * (`GuardIndex.untested`), so no key of it is below a tested one: its projections followed to the read they start from.
+ */
+function copiesUntested(contract: Contract, value: PlaceId): boolean {
+  const { program, guards } = contract.pass;
+  let at = value;
+  let first: string | null = null;
+  for (let projection = program.projOf.get(at); projection !== undefined;) {
+    if (projection.step === "iteration") return false;
+    first = stepName(projection.step);
+    at = projection.owner;
+    projection = program.projOf.get(at);
+  }
+  const binding = program.occurrenceOf.get(at);
+  return (
+    binding !== undefined &&
+    first !== null &&
+    wrapperFacts(contract, binding, first) &&
+    guards.untested(binding)
+  );
 }
 
 /**
@@ -435,15 +450,18 @@ export function depthOf(contract: Contract, holder: Holder): number {
  * holder once at the path and `ABSENT`. k references asked below k different properties are asked once each, not
  * k times.
  */
-export function marksAt(
-  contract: Contract,
-  holder: Holder | null,
-  read: readonly string[],
-): boolean {
+/** Whether a `Rest` is an array of steps (`key-ids.ts`' `isSteps`, which this module may not import). */
+function isPath(rest: Rest): rest is readonly string[] {
+  return Array.isArray(rest);
+}
+
+export function marksAt(contract: Contract, holder: Holder | null, asked: Rest): boolean {
   if (holder === null) return false;
   collectMarks(contract);
   // G3 3b: a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
   if (marksNothing(contract, holder)) return false;
+  // (a span's steps made through the charged boundary: a holder that marks nothing never asks them)
+  const read = isPath(asked) ? asked : asked.steps();
   const work = contract.pass.program.work;
   const tested = contract.pass.guards.testedSteps();
   const stack: {
@@ -670,7 +688,7 @@ export function annotated(
     readonly holder: Holder | null;
     readonly ingress: IngressNode | undefined;
   },
-  rest: readonly string[],
+  rest: Rest,
   items: readonly Item[],
 ): readonly Item[] {
   const ingress = contract.pass.program.scope.ingress;
