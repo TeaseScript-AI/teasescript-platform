@@ -885,9 +885,8 @@ test("each product a repair removed grows with the program in either order (#119
  * projections' members are gated at 64 → 128 and 128 → 256, the growing join an operand's first part (an `otherwise`'s
  * first side); a kept variable's and a copy's are reported, a variable read beside each join of distinct properties
  * growing on `main` too (#1384: about 3.4 total, `exactValues` 3.9). An `otherwise` holding the earlier join on its
- * later side is reported too: its charged work is linear, but on `main` too the fallback check makes its labels below
- * the charged length, 4.0 per doubling for any nested `otherwise` (#1433); the composition's own invariant is gated on
- * it below. (A literal's later element, the other later part, is #1192's accepted nested-literal product on `main`.)
+ * later side is gated below, with the composition's own invariant. (A literal's later element, the other later part, is
+ * #1192's accepted nested-literal product on `main`.)
  */
 test("a join's operand reaching an earlier join takes its composed type, its work linear either way (#1310)", () => {
   const gated = JOIN_REACH_FAMILIES.filter(
@@ -914,18 +913,27 @@ test("a join's operand reaching an earlier join takes its composed type, its wor
  * #1310: composing an operand's parts visits the smaller part only, so an earlier join growing with a chain is never
  * walked again where it stands as an operand's later part (`join-reach-choice-later-*`, an `otherwise`'s later side).
  * This gates that one operation, its visits (`partVisits`) at most 2.15 per doubling in either order; a walk of the
- * later part measures 3.9. It claims nothing about the shape: the shape's total is #1433's, the fallback check making
- * its labels below the charged length (4.0 per doubling, on `main` too), and the shape stays out of the gate above.
+ * later part measures 3.9. The same analyses gate the shape's total and counters, the sharing on: its fallback check
+ * makes each label below a fallback only where a check or warning names it, charged (#1433), so the shape's work is
+ * linear in the code units it makes too (the uncharged-work probe, outside CI; 4.0 per doubling before).
  */
-test("the composition of an operand's parts visits only its smaller part, on a shape whose total is #1433's (#1310)", () => {
-  const steep: string[] = [];
+test("the composition of an operand's parts visits only its smaller part, its shape's work linear (#1310, #1433)", () => {
   const later = JOIN_REACH_FAMILIES.filter((family) =>
     family.name.startsWith("join-reach-choice-later-"),
   );
   assert.equal(later.length, 6);
+  // (each analysis the counters' gate makes, kept for the visits')
+  const budgets = new Map<string, Measured>();
+  const steep = steepCounters(later, false, (at, reversed) => {
+    const { budget } = analysed(at, reversed);
+    budgets.set(`${at.name}${reversed ? " reversed" : ""}`, budget);
+    return budget;
+  });
   for (const family of later)
     for (const reversed of [false, true]) {
-      const [small, large] = [64, 128].map((k) => analysed(sized(family, k), reversed).budget);
+      const [small, large] = [64, 128].map((k) =>
+        budgets.get(`${family.name} at ${k}${reversed ? " reversed" : ""}`)!,
+      );
       const visits = (budget: Measured): number => budget.counts.get("partVisits") ?? 0;
       assert.ok(visits(large!) >= 128, `${family.name}: each link's parts composed`);
       const scale =
