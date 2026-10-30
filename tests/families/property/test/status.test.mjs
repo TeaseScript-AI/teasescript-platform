@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { summarize, exitCode, STATUSES } from "../lib/status.mjs";
-import { compare } from "../lib/compare.mjs";
+import { compare, toldApart } from "../lib/compare.mjs";
 for (const status of STATUSES)
   test(`status ${status} is not accidentally green`, () => {
     const result = summarize([{ status, executions: 0, assertions: 0 }]);
@@ -54,4 +54,17 @@ test("same row ID with different source or oracle inputs is never compared", () 
       ),
     /expectations/,
   );
+});
+
+test("a pair is told apart only when every failure on PRE is run and passes on POST", () => {
+  const rows = (...statuses) => statuses.map((status, i) => ({ id: `c${i}`, status }));
+  const apart = (pre, post) => toldApart(compare(pre, post));
+  assert.equal(apart(rows("FAIL", "PASS"), rows("PASS", "PASS")), true);
+  // review r1's witness: POST excludes every source and fixes nothing
+  assert.equal(apart(rows("FAIL", "PASS"), rows("UNSUPPORTED", "UNSUPPORTED")), false);
+  assert.equal(apart(rows("FAIL", "FAIL"), rows("PASS", "OUT_OF_SCOPE")), false);
+  assert.equal(apart(rows("FAIL", "PASS"), rows("PASS", "FAIL")), false);
+  assert.equal(apart(rows("FAIL", "ERROR"), rows("PASS", "PASS")), false);
+  assert.equal(apart(rows("FAIL", "PASS"), rows("PASS", "NOT_RUN")), false);
+  assert.equal(apart(rows("PASS"), rows("PASS")), false);
 });

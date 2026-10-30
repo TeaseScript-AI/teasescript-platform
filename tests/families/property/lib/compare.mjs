@@ -45,3 +45,20 @@ export function compare(base, head) {
       "Changes are scoped observations, not unique bug counts; incomplete configurations are never counted fixed.",
   };
 }
+/**
+ * Whether the family tells PRE from POST: every configuration that fails on PRE is run and passes on POST (an
+ * exclusion fixes nothing: a POST that excludes every source must not pass, #1477 review r1), none fails on POST, and
+ * no row of either lacks a verdict or an exclusion.
+ */
+export function toldApart(comparison) {
+  const { base, head, fixed } = comparison;
+  const incomplete = ({ counts }) =>
+    counts.ERROR + counts.TIMEOUT + counts.CANCELLED + counts.NOT_RUN;
+  return (
+    base.counts.FAIL > 0 &&
+    fixed.length === base.counts.FAIL &&
+    head.counts.FAIL === 0 &&
+    incomplete(base) === 0 &&
+    incomplete(head) === 0
+  );
+}

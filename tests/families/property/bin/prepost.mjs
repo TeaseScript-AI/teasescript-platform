@@ -4,13 +4,25 @@
 // One pre/post evaluation: builds PRE and POST (`prepare-build.mjs`, which gives a tree before #1427 the corpus runner's
 // oracle library from REF of `--library`), plans the profile, runs it on both builds, compares them, and, where both
 // trees hold the oracle library, runs the unextended corpus runner over the committed module (`tests/families/run.mjs
-// property`). Writes report.json and report.md. Exits 0 when the family tells the builds apart (scoped failures on PRE,
-// none on POST, every row of both run to a verdict), 1 when it does not, 2 when a step fails.
+// property`). Writes report.json and report.md. Exits 0 when the family tells the builds apart (`toldApart`: every
+// failure on PRE run and passing on POST, none on POST, every row of both a verdict or an exclusion), 1 when it does
+// not, 2 when a step fails. Both first signals, the family's first failure and the runner's first difference, are timed
+// from their step's start by the same watch of their output file.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setKey, sourceKey } from "../../sources.mjs";
+import { toldApart } from "../lib/compare.mjs";
 import { hash, readJson, writeJson } from "../lib/json.mjs";
 
 const bin = dirname(fileURLToPath(import.meta.url));
@@ -21,13 +33,14 @@ const steps = [];
 
 /**
  * A step's process: its exit, its output, its wall time and, where GNU time is installed, its CPU and peak RSS (the
- * largest process of the step, a waited-for child included). `watch`: a file whose first growth is timed.
+ * largest process of the step, a waited-for child included). `watch`: `{ file, text }`, timed to the first growth of
+ * the file that holds `text` (any growth without one), read as it grows.
  */
 async function step(name, command, args, watch) {
   const timing = join(out, `.time-${steps.length}`);
   const timed = existsSync(TIME);
   const started = performance.now();
-  let firstGrowthMs = null;
+  let firstMatchMs = null;
   const child = spawn(
     timed ? TIME : command,
     timed ? ["-f", "%e %U %S %M", "-o", timing, command, ...args] : args,
@@ -37,17 +50,29 @@ async function step(name, command, args, watch) {
   let stderr = "";
   child.stdout.on("data", (chunk) => (stdout += chunk));
   child.stderr.on("data", (chunk) => (stderr = (stderr + chunk).slice(-8000)));
+  let offset = 0;
+  let tail = "";
   const poll =
     watch === undefined
       ? null
       : setInterval(() => {
-          if (firstGrowthMs === null && existsSync(watch) && statSync(watch).size > 0)
-            firstGrowthMs = performance.now() - started;
+          if (firstMatchMs !== null || !existsSync(watch.file)) return;
+          const size = statSync(watch.file).size;
+          if (size <= offset) return;
+          const chunk = Buffer.alloc(size - offset);
+          const fd = openSync(watch.file, "r");
+          readSync(fd, chunk, 0, chunk.length, offset);
+          closeSync(fd);
+          offset = size;
+          const text = tail + chunk.toString("utf8");
+          if (watch.text === undefined || text.includes(watch.text))
+            firstMatchMs = performance.now() - started;
+          tail = text.slice(-(watch.text?.length ?? 0));
         }, 50);
   const code = await new Promise((done) => child.on("close", (exit) => done(exit)));
   clearInterval(poll);
   const record = { step: name, exit: code, wallMs: performance.now() - started };
-  if (watch !== undefined) record.firstGrowthMs = firstGrowthMs;
+  if (watch !== undefined) record.firstMatchMs = firstMatchMs;
   if (timed && existsSync(timing)) {
     const [, user, system, rss] = readFileSync(timing, "utf8").trim().split("\n").at(-1).split(" ");
     Object.assign(record, {
@@ -109,22 +134,29 @@ try {
   if (planned.code !== 0) throw new Error(`plan failed: ${planned.stderr}`);
   const plan = readJson(join(out, "plan.json"));
   const summaries = {};
+  const firstFailures = {};
   for (const side of ["pre", "post"]) {
-    await step(`run ${side}`, node, [
-      join(bin, "pilot.mjs"),
-      "run",
-      "--plan",
-      join(out, "plan.json"),
-      "--build",
-      join(out, `${side}-build`),
-      "--out",
-      join(out, side),
-      "--case-timeout-ms",
-      caseTimeout,
-    ]);
+    const ran = await step(
+      `run ${side}`,
+      node,
+      [
+        join(bin, "pilot.mjs"),
+        "run",
+        "--plan",
+        join(out, "plan.json"),
+        "--build",
+        join(out, `${side}-build`),
+        "--out",
+        join(out, side),
+        "--case-timeout-ms",
+        caseTimeout,
+      ],
+      { file: join(out, side, "results.jsonl"), text: '"status":"FAIL"' },
+    );
     if (!existsSync(join(out, side, "summary.json")))
       throw new Error(`run ${side} left no summary`);
     summaries[side] = readJson(join(out, side, "summary.json"));
+    firstFailures[side] = ran.record.firstMatchMs;
   }
   const compared = await step("compare", node, [
     join(bin, "compare.mjs"),
@@ -166,7 +198,7 @@ try {
         "--out",
         differences,
       ],
-      differences,
+      { file: differences },
     );
     const lines = ran.stdout.trim().split("\n").filter(Boolean).map(JSON.parse);
     const [preLibrary, postLibrary] = ["pre", "post"].map((side) =>
@@ -178,22 +210,13 @@ try {
       // (two libraries' projections may differ where the compilers do not)
       sameLibrary: preLibrary === postLibrary,
       total: lines.at(-1) ?? null,
-      // (the first difference or stall the runner records)
-      firstDifferenceMs: ran.record.firstGrowthMs,
+      // (from the step's start, the first difference or stall the runner records)
+      firstDifferenceMs: ran.record.firstMatchMs,
     };
   }
 
-  const incomplete = (summary) =>
-    summary.counts.ERROR +
-    summary.counts.TIMEOUT +
-    summary.counts.CANCELLED +
-    summary.counts.NOT_RUN;
-  const distinguished =
-    summaries.pre.counts.FAIL > 0 &&
-    summaries.post.counts.FAIL === 0 &&
-    incomplete(summaries.pre) === 0 &&
-    incomplete(summaries.post) === 0;
-  const side = (summary) => ({
+  const distinguished = toldApart(comparison);
+  const side = (summary, firstFailure) => ({
     verdict: summary.verdict,
     counts: summary.counts,
     executions: summary.actualRuntimeExecutions,
@@ -201,7 +224,9 @@ try {
     preflightMs: summary.preflightMs,
     adapterStartupsMs: summary.adapterStartupsMs,
     elapsedMs: summary.elapsedMs,
+    // (the first from the campaign's start, after the build's check; the second from the step's start, as the runner's)
     firstFailureMs: summary.firstFailureMs,
+    firstFailureFromStepStartMs: firstFailure,
   });
   const report = {
     schemaVersion: 1,
@@ -211,10 +236,11 @@ try {
     planHash: plan.planHash,
     node: process.versions.node,
     builds,
-    pre: side(summaries.pre),
-    post: side(summaries.post),
+    pre: side(summaries.pre, firstFailures.pre),
+    post: side(summaries.post, firstFailures.post),
     comparison: {
       fixed: comparison.fixed.length,
+      failingOnPreNotPassingOnPost: comparison.base.counts.FAIL - comparison.fixed.length,
       regressed: comparison.regressed.length,
       unchanged: comparison.unchangedCount,
       incomparable: comparison.incomparableCount,
@@ -232,7 +258,7 @@ try {
       "",
       `Pre ${builds.pre.commit ?? `tree ${builds.pre.tree}`}: ${summaries.pre.verdict}, ${counts(summaries.pre).join(", ")}`,
       `Post ${builds.post.commit ?? `tree ${builds.post.tree}`}: ${summaries.post.verdict}, ${counts(summaries.post).join(", ")}`,
-      `Compared: ${report.comparison.fixed} fixed, ${report.comparison.regressed} regressed, ${report.comparison.unchanged} unchanged, ${report.comparison.incomparable} incomparable`,
+      `Compared: ${report.comparison.fixed} fixed, ${report.comparison.failingOnPreNotPassingOnPost} failing on pre and not run to PASS on post, ${report.comparison.regressed} regressed, ${report.comparison.unchanged} unchanged, ${report.comparison.incomparable} incomparable`,
       `Runner: ${runner.status}${runner.total ? `, ${runner.total.differences} differences, ${runner.total.stalled} stalled` : ""}${runner.reason ? ` (${runner.reason})` : ""}${runner.sameLibrary === false ? " (the two trees' oracle libraries differ: a difference may be the projection's)" : ""}`,
       "",
       `Profile ${plan.profile}, seed ${plan.seed}, plan ${plan.planHash}, Node ${process.versions.node}.`,
