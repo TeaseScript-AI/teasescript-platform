@@ -1,9 +1,9 @@
 # Generator corpus
 
-The generators reviewers and builders used as evidence on the type core, kept so later builders rerun them. Not in CI:
-before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
-counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the sources of one
-recorded evidence run (#1446), and `check.mjs` checks that it does.
+The generators reviewers and builders used as evidence on the type core, kept so later builders rerun them. Their runs
+are not in CI: before a type-core review round, the builder runs the affected areas against the base and head builds
+and reports the counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the
+sources of one recorded evidence run (#1446), and `check.mjs` (in CI) checks that it does.
 
 ## Running an area
 
