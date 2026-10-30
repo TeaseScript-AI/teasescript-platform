@@ -4,6 +4,12 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## One member warning per access (#1469)
+
+The #1469 builder (Opus) edited one record of `cells.jsonl` by hand: `cp9-cells/r42/store-mixed-unknown-property`, a
+store into an object or host data, loses its second member-read warning at `target.other` (context `unknown`) and that
+warning's null-check, since one access owes one warning and check for its unknown kind (§4). No other record changed.
+
 ## Rule A2 where the copy meets the place (#1249, TABLE r4.131, r4.154)
 
 The #1249 builder (Opus) edited 10 records of `cells.jsonl` by hand, with no set revision yet: a property only copies
