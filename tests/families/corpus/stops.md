@@ -1,7 +1,8 @@
 # The desktop corpus: stops
 
-Kits and data on the desktop worker, indexed here and not imported: run each from its own folder there (`../README.md`,
-"Kept outside the repository").
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
 
 - `desktop:~/work/evidence/corpus/stops/owner-s8/`: the owner's independent S8 reviews. It holds the 75-source
   domain matrix, the every-allowance sweeps, the cache lifecycle probe and the JSON and load matrix. It is untrusted

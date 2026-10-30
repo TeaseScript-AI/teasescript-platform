@@ -1,7 +1,8 @@
 # The desktop corpus: limits across areas
 
-Kits and data on the desktop worker, indexed here and not imported: run each from its own folder there (`../README.md`,
-"Kept outside the repository").
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
 
 These kits read `tests/helpers/type-core-oracles` with `publishedAnswers(answers, bindings, request)` and run on trees
 from `main` `2960937a1` (#1446): `copies/astra-1423/` (`publication.mjs`, `route-check.mjs`), `copies/astra-1441/`,

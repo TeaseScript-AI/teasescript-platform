@@ -1,7 +1,8 @@
 # The desktop corpus: consumers
 
-Kits and data on the desktop worker, indexed here and not imported: run each from its own folder there (`../README.md`,
-"Kept outside the repository").
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
 
 - `desktop:~/work/evidence/corpus/consumers/sol-1455-r1/`: Sol's r1 of #1455 (#1436, object presence): the
   natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops

@@ -1,7 +1,8 @@
 # The desktop corpus: copies
 
-Kits and data on the desktop worker, indexed here and not imported: run each from its own folder there (`../README.md`,
-"Kept outside the repository").
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
 
 - `desktop:~/work/evidence/corpus/copies/astra-1423/`: Astra's r1 of #1423 (G3 part 2). It holds generators
   (`cases.mjs`, `families.mjs`, `stop-cases.mjs`, `route-cases.mjs`, `growth.mjs`), fixed case lists, and their

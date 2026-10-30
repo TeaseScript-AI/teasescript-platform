@@ -1,7 +1,8 @@
 # The desktop corpus: tooling
 
-Kits and data on the desktop worker, indexed here and not imported: run each from its own folder there (`../README.md`,
-"Kept outside the repository").
+Kits and data on the desktop worker, under `desktop:~/work/evidence/corpus/<area>/` with one README per area unless an
+entry names another path, indexed here and not imported: run each from its own folder there (`../README.md`, "Kept
+outside the repository").
 
 - `desktop:~/work/evidence/corpus/tooling/property-families/`: the owner's reviewer's property-family pilot (#1442;
   `property-family-pilot.zip`, sha256 `59ea4c55…`), whose portable parts are `tests/families/property/`. It also holds
