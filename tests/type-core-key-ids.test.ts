@@ -550,7 +550,7 @@ test("a member chain's key asked at each of its offsets in turn, cold, climbs it
   }
 });
 
-test("a member chain's work keeps its ratio to its text lane's from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the key side's member walk on a cursor adds no term that grows with the chain", () => {
+test("a member chain's work keeps its ratio to its text lane's within ×1.005 from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the two-size gate of the key side's member walk on a cursor", () => {
   // (each layer wraps the one before; `dicts` every third a dict below a property, read through its `values`)
   const chain = (n: number, dicts: boolean): string => {
     const lines = ["let seed: integer = 1", "let root = {f: seed}"];
