@@ -389,6 +389,8 @@ export class Contract {
   readonly shaping = new Set<string>();
   /** Per binding and first step, the lane its keys take this pass (`keyLane`). */
   readonly lanes = new Map<PlaceId, Map<string, KeyLane>>();
+  /** Per binding, the steps the program's facts leave a wrapper possible at, `null` at none (`wrapperFacts`). */
+  readonly wrapperSteps = new Map<PlaceId, ReadonlySet<string> | null>();
   /** How many computations of the identity layer and collections of marks are running (`settle`, `collectMarks`). */
   building = 0;
   /** Per projection, the key it copies, or `null` (`copiedKey`). */

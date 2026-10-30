@@ -19,6 +19,17 @@ export function wrapperFacts(
   binding: PlaceId,
   step: string | null = null,
 ): boolean {
+  let steps = contract.wrapperSteps.get(binding);
+  if (steps === undefined)
+    contract.wrapperSteps.set(binding, (steps = wrapperSteps(contract, binding)));
+  return steps !== null && (step === null || steps.has(step));
+}
+
+/**
+ * The steps `wrapperFacts` passes for a binding, `null` where its declaration rules a wrapper out: each found once per
+ * pass, by one walk of its literal's objects' properties.
+ */
+function wrapperSteps(contract: Contract, binding: PlaceId): ReadonlySet<string> | null {
   const { program, definitions } = contract.pass;
   const place = program.places[binding];
   if (
@@ -28,7 +39,7 @@ export function wrapperFacts(
     program.isHost(binding) ||
     program.speakerPlaces.has(binding)
   )
-    return false;
+    return null;
   const defs = definitions.byKey.get(keyOf(binding, [])) ?? [];
   const d = defs[0];
   if (
@@ -39,15 +50,23 @@ export function wrapperFacts(
     d.value === undefined ||
     !program.hasOf.has(d.value)
   )
-    return false;
-  if (step === null) return true;
-  return program.hasOf.get(d.value)!.every(({ type }) => {
-    if (type.kind !== "object") return false;
-    const property = (type.properties ?? []).find((each) => propertyStep(each.name) === step);
-    if (property === undefined || property.type.kind !== "ref") return false;
-    return (definitions.cellDefs.get(property.type.place) ?? []).some(
-      ({ value }) =>
-        value !== undefined && program.occurrenceOf.has(value) && !program.projOf.has(value),
-    );
-  });
+    return null;
+  // (the steps every object the literal holds has as a cell a read of a binding is stored in)
+  const objects: Set<string>[] = [];
+  for (const { type } of program.hasOf.get(d.value)!) {
+    const here = new Set<string>();
+    if (type.kind === "object")
+      for (const property of type.properties ?? [])
+        if (
+          property.type.kind === "ref" &&
+          (definitions.cellDefs.get(property.type.place) ?? []).some(
+            ({ value }) =>
+              value !== undefined && program.occurrenceOf.has(value) && !program.projOf.has(value),
+          )
+        )
+          here.add(propertyStep(property.name));
+    objects.push(here);
+  }
+  const [first, ...others] = objects;
+  return new Set([...(first ?? [])].filter((step) => others.every((each) => each.has(step))));
 }
