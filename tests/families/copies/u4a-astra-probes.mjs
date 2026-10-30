@@ -163,7 +163,6 @@ export const recorded = {
       "R/astra-m4-u4a-review/queue-final.sh:4",
     ],
     ["node ROOT/evidence/probes.mjs ROOT", "R/astra-m4-u4a-review/REPRODUCE.md:8"],
-    ["python3 evidence/summarize.py", "R/astra-m4-u4a-review/REPRODUCE.md:21"],
   ],
   sources: 90,
   sha256: "3fd208be26cc967a2b2596855e34fb7c861238dc41a54b079704c7dba8d8e9d4",

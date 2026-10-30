@@ -1,6 +1,6 @@
 // original subject origins, joins and argument-literal cases; astra-m4-s8d-review-r2-evidence, archived Python/shell
 // evidence (R/astra-m4-s8d-review-r2-evidence/make-cases.py).
-export const cases = (() => {
+const generated = (() => {
   let cases, expr, extra, family, form, literal, name, operand, pre, source, use, want;
   cases = [];
   function add(name, source) {
@@ -149,14 +149,34 @@ for (const input of [
   ["original/12/speaker-missing", "say player.badge\nexit\n"],
   ["original/13/profile", "say player.firstName\nexit\n"],
 ])
-  cases.push(input);
+  generated.push(input);
 
 // the globals the recorded run passed
 export const globals = ["hostValue"];
 
+// the applied repairs the runs compiled (globals []), as the round-2 capture shows them
+const captured = [
+  ["join-sum/emittedExample", 'let amount = 8\nsay "L:${(amount-3)*2}:R"\nexit\n', []],
+  ["join-index/emittedExample", 'let scores = [6, 11]\nsay "L:${scores[1]}:R"\nexit\n', []],
+  ["join-nested-quotes/emittedExample", 'say "L:${toInteger("23")}:R"\nexit\n', []],
+  ["join-escaped-quotes/emittedExample", 'say "L:${"x\\"y".length}:R"\nexit\n', []],
+  ["join-member/emittedExample", 'let pouch = {coins: 14}\nsay "L:${pouch.coins}:R"\nexit\n', []],
+  [
+    "join-call/emittedExample",
+    'function award(x) { return x*3 }\nsay "L:${award(4)}:R"\nexit\n',
+    [],
+  ],
+  ["join-dict-literal/emittedExample", 'say "L:${dict{"x": 17}["x"]}:R"\nexit\n', []],
+  ["join-quantity/emittedExample", 'say "L:${750 ms}:R"\nexit\n', []],
+];
+export const cases = [...generated, ...captured];
+
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  commands: [['node review.mjs "$PWD" 0', "R/astra-m4-s8d-review-r2.md:91"]],
-  sources: 102,
-  sha256: "5038583ed158d74e320fa6c9470f301ecd768e3bcb9ad622437baf5fbb4d78dd",
+  commands: [
+    ['node review.mjs "$PWD" 0', "R/astra-m4-s8d-review-r2.md:91"],
+    ['node review.mjs "$PWD" 1', "R/astra-m4-s8d-review-r2.md:91"],
+  ],
+  sources: 110,
+  sha256: "516a777c0f72ac58d2d537a7d5cc15bfb3cfe4730a66fbf392201cd605e91f53",
 };

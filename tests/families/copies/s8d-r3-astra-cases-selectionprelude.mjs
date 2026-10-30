@@ -1,5 +1,5 @@
 // complete selection/property matrix; Astra review, r3 (R/astra-m4-s8d-r3-evidence/cases.mjs).
-export const cases = [
+const generated = [
   [
     "000",
     'let value = "unrelated"\nlet sample = {tags: ["omitted"], title: "Harbor", count: 8}\nlet rack = [sample]\nlet cabinet = {rack: rack}\nlet boxes = [{item: sample}]\nlet position = 0\nfunction readSample { return rack[0] }\nsay "${sample}"\nexit\n',
@@ -677,12 +677,107 @@ export const checks = ["publication"];
 // the globals the recorded run passed
 export const globals = ["hostValue"];
 
+// the applied repairs the runs compiled (globals []), as the round-2 capture shows them
+const captured = [
+  [
+    "selection/root-random/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets.random\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/deep-random/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = cabinet.shelves.random\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/computed-index/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets[offset - 0]\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/call-root/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = readSample()\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/fixed/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\n\nif baskets[1].length > 0 { say baskets[1].first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/parenthesised/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\n\nif baskets[1].length > 0 { say (baskets[1]).first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/first-after-index/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = [baskets][0].last\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    'selection/key-anchor\\"point/applied.fixed',
+    'let lookup = dict{"anchor\\"point": [73], "empty": []}\n\nif lookup[ "anchor\\"point" ].length > 0 { say lookup[ "anchor\\"point" ].first }\n\nexit\n',
+    [],
+  ],
+  [
+    "selection/key-esc\\\\ape/applied.fixed",
+    'let lookup = dict{"esc\\\\ape": [73], "empty": []}\n\nif lookup[ "esc\\\\ape" ].length > 0 { say lookup[ "esc\\\\ape" ].first }\n\nexit\n',
+    [],
+  ],
+  [
+    "selection/new-variable/applied.fixed",
+    'let value = "untouched"\nlet baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets.random\nif checkedSelection.length > 0 { say checkedSelection.first }\nsay value\nexit\n',
+    [],
+  ],
+  [
+    "selection/middle-random/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = containers.random.bin.last\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/index-random/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets[slots.random]\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/call-index/applied.fixed",
+    'let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets[toInteger("1")]\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n',
+    [],
+  ],
+  [
+    "selection/remove-call/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = baskets.removeLast()\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/plain-index/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\n\nif baskets[offset].length > 0 { say baskets[offset].first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/inner-parenthesised/applied.fixed",
+    "let baskets: integer[][] = [[], [73]]\nlet cabinet = {shelves: baskets}\nlet containers = [{bin: baskets}]\nlet slots = [0, 1]\nlet offset = 1\nfunction readSample { return baskets.random }\nlet checkedSelection = (baskets)[1]\nif checkedSelection.length > 0 { say checkedSelection.first }\n\nexit\n",
+    [],
+  ],
+  [
+    "selection/key-cost$net/applied.fixed",
+    'let lookup = dict{"cost$net": [73], "empty": []}\n\nif lookup[ "cost$net" ].length > 0 { say lookup[ "cost$net" ].first }\n\nexit\n',
+    [],
+  ],
+  [
+    "selection/key-has space/applied.fixed",
+    'let lookup = dict{"has space": [73], "empty": []}\n\nif lookup[ "has space" ].length > 0 { say lookup[ "has space" ].first }\n\nexit\n',
+    [],
+  ],
+];
+export const cases = [...generated, ...captured];
+
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
   commands: [
     ["node review.mjs <root> 0", "R/astra-m4-s8d-review-r3.md:64"],
-    ["node base/tools/probe.mjs --run --json <source>", "R/astra-m4-s8d-review-r3.md:64"],
+    ["node review.mjs <root> 1", "R/astra-m4-s8d-review-r3.md:64"],
   ],
-  sources: 172,
-  sha256: "31df220c0efc39febb95ad282099a7a060eac4c9eaadb9b49ec93bd5f2c69a16",
+  sources: 190,
+  sha256: "745cd7b622f210e5e1857a66aabb73d8422815018e87cf8bd183ff672890eb98",
 };

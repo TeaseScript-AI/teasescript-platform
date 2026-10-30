@@ -301,13 +301,151 @@ const review = [
 
 // the review analysed its own programs with hostValue and hostOther, and its archived pastes and spot cases with
 // hostValue alone
-export const cases = review.map(([name, source]) =>
+const generated = review.map(([name, source]) =>
   name.startsWith("archived paste/") || name.startsWith("spot.json/")
     ? [name, source, ["hostValue"]]
     : [name, source],
 );
 export const globals = ["hostValue", "hostOther"];
 export const checks = ["publication"];
+
+// review.mjs cases analysed its cases again with the default globals (job 2 of the round-2 capture)
+const captured = [
+  [
+    "null-0/source",
+    "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = 2 * (3 + (n * 4))\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "null-1/source",
+    "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = -(2 + -n)\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "null-2/source",
+    "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = ({outer: {v: 2 * (n + 1)}}).outer.v\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "null-3/source",
+    'let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = "${2 * (n + 1)}".length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "null-4/source",
+    "let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = [1 .. (n + 1)].length\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "null-5/source",
+    'let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = "${n is integer}".length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "null-6/source",
+    'let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = dict{["${n + 1}"]: 3}.keys.length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "null-7/source",
+    'let ns = [2, null]\nlet n = ns[1]\nlet converted: duration = toInteger("${n + 1}", default: 1)\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "present-0/source",
+    "let n = 2\nlet converted: duration = 2 * (3 + (n * 4))\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "present-1/source",
+    "let n = 2\nlet converted: duration = -(2 + -n)\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "present-2/source",
+    "let n = 2\nlet converted: duration = ({outer: {v: 2 * (n + 1)}}).outer.v\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "present-3/source",
+    'let n = 2\nlet converted: duration = "${2 * (n + 1)}".length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "present-4/source",
+    "let n = 2\nlet converted: duration = [1 .. (n + 1)].length\nsay converted\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "present-5/source",
+    'let n = 2\nlet converted: duration = "${n is integer}".length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "present-6/source",
+    'let n = 2\nlet converted: duration = dict{["${n + 1}"]: 3}.keys.length\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "present-7/source",
+    'let n = 2\nlet converted: duration = toInteger("${n + 1}", default: 1)\nsay converted\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "warning-0/source",
+    "let ns = [2, null]\nlet n = ns[1]\nsay 2 * (3 + (n * 4))\nexit\n",
+    ["hostValue"],
+  ],
+  ["warning-1/source", "let ns = [2, null]\nlet n = ns[1]\nsay -(2 + -n)\nexit\n", ["hostValue"]],
+  [
+    "warning-2/source",
+    "let ns = [2, null]\nlet n = ns[1]\nsay ({outer: {v: 2 * (n + 1)}}).outer.v\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "warning-3/source",
+    'let ns = [2, null]\nlet n = ns[1]\nsay "${2 * (n + 1)}"\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "warning-4/source",
+    "let ns = [2, null]\nlet n = ns[1]\nfor i in 1 .. (n + 1) { say i }\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "warning-5/source",
+    "let ns = [2, null]\nlet n = ns[1]\nsay (n + 1) is integer\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "warning-6/source",
+    'let ns = [2, null]\nlet n = ns[1]\nlet d = dict{["${n + 1}"]: 3}\nsay d.keys\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "warning-7/source",
+    "let ns = [2, null]\nlet n = ns[1]\nfunction f(x: integer) { say x }\nf(2 * (n + 1))\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "warning-8/source",
+    'let ns = [2, null]\nlet n = ns[1]\nsay toInteger("${n + 1}", default: 1)\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "typed-result/source",
+    "function f: duration { return 2 * (3 + ([2, null].random * 4)) }\nsay f()\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "compound-null/source",
+    "let n = [2, null].random\nlet d = 1 s\nd = 2 * (n + 1)\nsay d\nexit\n",
+    ["hostValue"],
+  ],
+  ["written-type/source", "let x: integer | number = 3\nsay x\nexit\n", ["hostValue"]],
+  ["same-site-list-plus/source", 'let xs = [1]\nsay xs + "x"\nexit\n', ["hostValue"]],
+];
+export const cases = [...generated, ...captured];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
@@ -318,6 +456,6 @@ export const recorded = {
     ["review.mjs stops", "R/astra-m4-i1241-review-r4/COMMANDS:9"],
     ["review.mjs growth", "R/astra-m4-i1241-review-r4/COMMANDS:10"],
   ],
-  sources: 89,
-  sha256: "16e5e3261c70f11d75d75d7a1f57aba5cb0b36774a0bbbe78c71980c7421c659",
+  sources: 118,
+  sha256: "3d760035a349b1e6e2f42f65cba7658c8776002b973fe81cc472797cdfdf52d7",
 };

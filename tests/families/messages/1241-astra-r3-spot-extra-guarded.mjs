@@ -1,5 +1,5 @@
-// guarded/nested diagnostics and retained fixture controls; #1241, Astra review, r3
-// (R/astra-m4-i1241-review-r3/spot-extra.mjs).
+// guarded/nested diagnostics; #1241, Astra review, r3 (R/astra-m4-i1241-review-r3/spot-extra.mjs). Its run also
+// compiled five rows of the repository's type-core fixture as controls, which the corpus does not copy (README).
 export const cases = [
   [
     "guarded@4",
@@ -12,23 +12,6 @@ export const cases = [
   [
     "nesting.json/input",
     'let outer: duration = 2\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nif hostValue == 1 {\nlet inner: duration = 2\nsay "${hostValue}"\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\n}\nexit',
-  ],
-  ["original fixture/cp9-cells/F1/let", "let n = 1\nrepeat n {}\nexit\n"],
-  [
-    "original fixture/cp9-cells/C5a/possible-null",
-    'let x = "s"\nif askBoolean("Clear?") { x = null }\nsay x.length\nexit\n',
-  ],
-  [
-    "original fixture/cp9-cells/r46/guard/early-unrelated-key/counterpart",
-    "let n = 2.0\nlet other = 2.0\nif other is not integer { exit }\nlet whole: integer = n\nexit\n",
-  ],
-  [
-    "original fixture/cp9-cells/r46/m3/astra-m3/routes/read-null-kind",
-    'let flagHost = askBoolean "flag"\nlet value:integer|string|null=null\nif flagHost {value=4}\nsay value.length\nexit\n',
-  ],
-  [
-    "original fixture/cp9-cells/s9b/f18-held/computed-key/null-default",
-    'let key = "k"\nlet result = load(key, default: null)\nsay result\nrepeat result {}\nsay "after"\nexit\n',
   ],
 ];
 
@@ -45,6 +28,6 @@ export const recorded = {
       "R/astra-m4-i1241-review-r3/COMMANDS:7",
     ],
   ],
-  sources: 8,
-  sha256: "071f2842aabd3f18cbb04100c7ecf970654ec652970ff7ddb765d2a2f353ce23",
+  sources: 3,
+  sha256: "50b8e411849cc6b599bdc9cf7850e44c954ac6262458fe2d997fae19e174e19e",
 };
