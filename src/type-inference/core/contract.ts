@@ -423,7 +423,9 @@ export class Contract {
   }
 
   /** `stop` for a key in its identity: a cursor stops at its path's id, never its text. */
-  public stopKey(key: Key): void {
+  public stopKey(asked: Key): void {
+    // (a key in its identity: a wrapper family's text stops at its cursor's path, G3 stage 1)
+    const key = this.canonicalKey(asked);
     if (isKeyId(key)) this.#stopAt(keyIdPlace(key), keyIdPath(key));
     else this.#stopAt(keyPlace(key), keyPath(key));
   }
@@ -570,7 +572,8 @@ export class Contract {
    * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
    * receiver decided as a reference's or not once (F19a, r4.44): a reference's member is the runtime's.
    */
-  public keyThrough(key: Key, from: number): Work<readonly Item[]> {
+  public keyThrough(asked: Key, from: number): Work<readonly Item[]> {
+    const key = this.canonicalKey(asked);
     // (a cursor's member step from the arena's nearest member, never its path's text)
     const at = isKeyId(key)
       ? memberStepIn(this, key, from)

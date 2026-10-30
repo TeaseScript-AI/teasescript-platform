@@ -451,6 +451,15 @@ test("a key's text and its cursor read one stop: after a stop both forms are sto
     assert.equal(contractRead(key), stopped, String(key));
   }
   for (const key of below) assert.equal(read(key), stopped, String(key));
+  // (every entry reads one identity: one identity and one prefix's stores for both forms, a text's stop the cursor's)
+  const [byText, byCursor] = below;
+  assert.equal(contract.keyIdentity(byText!), contract.keyIdentity(byCursor!));
+  assert.equal(contract.prefixStores(byText!), contract.prefixStores(byCursor!));
+  const other = narrowingPass(request(text));
+  const otherBox = bindingOf(other, "box");
+  assert.equal(keyLane(other.contract, otherBox, "shell"), "cursor");
+  other.contract.stopKey(keyOf(otherBox, ["shell"]));
+  assert.equal(other.contract.keyStopped(keyIdOf(other.contract, otherBox, ["shell", "n"])), true);
 });
 
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {

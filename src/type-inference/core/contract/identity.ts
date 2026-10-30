@@ -189,7 +189,9 @@ function rootOfPlace(
  * A key's source identity: the key itself through its aliases, and a place of whole copies of one source followed
  * to that source; with its holder (§8 r4.15, r4.23). A loop along those places, then each answered from the last.
  */
-export function keyIdentity(contract: Contract, key: Key): Identity {
+export function keyIdentity(contract: Contract, asked: Key): Identity {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = contract.canonicalKey(asked);
   if (!contract.keys.has(key)) contract.settle(keyIdentityWork(contract, key));
   return contract.keys.get(key)!;
 }

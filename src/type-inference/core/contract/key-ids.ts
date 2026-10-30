@@ -246,12 +246,14 @@ export function canonicalKey(contract: Contract, key: Key): Key {
  * literal is its cursor's span, made once and charged; any other rest, a span among them, stands as asked.
  */
 export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest): Rest {
-  if (!isSteps(rest) || rest.length === 0) return rest;
+  // (an array or a view of one: a span stands as asked)
+  const steps = isSteps(rest) ? rest : rest.kind === "steps" ? rest.steps() : null;
+  if (steps === null || steps.length === 0) return rest;
   const d = (contract.pass.definitions.byValue.get(literal) ?? []).find(
     (each) => each.how === "initializer" && each.kind === "whole" && each.path.length === 0,
   );
-  if (d === undefined || keyLane(contract, d.place, rest[0]!) !== "cursor") return rest;
-  return spanRef(contract, keyIdPath(keyIdOf(contract, d.place, rest)));
+  if (d === undefined || keyLane(contract, d.place, steps[0]!) !== "cursor") return rest;
+  return spanRef(contract, keyIdPath(keyIdOf(contract, d.place, steps)));
 }
 
 /**

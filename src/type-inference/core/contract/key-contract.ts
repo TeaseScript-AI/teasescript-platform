@@ -174,7 +174,9 @@ export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]
  * a single exact contribution is no such meeting. Over the collection's own stores and every prefix's, as its
  * contract reads them; a copy's own elements by the same question; once per element step.
  */
-export function* severalElements(contract: Contract, key: Key): Work<boolean> {
+export function* severalElements(contract: Contract, asked: Key): Work<boolean> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
   const step = path.indexOf("element");
@@ -274,15 +276,17 @@ export function declaredBefore(contract: Contract, place: PlaceId, node: FlowNod
 
 export function* contractRead(
   contract: Contract,
-  key: Key,
+  asked: Key,
   node: FlowNode,
   context: ContextWord,
   later = false,
 ): Work<readonly Item[]> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const { program } = contract.pass;
   const items = yield* contract.contractOf(key);
   const kinds = withoutEmpty(items);
-  const walk = keyWalk(contract, canonicalKey(contract, key));
+  const walk = keyWalk(contract, key);
   const { place, path } = walk;
   // P3: one kind, not unknown, no guarded source, the root's declaration dominates the read. The dominance is a flow
   // fact, which dead code drops (X1): there a declared place's one known kind stays known, so an intrinsic violation
@@ -501,7 +505,9 @@ function* contractAlong(
  * A projected source's stores below its path start after the path: a demand, once per source and path, whatever
  * number of its copies read there (r4.46 (3)).
  */
-export function* subAt(contract: Contract, sub: Key, rest: Rest): Work<readonly Item[]> {
+export function* subAt(contract: Contract, asked: Key, rest: Rest): Work<readonly Item[]> {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const sub = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(sub)]?.site ?? null;
   return yield {
     key: joinParts("s", sub, restPart(rest)),

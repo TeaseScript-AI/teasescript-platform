@@ -146,7 +146,9 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
  * entry of its key, which the solver's fixpoint then closes, so each member's stores are one answer, whichever place
  * entered the cycle; any other key still open (a copy cycle through a projection) stays an entry, cut there.
  */
-export function prefixStores(contract: Contract, prefix: Key): PrefixStores {
+export function prefixStores(contract: Contract, asked: Key): PrefixStores {
+  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  const prefix = contract.canonicalKey(asked);
   if (!contract.prefix.has(prefix)) contract.settle(prefixWork(contract, prefix));
   return contract.prefix.get(prefix)!;
 }
