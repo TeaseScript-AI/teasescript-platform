@@ -7,6 +7,7 @@ import { conversionCategory, interactionCategory } from "../method-categories.js
 import type { ValueConstraint } from "../program.js";
 import { choiceLabels } from "./choices.js";
 import { guardsBelow } from "./identity.js";
+import { isKeyId, keyIdPlace } from "./key-ids.js";
 import { markFree } from "./levels.js";
 import { emptyIds, heldBelow, kindsPart, namesPart, pathOrder } from "./literal-index.js";
 import type { KeptClass, ReadClass, ValueClass } from "./model.js";
@@ -53,7 +54,9 @@ export function readSnapshot(contract: Contract, value: PlaceId): string | null 
       : keptParts(
           contract.work,
           read,
-          lists.readSignature(contract.keyText(copied), node),
+          // (a cursor's signature by its place's own key, as its family's one definition stands there and none below
+          // it: the read's reaching definition and events are that key's, its path apart, no text made, G3 stage 1)
+          lists.readSignature(isKeyId(copied) ? keyOf(keyIdPlace(copied), []) : copied, node),
           handlers.afterSomeCreation(node) ? "h" : "",
         );
   contract.snapshots.set(value, snapshot);
