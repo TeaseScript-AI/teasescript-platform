@@ -1,10 +1,17 @@
 import type { PlaceId } from "../graph.js";
 import type { CorePass } from "./answers.js";
-import { isKeyId, keyBelowIn, keyIdPath, keyWalk, stepsOfId } from "./contract/key-ids.js";
+import {
+  isKeyId,
+  keyBelowIn,
+  keyIdPath,
+  keyWalk,
+  stepsOfId,
+  type CanonicalKey,
+} from "./contract/key-ids.js";
 import { joinParts, joinSteps } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type IndexNode } from "./contract.js";
-import { keyPath, recordPath, type Key } from "./definitions.js";
+import { keyPath, recordPath } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -12,7 +19,7 @@ import type { Work } from "./solver.js";
 /** A task of a property name search (`propertyNames`): a value at a path, a key, or a literal at a path. */
 export type PropertyNamesTask =
   | { readonly value: PlaceId; readonly path: readonly string[] }
-  | { readonly key: Key }
+  | { readonly key: CanonicalKey }
   | { readonly literal: PlaceId; readonly path: readonly string[] };
 
 /**
