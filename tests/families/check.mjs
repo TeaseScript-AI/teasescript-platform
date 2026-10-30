@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { setKey, sourceKey, sourcesOf } from "./sources.mjs";
 
-const AREAS = ["copies", "joins", "messages", "rings", "stops"];
+const AREAS = ["copies", "joins", "messages", "property", "rings", "stops"];
 const args = process.argv.slice(2);
 const list = args.includes("--list");
 const areas = args.filter((arg) => arg !== "--list");

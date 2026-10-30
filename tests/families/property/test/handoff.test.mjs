@@ -2,10 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { setKey, sourceKey, sourcesOf } from "../../sources.mjs";
 import { makePlan, configurations } from "../lib/plan.mjs";
 import { corpusModule } from "../lib/export.mjs";
 import { mergeShards } from "../lib/merge.mjs";
 const plan = makePlan("quick");
+const pilot = fileURLToPath(new URL("../bin/pilot.mjs", import.meta.url));
 function parts() {
   return [0, 1].map((index) => ({
     plan,
@@ -23,11 +27,12 @@ function parts() {
     })),
   }));
 }
-test("corpus export contains every selected source and no imports", () => {
-  const code = corpusModule(plan);
+test("corpus export contains every selected source, no imports, and the record the corpus check reads", () => {
+  const code = corpusModule(plan, "where recorded");
   assert.equal(/\bimport\b/.test(code), false);
   const value = vm.runInNewContext(
-    code.replaceAll("export const ", "const ") + "\nJSON.stringify({cases,globals,checks})",
+    code.replaceAll("export const ", "const ") +
+      "\nJSON.stringify({cases,globals,checks,recorded})",
   );
   const exported = JSON.parse(value);
   assert.deepEqual(
@@ -35,6 +40,21 @@ test("corpus export contains every selected source and no imports", () => {
     plan.cases.map((c) => [c.id, c.source]),
   );
   assert.deepEqual(exported.globals, ["hostValue"]);
+  const keys = new Set(sourcesOf(exported).map(sourceKey));
+  assert.equal(exported.recorded.sources, keys.size);
+  assert.equal(exported.recorded.sha256, setKey(keys));
+});
+test("the committed corpus module is the focused plan's export", async () => {
+  const focused = makePlan("focused", 1442);
+  const committed = await import("../s8-stores.mjs");
+  assert.deepEqual(
+    committed.cases,
+    focused.cases.map((c) => [c.id, c.source]),
+  );
+  assert.match(
+    readFileSync(new URL("../s8-stores.mjs", import.meta.url), "utf8"),
+    new RegExp(focused.planHash),
+  );
 });
 test("shards merge completely in deterministic configuration order", () => {
   const result = mergeShards(parts().reverse());
@@ -72,7 +92,7 @@ test("CLI rejects flags from the wrong command and unknown families", () => {
     ["run", "--profile", "focused"],
     ["plan", "--family", "unknown", "--out", "x"],
   ]) {
-    const r = spawnSync(process.execPath, ["bin/pilot.mjs", ...args], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [pilot, ...args], { encoding: "utf8" });
     assert.equal(r.status, 2);
     assert.match(r.stderr, /Unknown/);
   }
