@@ -11,7 +11,7 @@ import {
   type WorkLedger,
 } from "../budget.js";
 import type { CarrierRole, StepsStrip, Strip } from "../carriers.js";
-import { convert, stepsArray } from "../contract/key-ids.js";
+import { convert, someStep, stepsArray } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
 import { pathAt } from "../contract/literal-index.js";
 import { writtenOf } from "../contract.js";
@@ -304,10 +304,10 @@ export function writtenSource(
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
     if (admission.keepsOwn(at)) return null;
-  // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`)
-  const steps = stepsArray(keyStepsIn(contract, key));
-  const path = keptSteps(admission.work, steps, strip);
-  if (steps.some((step) => dictList(step) !== undefined)) return null;
+  const steps = keyStepsIn(contract, key);
+  if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
+  // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
+  const path = keptSteps(admission.work, stepsArray(steps), strip);
   if (term === null) return { term: null, from: place, strip: path };
   return permittedAt(term, path) === null ? null : { term, from: null, strip: path };
 }

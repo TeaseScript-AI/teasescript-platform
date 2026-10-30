@@ -1022,8 +1022,8 @@ test("a demand name's span token is spelled by its path's record, its text made 
 /** The record's steps copied out (`PathSteps.toArray`) by site over `copiesOf`'s analyses: how many, and why each site needs an array. */
 const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
   writtenSource: [
-    318,
-    "a copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
+    310,
+    "a kept copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
   ],
   heldRead: [16, "a held read's touch path, an array its trie keeps (`Touches`)"],
   stoppedKeys: [
