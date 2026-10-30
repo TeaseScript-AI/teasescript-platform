@@ -93,7 +93,6 @@ import {
   keyPacket,
   keyParentIn,
   restRef,
-  restSteps,
   stepsOfId,
   type KeyId,
   type KeyPacketMaking,
@@ -141,9 +140,10 @@ export interface AdmissionHost {
   /**
    * After a stop, a value's items at a node and a path as the finishing read answers them (the leaf's own kind, the
    * finished answer and contract, the retained type: TABLE r4.102, r4.106, r4.109), else `null`: admission's C1 and its
-   * boundaries read as every consumer does (one derivation, TABLE r4.126).
+   * boundaries read as every consumer does (one derivation, TABLE r4.126). The path as asked: a cursor's span is made
+   * steps only where the finishing read answers (G3 stage 1).
    */
-  read?(value: PlaceId, node: FlowNode, at: readonly string[]): readonly Item[] | null;
+  read?(value: PlaceId, node: FlowNode, at: Rest): readonly Item[] | null;
 }
 
 /**
@@ -556,7 +556,7 @@ export class Admission {
 
   /** A value's items at a node and a path: the finishing read's after a stop (`AdmissionHost.read`), else the solver's. */
   public items(value: PlaceId, node: FlowNode, at: Rest): Item[] {
-    const finished = this.host.read?.(value, node, restSteps(at)) ?? null;
+    const finished = this.host.read?.(value, node, at) ?? null;
     return withoutEmpty(finished ?? this.run(this.pass.values.valueItems(value, node, at)));
   }
 

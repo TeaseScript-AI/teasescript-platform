@@ -11,6 +11,7 @@ import {
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
+import { restSteps } from "./contract/key-ids.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -203,7 +204,8 @@ export class Consumers {
       {
         run: (work) => this.solve(work),
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
-        read: (value, node, at) => (this.finishing ? finishingRead(this, value, node, at) : null),
+        read: (value, node, at) =>
+          this.finishing ? finishingRead(this, value, node, restSteps(at)) : null,
       },
       rejected,
       cycling,
