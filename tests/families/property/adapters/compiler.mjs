@@ -62,6 +62,12 @@ export async function loadCompiler(root) {
     if (typeof api[key] !== "function") throw new Error(`Unsupported compiler adapter API: ${key}`);
   return api;
 }
+/**
+ * `call` at the policy's allowance in one of the eight modes: the consumers' and the solver's worklist's order apart,
+ * as `tests/helpers/type-core-enclosing.ts`'s `MODES` (#1434), and the sharing on or off. Composed from the compiler's
+ * own seams, not the oracle library's `inMode` (four modes): the tool runs on any pinned tree, those before the library
+ * (#1427) too, and a tree's library drives only that tree's compiler.
+ */
 export function configured(api, mode, policy, call) {
   let fn = call;
   if (policy.kind !== "none") {
@@ -197,12 +203,8 @@ export function observe(api, config, { keepPlan = false } = {}) {
       d.site?.end === c.site.end &&
       d.obligation?.target === scope.target,
   );
-  const publication = {
-    outcome: answer.outcome,
-    diagnostics: answer.diagnostics,
-    checks: answer.checks,
-    deferred: answer.budget.deferred,
-  };
+  // (what the analysis publishes is compared by the corpus runner, `tests/families/run.mjs`, with the oracle library's
+  // projection; these rows carry the behavioural verdict only)
   const metadata = {
     id: config.id,
     caseId: c.id,
@@ -210,7 +212,6 @@ export function observe(api, config, { keepPlan = false } = {}) {
     mode: mode.id,
     policy,
     scope,
-    publicationHash: hash(publication),
     analysisWork: answer.budget.total,
     ownedMarks: marks.length,
   };
