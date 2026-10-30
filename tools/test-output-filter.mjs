@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fstatSync, globSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { costlyTestFiles } from "./costly-test-files.mjs";
@@ -81,14 +81,20 @@ const child = spawn(process.execPath, nodeArguments, {
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
 });
 
-// Data can arrive on a pipe at any time, so it also stops a run that has started: both runners cancel on SIGTERM.
+// Data can arrive on a pipe at any time, so it also stops a run that has started: both runners cancel on SIGTERM and
+// stop the files' processes. Windows ends a process at once on any signal, before it can cancel, so there the whole
+// process tree is ended instead.
 let refused = false;
 if (input === "stream") {
   process.stdin.once("data", () => {
     refused = true;
     process.exitCode = 1;
     process.stderr.write(usage);
-    child.kill("SIGTERM");
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    } else {
+      child.kill("SIGTERM");
+    }
   });
   // Neither a read error nor a pipe that stays open keeps the filter from ending with its tests.
   process.stdin.on("error", () => {}).unref();
