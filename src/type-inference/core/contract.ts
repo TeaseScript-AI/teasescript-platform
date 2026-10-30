@@ -54,6 +54,7 @@ import {
   standsAlong,
 } from "./contract/literal-index.js";
 import { contractOfLiteral, indexItems } from "./contract/literal-items.js";
+import type { Label } from "./contract/labels.js";
 import { wrapperShape, type KeyLane } from "./contract/lanes.js";
 import { newHolder } from "./contract/marks.js";
 import type {
@@ -243,6 +244,8 @@ export class Contract {
   /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
   readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
   readonly pathStepLists = new Map<number, readonly string[]>();
+  /** Per place, its own label's recipe, the root of its labels' recipes (`labels.ts`). */
+  readonly labelRoots = new Map<PlaceId, Label>();
   readonly signatures = new Map<PlaceId, string>();
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
   readonly carrierIds = new Map<string, string>();

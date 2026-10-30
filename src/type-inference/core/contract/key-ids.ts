@@ -68,8 +68,9 @@ export function keyIdFirst(contract: Contract, id: KeyId): string | null {
  * made too, and `read` code units of text it scans, a unit per eight (`invSteps`), and `entries` it keeps (a unit each);
  * the texts and arrays it makes, through the kept helpers (`keptKey`, `keptArray`, TABLE r4.58). Each conversion is
  * the asking demand's own work, never a shared build's or work apart; what it makes is kept per id, never per prefix.
+ * A label's rendering (`labelText`) is charged here too.
  */
-function convert(contract: Contract, visits: number, read: number, entries: number): void {
+export function convert(contract: Contract, visits: number, read: number, entries: number): void {
   const inspected = visits + (read >> 3);
   if (inspected > 0) contract.work.charge("invSteps", inspected);
   if (entries > 0) contract.keep(entries);

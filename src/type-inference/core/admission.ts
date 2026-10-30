@@ -70,9 +70,10 @@ import type { Composed } from "./admission/structure.js";
 import type { DeciderGroup, HeldInput } from "./admission/transfers.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
-import { joinSteps, keptSteps, stepText, type WorkLedger } from "./budget.js";
+import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
 import { carried, keepsOwn, type CarrierRole, type Dispatch } from "./carriers.js";
 import { heldReference, termAt, typeTags, writtenOf } from "./contract.js";
+import { labelBelow, labelPlainText, labelRoot, type Label } from "./contract/labels.js";
 import {
   KeyTrie,
   keptKey,
@@ -524,21 +525,19 @@ export class Admission {
   }
 
   /**
-   * A place's path in the contract's vocabulary: an element step below a dict is its `entry`, the collection above it as
-   * the contract holds it or, where the place's written type `written` reaches it (the finishing path before admission
-   * settled, TABLE r4.122), as the written type has it, final at every stop and asking no solver.
+   * A place's path in the contract's vocabulary, as a label's recipe (`labels.ts`), its text made only where it is shown:
+   * an element step below a dict is its `entry`, the collection above it as the contract holds it now or, where the
+   * place's written type `written` reaches it (the finishing path before admission settled, TABLE r4.122), as the
+   * written type has it, final at every stop and asking no solver. Each step is spelled here, so the text made later
+   * asks nothing; a recipe already made for the same spelling is the same recipe.
    */
-  public pathLabel(
-    place: PlaceId,
-    path: readonly string[],
-    written: TypeTerm | null = null,
-  ): string {
-    const { program, contract } = this.pass;
-    let label = program.place(place).label;
+  public labelOf(place: PlaceId, path: readonly string[], written: TypeTerm | null = null): Label {
+    const { contract } = this.pass;
+    let label = labelRoot(contract, place);
     // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
     let term = written;
     path.forEach((step, index) => {
-      if (step !== "element") label = stepText(label, step);
+      if (step !== "element") label = labelBelow(label, step);
       else {
         const tags =
           term !== null
@@ -546,11 +545,20 @@ export class Admission {
             : withoutEmpty(this.run(contract.contractOf(keyOf(place, path.slice(0, index))))).map(
                 (item) => item.tag,
               );
-        label = stepText(label, elementStep(tags));
+        label = labelBelow(label, elementStep(tags));
       }
       if (term !== null) term = termAt(term, [step]);
     });
     return label;
+  }
+
+  /** `labelOf`'s text made plain, for a check that charges the text it keeps itself (`labelPlainText`). */
+  public pathLabel(
+    place: PlaceId,
+    path: readonly string[],
+    written: TypeTerm | null = null,
+  ): string {
+    return labelPlainText(this.labelOf(place, path, written));
   }
 
   public stores(): readonly Definition[] {
