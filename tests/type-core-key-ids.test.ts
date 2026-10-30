@@ -1022,18 +1022,28 @@ test("a demand name's span token is spelled by its path's record, its text made 
 /** The record's steps copied out (`PathSteps.toArray`) by site over `copiesOf`'s analyses: how many, and why each site needs an array. */
 const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
   writtenSource: [
-    286,
+    318,
     "a copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
   ],
+  heldRead: [16, "a held read's touch path, an array its trie keeps (`Touches`)"],
   stoppedKeys: [
     12,
     "a stopped key leaves its pass as steps (`Contract.stoppedKeys`), as no path id does",
   ],
+  keyIdentityWork: [
+    12,
+    "a lifted holder's reference: the key's steps joined to its entry's, the holder's shift and its identity's name",
+  ],
+  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
+  keyStructure: [8, "a root's rest below a prefix's store, kept in the structure's roots"],
   decide: [
     6,
     "a stopped decision's path, its stores asked once by it (`stoppedStores`), kept as an array",
   ],
-  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
+  prefixWork: [
+    4,
+    "a projected copy's entry: the copied key's steps joined into the entry's `at`, kept in the prefix's entries",
+  ],
 };
 
 /** The record's steps copied out during `run`, by the function asking (the first named frame outside `key-ids.ts`). */
@@ -1057,10 +1067,22 @@ function copiesOf(run: () => void): Record<string, number> {
   return sites;
 }
 
-test("a record's steps leave it as an array only at the listed sites, each a charged copy (\`toArray\`), over the wrappers and the member chains to 16 levels in every mode", () => {
+/** A wrapper's reads that copy a record's steps where the wrappers' and chains' do not: a prefix's copy, a default, a loop, an add. */
+const COPYING_READS = [
+  ["", "let mid = a0.q\nlet out = mid.f"],
+  ["", "function g(x = a0.q) {\n  return x.f\n}\nlet out = g()"],
+  ["", "let acc = a0.q\nrepeat 3 {\n  acc = a0.q\n}"],
+  [", s: tag, l: items", "let xs = [0]\nxs.add(a0.q.f)\nxs.addAll(a0.q.l)"],
+].map(
+  ([fields, reads]) =>
+    `let seed: integer = 1\nlet tag = "t"\nlet items: integer[] = [1]\nlet root = {f: seed${fields}}\nlet a0 = {q: root}\n${reads}\nexit\n`,
+);
+
+test("a record's steps leave it as an array only at the listed sites, each a charged copy (\`toArray\`), over the wrappers, the member chains to 16 levels and the family's copying reads in every mode", () => {
   const sources = [
     ...[2, 4, 8, 16].flatMap((depth) => VARIANTS.map((variant) => wrapped(depth, variant))),
     ...[8, 16].flatMap((n) => [memberChain(n, false), memberChain(n, true)]),
+    ...COPYING_READS,
   ].map(request);
   const found = copiesOf(() => {
     for (const source of sources) for (const mode of MODES) inMode(mode, () => analyseCore(source));
