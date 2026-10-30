@@ -2,10 +2,14 @@ import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, keep, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
+import { keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import {
+  canonicalKey,
+  type CanonicalKey,
   isKeyId,
+  keptKeyAt,
   keptKeyAtRef,
+  type KeyId,
   keyIdAt,
   keyIdFirst,
   keyIdOf,
@@ -13,7 +17,6 @@ import {
   keyIdPlace,
   prefixId,
   spanRef,
-  type KeyId,
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
 import { landed, landedKey, passThrough, passThroughKey } from "./landings.js";
@@ -125,8 +128,10 @@ function inheritedAtKey(admission: Admission, key: Key): TypeTerm | null {
 }
 
 /** `inheritedAt`'s resolution of a key within the deepest path a written type reaches. */
-function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
+function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
   const { contract } = admission.pass;
+  // (a key in its identity, as the inherited types hold it: G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const known = admission.inherited.get(key);
   if (known !== undefined) return known;
   // (a resolution resolves every key its scans wait on itself, so none starts inside another)
@@ -135,7 +140,7 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
   admission.resolving = true;
   try {
     // (a cursor's path never made: its id, its first step from the arena, G3 stage 1)
-    const scan = (next: Key): Waiting => {
+    const scan = (next: CanonicalKey): Waiting => {
       const place = keyPlace(next);
       const cursor = isKeyId(next) ? next : null;
       const path = cursor === null ? keyPath(next) : null;
@@ -154,7 +159,7 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
         };
       return ownScan(next);
     };
-    const ownScan = (next: Key): Waiting => {
+    const ownScan = (next: CanonicalKey): Waiting => {
       const place = keyPlace(next);
       if (isKeyId(next)) {
         // (a cursor's place answers through no copy above it unless its forest says so: then its steps made)
@@ -181,7 +186,7 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
       if (through !== place)
         return {
           key: next,
-          steps: answerOf(admission, keptKey(admission.work, through, path)),
+          steps: answerOf(admission, keptKeyAt(contract, through, path)),
           cycle: "",
         };
       const inputs = inputsOf(admission, place, path);
@@ -193,7 +198,7 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
     };
     const pending: Waiting[] = [scan(key)];
     // (the positions of the waiting scans, and the last cycle closed)
-    const waiting = new Map<Key, number>([[key, 0]]);
+    const waiting = new Map<CanonicalKey, number>([[key, 0]]);
     let closed = "";
     // (the type the top scan waited on, given to it as it goes on)
     let given: TypeTerm | null = null;
@@ -427,7 +432,7 @@ export function drive<T>(admission: Admission, steps: Inheriting<T>): T {
 /** Another key's inherited type as a scan's answer (`inheritedAt`'s `passThrough`): known, or waited on. */
 function* answerOf(
   admission: Admission,
-  key: Key,
+  key: CanonicalKey,
 ): Inheriting<{ readonly copied: TypeTerm | null; readonly nullable: boolean } | null> {
   const known = admission.inherited.get(key);
   const term = known !== undefined ? known : yield key;

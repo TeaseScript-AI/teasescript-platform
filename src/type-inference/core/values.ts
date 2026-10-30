@@ -22,7 +22,7 @@ import {
   type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
-import { isSteps, spanRef, type Rest } from "./contract/key-ids.js";
+import { type CanonicalKey, isSteps, type Rest, spanRef } from "./contract/key-ids.js";
 import {
   keptKey,
   keyOf,
@@ -135,7 +135,7 @@ export class Values {
    * or the contract; `guardable` where the mark applies.
    */
   *#keyRead(
-    key: Key,
+    key: CanonicalKey,
     node: FlowNode | null,
     before: boolean,
   ): Work<{
@@ -295,7 +295,7 @@ export class Values {
     const { program, contract, guards, solver } = this.pass;
     const { g, root, key } = narrowed;
     const at = narrowed.node ?? node;
-    const read = yield* this.#keyRead(key, at, false);
+    const read = yield* this.#keyRead(contract.canonicalKey(key), at, false);
     const items = yield* this.narrowingValue(g);
     const kinds =
       solver.answer(narrowingKey(g)) === undefined
@@ -347,7 +347,7 @@ export class Values {
       "def" in exact.exactPath(g.key, g.input);
     const input = loopDefinition
       ? yield* contract.contractOf(g.key)
-      : (yield* this.#keyRead(g.key, g.input, false)).items;
+      : (yield* this.#keyRead(contract.canonicalKey(g.key), g.input, false)).items;
     return narrowedItems(g.form, input, program.scope);
   }
 

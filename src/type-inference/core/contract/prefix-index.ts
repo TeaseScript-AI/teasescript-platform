@@ -1,12 +1,13 @@
 import type { PlaceId } from "../../graph.js";
 import {
+  type CanonicalKey,
   isKeyId,
   keptKeyBelowIn,
   keyDepthIn,
   keyStepsIn,
+  type Rest,
   restRef,
   restSteps,
-  type Rest,
 } from "./key-ids.js";
 import { keepText, keptParts, keptSteps, keptText, pathText, stepText } from "../budget.js";
 import type { Contract } from "../contract.js";
@@ -153,11 +154,11 @@ export function prefixStores(contract: Contract, asked: Key): PrefixStores {
   return contract.prefix.get(prefix)!;
 }
 
-export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
+export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityWork {
   if (contract.prefix.has(prefix)) return;
   const { program, definitions, lists, guards } = contract.pass;
   const work = program.work;
-  const frame = (pk: Key): PrefixFrame => ({
+  const frame = (pk: CanonicalKey): PrefixFrame => ({
     pk,
     defs: definitions.byKey.get(pk) ?? [],
     i: 0,
@@ -251,7 +252,7 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
     }
     defs.add(f.d);
   };
-  const open = new Set<Key>([prefix]);
+  const open = new Set<CanonicalKey>([prefix]);
   const stack: PrefixFrame[] = [];
   const push = (f: PrefixFrame): void => {
     stack.push(f);
@@ -365,7 +366,7 @@ export function* prefixWork(contract: Contract, prefix: Key): IdentityWork {
       // (collected once), looked up at the read of each path; the entry stays its source's
       const path = keyStepsIn(contract, copied);
       if (path.length > 0) {
-        const root = keyOf(keyPlace(copied), []);
+        const root = contract.keyAt(keyPlace(copied), []);
         let direct = false;
         // (a cursor's keys below its place's own key hold no definition: its family's shape requires it, G3 stage 1)
         for (let length = 1; length <= path.length && !direct && !isKeyId(copied); length += 1) {

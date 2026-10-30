@@ -28,6 +28,23 @@ import { pathAt } from "./literal-index.js";
  */
 export type KeyId = `${number}#${number}`;
 
+declare const canonicalTextBrand: unique symbol;
+
+/** A text key in its family's identity: a family whose lane is text (`canonicalKey`, the identity functions). */
+type CanonicalText = Key & { readonly [canonicalTextBrand]: true };
+
+/**
+ * A key in its family's identity: a cursor, or the text of a family whose lane is text. Only `canonicalKey` and the
+ * identity functions make one, so a map or a set keyed by it holds each key in one form (G3 stage 1, Codex r3 R3-F1).
+ */
+export type CanonicalKey = KeyId | CanonicalText;
+
+/** A text in its family's identity, as the identity functions establish it (their own lane check or construction). */
+function canonicalText(key: Key): CanonicalText {
+  // EVIDENCE: invariant: only canonicalKey and the identity functions call this, on a text whose family's lane is text.
+  return key as CanonicalText;
+}
+
 /** The cursor of `place` at the path id `path`. */
 export function keyIdAt(place: PlaceId, path: number): KeyId {
   return `${place}#${path}`;
@@ -85,12 +102,16 @@ export function isKeyId(key: Key): key is KeyId {
  * its cursor where that lane is cursors, each step inspected and charged (`keyIdOf`); else its text, made plain
  * (`keyOf`; `keptKeyAt` charges it, `keptKey`). A place's own key is its text.
  */
-export function keyAt(contract: Contract, place: PlaceId, steps: readonly string[]): Key {
+export function keyAt(contract: Contract, place: PlaceId, steps: readonly string[]): CanonicalKey {
   return keyAtWith(contract, place, steps, false);
 }
 
 /** `keyAt`, its text charged before it is made where it is text (`keptKey`). */
-export function keptKeyAt(contract: Contract, place: PlaceId, steps: readonly string[]): Key {
+export function keptKeyAt(
+  contract: Contract,
+  place: PlaceId,
+  steps: readonly string[],
+): CanonicalKey {
   return keyAtWith(contract, place, steps, true);
 }
 
@@ -99,31 +120,43 @@ function keyAtWith(
   place: PlaceId,
   steps: readonly string[],
   kept: boolean,
-): Key {
+): CanonicalKey {
   if (steps.length > 0 && keyLane(contract, place, steps[0]!) === "cursor")
     return keyIdOf(contract, place, steps);
-  return kept ? keptKey(contract.work, place, steps) : keyOf(place, steps);
+  return canonicalText(kept ? keptKey(contract.work, place, steps) : keyOf(place, steps));
 }
 
 /**
  * The key `rest` below `key`, in the identity of its family's lane: a cursor's children one step each (`keyIdBelow`); a
  * place's own key's in the lane of its first step's family; else a text below a text, made plain (`keyBelow`).
  */
-export function keyBelowIn(contract: Contract, key: Key, rest: readonly string[]): Key {
+export function keyBelowIn(contract: Contract, key: Key, rest: readonly string[]): CanonicalKey {
   return keyBelowWith(contract, key, rest, false);
 }
 
 /** `keyBelowIn`, a text below a text charged before it is made (`keptKeyBelow`). */
-export function keptKeyBelowIn(contract: Contract, key: Key, rest: readonly string[]): Key {
+export function keptKeyBelowIn(
+  contract: Contract,
+  key: Key,
+  rest: readonly string[],
+): CanonicalKey {
   return keyBelowWith(contract, key, rest, true);
 }
 
-function keyBelowWith(contract: Contract, key: Key, rest: readonly string[], kept: boolean): Key {
+function keyBelowWith(
+  contract: Contract,
+  asked: Key,
+  rest: readonly string[],
+  kept: boolean,
+): CanonicalKey {
+  // (the key in its identity first: a wrapper family's text below its place's own key is its cursor)
+  const key = canonicalKey(contract, asked);
   if (rest.length === 0) return key;
   let id: KeyId | null = isKeyId(key) ? key : null;
   if (id === null && key.endsWith("|") && keyLane(contract, keyPlace(key), rest[0]!) === "cursor")
     id = rootId(keyPlace(key));
-  if (id === null) return kept ? keptKeyBelow(contract.work, key, rest) : keyBelow(key, rest);
+  if (id === null)
+    return canonicalText(kept ? keptKeyBelow(contract.work, key, rest) : keyBelow(key, rest));
   for (const step of rest) id = keyIdBelow(contract, id, step);
   return id;
 }
@@ -132,24 +165,30 @@ function keyBelowWith(contract: Contract, key: Key, rest: readonly string[], kep
  * A key's parent in its identity, `null` at a place's own key: a cursor's from the arena (a step's visit charged), a
  * place's own key's text above a first step; a text's text, made plain.
  */
-export function keyParentIn(contract: Contract, key: Key): Key | null {
+export function keyParentIn(contract: Contract, key: Key): CanonicalKey | null {
   return parentWith(contract, key, false);
 }
 
 /** `keyParentIn`, a text's parent charged before it is made (`keptParent`). */
-export function keptParentIn(contract: Contract, key: Key): Key | null {
+export function keptParentIn(contract: Contract, key: Key): CanonicalKey | null {
   return parentWith(contract, key, true);
 }
 
-function parentWith(contract: Contract, key: Key, kept: boolean): Key | null {
+function parentWith(contract: Contract, asked: Key, kept: boolean): CanonicalKey | null {
+  const key = canonicalKey(contract, asked);
   if (!isKeyId(key)) {
-    if (kept) return keptParent(contract.work, key);
+    if (kept) {
+      const parent = keptParent(contract.work, key);
+      return parent === null ? null : canonicalText(parent);
+    }
     const steps = keyPath(key);
-    return steps.length === 0 ? null : keyOf(keyPlace(key), steps.slice(0, -1));
+    return steps.length === 0 ? null : canonicalText(keyOf(keyPlace(key), steps.slice(0, -1)));
   }
   convert(contract, 1, 0, 0);
   const parent = keyIdParent(contract, key);
-  return parent === null || keyIdPath(parent) === 0 ? keyOf(keyIdPlace(key), []) : parent;
+  return parent === null || keyIdPath(parent) === 0
+    ? canonicalText(keyOf(keyIdPlace(key), []))
+    : parent;
 }
 
 /** A key's number of steps, made nothing: a cursor's the arena's, a text's counted (`keyDepth`). */
@@ -179,7 +218,7 @@ export interface KeyWalk {
   readonly place: PlaceId;
   readonly path: readonly string[];
   /** The key of the prefix of `length` steps, in the key's identity. */
-  prefix(length: number): Key;
+  prefix(length: number): CanonicalKey;
 }
 
 /**
@@ -196,11 +235,12 @@ export function keptKeyWalk(contract: Contract, key: Key): KeyWalk {
   return walkWith(contract, key, true);
 }
 
-function walkWith(contract: Contract, key: Key, kept: boolean): KeyWalk {
+function walkWith(contract: Contract, asked: Key, kept: boolean): KeyWalk {
+  const key = canonicalKey(contract, asked);
   const place = keyPlace(key);
   if (!isKeyId(key)) {
     const path = kept ? keptPath(contract.work, key) : keyPath(key);
-    return { place, path, prefix: (length) => keyOf(place, path.slice(0, length)) };
+    return { place, path, prefix: (length) => canonicalText(keyOf(place, path.slice(0, length))) };
   }
   const path = stepsOfId(contract, key);
   let above: KeyId[] | null = null;
@@ -208,7 +248,7 @@ function walkWith(contract: Contract, key: Key, kept: boolean): KeyWalk {
     place,
     path,
     prefix: (length) => {
-      if (length === 0) return keyOf(place, []);
+      if (length === 0) return canonicalText(keyOf(place, []));
       if (above === null) {
         above = [];
         convert(contract, path.length, 0, 0);
@@ -230,15 +270,15 @@ function walkWith(contract: Contract, key: Key, kept: boolean): KeyWalk {
  * scanned once and charged (`keyIdOfText`), so no map holds one key in both forms; any other text as it is. Where a key
  * enters the contract or admission from outside them (a consumer's key made of its own path).
  */
-export function canonicalKey(contract: Contract, key: Key): Key {
+export function canonicalKey(contract: Contract, key: Key): CanonicalKey {
   if (isKeyId(key)) return key;
   const bar = key.indexOf("|");
-  if (bar === key.length - 1) return key;
+  if (bar === key.length - 1) return canonicalText(key);
   const dot = key.indexOf(".", bar + 1);
   const first = key.slice(bar + 1, dot < 0 ? key.length : dot);
   return keyLane(contract, Number(key.slice(0, bar)), first) === "cursor"
     ? keyIdOfText(contract, key)
-    : key;
+    : canonicalText(key);
 }
 
 /**
@@ -384,16 +424,16 @@ export function restPart(rest: Rest): readonly string[] | string {
  * The key of `place` at `rest` in its family's identity: below a cursor's family the cursor of its path's id, a visit
  * charged (a span's path its own, `spanId`, never its steps); else as `keyAt` makes it from the steps.
  */
-export function keyAtRef(contract: Contract, place: PlaceId, rest: Rest): Key {
+export function keyAtRef(contract: Contract, place: PlaceId, rest: Rest): CanonicalKey {
   return keyAtRefWith(contract, place, rest, false);
 }
 
 /** `keyAtRef`, a text charged before it is made (`keptKey`). */
-export function keptKeyAtRef(contract: Contract, place: PlaceId, rest: Rest): Key {
+export function keptKeyAtRef(contract: Contract, place: PlaceId, rest: Rest): CanonicalKey {
   return keyAtRefWith(contract, place, rest, true);
 }
 
-function keyAtRefWith(contract: Contract, place: PlaceId, rest: Rest, kept: boolean): Key {
+function keyAtRefWith(contract: Contract, place: PlaceId, rest: Rest, kept: boolean): CanonicalKey {
   const ref = restRef(contract, rest);
   if (ref.kind === "span" && ref.length > 0 && keyLane(contract, place, ref.at(0)) === "cursor") {
     convert(contract, 1, 0, 0);
@@ -403,13 +443,13 @@ function keyAtRefWith(contract: Contract, place: PlaceId, rest: Rest, kept: bool
 }
 
 /** The key `rest` below `key` in its identity: a span below a cursor or a cursor family's root, by path ids alone. */
-export function keyBelowRef(contract: Contract, key: Key, rest: Rest): Key {
+export function keyBelowRef(contract: Contract, key: Key, rest: Rest): CanonicalKey {
   return keyBelowRefWith(contract, key, rest, false);
 }
 
-function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean): Key {
+function keyBelowRefWith(contract: Contract, key: Key, rest: Rest, kept: boolean): CanonicalKey {
   const ref = restRef(contract, rest);
-  if (ref.length === 0) return key;
+  if (ref.length === 0) return canonicalKey(contract, key);
   if (ref.kind === "span") {
     if (isKeyId(key)) {
       convert(contract, 1, 0, 0);

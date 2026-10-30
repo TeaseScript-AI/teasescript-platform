@@ -7,6 +7,7 @@ import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
 import type { CoreProgram } from "../program.js";
 import type { Touch, TouchRef } from "../touch.js";
+import { type CanonicalKey } from "../contract/key-ids.js";
 
 // The shapes admission's state and walks are made of.
 
@@ -173,7 +174,7 @@ export interface Storing {
  * and path's key and is resumed with the type, so a scan that waits on another stops where it stands and goes on from
  * there, never taken again from its start.
  */
-export type Inheriting<T> = Generator<Key, T, TypeTerm | null>;
+export type Inheriting<T> = Generator<CanonicalKey, T, TypeTerm | null>;
 
 /** `inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
 /**
@@ -187,7 +188,7 @@ export interface Frontier {
 }
 
 export interface Waiting {
-  readonly key: Key;
+  readonly key: CanonicalKey;
   readonly steps: Inheriting<{
     readonly copied: TypeTerm | null;
     readonly nullable: boolean;
@@ -432,7 +433,7 @@ export interface Level {
  */
 export interface Structure {
   readonly paths: readonly (readonly string[])[];
-  readonly sources: readonly { readonly below: readonly string[]; readonly key: Key }[];
+  readonly sources: readonly { readonly below: readonly string[]; readonly key: CanonicalKey }[];
 }
 
 /** A candidate of a decided type: a store and the path below its destination it reaches the place at. */

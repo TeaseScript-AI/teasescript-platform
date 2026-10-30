@@ -66,7 +66,9 @@ export function* entryAt(
  * A prefix's entries as its levels read them (§4.6), once per prefix: each entry a level's member (`levelMember`)
  * starts the levels, every other entry answers each path by itself.
  */
-export function prefixLevels(contract: Contract, prefix: Key, stores: PrefixStores): PrefixLevels {
+export function prefixLevels(contract: Contract, asked: Key, stores: PrefixStores): PrefixLevels {
+  // (a prefix in its identity, as the levels hold it: G3 stage 1)
+  const prefix = contract.canonicalKey(asked);
   const known = contract.levelBases.get(prefix);
   if (known !== undefined) return known;
   const others: PrefixEntry[] = [];
@@ -179,10 +181,12 @@ function levelMember(contract: Contract, entry: PrefixEntry): LevelGroup | null 
  */
 export function groupsAt(
   contract: Contract,
-  prefix: Key,
+  asked: Key,
   base: readonly LevelGroup[],
   path: readonly string[],
 ): readonly LevelGroup[] {
+  // (a prefix in its identity, as the levels' groups are named by it: G3 stage 1)
+  const prefix = contract.canonicalKey(asked);
   const memoKey = joinParts(prefix, path);
   const known = contract.levelGroups.get(memoKey);
   if (known !== undefined) return known;

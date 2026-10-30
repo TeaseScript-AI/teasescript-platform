@@ -1,9 +1,12 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinSteps, keep, keepText, keptParts, keptSlice, keptSteps, keptText } from "../budget.js";
-import { keptKey, keptPath, keyOf, keyPath, type Definition, type Key } from "../definitions.js";
+import { keptPath, keyOf, keyPath, type Definition, type Key } from "../definitions.js";
 import {
+  canonicalKey,
+  type CanonicalKey,
   isKeyId,
+  keptKeyAt,
   keptKeyBelowIn,
   keptKeyWalk,
   keyDepthIn,
@@ -21,10 +24,12 @@ import type { Structure } from "./model.js";
  * A value's source key: the key a copy reads, a call's callee's result key (F20), a dict's `values` read as its
  * elements (r4.46 (2)); `null` for any other value and for a dict's `keys`, which hold text.
  */
-export function sourceOf(admission: Admission, value: PlaceId): Key | null {
+export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | null {
   const { contract, program } = admission.pass;
-  const key = contract.copiedKey(value) ?? contract.resultKey(value);
-  if (key === null) return null;
+  const found = contract.copiedKey(value) ?? contract.resultKey(value);
+  if (found === null) return null;
+  // (the source in its identity, as the structures and depths hold it: G3 stage 1)
+  const key = canonicalKey(contract, found);
   // (G3 stage 1: a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
   if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
   const walk = keyWalk(contract, key);
@@ -41,7 +46,7 @@ export function sourceOf(admission: Admission, value: PlaceId): Key | null {
     }
     path.push(step);
   }
-  return isKeyId(key) ? contract.keyAt(walk.place, path) : keyOf(walk.place, path);
+  return contract.keyAt(walk.place, path);
 }
 
 /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
@@ -130,7 +135,10 @@ function collect(
   elements = false,
 ): Structure {
   const paths = new Map<string, readonly string[]>();
-  const sources = new Map<string, { readonly below: readonly string[]; readonly key: Key }>();
+  const sources = new Map<
+    string,
+    { readonly below: readonly string[]; readonly key: CanonicalKey }
+  >();
   // (each path's text charged by its size before it is made, TABLE r4.58)
   for (const at of levels)
     for (let length = 1; length <= at.length; length += 1) {
@@ -152,7 +160,7 @@ function collect(
 export interface Composed {
   readonly entries: readonly (
     | { readonly path: readonly string[] }
-    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly source: { readonly below: readonly string[]; readonly key: CanonicalKey } }
     | { readonly part: Composed; readonly at: readonly string[] }
   )[];
   readonly empty: boolean;
@@ -168,7 +176,7 @@ const NO_STRUCTURE: Composed = { entries: [], empty: true, listed: null };
 function joinInto(
   admission: Admission,
   paths: Map<string, readonly string[]>,
-  sources: Map<string, { readonly below: readonly string[]; readonly key: Key }>,
+  sources: Map<string, { readonly below: readonly string[]; readonly key: CanonicalKey }>,
   from: Composed,
   at: readonly string[],
 ): void {
@@ -251,7 +259,7 @@ function composed(
   if (known !== undefined) return known;
   type Entry =
     | { readonly path: readonly string[] }
-    | { readonly source: { readonly below: readonly string[]; readonly key: Key } }
+    | { readonly source: { readonly below: readonly string[]; readonly key: CanonicalKey } }
     | { readonly part: number; readonly at: readonly string[] };
   interface Frame {
     readonly name: string;
@@ -386,13 +394,15 @@ function longestKey(admission: Admission): number {
  * (Tarjan's components) one turn of it for each of its keys, so the copies of one source share it and every order
  * gives one answer.
  */
-export function depthOf(admission: Admission, key: Key): number {
+export function depthOf(admission: Admission, asked: Key): number {
+  const { program, contract } = admission.pass;
+  // (a key in its identity, as the depths hold it: G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const known = admission.depths.get(key);
   if (known !== undefined) return known;
-  const { program, contract } = admission.pass;
   const work = program.work;
   // (a key whose contract holds no collection has no elements to follow)
-  const flat = (at: Key): boolean => {
+  const flat = (at: CanonicalKey): boolean => {
     const none = !withoutEmpty(admission.run(contract.contractOf(at))).some(
       (item) => item.tag === "list" || item.tag === "set" || item.tag === "dict",
     );
@@ -400,12 +410,12 @@ export function depthOf(admission: Admission, key: Key): number {
     return none;
   };
   if (flat(key)) return 0;
-  const order = new Map<Key, number>();
-  const low = new Map<Key, number>();
-  const stack: Key[] = [];
-  const open = new Set<Key>();
-  const frames: { readonly key: Key; next: number }[] = [];
-  const enter = (at: Key): void => {
+  const order = new Map<CanonicalKey, number>();
+  const low = new Map<CanonicalKey, number>();
+  const stack: CanonicalKey[] = [];
+  const open = new Set<CanonicalKey>();
+  const frames: { readonly key: CanonicalKey; next: number }[] = [];
+  const enter = (at: CanonicalKey): void => {
     order.set(at, order.size);
     low.set(at, order.get(at)!);
     stack.push(at);
@@ -430,7 +440,7 @@ export function depthOf(admission: Admission, key: Key): number {
     if (parent !== undefined)
       low.set(parent.key, Math.min(low.get(parent.key)!, low.get(frame.key)!));
     if (low.get(frame.key) !== order.get(frame.key)) continue;
-    const members = new Set<Key>();
+    const members = new Set<CanonicalKey>();
     for (let member = stack.pop()!; ; member = stack.pop()!) {
       open.delete(member);
       members.add(member);
@@ -538,7 +548,7 @@ export function literalLanding(admission: Admission, literal: PlaceId): Key | nu
 }
 
 /** The paths admission decides (`groups`) below a key, indexed once by every prefix of each. */
-function decidedBelow(admission: Admission, key: Key): readonly (readonly string[])[] {
+function decidedBelow(admission: Admission, asked: Key): readonly (readonly string[])[] {
   if (admission.below === null) {
     admission.below = new Map();
     for (const group of admission.groups()) {
@@ -549,7 +559,7 @@ function decidedBelow(admission: Admission, key: Key): readonly (readonly string
         admission.pass.program.work.charge("indexSteps");
         const prefix =
           walk === null
-            ? keptKey(admission.work, group.root, path.slice(0, length))
+            ? keptKeyAt(admission.pass.contract, group.root, path.slice(0, length))
             : walk.prefix(length);
         const rest = keptSlice(admission.work, path, length);
         const paths = admission.below.get(prefix);
@@ -558,7 +568,8 @@ function decidedBelow(admission: Admission, key: Key): readonly (readonly string
       }
     }
   }
-  return admission.below.get(key) ?? [];
+  // (a key in its identity, as the groups' prefixes hold it: G3 stage 1)
+  return admission.below.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 
 /** A path below a store's destination: an `addAll`'s literal's elements are the destination's own elements. */

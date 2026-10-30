@@ -95,6 +95,7 @@ import {
   restRef,
   stepsOfId,
   type KeyId,
+  type CanonicalKey,
   type KeyPacketMaking,
   type Rest,
 } from "./contract/key-ids.js";
@@ -160,7 +161,7 @@ function packetPath(packet: KeyPacketMaking, index: number): readonly string[] {
  */
 export class Admission {
   /** The decider's kinds per key (§5). */
-  readonly decided = new Map<Key, readonly ItemTag[]>();
+  readonly decided = new Map<CanonicalKey, readonly ItemTag[]>();
   /** The stores rejected in this pass, by their definitions' order, with the places and paths they are rejected at (A6). */
   readonly newlyRejected = new Map<number, Set<Key>>();
   /**
@@ -169,7 +170,7 @@ export class Admission {
    */
   readonly refused = new Set<number>();
   /** The boundary checks of the ingress stores, by the key each enters (C9), published after the consumers ran. */
-  readonly boundaries = new Map<Key, Obligation[]>();
+  readonly boundaries = new Map<CanonicalKey, Obligation[]>();
   /** The boundary checks no store into a place owes: host data read where it is consumed, an ingress read (C9, F18). */
   readonly readChecks: Obligation[] = [];
   readonly rejectedKeys = new Set<Key>();
@@ -188,18 +189,18 @@ export class Admission {
     readonly term: TypeTerm;
   }[] = [];
   /** Whether each decision admits `null` (a copy of a written type without one does not, A4). */
-  readonly nullable = new Map<Key, boolean>();
+  readonly nullable = new Map<CanonicalKey, boolean>();
   /**
    * The decisions a copy of a written type with `null` made: they admit it whatever the stored kinds hold (A4, F17b; ADR
    * 0021 1.3: the kinds present never narrow a written domain, the lead's ruling on external round 7 B1).
    */
-  readonly permitsNull = new Set<Key>();
+  readonly permitsNull = new Set<CanonicalKey>();
   /** The paths a copy of a written type decides, not the place's own (A4 through copies, r4.75 (1)). */
-  readonly inheritsWrittenKeys = new Set<Key>();
+  readonly inheritsWrittenKeys = new Set<CanonicalKey>();
   /** The paths a written type, or a copy of one, leaves unrestricted (`permittedAt`): no decision, every kind fits. */
-  readonly unrestricted = new Set<Key>();
+  readonly unrestricted = new Set<CanonicalKey>();
   /** The site of the contribution each decision took (S3 §1's admitted answer), `null` for a written type. */
-  readonly deciderSites = new Map<Key, SourceSite | null>();
+  readonly deciderSites = new Map<CanonicalKey, SourceSite | null>();
   readonly copies = new Map<
     PlaceId,
     readonly {
@@ -214,11 +215,11 @@ export class Admission {
   /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
   readonly inheriting = new Set<PlaceId>();
   /** Per unwritten place and path, the written type its own decision copies there (`inheritedAt`), or none. */
-  readonly inherited = new Map<Key, TypeTerm | null>();
+  readonly inherited = new Map<CanonicalKey, TypeTerm | null>();
   /** The places and paths whose decisions wait on each other through copies, by cycle (`cut`): a union-find. */
-  readonly cycles = new Map<Key, Key>();
+  readonly cycles = new Map<CanonicalKey, CanonicalKey>();
   /** Each cycle's size, by its root (`cycleOf`). */
-  readonly cycleSizes = new Map<Key, number>();
+  readonly cycleSizes = new Map<CanonicalKey, number>();
   /**
    * The deepest path a written type can reach through copies (`inheritedAt`): the written copies' landing paths with
    * their types' element levels, and every copy of an inheriting place's own landing path beside them.
@@ -289,7 +290,7 @@ export class Admission {
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
-  demands: Map<Key, (readonly string[])[]> | null = null;
+  demands: Map<CanonicalKey, (readonly string[])[]> | null = null;
   readonly representative = new Map<Definition, Definition>();
   /** The expected types of typed ingresses by identity, and the contract-side classes, for `conflictClass`. */
   readonly termIds = new Map<TypeTerm, string>();
@@ -298,9 +299,9 @@ export class Admission {
   readonly structures = new Map<string, Structure>();
   /** Each value's own structure read below a strip, per side (`composed`), from its parts'. */
   readonly structureParts = new Map<string, Composed>();
-  readonly depths = new Map<Key, number>();
+  readonly depths = new Map<CanonicalKey, number>();
   keyBound: number | null = null;
-  below: Map<Key, (readonly string[])[]> | null = null;
+  below: Map<CanonicalKey, (readonly string[])[]> | null = null;
   readonly takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -379,8 +380,8 @@ export class Admission {
   /** Per place, its seeds' paths at or below each prefix (`seedsUnder`), and its stores taken again (`#retakenOf`). */
   readonly seedIndex = new Map<PlaceId, Map<string, string[]>>();
   /** Per key, its decision before it is recorded (`decided`); the keys `decide` took (`lazily`). */
-  readonly decisions = new Map<Key, Decided | null>();
-  readonly attempted = new Set<Key>();
+  readonly decisions = new Map<CanonicalKey, Decided | null>();
+  readonly attempted = new Set<CanonicalKey>();
   landings: LandingIndex | null = null;
   /** The touch tries of the pass (`Touches`, #1188), per place its trie and the paths its contributions meet at. */
   touches: Touches | null = null;
@@ -393,9 +394,9 @@ export class Admission {
   /** Per place, what its live stores definitely hold (`heldOf`, A2). */
   readonly helds = new Map<PlaceId, Touch | null>();
   /** The keys where what a place's stores definitely hold meets (`groups`, A2): checked where the copy meets it. */
-  readonly atCopies = new Set<Key>();
+  readonly atCopies = new Set<CanonicalKey>();
   /** The keys a member of a live group owes where the group's contributions meet (`finishHeld`, read by `groups`). */
-  readonly groupMeetings: Key[] = [];
+  readonly groupMeetings: CanonicalKey[] = [];
   /** Each place's live stores, each with its own points and reads (`liveOwn`), for a live group's members. */
   readonly liveStores = new Map<PlaceId, readonly HeldOwn[]>();
   /** The places with definitions, every one of them dead in this pass (`liveOwn`). */

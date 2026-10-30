@@ -1,15 +1,8 @@
 import type { PlaceId } from "../../graph.js";
-import { isKeyId, keptStepsIn } from "../contract/key-ids.js";
+import { isKeyId, keptKeyAt, keptStepsIn } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { keptArray, keptSlice, keptSteps, keptText } from "../budget.js";
-import {
-  keptKey,
-  keptPath,
-  keyPlace,
-  sortCost,
-  type Definition,
-  type Key,
-} from "../definitions.js";
+import { keptPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
 import { refText, type Found, type Touch, type TouchRef } from "../touch.js";
 import type { HeldOwn } from "./model.js";
 import { liveOwn } from "./own.js";
@@ -80,7 +73,7 @@ function keyComponents<T>(
  */
 export function atCopy(admission: Admission, root: PlaceId, path: readonly string[]): boolean {
   admission.groups();
-  return admission.atCopies.has(keptKey(admission.work, root, path));
+  return admission.atCopies.has(keptKeyAt(admission.pass.contract, root, path));
 }
 
 /**
@@ -309,7 +302,8 @@ function groupHeld(
       touches.paths(touches.standsAt(copyOf === null ? own : owns.get(copyOf)!, met), [], owed);
     }
     for (const path of owed)
-      if (path.length > 0) admission.groupMeetings.push(keptKey(admission.work, member, path));
+      if (path.length > 0)
+        admission.groupMeetings.push(keptKeyAt(admission.pass.contract, member, path));
   }
   return held;
 }

@@ -2,7 +2,7 @@ import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { joinParts, joinSteps, keptParts, pathText, splitPath } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
-import { keptKey, keyOf, sortCost, type Definition, type Key } from "../definitions.js";
+import { keyOf, sortCost, type Definition, type Key } from "../definitions.js";
 import {
   isKeyId,
   isSteps,
@@ -13,6 +13,7 @@ import {
   keyStepsIn,
   restSteps,
   spanRef,
+  type CanonicalKey,
   type KeyId,
   type PathRef,
   type Rest,
@@ -130,7 +131,7 @@ type At =
   | { readonly root: PlaceId; readonly key: KeyId; readonly path: null; readonly depth: number }
   | {
       readonly root: PlaceId;
-      readonly key: Key;
+      readonly key: CanonicalKey;
       readonly path: readonly string[];
       readonly depth: number;
     };
@@ -321,7 +322,7 @@ export function decided(
 /** `decided` of a decided path in its identity, its inputs found (`inputsAt`). */
 function decidedOf(admission: Admission, at: At, inputs: Inputs | null): Decided | null {
   // (a text key made again, as its legacy site made it, its text charged)
-  const key = at.path === null ? at.key : keptKey(admission.work, at.root, at.path);
+  const key = at.path === null ? at.key : keptKeyAt(admission.pass.contract, at.root, at.path);
   const known = admission.decisions.get(key);
   if (known !== undefined) return known;
   const found = inputs === null ? null : decision(admission, at, key, inputs);

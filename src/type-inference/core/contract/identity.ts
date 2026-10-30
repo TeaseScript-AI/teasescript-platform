@@ -2,7 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
-import { isKeyId, keptKeyBelowIn, keyBelowIn, keyStepsIn } from "./key-ids.js";
+import { type CanonicalKey, isKeyId, keptKeyBelowIn, keyBelowIn, keyStepsIn } from "./key-ids.js";
 import { methodCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import { holderAt, holderOfKey, newHolder } from "./marks.js";
@@ -13,16 +13,16 @@ import { resultOf } from "./value-kinds.js";
 // The one identity function (§8 r4.15): the key a value copies, a key's and a value's source identity, structures.
 
 /** The key a value copies, through its projections: `seed.f0` reads `seed|f0`; `null` for no read. */
-export function copiedKey(contract: Contract, value: PlaceId): Key | null {
+export function copiedKey(contract: Contract, value: PlaceId): CanonicalKey | null {
   const { program } = contract.pass;
   const binding = program.occurrenceOf.get(value);
-  if (binding !== undefined) return keyOf(binding, []);
+  if (binding !== undefined) return contract.keyAt(binding, []);
   // (G3 3b: a projection's key is its owner's and its step, once per projection, never its whole chain again)
   const known = contract.copiedKeys.get(value);
   if (known !== undefined) return known;
   const pending: PlaceId[] = [];
   let current = value;
-  let below: Key | null = null;
+  let below: CanonicalKey | null = null;
   for (;;) {
     const projection = program.projOf.get(current);
     if (projection === undefined || projection.step === "iteration") {
@@ -34,7 +34,7 @@ export function copiedKey(contract: Contract, value: PlaceId): Key | null {
     const owner = program.occurrenceOf.get(projection.owner);
     const memo = owner === undefined ? contract.copiedKeys.get(projection.owner) : undefined;
     if (owner !== undefined || memo !== undefined) {
-      below = owner !== undefined ? keyOf(owner, []) : memo!;
+      below = owner !== undefined ? contract.keyAt(owner, []) : memo!;
       break;
     }
     current = projection.owner;
@@ -196,10 +196,11 @@ export function keyIdentity(contract: Contract, asked: Key): Identity {
   return contract.keys.get(key)!;
 }
 
-export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
+export function* keyIdentityWork(contract: Contract, key: CanonicalKey): IdentityWork {
   if (contract.keys.has(key)) return;
   const { program } = contract.pass;
-  const chain: { readonly key: Key; readonly rooted: Key; readonly guarded: boolean }[] = [];
+  const chain: { readonly key: CanonicalKey; readonly rooted: Key; readonly guarded: boolean }[] =
+    [];
   let at = key;
   let last: Identity;
   for (;;) {
@@ -227,7 +228,7 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
       holder: holderOfKey(contract, rooted),
     };
     const place = keyPlace(rooted);
-    let inner: Key | null = null;
+    let inner: CanonicalKey | null = null;
     if (
       top.key === keyOf(place, []) &&
       copyOnly(contract, place) &&
@@ -236,7 +237,7 @@ export function* keyIdentityWork(contract: Contract, key: Key): IdentityWork {
       // (a prefix under discovery whose own stores already hold more than copies has no single entry, whatever the rest
       // bring: so answered, never discovered again from its start, so a chain of k calls of one helper discovers its
       // parameter once, not once per link, #1257)
-      const prefix = keyOf(place, []);
+      const prefix = contract.keyAt(place, []);
       const stores =
         contract.discovering.get(prefix)?.other === true
           ? null

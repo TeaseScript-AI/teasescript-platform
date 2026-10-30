@@ -1,7 +1,13 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { type Key } from "../definitions.js";
-import { keyAtRef, restRef, type Rest } from "../contract/key-ids.js";
+import {
+  canonicalKey,
+  keyAtRef,
+  restRef,
+  type CanonicalKey,
+  type Rest,
+} from "../contract/key-ids.js";
 import type { Inheriting } from "./model.js";
 import { permittedAt } from "./permitted.js";
 
@@ -36,10 +42,12 @@ export function* inheritedInto(
   admission: Admission,
   from: PlaceId,
   asked: Rest,
-  into: Key | null,
+  asking: Key | null,
 ): Inheriting<TypeTerm | null> {
   // (past the deepest path a written type reaches, the place's path there is what it waits on, `inheritedAt`)
   const { contract } = admission.pass;
+  // (the decision waiting in its identity, as the cycles hold it: G3 stage 1)
+  const into = asking === null ? null : canonicalKey(contract, asking);
   const path = restRef(contract, asked);
   const source = keyAtRef(
     contract,
@@ -52,7 +60,7 @@ export function* inheritedInto(
 }
 
 /** Whether two decisions wait on each other through copies (`cycles`). */
-function cut(admission: Admission, a: Key, b: Key): boolean {
+function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
   return (
     admission.cycles.has(a) &&
     admission.cycles.has(b) &&
@@ -61,13 +69,14 @@ function cut(admission: Admission, a: Key, b: Key): boolean {
 }
 
 /** A decision's cycle as it stands (`cycles`): its root and size, empty outside every cycle. */
-export function cycleOf(admission: Admission, key: Key): string {
+export function cycleOf(admission: Admission, asked: Key): string {
+  const key = canonicalKey(admission.pass.contract, asked);
   if (!admission.cycles.has(key)) return "";
   const root = rootOf(admission, key);
   return `${admission.cycleSizes.get(root)!}:${root}`;
 }
 
-function rootOf(admission: Admission, key: Key): Key {
+function rootOf(admission: Admission, key: CanonicalKey): CanonicalKey {
   let root = key;
   while (admission.cycles.get(root) !== root) root = admission.cycles.get(root)!;
   for (let at = key; at !== root;) {
@@ -78,7 +87,10 @@ function rootOf(admission: Admission, key: Key): Key {
   return root;
 }
 
-export function join(admission: Admission, a: Key, b: Key): void {
+export function join(admission: Admission, first: Key, second: Key): void {
+  // (both decisions in their identity: one member per key)
+  const { contract } = admission.pass;
+  const [a, b] = [canonicalKey(contract, first), canonicalKey(contract, second)];
   for (const key of [a, b])
     if (!admission.cycles.has(key)) {
       admission.cycles.set(key, key);

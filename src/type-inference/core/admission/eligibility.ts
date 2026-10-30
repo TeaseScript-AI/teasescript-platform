@@ -1,10 +1,15 @@
 import type { PlaceId } from "../../graph.js";
-import { keyWalk, type Rest } from "../contract/key-ids.js";
+import {
+  canonicalKey,
+  type CanonicalKey,
+  keptKeyAt,
+  keyWalk,
+  type Rest,
+} from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { joinParts, keepText, keptSlice, type WorkLedger } from "../budget.js";
 import {
   isCursor,
-  keptKey,
   keptPrefixes,
   prefixesOf,
   recordKey,
@@ -309,9 +314,9 @@ function walkGuards(
 }
 
 /** The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once. */
-function demandsOf(admission: Admission, prefix: Key): readonly (readonly string[])[] {
+function demandsOf(admission: Admission, asked: Key): readonly (readonly string[])[] {
   if (admission.demands === null) {
-    const demands = new Map<Key, (readonly string[])[]>();
+    const demands = new Map<CanonicalKey, (readonly string[])[]>();
     for (const group of admission.groups()) {
       // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
       const path = admission.stepsAt(group);
@@ -320,7 +325,7 @@ function demandsOf(admission: Admission, prefix: Key): readonly (readonly string
         admission.pass.program.work.charge("eligibility");
         const key =
           walk === null
-            ? keptKey(admission.work, group.root, path.slice(0, length))
+            ? keptKeyAt(admission.pass.contract, group.root, path.slice(0, length))
             : walk.prefix(length);
         const rest = keptSlice(admission.work, path, length);
         const list = demands.get(key);
@@ -330,7 +335,8 @@ function demandsOf(admission: Admission, prefix: Key): readonly (readonly string
     }
     admission.demands = demands;
   }
-  return admission.demands.get(prefix) ?? [];
+  // (a prefix in its identity, as the groups' prefixes hold it: G3 stage 1)
+  return admission.demands.get(canonicalKey(admission.pass.contract, asked)) ?? [];
 }
 
 /**

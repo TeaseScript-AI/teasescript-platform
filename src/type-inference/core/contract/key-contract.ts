@@ -136,8 +136,10 @@ export function* keyListsAt(contract: Contract, key: Key, at: number): Work<read
 }
 
 /** The contract of a key from its stores and its prefixes' (§3.2). */
-export function* keyContract(contract: Contract, key: Key): Work<readonly Item[]> {
+export function* keyContract(contract: Contract, asked: Key): Work<readonly Item[]> {
   const { program } = contract.pass;
+  // (a key in its identity: the levels and the prefixes its walk reads are held by it, G3 stage 1)
+  const key = canonicalKey(contract, asked);
   const walk = keyWalk(contract, key);
   const { place, path } = walk;
   const found = program.place(place);

@@ -73,6 +73,7 @@ import {
   spanRef,
   type Rest,
   stepsOfId,
+  type CanonicalKey,
 } from "./contract/key-ids.js";
 import { keyLane, wrapperShape, type KeyLane } from "./contract/lanes.js";
 import { newHolder } from "./contract/marks.js";
@@ -211,11 +212,11 @@ export class Contract {
     ringPorts: 0,
     ringStops: 0,
   };
-  readonly prefix = new Map<Key, PrefixStores>();
+  readonly prefix = new Map<CanonicalKey, PrefixStores>();
   /** Per copy-only place its copies reach, the cycle of whole copies it is a port of, `null` for none (`ringOf`). */
   readonly rings = new Map<PlaceId, CopyRing | null>();
   /** The prefixes under discovery (`prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
-  readonly discovering = new Map<Key, PrefixFrame>();
+  readonly discovering = new Map<CanonicalKey, PrefixFrame>();
   readonly subPaths = new Map<Key, ReadonlySet<string>>();
   /**
    * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix and step, its
@@ -225,7 +226,7 @@ export class Contract {
   readonly stepLayers = new WeakMap<PrefixStores, Map<string, StepLayers>>();
   readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
   readonly projectedLayers = new Map<string, SubLayer | null>();
-  readonly keys = new Map<Key, Identity>();
+  readonly keys = new Map<CanonicalKey, Identity>();
   readonly identities = new Map<PlaceId, Identity>();
   readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
   readonly holders = new Map<string, Holder>();
@@ -348,7 +349,7 @@ export class Contract {
   >();
   /** A prefix's literal entries grouped at each path below it (`groupsAt`), per prefix and path. */
   readonly levelGroups = new Map<string, readonly LevelGroup[]>();
-  readonly levelBases = new Map<Key, PrefixLevels>();
+  readonly levelBases = new Map<CanonicalKey, PrefixLevels>();
   /** A prefix's entries that answer by themselves, in groups of one class (`entryGroups`). */
   readonly entryGroupsOf = new WeakMap<PrefixLevels, readonly EntryGroup[]>();
   readonly groups = new WeakMap<
@@ -372,7 +373,7 @@ export class Contract {
   readonly #belowStop = new Map<PlaceId, Map<number, boolean>>();
   #stoppedCount = 0;
   /** The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`). */
-  readonly #askers = new Map<PlaceId, Map<string, Set<Key>>>();
+  readonly #askers = new Map<PlaceId, Map<string, Set<CanonicalKey>>>();
   /**
    * The demands of the property and index reads' occurrence answers and of the positions (`positions.ts`) made since the
    * last stop (`contractOfValue`, `stop`).
@@ -394,7 +395,7 @@ export class Contract {
   /** How many computations of the identity layer and collections of marks are running (`settle`, `collectMarks`). */
   building = 0;
   /** Per projection, the key it copies, or `null` (`copiedKey`). */
-  readonly copiedKeys = new Map<PlaceId, Key | null>();
+  readonly copiedKeys = new Map<PlaceId, CanonicalKey | null>();
   /** Per value, its chain of property reads of a read, or `null` (`chainOf`). */
   readonly chains = new Map<PlaceId, ChainRoot | null>();
   readonly literalHops = new Map<string, LoneRead | null>();
@@ -460,7 +461,7 @@ export class Contract {
   }
 
   /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
-  #asked(place: PlaceId, key: () => Key): void {
+  #asked(place: PlaceId, key: () => CanonicalKey): void {
     const demand = this.pass.solver.reading;
     if (demand === null) return;
     let byDemand = this.#askers.get(place);
@@ -505,7 +506,7 @@ export class Contract {
     // (a wrapper's family is asked by its cursor, so one key is never asked in two forms)
     if (path.length > 0 && keyLane(this, place, path[0]!) === "cursor")
       return this.keyStopped(keyIdOf(this, place, path));
-    this.#asked(place, () => keyOf(place, path));
+    this.#asked(place, () => keyAt(this, place, path));
     return this.#stoppedAt(place, path);
   }
 
@@ -627,17 +628,17 @@ export class Contract {
   }
 
   /** `keyBelowIn`: the key `rest` below `key` in its identity (a wrapper's family's a cursor's children). */
-  public keyBelowIn(key: Key, rest: readonly string[]): Key {
+  public keyBelowIn(key: Key, rest: readonly string[]): CanonicalKey {
     return keyBelowIn(this, key, rest);
   }
 
   /** `keptKeyBelowIn`: `keyBelowIn`, a text below a text charged before it is made. */
-  public keptKeyBelowIn(key: Key, rest: readonly string[]): Key {
+  public keptKeyBelowIn(key: Key, rest: readonly string[]): CanonicalKey {
     return keptKeyBelowIn(this, key, rest);
   }
 
   /** `keyAt`: the key of `place` at `steps` in its identity, an array-born key. */
-  public keyAt(place: PlaceId, steps: readonly string[]): Key {
+  public keyAt(place: PlaceId, steps: readonly string[]): CanonicalKey {
     return keyAt(this, place, steps);
   }
 
@@ -681,7 +682,7 @@ export class Contract {
   }
 
   /** A key's parent in its identity (`keyParentIn`): a cursor's from the arena, a text's text made plain. */
-  public keyParent(key: Key): Key | null {
+  public keyParent(key: Key): CanonicalKey | null {
     return keyParentIn(this, key);
   }
 
@@ -696,7 +697,7 @@ export class Contract {
   }
 
   /** `canonicalKey`: a key in its family's identity. */
-  public canonicalKey(key: Key): Key {
+  public canonicalKey(key: Key): CanonicalKey {
     return canonicalKey(this, key);
   }
 
@@ -763,7 +764,7 @@ export class Contract {
     return landsIn(this, value, path, depth);
   }
 
-  public copiedKey(value: PlaceId): Key | null {
+  public copiedKey(value: PlaceId): CanonicalKey | null {
     return copiedKey(this, value);
   }
 

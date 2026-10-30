@@ -1356,7 +1356,8 @@ class CoreAnswers implements Answers {
         elements: withoutEmpty(elements),
         emptiness: elements.some((item) => item.tag === "empty") ? "open" : "held",
       },
-      ingresses: this.#consumers.admission.boundaries.get(key) ?? [],
+      // (the key in its identity, as admission holds its boundaries: G3 stage 1)
+      ingresses: this.#consumers.admission.boundaries.get(contract.canonicalKey(key)) ?? [],
       // the exact service's list, not the raw stores (Astra B8), made where it is read: a key's events walk its
       // prefixes, and most askers want the place's types alone (the slice's facts ask one per expression)
       get definitions() {

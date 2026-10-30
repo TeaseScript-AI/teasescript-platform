@@ -7,7 +7,7 @@ import { marked } from "../guards.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { ABSENT } from "./kinds.js";
-import type { Rest } from "./key-ids.js";
+import type { CanonicalKey, Rest } from "./key-ids.js";
 import { wrapperFacts } from "./wrapper-facts.js";
 import { indexPaths, pathBelow } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
@@ -130,7 +130,7 @@ function refer(
 }
 
 /** A key's holder: its own reads, and a reference to its prefix's at its last step (one per projection). */
-export function holderOfKey(contract: Contract, key: Key): Holder {
+export function holderOfKey(contract: Contract, key: CanonicalKey): Holder {
   const known = contract.holders.get(`k${key}`);
   if (known !== undefined) return known;
   const holder = newHolder(contract, `k${key}`);

@@ -4,6 +4,7 @@ import type { Callable, FlowNode } from "../flow-graph.js";
 import type { IngressNode, Item, ItemTag, Writer } from "../items.js";
 import type { Work } from "../solver.js";
 import type { IndexObject } from "./literal-index.js";
+import { type CanonicalKey } from "./key-ids.js";
 
 // The shapes the contract side's indexes, identities, holders and classes are made of.
 
@@ -172,7 +173,7 @@ export type IdentityWork = Generator<() => IdentityWork, void, void>;
 
 /** A prefix's stores while they are collected: one frame per prefix on an explicit stack. */
 export interface PrefixFrame {
-  readonly pk: Key;
+  readonly pk: CanonicalKey;
   readonly defs: readonly Definition[];
   i: number;
   readonly out: PrefixEntry[];
