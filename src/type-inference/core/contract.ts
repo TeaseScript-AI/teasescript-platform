@@ -70,7 +70,9 @@ import {
   keyIdPlace,
   keyOfId,
   memberStepIn,
+  memberStepOf,
   spanRef,
+  type KeyId,
   type PathRef,
   type Rest,
   stepsOfId,
@@ -125,7 +127,6 @@ import {
   defaultKinds,
   expectedOf,
   landsIn,
-  memberStepOf,
   onlyNull,
 } from "./contract/value-kinds.js";
 import {
@@ -274,12 +275,14 @@ export class Contract {
   /** Per demand name holding a cursor, the logical name it orders as (`compareDemandNames`). */
   readonly logicalNames = new Map<string, string>();
   readonly prefixIds = new Map<number, Map<number, number>>();
-  /** Per offset, each member step's path's first member step below that offset (`memberStepIn`). */
-  readonly firstMembers = new Map<number, Map<number, number>>();
   readonly joinedIds = new Map<number, Map<number, number>>();
   /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
   readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
   readonly pathStepLists = new Map<number, readonly string[]>();
+  /** Per text of a family whose lane is cursors, its cursor (`canonicalKey`), converted once and kept. */
+  readonly textIds = new Map<Key, KeyId>();
+  /** Per path, its prefixes' ids by length (`keyPrefixIn`, `keyWalk`), made once and kept. */
+  readonly pathPrefixLists = new Map<number, readonly number[]>();
   /** Per place, its own label's recipe, the root of its labels' recipes (`labels.ts`). */
   readonly labelRoots = new Map<PlaceId, Label>();
   readonly signatures = new Map<PlaceId, string>();

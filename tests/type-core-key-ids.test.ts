@@ -510,31 +510,43 @@ test("a wrapper's own literal asked by an array converts it to its span once: as
   assert.equal(again.result, first.result);
 });
 
-test("a member chain's key asked again at an offset charges its one unit: its first member step below the offset and its prefix of a length are each climbed once, a deeper key's only below the known (a member chain reads each key at each of its steps)", () => {
-  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
-  const id = keyIdOf(
-    contract,
-    5,
-    Array.from({ length: 16 }, () => "year"),
-  );
-  const deeper = keyIdBelow(contract, id, "year");
+test("a member chain's key asked at each of its offsets in turn, cold, climbs its path once: its member scan and its prefixes cost a unit a question after, linear in the path, and a repeated question its one unit (a member chain's demand asks each offset once)", () => {
   const asks = [
-    ["memberStepIn", (key: KeyId) => memberStepIn(contract, key, 3), 3],
+    [
+      "memberStepIn",
+      (contract: Contract, id: KeyId, at: number) => memberStepIn(contract, id, at),
+      (_: Contract, at: number) => at,
+    ],
     [
       "keyPrefixIn",
-      (key: KeyId) => keyPrefixIn(contract, key, 3),
-      keyIdOf(contract, 5, ["year", "year", "year"]),
+      (contract: Contract, id: KeyId, at: number) => keyPrefixIn(contract, id, at + 1),
+      (contract: Contract, at: number) =>
+        keyIdOf(
+          contract,
+          5,
+          Array.from({ length: at + 1 }, () => "year"),
+        ),
     ],
   ] as const;
   for (const [name, ask, answer] of asks) {
-    const first = probeMade(contract, () => ask(id));
-    const again = probeMade(contract, () => ask(id));
-    const below = probeMade(contract, () => ask(deeper));
-    assert.equal(first.result, answer, name);
-    assert.equal(again.result, answer, name);
-    assert.equal(below.result, answer, name);
-    assert.equal(again.work.charged, 1, name);
-    assert.ok(below.work.charged < first.work.charged / 4, name);
+    const cost = (depth: number): number => {
+      const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+      const id = keyIdOf(
+        contract,
+        5,
+        Array.from({ length: depth }, () => "year"),
+      );
+      let charged = 0;
+      for (let at = 0; at < depth; at += 1) {
+        const { result, work } = probeMade(contract, () => ask(contract, id, at));
+        assert.equal(result, answer(contract, at), `${name} @${at}`);
+        charged += work.charged;
+      }
+      assert.equal(probeMade(contract, () => ask(contract, id, 3)).work.charged, 1, name);
+      return charged;
+    };
+    const [at16, at32] = [cost(16), cost(32)];
+    assert.ok(at32 <= 2.2 * at16, `${name}: ${at16} at 16, ${at32} at 32`);
   }
 });
 
@@ -796,7 +808,9 @@ function sites(n: number): Map<string, { readonly walked: number; readonly charg
   const sliced = keyIdOf(contract, 12, steps);
   site("stepsOfId span, kept", () => stepsOfId(contract, sliced, n >> 1));
   site("stepsOfId span, walked", () => stepsOfId(contract, walked, n >> 1));
-  site("memberStepIn", () => memberStepIn(contract, deepest, n >> 1));
+  // (a path whose steps are not yet kept: the scan's cold question makes them, its steps walked and charged)
+  const scanned = keyIdOf(contract, 14, [...steps, "y"]);
+  site("memberStepIn", () => memberStepIn(contract, scanned, n >> 1));
   const apart = keyIdBelow(contract, rootId(7), "t");
   site("compareKeyIds", () => compareKeyIds(contract, deepest, apart));
   // (width and branching, #1454 r1: `n` children below a step `n` code units wide, each compared with a short sibling;

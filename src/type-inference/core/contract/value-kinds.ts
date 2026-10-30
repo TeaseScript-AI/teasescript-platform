@@ -11,7 +11,6 @@ import {
   dictList,
   interactionCategory,
   kindElement,
-  memberStep,
   measuresLength,
   selectsElement,
 } from "../method-categories.js";
@@ -32,6 +31,7 @@ import {
   keyAtRef,
   keyIdAt,
   memberStepIn,
+  memberStepOf,
   restPart,
   restRef,
   restSteps,
@@ -45,20 +45,6 @@ import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
 
 const NESTING = 256;
-
-/**
- * `memberStep`: the first step of `path` from `from` on that a built-in value answers, its scan charged by the text it
- * reads, a unit per eight code units (TABLE r4.58; it keeps nothing, so no text's header), so a long member chain of
- * long names reaches the allowance by its own work.
- */
-export function memberStepOf(contract: Contract, path: readonly string[], from: number): number {
-  const at = memberStep(path, from);
-  let length = 0;
-  for (let index = from, end = at < 0 ? path.length : at + 1; index < end; index += 1)
-    length += path[index]!.length + 1;
-  contract.pass.program.work.charge("invSteps", length >> 3);
-  return at;
-}
 
 /** The kinds at a path of a value: a literal's field, a copied record's field. */
 export function contractOfValueAt(
@@ -93,7 +79,7 @@ function through(
     program.callOutOf.has(value)
   )
     return valueAt(contract, value, rest);
-  // (a span's member step from the arena's nearest member, `memberStepIn`, its span's offset taken off)
+  // (a span's member step from its path's steps, made once per path and kept, `memberStepIn`)
   const ref = restRef(contract, rest);
   const at =
     ref.kind === "span"
@@ -103,7 +89,7 @@ function through(
   return listsAt(contract, value, restSteps(rest), at, from);
 }
 
-/** `memberStepOf` for a span: its first member step from `from` on, from the arena (`memberStepIn`), by index. */
+/** `memberStepOf` for a span: its first member step from `from` on, from its path's kept steps (`memberStepIn`). */
 function spanMemberStep(contract: Contract, ref: PathRef, from: number): number {
   const id = keyIdAt(0, ref.id());
   return memberStepIn(contract, id, from);

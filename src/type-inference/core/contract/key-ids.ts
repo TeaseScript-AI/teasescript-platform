@@ -13,6 +13,7 @@ import {
   keyPlace,
   type Key,
 } from "../definitions.js";
+import { memberStep } from "../method-categories.js";
 import { keyLane } from "./lanes.js";
 import { pathAt } from "./literal-index.js";
 
@@ -193,15 +194,38 @@ function parentWith(contract: Contract, asked: Key, kept: boolean): CanonicalKey
 
 /**
  * A key's prefix of `length` steps in its identity, for a question that reads one prefix: a cursor's ancestor of that
- * depth found once per length and kept (`prefixId`), never its whole path climbed per question; a place's own key its
- * text; a text's as the legacy sites made it.
+ * depth from its path's prefixes, climbed once per path and kept (`prefixesOf`), never per question; a place's own key
+ * its text; a text's as the legacy sites made it.
  */
 export function keyPrefixIn(contract: Contract, asked: Key, length: number): CanonicalKey {
   const key = canonicalKey(contract, asked);
   const place = keyPlace(key);
   if (length === 0) return canonicalText(keyOf(place, []));
   if (!isKeyId(key)) return canonicalText(keyOf(place, keyPath(key).slice(0, length)));
-  return keyIdAt(place, prefixId(contract, keyIdPath(key), length));
+  return keyIdAt(place, prefixesOf(contract, keyIdPath(key))[length]!);
+}
+
+/**
+ * A path's prefixes' ids by length (0 its root), climbed once per path and kept, each later question a visit charged:
+ * so a question at each of a path's lengths climbs it once, as `stepsOfId` makes its steps once.
+ */
+function prefixesOf(contract: Contract, path: number): readonly number[] {
+  const known = contract.pathPrefixLists.get(path);
+  if (known !== undefined) {
+    convert(contract, 1, 0, 0);
+    return known;
+  }
+  const depth = contract.pathDepths[path]!;
+  convert(contract, depth + 1, 0, 1);
+  const prefixes: number[] = [];
+  for (let at = path; ; at = contract.pathParents[at]!) {
+    prefixes.push(at);
+    if (at === 0) break;
+  }
+  prefixes.reverse();
+  keptArray(contract.work, prefixes);
+  contract.pathPrefixLists.set(path, prefixes);
+  return prefixes;
 }
 
 /** A key's number of steps, made nothing: a cursor's the arena's, a text's counted (`keyDepth`). */
@@ -237,7 +261,7 @@ export interface KeyWalk {
 /**
  * A key's path and its prefixes in its identity, for a question that reads its whole path: a text's as the legacy sites
  * made them (`keyPath`, each prefix `keyOf`); a cursor's steps through the charged boundary (`stepsOfId`), its prefixes
- * its ancestors, climbed once where first asked, each a visit charged (a place's own key its text).
+ * its ancestors, climbed once per path and kept (`prefixesOf`, a place's own key its text).
  */
 export function keyWalk(contract: Contract, key: Key): KeyWalk {
   return walkWith(contract, key, false);
@@ -256,31 +280,22 @@ function walkWith(contract: Contract, asked: Key, kept: boolean): KeyWalk {
     return { place, path, prefix: (length) => canonicalText(keyOf(place, path.slice(0, length))) };
   }
   const path = stepsOfId(contract, key);
-  let above: KeyId[] | null = null;
+  let prefixes: readonly number[] | null = null;
   return {
     place,
     path,
     prefix: (length) => {
       if (length === 0) return canonicalText(keyOf(place, []));
-      if (above === null) {
-        above = [];
-        convert(contract, path.length, 0, 0);
-        for (
-          let at: KeyId | null = key;
-          at !== null && keyIdPath(at) !== 0;
-          at = keyIdParent(contract, at)
-        )
-          above.push(at);
-        above.reverse();
-      }
-      return above[length - 1]!;
+      prefixes ??= prefixesOf(contract, keyIdPath(key));
+      return keyIdAt(place, prefixes[length]!);
     },
   };
 }
 
 /**
  * A key in its family's identity: a cursor as it is; a text of a family whose lane is cursors as its cursor, its text
- * scanned once and charged (`keyIdOfText`), so no map holds one key in both forms; any other text as it is. Where a key
+ * scanned once per pass, charged and kept (`keyIdOfText`), so no map holds one key in both forms; any other text as it
+ * is. Where a key
  * enters the contract or admission from outside them (a consumer's key made of its own path).
  */
 export function canonicalKey(contract: Contract, key: Key): CanonicalKey {
@@ -289,9 +304,15 @@ export function canonicalKey(contract: Contract, key: Key): CanonicalKey {
   if (bar === key.length - 1) return canonicalText(key);
   const dot = key.indexOf(".", bar + 1);
   const first = key.slice(bar + 1, dot < 0 ? key.length : dot);
-  return keyLane(contract, Number(key.slice(0, bar)), first) === "cursor"
-    ? keyIdOfText(contract, key)
-    : canonicalText(key);
+  if (keyLane(contract, Number(key.slice(0, bar)), first) !== "cursor") return canonicalText(key);
+  // (a text asked again, as a consumer's reads ask theirs at each question, is found by its text: converted once)
+  let id = contract.textIds.get(key);
+  if (id === undefined) {
+    id = keyIdOfText(contract, key);
+    contract.keepText(key.length);
+    contract.textIds.set(key, id);
+  }
+  return id;
 }
 
 /**
@@ -641,31 +662,31 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): readonly str
 }
 
 /**
- * The first step of a cursor's path from its step `from` on that a built-in value answers by itself (`memberStep`), by
- * its index in the path, or -1: none where the nearest such step at or above the cursor (`pathMembers`) is not below
- * `from`; else the shallowest one below `from`, found by climbing only the member steps not yet known for that offset,
- * each charged and kept (`firstMembers`): so a member chain asked at every offset costs each member step once per
- * offset, never once per question.
+ * `memberStep`: the first step of `path` from `from` on that a built-in value answers, its scan charged by the text it
+ * reads, a unit per eight code units (TABLE r4.58; it keeps nothing, so no text's header), so a long member chain of
+ * long names reaches the allowance by its own work.
+ */
+export function memberStepOf(contract: Contract, path: readonly string[], from: number): number {
+  const at = memberStep(path, from);
+  let length = 0;
+  for (let index = from, end = at < 0 ? path.length : at + 1; index < end; index += 1)
+    length += path[index]!.length + 1;
+  contract.pass.program.work.charge("invSteps", length >> 3);
+  return at;
+}
+
+/**
+ * `memberStepOf` for a cursor: -1 at one visit where the nearest member step at or above it (`pathMembers`) is not
+ * below `from`; else its path's steps, made once per path and kept (`stepsOfId`), scanned from `from` as the legacy
+ * lane scans a text's, so a question at each of a path's offsets inspects only its own scan's steps.
  */
 export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
-  const { pathDepths: depths, pathParents: parents, pathMembers: members } = contract;
-  convert(contract, 1, 0, 0);
-  const nearest = members[keyIdPath(id)]!;
-  if (nearest === 0 || depths[nearest]! <= from) return -1;
-  let byMember = contract.firstMembers.get(from);
-  if (byMember === undefined) contract.firstMembers.set(from, (byMember = new Map()));
-  const way: number[] = [];
-  let at = nearest;
-  for (; at !== 0 && depths[at]! > from && !byMember.has(at); at = members[parents[at]!]!)
-    way.push(at);
-  let found = at !== 0 && depths[at]! > from ? byMember.get(at)! : -1;
-  convert(contract, way.length, 0, way.length);
-  // (down from the shallowest member climbed: the first below `from` is each deeper one's too)
-  for (let index = way.length - 1; index >= 0; index -= 1) {
-    if (found < 0) found = depths[way[index]!]! - 1;
-    byMember.set(way[index]!, found);
+  const nearest = contract.pathMembers[keyIdPath(id)]!;
+  if (nearest === 0 || contract.pathDepths[nearest]! <= from) {
+    convert(contract, 1, 0, 0);
+    return -1;
   }
-  return found;
+  return memberStepOf(contract, stepsOfId(contract, id), from);
 }
 
 /**
