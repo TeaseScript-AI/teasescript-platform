@@ -41,13 +41,15 @@ export const recorded = { commands: [["<command>", "<where it is recorded>"]], s
 
 A source runs with the host globals its case gives, else its generator's `globals`, else `hostValue`, `hostOther`,
 `hostInit` and `otherHost`. They are part of the input: the analysis declares a host binding for each. A recorded
-source keeps the list its run's type-core analysis passed, or, where the run only compiled it, that compile's.
+source is one call's files with the list that call passed: the list its run's type-core analysis passed, or, where the
+run only compiled those files, that compile's. Two analysis calls with different lists are two sources.
 
 `recorded` is the run the module reproduces: its commands with where its evidence records them, the count of its
 distinct sources (each with its globals) and their set key, and the inputs it drops with the reason (`dropped`).
 `node tests/families/check.mjs [area...]` checks every module against its record, and CI runs it
-(`npm run test:families`); `--list` prints each module's commands and the count and set key of its sources. A module
-changes only together with its record, from the run's own sources.
+(`npm run test:families`); `--list` prints each module's commands and the count and set key of its sources. A record
+comes from the capture of its run's commands (what each call passed), never from the module's own sources, so the
+check also fails a module assembled wrongly; a module changes only together with its record.
 
 A module reproduces what its run passed to the compiler, at the run's arguments, and nothing it did not:
 
@@ -57,9 +59,9 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's). A program the
-  driver derived from a fixture row (a pasted fix) stays, even one equal to another row. The module's first comment
-  names what its run also read.
+  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's), judged by where
+  each input came from: a case file its own review wrote stays, and a program the driver derived from a fixture row
+  (a pasted fix) stays, even one equal to another row. The module's first comment names what its run also read.
 
 ## Kept outside the repository
 
