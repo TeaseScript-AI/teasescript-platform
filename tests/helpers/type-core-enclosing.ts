@@ -938,7 +938,7 @@ function unprovedProblems(
   const problems: string[] = [];
   if (relation === "at" && unproved && marksAt(answers, c.site, target) < 1 && !rejects)
     problems.push("no mark at an unproved store at the stop");
-  if ((relation === "at" && unproved) || (relation === "above" && unsettledInferred)) {
+  if ((relation === "at" && unproved) || (relation !== "none" && unsettledInferred)) {
     const required = answers.requirement(place, c.into.path);
     if (required !== null) problems.push(`unproved requirement ${termText(required)}`);
   }
