@@ -3,7 +3,7 @@ import { concrete, isExternal, requiredKind } from "../admission.js";
 import { keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE, termAt, typeTags } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
+import { keptKey, keyOf, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { ContextWord, Item, ItemTag } from "../items.js";
@@ -29,7 +29,7 @@ import { SHOWN } from "./kinds.js";
 import { leftOutWarning } from "./left-out.js";
 import { proveOrigin, type StoreOrigin } from "./origins.js";
 import { kindsOf } from "./names.js";
-import { type CanonicalKey } from "../contract/key-ids.js";
+import { keyStepsIn, type CanonicalKey } from "../contract/key-ids.js";
 
 // The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
 
@@ -374,7 +374,9 @@ function loadOrigin(
   const kind = program.place(holder).kind;
   const declared = definitions.declOf.get(holder);
   const load = loadOf(declared?.value);
-  const path = keptSteps(work, keyPath(copied), below);
+  // (the copied key's steps through the charged boundary: a wrapper family's key is a cursor)
+  const copiedSteps = keyStepsIn(contract, copied);
+  const path = keptSteps(work, copiedSteps, below);
   const mine = definitions.byKey.get(keptKey(work, holder, [])) ?? [];
   if (
     kind.kind !== "binding" ||
@@ -390,7 +392,7 @@ function loadOrigin(
     if (definitions.loopAdds.has(key) || (length > 0 && definitions.byKey.has(key)))
       return undefined;
     if (
-      length < keyPath(copied).length &&
+      length < copiedSteps.length &&
       !fits(withoutEmpty(walk.run(contract.contractOf(key))), path[length]!)
     )
       return undefined;
