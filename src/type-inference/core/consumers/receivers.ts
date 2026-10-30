@@ -151,9 +151,8 @@ export function memberChecks(
 /**
  * C5c for a store: whether the receiver's sources have the property, once per receiver key and property: `none` (every
  * known source lacks it), `some`, `all`; the sources are those the contract reads at the property's path, and the
- * earliest literal that lacks it, where the store's error points (ADR 1.4); whether one gives an unknown there, which
- * an object the analysis cannot list gives at every property (#1436); and whether one that may lack it is data from
- * outside the script, a stored object's property its default lacks (#1459).
+ * earliest literal that lacks it, where the store's error points (ADR 1.4); and whether one gives an unknown there, which
+ * an object the analysis cannot list gives at every property (#1436).
  */
 function propertyPresence(
   walk: Consumers,
@@ -163,7 +162,6 @@ function propertyPresence(
   readonly state: "none" | "some" | "all";
   readonly literal: Writer | null;
   readonly unknown: boolean;
-  readonly outside: boolean;
 } {
   const { program, contract } = walk.pass;
   const memoKey = joinParts(receiver, property);
@@ -173,7 +171,6 @@ function propertyPresence(
   let lacks = false;
   let has = false;
   let unknown = false;
-  let outside = false;
   let literal: Writer | null = null;
   // a source without the property gives `missing`; an unknown value of a present property says nothing of it
   const see = (all: readonly Item[]): void => {
@@ -184,7 +181,6 @@ function propertyPresence(
       if (item.tag === "unknown" && (item.reasons & REASON.missing) !== 0) {
         lacks = true;
         literal = firstWriter(literal, item.writer);
-        if ((item.reasons & REASON.external) !== 0) outside = true;
       }
     if (items.some((item) => !(item.tag === "unknown" && item.reasons === REASON.missing)))
       has = true;
@@ -200,12 +196,7 @@ function propertyPresence(
     for (const sub of contract.relevantSubs(stored, below))
       if (!(lacks && has)) see(walk.run(contract.subAt(sub.key, below)));
   }
-  const presence = {
-    state: lacks ? (has ? "some" : "none") : "all",
-    literal,
-    unknown,
-    outside,
-  } as const;
+  const presence = { state: lacks ? (has ? "some" : "none") : "all", literal, unknown } as const;
   keepText(program.work, memoKey.length);
   walk.presence.set(memoKey, presence);
   return presence;
@@ -307,17 +298,10 @@ export function receivers(walk: Consumers): void {
         presence.state === "all" && presence.unknown && owner !== undefined
           ? unlistedObject(walk, owner, { node: d.prep ?? d.node, kinds: receiver })
           : null;
-      // (a stored object's property its default lacks is data from outside the script, as the read names it: #1459)
       if (presence.state !== "all" || unlisted !== null)
         extra.push([
           unlisted ??
-            makeItem(
-              "unknown",
-              null,
-              presence.outside
-                ? { reasons: REASON.external | REASON.missing, cert: "pos" }
-                : { reasons: REASON.missing, context: "missing", cert: "pos" },
-            ),
+            makeItem("unknown", null, { reasons: REASON.missing, context: "missing", cert: "pos" }),
           `has .${propertyName(property)} before the store`,
         ]);
     }

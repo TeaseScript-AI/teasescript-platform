@@ -454,10 +454,13 @@ test("a stored object's property its default lacks owes its member warning and c
         !isDeepStrictEqual(checks, ["null-check"])
       )
         wrong.push(`${c.name}: ${outcome} ${JSON.stringify({ diagnostics, checks })}`);
+      // (the read names stored data as the cause; the store says, as for any object that may lack it, what it may hold)
       const sentence =
-        `'${receiver}' may not have property 'm'${use === "store" ? " that can be set" : ""} here. If it does ` +
-        `not, the Tease stops with an error at this line. '${receiver}' comes from outside the script, so its type ` +
-        "is known only when the script runs.";
+        use === "read"
+          ? `'${receiver}' may not have property 'm' here. If it does not, the Tease stops with an error at this ` +
+            `line. '${receiver}' comes from outside the script, so its type is known only when the script runs.`
+          : `'${receiver}' may hold an object without property 'm' here. If it does, the Tease stops with an error ` +
+            "at this line.";
       for (const mode of MODES) {
         const { plan, text } = inMode(mode, () =>
           publishedRoute([{ path: "main.tease", source }], ["hostValue"]),
