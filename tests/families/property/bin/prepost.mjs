@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setKey, sourceKey } from "../../sources.mjs";
-import { readJson, writeJson } from "../lib/json.mjs";
+import { hash, readJson, writeJson } from "../lib/json.mjs";
 
 const bin = dirname(fileURLToPath(import.meta.url));
 const families = resolve(bin, "../..");
@@ -169,10 +169,16 @@ try {
       differences,
     );
     const lines = ran.stdout.trim().split("\n").filter(Boolean).map(JSON.parse);
+    const [preLibrary, postLibrary] = ["pre", "post"].map((side) =>
+      hash(readFileSync(join(out, `${side}-build`, LIBRARY)).toString("base64")),
+    );
     runner = {
       status: ran.code === 0 || ran.code === 1 ? "RUN" : "ERROR",
       sameSources: planSources === committed.recorded.sha256,
+      // (two libraries' projections may differ where the compilers do not)
+      sameLibrary: preLibrary === postLibrary,
       total: lines.at(-1) ?? null,
+      // (the first difference or stall the runner records)
       firstDifferenceMs: ran.record.firstGrowthMs,
     };
   }
@@ -227,7 +233,7 @@ try {
       `Pre ${builds.pre.commit ?? `tree ${builds.pre.tree}`}: ${summaries.pre.verdict}, ${counts(summaries.pre).join(", ")}`,
       `Post ${builds.post.commit ?? `tree ${builds.post.tree}`}: ${summaries.post.verdict}, ${counts(summaries.post).join(", ")}`,
       `Compared: ${report.comparison.fixed} fixed, ${report.comparison.regressed} regressed, ${report.comparison.unchanged} unchanged, ${report.comparison.incomparable} incomparable`,
-      `Runner: ${runner.status}${runner.total ? `, ${runner.total.differences} differences, ${runner.total.stalled} stalled` : ""}${runner.reason ? ` (${runner.reason})` : ""}`,
+      `Runner: ${runner.status}${runner.total ? `, ${runner.total.differences} differences, ${runner.total.stalled} stalled` : ""}${runner.reason ? ` (${runner.reason})` : ""}${runner.sameLibrary === false ? " (the two trees' oracle libraries differ: a difference may be the projection's)" : ""}`,
       "",
       `Profile ${plan.profile}, seed ${plan.seed}, plan ${plan.planHash}, Node ${process.versions.node}.`,
       "Counts are configurations, not bugs; UNSUPPORTED and OUT_OF_SCOPE rows are incomplete coverage, never PASS.",
