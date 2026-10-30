@@ -90,10 +90,10 @@ oracle library, runs `run.mjs property` on the same builds; `--library` adds the
 before #1427. It writes `report.json` and `report.md` and exits 0 when the family tells the pair apart (failures on the
 first, none on the second, no row without a verdict or an exclusion), 1 when it does not, 2 on an error. `quick` runs
 12 sources in two modes at four allowances, `focused` (the default) all 90 in eight modes at nine, `deep` at 23. On
-the desktop worker (Node 26.13, under load; #1477) a build took 24–28 s, a campaign 2 s (`quick`), 42–56 s (`focused`)
-or 107–130 s (`deep`) per build, the runner over the same sources 10–13 s, a whole job at most 1.7 GB: `quick` suits
-a builder's loop in the stops area, `focused` the run before a review round there, `deep` a change to where or how the
-budget stops.
+the desktop worker (Node 26.13, shared with other jobs; #1477) a build took 3–5 s, a campaign 2–3 s (`quick`), 52–57 s
+(`focused`) or 109–124 s (`deep`) per build, the runner over the same sources 10–12 s, a whole job at most 1.8 GB:
+`quick` suits a builder's loop in the stops area, `focused` the run before a review round there, `deep` a change to
+where or how the budget stops.
 `bin/canaries.mjs <build> <out>` checks that 12 mutants of clean plans fail; `bin/shrink.mjs`, `bin/merge.mjs` (shards)
 and `bin/metrics.mjs` print their usage. The tool's own tests: `node --test tests/families/property/test/`.
 
