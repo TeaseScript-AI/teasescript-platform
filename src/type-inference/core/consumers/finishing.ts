@@ -384,7 +384,8 @@ function frontiersOf(walk: Consumers): HostFrontiers {
     }
     return node;
   };
-  for (const [key, list] of definitions.byKey)
+  for (const [key, list] of definitions.byKey) {
+    program.work.charge("checks");
     for (const d of list) {
       program.work.charge("checks");
       if ((d.kind !== "whole" && d.kind !== "add") || d.value === undefined || !lists.live(d))
@@ -396,6 +397,7 @@ function frontiersOf(walk: Consumers): HostFrontiers {
         d.kind === "add" ? keptSteps(program.work, path, ["element"]) : path,
       ).stores.push({ d, elements: d.kind === "add" && d.how === "elements" });
     }
+  }
   const stopped = new Set(walk.pass.contract.stoppedKeys().map((key) => key.place));
   found = {
     places,
@@ -476,6 +478,7 @@ function partsOf(
 /** Enters the stores at a frontier's node: each value there, an `addAll`'s elements. */
 function enterStores(walk: Consumers, at: HostFrontier, depth: number): void {
   for (const { d, elements } of at.node?.stores ?? []) {
+    walk.pass.program.work.charge("checks");
     const value = [expand(walk.admission, d.value!, d.node, [])];
     if (!elements) enterValues(walk, at, value, depth);
     else {
@@ -852,6 +855,7 @@ function belowOf(walk: Consumers, start: HostFrontier): Below {
     if (own.low !== own.index) continue;
     const members: HostFrontier[] = [];
     for (let member = open.pop(); member !== undefined; member = open.pop()) {
+      program.work.charge("checks");
       onOpen.delete(member);
       members.push(member);
       if (member === frame.at) break;
@@ -884,14 +888,19 @@ function belowOf(walk: Consumers, start: HostFrontier): Below {
     if (!stopped) {
       const into: Reached = { holders: EMPTY_TRIE, tracked: undefined, inherited: undefined };
       for (const member of members) {
+        program.work.charge("checks");
         reach(member, into);
         into.holders = withOwnSteps(walk, into.holders, member);
         into.inherited = ingress.union(into.inherited, member.host);
       }
       const below: Below = { ...into, stopped, stepped: new Map() };
-      for (const member of members) record(member, below);
+      for (const member of members) {
+        program.work.charge("checks");
+        record(member, below);
+      }
     } else
       for (const member of members) {
+        program.work.charge("checks");
         const into: Reached = { holders: EMPTY_TRIE, tracked: undefined, inherited: member.host };
         reach(member, into);
         record(member, { ...into, stopped, stepped: new Map() });
@@ -944,19 +953,24 @@ function heldHost(walk: Consumers, start: HostFrontier): IngressNode | undefined
     // (a component's members: its host data, and the answers of the components its copies reach, all made before it)
     const members: HostFrontier[] = [];
     for (let member = open.pop(); member !== undefined; member = open.pop()) {
+      program.work.charge("checks");
       onOpen.delete(member);
       members.push(member);
       if (member === frame.at) break;
     }
     let node: IngressNode | undefined;
     for (const member of members) {
+      program.work.charge("checks");
       node = ingress.union(node, member.host);
       for (const copy of member.copies) {
         program.work.charge("checks");
         node = ingress.union(node, held.get(copy) ?? undefined);
       }
     }
-    for (const member of members) held.set(member, node ?? null);
+    for (const member of members) {
+      program.work.charge("checks");
+      held.set(member, node ?? null);
+    }
   }
   return held.get(start) ?? undefined;
 }
