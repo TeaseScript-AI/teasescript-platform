@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { compileProject } from "../src/compiler.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
@@ -1503,66 +1504,129 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 
 /**
  * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
- * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2). A load with a
- * default gets the property, of the place's type, in that default; any other value that property's check, the value
- * kept in a variable first unless it is a stable path; a value whose landing the syntax does not show, words that name
- * it and the place. A value that is the place keeps its own check.
+ * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2), and following it
+ * removes the warning (Astra r1's A1). Where the object comes from a load with a default, through copies, elements and
+ * list literals too, the load's default is given the property; else no property check removes the warning (#1496), so
+ * the words say where the type must come from and offer no check. A type with null takes no default that removes it yet
+ * (#1470). A value that is the place keeps its own check. Each followed source compiles under both checkers and no
+ * longer owes the warning.
  */
-test("a store's property below the warned value is the property its fix names (#1468)", () => {
+test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
   const load = 'load("prefs", default: {volume: 5})';
-  const cases: readonly (readonly [source: string, value: string, fix: string])[] = [
+  const given = 'load("prefs", default: {volume: 5, caption: 7})';
+  const guarded = (body: string) =>
+    `if original.entry is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
+  const cases: readonly (readonly [
+    source: string,
+    value: string,
+    fix: string,
+    followed: string | null,
+  ])[] = [
     [
       `let prefs = ${load}\nprefs.caption = 2\nexit\n`,
       load,
       `Give 'caption' a whole number (integer) in the default of '${load}'.`,
+      `let prefs = ${given}\nprefs.caption = 2\nexit\n`,
     ],
     [
       'let prefs = load("prefs", default: {inner: {volume: 5}})\nprefs.inner.caption = "on"\nexit\n',
       'load("prefs", default: {inner: {volume: 5}})',
       `Give 'inner.caption' text (string) in the default of 'load("prefs", default: {inner: {volume: 5}})'.`,
-    ],
-    [
-      `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
-      load,
-      `Give 'caption' a whole number (integer) or null in the default of '${load}'.`,
+      'let prefs = load("prefs", default: {inner: {volume: 5, caption: "off"}})\nprefs.inner.caption = "on"\nexit\n',
     ],
     [
       'let loaded = load("prefs", default: [{volume: 5}])\nloaded[0].caption = 2\nexit\n',
       'load("prefs", default: [{volume: 5}])',
       `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nloaded[0].caption = 2\nexit\n',
+    ],
+    // (Astra r1's copy, its property already checked)
+    [
+      `let original = load("cfg", default: {marker: 8})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
+      "original",
+      `Give 'entry' a whole number (integer) in the default of 'load("cfg", default: {marker: 8})'.`,
+      `let original = load("cfg", default: {marker: 8, entry: 7})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
     ],
     [
-      "let items = [{volume: 5}, hostValue]\nitems[1].caption = 2\nexit\n",
-      "hostValue",
-      "Check that 'hostValue.caption' is a whole number (integer) first.",
-    ],
-    [
-      `let prefs = ${load}\nlet copy = prefs\ncopy.caption = 2\nexit\n`,
-      "prefs",
-      "Check that 'prefs.caption' is a whole number (integer) first.",
+      'let loaded = load("prefs", default: [{volume: 5}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
+      "loaded[0]",
+      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
     ],
     [
       `let prefs = ${load}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
       "[{volume: 5}, prefs]",
-      "Keep '[{volume: 5}, prefs]' in a new variable and check that 'caption' of an element of it is a whole number (integer) first.",
+      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
+      `let prefs = ${given}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
+    ],
+    [
+      `let saved = ${load}\nlet prefs = [saved, saved].random\nprefs.caption = 2\nexit\n`,
+      "[saved, saved].random",
+      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
+      `let saved = ${given}\nlet prefs = [saved, saved].random\nprefs.caption = 2\nexit\n`,
+    ],
+    // (host data: no property check removes the warning, Astra r1's host and kept lists)
+    [
+      "let items = [{volume: 5}, hostValue]\nitems[1].caption = 2\nexit\n",
+      "hostValue",
+      "Give 'caption' of an element of 'items' a whole number (integer) where 'hostValue' gets its value.",
+      null,
+    ],
+    [
+      'if hostValue is object and hostValue.entry is integer {\n    let boxes = [{marker: 8}, hostValue]\n    boxes[1].entry = 4\n    say "done"\n}\nexit\n',
+      "hostValue",
+      "Give 'entry' of an element of 'boxes' a whole number (integer) where 'hostValue' gets its value.",
+      null,
+    ],
+    [
+      'let kept = [hostValue]\nif kept[0].entry is integer {\n    let box = kept\n    box[0].entry = 4\n    say "done"\n}\nexit\n',
+      "kept",
+      "Give 'entry' of an element of 'box' a whole number (integer) where 'kept' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
+      load,
+      `Give 'prefs.caption' a whole number (integer) or null where '${load}' gets its value.`,
+      null,
     ],
     [
       "let prefs = hostValue otherwise {volume: 5}\nprefs.caption = 2\nexit\n",
       "hostValue",
-      "Check that 'hostValue' gives 'prefs.caption' a whole number (integer) first.",
+      "Give 'prefs.caption' a whole number (integer) where 'hostValue' gets its value.",
+      null,
     ],
     [
       "let o = {caption: hostValue}\no.caption = 2\nexit\n",
       "hostValue",
       "Check that 'hostValue' is a whole number (integer) first.",
+      "if hostValue is integer {\n    let o = {caption: hostValue}\n    o.caption = 2\n}\nexit\n",
     ],
   ];
-  for (const [source, value, fix] of cases) {
+  const errors = (source: string) =>
+    compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] }).diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+  for (const [source, value, fix, followed] of cases) {
     const warned = reported(main(source)).filter(
       ({ code, site, message }) =>
-        code === "TSV041" && site === value && !message.includes("holds objects"),
+        code === "TSV041" && site === value && !/holds (objects|an object)/.test(message),
     );
     assert.equal(warned.length, 1, `${source}: ${JSON.stringify(warned)}`);
-    assert.ok(warned[0]!.message.endsWith(` ${STOPS} ${fix}`), `${source}: ${warned[0]!.message}`);
+    const { message } = warned[0]!;
+    assert.ok(message.endsWith(` ${STOPS} ${fix}`), `${source}: ${message}`);
+    const place = message.slice(0, message.indexOf(" holds "));
+    if (followed === null) {
+      assert.ok(!/check/i.test(fix), `${source}: no check is offered`);
+      continue;
+    }
+    assert.deepEqual(errors(followed), [], followed);
+    assert.deepEqual(
+      reported(main(followed)).filter(
+        ({ code, message: other }) => code === "TSV041" && other.startsWith(`${place} holds `),
+      ),
+      [],
+      followed,
+    );
   }
 });

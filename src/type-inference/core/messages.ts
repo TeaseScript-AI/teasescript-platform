@@ -1,4 +1,11 @@
-import type { Block, Expression, ObjectProperty, Program, Statement } from "../../ast.js";
+import type {
+  Block,
+  CallExpression,
+  Expression,
+  ObjectProperty,
+  Program,
+  Statement,
+} from "../../ast.js";
 import { parse } from "../../parser.js";
 import { someNode } from "../../project-globals.js";
 import {
@@ -50,6 +57,7 @@ import {
 import { hasIdentity, VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import { fits } from "./admission.js";
 import { REFERENCE } from "./contract.js";
+import { selectsElement } from "./method-categories.js";
 import { propertyName, propertyStep } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
@@ -100,6 +108,11 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
+  /**
+   * The one value a variable named `name` has in the project (#1468): the value its `let` or `global` gives it, where no
+   * other statement gives it or a property of it a value; `null` otherwise.
+   */
+  readonly valueOf: (name: string) => { readonly value: Expression; readonly file: number } | null;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -330,6 +343,8 @@ interface Given {
   readonly value: Expression;
   readonly root: string;
   readonly steps: readonly StoreStep[];
+  /** Whether a `let` or a `global` gives it, not an assignment. */
+  readonly declared: boolean;
 }
 
 /** The variable and the properties an assignment's target names (`box.inner`), else `null`. */
@@ -346,12 +361,12 @@ function targetSteps(target: Expression): Landing | null {
 /** The value a `let`, a `global` or an `=` statement gives its variable, else `null`. */
 function givenBy(statement: Statement): Given | null {
   if (statement.kind === "letStatement")
-    return { value: statement.initializer, root: statement.name.name, steps: [] };
+    return { value: statement.initializer, root: statement.name.name, steps: [], declared: true };
   if (statement.kind === "globalStatement")
-    return { value: statement.initial, root: statement.name.name, steps: [] };
+    return { value: statement.initial, root: statement.name.name, steps: [], declared: true };
   if (statement.kind !== "assignmentStatement" || statement.operator !== "=") return null;
   const target = targetSteps(statement.target);
-  return target === null ? null : { value: statement.value, ...target };
+  return target === null ? null : { value: statement.value, ...target, declared: false };
 }
 
 /**
@@ -536,11 +551,11 @@ export function messageSource(
   };
   // the values statements give their variables, each file's in start order, gathered once
   const givens = new Map<number, Given[]>();
-  const landing = (site: SourceSite): Landing | null => {
-    let found = givens.get(site.file);
+  const givensOf = (file: number): Given[] => {
+    let found = givens.get(file);
     if (found === undefined) {
       const list: Given[] = [];
-      someNode(programOf(site.file), (node) => {
+      someNode(programOf(file), (node) => {
         if (node.kind !== "program" && node.kind !== "block") return false;
         // EVIDENCE: invariant: a parser-owned node whose kind is `program` or `block` holds its statements.
         for (const statement of (node as Program | Block).statements)
@@ -554,13 +569,48 @@ export function messageSource(
         return false;
       });
       list.sort((a, b) => a.value.span.start.offset - b.value.span.start.offset);
-      givens.set(site.file, (found = list));
+      givens.set(file, (found = list));
     }
-    return landingOf(found, site);
+    return found;
+  };
+  const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
+  // the values given to each variable of the project by its name, gathered once
+  // (and the variables a method is called on, which may change what they hold: a list's `add`)
+  let named: Map<string, { readonly given: Given; readonly file: number }[]> | undefined;
+  const called = new Set<string>();
+  const valueOf = (name: string): { readonly value: Expression; readonly file: number } | null => {
+    if (named === undefined) {
+      const byName = new Map<string, { readonly given: Given; readonly file: number }[]>();
+      sources.forEach((_, file) => {
+        for (const given of givensOf(file)) {
+          const list = byName.get(given.root);
+          if (list === undefined) byName.set(given.root, [{ given, file }]);
+          else list.push({ given, file });
+        }
+        someNode(programOf(file), (node) => {
+          if (node.kind !== "callExpression") return false;
+          // EVIDENCE: invariant: a parser-owned node whose kind is `callExpression` is a `CallExpression`.
+          let at = (node as CallExpression).callee;
+          if (at.kind !== "propertyAccessExpression") return false;
+          while (at.kind === "propertyAccessExpression" || at.kind === "indexExpression")
+            at = at.object;
+          if (at.kind === "identifier") called.add(at.name);
+          return false;
+        });
+      });
+      named = byName;
+    }
+    if (called.has(name)) return null;
+    const found = named.get(name);
+    const only = found?.length === 1 ? found[0]! : undefined;
+    return only !== undefined && only.given.declared && only.given.steps.length === 0
+      ? { value: only.given.value, file: only.file }
+      : null;
   };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
+    valueOf,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
@@ -2663,23 +2713,102 @@ function checkFix(
 }
 
 /**
+ * The load with a default an object `value` holds at `below` comes from (#1468, Astra r1's A1), followed through
+ * parentheses, a variable's one value (`MessageSource.valueOf`), a property or an element of it, a selection of an
+ * element, and a list literal's elements but its object literals, all of one load: the load's text and the way from it
+ * to the place; `null` where anything else may give it. `textOf` gives an expression's text where it stands.
+ */
+function loadOf(
+  value: Expression,
+  below: readonly StoreStep[],
+  textOf: (expression: Expression) => string,
+  source: MessageSource,
+  depth = 0,
+): {
+  readonly text: string;
+  readonly steps: readonly StoreStep[];
+  readonly holder: string | null;
+} | null {
+  if (depth > 64) return null;
+  const element: StoreStep = { collection: "list" };
+  switch (value.kind) {
+    case "parenthesizedExpression":
+      return loadOf(value.expression, below, textOf, source, depth + 1);
+    case "loadExpression":
+      return value.defaultValue === null
+        ? null
+        : { text: textOf(value), steps: below, holder: null };
+    case "identifier": {
+      const found = source.valueOf(value.name);
+      const from =
+        found === null
+          ? null
+          : loadOf(
+              found.value,
+              below,
+              (expression) => source.text(siteIn(found.file, expression)),
+              source,
+              depth + 1,
+            );
+      // (the variable whose one value the load is holds it, for an element's name)
+      return from === null || from.holder !== null ? from : { ...from, holder: value.name };
+    }
+    case "propertyAccessExpression":
+      return loadOf(
+        value.object,
+        [
+          selectsElement(value.property.name) ? element : { property: value.property.name },
+          ...below,
+        ],
+        textOf,
+        source,
+        depth + 1,
+      );
+    case "indexExpression":
+      return loadOf(value.object, [element, ...below], textOf, source, depth + 1);
+    case "listLiteral": {
+      const [first, ...rest] = below;
+      if (first === undefined || !("collection" in first)) return null;
+      let found: {
+        readonly text: string;
+        readonly steps: readonly StoreStep[];
+        readonly holder: string | null;
+      } | null = null;
+      for (const each of value.elements) {
+        if (each.kind === "objectLiteral") continue;
+        const from = loadOf(each, rest, textOf, source, depth + 1);
+        if (from === null || (found !== null && found.text !== from.text)) return null;
+        found = from;
+      }
+      return found;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The site of an expression of the file `file`. */
+function siteIn(file: number, expression: Expression): SourceSite {
+  return { file, start: expression.span.start.offset, end: expression.span.end.offset };
+}
+
+/**
  * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), in
- * words by construction, with no form and no value of its own (the lead's ruling after Codex r2: a pasted default needs
- * a whole-program proof of its literal at every read, load and save, which kept breaking). By where the value lands
- * (`MessageSource.landing`): a load with a default gets the property, of the place's type, in that default, which its
- * reader then takes where the stored property misfits or is missing (a check of the loaded property could only run
- * after the load, the line that stops); any other value that property's check, of a stable path itself, of any other
- * value kept in a variable first. Where no landing is proved, the words name the value and the place. `null` where the
- * place is the value itself or its element, whose own check is the fix, and for a check of a type with no test.
+ * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the object comes
+ * from a load with a default (`loadOf`), that load's default given the property, of the place's type, which its reader
+ * then takes where the stored property misfits or is missing; anything else gives no check that discharges the warning
+ * (a property's check does not reach a copy of the whole object, Astra r1's A1, #1496), so the words say where the type
+ * must come from. `null` where the place is the value itself or its element, whose own check is the fix.
  */
 function propertyFix(
   rule: StoreRule,
   text: string,
-  test: Test | null,
   site: SourceSite,
   source: MessageSource,
 ): string | null {
   if (!rule.steps.some((step) => "property" in step)) return null;
+  const type = described(rule.type);
+  const otherwise = `Give ${rule.into} ${type} where '${text}' gets its value.`;
   const landing = source.landing(site);
   const above = landing?.steps ?? [];
   const same = (a: StoreStep, b: StoreStep): boolean =>
@@ -2694,25 +2823,37 @@ function propertyFix(
     above.length > rule.steps.length ||
     !above.every((step, index) => same(step, rule.steps[index]!))
   )
-    return `Check that '${text}' gives ${rule.into} ${described(rule.type)} first.`;
+    return otherwise;
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
-  const path = below.map((step) =>
-    "property" in step
-      ? propertyStep(step.property)
-      : step.collection === "dict"
-        ? "entry"
-        : "element",
+  const parsed = parsedExpression(text);
+  const found =
+    parsed === null
+      ? null
+      : loadOf(
+          parsed.expression,
+          below,
+          (expression) =>
+            text.slice(
+              expression.span.start.offset - parsed.at,
+              expression.span.end.offset - parsed.at,
+            ),
+          source,
+        );
+  // (a type with null takes no default that discharges yet: a value of its other type narrows what the place takes,
+  // and a default's `null` does not yet prove the property, #1470)
+  if (found === null || rule.type.includes("null")) return otherwise;
+  // (the property by its way below the load where only properties lead there, else by its way from the variable that
+  // holds the load, else the place as the first sentence names it, an element's in words)
+  const path = found.steps.map((step) =>
+    "property" in step ? propertyStep(step.property) : "element",
   );
-  const value = parsedExpression(text)?.expression;
-  // (the property by its way below the load where only properties lead there, else the place as the first sentence
-  // names it, an element's in words)
-  if (value?.kind === "loadExpression" && value.defaultValue !== null)
-    return `Give ${below.every((step) => "property" in step) ? pathPhrase({ code: "" }, path) : rule.into} ${described(rule.type)} in the default of '${text}'.`;
-  if (test === null) return null;
-  return stablePath(text)
-    ? `Check that ${pathPhrase({ code: text }, path)} ${test.words} first.`
-    : `Keep '${text}' in a new variable and check that ${pathPhrase({ words: "it" }, path)} ${test.words} first.`;
+  const named = found.steps.every((step) => "property" in step)
+    ? pathPhrase({ code: "" }, path)
+    : found.holder !== null
+      ? pathPhrase({ code: found.holder }, path)
+      : rule.into;
+  return `Give ${named} ${type} in the default of '${found.text}'.`;
 }
 
 /** The literals an example may write beside a named value as the source writes them. */
@@ -2880,7 +3021,7 @@ function warningFix(
     // (a store's place below the value, a property of what it holds: that property's fix, #1468)
     const property =
       rule.rule === "store" && !isLiteral(text) && context !== "missing"
-        ? propertyFix(rule, text, test, site, source)
+        ? propertyFix(rule, text, site, source)
         : null;
     if (property !== null) return property;
     return test === null || isLiteral(text) || context === "missing"
