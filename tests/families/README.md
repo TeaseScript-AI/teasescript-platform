@@ -122,6 +122,10 @@ Data, indexed here and not imported: run each from its own folder on the desktop
 - `desktop:~/work/evidence/corpus/copies/astra-1423/`: Astra's r1 of #1423 (G3 part 2). It holds generators
   (`cases.mjs`, `families.mjs`, `stop-cases.mjs`, `route-cases.mjs`, `growth.mjs`), fixed case lists, and their
   publication, stop-set and growth harnesses. Its `README.md` gives the pins.
+- `desktop:~/work/evidence/corpus/copies/astra-1441/` and `copies/sol-1441-r1/`: Astra's and Sol's r1 of #1441. Their
+  runners keep an exception apart, unhashed, and exit 1 on it, and Astra's `run.mjs` and Sol's `compare.py` count it
+  apart and reject it, never as an equal publication (#1494). Each folder's `canary-1494.sh` checks that; its changed
+  files stay beside it as `<file>.pre-1494` (`PORTED-1494.md`).
 - `desktop:~/work/evidence/corpus/stops/owner-s8/`: the owner's independent S8 reviews. It holds the 75-source
   domain matrix, the every-allowance sweeps, the cache lifecycle probe and the JSON and load matrix. It is untrusted
   input, never imported into a build.
@@ -130,6 +134,10 @@ Data, indexed here and not imported: run each from its own folder on the desktop
   implementation-independent predicate, the relocation-only replay driver (`replay.mjs`, `check-run.py`),
   `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
   the stops area: it runs before a builder's first review there.
+- `desktop:~/work/evidence/corpus/stops/i1433-fallback-labels/`: #1476's fallback-label kit (#1433). `labels.mjs`
+  keeps an analysis's exception as its own row and exits 1 on it, and `labels-compare.py` counts such rows apart and
+  rejects them (#1494). Its `canary-1494.sh` checks that; its changed files stay beside it as `<file>.pre-1494`
+  (`PORTED-1494.md`).
 - `desktop:~/work/evidence/corpus/consumers/sol-1455-r1/`: Sol's r1 of #1455 (#1436, object presence): the
   natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
   (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
