@@ -4,17 +4,15 @@
 // in the four modes (source and reversed order, the sharing on and off), and compares what the sources publish
 // (`publication`) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each
 // demand allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in
-// a worker thread: a source that takes longer than `--timeout` seconds or more than `--memory` MB of heap is counted as
-// stalled and the next source runs in a fresh worker. Prints one JSON line per generator and a total: sources,
-// unparsed, stalled, modes, runs, differences.
+// a child process: a source that takes longer than `--timeout` seconds, more than `--memory` MB of heap, or that ends
+// the process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process.
+// Prints one JSON line per generator and a total: sources, unparsed, stalled, modes, runs, differences.
+import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-
-/** The host globals a source may read, unless its generator exports its own `globals`. */
-const GLOBALS = ["hostValue", "hostOther", "hostInit", "otherHost"];
+import { sourcesOf } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -24,22 +22,26 @@ async function oracles(root) {
   return import(pathToFileURL(file).href);
 }
 
-/** What `run` returns, as text; an exception's message where it throws (both trees are held to the same). */
+/**
+ * What `run` returns, as text (the publication's own text as it is: encoding it again would double a large one); an
+ * exception's message where it throws (both trees are held to the same).
+ */
 function attempt(run) {
   try {
-    return JSON.stringify(run());
+    const value = run();
+    return typeof value === "string" ? value : JSON.stringify(value);
   } catch (error) {
     return `error: ${String(error).slice(0, 300)}`;
   }
 }
 
-const hash = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
+const hash = (text) => createHash("sha256").update(text).digest("hex");
 
-if (!isMainThread) {
-  // the worker: each source's runs in the four modes on both trees
-  const { baseRoot, headRoot, allowances } = workerData;
+if (process.argv[2] === "--child") {
+  // the child: each source's runs in the four modes on both trees
+  const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
   const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
-  parentPort.on("message", ({ files, checks, globals }) => {
+  process.on("message", ({ files, checks, globals }) => {
     const reply = { runs: 0, parsed: true, differences: [] };
     for (const mode of head.MODES) {
       const runs = [];
@@ -52,19 +54,22 @@ if (!isMainThread) {
             (oracle) => oracle.stopSet(files, mode, globals, allowance),
           ]);
       for (const [check, run] of runs) {
-        const [was, is] = [attempt(() => run(base)), attempt(() => run(head))];
-        if (is === "null") reply.parsed = false;
+        // compared by hash, so that the base's text is not held while the head runs
+        const was = hash(attempt(() => run(base)));
+        const text = attempt(() => run(head));
+        if (text === "null") reply.parsed = false;
+        const is = hash(text);
         reply.runs += 1;
         if (was !== is)
           reply.differences.push({
             mode: `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`,
             check,
-            base: hash(was),
-            head: hash(is),
+            base: was.slice(0, 16),
+            head: is.slice(0, 16),
           });
       }
     }
-    parentPort.postMessage(reply);
+    process.send(reply);
   });
 } else {
   const [area, baseRoot, headRoot, ...rest] = process.argv.slice(2);
@@ -91,49 +96,58 @@ if (!isMainThread) {
   // fail before the first source when a tree has no library
   await Promise.all([oracles(baseRoot), oracles(headRoot)]);
 
-  let worker = null;
-  const fresh = () =>
-    new Worker(fileURLToPath(import.meta.url), {
-      workerData: { baseRoot, headRoot, allowances },
-      resourceLimits: { maxOldGenerationSizeMb: memory },
+  let child = null;
+  /** A child process, keeping the end of its error output: a fatal V8 error says there why the process ended. */
+  const fresh = () => {
+    const created = fork(
+      fileURLToPath(import.meta.url),
+      ["--child", JSON.stringify({ baseRoot, headRoot, allowances })],
+      {
+        execArgv: [`--max-old-space-size=${memory}`],
+        serialization: "advanced",
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
+      },
+    );
+    created.errors = "";
+    created.stderr.on("data", (chunk) => {
+      created.errors = (created.errors + chunk).slice(-4000);
     });
-  /** One source's reply, or why it stalled (`timeout`, or the worker's error). */
+    return created;
+  };
+  // a runner stopped by a signal stops its child first (it would go on analysing), then ends by that signal
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.once(signal, () => {
+      child?.kill("SIGKILL");
+      process.kill(process.pid, signal);
+    });
+  /** One source's reply, or why it stalled (`timeout`, or how the process ended). */
   const analysed = (message) =>
     new Promise((resolve) => {
-      worker ??= fresh();
-      const current = worker;
+      // a child that ended between sources (its channel closed) is replaced, not given the next source
+      if (child?.connected !== true) child = fresh();
+      const current = child;
       const onMessage = (reply) => settle(reply);
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
-      const onExit = (code) => settle({ stalled: `exit ${code}` });
-      // (only these listeners go: the worker keeps its port referenced through its own)
+      // after `close`, the process's error output is complete
+      const onClose = (code, signal) => {
+        const fatal = /FATAL ERROR: [^\n]*/.exec(current.errors)?.[0];
+        settle({
+          stalled: [signal ?? `exit ${code}`, fatal].filter(Boolean).join(": ").slice(0, 200),
+        });
+      };
       const settle = (result) => {
         clearTimeout(timer);
-        current.off("message", onMessage).off("error", onError).off("exit", onExit);
+        current.off("message", onMessage).off("error", onError).off("close", onClose);
         if ("stalled" in result) {
-          worker = null;
-          void current.terminate();
+          child = null;
+          current.kill("SIGKILL");
         }
         resolve(result);
       };
       const timer = setTimeout(() => settle({ stalled: "timeout" }), timeout);
-      current.on("message", onMessage).on("error", onError).on("exit", onExit);
-      current.postMessage(message);
+      current.on("message", onMessage).on("error", onError).on("close", onClose);
+      current.send(message);
     });
-
-  /** A generator's sources: its fixed `cases`, and each of its `shapes` at each size. */
-  const sourcesOf = (generator) => {
-    const files = (value) =>
-      typeof value === "string" ? [{ path: "main.tease", source: value }] : value;
-    const cases = (generator.cases ?? []).map(([name, value]) => ({ name, files: files(value) }));
-    const shapes = generator.shapes ?? {};
-    const sized = (sizesOption ?? generator.sizes ?? [4, 8]).flatMap((size) =>
-      Object.entries(shapes).map(([name, shape]) => ({
-        name: `${name}@${size}`,
-        files: files(shape(size)),
-      })),
-    );
-    return [...cases, ...sized];
-  };
 
   const folder = path.join(path.dirname(fileURLToPath(import.meta.url)), area);
   const generators = readdirSync(folder)
@@ -145,12 +159,13 @@ if (!isMainThread) {
   for (const name of generators) {
     const generator = await import(pathToFileURL(path.join(folder, name)).href);
     const checks = generator.checks ?? ["publication"];
-    const globals = generator.globals ?? GLOBALS;
     const row = { generator: name, sources: 0, unparsed: 0, stalled: 0, runs: 0, differences: 0 };
-    const sources = sourcesOf(generator).filter((_, index) => index % shards === shard);
+    const sources = sourcesOf(generator, sizesOption).filter(
+      (_, index) => index % shards === shard,
+    );
     for (const source of sources) {
       row.sources += 1;
-      const reply = await analysed({ files: source.files, checks, globals });
+      const reply = await analysed({ files: source.files, checks, globals: source.globals });
       if ("stalled" in reply) {
         row.stalled += 1;
         record({
@@ -158,6 +173,7 @@ if (!isMainThread) {
           source: source.name,
           stalled: reply.stalled,
           files: source.files,
+          globals: source.globals,
         });
         continue;
       }
@@ -165,13 +181,19 @@ if (!isMainThread) {
       if (!reply.parsed) row.unparsed += 1;
       row.differences += reply.differences.length;
       for (const difference of reply.differences)
-        record({ generator: name, source: source.name, ...difference, files: source.files });
+        record({
+          generator: name,
+          source: source.name,
+          ...difference,
+          files: source.files,
+          globals: source.globals,
+        });
     }
     console.log(JSON.stringify(row));
     total.generators += 1;
     for (const key of counts) total[key] += row[key];
   }
-  await worker?.terminate();
+  child?.kill();
   console.log(JSON.stringify({ ...total, node: process.version }));
   process.exitCode = total.differences === 0 && total.stalled === 0 ? 0 : 1;
 }

@@ -1,10 +1,9 @@
 # Generator corpus
 
-The generators reviewers and builders used as evidence on the type core, kept so later builders rerun them. Not in CI:
-before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
-counts (`docs/TESTING.md`, test admission). This folder holds the runner and the module contract. The modules arrive
-under `tests/families/<area>/` in a follow-up, #1446. That follow-up rebuilds each module from the inputs of its
-recorded evidence command, and each module must reproduce that run's sources and arguments.
+The generators reviewers and builders used as evidence on the type core, kept so later builders rerun them. Their runs
+are not in CI: before a type-core review round, the builder runs the affected areas against the base and head builds
+and reports the counts (`docs/TESTING.md`, test admission). Each module under `tests/families/<area>/` reproduces the
+sources of one recorded evidence run (#1446), and `check.mjs` (in CI) checks that it does.
 
 ## Running an area
 
@@ -17,10 +16,10 @@ node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dis
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
 publishes (`publication`) and, for a generator whose `checks` include `"stops"`, which decisions stop and when at each
-demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap is counted as
-stalled, and the runner goes on with the next. It prints one JSON line per generator and a total (sources, unparsed,
-stalled, modes, runs, differences), and exits 1 when any run differs or any source stalls. Run large sizes as one
-capped job per area or shard on a worker.
+demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap, or that ends
+its analysing process (a fatal V8 error), is counted as stalled with the reason (`--out`), and the runner goes on with
+the next. It prints one JSON line per generator and a total (sources, unparsed, stalled, modes, runs, differences), and
+exits 1 when any run differs or any source stalls. Run large sizes as one capped job per area or shard on a worker.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
@@ -31,15 +30,38 @@ mutated file's hash in the head tree, which differs from the base's. Without tha
 A module `tests/families/<area>/<name>.mjs` with no imports beyond `node:` built-ins and no side effects:
 
 ```js
-// <what it generates>
-export const sizes = [4, 8]; // default sizes, one doubling
+// <what it generates> (<its origin>)
+export const sizes = [64, 128]; // the recorded run's sizes
 export const shapes = { "<shape>": (n) => "<source>" }; // or (n) => [{ path, source }]
-// or fixed sources: export const cases = [["<name>", "<source>"]];
+// or fixed sources: export const cases = [["<name>", "<source>" or [{ path, source }], <globals>?]];
 export const checks = ["publication", "stops"]; // default ["publication"]
+export const globals = ["hostValue"]; // the run's host globals, where they are not the default
+export const recorded = { commands: [["<command>", "<where it is recorded>"]], sources: 0, sha256: "<set key>" };
 ```
 
-Sources may use the host globals `hostValue`, `hostOther`, `hostInit` and `otherHost`; a generator whose sources
-need other names exports `globals`, the full list.
+A source runs with the host globals its case gives, else its generator's `globals`, else `hostValue`, `hostOther`,
+`hostInit` and `otherHost`. They are part of the input: the analysis declares a host binding for each. A recorded
+source is one call's files with the list that call passed: the list its run's type-core analysis passed, or, where the
+run only compiled those files, that compile's. Two analysis calls with different lists are two sources.
+
+`recorded` is the run the module reproduces: its commands with where its evidence records them, the count of its
+distinct sources (each with its globals) and their set key, and the inputs it drops with the reason (`dropped`).
+`node tests/families/check.mjs [area...]` checks every module against its record, and CI runs it
+(`npm run test:families`); `--list` prints each module's commands and the count and set key of its sources. A record
+comes from the capture of its run's commands (what each call passed), never from the module's own sources, so the
+check also fails a module assembled wrongly; a module changes only together with its record.
+
+A module reproduces what its run passed to the compiler, at the run's arguments, and nothing it did not:
+
+- the commands the evidence folder records (README, run and queue scripts, review text, result files); for a run that
+  recorded none, its driver's run without arguments; a generator no recorded run used is not kept;
+- without an input that no longer resolves on `main` for a reason its origin did not test (a removed feature,
+  experimental syntax), and with one whose origin meant a parse or name error;
+- without the data a driver read but its review did not write: the repository's type-core fixture
+  (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
+  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's), judged by where
+  each input came from: a case file its own review wrote stays, and a program the driver derived from a fixture row
+  (a pasted fix) stays, even one equal to another row. The module's first comment names what its run also read.
 
 ## Kept outside the repository
 
@@ -56,15 +78,45 @@ Data, indexed here and not imported: run each from its own folder on the desktop
   implementation-independent predicate, the relocation-only replay driver (`replay.mjs`, `check-run.py`),
   `cost-probe.mjs` and the raw results, and its `README.md` gives the replay commands. It is the standard oracle for
   the stops area: it runs before a builder's first review there.
+- `desktop:~/work/evidence/corpus/consumers/sol-1455-r1/`: Sol's r1 of #1455 (#1436, object presence): the
+  natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
+  (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
+  base `2960937a1`; `SHA256SUMS` sha256 `a42f4ef4…`. Its family and checkpoints run on `main` `2960937a1`.
+- `desktop:~/work/evidence/corpus/tooling/`: one master copy of each kit that briefs hand out, the split kit (`split/`,
+  with `cycles.cjs`) and the #1423 probe kit (`g3-probe/`, with `queue-final.sh`). Its `README.md` says what each
+  master fixes.
 
-Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, one README per area), reported by the
-#1416 builder:
+These kits read `tests/helpers/type-core-oracles` with `publishedAnswers(answers, bindings, request)` and run on trees
+from `main` `2960937a1` (#1446): `copies/astra-1423/` (`publication.mjs`, `route-check.mjs`), `copies/astra-1441/`,
+`copies/astra-1443/builder-probe/`, `copies/sol-1437-r2/`, `copies/sol-1441-r1/`, `copies/sol-1443-r1/`,
+`consumers/astra-1437/` (Astra's `seam-stops.mjs`, the spot publications and the proof scripts),
+`consumers/owner-s9b/` and `stops/astra-1434/`; `consumers/sol-1437-r5/`, `-r6/` and `-r7/` read `stopIdentity` from
+there too. Each folder's `PORTED-1446.md` names the ported files; each original stays beside its port as
+`<file>.pre-1446`. The `sol-1437` kits still name their review's folders: retarget those as their READMEs say.
 
-- `stops/astra-1405/lifecycle.mjs` no longer loads on any tree. Its hook patches private methods of `Consumers`, which
-  the consumers split (#1367) removed, so it needs a port to the split layout.
-- Sol's runner's `ownership-maps` helper fails on both trees, and its classifier does not read it.
+Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, one README per area):
+
+- `stops/astra-1405/lifecycle.mjs` loads on no tree since the consumers split (#1367). It drives `narrowingPass` and
+  patches the consumers' private `#valueRun` and `#syntaxRead`, none of which exist on `main`, and the anchor of its
+  `no-restart` mutant is gone, so it needs a rewrite against the current pass, not a port.
+- Sol's S8 runner (`~/work/evidence/i1416/<head>/s8-run.sh`) runs `ownership-maps.mjs`, a draft cut off inside its
+  first loop, so it parses on no tree. `place-maps` writes the `ownership.json` its classifier reads: leave the
+  probe out.
 - The made-units probe (`stops/uncharged-making/`) attributes code to source lines. Across trees whose line numbers
   differ, compare per site by a stable key (function name and step), not by line.
+- `consumers/sol-1437-r5/probe.mjs` (`controls`, `chain-work`) hooks `readSnapshot(contentSource(walk, value))` in the
+  consumers' signatures, which `main` no longer has (the read's class comes from `contract.readClass`): its alias
+  bypass needs a redesign. The folder's other scripts run on `main`.
+- `consumers/sol-1437-r7/identity-r7.mjs mutant` recreates #1437's B1 by caching a JSON proof's root and items, and
+  anchors on the items expression that `main` extended with the unread (stopped) branch. Its other flavors run.
+- `consumers/sol-1437-r6/spot.mjs` refuses a tree whose sources differ from its review's head (`source-hashes.json`),
+  by design: it reproduces that review on its pinned build only.
+- `consumers/sol-1437-r7/spot-r7.mjs`, which the folder's README lists, is in no archive (not on the workers, not in
+  the builder's r7 evidence): the r7 spot check cannot be rerun.
+- Four drivers that #1249's reviews ran are in no archive (not on the workers, not in their evidence folders), so their
+  runs cannot be reproduced and no module stands for them: `repro-ring.mjs`, `repro-many-fed.mjs` and
+  `r3-product-head.mjs` (the report archive's `astra-m4-i1249-review-r2-evidence/builder/tools/run.sh:4`–`6`), and
+  `probe/famsum.mjs` (`astra-m4-i1249-review-evidence/design-r5.md:797`).
 
 ## The oracle library's next step
 
