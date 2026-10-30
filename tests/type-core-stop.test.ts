@@ -12,7 +12,11 @@ import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
-import { withHolderCheck } from "../src/type-inference/core/consumers/finishing.js";
+import {
+  FRONTIER_COPIES,
+  FRONTIER_DEPTH,
+  withFrontierBound,
+} from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -2071,15 +2075,16 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
 });
 
 /**
- * #1445: after a settled stop, each copy-graph component's holders, merged along its lineage (a base extended by
- * deltas, shared across branches), equal the naive union of its members' own entries and its reached summaries' holders
- * at every step (`withHolderCheck`). With the naive union used instead, the analysis is the same: its checks, its
- * diagnostics and its marks, the stopped decisions' (r4.186) among them. The topologies at k = 4 and six random copy
- * graphs (two with readers of two places), forward with sharing and reversed without, at the first settled stop, the
- * last, and halfway between, without a demand cap and under the largest that stops a decision (`heldDemands`). The same
- * check runs at scale, in all four modes, on the workers.
+ * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
+ * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
+ * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
+ * where its walk is not cut and a superset where it is; whole, the same checks, diagnostics and marks where no read is
+ * cut, and where one is, every exact check kept or owned by a mark. The topologies at k = 4 (rings and chains of own
+ * stores are cut there) and six random copy graphs (two with readers of two places), forward with sharing and reversed
+ * without, near the first settled stop and at the last, without a demand cap and under the largest that stops a
+ * decision. The same check runs at scale, in all four modes, on the workers.
  */
-test("after a settled stop a component's lineage-merged holders equal their naive union (#1445)", () => {
+test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
     ...topologySources(4),
     ...[1, 2, 3, 4, 5, 6].map((seed) => ({
@@ -2093,7 +2098,9 @@ test("after a settled stop a component's lineage-merged holders equal their naiv
     diagnostics: answers.diagnostics.map(stopIdentity),
     deferred: answers.budget.deferred.map(stopIdentity),
   });
-  let [summaries, stoppedDecisions] = [0, 0];
+  const bound = { depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES };
+  const exactly = { depth: Infinity, copies: Infinity };
+  const seen = { cut: 0, whole: 0, guarded: 0, decisionStops: 0 };
   for (const { name, source } of sources) {
     const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
     assert.ok(request !== null, name);
@@ -2109,30 +2116,124 @@ test("after a settled stop a component's lineage-merged holders equal their naiv
             return allowance === undefined ? capped() : withTestAllowance(allowance, capped);
           });
         const total = analyse().budget.total;
-        // (the first settled stop: the settled phases, the walk and the publication, are the last)
-        let first = 1;
-        for (let top = total - 1; first < top;) {
+        // (a settled stop within a 64th of the first: the settled phases, the walk and the publication, are the last)
+        let [first, top] = [1, total - 1];
+        while (top - first > total >> 6) {
           const middle = (first + top) >> 1;
           if (analyse(middle).budget.settled) top = middle;
           else first = middle + 1;
         }
-        for (const allowance of new Set([first, (first + total) >> 1, total - 1])) {
+        for (const allowance of new Set([top, total - 1])) {
           const where = `${name}, ${mode.name}, demand ${demand} @${allowance}`;
-          const merged = withHolderCheck(false, () => analyse(allowance));
-          assert.ok(merged.result.budget.settled, where);
-          assert.deepEqual(merged.mismatches, [], where);
-          const naive = withHolderCheck(true, () => analyse(allowance));
-          assert.deepEqual(answered(naive.result), answered(merged.result), where);
-          summaries += merged.summaries;
-          if (merged.result.budget.decisions.some((d) => d.stopped)) stoppedDecisions += 1;
+          const bounded = withFrontierBound(bound, () => analyse(allowance));
+          const exact = withFrontierBound(exactly, () => analyse(allowance));
+          assert.ok(bounded.result.budget.settled, where);
+          assert.deepEqual([...bounded.reads.keys()].sort(), [...exact.reads.keys()].sort(), where);
+          let cut = false;
+          for (const [read, mine] of bounded.reads) {
+            const theirs = exact.reads.get(read)!;
+            assert.equal(mine.guarded, theirs.guarded, `${where} ${read}`);
+            const missing = [...theirs.writers].filter((writer) => !mine.writers.has(writer));
+            assert.equal(missing.length, 0, `${where} ${read}: a writer the exact walk names`);
+            if (!mine.cut) assert.equal(mine.writers.size, theirs.writers.size, `${where} ${read}`);
+            cut ||= mine.cut;
+            if (mine.guarded) seen.guarded += 1;
+            else if (mine.cut) seen.cut += 1;
+            else seen.whole += 1;
+          }
+          if (bounded.result.budget.decisions.some((d) => d.stopped)) seen.decisionStops += 1;
+          if (!cut) assert.deepEqual(answered(bounded.result), answered(exact.result), where);
+          else {
+            const kept = new Set(bounded.result.checks.map((check) => JSON.stringify(check)));
+            const owned = new Set(
+              bounded.result.budget.deferred.map((mark) => JSON.stringify(mark.obligation)),
+            );
+            for (const check of exact.result.checks.map((each) => JSON.stringify(each)))
+              assert.ok(kept.has(check) || owned.has(check), `${where}: ${check}`);
+          }
         }
       }
     }
   }
   assert.ok(
-    summaries > 0 && stoppedDecisions > 0,
-    `${summaries} summaries, ${stoppedDecisions} decision stops`,
+    Object.values(seen).every((count) => count > 0),
+    JSON.stringify(seen),
   );
+});
+
+/**
+ * #1453 and TABLE r4.208: after a settled stop, a read whose walk is cut answers its place's component's host data, so it
+ * keeps every check: through 257 copies of a host object (the store's record-level boundary, `copy-type root against
+ * object`, which #1453 lost at 256), through 33 copies each storing its own property, and in a ring of 64 copies. In
+ * each, at its first settled stop, its last and halfway between, in both orders, every check of the unstopped compile is
+ * kept or owned by a mark, and some read's walk is cut.
+ */
+test("a read past the bounded walk keeps every check: #1453's 257 copies, copies each storing, and a ring", () => {
+  const chain = (length: number, store: boolean) =>
+    [
+      "let root = {f: hostValue, g: 1}",
+      ...Array.from(
+        { length },
+        (_, i) => `let c${i} = ${i ? `c${i - 1}` : "root"}${store ? `\nc${i}.g = ${i}` : ""}`,
+      ),
+      'say "BEFORE"',
+      `repeat c${length - 1}.f {say "ok"}`,
+      'say "AFTER"',
+    ].join("\n");
+  const ring = [
+    ...Array.from({ length: 64 }, (_, i) => `let c${i} = {f: hostValue}`),
+    ...Array.from({ length: 64 }, (_, i) => `c${i} = c${(i + 1) % 64}`),
+    ...Array.from({ length: 64 }, (_, i) => `repeat c${i}.f {}`),
+  ].join("\n");
+  const bound = { depth: FRONTIER_DEPTH, copies: FRONTIER_COPIES };
+  for (const [name, text] of [
+    ["257 copies", chain(257, false)],
+    ["33 copies, each storing", chain(33, true)],
+    ["a ring of 64", ring],
+  ] as const) {
+    const request = coreRequest([{ path: "main.tease", source: `${text}\nexit\n` }], ["hostValue"]);
+    assert.ok(request !== null, name);
+    for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!]) {
+      const analyse = (allowance?: number): Answers =>
+        mode.run(() =>
+          allowance === undefined
+            ? analyseCore(request)
+            : withTestAllowance(allowance, () => analyseCore(request)),
+        );
+      const unstopped = analyse();
+      if (name !== "a ring of 64")
+        assert.ok(
+          unstopped.checks.some((check) =>
+            JSON.stringify(check).includes('"kind":"copy-type","target":"root"'),
+          ),
+          name,
+        );
+      const total = unstopped.budget.total;
+      // (the first settled stop, where the most reads are left to the finishing walk)
+      let first = 1;
+      for (let top = total - 1; first < top;) {
+        const middle = (first + top) >> 1;
+        if (analyse(middle).budget.settled) top = middle;
+        else first = middle + 1;
+      }
+      let cut = false;
+      for (const allowance of new Set(
+        [0, 1, 2].map((i) => first + (((total - 1 - first) * i) >> 1)),
+      )) {
+        const where = `${name}, ${mode.name} @${allowance}`;
+        const { result, reads } = withFrontierBound(bound, () => analyse(allowance));
+        assert.ok(result.budget.settled, where);
+        cut ||= [...reads.values()].some((read) => read.cut);
+        const kept = new Set(result.checks.map((check) => JSON.stringify(check)));
+        const owned = new Set(
+          result.budget.deferred.map((mark) => JSON.stringify(mark.obligation)),
+        );
+        for (const check of unstopped.checks.map((each) => JSON.stringify(each)))
+          assert.ok(kept.has(check) || owned.has(check), `${where}: ${check}`);
+      }
+      assert.ok(cut, `${name}, ${mode.name}: no read's walk is cut`);
+    }
+  }
 });
 
 /**

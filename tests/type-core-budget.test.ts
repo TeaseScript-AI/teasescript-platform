@@ -444,14 +444,16 @@ test("a linked record list stops at the allowance with its count checked when it
 });
 
 /**
- * #1445: after a settled program stop, the finishing read's host data (`heldIngress`) steps a place's frontier by index
- * alone, and each component of the copy graph's holders (a persistent trie) extend the summary they share most with and
- * add only what lies above the lineage they share with it, so the work stays linear in the program's size. The shapes:
+ * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
+ * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
+ * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
+ * linear in the program's size by construction. The shapes:
  *
  * - the copy graph's topologies (`topologySources`): a chain of copies, a ring, a fan-out, a fan-in of branches read
  *   through one root (Codex r4's B2), a stack of diamonds, a shared base with branch deltas read at every field, nested
  *   cycles, two-way copies, a chain whose links each store their own property, and readers each holding two unrelated
- *   objects, an object and a chain's tip, or a chain's root and tip in either order (Codex r5's B1 and T1);
+ *   objects, an object and a chain's tip, or a chain's root and tip in either order (Codex r5's B1 and T1), and Sol's
+ *   staggered pairs of two chains' links and readers of an object's branches with another object;
  * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1);
  * - the same through copies of k places, plainly and through a selection (Codex r3's B1).
  *
@@ -481,21 +483,16 @@ test("a settled stop finishes the host data of every copy-graph topology in line
     selected: (k) =>
       `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
   };
-  // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already: their
-  // sizes are smaller; a lineage's depth gap shows its jumps' cost from k = 32)
+  // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already, #1466:
+  // their sizes are smaller)
   const sizes = (shape: string): readonly [number, number] =>
-    shape === "shared-deltas"
-      ? [4, 8]
-      : shape === "diamond" || shape === "nested-cycles"
-        ? [8, 16]
-        : shape === "tie-tip-first"
-          ? [32, 64]
-          : [16, 32];
+    shape === "shared-deltas" ? [4, 8] : shape === "diamond" ? [8, 16] : [16, 32];
   for (const [shape, make] of Object.entries(shapes))
     for (const reversed of [false, true]) {
       const measured = (k: number) => {
         const request = requestOf(main(make(k)), ["hostValue", "hostOther"]);
-        // (the first settled stop: the settled phases, the walk and the publication, are the last)
+        // (the first settled stop: the settled phases, the walk and the publication, are the last; a later stop also
+        // measures finishing work that grows faster on `main`, #1464)
         let first = 1;
         for (let top = analysed(request, reversed).budget.total - 1; first < top;) {
           const middle = (first + top) >> 1;

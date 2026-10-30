@@ -3,7 +3,7 @@ import { concrete, isExternal } from "../admission.js";
 import { expand, partOf } from "../admission/walk.js";
 import type { Expansion, Part } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
-import { joinSteps, keptParts, keptSlice, keptSteps, NESTING_LIMIT } from "../budget.js";
+import { joinSteps, keptParts, keptSlice, keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
 import { keptPath, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
@@ -12,6 +12,7 @@ import type { FlowNode } from "../flow-graph.js";
 import {
   EMPTY,
   makeItem,
+  ingressLeaves,
   REASON,
   STOPPED,
   type IngressNode,
@@ -256,92 +257,102 @@ interface StoreNode {
   readonly stores: { readonly d: Definition; readonly elements: boolean }[];
 }
 
+/** A copy standing at a path: the read it copies, and the steps below that read it stands at. */
+interface CopyTask {
+  readonly value: PlaceId;
+  readonly strip: readonly string[];
+}
+
 /**
- * What stands at a path of a place by its stores' structure, made from its owner path's by one step (as the syntax
- * decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
- * (admission's store walk, `expand`), the node of the place's stored paths there, the frontiers of what the copies
- * standing there copy, and the host data standing there or above it. A step enters by index only (`stepFrontier`): the
- * frontiers with something of their own at the step, through copies (`Below`), each by its own content there
- * (`ownStep`). One holding nothing but one copy's is that copy's, unless its place has a decision that stopped: then the
- * frontier keeps its place and path, so a step below that decision reads the stop alone (r4.186).
+ * What stands at a path of a place by its own stores' structure, made once from its owner path's by one step (as the
+ * syntax decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
+ * (admission's store walk, `expand`), the node of the place's stored paths there, the copies standing there, and the
+ * host data standing there or above it. What its copies hold is reached by a read's bounded walk (`explore`): the copies
+ * standing at a frontier's path are its own and its owner path's, one step below. Where its place has a decision that
+ * stopped, its place and path are kept, so a step below that decision reads the stop alone (r4.186).
  */
 interface HostFrontier {
   readonly cells: Map<string, Part[]>;
   readonly node: StoreNode | null;
   /** Its place and path where the place has a decision that stopped, else `null`. */
   readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
-  readonly copies: HostFrontier[];
+  readonly copies: CopyTask[];
   host: IngressNode | undefined;
+  /** Its owner path's frontier and the step below it, whose copies stand here one step below; `null` at a root. */
+  readonly owner: { readonly frontier: HostFrontier; readonly step: string } | null;
   readonly steps: Map<string, HostFrontier>;
-  /** Its own content at each step (`ownStep`): its cells and stored paths there, not its copies'. */
-  readonly own: Map<string, HostFrontier>;
+  /** What it stands for as far as followed (`sameOf`): itself, or the copy it holds alone, or one further down. */
+  same: HostFrontier | undefined;
 }
 
-/** The frontiers that hold something of their own at a step: a frontier, or two such groups (`holdersOf` lists them). */
-type Holders = HostFrontier | { readonly union: readonly [Holders, Holders] };
-
-/** A leaf of a `StepTrie`: a step's number (`stepId`) and its holders. */
-interface TrieLeaf {
-  readonly id: number;
-  readonly holders: Holders;
-}
-
-/** A node of a `StepTrie`: the entries present at its five bits of a step's number, packed by a bitmap. */
-interface TrieNode {
-  readonly bitmap: number;
-  readonly entries: readonly (TrieNode | TrieLeaf)[];
-}
-
-/**
- * Each step's holders below a component of the copy graph, a persistent hash array mapped trie by the step's number,
- * sharing every node it does not change (`Below`'s lineage says which trie it extends and by what).
- */
-interface StepTrie {
-  readonly size: number;
-  readonly root: TrieNode | null;
-}
-
-/**
- * What stands below a frontier through its copies (`belowOf`), made once per component of the copy graph. Where no stop
- * tracks the component, its members share it: each step's holders through copies no stop tracks (`holders`), the copies
- * of places with a stopped decision reached through them (`tracked`, stepped one by one for their stops, r4.186), the
- * host data standing at it and so at every path below it (`inherited`), and its step at each step, made once
- * (`stepped`). Where a stop tracks it (a member's place has a stopped decision), each member has its own, without its
- * own steps, and its copies inside the component are `tracked`.
- *
- * Its lineage: the reached summary its `holders` extend (`base`), and the entries it adds to them (`delta`), so that
- * `holders` is `base`'s with `delta` added, and a lineage root's `holders` its `delta`; `depth` and one jump up the
- * lineage (`jump`, skew-binary: a lineage root's is `null`, standing for itself) find the lowest summary two lineages
- * share in a number of hops logarithmic in the depth.
- */
-interface Below {
-  readonly holders: StepTrie;
-  readonly base: Below | null;
-  readonly delta: StepTrie;
-  readonly depth: number;
-  readonly jump: Below | null;
-  readonly tracked: Holders | undefined;
-  readonly inherited: IngressNode | undefined;
-  readonly stopped: boolean;
-  readonly stepped: Map<string, HostFrontier>;
-}
-
-/** Per walk: the stored paths of each place, each place's frontier at its root, each read's, and each one's host data. */
+/** Per walk: the stored paths of each place, each place's frontier at its root, each read's and each copy's. */
 interface HostFrontiers {
   readonly places: Map<PlaceId, StoreNode>;
   readonly roots: Map<PlaceId, HostFrontier>;
   readonly reads: Map<PlaceId, HostFrontier>;
-  readonly held: Map<HostFrontier, IngressNode | null>;
-  readonly below: Map<HostFrontier, Below>;
-  /** Each step's number for the step tries (`stepId`). */
-  readonly stepIds: Map<string, number>;
-  /** The frontiers being made: what stands below one of them is not kept until it is made. */
-  readonly making: Set<HostFrontier>;
-  /** The places with a decision that stopped (`Contract.stop`). */
-  readonly stopped: ReadonlySet<PlaceId>;
+  readonly copied: Map<CopyTask, HostFrontier>;
+  /** The host data each place's component of the place-level copy graph reaches (`placeIngress`), `null` for none. */
+  readonly unions: Map<PlaceId, IngressNode | null>;
 }
 
 const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
+
+/**
+ * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`, each met once per copy standing at
+ * a frontier's path, again where it was met before) a read's host data is followed before the read answers its place's
+ * component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
+ * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
+ * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
+ * dropped check. Measured on #1445's head over the stop corpus (172 sources), the repository's scripts (19) and the held
+ * family (438), at sampled settled stops in two orders: of 12,176 finishing reads, 11,816 hold their host data at their
+ * own path (copy depth 0), 292 one copy deep, 35 two, and 33 four or more (the family's rings); no read meets more than
+ * two frontiers within two copies. At 2 and 8, 33 reads are cut, each answering the same writers its exact walk names,
+ * so the cut adds no mark, warning, runtime check or boundary there.
+ */
+export const FRONTIER_DEPTH = 2;
+export const FRONTIER_COPIES = 8;
+
+/** The limits a read's walk follows (`withFrontierBound` in tests). */
+let frontierBound: { readonly depth: number; readonly copies: number } = {
+  depth: FRONTIER_DEPTH,
+  copies: FRONTIER_COPIES,
+};
+
+/** Test-only: each read's walk, by its value and path (`withFrontierBound`), or `null`. */
+let frontierReads: Map<string, FrontierRead> | null = null;
+
+/** Test-only: what a read's walk found (`withFrontierBound`). */
+export interface FrontierRead {
+  /** Whether the read answered the stop alone (r4.186) before its walk. */
+  readonly guarded: boolean;
+  /** Whether its walk was cut, so it answered its place's component's host data. */
+  readonly cut: boolean;
+  /** The ingress writers its answer names, each by its site and kind. */
+  readonly writers: ReadonlySet<string>;
+  /** The copies its walk met and the deepest it went. */
+  readonly copies: number;
+  readonly depth: number;
+}
+
+/**
+ * Test-only: runs `callback` with each read's walk bounded by `bound` (the exact reference: `Infinity` for both), and
+ * records each read's walk (the bounded frontier's oracle, `tests/type-core-stop.test.ts`).
+ */
+export function withFrontierBound<T>(
+  bound: { readonly depth: number; readonly copies: number },
+  callback: () => T,
+): { readonly result: T; readonly reads: ReadonlyMap<string, FrontierRead> } {
+  if (frontierReads !== null) throw new Error("The frontier is already bounded.");
+  const reads = new Map<string, FrontierRead>();
+  const kept = frontierBound;
+  [frontierBound, frontierReads] = [bound, reads];
+  try {
+    const result = callback();
+    return { result, reads };
+  } finally {
+    [frontierBound, frontierReads] = [kept, null];
+  }
+}
 
 /**
  * Whether a frontier holds nothing of its own beside its copies' frontiers: no value a step enters, no store below, no
@@ -362,16 +373,18 @@ const NOTHING: HostFrontier = {
   at: null,
   copies: [],
   host: undefined,
+  owner: null,
   steps: new Map(),
-  own: new Map(),
+  same: undefined,
 };
 
 function frontier(
   node: StoreNode | null,
   host: IngressNode | undefined,
-  at: HostFrontier["at"] = null,
+  at: HostFrontier["at"],
+  owner: HostFrontier["owner"],
 ): HostFrontier {
-  return { cells: new Map(), node, at, copies: [], host, steps: new Map(), own: new Map() };
+  return { cells: new Map(), node, at, copies: [], host, owner, steps: new Map(), same: undefined };
 }
 
 /** The walk's frontiers, its places' stored paths made once from the definitions (each store, add and transfer). */
@@ -406,38 +419,24 @@ function frontiersOf(walk: Consumers): HostFrontiers {
       ).stores.push({ d, elements: d.kind === "add" && d.how === "elements" });
     }
   }
-  const stopped = new Set(walk.pass.contract.stoppedKeys().map((key) => key.place));
-  found = {
-    places,
-    roots: new Map(),
-    reads: new Map(),
-    held: new Map(),
-    below: new Map(),
-    stepIds: new Map(),
-    making: new Set(),
-    stopped,
-  };
+  found = { places, roots: new Map(), reads: new Map(), copied: new Map(), unions: new Map() };
   hostFrontiers.set(walk, found);
   return found;
 }
 
 /**
  * Enters values standing at a frontier's path: each with the carriers' operands and own contributions at the same path
- * (`expand`'s parts without a step), a host read's ingress its host data, a copy the frontier of the read it copies at
- * its strip; those with cells a step enters kept for the steps.
+ * (`expand`'s parts without a step), a host read's ingress its host data, a copy as a copy task; those with cells a
+ * step enters kept for the steps.
  */
-function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[], depth: number): void {
+function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): void {
   const { program } = walk.pass;
   for (let task = values.pop(); task !== undefined; task = values.pop()) {
     program.work.charge("checks");
     if (task.stop?.list === "values") {
       const host = hostIngress(walk, task.value);
       if (host !== null) at.host = program.scope.ingress.union(at.host, host[0]?.ingress);
-      else {
-        let copied = readFrontier(walk, task.value, depth + 1);
-        for (const step of task.stop.strip) copied = stepFrontier(walk, copied, step, depth + 1);
-        if (copied !== NOTHING) at.copies.push(copied);
-      }
+      else at.copies.push({ value: task.value, strip: task.stop.strip });
     }
     const { cells, operands } = partsOf(walk, task);
     for (const part of operands) {
@@ -484,72 +483,63 @@ function partsOf(
 }
 
 /** Enters the stores at a frontier's node: each value there, an `addAll`'s elements. */
-function enterStores(walk: Consumers, at: HostFrontier, depth: number): void {
+function enterStores(walk: Consumers, at: HostFrontier): void {
+  const { program } = walk.pass;
   for (const { d, elements } of at.node?.stores ?? []) {
-    walk.pass.program.work.charge("checks");
+    program.work.charge("checks");
     const value = [expand(walk.admission, d.value!, d.node, [])];
-    if (!elements) enterValues(walk, at, value, depth);
+    if (!elements) enterValues(walk, at, value);
     else {
-      const list = frontier(null, undefined);
-      enterValues(walk, list, value, depth);
-      const element = stepFrontier(walk, list, "element", depth);
+      // (the list's elements: its own at its element step, and its copies' one step below)
+      const list = frontier(null, undefined, null, null);
+      enterValues(walk, list, value);
+      const element = stepOwn(walk, list, "element");
       for (const [step, parts] of element.cells) addCells(walk, at, step, parts);
-      at.copies.push(...element.copies);
-      at.host = walk.pass.program.scope.ingress.union(at.host, element.host);
+      for (const task of [...element.copies, ...list.copies]) {
+        program.work.charge("checks");
+        at.copies.push(
+          element.copies.includes(task)
+            ? task
+            : { value: task.value, strip: keptSteps(program.work, task.strip, ["element"]) },
+        );
+      }
+      at.host = program.scope.ingress.union(at.host, element.host);
     }
   }
 }
 
 /** A place's frontier at a path, from its root's by its steps; nothing at a path whose decision stopped (r4.186). */
-function locate(
-  walk: Consumers,
-  place: PlaceId,
-  path: readonly string[],
-  depth: number,
-): HostFrontier {
+function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostFrontier {
   const { contract } = walk.pass;
-  if (depth > NESTING_LIMIT || (contract.anyStopped && walk.admission.decisionStopped(place, path)))
-    return NOTHING;
+  if (contract.anyStopped && walk.admission.decisionStopped(place, path)) return NOTHING;
   const frontiers = frontiersOf(walk);
   let at = frontiers.roots.get(place);
   if (at === undefined) {
+    const stopped =
+      contract.anyStopped && contract.stoppedKeys().some((key) => key.place === place);
     at = frontier(
       frontiers.places.get(place) ?? null,
       undefined,
-      frontiers.stopped.has(place) ? { place, path: [] } : null,
+      stopped ? { place, path: [] } : null,
+      null,
     );
     frontiers.roots.set(place, at);
-    frontiers.making.add(at);
-    enterStores(walk, at, depth);
-    frontiers.making.delete(at);
-    if (holdsOnlyCopies(at) && at.copies.length === 1) frontiers.roots.set(place, at.copies[0]!);
+    enterStores(walk, at);
   }
-  for (const step of path) at = stepFrontier(walk, at, step, depth);
+  for (const step of path) at = stepOwn(walk, at, step);
   return at;
 }
 
 /**
- * A frontier one step below, made once (a frontier the step reaches again while it is made is its own): the host data
- * standing at `from`, and by index alone the own content there of each frontier holding something at the step through
- * copies, and the step of each copy a stop tracks. Where no stop tracks `from`'s component, its members share the step.
+ * A frontier's own content one step below, made once: its cells and its stored paths there, the copies standing there
+ * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186).
  */
-function stepFrontier(
-  walk: Consumers,
-  from: HostFrontier,
-  step: string,
-  depth: number,
-): HostFrontier {
-  if (from === NOTHING || depth > NESTING_LIMIT) return NOTHING;
+function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontier {
+  const { program } = walk.pass;
+  program.work.charge("checks");
+  if (from === NOTHING) return NOTHING;
   const known = from.steps.get(step);
   if (known !== undefined) return known;
-  const below = belowOf(walk, from);
-  if (!below.stopped) {
-    const shared = below.stepped.get(step) ?? componentStep(walk, below, step, depth);
-    from.steps.set(step, shared);
-    return shared;
-  }
-  // (below a decision of the place that stopped, the stop alone)
-  const { program } = walk.pass;
   const stop =
     from.at === null
       ? null
@@ -558,95 +548,46 @@ function stepFrontier(
     from.steps.set(step, NOTHING);
     return NOTHING;
   }
-  const { making } = frontiersOf(walk);
-  const at = frontier(from.node?.children.get(step) ?? null, below.inherited, stop);
+  const at = frontier(from.node?.children.get(step) ?? null, from.host, stop, {
+    frontier: from,
+    step,
+  });
   from.steps.set(step, at);
-  making.add(at);
   const cells: Expansion[] = [];
   for (const part of from.cells.get(step) ?? []) {
     program.work.charge("checks");
     cells.push(partOf(walk.admission, part));
   }
-  enterValues(walk, at, cells, depth);
-  enterStores(walk, at, depth);
-  enterHolders(walk, at, below, step, depth);
-  making.delete(at);
-  if (holdsOnlyCopies(at) && at.copies.length <= 1) {
-    const same = at.copies[0] ?? NOTHING;
-    from.steps.set(step, same);
-    return same;
-  }
+  enterValues(walk, at, cells);
+  enterStores(walk, at);
   return at;
 }
 
-/** A component's step where no stop tracks it, made once for its members (`Below.stepped`). */
-function componentStep(walk: Consumers, below: Below, step: string, depth: number): HostFrontier {
-  const { making } = frontiersOf(walk);
-  const at = frontier(null, below.inherited);
-  below.stepped.set(step, at);
-  making.add(at);
-  enterHolders(walk, at, below, step, depth);
-  making.delete(at);
-  if (holdsOnlyCopies(at) && at.copies.length <= 1) {
-    const same = at.copies[0] ?? NOTHING;
-    below.stepped.set(step, same);
-    return same;
-  }
-  return at;
-}
-
-/** Enters a step's holders below a component, each by its own content there, and steps the copies a stop tracks. */
-function enterHolders(
-  walk: Consumers,
-  at: HostFrontier,
-  below: Below,
-  step: string,
-  depth: number,
-): void {
+/**
+ * The place a read reads: its binding's target root, a call's function's result place, a projection's owner's; `null`
+ * else.
+ */
+function readPlace(walk: Consumers, value: PlaceId): PlaceId | null {
   const { program } = walk.pass;
-  for (const holder of holdersOf(walk, trieGet(walk, below.holders, stepId(walk, step)))) {
+  let at = value;
+  for (
+    let projection = program.projOf.get(at);
+    projection !== undefined;
+    projection = program.projOf.get(at)
+  ) {
     program.work.charge("checks");
-    const own = ownStep(walk, holder, step, depth + 1);
-    if (own !== NOTHING) at.copies.push(own);
+    at = projection.owner;
   }
-  for (const copy of holdersOf(walk, below.tracked)) {
-    program.work.charge("checks");
-    const copied = stepFrontier(walk, copy, step, depth + 1);
-    if (copied !== NOTHING) at.copies.push(copied);
-  }
-}
-
-/** A frontier's own content one step below, made once: its cells and its stored paths there, not its copies'. */
-function ownStep(walk: Consumers, holder: HostFrontier, step: string, depth: number): HostFrontier {
-  if (depth > NESTING_LIMIT) return NOTHING;
-  const known = holder.own.get(step);
-  if (known !== undefined) return known;
-  const { program } = walk.pass;
-  const { making } = frontiersOf(walk);
-  const at = frontier(holder.node?.children.get(step) ?? null, undefined);
-  holder.own.set(step, at);
-  making.add(at);
-  const cells: Expansion[] = [];
-  for (const part of holder.cells.get(step) ?? []) {
-    program.work.charge("checks");
-    cells.push(partOf(walk.admission, part));
-  }
-  enterValues(walk, at, cells, depth);
-  enterStores(walk, at, depth);
-  making.delete(at);
-  if (holdsOnlyCopies(at) && at.copies.length <= 1) {
-    const same = at.copies[0] ?? NOTHING;
-    holder.own.set(step, same);
-    return same;
-  }
-  return at;
+  const binding = program.occurrenceOf.get(at);
+  const target = binding === undefined ? null : program.targetRoot(binding);
+  return target?.root ?? walk.resultOfCall.get(at) ?? null;
 }
 
 /**
  * A read's frontier: its binding's at its target path, a call's its function's result's, a projection's its owner's one
  * step below; `NOTHING` else.
  */
-function readFrontier(walk: Consumers, value: PlaceId, depth: number): HostFrontier {
+function readFrontier(walk: Consumers, value: PlaceId): HostFrontier {
   const { program } = walk.pass;
   const reads = frontiersOf(walk).reads;
   const chain: PlaceId[] = [];
@@ -668,441 +609,297 @@ function readFrontier(walk: Consumers, value: PlaceId, depth: number): HostFront
     const result = walk.resultOfCall.get(at);
     found =
       target !== null
-        ? locate(walk, target.root, target.path, depth)
+        ? locate(walk, target.root, target.path)
         : result !== undefined
-          ? locate(walk, result, [], depth)
+          ? locate(walk, result, [])
           : NOTHING;
     reads.set(at, found);
   }
   for (const next of chain.reverse()) {
     program.work.charge("checks");
     const step = program.projOf.get(next)!.step;
-    found = step === "iteration" ? NOTHING : stepFrontier(walk, found, stepName(step), depth);
+    found = step === "iteration" ? NOTHING : stepOwn(walk, found, stepName(step));
     reads.set(next, found);
   }
   return found;
 }
 
-/** A step's number for the step tries, made once per walk. */
-function stepId(walk: Consumers, step: string): number {
-  const { stepIds } = frontiersOf(walk);
-  let id = stepIds.get(step);
-  if (id === undefined) {
-    walk.pass.program.work.charge("checks");
-    stepIds.set(step, (id = stepIds.size));
+/** A copy task's frontier: its read's, at its strip; made once. */
+function copyFrontier(walk: Consumers, task: CopyTask): HostFrontier {
+  const { copied } = frontiersOf(walk);
+  let found = copied.get(task);
+  if (found === undefined) {
+    found = readFrontier(walk, task.value);
+    for (const step of task.strip) found = stepOwn(walk, found, step);
+    copied.set(task, found);
   }
-  return id;
-}
-
-/** The bits set in a trie node's bitmap below an entry's: its place among the entries. */
-function bitsBelow(bits: number): number {
-  let count = 0;
-  for (let rest = bits; rest !== 0; rest &= rest - 1) count += 1;
-  return count;
-}
-
-/** Two groups of holders as one, kept as both (`holdersOf` lists them once). */
-function joinHolders(a: Holders | undefined, b: Holders | undefined): Holders | undefined {
-  if (a === undefined) return b;
-  return b === undefined || a === b ? a : { union: [a, b] };
-}
-
-/** The frontiers a group of holders names, each group met once by identity, charged per group. */
-function holdersOf(walk: Consumers, holders: Holders | undefined): HostFrontier[] {
-  const out: HostFrontier[] = [];
-  const seen = new Set<Holders>();
-  const pending: Holders[] = [];
-  const meet = (group: Holders): void => {
-    if (seen.has(group)) return;
-    seen.add(group);
-    pending.push(group);
-  };
-  if (holders !== undefined) meet(holders);
-  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-    walk.pass.program.work.charge("checks");
-    if ("union" in at) {
-      meet(at.union[1]);
-      meet(at.union[0]);
-    } else out.push(at);
-  }
-  return out;
-}
-
-const EMPTY_TRIE: StepTrie = { size: 0, root: null };
-
-/** A step's holders in a trie, by the step's number; charged per level. */
-function trieGet(walk: Consumers, trie: StepTrie, id: number): Holders | undefined {
-  let node = trie.root;
-  for (let shift = 0; node !== null; shift += 5) {
-    walk.pass.program.work.charge("checks");
-    const bit = 1 << ((id >>> shift) & 31);
-    if ((node.bitmap & bit) === 0) return undefined;
-    const entry = node.entries[bitsBelow(node.bitmap & (bit - 1))]!;
-    if ("id" in entry) return entry.id === id ? entry.holders : undefined;
-    node = entry;
-  }
-  return undefined;
+  return found;
 }
 
 /**
- * A trie node with a leaf added (its holders joined to a leaf of the same step), the nodes on its path copied and every
- * other shared; charged per level (a node holds at most 32 entries). Two different numbers part within the 32 bits, so
- * it ends.
+ * Visits the copies standing at a frontier's path, each by its frontier there: its own, then its owner path's one step
+ * below, and so on to its place's root, until `visit` answers `false`. Each copy met is charged, with its steps.
  */
-function trieWith(
-  walk: Consumers,
-  node: TrieNode | null,
-  leaf: TrieLeaf,
-  shift: number,
-): { readonly node: TrieNode; readonly added: boolean } {
-  const { work } = walk.pass.program;
-  const bit = 1 << ((leaf.id >>> shift) & 31);
-  if (node === null) {
-    work.charge("checks");
-    return { node: { bitmap: bit, entries: [leaf] }, added: true };
-  }
-  const at = bitsBelow(node.bitmap & (bit - 1));
-  work.charge("checks");
-  const entries = [...node.entries];
-  if ((node.bitmap & bit) === 0) {
-    entries.splice(at, 0, leaf);
-    return { node: { bitmap: node.bitmap | bit, entries }, added: true };
-  }
-  const entry = node.entries[at]!;
-  if ("id" in entry && entry.id === leaf.id) {
-    entries[at] = { id: leaf.id, holders: joinHolders(entry.holders, leaf.holders)! };
-    return { node: { bitmap: node.bitmap, entries }, added: false };
-  }
-  const deeper = trieWith(
-    walk,
-    "id" in entry ? trieWith(walk, null, entry, shift + 5).node : entry,
-    leaf,
-    shift + 5,
-  );
-  entries[at] = deeper.node;
-  return { node: { bitmap: node.bitmap, entries }, added: deeper.added };
-}
-
-/** Two tries as one: the smaller's leaves added to the larger, charged per node and entry met. */
-function trieUnion(walk: Consumers, a: StepTrie, b: StepTrie): StepTrie {
-  if (a === b || b.root === null) return a;
-  if (a.root === null) return b;
-  const [large, small] = a.size >= b.size ? [a, b] : [b, a];
-  let { size, root } = large;
-  const pending: TrieNode[] = [small.root!];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
-    walk.pass.program.work.charge("checks");
-    for (const entry of node.entries) {
-      walk.pass.program.work.charge("checks");
-      if (!("id" in entry)) {
-        pending.push(entry);
-        continue;
-      }
-      const added = trieWith(walk, root, entry, 0);
-      root = added.node;
-      if (added.added) size += 1;
-    }
-  }
-  return { size, root };
-}
-
-/** A trie with a frontier added as a holder of each step it holds something of its own at (its cells, its stored paths). */
-function withOwnSteps(walk: Consumers, trie: StepTrie, member: HostFrontier): StepTrie {
-  let { size, root } = trie;
-  const add = (step: string): void => {
-    const added = trieWith(walk, root, { id: stepId(walk, step), holders: member }, 0);
-    root = added.node;
-    if (added.added) size += 1;
-  };
-  for (const step of member.cells.keys()) add(step);
-  for (const step of member.node?.children.keys() ?? []) add(step);
-  return { size, root };
-}
-
-/** What a component's members reach (`belowOf`): the reached untracked summaries, the tracked copies and the host data. */
-interface Reached {
-  readonly reached: Set<Below>;
-  tracked: Holders | undefined;
-  inherited: IngressNode | undefined;
-}
-
-/** The fields of a summary its holders and lineage make (`combine`). */
-type Lineage = Pick<Below, "holders" | "base" | "delta" | "depth" | "jump">;
-
-/** Test-only: the check of each summary's lineage-merged holders (`withHolderCheck`). */
-interface HolderCheck {
-  readonly naive: boolean;
-  readonly mismatches: string[];
-  summaries: number;
-}
-
-/** The running holder check, or `null`. */
-let holderCheck: HolderCheck | null = null;
-
-/**
- * Test-only: runs `callback` with every summary's lineage-merged holders compared with the naive union of its members'
- * own entries and its reached summaries' holders, step by step, each difference recorded, and the summaries counted;
- * with `naive`, the naive union is the summary's holders instead (the lineage's oracle, `tests/type-core-stop.test.ts`).
- */
-export function withHolderCheck<T>(
-  naive: boolean,
-  callback: () => T,
-): { readonly result: T; readonly mismatches: readonly string[]; readonly summaries: number } {
-  if (holderCheck !== null) throw new Error("The holders are already checked.");
-  const check: HolderCheck = { naive, mismatches: [], summaries: 0 };
-  holderCheck = check;
-  try {
-    const result = callback();
-    return { result, mismatches: check.mismatches, summaries: check.summaries };
-  } finally {
-    holderCheck = null;
-  }
-}
-
-/** A trie's holders by step number, each step's holders as a set (`withHolderCheck`). */
-function trieEntries(walk: Consumers, trie: StepTrie): Map<number, Set<HostFrontier>> {
-  const out = new Map<number, Set<HostFrontier>>();
-  const pending = trie.root === null ? [] : [trie.root];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop())
-    for (const entry of node.entries)
-      if ("id" in entry) out.set(entry.id, new Set(holdersOf(walk, entry.holders)));
-      else pending.push(entry);
-  return out;
-}
-
-/** A summary's lineage checked against the naive union of what it combines (`withHolderCheck`), or used instead. */
-function checked(
-  walk: Consumers,
-  lineage: Lineage,
-  reached: ReadonlySet<Below>,
-  own: StepTrie,
-): Lineage {
-  if (holderCheck === null) return lineage;
-  holderCheck.summaries += 1;
-  let naive = own;
-  for (const below of reached) naive = trieUnion(walk, naive, below.holders);
-  const [merged, union] = [trieEntries(walk, lineage.holders), trieEntries(walk, naive)];
-  for (const id of new Set([...merged.keys(), ...union.keys()])) {
-    const [a, b] = [merged.get(id) ?? new Set(), union.get(id) ?? new Set()];
-    if (a.size !== b.size || [...a].some((holder) => !b.has(holder)))
-      holderCheck.mismatches.push(`step ${id}: ${a.size} merged, ${b.size} in the union`);
-  }
-  return holderCheck.naive ? { ...lineage, holders: naive } : lineage;
-}
-
-/** A summary's jump up its lineage, a lineage root's being itself. */
-const jumpOf = (below: Below): Below => below.jump ?? below;
-
-/**
- * Whether summary `x` is `of` or an ancestor of it in their lineage (its `holders` then within `of`'s): `of` lifted to
- * `x`'s depth by its jumps where they do not pass it, else by its base, charged per hop.
- */
-function lineageHolds(walk: Consumers, x: Below, of: Below): boolean {
-  let at = of;
-  while (at.depth > x.depth) {
-    walk.pass.program.work.charge("checks");
-    const jump = jumpOf(at);
-    at = jump.depth < x.depth ? at.base! : jump;
-  }
-  return at === x;
-}
-
-/**
- * A summary's holders from its members' own entries and the distinct summaries it reaches, by lineage: none reached, its
- * own entries; else the largest reached is its base, and from every other reached summary only the entries its lineage
- * adds above the lowest summary it shares with the base, so a base many branches share is never enumerated again (a
- * summary sharing none is added whole, smaller into larger). Charged per lineage hop and per trie entry and level.
- */
-function combine(walk: Consumers, reached: ReadonlySet<Below>, own: StepTrie): Lineage {
+function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier) => boolean): void {
   const { program } = walk.pass;
-  let base: Below | null = null;
-  for (const below of reached) {
-    program.work.charge("checks");
-    if (base === null || below.holders.size > base.holders.size) base = below;
-  }
-  if (base === null) return { holders: own, base: null, delta: own, depth: 0, jump: null };
-  let delta = own;
-  for (const below of reached) {
-    if (below === base) continue;
-    for (let at: Below | null = below; at !== null && !lineageHolds(walk, at, base); at = at.base) {
+  const below: string[] = [];
+  for (let level: HostFrontier | null = at; level !== null;) {
+    for (const task of level.copies) {
       program.work.charge("checks");
-      delta = trieUnion(walk, delta, at.delta);
+      let copied = copyFrontier(walk, task);
+      for (let i = below.length - 1; i >= 0; i -= 1) copied = stepOwn(walk, copied, below[i]!);
+      if (!visit(copied)) return;
     }
+    if (level.owner === null) return;
+    below.push(level.owner.step);
+    level = level.owner.frontier;
   }
-  // (the skew-binary jump: two equal spans above the base make one, else the base itself)
-  const [over, further] = [jumpOf(base), jumpOf(jumpOf(base))];
-  const jump = base.depth - over.depth === over.depth - further.depth ? further : base;
-  return {
-    holders: trieUnion(walk, base.holders, delta),
-    base,
-    delta,
-    depth: base.depth + 1,
-    jump,
-  };
 }
 
 /**
- * What stands below a frontier through its copies (`Below`), each component of the copy graph once (Tarjan's,
- * iteratively), from its members and the components their copies reach, all made before it. Charged per frame, per copy
- * and per trie entry. A component with a member being made is not kept.
+ * The frontier one stands for: itself, or, where it holds nothing of its own beside one copy, what that copy's stands
+ * for; nothing where it holds nothing (a cycle of such frontiers holds nothing either). Each link followed is one of the
+ * copies its read's walk meets (`budget`), but no copy deep; past them `null`. Each frontier followed keeps the
+ * furthest one found (`same`, itself where it stands for itself), so each copy is listed once and a later read jumps
+ * where an earlier one stopped.
  */
-function belowOf(walk: Consumers, start: HostFrontier): Below {
+function sameOf(
+  walk: Consumers,
+  start: HostFrontier,
+  budget: { met: number },
+): HostFrontier | null {
+  const chain: HostFrontier[] = [];
+  const met = new Set<HostFrontier>();
+  let at = start;
+  for (;;) {
+    walk.pass.program.work.charge("checks");
+    if (at === NOTHING || at.same === at) break;
+    if (met.has(at)) {
+      at = NOTHING;
+      break;
+    }
+    met.add(at);
+    let next = at.same;
+    if (next === undefined) {
+      if (!holdsOnlyCopies(at)) {
+        at.same = at;
+        break;
+      }
+      const copies: HostFrontier[] = [];
+      eachCopy(walk, at, (copy) => copies.push(copy) < 2);
+      if (copies.length > 1) {
+        at.same = at;
+        break;
+      }
+      next = copies[0] ?? NOTHING;
+    }
+    chain.push(at);
+    if (++budget.met > frontierBound.copies) {
+      for (const each of chain) each.same = next;
+      return null;
+    }
+    at = next;
+  }
+  for (const each of chain) each.same = at;
+  return at;
+}
+
+/**
+ * A read's bounded walk (TABLE r4.208): the host data standing at its frontier and at the frontiers of the copies
+ * standing there, breadth first, each frontier once, at most `frontierBound.depth` copies deep and `.copies` copies met.
+ * Cut where a copy would lead deeper, or past the copies it may meet, to a frontier it has not met: then the read
+ * answers its place's component's host data (`placeIngress`).
+ */
+function explore(
+  walk: Consumers,
+  start: HostFrontier,
+): {
+  readonly host: IngressNode | undefined;
+  readonly cut: boolean;
+  readonly copies: number;
+  readonly depth: number;
+} {
   const { program } = walk.pass;
-  const frontiers = frontiersOf(walk);
-  const known = frontiers.below.get(start);
-  if (known !== undefined) return known;
+  const budget = { met: 0 };
+  const first = sameOf(walk, start, budget);
+  let cut = first === null;
+  const met = new Set<HostFrontier>(first === null ? [] : [first]);
+  let layer = first === null || first === NOTHING ? [] : [first];
+  let host: IngressNode | undefined;
+  let depth = 0;
+  for (; layer.length > 0 && !cut; depth += 1) {
+    const next: HostFrontier[] = [];
+    for (const at of layer) {
+      program.work.charge("checks");
+      host = program.scope.ingress.union(host, at.host);
+      if (cut) continue;
+      eachCopy(walk, at, (copy) => {
+        if (++budget.met > frontierBound.copies) return !(cut = true);
+        const same = sameOf(walk, copy, budget);
+        if (same === null) return !(cut = true);
+        if (same === NOTHING || met.has(same)) return true;
+        if (depth >= frontierBound.depth) return !(cut = true);
+        met.add(same);
+        next.push(same);
+        return true;
+      });
+    }
+    layer = next;
+  }
+  return { host, cut, copies: budget.met, depth: Math.max(0, depth - 1) };
+}
+
+/**
+ * The host data a place's stores bring and the places their copies read (each store's value walked once), for the
+ * place-level copy graph (`placeIngress`).
+ */
+function placeEdges(
+  walk: Consumers,
+  place: PlaceId,
+): { readonly host: IngressNode | undefined; readonly places: PlaceId[] } {
+  const { program } = walk.pass;
+  let host: IngressNode | undefined;
+  const places: PlaceId[] = [];
+  const nodes = [frontiersOf(walk).places.get(place)].filter((node) => node !== undefined);
+  for (let node = nodes.pop(); node !== undefined; node = nodes.pop()) {
+    program.work.charge("checks");
+    nodes.push(...node.children.values());
+    for (const { d } of node.stores) {
+      const values = [expand(walk.admission, d.value!, d.node, [])];
+      for (let task = values.pop(); task !== undefined; task = values.pop()) {
+        program.work.charge("checks");
+        if (task.stop?.list === "values") {
+          const ingress = hostIngress(walk, task.value);
+          if (ingress !== null) host = program.scope.ingress.union(host, ingress[0]?.ingress);
+          else {
+            const read = readPlace(walk, task.value);
+            if (read !== null) places.push(read);
+          }
+        }
+        for (const part of task.parts) {
+          program.work.charge("checks");
+          values.push(partOf(walk.admission, part));
+        }
+      }
+    }
+  }
+  return { host, places };
+}
+
+/**
+ * The host data a place's component of the place-level copy graph reaches, at every path: its members' stores' and
+ * every component's its copies read, each component once (Tarjan's, iteratively), shared as one ingress union by every
+ * place that reaches it. A cut read answers its place's (`explore`), a superset of what its walk would name.
+ */
+function placeIngress(walk: Consumers, start: PlaceId): IngressNode | undefined {
+  const { program } = walk.pass;
+  const { unions } = frontiersOf(walk);
+  const known = unions.get(start);
+  if (known !== undefined) return known ?? undefined;
   const ingress = program.scope.ingress;
-  const made = new Map<HostFrontier, Below>();
-  const doneOf = (at: HostFrontier): Below | undefined => frontiers.below.get(at) ?? made.get(at);
-  const order = new Map<HostFrontier, { readonly index: number; low: number }>();
-  const open: HostFrontier[] = [];
-  const onOpen = new Set<HostFrontier>();
-  const frames: { readonly at: HostFrontier; next: number }[] = [];
-  const enter = (at: HostFrontier): void => {
-    order.set(at, { index: order.size, low: order.size });
-    open.push(at);
-    onOpen.add(at);
-    frames.push({ at, next: 0 });
+  const order = new Map<PlaceId, { readonly index: number; low: number }>();
+  const open: PlaceId[] = [];
+  // (each member's host data and its closed successors', until its component closes)
+  const pendingHost = new Map<PlaceId, IngressNode | undefined>();
+  const frames: {
+    readonly place: PlaceId;
+    readonly edges: ReturnType<typeof placeEdges>;
+    next: number;
+    host: IngressNode | undefined;
+  }[] = [];
+  const enter = (place: PlaceId): void => {
+    order.set(place, { index: order.size, low: order.size });
+    open.push(place);
+    const edges = placeEdges(walk, place);
+    frames.push({ place, edges, next: 0, host: edges.host });
   };
   enter(start);
   while (frames.length > 0) {
     const frame = frames.at(-1)!;
-    const own = order.get(frame.at)!;
     program.work.charge("checks");
-    if (frame.next < frame.at.copies.length) {
-      const copy = frame.at.copies[frame.next++]!;
-      if (doneOf(copy) !== undefined) continue;
-      const met = order.get(copy);
-      if (met === undefined) enter(copy);
-      else if (onOpen.has(copy)) own.low = Math.min(own.low, met.index);
+    const own = order.get(frame.place)!;
+    if (frame.next < frame.edges.places.length) {
+      const to = frame.edges.places[frame.next++]!;
+      const done = unions.get(to);
+      if (done !== undefined) frame.host = ingress.union(frame.host, done ?? undefined);
+      else if (!order.has(to)) enter(to);
+      else own.low = Math.min(own.low, order.get(to)!.index);
       continue;
     }
     frames.pop();
     const parent = frames.at(-1);
-    if (parent !== undefined) {
-      const above = order.get(parent.at)!;
-      above.low = Math.min(above.low, own.low);
+    if (own.low === own.index) {
+      // (a component: its members' host data and the components they reach, one union for all of them)
+      const members: PlaceId[] = [];
+      for (let member = open.pop(); member !== undefined; member = open.pop()) {
+        program.work.charge("checks");
+        members.push(member);
+        if (member === frame.place) break;
+      }
+      let host = frame.host;
+      for (const member of members) host = ingress.union(host, pendingHost.get(member));
+      for (const member of members) {
+        unions.set(member, host ?? null);
+        pendingHost.delete(member);
+      }
+      if (parent !== undefined) parent.host = ingress.union(parent.host, host);
+    } else {
+      // (inside a component not yet closed: its host data waits for the component's root)
+      pendingHost.set(frame.place, frame.host);
+      if (parent !== undefined) {
+        const above = order.get(parent.place)!;
+        above.low = Math.min(above.low, own.low);
+      }
     }
-    if (own.low !== own.index) continue;
-    const members: HostFrontier[] = [];
-    for (let member = open.pop(); member !== undefined; member = open.pop()) {
-      program.work.charge("checks");
-      onOpen.delete(member);
-      members.push(member);
-      if (member === frame.at) break;
-    }
-    const inside = new Set(members);
-    const stopped = members.some((member) => member.at !== null);
-    // (what a member's copies outside the component bring: an untracked component's holders, tracked copies and host
-    // data; a tracked component's copy, to step; inside a tracked component, the copy itself, to step)
-    const reach = (member: HostFrontier, into: Reached): void => {
-      for (const copy of member.copies) {
-        program.work.charge("checks");
-        if (inside.has(copy)) {
-          if (stopped && copy !== member) into.tracked = joinHolders(into.tracked, copy);
-          continue;
-        }
-        const below = doneOf(copy)!;
-        if (below.stopped) into.tracked = joinHolders(into.tracked, copy);
-        else {
-          into.reached.add(below);
-          into.tracked = joinHolders(into.tracked, below.tracked);
-          into.inherited = ingress.union(into.inherited, below.inherited);
-        }
-      }
-    };
-    const keep = !members.some((member) => frontiers.making.has(member));
-    const record = (member: HostFrontier, below: Below): void => {
-      made.set(member, below);
-      if (keep) frontiers.below.set(member, below);
-    };
-    if (!stopped) {
-      const into: Reached = { reached: new Set(), tracked: undefined, inherited: undefined };
-      let own = EMPTY_TRIE;
-      for (const member of members) {
-        program.work.charge("checks");
-        reach(member, into);
-        own = withOwnSteps(walk, own, member);
-        into.inherited = ingress.union(into.inherited, member.host);
-      }
-      const below: Below = {
-        ...checked(walk, combine(walk, into.reached, own), into.reached, own),
-        tracked: into.tracked,
-        inherited: into.inherited,
-        stopped,
-        stepped: new Map(),
-      };
-      for (const member of members) {
-        program.work.charge("checks");
-        record(member, below);
-      }
-    } else
-      for (const member of members) {
-        program.work.charge("checks");
-        const into: Reached = { reached: new Set(), tracked: undefined, inherited: member.host };
-        reach(member, into);
-        record(member, {
-          ...checked(walk, combine(walk, into.reached, EMPTY_TRIE), into.reached, EMPTY_TRIE),
-          tracked: into.tracked,
-          inherited: into.inherited,
-          stopped,
-          stepped: new Map(),
-        });
-      }
   }
-  return doneOf(start)!;
+  return unions.get(start) ?? undefined;
 }
 
 /**
- * The host data a frontier and the copies it holds hold: its component's (`Below.inherited`, through untracked copies),
- * and that of each component reached through tracked ones, each once, charged per component met; kept per frontier.
- */
-function heldHost(walk: Consumers, start: HostFrontier): IngressNode | undefined {
-  const { program } = walk.pass;
-  const { held } = frontiersOf(walk);
-  const known = held.get(start);
-  if (known !== undefined) return known ?? undefined;
-  const ingress = program.scope.ingress;
-  let node: IngressNode | undefined;
-  const seen = new Set<Below>();
-  const pending = [start];
-  for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
-    program.work.charge("checks");
-    const below = belowOf(walk, at);
-    if (seen.has(below)) continue;
-    seen.add(below);
-    node = ingress.union(node, below.inherited);
-    pending.push(...holdersOf(walk, below.tracked));
-  }
-  held.set(start, node ?? null);
-  return node;
-}
-
-/**
- * At a settled program stop, the host data a read's key may hold over all its stores (S3 §5 revision 16: a domain is
- * what the key may hold over all its stores; TABLE r4.113: ingress is structural): the read's own host ingress, and each
- * host read that a store into the key or a key above it holds at the read's path, through the literals and carriers
- * that hold it and the copies of other places (`HostFrontier`), as one external item naming those reads; none where no
- * store holds host data there, nor below a key whose decision stopped (r4.186); past the nesting limit of copies within
- * copies, none.
+ * The host data a domain read holds after a settled stop (#1432, #1415): its own host ingress and what its bounded walk
+ * meets (`explore`), and where the walk is cut its place's component's (`placeIngress`), as one external item naming
+ * those reads. Nothing below a key whose decision stopped (r4.186).
  */
 function heldIngress(walk: Consumers, value: PlaceId, rest: readonly string[]): readonly Item[] {
   const { program, contract, definitions } = walk.pass;
   if (!walk.settled || program.work.stopped === null || definitions.ingress.size === 0) return [];
+  // (the test seam's key for the read, made only where the seam records, `withFrontierBound`)
+  const read = (): string => `${value}\u0000${rest.join("\u0000")}`;
   if (contract.anyStopped) {
     const key = readKey(walk, value);
     if (
       key === null ||
       walk.admission.decisionStopped(keyPlace(key), joinSteps(keyPath(key), rest))
-    )
+    ) {
+      frontierReads?.set(read(), {
+        guarded: true,
+        cut: false,
+        writers: new Set(),
+        copies: 0,
+        depth: 0,
+      });
       return [];
+    }
   }
-  let at = readFrontier(walk, value, 0);
-  for (const step of rest) at = stepFrontier(walk, at, step, 0);
+  let at = readFrontier(walk, value);
+  for (const step of rest) at = stepOwn(walk, at, step);
+  const found = explore(walk, at);
+  const place = found.cut ? readPlace(walk, value) : null;
+  // (cut, its place's component's host data holds all its walk met: that one union, shared by every read of the
+  // component, so a consumer resolves it once)
   const node = program.scope.ingress.union(
     hostIngress(walk, value)?.[0]?.ingress,
-    heldHost(walk, at),
+    place === null ? found.host : placeIngress(walk, place),
   );
+  frontierReads?.set(read(), {
+    guarded: false,
+    cut: found.cut,
+    writers: new Set(
+      node === undefined ? [] : ingressLeaves(node).map((writer) => JSON.stringify(writer)),
+    ),
+    copies: found.copies,
+    depth: found.depth,
+  });
   return node === undefined ? [] : [{ ...unknownItem(REASON.external), ingress: node }];
 }
 

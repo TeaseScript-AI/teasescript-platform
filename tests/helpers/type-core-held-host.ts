@@ -575,8 +575,10 @@ const fields0 = (k: number, value: (i: number) => string): string =>
  * field, nested cycles, two-way copies, and a chain whose links each store their own property. Codex r5's B1 and T1: k
  * readers each holding the same two unrelated objects (`unshared-readers`), or one object and the tip of a chain whose
  * links store their own property (`unshared-chain-readers`), and k readers each holding a chain's root and its tip, root
- * first (`tie-root-first`: equal holders, the ancestor met first) or tip first (`tie-tip-first`: the lineage's depth
- * gap).
+ * first (`tie-root-first`) or tip first (`tie-tip-first`). Sol's design round r1 (TABLE r4.208): reader i holding the
+ * i+1-th link of one chain and the k-i-th of another, each link storing its own property (`staggered-pairs`), and k
+ * branches of one object, each storing its own property, each read through a reader that also holds another object
+ * (`branch-disjoint-readers`).
  */
 export function topologySources(k: number): { readonly name: string; readonly source: string }[] {
   const shapes: Record<string, string[]> = {
@@ -641,6 +643,25 @@ export function topologySources(k: number): { readonly name: string; readonly so
       `let b = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
       ...lines(k, (i) => `let b${i} = ${i > 0 ? `b${i - 1}` : "b"}\nb${i}.f${i} = hostOther`),
       ...lines(k, (i) => `let r${i} = a\nr${i} = b${k - 1}\nrepeat r${i}.f${i} {}`),
+    ],
+    "staggered-pairs": [
+      `let a0 = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+      `let b0 = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
+      ...lines(
+        k,
+        (i) =>
+          `let a${i + 1} = a${i}\na${i + 1}.f${i} = hostValue\nlet b${i + 1} = b${i}\nb${i + 1}.f${i} = hostOther`,
+      ),
+      ...lines(k, (i) => `let r${i} = a${i + 1}\nr${i} = b${k - i}\nrepeat r${i}.f${i} {}`),
+    ],
+    "branch-disjoint-readers": [
+      `let a = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+      `let b = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
+      ...lines(
+        k,
+        (i) =>
+          `let t${i} = b\nt${i}.f${i} = hostOther\nlet r${i} = a\nr${i} = t${i}\nrepeat r${i}.f${i} {}`,
+      ),
     ],
     ...Object.fromEntries(
       [true, false].map((rootFirst) => [
