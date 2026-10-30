@@ -21,6 +21,9 @@ tester.run(
       "// EVIDENCE: The guard receives a value validated by the fixture.\nif (value as boolean) run();",
       "const result = {\n// EVIDENCE: validation.valid proves capture.value is an InstructionPlan.\nplan: validation.valid ? capture.value as InstructionPlan : null,\n};",
       "// oxlint-disable-next-line no-explicit-any -- EVIDENCE: The fixture validates the input before this assertion.\nconst id = value as UserId;",
+      "// EVIDENCE: `parseUserId` established the UserId invariant.\nconst id = value as UserId;",
+      "/* EVIDENCE:\n * 'parseUserId' established the UserId invariant.\n */\nconst id = value as UserId;",
+      "// oxlint-disable-next-line no-explicit-any -- EVIDENCE: (fixture) The input is validated first.\nconst id = value as UserId;",
       {
         code: "// INVARIANT: The parser established the UserId invariant.\nconst id = value as UserId;",
         options: [{ markers: ["INVARIANT"] }],
@@ -36,6 +39,8 @@ tester.run(
       { code: "// EVIDENCE:\nconst id = value as UserId;", errors: [error] },
       { code: "// EVIDENCE: ...\nconst id = value as UserId;", errors: [error] },
       { code: "const id = /* EVIDENCE: */ value as UserId;", errors: [error] },
+      { code: "// EVIDENCE: ``\nconst id = value as UserId;", errors: [error] },
+      { code: "/* EVIDENCE:\n * ...\n */\nconst id = value as UserId;", errors: [error] },
       {
         code: "// EVIDENCE: This applies to the old declaration.\nconst old = 1;\nconst id = value as UserId;",
         errors: [error],

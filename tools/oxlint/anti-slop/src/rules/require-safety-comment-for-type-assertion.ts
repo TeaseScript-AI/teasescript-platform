@@ -48,8 +48,10 @@ function markerPattern(markers: readonly string[]): RegExp {
   const alternation = markers
     .map((marker) => marker.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`))
     .join("|");
+  // A letter or digit after the colon makes an explanation: it may start with code or a quote, and an empty or
+  // punctuation-only one such as `...` is rejected.
   return new RegExp(
-    String.raw`(?:^|[^\p{L}\p{N}_])(?:${alternation})\s*:\s*(?:\*\s*)*[\p{L}\p{N}]`,
+    String.raw`(?:^|[^\p{L}\p{N}_])(?:${alternation})\s*:[^\p{L}\p{N}]*[\p{L}\p{N}]`,
     "u",
   );
 }

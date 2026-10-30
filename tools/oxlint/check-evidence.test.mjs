@@ -18,6 +18,8 @@ const first = value;
 const second = value; // oxlint-disable-line no-console -- EVIDENCE: Node CLI output is the intended behavior
 // oxlint-disable-next-line anti-slop/first-rule, @scope/plugin/second-rule -- EVIDENCE: both rules apply to this fixture
 const third = value;
+// oxlint-disable-next-line anti-slop/no-reflect-get -- EVIDENCE: \`Reflect.get\` forwards unchanged proxy keys
+const fourth = value;
 `;
 
   assert.deepEqual(checkEvidenceComments("fixture.ts", sourceText), []);
