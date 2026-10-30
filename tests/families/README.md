@@ -12,6 +12,7 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
   [--allowances natural,16,256] [--shard i/N] [--timeout 180] [--memory 2048] [--out differences.jsonl]
+node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base SHA>/<area> [the same options]
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
@@ -31,10 +32,19 @@ from stalls, in a source that stalls later too (`tests/families-runner.test.ts`,
 the oracle's own stop: where its questions after a finished analysis pass the allowance, the nodes from that one on stay
 unanswered (`publicationHashes`'s `unanswered`, #1499). A run with any on either tree is neither compared nor an
 exception: the runner writes it to `--out` and counts it apart. It prints one JSON line per generator and a total
-(sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences, the limit in seconds), and exits 1 when
-any run differs, throws or leaves nodes unanswered, or any source stalls. Run large sizes as one capped job per area or
-shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls and
-publication exceptions separately; neither establishes agreement.
+(sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences, the limit in seconds), and
+exits 1 when any run differs, throws, leaves nodes unanswered or is uncompared, or any source stalls. Run large sizes as
+one capped job per area or shard on a worker. Some recorded large inputs exceed the default timeout on unchanged trees.
+Report stalls and publication exceptions separately; neither establishes agreement.
+
+With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the
+stored result of the same source (its generator, name and key, so an edited source is new), mode and check, and a run
+the baseline does not hold is `uncompared`, never agreement (`--out` names its source and runs); a source stalls or
+throws outside its runs where either the stored run or the head did. The limits then apply to each tree alone, where a
+run of both trees shares them in one process. `--store <file>` runs one tree and stores each source's results as one
+line; `--baseline` reads a folder's `*.runs.jsonl` files. `tools/corpus/baseline.sh`, installed as the desktop's
+`~/work/trees/hooks/baseline`, stores every runner area and the type-core fixture (`tools/corpus/fixture/`) of each new
+`main` in `~/work/baselines/<sha>/<area>/`; an area without its `SHA256SUMS` is not complete.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never

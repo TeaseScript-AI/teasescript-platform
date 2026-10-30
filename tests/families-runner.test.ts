@@ -216,3 +216,107 @@ test("the corpus runner counts a publication its oracle left unanswered apart, n
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+/**
+ * A built tree's library where the source `changed` publishes its fourth part differently on the head, `throws` throws
+ * and `stopped` leaves two nodes unanswered on the base, and `ends` ends the process on both.
+ */
+const storable = (head: boolean): string => `import { createHash } from "node:crypto";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+export function publicationHashes(files) {
+  const source = files[0].source;
+  if (!${head} && source === "throws") throw new TypeError("no publication");
+  if (source === "ends") process.exit(3);
+  const changed = ${head} && source === "changed";
+  const parts = ['"A"', '"R"', '[1,"x"]', changed ? '[2,"z"]' : '[2,"y"]', '"T"'].map((text) =>
+    createHash("sha256").update(text).digest("hex"),
+  );
+  return { parts, unanswered: !${head} && source === "stopped" ? 2 : 0 };
+}
+`;
+
+test("the corpus runner compares a head with a stored baseline as with the base tree beside it, and never a source the baseline lacks", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const [base, head] = [false, true].map((isHead) => {
+      const tree = join(directory, isHead ? "head" : "base");
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        storable(isHead),
+      );
+      return tree;
+    });
+    const area = join(directory, "area");
+    mkdirSync(area);
+    writeFileSync(
+      join(area, "stored.mjs"),
+      `export const cases = ${JSON.stringify(["same", "changed", "throws", "stopped", "ends"].map((name) => [name, name]))};\n`,
+    );
+    const baseline = join(directory, "baseline");
+    mkdirSync(baseline);
+    const stored = join(baseline, "0of1.runs.jsonl");
+    const out = join(directory, "out.jsonl");
+    const run = (...args: string[]) => {
+      const result = spawnSync(process.execPath, [runner, area, ...args, "--out", out], {
+        encoding: "utf8",
+      });
+      const total = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      const kept = readFileSync(out, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .map(({ files, globals, ...line }) => line);
+      return { status: result.status, total, kept };
+    };
+    const counts = ({ total }: { total: Record<string, number> }) =>
+      ["sources", "stalled", "exceptions", "unanswered", "uncompared", "runs", "differences"].map(
+        (key) => total[key],
+      );
+
+    // the base tree stored, then the head against it and against the base tree run beside it
+    assert.equal(run(base!, "--store", stored).status, 1);
+    const beside = run(base!, head!);
+    const against = run(head!, "--baseline", baseline);
+    assert.deepEqual(counts(beside), [5, 1, 4, 4, 0, 16, 4]);
+    assert.deepEqual(counts(against), counts(beside));
+    assert.equal(against.status, 1);
+    const runs = ({ kept }: { kept: Record<string, unknown>[] }) =>
+      kept.filter(({ mode }) => mode !== undefined).map(({ thrown, ...line }) => line);
+    assert.deepEqual(runs(against), runs(beside));
+    assert.deepEqual(
+      against.kept.filter(({ stalled }) => stalled !== undefined),
+      [{ generator: "stored.mjs", source: "ends", stalled: { base: "exit 3", head: "exit 3" } }],
+    );
+
+    // one stored hash altered and one source removed: a difference, and the removed source's runs uncompared
+    const entries = readFileSync(stored, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter(({ source }) => source !== "changed");
+    entries.find(({ source }) => source === "same").runs["src-on publication"].value.hash =
+      "0".repeat(64);
+    writeFileSync(stored, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
+    const mutated = run(head!, "--baseline", baseline);
+    assert.equal(mutated.status, 1);
+    assert.deepEqual(counts(mutated), [5, 1, 4, 4, 4, 16, 1]);
+    assert.deepEqual(
+      mutated.kept
+        .filter(({ source }) => source === "same" || source === "changed")
+        .map(({ source, mode, uncompared }) => [source, mode ?? uncompared]),
+      [
+        ["same", "src-on"],
+        [
+          "changed",
+          ["src-on", "src-off", "rev-on", "rev-off"].map((mode) => `${mode} publication`),
+        ],
+      ],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

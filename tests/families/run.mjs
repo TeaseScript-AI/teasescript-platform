@@ -1,5 +1,7 @@
 // node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
 //   [--timeout 180] [--memory 2048] [--out differences.jsonl]
+// node tests/families/run.mjs <area> <head> --baseline <folder> [options]
+// node tests/families/run.mjs <area> <tree> --store <file> [options]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
@@ -10,14 +12,18 @@
 // that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
 // check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. A publication whose
 // oracle left nodes unanswered at its own budget stop (`publicationHashes`'s `unanswered`) on either tree is never
-// compared either, and is counted apart (`unanswered`) and kept in `--out`. Prints one JSON line per generator and a
-// total: sources, unparsed, stalled, exceptions, unanswered, modes, runs, differences.
+// compared either, and is counted apart (`unanswered`) and kept in `--out`. With `--baseline`, the head alone runs, and
+// each run is judged against the stored base result of the same source, mode and check (a source with each run it
+// does not hold is kept in `--out` as `uncompared`, never agreement); `--store` runs one tree and stores each source's
+// results as a JSON line, which a folder's `*.runs.jsonl` files then hold for `--baseline`. Prints one JSON line per
+// generator and a total: sources, unparsed, stalled, exceptions, unanswered, uncompared, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { sourcesOf } from "./sources.mjs";
+import { sourceKey, sourcesOf } from "./sources.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -69,12 +75,13 @@ function partHashes(oracle, files, mode, globals) {
 }
 
 /**
- * A run's result by its hash (a publication's by its parts'), with a publication's part hashes (`parts`) and unanswered
- * nodes, and whether the files did not parse.
+ * A run's result by its hash (a publication's by its parts'), with a publication's part hashes (`parts`, each cut to 16
+ * digits, which still place a difference and keep a stored run small) and unanswered nodes, and whether the files did
+ * not parse.
  */
 const digest = (value) => ({
   hash: hash(textOf(value?.parts ?? value)),
-  parts: value?.parts ?? null,
+  parts: value?.parts?.map((part) => part.slice(0, 16)) ?? null,
   unanswered: value?.unanswered ?? 0,
   unparsed: value === null,
 });
@@ -87,10 +94,32 @@ function firstPart(was, is) {
   return { part, parts: [was.length, is.length] };
 }
 
+/**
+ * A run's outcome from the base's result (`was`, run or stored; none where the baseline has none) and the head's
+ * (`is`): an exception on either, never compared (#1439); nodes left unanswered on either; with no base, `uncompared`,
+ * never agreement; else a difference, or nothing where they agree.
+ */
+function judged(was, is) {
+  if (was?.thrown !== undefined || is.thrown !== undefined)
+    return { thrown: { base: was?.thrown, head: is.thrown } };
+  if (was?.value.unanswered > 0 || is.value.unanswered > 0)
+    return { unanswered: { base: was?.value.unanswered, head: is.value.unanswered } };
+  if (was === undefined) return { uncompared: true };
+  if (was.value.hash === is.value.hash) return {};
+  return {
+    difference: {
+      base: was.value.hash.slice(0, 16),
+      head: is.value.hash.slice(0, 16),
+      ...firstPart(was.value.parts, is.value.parts),
+    },
+  };
+}
+
 if (process.argv[2] === "--child") {
-  // the child: each source's runs in the four modes on both trees
-  const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
-  const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
+  // the child: each source's runs in the four modes on each tree (the base and the head, or one)
+  const { roots, allowances } = JSON.parse(process.argv[3]);
+  const trees = await Promise.all(roots.map(oracles));
+  const head = trees.at(-1);
   /**
    * `message` sent to the runner, once it is written: a send returns before that, and a process that ends with sends
    * still queued loses them.
@@ -100,8 +129,9 @@ if (process.argv[2] === "--child") {
       process.send(message, (error) => (error ? reject(error) : resolve())),
     );
   /**
-   * One source's runs in the four modes on both trees, each run's outcome sent as it ends (`run`: a difference or an
-   * exception) and written before the next run starts, so that a later stall in the same source keeps it.
+   * One source's runs in the four modes on its trees, each run's outcome (`run`: a difference or an exception, or one
+   * tree's result) sent as it ends and written before the next run starts, so that a later stall in the source keeps
+   * it.
    */
   const compared = async ({ files, checks, globals }) => {
     let parsed = true;
@@ -118,21 +148,12 @@ if (process.argv[2] === "--child") {
           ]);
       for (const [check, run] of runs) {
         // compared by hash, so that the base's text is not held while the head runs
-        const was = attempt(() => digest(run(base)));
-        const is = attempt(() => digest(run(head)));
+        const results = trees.map((tree) => attempt(() => digest(run(tree))));
+        const is = results.at(-1);
         if (is.value?.unparsed) parsed = false;
-        const outcome = { mode: label, check };
-        if ("thrown" in was || "thrown" in is)
-          outcome.thrown = { base: was.thrown, head: is.thrown };
-        else if (was.value.unanswered > 0 || is.value.unanswered > 0)
-          outcome.unanswered = { base: was.value.unanswered, head: is.value.unanswered };
-        else if (was.value.hash !== is.value.hash)
-          outcome.difference = {
-            base: was.value.hash.slice(0, 16),
-            head: is.value.hash.slice(0, 16),
-            ...firstPart(was.value.parts, is.value.parts),
-          };
-        await sent({ run: outcome });
+        // one tree's result goes to the runner, which compares it with the stored one or stores it
+        const outcome = results.length === 2 ? judged(results[0], is) : { result: is };
+        await sent({ run: { mode: label, check, ...outcome } });
       }
     }
     return { parsed };
@@ -149,15 +170,26 @@ if (process.argv[2] === "--child") {
     process.send(reply);
   });
 } else {
-  const [area, baseRoot, headRoot, ...rest] = process.argv.slice(2);
-  if (area === undefined || baseRoot === undefined || headRoot === undefined) {
-    console.error("usage: node tests/families/run.mjs <area> <base> <head> [options]");
+  // each option takes one value; the other arguments are the area and its trees
+  const args = process.argv.slice(2);
+  const options = new Map();
+  const [area, ...roots] = args.filter((arg, index) => {
+    if (arg.startsWith("--")) options.set(arg.slice(2), args[index + 1]);
+    return !arg.startsWith("--") && !args[index - 1]?.startsWith("--");
+  });
+  const option = (name) => options.get(name);
+  // the base against the head, the head against a stored baseline (`--baseline`), or one tree's runs stored (`--store`)
+  const baseline = option("baseline");
+  const store = option("store");
+  const single = baseline !== undefined || store !== undefined;
+  if (area === undefined || roots.length !== (single ? 1 : 2) || (baseline && store)) {
+    console.error(
+      "usage: node tests/families/run.mjs <area> <base> <head> [options]\n" +
+        "       node tests/families/run.mjs <area> <head> --baseline <folder> [options]\n" +
+        "       node tests/families/run.mjs <area> <tree> --store <file> [options]",
+    );
     process.exit(2);
   }
-  const option = (name) => {
-    const index = rest.indexOf(`--${name}`);
-    return index === -1 ? undefined : rest[index + 1];
-  };
   const sizesOption = option("sizes")?.split(",").map(Number);
   const allowances = (option("allowances") ?? "natural,16,256")
     .split(",")
@@ -182,14 +214,14 @@ if (process.argv[2] === "--child") {
     record({ ...line, files: source.files, globals: source.globals });
   };
   // fail before the first source when a tree has no library
-  await Promise.all([oracles(baseRoot), oracles(headRoot)]);
+  await Promise.all(roots.map(oracles));
 
   let child = null;
   /** A child process, keeping the end of its error output: a fatal V8 error says there why the process ended. */
   const fresh = () => {
     const created = fork(
       fileURLToPath(import.meta.url),
-      ["--child", JSON.stringify({ baseRoot, headRoot, allowances })],
+      ["--child", JSON.stringify({ roots, allowances })],
       {
         execArgv: [`--max-old-space-size=${memory}`],
         serialization: "advanced",
@@ -251,50 +283,103 @@ if (process.argv[2] === "--child") {
     });
 
   const folder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), area);
-  const generators = readdirSync(folder)
-    .filter((name) => name.endsWith(".mjs"))
-    .sort();
+  const generators = [];
+  for (const name of readdirSync(folder)
+    .filter((file) => file.endsWith(".mjs"))
+    .sort()) {
+    const generator = await import(pathToFileURL(path.join(folder, name)).href);
+    const sources = sourcesOf(generator, sizesOption).filter(
+      (_, index) => index % shards === shard,
+    );
+    generators.push({ name, checks: generator.checks ?? ["publication"], sources });
+  }
+  /** A source's place in a baseline: its generator, its name and its key, so that an edited source is a new one. */
+  const placeOf = (name, source) => JSON.stringify([name, source.name, sourceKey(source)]);
+  /** The stored runs of this shard's sources, by their place, from the baseline's `*.runs.jsonl` files. */
+  const stored = new Map();
+  if (baseline !== undefined) {
+    const files = existsSync(baseline)
+      ? readdirSync(baseline).filter((file) => file.endsWith(".runs.jsonl"))
+      : [];
+    if (files.length === 0) {
+      console.error(`no stored runs (*.runs.jsonl) in ${baseline}`);
+      process.exit(2);
+    }
+    const places = new Set(
+      generators.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source))),
+    );
+    for (const file of files.sort())
+      for await (const line of createInterface({
+        input: createReadStream(path.join(baseline, file)),
+      })) {
+        const entry = JSON.parse(line);
+        const place = JSON.stringify([entry.generator, entry.source, entry.key]);
+        if (places.has(place)) stored.set(place, entry);
+      }
+  }
+  if (store !== undefined) writeFileSync(store, "");
+  /** What the stored tree and the head did (a stall's or an exception's text), where either did. */
+  const either = (base, head) =>
+    base === undefined && head === undefined ? undefined : { base, head };
   const counts = [
     "sources",
     "unparsed",
     "stalled",
     "exceptions",
     "unanswered",
+    "uncompared",
     "runs",
     "differences",
   ];
   const zeros = () => Object.fromEntries(counts.map((key) => [key, 0]));
   const total = { area, generators: 0, ...zeros(), modes: 4 };
-  for (const name of generators) {
-    const generator = await import(pathToFileURL(path.join(folder, name)).href);
-    const checks = generator.checks ?? ["publication"];
+  for (const { name, checks, sources } of generators) {
     const row = { generator: name, ...zeros() };
-    const sources = sourcesOf(generator, sizesOption).filter(
-      (_, index) => index % shards === shard,
-    );
     for (const source of sources) {
       row.sources += 1;
       const reply = await analysed({ files: source.files, checks, globals: source.globals });
       const inputs = { files: source.files, globals: source.globals };
+      const kept = stored.get(placeOf(name, source));
+      const results = {};
+      const uncompared = [];
       // the runs that ended count, those of a source that stalls or throws after them included
       row.runs += reply.runs.length;
-      for (const { thrown: exception, unanswered, difference, ...run } of reply.runs)
+      for (const { result, ...run } of reply.runs) {
+        // one tree's result, judged against the stored one, where there is one
+        const id = `${run.mode} ${run.check}`;
+        results[id] = result;
+        const outcome = result === undefined ? run : { ...run, ...judged(kept?.runs[id], result) };
+        const { thrown: exception, unanswered, difference, uncompared: alone, ...where } = outcome;
         if (exception !== undefined) {
           row.exceptions += 1;
-          thrown({ generator: name, source: source.name, ...run, thrown: exception }, source);
+          thrown({ generator: name, source: source.name, ...where, thrown: exception }, source);
         } else if (unanswered !== undefined) {
           row.unanswered += 1;
-          record({ generator: name, source: source.name, ...run, unanswered, ...inputs });
+          record({ generator: name, source: source.name, ...where, unanswered, ...inputs });
         } else if (difference !== undefined) {
           row.differences += 1;
-          record({ generator: name, source: source.name, ...run, ...difference, ...inputs });
-        }
-      if ("stalled" in reply) {
+          record({ generator: name, source: source.name, ...where, ...difference, ...inputs });
+        } else if (alone && baseline !== undefined) uncompared.push(id);
+      }
+      if (uncompared.length > 0) {
+        row.uncompared += uncompared.length;
+        record({ generator: name, source: source.name, uncompared, ...inputs });
+      }
+      // with a baseline, a source stalls or throws outside its runs where either tree did, as with both trees run
+      const stalled = baseline === undefined ? reply.stalled : either(kept?.stalled, reply.stalled);
+      const failed =
+        baseline === undefined ? reply.thrown : either(kept?.thrown?.runner, reply.thrown?.runner);
+      if (store !== undefined) {
+        const key = sourceKey(source);
+        const entry = { generator: name, source: source.name, key, stalled, thrown: failed };
+        appendFileSync(store, `${JSON.stringify({ ...entry, runs: results })}\n`);
+      }
+      if (stalled !== undefined) {
         row.stalled += 1;
-        record({ generator: name, source: source.name, stalled: reply.stalled, ...inputs });
-      } else if ("thrown" in reply) {
+        record({ generator: name, source: source.name, stalled, ...inputs });
+      } else if (failed !== undefined) {
         row.exceptions += 1;
-        thrown({ generator: name, source: source.name, thrown: reply.thrown }, source);
+        thrown({ generator: name, source: source.name, thrown: failed }, source);
       } else if (!reply.parsed) row.unparsed += 1;
     }
     console.log(JSON.stringify(row));
@@ -304,5 +389,7 @@ if (process.argv[2] === "--child") {
   child?.kill();
   console.log(JSON.stringify({ ...total, timeout: seconds, node: process.version }));
   process.exitCode =
-    total.differences + total.stalled + total.exceptions + total.unanswered === 0 ? 0 : 1;
+    total.differences + total.stalled + total.exceptions + total.unanswered + total.uncompared === 0
+      ? 0
+      : 1;
 }
