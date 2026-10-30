@@ -1505,11 +1505,11 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 /**
  * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
  * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2), and following it
- * removes the warning (Astra r1's A1). Where the value is proven to be a load with a default, the load as its variable's
- * one binding's `let` value or a read of a variable so bound that nothing writes to or below, the load's default is
- * given the property; else, a write of any form, another binding of the name, a property, element or selection around
- * the read (Codex r4's N1 to N3), no property check removes the warning (#1496), so the words say where the type must
- * come from and offer no check. A type with null takes no default that removes it yet (#1470). A value that is the place
+ * removes the warning (Astra r1's A1). Where the checker's definitions prove the value a load with a default, the load
+ * as its variable's declaration's value or a copy of a variable whose key holds only that declaration and the keys below
+ * it on the way none, the load's default is given the property; else, a write in any spelling, another binding of the
+ * name, a selection or a join around the read (Codex r4's N1 to N3, r5's), no property check removes the warning
+ * (#1496), so the words say where the type must come from and offer no check. A type with null takes no default that removes it yet (#1470). A value that is the place
  * keeps its own check. Each followed source compiles under both checkers and no longer owes the warning.
  */
 test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
@@ -1548,15 +1548,16 @@ test("a store's property below the warned value is the property its fix names, a
       `Give 'entry' a whole number (integer) in the default of 'load("cfg", default: {marker: 8})'.`,
       `let original = load("cfg", default: {marker: 8, entry: 7})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
     ],
-    // (a load the whitelist does not prove: an element, a list literal, a selection around the read; Codex r4's N1, a
-    // write by an index and a mutator through parentheses; N2, two ways from one load; N3, an object's property named
-    // like a selection; another binding of the name, a parameter; a load that is not its variable's `let`'s value)
     [
       'let loaded = load("prefs", default: [{volume: 5}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
       "loaded[0]",
-      "Give 'prefs.caption' a whole number (integer) where 'loaded[0]' gets its value.",
-      null,
+      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
     ],
+    // (a load the checker's definitions do not prove: a list literal, a selection around the read; Codex r4's N1 and
+    // r5's, a write by an index, a mutator through a parenthesized receiver and callee; N2, two ways from one load; N3,
+    // an object's property named like a selection; another binding of the name, a parameter; a second load of the
+    // variable; a load that is not its variable's declaration's value)
     [
       `let prefs = ${load}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
       "[{volume: 5}, prefs]",
@@ -1569,7 +1570,7 @@ test("a store's property below the warned value is the property its fix names, a
       "Give 'prefs.caption' a whole number (integer) where '[saved, saved].random' gets its value.",
       null,
     ],
-    ...["loaded[0] = hostValue", "(loaded).add(hostValue)"].map(
+    ...["loaded[0] = hostValue", "(loaded).add(hostValue)", "(loaded.add)(hostValue)"].map(
       (write) =>
         [
           `let loaded = load("prefs", default: [{volume: 5}])\n${write}\nlet items = loaded\nitems[0].caption = 2\nexit\n`,
@@ -1592,6 +1593,12 @@ test("a store's property below the warned value is the property its fix names, a
     ],
     [
       `function keep {\n    let prefs = ${load}\n    say "kept"\n}\nkeep()\nfunction use(prefs) {\n    let copy = prefs\n    copy.caption = 2\n}\nuse(hostValue)\nuse({volume: 1})\nexit\n`,
+      "prefs",
+      "Give 'copy.caption' a whole number (integer) where 'prefs' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = ${load}\nprefs = load("other", default: {volume: 5})\nlet copy = prefs\ncopy.caption = 2\nexit\n`,
       "prefs",
       "Give 'copy.caption' a whole number (integer) where 'prefs' gets its value.",
       null,

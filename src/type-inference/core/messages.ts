@@ -1,16 +1,4 @@
-import type {
-  AssignmentStatement,
-  Block,
-  CallExpression,
-  Expression,
-  ForStatement,
-  FunctionParameter,
-  GlobalStatement,
-  LetStatement,
-  ObjectProperty,
-  Program,
-  Statement,
-} from "../../ast.js";
+import type { Block, Expression, ObjectProperty, Program, Statement } from "../../ast.js";
 import { parse } from "../../parser.js";
 import { someNode } from "../../project-globals.js";
 import {
@@ -32,7 +20,7 @@ import {
 } from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit, localCalendarOffsetMessage, UNIT_OPERANDS } from "../../duration.js";
-import { expressionParts, statementExpressions, unwrap } from "../../expression-children.js";
+import { expressionParts, statementExpressions } from "../../expression-children.js";
 import { listDraw, listMethod, SORT_RULE } from "../../list-methods.js";
 import {
   FOR_SOURCE_RULE,
@@ -62,7 +50,7 @@ import {
 import { hasIdentity, VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import { fits } from "./admission.js";
 import { REFERENCE } from "./contract.js";
-import { propertyName, propertyStep } from "./program.js";
+import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
 import type {
   BudgetStop,
@@ -112,11 +100,6 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
-  /**
-   * The one binding a variable named `name` has in the project, where it is a `let` (#1468); `null` where the name has
-   * another binding (a `let`, a `global`, a parameter or a loop variable) or none.
-   */
-  readonly binding: (name: string) => Binding | null;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -340,17 +323,6 @@ function acts(node: Expression): boolean {
 export interface Landing {
   readonly root: string;
   readonly steps: readonly StoreStep[];
-}
-
-/** A variable's one binding, a `let` (`MessageSource.binding`): its value, its file, and whether it is written. */
-export interface Binding {
-  readonly value: Expression;
-  readonly file: number;
-  /**
-   * Whether anything in the project writes to the variable or below it: an assignment of any operator to it, a property
-   * or an element of it, or a method called on it or anything below it, through parentheses.
-   */
-  readonly written: boolean;
 }
 
 /** A value a statement gives its variable (`MessageSource.landing`): the value, the variable and its steps. */
@@ -587,75 +559,9 @@ export function messageSource(
     return found;
   };
   const landing = (site: SourceSite): Landing | null => landingOf(givensOf(site.file), site);
-  // each name's bindings in the project, a `let`'s with its value, and the names written to or below, gathered once
-  let bindings:
-    Map<string, { readonly value: Expression | null; readonly file: number }[]> | undefined;
-  const written = new Set<string>();
-  const binding = (name: string): Binding | null => {
-    if (bindings === undefined) {
-      const byName = new Map<
-        string,
-        { readonly value: Expression | null; readonly file: number }[]
-      >();
-      sources.forEach((_, file) => {
-        const bind = (bound: string, value: Expression | null = null): void => {
-          const list = byName.get(bound);
-          if (list === undefined) byName.set(bound, [{ value, file }]);
-          else list.push({ value, file });
-        };
-        // (the variable a target or a receiver lies in, through properties, elements and parentheses)
-        const write = (target: Expression): void => {
-          let at = target;
-          while (
-            at.kind === "propertyAccessExpression" ||
-            at.kind === "indexExpression" ||
-            at.kind === "parenthesizedExpression"
-          )
-            at = at.kind === "parenthesizedExpression" ? at.expression : at.object;
-          if (at.kind === "identifier") written.add(at.name);
-        };
-        someNode(programOf(file), (node) => {
-          // EVIDENCE: invariant: a parser-owned node is the node its kind names; each case reads only its own kind's.
-          const each = node as
-            | LetStatement
-            | GlobalStatement
-            | ForStatement
-            | FunctionParameter
-            | AssignmentStatement
-            | CallExpression;
-          switch (each.kind) {
-            case "letStatement":
-              bind(each.name.name, each.initializer);
-              break;
-            case "globalStatement":
-            case "functionParameter":
-              bind(each.name.name);
-              break;
-            case "forStatement":
-              bind(each.variable.name);
-              if (each.valueVariable !== null) bind(each.valueVariable.name);
-              break;
-            case "assignmentStatement":
-              write(each.target);
-              break;
-            case "callExpression":
-              if (each.callee.kind === "propertyAccessExpression") write(each.callee.object);
-          }
-          return false;
-        });
-      });
-      bindings = byName;
-    }
-    const found = bindings.get(name);
-    const only = found?.length === 1 ? found[0]! : undefined;
-    return only === undefined || only.value === null
-      ? null
-      : { value: only.value, file: only.file, written: written.has(name) };
-  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
-    binding,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
@@ -2758,52 +2664,11 @@ function checkFix(
 }
 
 /**
- * The load with a default the warned value at `site` is proven to be (#1468, the lead's ruling after Codex r4), by a
- * conservative whitelist: the load itself as the value of the `let` that is its variable's one binding in the project
- * (`MessageSource.binding`), or a read of a variable whose one binding is such a `let` and which nothing in the project
- * writes to or below; through parentheses alone, with no property, element, selection, call or list around it, so the
- * place's steps below the value are the store's own, which the analysis decided. The load's text and the variable that
- * holds it; `null` for anything else.
- */
-function originOf(
-  text: string,
-  site: SourceSite,
-  root: string,
-  source: MessageSource,
-): { readonly text: string; readonly holder: string } | null {
-  const parsed = parsedExpression(text);
-  if (parsed === null) return null;
-  const value = unwrap(parsed.expression);
-  const isLoad = (expression: Expression): boolean =>
-    expression.kind === "loadExpression" && expression.defaultValue !== null;
-  if (isLoad(value)) {
-    // (the load is the `let`'s own value, at the warned site)
-    const bound = source.binding(root);
-    if (bound === null) return null;
-    const load = unwrap(bound.value);
-    return bound.file === site.file &&
-      load.span.start.offset === site.start + value.span.start.offset - parsed.at &&
-      load.span.end.offset === site.start + value.span.end.offset - parsed.at
-      ? { text: source.text(siteIn(site.file, load)), holder: root }
-      : null;
-  }
-  if (value.kind !== "identifier") return null;
-  const bound = source.binding(value.name);
-  if (bound === null || bound.written) return null;
-  const load = unwrap(bound.value);
-  return isLoad(load) ? { text: source.text(siteIn(bound.file, load)), holder: value.name } : null;
-}
-
-/** The site of an expression of the file `file`. */
-function siteIn(file: number, expression: Expression): SourceSite {
-  return { file, start: expression.span.start.offset, end: expression.span.end.offset };
-}
-
-/**
  * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), in
- * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the value is
- * proven to be a load with a default (`originOf`), that load's default given the property by its exact way from the
- * load, of the place's type, which its reader then takes where the stored property misfits or is missing; anything else
+ * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the checker's
+ * definitions prove the value a load with a default (the rule's `origin`, `loadOrigin`), that load's default given the
+ * property by its way from the load, of the place's type, which its reader then takes where the stored property misfits
+ * or is missing; anything else
  * gives no check that discharges the warning (a property's check does not reach a copy of the whole object, Astra r1's
  * A1, #1496), so the words say where the type must come from. `null` where the place is the value itself or its
  * element, whose own check is the fix.
@@ -2834,24 +2699,19 @@ function propertyFix(
     return otherwise;
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
-  const found = originOf(text, site, landing.root, source);
+  const found = rule.origin;
   // (a type with null takes no default that discharges yet: a value of its other type narrows what the place takes,
   // and a default's `null` does not yet prove the property, #1470)
-  if (found === null || rule.type.includes("null")) return otherwise;
+  if (found === undefined || rule.type.includes("null")) return otherwise;
   // (the property by its way below the load where only properties lead there, else by its way from the variable that
   // holds the load)
-  const path = below.map((step) =>
-    "property" in step
-      ? propertyStep(step.property)
-      : step.collection === "dict"
-        ? "entry"
-        : "element",
-  );
   const named = pathPhrase(
-    { code: below.every((step) => "property" in step) ? "" : found.holder },
-    path,
+    {
+      code: found.path.every((step) => step !== "element" && step !== "entry") ? "" : found.holder,
+    },
+    found.path,
   );
-  return `Give ${named} ${type} in the default of '${found.text}'.`;
+  return `Give ${named} ${type} in the default of '${source.text(found.load)}'.`;
 }
 
 /** The literals an example may write beside a named value as the source writes them. */

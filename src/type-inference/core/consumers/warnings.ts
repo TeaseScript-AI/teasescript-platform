@@ -1,14 +1,15 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import { concrete, isExternal, requiredKind } from "../admission.js";
+import { keptSteps } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { REFERENCE, termAt, typeTags } from "../contract.js";
-import { keyOf, type Key } from "../definitions.js";
+import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { ContextWord, Item, ItemTag } from "../items.js";
 import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
-import { propertyName, siteKey, stepName } from "../program.js";
+import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
 import { propertyNames, type PropertyNamesTask } from "../property-names.js";
 import {
   contextOf,
@@ -20,6 +21,7 @@ import {
   type Obligation,
   type ObligationKind,
   type RequiredKind,
+  type StoreOrigin,
   type StoreRoot,
   type StoreStep,
 } from "../result.js";
@@ -272,6 +274,9 @@ export function storeWarning(
   rule: DiagnosticRule,
   fits: readonly Item[],
 ): boolean {
+  const origin = rule.rule === "store" ? loadOrigin(walk, site, rule) : undefined;
+  const proved: DiagnosticRule =
+    rule.rule === "store" && origin !== undefined ? { ...rule, origin } : rule;
   return warning(
     walk,
     "written-target",
@@ -284,9 +289,111 @@ export function storeWarning(
       against.map((tag) => requiredKind(tag)),
       `validate the stored value of ${label} against ${against.join("|")}`,
     ),
-    rule,
+    proved,
     fits,
   );
+}
+
+/**
+ * #1468: the load with a default a store's warned value at `site` is, as the checker's own model proves it (the lead's
+ * ruling after Codex r5), for a fix that gives the place's property in that default. The value is stored once, into
+ * the place's variable or a property or element of it, with a property of the place below it; and it is the load
+ * itself, its variable's declaration's value; or a copy of a variable, or of a property or an element of one, whose
+ * key holds one definition, its declaration storing the load, and every key below it on the way to the property none
+ * (`definitions.byKey`, a loop's adds: no store, add or removal in any spelling the checker models). Each step's receiver
+ * on that way is what the analysis answers there: objects only below a property, lists or sets below an element, dicts
+ * below a dict's value; never by a step's name. With the way from the load and the variable holding it; `undefined`
+ * where anything is unproved.
+ */
+function loadOrigin(
+  walk: Consumers,
+  site: SourceSite,
+  rule: Extract<DiagnosticRule, { rule: "store" }>,
+): StoreOrigin | undefined {
+  const { program, definitions, contract, values } = walk.pass;
+  const work = program.work;
+  if (rule.root === null || rule.root.kind === "result") return undefined;
+  const value = program.placeBySite.get(siteKey(site));
+  const stored = value === undefined ? [] : (definitions.byValue.get(value) ?? []);
+  const d = stored.length === 1 ? stored[0]! : undefined;
+  const into = d === undefined ? undefined : program.place(d.place).kind;
+  if (
+    value === undefined ||
+    d === undefined ||
+    d.kind !== "whole" ||
+    into?.kind !== "binding" ||
+    into.name !== rule.root.name
+  )
+    return undefined;
+  // (the place's steps below where the value lands, as the rule names them)
+  const steps = rule.steps.map((step) =>
+    "property" in step
+      ? propertyStep(step.property)
+      : step.collection === "dict"
+        ? "entry"
+        : "element",
+  );
+  if (d.path.length > steps.length || !d.path.every((step, index) => step === steps[index]))
+    return undefined;
+  const below = steps.slice(d.path.length);
+  if (!below.some((step) => step !== "element" && step !== "entry")) return undefined;
+  const loadOf = (place: PlaceId | undefined): SourceSite | undefined => {
+    const constraint = place === undefined ? undefined : program.opOf.get(place);
+    return constraint?.kind === "load" && constraint.fallback !== null
+      ? constraint.site
+      : undefined;
+  };
+  // the receivers' kinds the analysis answers, each step's (`receiver` the items above it)
+  const fits = (receiver: readonly Item[], step: string): boolean =>
+    receiver.length > 0 &&
+    receiver.every((found) =>
+      step === "element"
+        ? found.tag === "list" || found.tag === "set"
+        : step === "entry"
+          ? found.tag === "dict"
+          : found.tag === "object",
+    );
+  const node = program.exprAt(site);
+  for (let length = 0; length < below.length; length += 1) {
+    work.charge("checks");
+    const receiver = withoutEmpty(walk.run(values.valueItems(value, node, below.slice(0, length))));
+    if (!fits(receiver, below[length]!)) return undefined;
+  }
+  // (the load itself, the declaration's value)
+  const own = loadOf(value);
+  if (own !== undefined)
+    return definitions.declOf.get(d.place) === d
+      ? { load: own, holder: into.name, path: below }
+      : undefined;
+  // (a copy: the variable's one definition, its declaration of the load, and no definition below it on the way)
+  const copied = contract.copiedKey(value);
+  if (copied === null) return undefined;
+  const holder = keyPlace(copied);
+  const kind = program.place(holder).kind;
+  const declared = definitions.declOf.get(holder);
+  const load = loadOf(declared?.value);
+  const path = keptSteps(work, keyPath(copied), below);
+  const mine = definitions.byKey.get(keptKey(work, holder, [])) ?? [];
+  if (
+    kind.kind !== "binding" ||
+    declared === undefined ||
+    load === undefined ||
+    mine.length !== 1 ||
+    mine[0] !== declared
+  )
+    return undefined;
+  for (let length = 0; length <= path.length; length += 1) {
+    work.charge("checks");
+    const key = keptKey(work, holder, path.slice(0, length));
+    if (definitions.loopAdds.has(key) || (length > 0 && definitions.byKey.has(key)))
+      return undefined;
+    if (
+      length < keyPath(copied).length &&
+      !fits(withoutEmpty(walk.run(contract.contractOf(key))), path[length]!)
+    )
+      return undefined;
+  }
+  return { load, holder: kind.name, path };
 }
 
 /** S4: a possible null owes a null-check at every consumer, against what the place needs; `fits` as `warning`'s. */

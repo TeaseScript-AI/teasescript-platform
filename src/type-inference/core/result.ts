@@ -120,6 +120,11 @@ export type DiagnosticRule =
       readonly root: StoreRoot | null;
       /** The steps from the root to the place: a property, or the collection an element or a dict value is in. */
       readonly steps: readonly StoreStep[];
+      /**
+       * #1468: the load with a default a warning's value is, as the checker's definitions prove it (`loadOrigin`), which
+       * a fix gives the place's property: its site, the variable holding it, and the way from it to the property.
+       */
+      readonly origin?: StoreOrigin;
     }
   /**
    * C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for, and the variable or
@@ -287,6 +292,14 @@ export interface StoreRoot {
 /** A step below a store's root: a property by its name, or the collection whose element or dict value comes next. */
 export type StoreStep =
   { readonly property: string } | { readonly collection: "list" | "set" | "dict" };
+
+/** A store rule's proven load (`DiagnosticRule` `store`'s `origin`). */
+export interface StoreOrigin {
+  readonly load: SourceSite;
+  readonly holder: string;
+  /** Its key's steps (`element`, `entry`, a property's step). */
+  readonly path: readonly string[];
+}
 
 /**
  * A written type that V30 §13 does not allow: a union that holds a whole list, set or dict beside another type
