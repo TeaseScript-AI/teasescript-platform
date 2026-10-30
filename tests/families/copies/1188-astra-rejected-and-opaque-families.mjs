@@ -381,7 +381,15 @@ const captured = [
     'let u:integer=7\nlet src={f:u}\nlet yes={f:"text"}\nlet out=[src,yes]\nexit\n',
   ],
 ];
-export const cases = [...generated, ...captured];
+// the run's input with the default globals its round-2 capture adds
+const captured2 = [
+  [
+    "union-rejection",
+    "let unit:integer | string=7\nlet wide={f:unit}\nlet inner=[{f:true},wide]\nlet result=[inner.first,wide]\nexit\n",
+    ["hostValue"],
+  ],
+];
+export const cases = [...generated, ...captured, ...captured2];
 
 // the globals the recorded run passed
 export const globals = ["hostValue", "hostInit"];
@@ -409,7 +417,23 @@ export const recorded = {
       "node evidence/probe/raw.mjs . evidence/probe/union-rejection.json union-rejection",
       "R/astra-m4-i1188-design-recheck-evidence/REPRODUCE.md:39",
     ],
+    [
+      "node probe/run.mjs <build> file probe/rejection.json none <out>",
+      "R/astra-m4-i1188-design-recheck-evidence/out/rejection-proto.jsonl:1 (its result's header)",
+    ],
+    [
+      "node probe/run.mjs <build> file probe/union-rejection.json none <out>",
+      "R/astra-m4-i1188-design-recheck-evidence/out/union-proto.jsonl:1 (its result's header)",
+    ],
+    [
+      "node probe/run.mjs <build> file probe/final-witnesses.json none <out>",
+      "R/astra-m4-i1188-design-recheck-evidence/out/final-witnesses-proto.jsonl:1 (its result's header)",
+    ],
+    [
+      "node probe/run.mjs <build> file probe/focused.json none <out>",
+      "R/astra-m4-i1188-design-recheck-evidence/out/focused-proto.jsonl:1 (its result's header)",
+    ],
   ],
-  sources: 492,
-  sha256: "149f1a2c994c221851519ba02372bd6736c612072e82312e5f17580cb18a5a80",
+  sources: 493,
+  sha256: "94c142a77a00db6df6b98a5cb17fb1ad3655ea733463817d72ddaaedfe46fa6b",
 };

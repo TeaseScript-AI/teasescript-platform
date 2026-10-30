@@ -1,6 +1,6 @@
 // small whole-copy SCCs and fed rings; #1188, astra-m4-i1188-design-recheck-r3-evidence, archived Python/shell evidence
 // (R/astra-m4-i1188-design-recheck-r3-evidence/focused.py).
-export const cases = (() => {
+const generated = (() => {
   let cases, count, i, own, route, s, tail;
   cases = [];
   function add(name, s) {
@@ -80,6 +80,46 @@ let final=[fractional,box.v]`;
 
   return cases.map((c) => [c.name, c.source]);
 })();
+// the run's other inputs with the default globals, as round-2 capture shows them (refs2/C, job 1 and 4)
+const captured = [
+  [
+    "whole-small/False/box",
+    'let nvalue:integer=23\nlet wordvalue:string="s"\nlet left={f:nvalue}\nlet right={f:wordvalue}\nleft=right\nright=left\nlet box={a:left,b:right}\nlet final=[box.a,box.b]\nexit\n',
+    ["hostValue"],
+  ],
+  [
+    "assign-small",
+    "let count:integer=11\nlet parcel={score:count}\nlet broken=[{score:false},parcel]\nlet capsule={value:broken.first}\nlet relay=capsule\nlet final=relay.value\nfinal=parcel\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "live-small",
+    "let score:integer | string=13\nlet source={score:score}\nlet grid=[{rows:[{score:false}]},{rows:[source]}]\nlet final=[grid.first.rows.first,source]\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "runtime/live",
+    "let count:integer=11\nlet parcel={score:count}\nlet broken=[{score:false},parcel]\nlet final=[broken[0],parcel]\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "runtime/host",
+    "let fixed:integer=5\nlet original={score:fixed}\nlet rows=[original,hostValue]\nlet copy=rows\nsay copy[0].score\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "runtime/host-store",
+    "let fixed:integer=5\nlet original={score:fixed}\nlet receive=original\nreceive=hostValue\nlet copy=receive\nsay copy.score\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "runtime/clean",
+    "let fixed:integer=5\nlet original={score:fixed}\nlet rows=[original,{score:6}]\nlet copy=rows\nsay copy[0].score\nexit\n",
+    ["hostValue"],
+  ],
+];
+export const cases = [...generated, ...captured];
+
 export const checks = ["publication"];
 
 // the globals the recorded run passed
@@ -105,6 +145,6 @@ export const recorded = {
       "R/astra-m4-i1188-design-recheck-r3-evidence/focus-queue.sh:10",
     ],
   ],
-  sources: 18,
-  sha256: "ec5b697f8688459296eed21e415dd852efa6217b311b4112324280a06658a92a",
+  sources: 25,
+  sha256: "3ac66ad180f37214af1df17f4ebac2d6df8c8c71ed450f7a1f5d39b690c1fa08",
 };

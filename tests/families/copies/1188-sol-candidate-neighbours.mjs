@@ -696,9 +696,22 @@ const sizesOf = (name) =>
     : quick.has(name)
       ? [8, 16, 64, 128, 256]
       : [64, 128, 256];
-export const cases = Object.entries(shapes)
+const series = Object.entries(shapes)
   .filter(([name]) => !unrun.has(name))
   .flatMap(([name, make]) => sizesOf(name).map((n) => [`${name}@${n}`, make(n)]));
+// construction-directed.mjs (node-directed-chain at 4 to 32) and construction-gates.mjs (the quick shapes at 64 to 256)
+// analyse with the default globals (coreRequest's hostValue)
+const construction = [
+  ...[4, 8, 16, 32].map((n) => [
+    `construction/node-directed-chain@${n}`,
+    shapes["node-directed-chain"](n),
+    ["hostValue"],
+  ]),
+  ...[...quick].flatMap((name) =>
+    [64, 128, 256].map((n) => [`construction/${name}@${n}`, shapes[name](n), ["hostValue"]]),
+  ),
+];
+export const cases = [...series, ...construction];
 export const checks = ["publication"];
 
 // the globals the recorded run passed
@@ -720,6 +733,6 @@ export const recorded = {
       "R/sol-m4-i1188-held-nodes-r1-evidence/directed-small.sh",
     ],
   ],
-  sources: 159,
-  sha256: "dfb786785c0505f57218e7220548bd1cd28ed7e6d59e883600c8eabde096100c",
+  sources: 175,
+  sha256: "f8f906703e920ae21b157bf8639328d201724f4167d80a0a61cc3727e6768334",
 };

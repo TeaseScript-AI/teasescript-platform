@@ -96,7 +96,7 @@ export const cases = Object.entries(shapes).flatMap(([name, make]) =>
 export const checks = ["publication"];
 
 // the globals the recorded run passed
-export const globals = ["hostValue"];
+export const globals = ["hostValue", "hostOther"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
@@ -107,5 +107,5 @@ export const recorded = {
     ],
   ],
   sources: 14,
-  sha256: "9d1ab6f5cf4ffa6279effae6916e9f2b184e0d8881d9058159c7d924dce48210",
+  sha256: "8ed01bba2ca57c24eb08eb62fdc749fa2701aa64811c2eb5922dce807c2a79d1",
 };

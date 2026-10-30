@@ -1,6 +1,7 @@
 // toNumber/default/literal, toNumber/default/copies and related fixed cases; #1105, Astra review, round unrecorded
-// (R/astra-m4-i1105-review/scripts/make-cases.mjs).
-export const cases = (() => {
+// (R/astra-m4-i1105-review/scripts/make-cases.mjs), as independent.mjs analysed them (base and forward) and as its v1
+// mode compiled them as probe files.
+const forward = (() => {
   const cases = [];
   function add(name, source, expect = "quiet", runtime = true) {
     cases.push({ name, source: source + "\nexit\n", expect, runtime });
@@ -170,6 +171,25 @@ export const cases = (() => {
   );
   return cases.map((c, i) => [c.name ?? c.id ?? String(i), c.source]);
 })();
+// independent.mjs v1 (:24-28): each case as a probe file, a case that reads hostValue with a same-family fallback bound
+// first, which tools/probe.mjs compiles without globals
+const hostSources = {
+  toNumber: "0.0",
+  toInteger: "0",
+  toBoolean: "false",
+  toDate: 'toDate("2000-02-29")',
+  toTime: 'toTime("23:59:59.125")',
+  toDateTime: 'toDateTime("2028-04-30T23:59")',
+  toAbsoluteDateTime: 'toAbsoluteDateTime("2028-04-30T23:59:59+02:30")',
+};
+const probes = forward.map(([name, source]) => [
+  `v1/${name}`,
+  (source.includes("hostValue")
+    ? `let hostValue = ${hostSources[name.split("/")[0]] ?? "4"}\n`
+    : "") + source,
+  [],
+]);
+export const cases = [...forward, ...probes];
 export const checks = ["publication"];
 
 // the globals the recorded run passed
@@ -190,7 +210,15 @@ export const recorded = {
       '/home/peter/opt/node-24.18/bin/node "$root/scripts/independent.mjs" "$root/base" "$root/cases.json" "$root/results/base.jsonl" forward',
       "R/astra-m4-i1105-review/scripts/queue.sh:8",
     ],
+    [
+      "node scripts/independent.mjs <build> cases.json <out> forward",
+      "R/astra-m4-i1105-review/scripts/queue-cases.sh:8",
+    ],
+    [
+      "node scripts/independent.mjs <build> cases.json <out> v1",
+      "R/astra-m4-i1105-review/scripts/queue-cases.sh:8",
+    ],
   ],
-  sources: 163,
-  sha256: "566813e8fa8e7f0aa01bd4625c5e10c5251fb411b4ea26ea07aa4356469e4ccb",
+  sources: 326,
+  sha256: "6f4525c59933e3d5b05ad25492466119d8e060f550deccad9eb9b14b4b0644ef",
 };

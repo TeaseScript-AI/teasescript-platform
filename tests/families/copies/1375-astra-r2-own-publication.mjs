@@ -32,7 +32,25 @@ const captured = [
     'let plant = {left: [{leaf: 1}], right: [{leaf: "x"}]}\nsay plant.left[0].leaf\nsay plant.right[0].leaf\nsay plant.left[0].leaf\nexit\n',
   ],
 ];
-export const cases = captured;
+const generated = captured;
+
+// the own-publication run's inputs whose files the integration run also analysed, with the run's three globals (run-integration.sh:5)
+const captured2 = [
+  ["r1-witness", "let tree = [{q: [{q: 1}]}]\nlet copy = tree[0].q[0].q\nsay copy\nexit\n"],
+  [
+    "restarted-stop-depth-1",
+    'let box = {n: 1}\nbox.n = 2 + 3\nbox.n = 3 + 4\nbox.n = 4 + 5\nbox.n = 5 + 6\nbox.n = 6 + 7\nbox.n = 7 + 8\nbox.n = 8 + 9\nbox.n = 9 + 10\nbox.n = 10 + 11\nbox.n = 11 + 12\nbox.n = 12 + 13\nbox.n = 13 + 14\nbox = {n: 4}\nrepeat box.n {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "restarted-stop-depth-2",
+    'let box = {branch: {n: 1}}\nbox.branch.n = 2 + 3\nbox.branch.n = 3 + 4\nbox.branch.n = 4 + 5\nbox.branch.n = 5 + 6\nbox.branch.n = 6 + 7\nbox.branch.n = 7 + 8\nbox.branch.n = 8 + 9\nbox.branch.n = 9 + 10\nbox.branch.n = 10 + 11\nbox.branch.n = 11 + 12\nbox.branch.n = 12 + 13\nbox.branch.n = 13 + 14\nbox = {branch: {n: 4}}\nrepeat box.branch.n {}\nsay "DONE"\nexit\n',
+  ],
+  [
+    "restarted-stop-depth-3",
+    'let box = {branch: {branch: {n: 1}}}\nbox.branch.branch.n = 2 + 3\nbox.branch.branch.n = 3 + 4\nbox.branch.branch.n = 4 + 5\nbox.branch.branch.n = 5 + 6\nbox.branch.branch.n = 6 + 7\nbox.branch.branch.n = 7 + 8\nbox.branch.branch.n = 8 + 9\nbox.branch.branch.n = 9 + 10\nbox.branch.branch.n = 10 + 11\nbox.branch.branch.n = 11 + 12\nbox.branch.branch.n = 12 + 13\nbox.branch.branch.n = 13 + 14\nbox = {branch: {branch: {n: 4}}}\nrepeat box.branch.branch.n {}\nsay "DONE"\nexit\n',
+  ],
+];
+export const cases = [...generated, ...captured2];
 
 // the globals the recorded run passed
 export const globals = ["hostValue", "hostOther", "hostInit"];
@@ -45,6 +63,6 @@ export const recorded = {
       "R/astra-m4-g3-p1-review-r2-evidence/run-integration.sh:5",
     ],
   ],
-  sources: 9,
-  sha256: "ae73ca79b0f2127f55cf29f554d363a3522dbdfb269aeea00ffb7588bbe019f1",
+  sources: 13,
+  sha256: "0f7c600159d540dfcecf776463fa46b7c8776e8dc73000b82ae0275a1ddff5cc",
 };

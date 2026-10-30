@@ -151,7 +151,20 @@ const captured = [
     'let atom:integer | string=59\nlet payload={detail:{v:atom},spare:0}\nlet matrix=[{tray:[{detail:{v:false},spare:0}]},{tray:[payload]}]\nlet unrelated=["unrelated",false]\nlet outcome=[{v:atom},matrix.first.tray.first.detail]\nexit\n',
   ],
 ];
-export const cases = [...generated, ...captured];
+// the run's inputs with the default globals its round-2 capture adds
+const captured2 = [
+  [
+    "reversed/integer/direct",
+    "let sample:integer=29\nlet parcel={weight:sample}\nlet damaged=[{weight:false},parcel]\nlet outcome=parcel\noutcome=damaged.first\nexit\n",
+    ["hostValue"],
+  ],
+  [
+    "cycle/string/False/none/direct",
+    'let lval:integer=37\nlet rval:string="r"\nlet a={cell:{v:lval},keep:0}\nlet b=a\na=b\nlet c={cell:{v:rval},keep:0}\nlet d=c\nc=d\na=d\nc=b\nlet outcome=[b,d]\nexit\n',
+    ["hostValue"],
+  ],
+];
+export const cases = [...generated, ...captured, ...captured2];
 
 // the globals the recorded run passed
 export const globals = ["hostValue", "hostInit"];
@@ -176,6 +189,6 @@ export const recorded = {
       "R/astra-m4-i1188-design-recheck-r4-evidence/REPRODUCE.md:33",
     ],
   ],
-  sources: 60,
-  sha256: "191959512a390c338f9a37e6d40f9db30640b584541c9a01a9ea2d8f13055db4",
+  sources: 62,
+  sha256: "7d36be2a3e2a6a3d3b1606f2d7ec3dbb6ee435a289b15479d16e3a9886e8aeba",
 };

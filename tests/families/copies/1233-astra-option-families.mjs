@@ -189,14 +189,17 @@ export const globals = ["hostValue"];
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
   commands: [
-    ['node review.mjs "$1"', "R/astra-m4-i1233-review-evidence/run.sh:7"],
     [
-      "for job in independent growth fixture-0 fixture-1 fixture-2 fixture-3; do",
-      "R/astra-m4-i1233-review-evidence/submit.sh:6",
+      "node review.mjs <job> for job independent and growth (submit.sh queues each through run.sh; its fixture-0 to fixture-3 jobs ran the repository fixture, not copied)",
+      "R/astra-m4-i1233-review-evidence/submit.sh:6, run.sh:7",
     ],
     [
-      'SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name "astra-i1233-$job" --priority 1 --dir /tmp/agent-work/o4-3a-lead-astra-i1233 -- timeout 180m bash /tmp/agent-work/o4-3a-lead-astra-i1233/run.sh "$job"',
-      "R/astra-m4-i1233-review-evidence/submit.sh:7",
+      "node review.mjs smoke (no shell line kept; the result names its job)",
+      "R/astra-m4-i1233-review-evidence/results/smoke.summary.json",
+    ],
+    [
+      "node residuals.mjs (no shell line kept; the result names its job)",
+      "R/astra-m4-i1233-review-evidence/results/residuals.summary.json",
     ],
   ],
   sources: 737,
