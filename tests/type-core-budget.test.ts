@@ -23,7 +23,7 @@ import { operationItems } from "../src/type-inference/core/operator-table.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { ItemSource } from "./helpers/type-core-items.js";
-import { topologySources } from "./helpers/type-core-held-host.js";
+import { frontierGrowthProblems } from "./helpers/type-core-held-host.js";
 
 // The work budget (TABLE §8; the reference model's `budget-check.mjs`, checks 1 and 2): the counters sum to the charged
 // total, and an analysis stops at exactly the unit that crosses its allowance. This proves the accounting, not that
@@ -104,11 +104,8 @@ test("a test allowance holds for every ledger made inside it, and only there", (
 });
 
 /** A project's request, its files parsing and resolving. */
-function requestOf(
-  files: readonly { readonly path: string; readonly source: string }[],
-  globals?: readonly string[],
-) {
-  const request = coreRequest(files, globals);
+function requestOf(files: readonly { readonly path: string; readonly source: string }[]) {
+  const request = coreRequest(files);
   assert.ok(request !== null, "the files parse and resolve");
   return request;
 }
@@ -447,83 +444,28 @@ test("a linked record list stops at the allowance with its count checked when it
  * #1445, TABLE r4.208: after a settled program stop, the finishing read's host data (`heldIngress`) is followed by a walk
  * bounded by constants (`FRONTIER_DEPTH` copies deep, `FRONTIER_COPIES` copies met), past which the read answers its
  * place's component's host data, made once per component; so each read's work is bounded and the finishing work stays
- * linear in the program's size by construction. The shapes:
- *
- * - the copy graph's topologies (`topologySources`): a chain of copies, a ring, a fan-out, a fan-in of branches read
- *   through one root (Codex r4's B2), a stack of diamonds, a shared base with branch deltas read at every field, nested
- *   cycles, two-way copies, a chain whose links each store their own property, and readers each holding two unrelated
- *   objects, an object and a chain's tip, or a chain's root and tip in either order (Codex r5's B1 and T1), and Sol's
- *   staggered pairs of two chains' links and readers of an object's branches with another object;
- * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1);
- * - the same through copies of k places, plainly and through a selection (Codex r3's B1).
- *
- * The test measures the first settled walk stop at two sizes, in both orders. It reads the work after the stop from
- * `budget.apart`, where the ledger books it, and the syntax nodes from `budget.counts`. Per doubling of the syntax nodes,
- * the frontier's own counter, `checks`, stays within 2.35. The ring and the chain whose links store their own property are
- * also gated whole: finishing within 2.15 and every finishing counter within 2.35. The other shapes' admission and contract
- * work and decision-stop bookkeeping (`readerRecords`, `stopAsks`) grow faster on `main` already (#1456, #1464). The
- * uncharged-work probe runs beside it, outside CI.
+ * linear in the program's size by construction (`frontierGrowthProblems`). The shapes: the copy graph's topologies
+ * (`topologySources`: chains, rings, fans, diamonds, shared bases, nested cycles, two-way copies, chains of own stores,
+ * Codex r5's readers of unrelated lineages and lineage ties, Sol's staggered pairs and branch readers, the owner
+ * reviewer's overlapping ancestor and two-holder ladder), and a place's many stores (Astra r1's B1), plainly, through
+ * copies and through a selection (Codex r3's B1). Here at the smaller size pair, one doubling (8 → 16; chains 16 → 32,
+ * diamonds 4 → 8, a shared base read at every field 2 → 4); the worker-side probe runs the same gate at the larger pair
+ * (16 → 32), with the uncharged-work probe beside it.
  */
 test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
-  const rows = (k: number, line: (i: number) => string) =>
-    Array.from({ length: k }, (_, i) => line(i)).join("\n");
-  // (the shapes gated whole besides their `checks`)
-  const whole = new Set(["ring", "chain-own"]);
-  const shapes: Record<string, (k: number) => string> = {
-    ...Object.fromEntries(
-      topologySources(1).map(({ name }) => [
-        name,
-        (k: number) => topologySources(k).find((each) => each.name === name)!.source,
-      ]),
-    ),
-    stores: (k) =>
-      `let root = {f0: hostValue}\n${rows(k, (i) => `${i === 0 ? "" : `root = {f${i}: hostValue}\n`}repeat root.f${i} {}`)}\nexit`,
-    copies: (k) =>
-      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = c0\n${rows(k, (i) => `${i === 0 ? "" : `root = c${i}\n`}repeat root.f${i} {}`)}\nexit`,
-    selected: (k) =>
-      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
-  };
   // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already, #1466:
-  // their sizes are smaller)
-  const sizes = (shape: string): readonly [number, number] =>
-    shape === "shared-deltas" ? [4, 8] : shape === "diamond" ? [8, 16] : [16, 32];
-  for (const [shape, make] of Object.entries(shapes))
-    for (const reversed of [false, true]) {
-      const measured = (k: number) => {
-        const request = requestOf(main(make(k)), ["hostValue", "hostOther"]);
-        // (the first settled stop: the settled phases, the walk and the publication, are the last; a later stop also
-        // measures finishing work that grows faster on `main`, #1464)
-        let first = 1;
-        for (let top = analysed(request, reversed).budget.total - 1; first < top;) {
-          const middle = (first + top) >> 1;
-          if (analysed(request, reversed, middle).budget.settled) top = middle;
-          else first = middle + 1;
-        }
-        const { budget } = analysed(request, reversed, first);
-        assert.equal(budget.stoppedIn, "walk", `${shape} ${k}`);
-        return {
-          units: budget.finishing,
-          nodes: budget.counts.get("syntaxNodes")!,
-          apart: budget.apart,
-        };
-      };
-      const [smaller, larger] = sizes(shape);
-      const [small, large] = [measured(smaller), measured(larger)];
-      const nodes = large.nodes / small.nodes;
-      const where = `${shape}${reversed ? " reversed" : ""}`;
-      const doubling = (2 * (large.units / small.units)) / nodes;
-      if (whole.has(shape))
-        assert.ok(
-          doubling <= 2.15,
-          `${where}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`,
-        );
-      for (const [counter, count] of small.apart) {
-        if (count < 64 || (!whole.has(shape) && counter !== "checks")) continue;
-        const grown = (2 * ((large.apart.get(counter) ?? 0) / count)) / nodes;
-        assert.ok(
-          grown <= 2.35,
-          `${where} ${counter}: ${count} -> ${large.apart.get(counter)}: ${grown.toFixed(3)}`,
-        );
-      }
-    }
+  // their sizes are smaller; a chain's reads reach the copies a walk meets from 8 links on, so its pair starts past
+  // twice them, where every read's walk is at its bound)
+  assert.deepEqual(
+    frontierGrowthProblems((shape) =>
+      shape === "shared-deltas"
+        ? [2, 4]
+        : shape === "diamond"
+          ? [4, 8]
+          : shape === "chain" || shape === "chain-own"
+            ? [16, 32]
+            : [8, 16],
+    ),
+    [],
+  );
 });

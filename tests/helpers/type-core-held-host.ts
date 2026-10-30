@@ -21,8 +21,8 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
  * r4.113, the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
  * stand for, each carrying its obligation). A generated family over the holder: a list's element, an object's
  * property, a host property, a chain of copies, copies inside objects, a selection, a `get` default, a property's
- * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll`, the copy
- * graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing read's other sources
+ * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner
+ * reviewer's seven `addAll` texts), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing read's other sources
  * (a typed parse, a written type). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count,
  * an arithmetic operand, a fallback's left in requirement mode, a written store); the stores around the read (none, a
  * replacement before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance that stops
@@ -211,7 +211,82 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     read: `xs${"[0]".repeat(depth - 1)}[1]`,
     integer: true,
   }),
+  // (the owner reviewer's `addAll` texts, #1445 review of 2026-10-30, at depth 1 alone: host data stored below the
+  // source list's element, in a field, a deeper field, a nested list and an object copied into the list, and the
+  // controls of a replaced element, an inline literal and a single `add`)
+  addAllField: () => ({
+    lines: [
+      "let source = [{n: 0}]",
+      "source[0].n = hostValue",
+      "let xs = [{n: 0}]",
+      "xs.addAll(source)",
+    ],
+    read: "xs[1].n",
+    integer: true,
+  }),
+  addAllDeeper: () => ({
+    lines: [
+      "let source = [{m: {n: 0}}]",
+      "source[0].m.n = hostValue",
+      "let xs = [{m: {n: 0}}]",
+      "xs.addAll(source)",
+    ],
+    read: "xs[1].m.n",
+    integer: true,
+  }),
+  addAllNested: () => ({
+    lines: [
+      "let source = [[0]]",
+      "source[0][0] = hostValue",
+      "let xs = [[0]]",
+      "xs.addAll(source)",
+    ],
+    read: "xs[1][0]",
+    integer: true,
+  }),
+  addAllCopied: () => ({
+    lines: [
+      "let item = {n: 0}",
+      "item.n = hostValue",
+      "let source = [item]",
+      "let xs = [{n: 0}]",
+      "xs.addAll(source)",
+    ],
+    read: "xs[1].n",
+    integer: true,
+  }),
+  addAllReplaced: () => ({
+    lines: [
+      "let source = [{n: 0}]",
+      "source[0] = {n: hostValue}",
+      "let xs = [{n: 0}]",
+      "xs.addAll(source)",
+    ],
+    read: "xs[1].n",
+    integer: true,
+  }),
+  addAllLiteral: () => ({
+    lines: ["let xs = [{n: 0}]", "xs.addAll([{n: hostValue}])"],
+    read: "xs[1].n",
+    integer: true,
+  }),
+  addSingle: () => ({
+    lines: ["let item = {n: 0}", "item.n = hostValue", "let xs = [{n: 0}]", "xs.add(item)"],
+    read: "xs[1].n",
+    integer: true,
+  }),
 };
+
+/** The holders taken at depth 1 alone (fixed texts). */
+const FIXED_HOLDERS = new Set([
+  "addAllField",
+  "addAllDeeper",
+  "addAllNested",
+  "addAllCopied",
+  "addAllReplaced",
+  "addAllLiteral",
+  "addSingle",
+]);
 
 /** A consumer of the read: its lines, whether the candidate route takes it, and the value it needs and says. */
 interface Consumer {
@@ -298,7 +373,7 @@ function hostObject(value: SerializableRuntimeValue): SerializableRuntimeValue {
 export function heldFamily(few = false): HeldCase[] {
   const cases: HeldCase[] = [];
   for (const [holderName, holder] of Object.entries(HOLDERS))
-    for (const depth of few ? [1] : [1, 2, 4])
+    for (const depth of few || FIXED_HOLDERS.has(holderName) ? [1] : [1, 2, 4])
       for (const [consumerName, consumer] of Object.entries(CONSUMERS)) {
         if (few && consumerName !== "repeat" && consumerName !== "interpolation") continue;
         // (two classes the oracle reports, outside this family's rule, judged in the whole family outside CI: a property
@@ -306,6 +381,8 @@ export function heldFamily(few = false): HeldCase[] {
         // member's host store, the unstopped read the reaching one's, #1448)
         if (few && consumerName === "repeat" && (holderName === "field" || holderName === "ring"))
           continue;
+        // (of the fixed texts, the anchors take the reviewer's witness alone)
+        if (few && FIXED_HOLDERS.has(holderName) && holderName !== "addAllField") continue;
         const held = holder(depth);
         const root = held.read.split(/[.[]/)[0]!;
         const declared = held.lines.find((line) => line.startsWith(`let ${root} = `)) ?? "";
@@ -329,7 +406,8 @@ export function heldFamily(few = false): HeldCase[] {
             consumer.slice &&
             !["add", "addAll", "parameter", "default", "loop", "result", "typed"].includes(
               holderName,
-            );
+            ) &&
+            !FIXED_HOLDERS.has(holderName);
           // (the read's global holds the value; the other one, independent of it, a value every holder takes)
           const read = variant === "overwritten" ? "hostOther" : "hostValue";
           const other = read === "hostValue" ? "hostOther" : "hostValue";
@@ -578,7 +656,10 @@ const fields0 = (k: number, value: (i: number) => string): string =>
  * first (`tie-root-first`) or tip first (`tie-tip-first`). Sol's design round r1 (TABLE r4.208): reader i holding the
  * i+1-th link of one chain and the k-i-th of another, each link storing its own property (`staggered-pairs`), and k
  * branches of one object, each storing its own property, each read through a reader that also holds another object
- * (`branch-disjoint-readers`).
+ * (`branch-disjoint-readers`). Codex r6's B1: one `addAll` of k copies holding host data (`addAll-copies`). The owner
+ * reviewer's (#1445 review of 2026-10-30): a root of k host properties, each of k places copying it and the previous one
+ * and storing its own property, read at every property (`overlapping-ancestor`), and a ladder of two places per level,
+ * each copying both of the level below, read at every level (`two-holder-ladder`).
  */
 export function topologySources(k: number): { readonly name: string; readonly source: string }[] {
   const shapes: Record<string, string[]> = {
@@ -654,6 +735,27 @@ export function topologySources(k: number): { readonly name: string; readonly so
       ),
       ...lines(k, (i) => `let r${i} = a${i + 1}\nr${i} = b${k - i}\nrepeat r${i}.f${i} {}`),
     ],
+    "addAll-copies": [
+      ...lines(k, (i) => `let a${i} = {f: hostValue}`),
+      "let xs = [{f: 1}]",
+      `xs.addAll([${lines(k, (i) => `a${i}`).join(", ")}])`,
+      "repeat xs[0].f {}",
+    ],
+    "overlapping-ancestor": [
+      `let root = ${fields0(k, () => "hostValue")}`,
+      "let c0 = root",
+      ...lines(k, (i) => `let c${i + 1} = root\nc${i + 1} = c${i}\nc${i + 1}.f${i} = hostOther`),
+      ...lines(k, (j) => `repeat c${k}.f${j} {}`),
+    ],
+    "two-holder-ladder": [
+      "let a0 = {f: hostValue}",
+      "let b0 = {f: hostOther}",
+      ...lines(
+        k,
+        (i) => `let a${i + 1} = a${i}\nlet b${i + 1} = b${i}\na${i + 1} = b${i}\nb${i + 1} = a${i}`,
+      ),
+      ...lines(k, (i) => `repeat a${i + 1}.f {}\nrepeat b${i + 1}.f {}`),
+    ],
     "branch-disjoint-readers": [
       `let a = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
       `let b = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
@@ -728,4 +830,86 @@ export function randomCopyGraph(
     rows.push(`let q${r} = p${i}\nq${r} = p${j}\nrepeat q${r}.f${f} {}`);
   }
   return `${rows.join("\n")}\nexit\n`;
+}
+
+/** The finishing growth gate's shapes: the copy graph's topologies and three shapes of a place's many stores. */
+function gateShapes(): Record<string, (k: number) => string> {
+  const rows = (k: number, line: (i: number) => string) => lines(k, line).join("\n");
+  return {
+    ...Object.fromEntries(
+      topologySources(1).map(({ name }) => [
+        name,
+        (k: number) => topologySources(k).find((each) => each.name === name)!.source,
+      ]),
+    ),
+    stores: (k) =>
+      `let root = {f0: hostValue}\n${rows(k, (i) => `${i === 0 ? "" : `root = {f${i}: hostValue}\n`}repeat root.f${i} {}`)}\nexit`,
+    copies: (k) =>
+      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = c0\n${rows(k, (i) => `${i === 0 ? "" : `root = c${i}\n`}repeat root.f${i} {}`)}\nexit`,
+    selected: (k) =>
+      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
+  };
+}
+
+/**
+ * The finishing growth gate (#1445, TABLE r4.208): each shape at its two sizes (`sizes`, one doubling), in both orders,
+ * measured at its first settled walk stop. Per doubling of the syntax nodes, the frontier's own counter (`checks`) grows
+ * within 2.35; the ring and the chain whose links store their own property are also gated whole, finishing within 2.15
+ * and every finishing counter within 2.35. The other shapes' admission and contract work and decision-stop bookkeeping
+ * (`readerRecords`, `stopAsks`) grow faster on `main` already (#1456, #1464). Each problem as a line.
+ *
+ * @public (the worker-side probe runs it at the larger size pair, beside `tests/type-core-budget.test.ts`'s smaller one)
+ */
+export function frontierGrowthProblems(
+  sizes: (shape: string) => readonly [number, number],
+): string[] {
+  const problems: string[] = [];
+  // (the shapes gated whole besides their `checks`)
+  const whole = new Set(["ring", "chain-own"]);
+  for (const [shape, make] of Object.entries(gateShapes()))
+    for (const reversed of [false, true]) {
+      const mode = HELD_MODES[reversed ? 1 : 0]!;
+      const measured = (k: number) => {
+        const request = coreRequest([{ path: "main.tease", source: make(k) }], GLOBALS);
+        if (request === null) throw new Error(`${shape} ${k} does not resolve`);
+        const analysed = (allowance?: number) =>
+          mode.run(() =>
+            allowance === undefined
+              ? analyseCore(request)
+              : withTestAllowance(allowance, () => analyseCore(request)),
+          );
+        // (the first settled stop: the settled phases, the walk and the publication, are the last; a later stop also
+        // measures finishing work that grows faster on `main`, #1464)
+        let first = 1;
+        for (let top = analysed().budget.total - 1; first < top;) {
+          const middle = (first + top) >> 1;
+          if (analysed(middle).budget.settled) top = middle;
+          else first = middle + 1;
+        }
+        const { budget } = analysed(first);
+        if (budget.stoppedIn !== "walk")
+          problems.push(`${shape} ${k}: the first settled stop is not in the walk`);
+        return {
+          units: budget.finishing,
+          nodes: budget.counts.get("syntaxNodes")!,
+          apart: budget.apart,
+        };
+      };
+      const [smaller, larger] = sizes(shape);
+      const [small, large] = [measured(smaller), measured(larger)];
+      const nodes = large.nodes / small.nodes;
+      const where = `${shape}${reversed ? " reversed" : ""} ${smaller} -> ${larger}`;
+      const doubling = (2 * (large.units / small.units)) / nodes;
+      if (whole.has(shape) && doubling > 2.15)
+        problems.push(`${where}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`);
+      for (const [counter, count] of small.apart) {
+        if (count < 64 || (!whole.has(shape) && counter !== "checks")) continue;
+        const grown = (2 * ((large.apart.get(counter) ?? 0) / count)) / nodes;
+        if (grown > 2.35)
+          problems.push(
+            `${where} ${counter}: ${count} -> ${large.apart.get(counter)}: ${grown.toFixed(3)}`,
+          );
+      }
+    }
+  return problems;
 }

@@ -2077,8 +2077,9 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
 /**
  * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
  * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
- * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same stop guard (r4.186), the same writers
- * where its walk is not cut and a superset where it is; whole, the same checks, diagnostics and marks where no read is
+ * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same reads where no walk is cut (with a cut,
+ * its conservative checks may read more, never fewer), the same stop guard (r4.186), the same writers where a read's
+ * walk is not cut and a superset where it is; whole, the same checks, diagnostics and marks where no read is
  * cut, and where one is, every exact check kept or owned by a mark. The topologies at k = 4 (rings and chains of own
  * stores are cut there) and six random copy graphs (two with readers of two places), forward with sharing and reversed
  * without, near the first settled stop and at the last, without a demand cap and under the largest that stops a
@@ -2128,15 +2129,24 @@ test("after a settled stop a read's bounded host frontier names its exact writer
           const bounded = withFrontierBound(bound, () => analyse(allowance));
           const exact = withFrontierBound(exactly, () => analyse(allowance));
           assert.ok(bounded.result.budget.settled, where);
-          assert.deepEqual([...bounded.reads.keys()].sort(), [...exact.reads.keys()].sort(), where);
-          let cut = false;
+          const cut = [...bounded.reads.values()].some((read) => read.cut);
+          // (the same reads without a cut; with one, its conservative checks may read more, never fewer)
+          if (!cut)
+            assert.deepEqual(
+              [...bounded.reads.keys()].sort(),
+              [...exact.reads.keys()].sort(),
+              where,
+            );
+          else
+            for (const read of exact.reads.keys())
+              assert.ok(bounded.reads.has(read), `${where} ${read}`);
           for (const [read, mine] of bounded.reads) {
-            const theirs = exact.reads.get(read)!;
+            const theirs = exact.reads.get(read);
+            if (theirs === undefined) continue;
             assert.equal(mine.guarded, theirs.guarded, `${where} ${read}`);
             const missing = [...theirs.writers].filter((writer) => !mine.writers.has(writer));
             assert.equal(missing.length, 0, `${where} ${read}: a writer the exact walk names`);
             if (!mine.cut) assert.equal(mine.writers.size, theirs.writers.size, `${where} ${read}`);
-            cut ||= mine.cut;
             if (mine.guarded) seen.guarded += 1;
             else if (mine.cut) seen.cut += 1;
             else seen.whole += 1;
