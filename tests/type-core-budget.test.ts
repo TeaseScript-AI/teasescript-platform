@@ -441,35 +441,42 @@ test("a linked record list stops at the allowance with its count checked when it
 });
 
 /**
- * #1445: after a settled program stop, the finishing read's host data (`heldIngress`) is made once per place path, so
- * the work stays linear in the program's size in two shapes.
+ * #1445: after a settled program stop, the finishing read's host data (`heldIngress`) steps a place's frontier by index
+ * alone, so the work stays linear in the program's size. A step enters only the frontiers holding something at it through
+ * copies (`Below`, a persistent trie per component of the copy graph), and a component's step is made once for its
+ * members. The shapes:
  *
- * - A ring of k copies of host objects, each read by a count (Codex r1's B1). A cycle of copies is one component, made
- *   once and shared.
- * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1). A
- *   step enters only the cells of its own property, indexed when the frontier is made.
+ * - a ring of k copies of host objects, each read by a count (Codex r1's B1);
+ * - a chain of k copies, each storing its own property, read at each (the lead's third sibling);
+ * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1);
+ * - the same through copies of k places, plainly and through a selection (Codex r3's B1).
  *
- * The test measures the first settled walk stop at k = 16 and 32, in both orders. Per doubling of the syntax nodes:
+ * The test measures the first settled walk stop at k = 16 and 32, in both orders. It reads the work after the stop from
+ * `budget.apart`, where the ledger books it, and the syntax nodes from `budget.counts`. Per doubling of the syntax nodes:
  *
- * - the ring's finishing units stay within 2.15, and each of its counters of 64 units or more within 2.35;
- * - the stores' `checks`, the counter the frontier charges, stay within 2.35. Their admission and contract work, and with
- *   it their whole finishing, grows faster on `main` already: #1456.
+ * - for the ring and the chain, the finishing units stay within 2.15, and each finishing counter of 64 units or more
+ *   within 2.35;
+ * - for the store shapes, the frontier's own counter, `checks`, stays within 2.35. Their admission and contract work, and
+ *   the decision stops' bookkeeping (`readerRecords`, `stopAsks`), grow faster on `main` already (#1456).
  *
  * The uncharged-work probe runs beside it, outside CI.
  */
-test("a settled stop finishes a ring of copies' and a place's many stores' host data in linear work", () => {
+test("a settled stop finishes the host data of copies and of a place's many stores in linear work", () => {
   const rows = (k: number, line: (i: number) => string) =>
     Array.from({ length: k }, (_, i) => line(i)).join("\n");
-  // (each shape with the counters gated: all, or the frontier's own)
-  const counted: Record<string, ((counter: string) => boolean) | null> = {
-    ring: null,
-    stores: (counter) => counter === "checks",
-  };
+  // (the shapes whose whole finishing and every counter are gated; the others' `checks`)
+  const whole = new Set(["ring", "chain"]);
   const shapes: Record<string, (k: number) => string> = {
     ring: (k) =>
       `${rows(k, (i) => `let c${i} = {f: hostValue}`)}\n${rows(k, (i) => `c${i} = c${(i + 1) % k}`)}\n${rows(k, (i) => `repeat c${i}.f {}`)}\nexit`,
+    chain: (k) =>
+      `let c0 = {${Array.from({ length: k }, (_, i) => `f${i}: ${i === 0 ? "hostValue" : "1"}`).join(", ")}}\n${rows(k - 1, (i) => `let c${i + 1} = c${i}\nc${i + 1}.f${i + 1} = hostValue`)}\n${rows(k, (i) => `repeat c${k - 1}.f${i} {}`)}\nexit`,
     stores: (k) =>
       `let root = {f0: hostValue}\n${rows(k, (i) => `${i === 0 ? "" : `root = {f${i}: hostValue}\n`}repeat root.f${i} {}`)}\nexit`,
+    copies: (k) =>
+      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = c0\n${rows(k, (i) => `${i === 0 ? "" : `root = c${i}\n`}repeat root.f${i} {}`)}\nexit`,
+    selected: (k) =>
+      `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
   };
   for (const [shape, make] of Object.entries(shapes))
     for (const reversed of [false, true]) {
@@ -485,25 +492,24 @@ test("a settled stop finishes a ring of copies' and a place's many stores' host 
         return {
           units: budget.finishing,
           nodes: budget.counts.get("syntaxNodes")!,
-          counts: budget.counts,
+          apart: budget.apart,
         };
       };
       const [small, large] = [measured(16), measured(32)];
       const nodes = large.nodes / small.nodes;
       const where = `${shape}${reversed ? " reversed" : ""}`;
-      const only = counted[shape] ?? null;
       const doubling = (2 * (large.units / small.units)) / nodes;
-      if (only === null)
+      if (whole.has(shape))
         assert.ok(
           doubling <= 2.15,
           `${where}: ${small.units} -> ${large.units} units: ${doubling.toFixed(3)}`,
         );
-      for (const [counter, count] of small.counts) {
-        if (count < 64 || (only !== null && !only(counter))) continue;
-        const grown = (2 * ((large.counts.get(counter) ?? 0) / count)) / nodes;
+      for (const [counter, count] of small.apart) {
+        if (count < 64 || (!whole.has(shape) && counter !== "checks")) continue;
+        const grown = (2 * ((large.apart.get(counter) ?? 0) / count)) / nodes;
         assert.ok(
           grown <= 2.35,
-          `${where} ${counter}: ${count} -> ${large.counts.get(counter)}: ${grown.toFixed(3)}`,
+          `${where} ${counter}: ${count} -> ${large.apart.get(counter)}: ${grown.toFixed(3)}`,
         );
       }
     }
