@@ -25,7 +25,7 @@ try {
     },
     workerPeakRssKiB: Math.max(0, ...measured.map((r) => r.metrics.workerPeakRssKiB ?? 0)),
     notes:
-      "RSS is process high-water, not independent per-case allocation; CPU sum covers rows carrying cpuMs only; stage sums exclude sealing, compilation preparation, queue delay and IPC. Local compatibility, not desktop.",
+      "RSS is process high-water, not independent per-case allocation; CPU sum covers rows carrying cpuMs only; stage sums exclude sealing, compilation preparation, queue delay and IPC.",
   };
   writeJson(out, result);
   console.log(JSON.stringify(result));

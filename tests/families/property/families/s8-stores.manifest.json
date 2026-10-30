@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "s8-stores",
   "area": "stops",
-  "status": "pilot",
+  "status": "test tooling outside CI",
   "authority": [
     "docs/decisions/0021-static-types.md (accepted type and copy rules)",
     "docs/RESOURCE-LIMITS.md (compiler.core-demand-allowance; #1416 enclosing-store scope)"
@@ -40,16 +40,8 @@
   },
   "resources": {
     "requiredCompilerNode": "26.13.0",
-    "localCompatibilityNode": "26.5.0",
     "workers": 1,
-    "queue": {
-      "reservationGiB": 3,
-      "defaultCapGiB": 8,
-      "totalReservationsGiB": 48,
-      "memoryHighGiB": 50,
-      "memoryMaxGiB": 53,
-      "fairness": "existing sx-queue fair by owner; one campaign prefix, no internal scheduler"
-    }
+    "queue": "one capped job per pre/post pair or campaign through the worker's sx-queue; no internal scheduler"
   },
   "mutationCanaries": [
     "deleted assignment typeCheck",
@@ -60,13 +52,13 @@
     "timeout is never PASS"
   ],
   "cost": {
-    "desktopMeasured": false,
-    "notes": "See evidence; local measurements are not desktop acceptance"
+    "desktopMeasured": true,
+    "notes": "Measured per phase on the desktop worker with Node 26.13 by #1442's integration; its evidence holds the measured manifest"
   },
   "externalHoldouts": {
     "imported": false,
     "runnerExecutesArchives": false,
-    "phaseD": "Astra independent unseen evaluation; owner bundles remain external data"
+    "evaluation": "Astra runs an unseen holdout set blind before the integration merges (#1442); owner bundles remain external data"
   },
   "notCovered": [
     "Scalar destinations without lists",

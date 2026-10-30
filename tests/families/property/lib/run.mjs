@@ -40,7 +40,6 @@ export async function runCampaign(plan, build, out, options = {}) {
     shard: options.shard ?? { index: 0, total: 1 },
     expected: configs.length,
     coverage: plan.coverage,
-    calibration: "historical-not-blinded",
     startedAt: new Date().toISOString(),
     runnerPolicy: {
       workers: 1,
@@ -113,7 +112,7 @@ export async function runCampaign(plan, build, out, options = {}) {
       .map(([k, v]) => `${k}: ${v}`)
       .join(
         "\n",
-      )}\n\nRuntime executions: ${summary.actualRuntimeExecutions}\nAssertions: ${summary.assertions}\nLocal elapsed ms: ${summary.elapsedMs.toFixed(1)}\n\n${summary.scopeNote}\n`,
+      )}\n\nRuntime executions: ${summary.actualRuntimeExecutions}\nAssertions: ${summary.assertions}\nElapsed ms: ${summary.elapsedMs.toFixed(1)}\n\n${summary.scopeNote}\n`,
   );
   return summary;
 }

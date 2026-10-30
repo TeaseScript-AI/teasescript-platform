@@ -38,6 +38,6 @@ export function verifyBuild(root, allowMismatch = false) {
     executionNode: process.versions.node,
     requiredNode: required,
     runtimeMatches: matches,
-    acceptanceEnvironment: matches ? "runtime-matches-unmeasured-desktop" : "compatibility-only",
+    acceptanceEnvironment: matches ? "runtime-matches" : "compatibility-only",
   };
 }
