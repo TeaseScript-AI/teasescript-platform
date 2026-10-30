@@ -67,7 +67,18 @@ for (const seed of [-1, 1.5, NaN, 2 ** 33])
   test(`reject invalid seed ${seed}`, () => assert.throws(() => makePlan("quick", seed)));
 test("reject invalid shard", () =>
   assert.throws(() => configurations(makePlan(), { index: 2, total: 2 })));
-test("independent integer predicate rejects decimals and unsafe integers", () => {
+test("the integer predicate takes every whole number and nothing else (V30 §3)", () => {
   assert.equal(fits({ kind: "integer" }, 1.5), false);
-  assert.equal(fits({ kind: "integer" }, Number.MAX_SAFE_INTEGER + 1), false);
+  assert.equal(fits({ kind: "integer" }, Number.NaN), false);
+  assert.equal(fits({ kind: "integer" }, Number.POSITIVE_INFINITY), false);
+  assert.equal(fits({ kind: "integer" }, 2 ** 53), true);
+});
+test("each violation is tried first and after a fitting element, at every level", () => {
+  const type = makeType({ leaf: "integer", nullable: "none", depth: 2 }),
+    values = witnesses(type).map((x) => JSON.stringify(x.value));
+  for (const nested of [
+    list([list([1 + (1442 % 17), "wrong-leaf"])]),
+    list([list([15]), "not-a-list"]),
+  ])
+    assert.ok(values.includes(JSON.stringify(nested)), JSON.stringify(nested));
 });

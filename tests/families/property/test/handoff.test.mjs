@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { setKey, sourceKey, sourcesOf } from "../../sources.mjs";
 import { makePlan, configurations } from "../lib/plan.mjs";
@@ -44,17 +43,17 @@ test("corpus export contains every selected source, no imports, and the record t
   assert.equal(exported.recorded.sources, keys.size);
   assert.equal(exported.recorded.sha256, setKey(keys));
 });
-test("the committed corpus module is the focused plan's export", async () => {
+test("the committed corpus module holds the focused plan's sources, as its record says", async () => {
   const focused = makePlan("focused", 1442);
   const committed = await import("../s8-stores.mjs");
   assert.deepEqual(
     committed.cases,
     focused.cases.map((c) => [c.id, c.source]),
   );
-  assert.match(
-    readFileSync(new URL("../s8-stores.mjs", import.meta.url), "utf8"),
-    new RegExp(focused.planHash),
+  const keys = focused.cases.map((c) =>
+    sourceKey({ files: [{ path: "main.tease", source: c.source }], globals: c.globals }),
   );
+  assert.equal(committed.recorded.sha256, setKey(new Set(keys)));
 });
 test("shards merge completely in deterministic configuration order", () => {
   const result = mergeShards(parts().reverse());

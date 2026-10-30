@@ -7,7 +7,8 @@ export function fits(type, value) {
       Array.isArray(value.items) &&
       value.items.every((v) => fits(type.element, v))
     );
-  if (type.kind === "integer") return typeof value === "number" && Number.isSafeInteger(value);
+  // (V30 §3: `integer` is for whole numbers; no range is accepted beside it)
+  if (type.kind === "integer") return typeof value === "number" && Number.isInteger(value);
   if (type.kind === "string") return typeof value === "string";
   if (type.kind === "boolean") return typeof value === "boolean";
   throw new Error(`Unsupported model type ${type.kind}`);
@@ -62,7 +63,9 @@ export function witnesses(type, seed = 1442) {
     }
     if (t.kind === "list") {
       values.push(wrap(list([])), wrap("not-a-list"), wrap(null));
+      // each element's value first, and after a fitting element: a check that reads only the first element is seen
       descend(t.element, (v) => wrap(list([v])));
+      descend(t.element, (v) => wrap(list([good(t.element), v])));
     } else {
       values.push(wrap(t.kind === "string" ? 4 : "wrong-leaf"), wrap(null));
       if (t.kind === "integer") values.push(wrap(1.25));
