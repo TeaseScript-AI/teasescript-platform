@@ -3,7 +3,7 @@ import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission
 import { joinParts, joinSteps, keepText, keptText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { typeTags } from "../contract.js";
-import { keyPlace, type Key } from "../definitions.js";
+import { keyPlace } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { STOPPED, type Item, type ItemTag } from "../items.js";
@@ -14,6 +14,7 @@ import { heldHostData } from "./finishing.js";
 import { unsettledItem } from "./kinds.js";
 import { keyLabel, ownSpan, quietKinds } from "./names.js";
 import { obligation, storeRoot, storeWarning } from "./warnings.js";
+import { type CanonicalKey } from "../contract/key-ids.js";
 
 // C10: a fallback's or a default's kinds against the direct value's, and an unwritten parameter's default (ADR 1.5).
 
@@ -247,17 +248,17 @@ function offendingElement(
  */
 function defaultSource(
   walk: Consumers,
-  key: Key,
+  key: CanonicalKey,
   at: FlowNode,
-): { readonly key: Key; readonly at: FlowNode } | null {
+): { readonly key: CanonicalKey; readonly at: FlowNode } | null {
   const { program, guards } = walk.pass;
   // a loop along the copies, each step memoised with the chain's answer
   const visited: string[] = [];
-  let found: { readonly key: Key; readonly at: FlowNode } | null = null;
-  let next: { readonly key: Key; readonly at: FlowNode } | null = { key, at };
+  let found: { readonly key: CanonicalKey; readonly at: FlowNode } | null = null;
+  let next: { readonly key: CanonicalKey; readonly at: FlowNode } | null = { key, at };
   try {
     while (next !== null) {
-      const step: { readonly key: Key; readonly at: FlowNode } = next;
+      const step: { readonly key: CanonicalKey; readonly at: FlowNode } = next;
       next = null;
       const memoKey = joinParts(step.key, step.at.id);
       if (walk.defaults.has(memoKey)) {

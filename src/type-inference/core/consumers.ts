@@ -172,7 +172,10 @@ export class Consumers {
       readonly unknown: boolean;
     }
   >();
-  readonly defaults = new Map<string, { readonly key: Key; readonly at: FlowNode } | null>();
+  readonly defaults = new Map<
+    string,
+    { readonly key: CanonicalKey; readonly at: FlowNode } | null
+  >();
   /** The cheap deciders' shapes, one per key, and their decisions, one per key and path (`cheapDecided`). */
   readonly cheapShapes = new Map<Key, CheapShape>();
   readonly cheapFrontiers = new Map<Key, CheapFrontier>();
