@@ -12,6 +12,7 @@ import { CORE_BACKEND } from "../src/type-inference/core/backend.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import { withTestAllowance, withTestDemandAllowance } from "../src/type-inference/core/budget.js";
 import { withConsumerOrder, withoutRecords } from "../src/type-inference/core/consumers.js";
+import { withHolderCheck } from "../src/type-inference/core/consumers/finishing.js";
 import { coreMessage, messageSource } from "../src/type-inference/core/messages.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { withoutSharing } from "../src/type-inference/core/sharing.js";
@@ -21,11 +22,14 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import {
+  heldDemands,
   heldFamily,
   heldProblems,
   heldStops,
   heldUnstopped,
   HELD_MODES,
+  randomCopyGraph,
+  topologySources,
   phaseEnds,
 } from "./helpers/type-core-held-host.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
@@ -2064,6 +2068,70 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
           `${c.name}, ${mode.name}, ${phase} @${allowance}`,
         );
     }
+});
+
+/**
+ * #1445: after a settled stop, each copy-graph component's holders, merged along its lineage (a base extended by
+ * deltas, shared across branches), equal the naive union of its members' own entries and its reached summaries' holders
+ * at every step (`withHolderCheck`). With the naive union used instead, the analysis is the same: its checks, its
+ * diagnostics and its marks, the stopped decisions' (r4.186) among them. The nine topologies at k = 4 and four random
+ * copy graphs, forward with sharing and reversed without, at the first settled stop, the last, and halfway between,
+ * without a demand cap and under the largest that stops a decision (`heldDemands`). The same check runs at scale, in all
+ * four modes, on the workers.
+ */
+test("after a settled stop a component's lineage-merged holders equal their naive union (#1445)", () => {
+  const sources = [
+    ...topologySources(4),
+    ...[1, 2, 3, 4].map((seed) => ({
+      name: `random ${seed}`,
+      source: randomCopyGraph(seed, 6, 4, 18),
+    })),
+  ];
+  const answered = (answers: Answers) => ({
+    checks: answers.checks,
+    diagnostics: answers.diagnostics.map(stopIdentity),
+    deferred: answers.budget.deferred.map(stopIdentity),
+  });
+  let [summaries, stoppedDecisions] = [0, 0];
+  for (const { name, source } of sources) {
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostOther"]);
+    assert.ok(request !== null, name);
+    for (const mode of [HELD_MODES[0]!, HELD_MODES[3]!]) {
+      // (the largest demand allowance under which a decision stops)
+      for (const demand of [undefined, ...heldDemands({ source }, mode).slice(0, 1)]) {
+        const analyse = (allowance?: number): Answers =>
+          mode.run(() => {
+            const capped = () =>
+              demand === undefined
+                ? analyseCore(request)
+                : withTestDemandAllowance(demand, () => analyseCore(request));
+            return allowance === undefined ? capped() : withTestAllowance(allowance, capped);
+          });
+        const total = analyse().budget.total;
+        // (the first settled stop: the settled phases, the walk and the publication, are the last)
+        let first = 1;
+        for (let top = total - 1; first < top;) {
+          const middle = (first + top) >> 1;
+          if (analyse(middle).budget.settled) top = middle;
+          else first = middle + 1;
+        }
+        for (const allowance of new Set([first, (first + total) >> 1, total - 1])) {
+          const where = `${name}, ${mode.name}, demand ${demand} @${allowance}`;
+          const merged = withHolderCheck(false, () => analyse(allowance));
+          assert.ok(merged.result.budget.settled, where);
+          assert.deepEqual(merged.mismatches, [], where);
+          const naive = withHolderCheck(true, () => analyse(allowance));
+          assert.deepEqual(answered(naive.result), answered(merged.result), where);
+          summaries += merged.summaries;
+          if (merged.result.budget.decisions.some((d) => d.stopped)) stoppedDecisions += 1;
+        }
+      }
+    }
+  }
+  assert.ok(
+    summaries > 0 && stoppedDecisions > 0,
+    `${summaries} summaries, ${stoppedDecisions} decision stops`,
+  );
 });
 
 /**

@@ -540,7 +540,7 @@ export function heldUnstopped(
  *
  * @public (the whole family's driver outside CI reads it, with the family)
  */
-export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
+export function heldDemands(c: Pick<HeldCase, "source">, mode: HeldMode): number[] {
   const request = coreRequest([{ path: "main.tease", source: c.source }], GLOBALS)!;
   const units = [
     ...new Set(mode.run(() => analyseCore(request)).budget.decisions.map((d) => d.units)),
@@ -558,4 +558,118 @@ export function heldDemands(c: HeldCase, mode: HeldMode): number[] {
     if (decisions.some((d) => d.stopped)) stopping.push(demand);
   }
   return stopping;
+}
+
+/** Rows of `line(i)` for i < k. */
+const lines = (k: number, line: (i: number) => string): string[] =>
+  Array.from({ length: k }, (_, i) => line(i));
+
+/** An object literal of properties `f0` … `f(k-1)`, each `value(i)`. */
+const fields0 = (k: number, value: (i: number) => string): string =>
+  `{${lines(k, (i) => `f${i}: ${value(i)}`).join(", ")}}`;
+
+/**
+ * The copy graph's topologies at size k, each read after a settled stop through the host-data completion (#1445): a
+ * chain of copies, a ring, a fan-out of copies of one base, a fan-in of branches (one base, each branch changing its own
+ * property, all read through one root: Codex r4's B2), a stack of diamonds, a shared base with branch deltas read at every
+ * field, nested cycles, two-way copies, and a chain whose links each store their own property.
+ */
+export function topologySources(k: number): { readonly name: string; readonly source: string }[] {
+  const shapes: Record<string, string[]> = {
+    chain: [
+      "let c0 = {f: hostValue}",
+      ...lines(k, (i) => `let c${i + 1} = c${i}`),
+      ...lines(k, (i) => `repeat c${i + 1}.f {}`),
+    ],
+    ring: [
+      ...lines(k, (i) => `let c${i} = {f: hostValue}`),
+      ...lines(k, (i) => `c${i} = c${(i + 1) % k}`),
+      ...lines(k, (i) => `repeat c${i}.f {}`),
+    ],
+    "fan-out": [
+      "let base = {f: hostValue}",
+      ...lines(k, (i) => `let c${i} = base`),
+      ...lines(k, (i) => `repeat c${i}.f {}`),
+    ],
+    "fan-in": [
+      `let base = {common: hostOther, ${lines(k, (i) => `f${i}: 1`).join(", ")}}`,
+      ...lines(k, (i) => `let a${i} = base\na${i}.f${i} = hostValue`),
+      "let root = a0",
+      ...lines(k, (i) => `${i > 0 ? `root = a${i}\n` : ""}repeat root.f${i} {}`),
+    ],
+    diamond: [
+      "let d0 = {f: hostValue, g: 1}",
+      ...lines(
+        k,
+        (i) =>
+          `let l${i} = d${i}\nlet r${i} = d${i}\nl${i}.g = hostValue\nlet d${i + 1} = l${i}\nd${i + 1} = r${i}`,
+      ),
+      ...lines(k, (i) => `repeat d${i + 1}.g {}`),
+    ],
+    "shared-deltas": [
+      `let base = ${fields0(k, () => "1")}`,
+      ...lines(k, (i) => `let a${i} = base\na${i}.f${i} = hostValue`),
+      ...lines(k, (i) => lines(k, (j) => `repeat a${i}.f${j} {}`).join("\n")),
+    ],
+    "nested-cycles": [
+      ...lines(k, (i) => `let a${i} = {f: hostValue}`),
+      ...lines(k, (i) => `a${i} = a${(i + 1) % k}`),
+      ...lines(k, (i) => `let b${i} = [{q: a${i}}]`),
+      ...lines(k, (i) => `b${i} = b${(i + 1) % k}`),
+      ...lines(k, (i) => `repeat b${i}[0].q.f {}`),
+    ],
+    "two-way": [
+      ...lines(k, (i) => `let a${i} = {f: hostValue}\nlet b${i} = a${i}\na${i} = b${i}`),
+      ...lines(k, (i) => `repeat a${i}.f {}`),
+    ],
+    "chain-own": [
+      `let c0 = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+      ...lines(k - 1, (i) => `let c${i + 1} = c${i}\nc${i + 1}.f${i + 1} = hostValue`),
+      ...lines(k, (j) => `repeat c${k - 1}.f${j} {}`),
+    ],
+  };
+  return Object.entries(shapes).map(([name, rows]) => ({
+    name,
+    source: `${rows.join("\n")}\nexit\n`,
+  }));
+}
+
+/**
+ * A random copy graph, by a seeded generator: `places` objects of `fields` properties, some holding host data, then
+ * `statements` stores at random, each a copy of another place, a copy through a selection, a property store of host
+ * data, or a read of a property by a count.
+ */
+export function randomCopyGraph(
+  seed: number,
+  places: number,
+  fields: number,
+  statements: number,
+): string {
+  let state = seed >>> 0;
+  const next = (n: number): number => {
+    state = (Math.imul(state ^ (state >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0;
+    return state % n;
+  };
+  const rows = lines(
+    places,
+    (i) => `let p${i} = ${fields0(fields, () => (next(3) === 0 ? "hostValue" : "1"))}`,
+  );
+  for (let s = 0; s < statements; s += 1) {
+    const [i, j, f] = [next(places), next(places), next(fields)];
+    switch (next(4)) {
+      case 0:
+        if (i !== j) rows.push(`p${i} = p${j}`);
+        break;
+      case 1:
+        if (i !== j) rows.push(`p${i} = [p${j}, p${j}][0]`);
+        break;
+      case 2:
+        rows.push(`p${i}.f${f} = hostValue`);
+        break;
+      default:
+        rows.push(`repeat p${i}.f${f} {}`);
+    }
+  }
+  rows.push(...lines(places, (i) => `repeat p${i}.f${next(fields)} {}`));
+  return `${rows.join("\n")}\nexit\n`;
 }
