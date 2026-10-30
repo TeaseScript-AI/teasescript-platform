@@ -454,15 +454,16 @@ test("a linked record list stops at the allowance with its count checked when it
  */
 test("a settled stop finishes the host data of every copy-graph topology in linear work", () => {
   // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already, #1466:
-  // their sizes are smaller; a chain's reads reach the copies a walk meets from 8 links on, so its pair starts past
-  // twice them, where every read's walk is at its bound)
+  // their sizes are smaller)
   assert.deepEqual(
     frontierGrowthProblems((shape) =>
       shape === "shared-deltas"
         ? [2, 4]
         : shape === "diamond"
           ? [4, 8]
-          : shape === "chain" || shape === "chain-own"
+          : // (a chain's read follows up to `FRONTIER_COPIES` = 8 of its links, so from 8 → 16 its work ramps up to
+            // that bound, which reads as growth though each read's work is bounded; from 16 every read is at it)
+            shape === "chain" || shape === "chain-own"
             ? [16, 32]
             : [8, 16],
     ),
