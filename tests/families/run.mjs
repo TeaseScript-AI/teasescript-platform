@@ -50,10 +50,18 @@ if (process.argv[2] === "--child") {
   const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
   const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
   /**
-   * One source's runs in the four modes on both trees, each run's outcome sent as it ends (`run`: a difference or an
-   * exception), so that a later stall in the same source keeps it.
+   * `message` sent to the runner, once it is written: a send returns before that, and a process that ends with sends
+   * still queued loses them.
    */
-  const compared = ({ files, checks, globals }) => {
+  const sent = (message) =>
+    new Promise((resolve, reject) =>
+      process.send(message, (error) => (error ? reject(error) : resolve())),
+    );
+  /**
+   * One source's runs in the four modes on both trees, each run's outcome sent as it ends (`run`: a difference or an
+   * exception) and written before the next run starts, so that a later stall in the same source keeps it.
+   */
+  const compared = async ({ files, checks, globals }) => {
     let parsed = true;
     for (const mode of head.MODES) {
       const label = `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`;
@@ -77,17 +85,17 @@ if (process.argv[2] === "--child") {
           outcome.thrown = { base: was.thrown, head: text.thrown };
         else if (was.value !== is)
           outcome.difference = { base: was.value.slice(0, 16), head: is.slice(0, 16) };
-        process.send({ run: outcome });
+        await sent({ run: outcome });
       }
     }
     return { parsed };
   };
   // an exception outside the runs (the runner's own, or a library without `MODES`) is the source's exception, not a
   // stall: the process that ends with it would say only its exit code
-  process.on("message", (message) => {
+  process.on("message", async (message) => {
     let reply;
     try {
-      reply = compared(message);
+      reply = await compared(message);
     } catch (error) {
       reply = { thrown: { runner: thrownText(error) } };
     }
