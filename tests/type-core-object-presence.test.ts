@@ -510,3 +510,185 @@ test("a stored object's property its default lacks owes its member warning and c
     wrong.push(`a listed property with a null default: ${JSON.stringify(filled)}`);
   assert.deepEqual(wrong, []);
 });
+
+/**
+ * #1469 (§4: one warning and check per offending kind, every unknown one kind): where the receiver may hold a value the
+ * script cannot know, itself absent included, and an object it may hold may lack the property, the access owes one check,
+ * explained by the property's own answer. The receiver's own access keeps its warning, and a run stops there where the
+ * receiver is absent, at the access where the property is. A read names stored or host data as its cause (`outside`),
+ * a store what the object may lack (#1465 r1's F2). Each source is read and stored, in the four modes, each mode's plan
+ * run on the stored or host values given (`said` the value a read says, else the access the run stops at with TSR017).
+ */
+const RECEIVER_AND_PROPERTY: readonly {
+  readonly name: string;
+  readonly declare: string;
+  readonly access: string;
+  /** The receiver's own member access, which keeps its own warning, where it is one. */
+  readonly receiver: string | null;
+  readonly outside: boolean;
+  readonly runs: readonly (readonly [
+    input:
+      { readonly host: SerializableRuntimeValue } | { readonly stored: SerializableRuntimeValue },
+    outcome: { readonly said: string } | "receiver" | "access",
+  ])[];
+}[] = (() => {
+  const seed = 'let seed = load("seed", default: [{inner: {n: 1}}])';
+  const stored = (inner: Readonly<Record<string, SerializableRuntimeValue>> | null) => ({
+    stored: {
+      kind: "list" as const,
+      items: [object(inner === null ? {} : { inner: object(inner) })],
+    },
+  });
+  const runs = (property: string) =>
+    [
+      [stored({ n: 1, [property]: 9 }), { said: "9" }],
+      [stored(property === "n" ? {} : { n: 1 }), "access"],
+      [stored(null), "receiver"],
+    ] as const;
+  const literal = {
+    declare: "let items = [{inner: {n: 1}}, {other: 2}]",
+    receiver: "items[0].inner",
+  };
+  const host = "let items = [{other: 1}, hostValue]";
+  return [
+    {
+      name: "a stored list element's property its default lacks",
+      declare: seed,
+      access: "seed[0].inner.m",
+      receiver: "seed[0].inner",
+      outside: true,
+      runs: runs("m"),
+    },
+    {
+      name: "a stored list element's property its default lists",
+      declare: seed,
+      access: "seed[0].inner.n",
+      receiver: "seed[0].inner",
+      outside: false,
+      runs: runs("n"),
+    },
+    {
+      name: "a copy of a stored list element's object",
+      declare: `${seed}\nlet x = seed[0].inner`,
+      access: "x.m",
+      receiver: "seed[0].inner",
+      outside: true,
+      runs: runs("m"),
+    },
+    {
+      name: "a literal list with an element without the object",
+      ...literal,
+      access: "items[0].inner.n",
+      outside: false,
+      runs: [[{ host: 0 }, { said: "1" }]],
+    },
+    {
+      name: "host data beside a literal without the property",
+      declare: host,
+      access: "items[1].n",
+      receiver: null,
+      outside: true,
+      runs: [
+        [{ host: object({ n: 9 }) }, { said: "9" }],
+        [{ host: object({}) }, "access"],
+      ],
+    },
+  ];
+})();
+
+test("an access whose receiver may be absent or unknown and whose object may lack the property gets one warning and one check (#1469)", () => {
+  const wrong: string[] = [];
+  for (const { name, declare, access, receiver, outside, runs } of RECEIVER_AND_PROPERTY)
+    for (const use of ["read", "store"] as const) {
+      const source =
+        `${declare}\nsay "BEFORE"\n` +
+        (use === "read"
+          ? `let observed = ${access}\nsay observed\n`
+          : `${access} = 9\nsay "STORED"\n`) +
+        'say "AFTER"\nexit\n';
+      const start = source.indexOf(access, source.indexOf("BEFORE"));
+      const c = { name: `${name}, a ${use}`, source, start, end: start + access.length };
+      const own =
+        receiver === null
+          ? null
+          : { start: source.indexOf(receiver), end: source.indexOf(receiver) + receiver.length };
+      const subject = access.slice(0, access.lastIndexOf("."));
+      const property = access.slice(access.lastIndexOf(".") + 1);
+      const sentence =
+        use === "read" && outside
+          ? `'${subject}' may not have property '${property}' here. If it does not, the Tease stops with an error at ` +
+            `this line. '${subject}' comes from outside the script, so its type is known only when the script runs.`
+          : `'${subject}' may hold an object without property '${property}' here. If it does, the Tease stops with ` +
+            "an error at this line.";
+      const [first, ...others] = MODES.map((mode: Mode) => inMode(mode, () => decision(c)));
+      if (others.some((other) => other.record !== first!.record))
+        wrong.push(`${c.name}: the modes differ`);
+      const { diagnostics, checks } = first!;
+      if (
+        !isDeepStrictEqual(diagnostics, [["warning-runtime-check", "member-read", "null-check"]]) ||
+        !isDeepStrictEqual(checks, ["null-check"])
+      )
+        wrong.push(`${c.name}: ${JSON.stringify({ diagnostics, checks })}`);
+      for (const mode of MODES) {
+        const { plan, text } = inMode(mode, () =>
+          publishedRoute([{ path: "main.tease", source }], ["hostValue"]),
+        );
+        if (plan === null || plan === "outside") {
+          wrong.push(`${c.name}, ${JSON.stringify(mode)}: not planned`);
+          continue;
+        }
+        // EVIDENCE: invariant: the text `publishedRoute` gives is the JSON of the compiler's plan and diagnostics.
+        const route = JSON.parse(text) as {
+          diagnostics: {
+            code: string;
+            message: string;
+            span: { start: { offset: number }; end: { offset: number } };
+          }[];
+        };
+        const here = (site: { readonly start: number; readonly end: number }) =>
+          route.diagnostics.flatMap((d) =>
+            d.code === "TSV043" &&
+            d.span.start.offset === site.start &&
+            d.span.end.offset === site.end
+              ? [d.message]
+              : [],
+          );
+        if (!isDeepStrictEqual(here(c), [sentence]))
+          wrong.push(`${c.name}, ${JSON.stringify(mode)}: ${JSON.stringify(here(c))}`);
+        if (own !== null && here(own).length !== 1)
+          wrong.push(
+            `${c.name}, ${JSON.stringify(mode)}: the receiver's own access ${JSON.stringify(here(own))}`,
+          );
+        for (const [input, outcome] of runs) {
+          const result =
+            "stored" in input
+              ? runGlobals(plan, { hostValue: 0 }, [
+                  { key: "seed", value: structuredClone(input.stored) },
+                ])
+              : runGlobals(plan, { hostValue: structuredClone(input.host) });
+          // (a copy's receiver is read before the first `say`)
+          const expected =
+            outcome === "access"
+              ? { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }
+              : outcome === "receiver"
+                ? {
+                    failure: `TSR017@${own!.start}:${own!.end}`,
+                    said: own!.start < source.indexOf("BEFORE") ? [] : ["BEFORE"],
+                  }
+                : {
+                    failure: null,
+                    said: ["BEFORE", use === "read" ? outcome.said : "STORED", "AFTER"],
+                  };
+          const got = {
+            failure: result.failure,
+            said: result.said.map(({ text: shown }) => shown),
+          };
+          if (!isDeepStrictEqual(got, expected))
+            wrong.push(
+              `${c.name}, ${JSON.stringify(mode)}, ${JSON.stringify(input)}: ${JSON.stringify(got)}`,
+            );
+        }
+      }
+    }
+  assert.deepEqual(wrong, []);
+});

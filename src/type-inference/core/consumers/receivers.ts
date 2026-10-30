@@ -69,7 +69,9 @@ export function methodReceiver(
  * C5a–c, F19a, §4: a member access's receiver kinds at the whole access's span (§3.4). An error when every kind is
  * definite and null, or definite and without the member; else one warning and member obligation per offending kind:
  * a possible null, each kind without the member, each reference, an unknown receiver (its `on` names the kinds that
- * have the member, A7 r4.10), and the `extra` ones (an object without the property, an object's own selection).
+ * have the member, A7 r4.10), and the `extra` ones (an object without the property, an object's own selection). An
+ * `extra` one is the property's own answer at the access and explains its unknown kind, which an unknown receiver is
+ * too: that receiver owes no second warning there, and its own absence is its own access's (#1469).
  */
 export function memberChecks(
   walk: Consumers,
@@ -123,7 +125,7 @@ export function memberChecks(
       ({ item }): Offending => [{ ...item, context: "unmodelled" }, has],
     ),
     ...others
-      .filter((item) => isOpaque(item) || isExternal(item))
+      .filter((item) => extra.length === 0 && (isOpaque(item) || isExternal(item)))
       .slice(0, 1)
       .map((item): Offending => [
         item,
