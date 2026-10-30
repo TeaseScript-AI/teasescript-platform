@@ -9,7 +9,6 @@ import { withoutSharing } from "../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../src/type-inference/core/solver.js";
 import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import { readFixture } from "./helpers/type-core-fixture.js";
-import { pasteFailure, pastedForms } from "./helpers/type-core-paste.js";
 
 /*
  * The sentences of the coarse core's diagnostics (D1–D3, TABLE r4.53, `core/messages.ts`): each consumer's and
@@ -1504,115 +1503,66 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 
 /**
  * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
- * the fix names that property. A load whose default is an object literal gets the property in its default, with a
- * literal of the place's type (the lead's ruling) that every read of the property takes, where no other load or save
- * of its key reads or writes the property's type, pasted in place of the load:
- * it compiles and runs, and the load owes no check any more. Any other value gets that property's check in words, the value kept in a variable first unless it
- * is a stable path; a value whose landing the syntax does not show, words that name it and the place. A value that is
- * the place keeps its own check.
+ * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2). A load with a
+ * default gets the property, of the place's type, in that default; any other value that property's check, the value
+ * kept in a variable first unless it is a stable path; a value whose landing the syntax does not show, words that name
+ * it and the place. A value that is the place keeps its own check.
  */
 test("a store's property below the warned value is the property its fix names (#1468)", () => {
   const load = 'load("prefs", default: {volume: 5})';
-  const cases: readonly (readonly [source: string, value: string, fix: string, pasted?: string])[] =
+  const cases: readonly (readonly [source: string, value: string, fix: string])[] = [
     [
-      [
-        `let prefs = ${load}\nprefs.caption = 2\nexit\n`,
-        load,
-        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {volume: 5, caption: 0})'.`,
-        'load("prefs", default: {volume: 5, caption: 0})',
-      ],
-      [
-        'let prefs = load("prefs", default: {inner: {volume: 5}})\nprefs.inner.caption = "on"\nexit\n',
-        'load("prefs", default: {inner: {volume: 5}})',
-        `Give 'inner.caption' text (string) in the default, as in 'load("prefs", default: {inner: {volume: 5, caption: ""}})'.`,
-        'load("prefs", default: {inner: {volume: 5, caption: ""}})',
-      ],
-      [
-        `let prefs = ${load}\nprefs.inner.muted = true\nexit\n`,
-        load,
-        `Give 'inner.muted' true or false (boolean) in the default, as in 'load("prefs", default: {volume: 5, inner: {muted: false}})'.`,
-        'load("prefs", default: {volume: 5, inner: {muted: false}})',
-      ],
-      [
-        "let items = [{volume: 5}, hostValue]\nitems[1].caption = 2\nexit\n",
-        "hostValue",
-        "Check that 'hostValue.caption' is a whole number (integer) first.",
-      ],
-      [
-        `let prefs = ${load}\nlet copy = prefs\ncopy.caption = 2\nexit\n`,
-        "prefs",
-        "Check that 'prefs.caption' is a whole number (integer) first.",
-      ],
-      [
-        'let loaded = load("prefs", default: [{volume: 5}])\nloaded[0].caption = 2\nexit\n',
-        'load("prefs", default: [{volume: 5}])',
-        `Keep 'load("prefs", default: [{volume: 5}])' in a new variable and check that 'caption' of an element of it is a whole number (integer) first.`,
-      ],
-      [
-        "let prefs = hostValue otherwise {volume: 5}\nprefs.caption = 2\nexit\n",
-        "hostValue",
-        "Check that 'hostValue' gives 'prefs.caption' a whole number (integer) first.",
-      ],
-      [
-        "let o = {caption: hostValue}\no.caption = 2\nexit\n",
-        "hostValue",
-        "Check that 'hostValue' is a whole number (integer) first.",
-      ],
-      // (Codex r1: a read that divides by the property would take the default's `0`, F1; one that shows it takes any
-      // value; a type with null takes no literal yet, F2; a quote in the default's text is the author's, F3)
-      [
-        `let prefs = ${load}\nsay 10 / prefs.caption\nprefs.caption = 2\nexit\n`,
-        load,
-        `Keep '${load}' in a new variable and check that 'caption' of it is a whole number (integer) first.`,
-      ],
-      [
-        `let prefs = ${load}\nsay "Caption \${prefs.caption}"\nprefs.caption = 2\nexit\n`,
-        load,
-        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {volume: 5, caption: 0})'.`,
-        'load("prefs", default: {volume: 5, caption: 0})',
-      ],
-      [
-        `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
-        load,
-        `Keep '${load}' in a new variable and check that 'caption' of it is a whole number (integer) first.`,
-      ],
-      // (another load of the key reads the property's stored type too; the variable saved back writes it)
-      [
-        `let prefs = ${load}\nprefs.caption = 2\nlet other = load("prefs", default: {volume: 5, caption: "old"})\nexit\n`,
-        load,
-        `Keep '${load}' in a new variable and check that 'caption' of it is a whole number (integer) first.`,
-      ],
-      [
-        `let prefs = ${load}\nprefs.caption = 2\nsave prefs as "prefs"\nexit\n`,
-        load,
-        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {volume: 5, caption: 0})'.`,
-        'load("prefs", default: {volume: 5, caption: 0})',
-      ],
-      [
-        `let prefs = load("prefs", default: {label: "don't"})\nprefs.caption = 2\nexit\n`,
-        `load("prefs", default: {label: "don't"})`,
-        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {label: "don't", caption: 0})'.`,
-        `load("prefs", default: {label: "don't", caption: 0})`,
-      ],
-    ];
-  for (const [source, value, fix, pasted] of cases) {
+      `let prefs = ${load}\nprefs.caption = 2\nexit\n`,
+      load,
+      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
+    ],
+    [
+      'let prefs = load("prefs", default: {inner: {volume: 5}})\nprefs.inner.caption = "on"\nexit\n',
+      'load("prefs", default: {inner: {volume: 5}})',
+      `Give 'inner.caption' text (string) in the default of 'load("prefs", default: {inner: {volume: 5}})'.`,
+    ],
+    [
+      `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
+      load,
+      `Give 'caption' a whole number (integer) or null in the default of '${load}'.`,
+    ],
+    [
+      'let loaded = load("prefs", default: [{volume: 5}])\nloaded[0].caption = 2\nexit\n',
+      'load("prefs", default: [{volume: 5}])',
+      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+    ],
+    [
+      "let items = [{volume: 5}, hostValue]\nitems[1].caption = 2\nexit\n",
+      "hostValue",
+      "Check that 'hostValue.caption' is a whole number (integer) first.",
+    ],
+    [
+      `let prefs = ${load}\nlet copy = prefs\ncopy.caption = 2\nexit\n`,
+      "prefs",
+      "Check that 'prefs.caption' is a whole number (integer) first.",
+    ],
+    [
+      `let prefs = ${load}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
+      "[{volume: 5}, prefs]",
+      "Keep '[{volume: 5}, prefs]' in a new variable and check that 'caption' of an element of it is a whole number (integer) first.",
+    ],
+    [
+      "let prefs = hostValue otherwise {volume: 5}\nprefs.caption = 2\nexit\n",
+      "hostValue",
+      "Check that 'hostValue' gives 'prefs.caption' a whole number (integer) first.",
+    ],
+    [
+      "let o = {caption: hostValue}\no.caption = 2\nexit\n",
+      "hostValue",
+      "Check that 'hostValue' is a whole number (integer) first.",
+    ],
+  ];
+  for (const [source, value, fix] of cases) {
     const warned = reported(main(source)).filter(
       ({ code, site, message }) =>
         code === "TSV041" && site === value && !message.includes("holds objects"),
     );
     assert.equal(warned.length, 1, `${source}: ${JSON.stringify(warned)}`);
     assert.ok(warned[0]!.message.endsWith(` ${STOPS} ${fix}`), `${source}: ${warned[0]!.message}`);
-    if (pasted === undefined) continue;
-    const start = source.indexOf(value);
-    const forms = pastedForms(source, start, start + value.length).forms.filter(
-      (form) => form.code === pasted,
-    );
-    assert.equal(forms.length, 1, source);
-    assert.equal(pasteFailure(forms[0]!.source), null, forms[0]!.source);
-    assert.deepEqual(
-      reported(main(forms[0]!.source)).filter(({ code }) => code === "TSV041"),
-      [],
-      forms[0]!.source,
-    );
   }
 });
