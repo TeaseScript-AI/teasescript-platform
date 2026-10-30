@@ -576,9 +576,11 @@ test("a member chain's work keeps its ratio to its text lane's from 8 to 16 leve
         const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
         return cursor / text;
       });
-      // (a constant factor's own terms move a ratio by less than a hundredth; a term growing with the chain, more)
+      // (a band of ×1.005: the ratio of a flat series still moves a little between sizes with its constant terms; each
+      // mutant of the walk rises by more on the mixed chain in some mode, M04 by 2.2%, M21 4.2%, M19 8.0%, M20 19%,
+      // while on the year chain alone M04 rises by 0.7% in one mode, so the year chain alone would not hold the class)
       assert.ok(
-        at16! <= at8! * 1.01,
+        at16! <= at8! * 1.005,
         `${dicts ? "dicts" : "year"} ${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
       );
     }

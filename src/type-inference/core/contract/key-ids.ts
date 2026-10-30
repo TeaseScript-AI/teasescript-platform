@@ -122,8 +122,9 @@ function keyAtWith(
   steps: readonly string[],
   kept: boolean,
 ): CanonicalKey {
+  // (a cursor family's key asked by an array: kept by the text its question makes, `textCursor`)
   if (steps.length > 0 && keyLane(contract, place, steps[0]!) === "cursor")
-    return keyIdOf(contract, place, steps);
+    return textCursor(contract, keyOf(place, steps), () => keyIdOf(contract, place, steps));
   return canonicalText(kept ? keptKey(contract.work, place, steps) : keyOf(place, steps));
 }
 
@@ -158,9 +159,19 @@ function keyBelowWith(
     !(key.endsWith("|") && keyLane(contract, keyPlace(key), rest[0]!) === "cursor")
   )
     return canonicalText(kept ? keptKeyBelow(contract.work, key, rest) : keyBelow(key, rest));
-  let id = isKeyId(key) ? key : rootId(keyPlace(key));
-  for (const step of rest) id = keyIdBelow(contract, id, step);
-  return id;
+  const start = isKeyId(key) ? key : rootId(keyPlace(key));
+  // (the path below a kept path, by its steps' text: made once per path and steps, found again at one visit)
+  const below = (factsOf(contract, keyIdPath(start)).below ??= new Map());
+  const text = pathText(rest);
+  let path = below.get(text);
+  if (path === undefined) {
+    let id = start;
+    for (const step of rest) id = keyIdBelow(contract, id, step);
+    path = keyIdPath(id);
+    contract.keepText(text.length);
+    below.set(text, path);
+  } else convert(contract, 1, 0, 0);
+  return keyIdAt(keyIdPlace(start), path);
 }
 
 /**
@@ -209,8 +220,8 @@ export function keyPrefixIn(contract: Contract, asked: Key, length: number): Can
 /**
  * What the cursors derive from one path of the arena (G3 stage 1), each made at its first question by its charged maker,
  * its entry kept, and found again by the path's id (`factsOf`), never derived twice: its steps and its suffixes' by
- * offset (`stepsOfId`), its prefixes' ids by length (`prefixesOf`), its spans' ids by offset (`spanId`), and its
- * joins' ids by the joined path (`joinedId`, the path the base).
+ * offset (`stepsOfId`), its prefixes' ids by length (`prefixesOf`), its spans' ids by offset (`spanId`), its joins'
+ * ids by the joined path (`joinedId`, the path the base), and the paths below it by their steps' text (`keyBelowIn`).
  */
 export interface PathFacts {
   steps?: readonly string[];
@@ -218,6 +229,7 @@ export interface PathFacts {
   prefixes?: readonly number[];
   spans?: Map<number, number>;
   joined?: Map<number, number>;
+  below?: Map<string, number>;
 }
 
 /** A path's facts, the one place they are kept: made empty at its first question, its fields filled by their makers. */
