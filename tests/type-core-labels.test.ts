@@ -144,6 +144,11 @@ const CASES: readonly (readonly [string, string, readonly string[]])[] = [
     `let box = ${nest(12, "1")}\n${Array.from({ length: 12 }, (_, i) => `let r${i} = box.${along(i + 1)}`).join("\n")}\nexit\n`,
     [],
   ],
+  [
+    "a store a handler changes later, its data checked nowhere: nothing shown",
+    `let n = 1\nlet box = ${nest(3, "{v: 0}")}\nbox.${along(3)}.v = n\nshowPermanentButton "x" { n = 1.5 }\nlet copy: integer = box.${along(3)}.v\nexit\n`,
+    [],
+  ],
 ];
 
 test("a decision's label makes no text: in every mode the labels shown are those the store's warnings and checks publish, each text made at most once in the pass, spelled by the contract or the written type", () => {
