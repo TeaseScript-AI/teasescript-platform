@@ -207,7 +207,7 @@ function itemText(item: Item): string {
  * Every occurrence's answer (each item by `itemText`, its items in `order`), route, place and obligations, with its
  * element's and its properties' answers where it holds a collection or an object.
  */
-function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
+export function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
   const items = (list: readonly Item[]): string[] => order(list.map(itemText));
   return answers.graph.nodes.flatMap((node) => {
     const at = answers.at(node);
@@ -313,30 +313,35 @@ function ingressLines(answers: Answers): string {
     .join("\n");
 }
 
-/** An array or an object `jsonText` walks: an array by index, an object by its own keys. */
+/** An array or an object `jsonText` walks: an array by index to its length on entry, an object by its own keys. */
 type Walked =
-  | { readonly array: readonly unknown[]; next: number; written: number }
+  | { readonly array: readonly unknown[]; readonly length: number; next: number; written: number }
   | {
       readonly object: Readonly<Record<string, unknown>>;
       readonly keys: Iterator<string>;
       written: number;
     };
 
+/** The tags of the objects outside `jsonText`'s data: a primitive's wrapper (`Object(1)`), which no plan holds. */
+const WRAPPERS = new Set([
+  "[object Number]",
+  "[object String]",
+  "[object Boolean]",
+  "[object BigInt]",
+]);
+
 /**
  * How `JSON.stringify` writes `value` as the member `key`: its text, no text (`null`: an object leaves the member out,
  * an array writes `null`), or a walk of its members. A BigInt throws, as `JSON.stringify` does without a
- * `BigInt.prototype.toJSON`.
+ * `BigInt.prototype.toJSON`; a primitive's wrapper or a raw JSON value throws, outside the data `jsonText` writes.
  */
 function writing(value: unknown, key: string): { readonly text: string } | Walked | null {
   let current = value;
-  // (`toJSON` first, then a wrapper's primitive, in `JSON.stringify`'s order)
+  // (`toJSON` first, as `JSON.stringify` calls it)
   if (typeof current === "object" && current !== null && "toJSON" in current) {
     const { toJSON } = current;
     if (typeof toJSON === "function") current = toJSON.call(current, key);
   }
-  if (current instanceof Number) current = Number(current);
-  else if (current instanceof String) current = String(current);
-  else if (current instanceof Boolean) current = current.valueOf();
   if (current === null) return { text: "null" };
   switch (typeof current) {
     case "boolean":
@@ -348,10 +353,13 @@ function writing(value: unknown, key: string): { readonly text: string } | Walke
     case "bigint":
       throw new TypeError("Do not know how to serialize a BigInt");
     case "object": {
-      if (Array.isArray(current)) return { array: current, next: 0, written: 0 };
-      if (Object.prototype.toString.call(current) === "[object BigInt]")
-        throw new TypeError("Do not know how to serialize a BigInt");
-      // EVIDENCE: invariant: JSON.stringify reads a non-array object by its own enumerable string keys, as this walk does.
+      if (Array.isArray(current))
+        return { array: current, length: current.length, next: 0, written: 0 };
+      if (WRAPPERS.has(Object.prototype.toString.call(current)))
+        throw new TypeError("jsonText writes plan data, not a primitive's wrapper object.");
+      if ("isRawJSON" in JSON && typeof JSON.isRawJSON === "function" && JSON.isRawJSON(current))
+        throw new TypeError("jsonText writes plan data, not a raw JSON value.");
+      // EVIDENCE: invariant: JSON.stringify reads a non-array object by its own enumerable string keys, as this does.
       const object = current as Readonly<Record<string, unknown>>;
       return { object, keys: Object.keys(object)[Symbol.iterator](), written: 0 };
     }
@@ -361,8 +369,11 @@ function writing(value: unknown, key: string): { readonly text: string } | Walke
 }
 
 /**
- * `JSON.stringify(value)` without its recursion: the same text for every value it encodes, with an explicit stack, so a
- * value nested deeper than its recursion reaches (a 4,096-wide fan-out's plan, #1503) still has one.
+ * `JSON.stringify(value)` without its recursion, for the data a plan and its diagnostics hold: objects of any class
+ * (their own enumerable string keys, and their `toJSON`), arrays, strings, numbers, booleans and `null`, a member
+ * without text (`undefined`, a function, a symbol) left out of an object or `null` in an array. The same text, with an
+ * explicit stack, so a plan nested deeper than its recursion reaches (a 4,096-wide fan-out's, #1503) still has one; a
+ * cycle or a BigInt throws as it does, and a primitive's wrapper or a raw JSON value, which no plan holds, throws.
  *
  * @public (the desktop corpus's kits read it from a built tree, not by an import)
  */
@@ -385,7 +396,7 @@ export function jsonText(value: unknown): string | undefined {
     let key: string;
     let member: unknown;
     if ("array" in frame) {
-      if (frame.next === frame.array.length) {
+      if (frame.next === frame.length) {
         text.push("]");
         open.delete(frame.array);
         stack.pop();

@@ -9,10 +9,13 @@ import { coreRequest, type SourceFile } from "./helpers/type-core-analysis.js";
 import {
   everyAnswer,
   ingressAnswers,
+  inMode,
   jsonText,
   MODES,
+  occurrences,
   publication,
   publicationParts,
+  publishedAnswers,
   publishedRoute,
   publishedUpToOrder,
   stoppedRecord,
@@ -114,25 +117,34 @@ test("a finished analysis's questions past its allowance stop there in each proj
 });
 
 test("a publication is its parts joined, byte for byte as the whole was written (#1503)", () => {
-  for (const source of SMALL)
+  for (const source of SMALL) {
+    const files = main(source);
+    const request = coreRequest(files, GLOBALS);
+    assert.ok(request !== null);
+    const bindings = new CoreProgram(request).places
+      .filter(({ kind }) => kind.kind === "binding")
+      .map((place) => place.id);
     for (const mode of MODES) {
-      const parts = publicationParts(main(source), mode, GLOBALS);
-      assert.ok(parts !== null);
-      assert.equal(
-        publication(main(source), mode, GLOBALS),
-        JSON.stringify([
-          JSON.parse(parts.answers),
-          JSON.parse(parts.record),
-          parts.occurrences.map((part) => JSON.parse(part)),
-          JSON.parse(parts.route),
-        ]),
-      );
+      // (the whole as `publication` wrote it before its parts, from the same pieces)
+      const whole = inMode(mode, () => {
+        const answers = analyseCore(request);
+        const published = publishedAnswers(answers, bindings, request);
+        const route = publishedRoute(files, GLOBALS);
+        return JSON.stringify([
+          published.text,
+          published.record,
+          occurrences(answers, (items) => items),
+          route.text,
+        ]);
+      });
+      assert.equal(publication(files, mode, GLOBALS), whole);
     }
+  }
   assert.equal(publicationParts(main("let = 1\n"), MODES[0]!, GLOBALS), null);
   assert.equal(publication(main("let = 1\n"), MODES[0]!, GLOBALS), null);
 });
 
-test("jsonText writes what JSON.stringify writes, and also past the depth JSON.stringify reaches (#1503)", () => {
+test("jsonText writes plan data as JSON.stringify does, and also past the depth JSON.stringify reaches (#1503)", () => {
   // (an array with a hole at 1)
   const sparse: unknown[] = [1];
   sparse[2] = 3;
@@ -150,7 +162,7 @@ test("jsonText writes what JSON.stringify writes, and also past the depth JSON.s
     sparse,
     [undefined, () => 1, Symbol("s"), null],
     { a: undefined, b: () => 1, c: Symbol("s"), d: 1, 2: "two", 1: "one" },
-    { at: new Date(0), wrapped: [Object(1), Object("s"), Object(false)] },
+    { at: new Date(0) },
     { toJSON: (key: string) => ({ key }) },
     { inner: { toJSON: (key: string) => key }, list: [{ toJSON: (key: string) => key }] },
     [[[]], [{}], { x: [{ y: [] }] }],
@@ -165,6 +177,10 @@ test("jsonText writes what JSON.stringify writes, and also past the depth JSON.s
     assert.throws(() => JSON.stringify(value), TypeError);
     assert.throws(() => jsonText(value), TypeError);
   }
+  // (outside plan data: a primitive's wrapper and a raw JSON value throw rather than be guessed at)
+  const raw = "rawJSON" in JSON && typeof JSON.rawJSON === "function" ? [JSON.rawJSON("1")] : [];
+  for (const value of [{ n: Object(1) }, [Object(false)], ...raw])
+    assert.throws(() => jsonText(value), TypeError);
   // (a class's instances take JSON.stringify's recursive path, as a plan's nodes do: it ends past some thousand levels)
   let deep: Nest = 0;
   for (let depth = 0; depth < 20_000; depth += 1)
