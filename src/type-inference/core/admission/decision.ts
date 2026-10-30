@@ -109,23 +109,6 @@ export function decisionStopped(
   return admission.pass.contract.stopped(place, path);
 }
 
-/**
- * The complete type a store into `place` at `path` is checked against where a decision below the path stopped (S3 §5,
- * #1416), without new solving: the place's written type there (A1), else the written type a copy decides the path by,
- * whole below it (A4, this pass's decision: a pass in which a decision stops is restarted with it stopped, TABLE r4.180,
- * so that decision never read what the stop took back); `null` where neither decides the path.
- */
-export function storeRequirement(
-  admission: Admission,
-  place: PlaceId,
-  path: readonly string[],
-): TypeTerm | null {
-  const written = writtenOf(admission.pass.program.place(place).kind);
-  const term = written === null ? null : permittedAt(written, path);
-  if (term !== null) return term;
-  return copiedAt(admission, keptKey(admission.work, place, path));
-}
-
 /** The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`. */
 export function copiedAt(admission: Admission, key: Key): TypeTerm | null {
   return admission.decisions.get(key)?.copied ?? null;
