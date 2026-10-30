@@ -51,12 +51,14 @@ function markerPattern(markers: readonly string[]): RegExp {
   return new RegExp(String.raw`(?:^|[^\p{L}\p{N}_])(?:${alternation})\s*:`, "u");
 }
 
+const lastLetterOrDigit = /[\p{L}\p{N}](?=[^\p{L}\p{N}]*$)/u;
+
 // A letter or digit after the colon makes an explanation: it may start with code or a quote, and an empty or
-// punctuation-only one such as `...` is rejected. Any letter or digit after a later marker also follows the first, so
-// the text after the first marker is searched once.
+// punctuation-only one such as `...` is rejected. A marker has one exactly when it ends before the comment's last letter
+// or digit, so one search of the text before that finds it, without scanning after every marker.
 function hasExplanation(text: string, pattern: RegExp): boolean {
-  const marker = pattern.exec(text);
-  return marker !== null && /[\p{L}\p{N}]/u.test(text.slice(marker.index + marker[0].length));
+  const last = lastLetterOrDigit.exec(text);
+  return last !== null && pattern.test(text.slice(0, last.index));
 }
 
 function hasEvidenceImmediatelyBefore(

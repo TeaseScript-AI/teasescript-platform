@@ -28,6 +28,15 @@ tester.run(
         code: "// INVARIANT: The parser established the UserId invariant.\nconst id = value as UserId;",
         options: [{ markers: ["INVARIANT"] }],
       },
+      // A marker's explanation counts when another, overlapping marker has none.
+      {
+        code: "// EVIDENCE: x:\nconst id = value as UserId;",
+        options: [{ markers: ["EVIDENCE: x", "EVIDENCE"] }],
+      },
+      {
+        code: "// # EVIDENCE: x:\nconst id = value as UserId;",
+        options: [{ markers: ["EVIDENCE", "# EVIDENCE: x"] }],
+      },
     ],
     invalid: [
       { code: "const id = value as UserId;", errors: [error] },
