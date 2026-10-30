@@ -2077,13 +2077,14 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
 /**
  * #1445, TABLE r4.208: after a settled stop, a domain read's host data is followed at most two copies deep and over at
  * most eight copies met (`FRONTIER_DEPTH`, `FRONTIER_COPIES`); past them the read answers its place's component's.
- * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same reads where no walk is cut (with a cut,
- * its conservative checks may read more, never fewer), the same stop guard (r4.186), the same writers where a read's
- * walk is not cut and a superset where it is; whole, the same checks, diagnostics and marks where no read is
- * cut, and where one is, every exact check kept or owned by a mark. The topologies at k = 4 (rings and chains of own
- * stores are cut there) and six random copy graphs (two with readers of two places), forward with sharing and reversed
- * without, near the first settled stop and at the last, without a demand cap and under the largest that stops a
- * decision. The same check runs at scale, in all four modes, on the workers.
+ * Against the exact walk (`withFrontierBound`, unbounded), read by read: the same reads where no walk is cut, the same
+ * stop guard (r4.186), the same writers where a read's walk is not cut and a superset where it is; whole, the same
+ * checks, diagnostics and marks where no read is cut, and where one is, every exact check's obligation (its kind,
+ * target, requirement, site and boundary flag) kept or owned by a mark. A cut may word a check for external data and so
+ * need no read of its receiver (TABLE r4.208's reworded class, #1449's wording difference at a stop). The topologies at
+ * k = 4 (rings and chains of own stores are cut there) and six random copy graphs (two with readers of two places),
+ * forward with sharing and reversed without, near the first settled stop and at the last, without a demand cap and
+ * under the largest that stops a decision. The same check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a read's bounded host frontier names its exact writers, or more where it is cut (#1445)", () => {
   const sources = [
@@ -2130,16 +2131,14 @@ test("after a settled stop a read's bounded host frontier names its exact writer
           const exact = withFrontierBound(exactly, () => analyse(allowance));
           assert.ok(bounded.result.budget.settled, where);
           const cut = [...bounded.reads.values()].some((read) => read.cut);
-          // (the same reads without a cut; with one, its conservative checks may read more, never fewer)
+          // (the same reads without a cut; with one, its conservative checks may read more, and where a consumer owes
+          // the check of external data it needs no read of its receiver: TABLE r4.208's reworded class)
           if (!cut)
             assert.deepEqual(
               [...bounded.reads.keys()].sort(),
               [...exact.reads.keys()].sort(),
               where,
             );
-          else
-            for (const read of exact.reads.keys())
-              assert.ok(bounded.reads.has(read), `${where} ${read}`);
           for (const [read, mine] of bounded.reads) {
             const theirs = exact.reads.get(read);
             if (theirs === undefined) continue;
@@ -2154,12 +2153,17 @@ test("after a settled stop a read's bounded host frontier names its exact writer
           if (bounded.result.budget.decisions.some((d) => d.stopped)) seen.decisionStops += 1;
           if (!cut) assert.deepEqual(answered(bounded.result), answered(exact.result), where);
           else {
-            const kept = new Set(bounded.result.checks.map((check) => JSON.stringify(check)));
-            const owned = new Set(
-              bounded.result.budget.deferred.map((mark) => JSON.stringify(mark.obligation)),
+            // (a check by its obligation, its wording aside: a cut may word the same check for external data)
+            const obligation = (check: (typeof exact.result.checks)[number]) =>
+              JSON.stringify({ ...check, on: undefined });
+            const kept = new Set(
+              [
+                ...bounded.result.checks,
+                ...bounded.result.budget.deferred.map((mark) => mark.obligation),
+              ].map(obligation),
             );
-            for (const check of exact.result.checks.map((each) => JSON.stringify(each)))
-              assert.ok(kept.has(check) || owned.has(check), `${where}: ${check}`);
+            for (const check of exact.result.checks)
+              assert.ok(kept.has(obligation(check)), `${where}: ${JSON.stringify(check)}`);
           }
         }
       }
