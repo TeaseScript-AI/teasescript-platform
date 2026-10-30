@@ -235,8 +235,8 @@ export function decide(
   return {
     root,
     path,
-    // (a written path's label from its written type, final at every stop, TABLE r4.122)
-    label: admission.pathLabel(
+    // (a written path's label from its written type, final at every stop, TABLE r4.122; its text made where shown)
+    label: admission.labelOf(
       root,
       path,
       byWritten ? writtenOf(admission.pass.program.place(root).kind) : null,

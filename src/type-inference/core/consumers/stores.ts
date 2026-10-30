@@ -19,6 +19,7 @@ import {
 } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { writtenOf } from "../contract.js";
+import { labelText } from "../contract/labels.js";
 import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
@@ -147,7 +148,9 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
   for (const { root, path } of walk.order(writtenOnly ? writtenGroups(walk) : admission.groups())) {
     const decision = decide(walk, root, path);
     if (decision === null) continue;
-    const { label, tags, nullable, decider } = decision;
+    const { tags, nullable, decider } = decision;
+    // (the label's text made where a diagnostic or a check shows it, not for every decision, TABLE r4.196)
+    const label = (): string => labelText(walk.pass.contract, decision.label);
     const written = decision.written;
     const nullableTags = written && nullable ? [...tags, "null" as const] : tags;
     const fitsAny = (item: Item): boolean =>
@@ -193,19 +196,21 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           );
           const against = admission.admitted(root, path);
           for (const { item } of offendingKinds(named))
-            storeWarning(walk, site, label, item, against, rule(), value.filter(fitting));
+            storeWarning(walk, site, label(), item, against, rule(), value.filter(fitting));
           // C9: the named data's own ingress keeps its boundary, as at a decided store
-          for (const item of named)
+          for (const item of named) {
+            const text = label();
             admission.boundaryFor(
               item,
               obligation(
                 "copy-type",
                 site,
-                label,
+                text,
                 against.map(requiredKind),
-                `validate ${label} against ${against.join("|")}`,
+                `validate ${text} against ${against.join("|")}`,
               ),
             );
+          }
         }
       continue;
     }
@@ -245,7 +250,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
         storeWarning(
           walk,
           d.site,
-          label,
+          label(),
           { ...bad[0]!, cert: "pos" },
           tags,
           rule(),
@@ -381,7 +386,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
             : d.kind === "whole"
               ? admission.ingressSiteOf(d, at, item)
               : admission.contributionSited(d.site, item, d),
-          label,
+          label(),
           later(item),
           nullableTags,
           rule(),
@@ -395,17 +400,21 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
         (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
       )
         admission.boundaryAt(d);
+      // (only external data owes it, `boundaryFor`: the label shown for it alone)
       for (const item of items)
-        admission.boundaryFor(
-          item,
-          obligation(
-            "copy-type",
-            admission.cellSited(d.site, item, d),
-            label,
-            tags.map(requiredKind),
-            `validate ${label} against ${tags.join("|")}`,
-          ),
-        );
+        if (isExternal(item)) {
+          const text = label();
+          admission.boundaryFor(
+            item,
+            obligation(
+              "copy-type",
+              admission.cellSited(d.site, item, d),
+              text,
+              tags.map(requiredKind),
+              `validate ${text} against ${tags.join("|")}`,
+            ),
+          );
+        }
       // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
       // null into a non-nullable type a null-check, a definite one an error
       const external = items.some(isExternal);
@@ -425,18 +434,20 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
               ["null"],
             );
             admission.reject(d, root, path);
-          } else
+          } else {
+            const text = label();
             nullWarning(
               walk,
               "written-target",
               d.site,
               later(item),
-              `check that the value is not null before ${label} holds it`,
-              label,
+              `check that the value is not null before ${text} holds it`,
+              text,
               rule(),
               items.filter(fitting),
               tags.map(requiredKind),
             );
+          }
     };
     // S6-CARRIERS §4.4: a class's quiet proofs, one per side of the decider, each its side's first member but the
     // decider's own store; a proof that emits nothing (no diagnostic, rejection or check) proves its side quiet, else

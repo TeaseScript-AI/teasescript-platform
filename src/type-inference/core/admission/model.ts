@@ -1,5 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { CarrierRole } from "../carriers.js";
+import type { Label } from "../contract/labels.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -445,7 +446,8 @@ export interface Candidate {
 export interface Decision {
   readonly root: PlaceId;
   readonly path: readonly string[];
-  readonly label: string;
+  /** Its path's label, as a recipe: its text made only where a diagnostic or a check shows it (`labelText`). */
+  readonly label: Label;
   readonly tags: readonly ItemTag[];
   /** By a written type, at the place or of a copied binding (A4): no number of an integer fits there. */
   readonly written: boolean;
