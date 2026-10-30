@@ -467,8 +467,11 @@ const CODE = /(?:such as|with|Use|Write|write) '([^']+)'( on a line of its own)?
 /** A warning's fallback (ADR 0021 rule 1.9), which stands in place of its subject. */
 const FALLBACK = /give a fallback, as in '([^']+)'/;
 
-/** A warning's load with the property a store types given in its default (#1468), in place of the warned load. */
-const DEFAULT_GIVEN = /in the default, as in '([^']+)'/;
+/**
+ * A warning's load with the property a store types given in its default (#1468), in place of the warned load: the whole
+ * form up to its closing quote before the sentence's end, a quote inside its text kept (Codex r1's F3).
+ */
+const DEFAULT_GIVEN = /in the default, as in '(.+?)'\.(?= |$)/;
 
 /**
  * The declaration a list join's fix offers whole (#1268, TABLE r4.146): its head, the name it declares, and its text

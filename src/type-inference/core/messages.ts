@@ -20,7 +20,12 @@ import {
 } from "../../conversions.js";
 import { DICT_METHODS, DICT_PROPERTIES, dictMethod } from "../../dict-operations.js";
 import { elapsedDurationUnit, localCalendarOffsetMessage, UNIT_OPERANDS } from "../../duration.js";
-import { expressionParts, statementExpressions } from "../../expression-children.js";
+import {
+  expressionParts,
+  handlerBlocks,
+  nestedStatements,
+  statementExpressions,
+} from "../../expression-children.js";
 import { listDraw, listMethod, SORT_RULE } from "../../list-methods.js";
 import {
   FOR_SOURCE_RULE,
@@ -100,6 +105,12 @@ export interface MessageSource {
    * list literal's element); `null` where it lands any other way.
    */
   readonly landing: (site: SourceSite) => Landing | null;
+  /**
+   * Whether every read of a property named `name`, in any file and through any value, passes whatever value of its
+   * type the property holds (#1468, Codex r1's F1): shown in a text (`${...}`) or compared with `==` or `!=`; no read
+   * at all passes too. A store into the property is no read; a compound assignment's is one.
+   */
+  readonly readsPass: (name: string) => boolean;
   /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
@@ -392,6 +403,61 @@ function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
   return null;
 }
 
+/** Whether every read of a property named `name` in `program` passes whatever value it holds (`readsPass`). */
+function readsPassIn(program: Program, name: string): boolean {
+  const named = (expression: Expression): boolean =>
+    expression.kind === "propertyAccessExpression" && expression.property.name === name;
+  // (no recursion: a file may nest deeply; each expression with whether its own value only is shown or compared)
+  const statements: Statement[] = [...program.statements];
+  const expressions: { readonly expression: Expression; readonly passes: boolean }[] = [];
+  const blocks = (node: Statement | Expression): void => {
+    for (const block of handlerBlocks(node)) statements.push(...block.statements);
+  };
+  while (statements.length > 0 || expressions.length > 0) {
+    const statement = statements.pop();
+    if (statement !== undefined) {
+      if (statement.kind === "functionDeclaration") {
+        statements.push(...statement.body.statements);
+        for (const parameter of statement.parameters)
+          if (parameter.defaultValue !== null)
+            expressions.push({ expression: parameter.defaultValue, passes: false });
+        continue;
+      }
+      // (a compound assignment reads its target first)
+      if (
+        statement.kind === "assignmentStatement" &&
+        statement.operator !== "=" &&
+        named(statement.target)
+      )
+        return false;
+      for (const expression of statementExpressions(statement))
+        expressions.push({ expression, passes: false });
+      statements.push(...nestedStatements(statement));
+      blocks(statement);
+      continue;
+    }
+    const { expression, passes } = expressions.pop()!;
+    if (named(expression) && !passes) return false;
+    blocks(expression);
+    if (expression.kind === "parenthesizedExpression")
+      expressions.push({ expression: expression.expression, passes });
+    else if (expression.kind === "stringLiteral") {
+      for (const part of expression.parts)
+        if (part.kind === "stringInterpolation")
+          expressions.push({ expression: part.expression, passes: true });
+    } else if (
+      expression.kind === "binaryExpression" &&
+      (expression.operator === "==" || expression.operator === "!=")
+    ) {
+      expressions.push({ expression: expression.left, passes: true });
+      expressions.push({ expression: expression.right, passes: true });
+    } else
+      for (const part of expressionParts(expression))
+        expressions.push({ expression: part, passes: false });
+  }
+  return true;
+}
+
 export function messageSource(
   sources: readonly string[],
   diagnostics: readonly CheckedDiagnostic[],
@@ -558,9 +624,17 @@ export function messageSource(
     }
     return landingOf(found, site);
   };
+  const passing = new Map<string, boolean>();
+  const readsPass = (name: string): boolean => {
+    let found = passing.get(name);
+    if (found === undefined)
+      passing.set(name, (found = sources.every((_, file) => readsPassIn(programOf(file), name))));
+    return found;
+  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
+    readsPass,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
@@ -2662,11 +2736,15 @@ function checkFix(
     : `${check}, or give a fallback after 'otherwise'.`;
 }
 
-/** A literal of each place type a load's default may give a property it adds (`fallbackValue`'s). */
+/**
+ * The literal a load's default may give a property it adds, of the place's type (`fallbackValue`'s); none where the type
+ * holds null: a literal of another of its kinds would narrow what the place takes (Codex r1's F2), and a default's
+ * `null` proves nothing of the property yet, so the load would still owe its check (#1470).
+ */
 function defaultLiteral(type: readonly ItemTag[]): string | null {
-  const kinds = type.filter((kind) => kind !== "null");
+  if (type.includes("null")) return null;
   const every = (...names: ItemTag[]): boolean =>
-    kinds.length > 0 && kinds.every((kind) => names.includes(kind));
+    type.length > 0 && type.every((kind) => names.includes(kind));
   return every("integer", "number")
     ? "0"
     : every("string")
@@ -2736,7 +2814,7 @@ function propertyFix(
     above.length > rule.steps.length ||
     !above.every((step, index) => same(step, rule.steps[index]!))
   )
-    return `Check that '${text}' gives ${rule.into} ${described(rule.type.filter((kind) => kind !== "null"))} first.`;
+    return `Check that '${text}' gives ${rule.into} ${described(rule.type)} first.`;
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
   const path = below.map((step) =>
@@ -2746,13 +2824,17 @@ function propertyFix(
         ? "entry"
         : "element",
   );
+  // (the literal is a value the script never held: offered only where every read of a property of that name passes
+  // it, Codex r1's F1; a read the store precedes would too, which no syntax proves)
   const literal = defaultLiteral(rule.type);
   const given =
-    literal === null || !below.every((step) => "property" in step)
+    literal === null ||
+    !below.every((step) => "property" in step) ||
+    !source.readsPass(propertyName(path.at(-1)!))
       ? null
       : defaultGiven(text, path.map(propertyName), literal);
-  // (the load in its place, its key and its default the author's own as written; the property's literal is a value of
-  // the fix's own, in a place no division reads: the load's value is an object, given to a variable)
+  // (the load in its place, its key and its default the author's own as written; its literal divides nothing, since
+  // every read of the property shows or compares it)
   const code =
     given === null
       ? null
@@ -2771,7 +2853,7 @@ function propertyFix(
           { takes: null, binds: "whole", elements: null, divides: false },
         );
   if (code !== null)
-    return `Give ${pathPhrase({ code: "" }, path)} ${described(rule.type.filter((kind) => kind !== "null"))} in the default, as in '${code}'.`;
+    return `Give ${pathPhrase({ code: "" }, path)} ${described(rule.type)} in the default, as in '${code}'.`;
   return stablePath(text)
     ? `Check that ${pathPhrase({ code: text }, path)} ${test.words} first.`
     : `Keep '${text}' in a new variable and check that ${pathPhrase({ words: "it" }, path)} ${test.words} first.`;

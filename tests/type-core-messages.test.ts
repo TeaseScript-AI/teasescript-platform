@@ -1505,8 +1505,8 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 /**
  * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
  * the fix names that property. A load whose default is an object literal gets the property in its default, with a
- * literal of the place's type (the lead's ruling), pasted in place of the load: it compiles and runs, and the load owes
- * no check any more. Any other value gets that property's check in words, the value kept in a variable first unless it
+ * literal of the place's type (the lead's ruling) that every read of the property takes, pasted in place of the load:
+ * it compiles and runs, and the load owes no check any more. Any other value gets that property's check in words, the value kept in a variable first unless it
  * is a stable path; a value whose landing the syntax does not show, words that name it and the place. A value that is
  * the place keeps its own check.
  */
@@ -1556,6 +1556,30 @@ test("a store's property below the warned value is the property its fix names (#
         "let o = {caption: hostValue}\no.caption = 2\nexit\n",
         "hostValue",
         "Check that 'hostValue' is a whole number (integer) first.",
+      ],
+      // (Codex r1: a read that divides by the property would take the default's `0`, F1; one that shows it takes any
+      // value; a type with null takes no literal yet, F2; a quote in the default's text is the author's, F3)
+      [
+        `let prefs = ${load}\nsay 10 / prefs.caption\nprefs.caption = 2\nexit\n`,
+        load,
+        `Keep '${load}' in a new variable and check that 'caption' of it is a whole number (integer) first.`,
+      ],
+      [
+        `let prefs = ${load}\nsay "Caption \${prefs.caption}"\nprefs.caption = 2\nexit\n`,
+        load,
+        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {volume: 5, caption: 0})'.`,
+        'load("prefs", default: {volume: 5, caption: 0})',
+      ],
+      [
+        `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
+        load,
+        `Keep '${load}' in a new variable and check that 'caption' of it is a whole number (integer) first.`,
+      ],
+      [
+        `let prefs = load("prefs", default: {label: "don't"})\nprefs.caption = 2\nexit\n`,
+        `load("prefs", default: {label: "don't"})`,
+        `Give 'caption' a whole number (integer) in the default, as in 'load("prefs", default: {label: "don't", caption: 0})'.`,
+        `load("prefs", default: {label: "don't", caption: 0})`,
       ],
     ];
   for (const [source, value, fix, pasted] of cases) {
