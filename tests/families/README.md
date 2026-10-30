@@ -111,6 +111,11 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
   by design: it reproduces that review on its pinned build only.
 - `consumers/sol-1437-r7/spot-r7.mjs`, which the folder's README lists, is in no archive (not on the workers, not in
   the builder's r7 evidence): the r7 spot check cannot be rerun.
+- Five drivers that #1249's reviews ran are in no archive (not on the workers, not in their evidence folders), so their
+  runs cannot be reproduced and no module stands for them: `repro-ring.mjs`, `repro-many-fed.mjs`,
+  `r3-product-head.mjs` and #1293's r3 `matrix.mjs` (the report archive's
+  `astra-m4-i1249-review-r2-evidence/builder/tools/run.sh:4`–`8`), and `probe/famsum.mjs`
+  (`astra-m4-i1249-review-evidence/design-r5.md:797`).
 
 ## The oracle library's next step
 
