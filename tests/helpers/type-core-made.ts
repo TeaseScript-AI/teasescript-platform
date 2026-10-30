@@ -1,5 +1,6 @@
 import type { WorkCounter } from "../../src/type-inference/core/budget.js";
 import type { Contract } from "../../src/type-inference/core/contract.js";
+import { PathSteps } from "../../src/type-inference/core/contract/key-ids.js";
 
 /*
  * The uncharged-work probe (compute rules, "a growth gate on charged counters is accompanied by an uncharged-work
@@ -31,9 +32,14 @@ export interface MadeWork {
   readonly charged: number;
 }
 
-/** The code units of the texts and the elements of the arrays in `value`, nested ones too. */
+/** The code units of the texts and the elements of the arrays in `value`, nested ones too: a record's steps as an array's. */
 function madeUnits(value: unknown): number {
   if (typeof value === "string") return value.length;
+  if (value instanceof PathSteps) {
+    let units = 0;
+    for (let index = 0; index < value.length; index += 1) units += 1 + value.at(index)!.length;
+    return units;
+  }
   if (Array.isArray(value))
     return value.reduce((sum: number, part) => sum + 1 + madeUnits(part), 0);
   if (typeof value === "object" && value !== null)
