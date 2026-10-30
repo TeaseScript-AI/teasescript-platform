@@ -139,14 +139,17 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
       const place = keyPlace(next);
       const cursor = isKeyId(next) ? next : null;
       const path = cursor === null ? keyPath(next) : null;
-      const id = cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!);
+      // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
+      const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
       const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);
       // (G3 3a: a key past a wrapper inherits what the wrapper's read does below it, from its frontier, `wrapped`)
       const frontier = positions() ? wrappedFrontier(admission, place, id, first) : null;
       if (frontier !== null)
         return {
           key: next,
-          steps: wrapped(admission, next, place, path ?? id, first!, frontier, () => ownScan(next)),
+          steps: wrapped(admission, next, place, path ?? id(), first!, frontier, () =>
+            ownScan(next),
+          ),
           cycle: "",
         };
       return ownScan(next);
@@ -249,12 +252,12 @@ function resolveInherited(admission: Admission, key: Key): TypeTerm | null {
 function wrappedFrontier(
   admission: Admission,
   place: PlaceId,
-  path: number,
+  path: () => number,
   first: string | null,
 ): Frontier | null {
   if (first === null || scanHop(admission, place, first) === null) return null;
   const { contract } = admission.pass;
-  const ids: number[] = [path];
+  const ids: number[] = [path()];
   // (up to the nearest path known, then each one step below its parent's)
   for (let id = ids[0]!; !admission.frontiers.has(joinParts(place, id)) && id > 0;) {
     id = contract.pathParent(id);
