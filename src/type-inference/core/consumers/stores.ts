@@ -150,9 +150,9 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
   )) {
     const decision = decide(walk, group);
     if (decision === null) continue;
-    // (a cursor's group's steps made through the charged boundary: G3 stage 1)
+    // (a cursor's group's steps made only where a diagnostic or a check names its path: G3 stage 1)
     const { root } = group;
-    const path = group.path ?? admission.stepsAt(group);
+    const path = (): readonly string[] => group.path ?? admission.stepsAt(group);
     const { tags, nullable, decider } = decision;
     // (the label's text made where a diagnostic or a check shows it, not for every decision, TABLE r4.196)
     const label = (): string => labelText(walk.pass.contract, decision.label);
@@ -167,18 +167,18 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
     // D1: the sentence's rule, the place in its own text, its type (optional where it holds null too, ADR 0021 rule
     // 1.2) and the store that decided it
     const named = (): readonly ItemTag[] =>
-      written || !admission.admitted(root, path).includes("null")
+      written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
         : [...tags, "null"];
     const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
       rule: "store",
-      into: placeText(walk, root, path),
+      into: placeText(walk, root, path()),
       type: named(),
       written,
       decider: decider?.site ?? null,
       brought,
       root: storeRoot(walk, root),
-      steps: storeSteps(walk, root, path, written ? writtenOf(program.place(root).kind) : null),
+      steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
     });
     // C9 r4.12, r4.50 (1): a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
@@ -199,7 +199,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           const named = value.filter(
             (item) => isExternal(item) && !admission.ownIngress(item, d, at),
           );
-          const against = admission.admitted(root, path);
+          const against = admission.admitted(root, path());
           for (const { item } of offendingKinds(named))
             storeWarning(walk, site, label(), item, against, rule(), value.filter(fitting));
           // C9: the named data's own ingress keeps its boundary, as at a decided store
@@ -286,24 +286,24 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           rule(),
           kindsOf(walk, wrong.value!, d.node).map((item) => item.tag),
         );
-        admission.reject(d, root, path);
+        admission.reject(d, root, path());
         return;
       }
       // A6: a definite contribution that does not fit, where no kind of the value fits (r4.46: a fitting kind beside it
       // makes it a warning), is rejected, its error at the innermost offending expression (r4.35)
       if (bad.length > 0 && d !== decider && !items.some(fitting)) {
-        const reach = !written && d.place === root ? storeReach(walk, d, path) : null;
+        const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
         const { site, brought } = deferred(
           walk,
           admission.siteAt(d, at, (elements) =>
             deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
           ),
           root,
-          path,
+          path(),
           reach !== null &&
             reach.brought &&
-            !admission.atCopy(root, path) &&
-            copiesOnly(walk, root, path),
+            !admission.atCopy(root, path()) &&
+            copiesOnly(walk, root, path()),
           () => reach?.copy ?? null,
         );
         error(
@@ -313,7 +313,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           rule(brought),
           bad.map((item) => item.tag),
         );
-        admission.reject(d, root, path);
+        admission.reject(d, root, path());
         return;
       }
       // C1, ADR 1.7: a value none of whose kinds fits errs, against a written type at any path or a type decided
@@ -339,7 +339,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           rule(),
           items.map((item) => item.tag),
         );
-        admission.reject(d, root, path);
+        admission.reject(d, root, path());
         return;
       }
       // A7: a copy made before the decider is checked against it with context `later`
@@ -423,7 +423,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
       const external = items.some(isExternal);
       if (
         (!nullable && (at.length === 0 || written) && !before) ||
-        (external && !admission.admitted(root, path).includes("null"))
+        (external && !admission.admitted(root, path()).includes("null"))
       )
         for (const item of nulls)
           if (item.cert === "def" && !external) {
@@ -436,7 +436,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
               rule(),
               ["null"],
             );
-            admission.reject(d, root, path);
+            admission.reject(d, root, path());
           } else {
             const text = label();
             nullWarning(
