@@ -220,16 +220,20 @@ export function keyPrefixIn(contract: Contract, asked: Key, length: number): Can
 /**
  * What the cursors derive from one path of the arena (G3 stage 1), each made at its first question by its charged maker,
  * its entry kept, and found again by the path's id (`factsOf`), never derived twice: its steps and its suffixes' by
- * offset (`stepsOfId`), its prefixes' ids by length (`prefixesOf`), its spans' ids by offset (`spanId`), its joins'
- * ids by the joined path (`joinedId`, the path the base), and the paths below it by their steps' text (`keyBelowIn`).
+ * offset (`stepsOfId`), its prefixes' ids by length, all of them (`prefixesOf`) or one (`prefixId`), its spans' ids
+ * by offset (`spanId`), its joins'
+ * ids by the joined path (`joinedId`, the path the base), the paths below it by their steps' text (`keyBelowIn`), and
+ * its steps as text (`textOf`).
  */
 export interface PathFacts {
   steps?: readonly string[];
   suffixes?: Map<number, readonly string[]>;
   prefixes?: readonly number[];
+  prefixAt?: Map<number, number>;
   spans?: Map<number, number>;
   joined?: Map<number, number>;
   below?: Map<string, number>;
+  text?: string;
 }
 
 /** A path's facts, the one place they are kept: made empty at its first question, its fields filled by their makers. */
@@ -399,9 +403,29 @@ function spanId(contract: Contract, path: number, from: number): number {
   return id;
 }
 
-/** The id of the prefix of `path` of `length` steps (`length` at most its depth): from its path's prefixes (`prefixesOf`). */
+/**
+ * The id of the prefix of `path` of `length` steps (`length` at most its depth): from its path's prefixes where they
+ * are kept (`prefixesOf`), else found from the nearest of its ancestors whose prefix of that length is kept (each
+ * node's `prefixAt`), each node on the way kept and charged as `spanId`'s: so the prefixes of one length of k nested
+ * paths cost k steps, never k².
+ */
 export function prefixId(contract: Contract, path: number, length: number): number {
-  return contract.pathDepths[path]! <= length ? path : prefixesOf(contract, path)[length]!;
+  const { pathDepths: depths, pathParents: parents } = contract;
+  if (depths[path]! <= length) return path;
+  const whole = contract.pathFacts.get(path)?.prefixes;
+  if (whole !== undefined) {
+    convert(contract, 1, 0, 0);
+    return whole[length]!;
+  }
+  const known = (node: number): number | undefined =>
+    contract.pathFacts.get(node)?.prefixAt?.get(length);
+  const way: number[] = [];
+  let at = path;
+  for (; depths[at]! > length && known(at) === undefined; at = parents[at]!) way.push(at);
+  const id = depths[at]! === length ? at : known(at)!;
+  convert(contract, way.length + 1, 0, way.length);
+  for (const node of way) (factsOf(contract, node).prefixAt ??= new Map()).set(length, id);
+  return id;
 }
 
 /**
@@ -572,11 +596,8 @@ export function spanRef(contract: Contract, path: number, from = 0): PathRef {
     from: (more) => (more === 0 ? ref : spanRef(contract, path, from + more)),
     to: (count) => (count >= length ? ref : spanRef(contract, prefixId(contract, ownId(), count))),
     steps: () => stepsOfId(contract, keyIdAt(0, path), from),
-    text: (count) => {
-      const parts: string[] = [];
-      for (let index = 0; index < count; index += 1) parts.push(ref.at(index));
-      return pathText(parts);
-    },
+    // (the text kept on its prefix's own path: each a visit found again)
+    text: (count) => (count === 0 ? "" : textOf(contract, prefixId(contract, ownId(), count))),
     id: ownId,
     name: () => `.${ownId()}`,
     after: (strip) => {
@@ -593,6 +614,19 @@ export function spanRef(contract: Contract, path: number, from = 0): PathRef {
     },
   };
   return ref;
+}
+
+/** A path's steps as text (`pathText`), made once per path from its kept steps, its text kept; found again at one visit. */
+function textOf(contract: Contract, path: number): string {
+  const facts = factsOf(contract, path);
+  if (facts.text !== undefined) {
+    convert(contract, 1, 0, 0);
+    return facts.text;
+  }
+  const text = pathText(stepsOfId(contract, keyIdAt(0, path)));
+  contract.keepText(text.length);
+  facts.text = text;
+  return text;
 }
 
 /**

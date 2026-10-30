@@ -33,6 +33,7 @@ import {
   memberStepIn,
   restSteps,
   rootId,
+  spanRef,
   stepsOfId,
   type KeyId,
   type KeyPacket,
@@ -508,6 +509,19 @@ test("a wrapper's own literal asked by an array converts it to its span once: as
   assert.ok(first.work.charged > 0);
   assert.equal(again.work.charged, 0);
   assert.equal(again.result.id(), first.result.id());
+});
+
+test("a span's prefix text is made once, on the prefix's own path, and found again: asked again through another view of the same span, it charges only its visits to the span, the prefix and the text (a stop lookup asks one prefix again and again)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  const steps = ["propertyzero", "propertyone1", "propertytwo2", "propertythre", "propertyfour"];
+  const id = keyIdOf(contract, 5, steps);
+  const view = () => spanRef(contract, keyIdPath(id), 1);
+  const first = probeMade(contract, () => view().text(3));
+  const again = probeMade(contract, () => view().text(3));
+  assert.equal(first.result, "propertyone1.propertytwo2.propertythre");
+  assert.equal(again.result, first.result);
+  assert.equal(again.work.charged, 3, `${first.work.charged} then ${again.work.charged}`);
+  assert.ok(first.work.charged > again.work.charged);
 });
 
 test("a member chain's key asked at each of its offsets in turn, cold, climbs its path once: its member scan and its prefixes cost a unit a question after, linear in the path, and a repeated question its one unit (a member chain's demand asks each offset once)", () => {
