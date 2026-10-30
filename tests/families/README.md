@@ -59,9 +59,10 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's), judged by where
-  each input came from: a case file its own review wrote stays, and a program the driver derived from a fixture row
-  (a pasted fix) stays, even one equal to another row. The module's first comment names what its run also read.
+  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`)
+  and other runs' case files (the 3a budget check's), judged by where each input came from: a case file its own review
+  wrote stays, and a program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal
+  to another row. The module's first comment names what its run also read.
 
 ## A property family
 
@@ -157,6 +158,9 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
   runs cannot be reproduced and no module stands for them: `repro-ring.mjs`, `repro-many-fed.mjs` and
   `r3-product-head.mjs` (the report archive's `astra-m4-i1249-review-r2-evidence/builder/tools/run.sh:4`–`6`), and
   `probe/famsum.mjs` (`astra-m4-i1249-review-evidence/design-r5.md:797`).
+- #1310's first paste family run on `c1` (`1310/4a11b0553…/run/outc1/paste-*`, `tools/c1-check.sh:13`: 6,507 cases,
+  495 forms) ran on an uncommitted state of the paste helper, which no archive keeps, so its forms cannot be pasted
+  again: `messages/1310-paste-family.mjs` holds the PR's thirteen other runs.
 
 ## The oracle library's next step
 
