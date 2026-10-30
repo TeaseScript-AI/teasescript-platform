@@ -112,6 +112,13 @@ export interface MessageSource {
    */
   readonly readsPass: (name: string) => boolean;
   /**
+   * How the project uses a storage key written as plain text (#1468): its loads, and each save with its value's
+   * variable (`null` for any other value); `null` where some load's or save's key is no plain text, which may be any.
+   */
+  readonly storage: (
+    key: string,
+  ) => { readonly loads: number; readonly saves: readonly (string | null)[] } | null;
+  /**
    * Whether no diagnostic of the analysis but `self` lies in the author's text at `held` (TABLE r4.162): none at a
    * site in it, nor a "not checked (budget)" mark whose region reaches into it, where the checks the stop moved to the
    * runtime stand unreported (Astra r3; a stop's own warning claims no region); apart from one at `self`'s site whose
@@ -403,11 +410,19 @@ function landingOf(given: readonly Given[], site: SourceSite): Landing | null {
   return null;
 }
 
-/** Whether every read of a property named `name` in `program` passes whatever value it holds (`readsPass`). */
-function readsPassIn(program: Program, name: string): boolean {
-  const named = (expression: Expression): boolean =>
-    expression.kind === "propertyAccessExpression" && expression.property.name === name;
-  // (no recursion: a file may nest deeply; each expression with whether its own value only is shown or compared)
+/**
+ * Each statement and expression of `program`, each expression with whether its own value is only shown in a text
+ * (`${...}`) or compared with `==` or `!=` (`passes`), through parentheses; `visit` gives `false` to stop the walk, which
+ * then gives `false` too. No recursion: a file may nest deeply.
+ */
+function everyNode(
+  program: Program,
+  visit: (
+    node:
+      | { readonly statement: Statement }
+      | { readonly expression: Expression; readonly passes: boolean },
+  ) => boolean,
+): boolean {
   const statements: Statement[] = [...program.statements];
   const expressions: { readonly expression: Expression; readonly passes: boolean }[] = [];
   const blocks = (node: Statement | Expression): void => {
@@ -416,6 +431,7 @@ function readsPassIn(program: Program, name: string): boolean {
   while (statements.length > 0 || expressions.length > 0) {
     const statement = statements.pop();
     if (statement !== undefined) {
+      if (!visit({ statement })) return false;
       if (statement.kind === "functionDeclaration") {
         statements.push(...statement.body.statements);
         for (const parameter of statement.parameters)
@@ -423,21 +439,15 @@ function readsPassIn(program: Program, name: string): boolean {
             expressions.push({ expression: parameter.defaultValue, passes: false });
         continue;
       }
-      // (a compound assignment reads its target first)
-      if (
-        statement.kind === "assignmentStatement" &&
-        statement.operator !== "=" &&
-        named(statement.target)
-      )
-        return false;
       for (const expression of statementExpressions(statement))
         expressions.push({ expression, passes: false });
       statements.push(...nestedStatements(statement));
       blocks(statement);
       continue;
     }
-    const { expression, passes } = expressions.pop()!;
-    if (named(expression) && !passes) return false;
+    const entry = expressions.pop()!;
+    if (!visit(entry)) return false;
+    const { expression, passes } = entry;
     blocks(expression);
     if (expression.kind === "parenthesizedExpression")
       expressions.push({ expression: expression.expression, passes });
@@ -456,6 +466,60 @@ function readsPassIn(program: Program, name: string): boolean {
         expressions.push({ expression: part, passes: false });
   }
   return true;
+}
+
+/** Whether every read of a property named `name` in `program` passes whatever value it holds (`readsPass`). */
+function readsPassIn(program: Program, name: string): boolean {
+  const named = (expression: Expression): boolean =>
+    expression.kind === "propertyAccessExpression" && expression.property.name === name;
+  return everyNode(program, (node) =>
+    "statement" in node
+      ? // (a compound assignment reads its target first)
+        !(
+          node.statement.kind === "assignmentStatement" &&
+          node.statement.operator !== "=" &&
+          named(node.statement.target)
+        )
+      : !named(node.expression) || node.passes,
+  );
+}
+
+/** A storage key written as plain text (`"prefs"`), else `null`. */
+function plainKey(key: Expression): string | null {
+  return key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
+    ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+    : null;
+}
+
+/**
+ * The storage key uses of `program` added to `uses` (`MessageSource.storage`): each load's and each save's key, a save
+ * with its value's variable (`null` for any other value); `false` where a key is no plain text.
+ */
+function storageIn(
+  program: Program,
+  uses: Map<string, { loads: number; saves: (string | null)[] }>,
+): boolean {
+  const use = (key: Expression): { loads: number; saves: (string | null)[] } | null => {
+    const text = plainKey(key);
+    if (text === null) return null;
+    let found = uses.get(text);
+    if (found === undefined) uses.set(text, (found = { loads: 0, saves: [] }));
+    return found;
+  };
+  return everyNode(program, (node) => {
+    if ("statement" in node) {
+      if (node.statement.kind !== "saveStatement") return true;
+      const found = use(node.statement.key);
+      found?.saves.push(
+        node.statement.value.kind === "identifier" ? node.statement.value.name : null,
+      );
+      return found !== null;
+    }
+    if (node.expression.kind !== "loadExpression") return true;
+    const found = use(node.expression.key);
+    if (found !== null) found.loads += 1;
+    return found !== null;
+  });
 }
 
 export function messageSource(
@@ -631,10 +695,20 @@ export function messageSource(
       passing.set(name, (found = sources.every((_, file) => readsPassIn(programOf(file), name))));
     return found;
   };
+  // every storage key use of the project, once; `null` where a key is no plain text
+  let storage: Map<string, { loads: number; saves: (string | null)[] }> | null | undefined;
+  const storageOf = (key: string): { loads: number; saves: (string | null)[] } | null => {
+    if (storage === undefined) {
+      const uses = new Map<string, { loads: number; saves: (string | null)[] }>();
+      storage = sources.every((_, file) => storageIn(programOf(file), uses)) ? uses : null;
+    }
+    return storage === null ? null : (storage.get(key) ?? { loads: 0, saves: [] });
+  };
   return {
     text: (site) => (sources[site.file] ?? "").slice(site.start, site.end),
     landing,
     readsPass,
+    storage: storageOf,
     target: (site) =>
       statementsOf(site.file)
         .get(line(site) - 1)
@@ -2745,13 +2819,16 @@ function defaultLiteral(type: readonly ItemTag[]): string | null {
   if (type.includes("null")) return null;
   const every = (...names: ItemTag[]): boolean =>
     type.length > 0 && type.every((kind) => names.includes(kind));
-  return every("integer", "number")
+  // (a number's literal has decimals, which a storage key's type then holds too, as a later number does)
+  return every("integer")
     ? "0"
-    : every("string")
-      ? '""'
-      : every("boolean")
-        ? "false"
-        : null;
+    : every("integer", "number")
+      ? "0.0"
+      : every("string")
+        ? '""'
+        : every("boolean")
+          ? "false"
+          : null;
 }
 
 /**
@@ -2781,6 +2858,18 @@ function defaultGiven(text: string, path: readonly string[], literal: string): s
     object = found.value;
   }
   return null;
+}
+
+/**
+ * Whether the load `text` is its storage key's only load in the project, of a key written as plain text, and every save
+ * of that key the variable `root` it is given to (the rerun of Codex r1's storage probes): another load or save of the
+ * key would read or write the property's stored type too, which the default's literal may not fit.
+ */
+function soleLoad(text: string, root: string, source: MessageSource): boolean {
+  const parsed = parsedExpression(text);
+  const key = parsed?.expression.kind === "loadExpression" ? plainKey(parsed.expression.key) : null;
+  const uses = key === null ? null : source.storage(key);
+  return uses !== null && uses.loads === 1 && uses.saves.every((saved) => saved === root);
 }
 
 /**
@@ -2830,7 +2919,8 @@ function propertyFix(
   const given =
     literal === null ||
     !below.every((step) => "property" in step) ||
-    !source.readsPass(propertyName(path.at(-1)!))
+    !source.readsPass(propertyName(path.at(-1)!)) ||
+    !soleLoad(text, landing.root, source)
       ? null
       : defaultGiven(text, path.map(propertyName), literal);
   // (the load in its place, its key and its default the author's own as written; its literal divides nothing, since
