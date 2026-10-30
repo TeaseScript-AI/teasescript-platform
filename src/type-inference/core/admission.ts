@@ -94,10 +94,11 @@ import {
   keyParentIn,
   restRef,
   stepsOfId,
-  type KeyId,
   type CanonicalKey,
+  type KeyId,
   type KeyPacketMaking,
   type Rest,
+  type Steps,
 } from "./contract/key-ids.js";
 import { labelBelow, labelPlainText, labelRoot, type Label } from "./contract/labels.js";
 import {
@@ -290,7 +291,7 @@ export class Admission {
   /** Per class (its representative), its eligible member at each tested key of its demanded paths (§4.3). */
   readonly eligible = new Map<Definition, Map<string, Definition | null>>();
   /** Per key with stores, the rests below it of the paths the pass decides (`groups()`), once. */
-  demands: Map<CanonicalKey, (readonly string[])[]> | null = null;
+  demands: Map<CanonicalKey, Steps[]> | null = null;
   readonly representative = new Map<Definition, Definition>();
   /** The expected types of typed ingresses by identity, and the contract-side classes, for `conflictClass`. */
   readonly termIds = new Map<TypeTerm, string>();
@@ -301,7 +302,7 @@ export class Admission {
   readonly structureParts = new Map<string, Composed>();
   readonly depths = new Map<CanonicalKey, number>();
   keyBound: number | null = null;
-  below: Map<CanonicalKey, (readonly string[])[]> | null = null;
+  below: Map<CanonicalKey, Steps[]> | null = null;
   readonly takeables = new WeakMap<
     ReadonlySet<Definition | null>,
     { readonly wholes: readonly Definition[]; readonly adds: readonly Definition[] }[]
@@ -699,7 +700,7 @@ export class Admission {
   }
 
   /** A decided path's steps, made: a cursor's through the charged boundary (`stepsOfId`), for a stop's stores. */
-  public stepsAt(at: DecidedAt): readonly string[] {
+  public stepsAt(at: DecidedAt): Steps {
     return at.key === undefined ? at.path : stepsOfId(this.pass.contract, at.key);
   }
 
@@ -808,17 +809,13 @@ export class Admission {
 
   public offendingAt(
     d: Definition,
-    at: readonly string[],
+    at: Steps,
     leaf: (items: readonly Item[]) => boolean,
   ): Definition | null {
     return offendingAt(this, d, at, leaf);
   }
 
-  public siteAt(
-    d: Definition,
-    at: readonly string[],
-    leaf: (items: readonly Item[]) => boolean,
-  ): SourceSite {
+  public siteAt(d: Definition, at: Steps, leaf: (items: readonly Item[]) => boolean): SourceSite {
     return siteAt(this, d, at, leaf);
   }
 
@@ -826,11 +823,11 @@ export class Admission {
     return storesAt(this, value, step);
   }
 
-  public ingressSiteOf(d: Definition, at: readonly string[], item?: Item): SourceSite {
+  public ingressSiteOf(d: Definition, at: Steps, item?: Item): SourceSite {
     return ingressSiteOf(this, d, at, item);
   }
 
-  public namedExternalSite(d: Definition, at: readonly string[]): SourceSite | null {
+  public namedExternalSite(d: Definition, at: Steps): SourceSite | null {
     return namedExternalSite(this, d, at);
   }
 
@@ -838,7 +835,7 @@ export class Admission {
     return ownReadItem(this, item, d);
   }
 
-  public wholeBelow(value: PlaceId, at: readonly string[]): PlaceId | null {
+  public wholeBelow(value: PlaceId, at: Steps): PlaceId | null {
     return wholeBelow(this, value, at);
   }
 
@@ -885,7 +882,7 @@ export class Admission {
     return d.kind === "add" ? joinSteps(d.path, ["element"]) : d.path;
   }
 
-  public ownIngress(item: Item, d: Definition, at: readonly string[]): boolean {
+  public ownIngress(item: Item, d: Definition, at: Steps): boolean {
     return ownIngress(this, item, d, at);
   }
 

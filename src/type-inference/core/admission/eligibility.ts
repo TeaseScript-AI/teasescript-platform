@@ -1,13 +1,17 @@
 import type { PlaceId } from "../../graph.js";
 import {
   canonicalKey,
-  type CanonicalKey,
   keptKeyAt,
+  keptStepsFrom,
   keyWalk,
+  stepsRest,
+  stepsTo,
+  type CanonicalKey,
   type Rest,
+  type Steps,
 } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
-import { joinParts, keepText, keptSlice, type WorkLedger } from "../budget.js";
+import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import {
   isCursor,
   keptPrefixes,
@@ -152,13 +156,15 @@ function eligibility(
     if (
       representative.kind === "add" &&
       representative.how !== "elements" &&
-      demanded[0] !== "element"
+      demanded.at(0) !== "element"
     )
       continue;
+    // (a record's rest read as its steps, a view: `stepsRest`)
+    const rest = stepsRest(demanded);
     const at = aliasKeyAt(
       admission.pass.contract,
       alias,
-      representative.kind === "add" ? addRest(representative, demanded) : demanded,
+      representative.kind === "add" ? addRest(representative, rest) : rest,
     );
     // (a cursor's binding no test names: its family's shape requires it, G3 stage 1)
     if (at === null || isCursor(at)) continue;
@@ -314,9 +320,9 @@ function walkGuards(
 }
 
 /** The rests below a key of the paths the pass decides (`groups()`): every split of every decided path, once. */
-function demandsOf(admission: Admission, asked: Key): readonly (readonly string[])[] {
+function demandsOf(admission: Admission, asked: Key): readonly Steps[] {
   if (admission.demands === null) {
-    const demands = new Map<CanonicalKey, (readonly string[])[]>();
+    const demands = new Map<CanonicalKey, Steps[]>();
     for (const group of admission.groups()) {
       // (a cursor's steps made through the charged boundary, its prefixes its ancestors: G3 stage 1)
       const path = admission.stepsAt(group);
@@ -325,9 +331,9 @@ function demandsOf(admission: Admission, asked: Key): readonly (readonly string[
         admission.pass.program.work.charge("eligibility");
         const key =
           walk === null
-            ? keptKeyAt(admission.pass.contract, group.root, path.slice(0, length))
+            ? keptKeyAt(admission.pass.contract, group.root, stepsTo(path, length))
             : walk.prefix(length);
-        const rest = keptSlice(admission.work, path, length);
+        const rest = keptStepsFrom(admission.work, path, length);
         const list = demands.get(key);
         if (list === undefined) demands.set(key, [rest]);
         else list.push(rest);

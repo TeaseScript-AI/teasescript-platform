@@ -31,7 +31,7 @@ import type {
   ValueEntry,
 } from "./model.js";
 import { othersAt, readGroupsAt } from "./others.js";
-import { keyBelowIn, restPart, restSteps, type Rest } from "./key-ids.js";
+import { keyBelowIn, restPart, restSteps, stepsText, type Rest, type Steps } from "./key-ids.js";
 import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
 
 // The value side's wide gathers (S10 part 2b): a gather site's contributions, its groups, its selections' runs.
@@ -40,11 +40,7 @@ import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
  * F12 (r4.7): below a read that stands below an element step, the read's contract answer at the rest of the path
  * (definite by P3, else possible; context `member`), with the read's ingress stores and guard mark.
  */
-function* belowRead(
-  contract: Contract,
-  read: PlaceId,
-  below: readonly string[],
-): Work<readonly Item[]> {
+function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<readonly Item[]> {
   const { program, guards } = contract.pass;
   let root = read;
   for (let projection = program.projOf.get(root); projection !== undefined;) {
@@ -59,7 +55,7 @@ function* belowRead(
       ? yield* contract.contractOf(keyBelowIn(contract, copied, below))
       : yield* contract.contractRead(keyBelowIn(contract, copied, below), node, "member"),
   );
-  return guards.guardedRead(read, below) ? marked(items) : items;
+  return guards.guardedReadAt(read, stepsText(below)) ? marked(items) : items;
 }
 
 /**
@@ -187,12 +183,7 @@ export function* gatherAt(
   if (site.kind === "groups") {
     const group = gatherGroups(contract, site)[at]!;
     if (group === null)
-      return yield* loadsBelow(
-        contract,
-        othersAt(contract, here?.others, false),
-        restSteps(rest),
-        false,
-      );
+      return yield* loadsBelow(contract, othersAt(contract, here?.others, false), rest, false);
     return yield* groupItems(contract, group, false, (entry) =>
       contract.contractOfValueAt(entry.value, rest),
     );
@@ -211,8 +202,8 @@ export function* gatherAt(
       contract,
       { ...site, kind: "absent", exact: true },
       selection,
-      selectionPieces(contract, selection, restSteps(rest))[at]!,
-      restSteps(rest),
+      selectionPieces(contract, selection, rest)[at]!,
+      rest,
       node,
     );
   }
@@ -238,13 +229,7 @@ export function* gatherAt(
   }
   const group = gatherGroups(contract, site)[at]!;
   if (group === null)
-    return yield* loadsBelow(
-      contract,
-      othersAt(contract, here?.others, true),
-      restSteps(rest),
-      true,
-      node,
-    );
+    return yield* loadsBelow(contract, othersAt(contract, here?.others, true), rest, true, node);
   return yield* groupItems(contract, group, true, (entry) =>
     values.valueItems(entry.value, entry.g?.node ?? node, rest),
   );
@@ -377,7 +362,7 @@ export function* selectionPiece(
   site: Extract<GatherSite, { readonly kind: "absent" }>,
   selection: Selection,
   piece: SelectionPiece,
-  after: readonly string[],
+  after: Rest,
   node: FlowNode | null,
 ): Work<readonly Item[]> {
   if (typeof piece === "number")

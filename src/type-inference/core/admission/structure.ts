@@ -4,14 +4,19 @@ import { joinSteps, keep, keepText, keptParts, keptSlice, keptSteps, keptText } 
 import { keptPath, keyOf, keyPath, type Definition, type Key } from "../definitions.js";
 import {
   canonicalKey,
-  type CanonicalKey,
   isKeyId,
+  isPathSteps,
   keptKeyAt,
   keptKeyBelowIn,
   keptKeyWalk,
+  keptStepsFrom,
   keyDepthIn,
   keyIdPath,
   keyWalk,
+  stepsArray,
+  stepsTo,
+  type CanonicalKey,
+  type Steps,
 } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
 import { dictList } from "../method-categories.js";
@@ -34,7 +39,8 @@ export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | n
   if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
   const walk = keyWalk(contract, key);
   const path: string[] = [];
-  for (const [index, step] of walk.path.entries()) {
+  for (let index = 0; index < walk.path.length; index += 1) {
+    const step = walk.path.at(index)!;
     const list = dictList(step);
     if (list !== undefined) {
       program.work.charge("indexSteps");
@@ -108,7 +114,13 @@ function keyStructure(admission: Admission, key: Key): Structure {
     // (a cursor's prefixes below its root are in no definition index: its family's shape requires it)
     const stores = definitions.byKey.get(walk.prefix(length)) ?? [];
     // (a prefix's stores share one rest of the key's path)
-    const rest = stores.length === 0 ? [] : keptSlice(admission.work, path, length);
+    // (the roots keep their rests as arrays: a record's suffix copied out, `stepsArray`)
+    const rest =
+      stores.length === 0
+        ? []
+        : isPathSteps(path)
+          ? stepsArray(path.from(length))
+          : keptSlice(admission.work, path, length);
     for (const d of stores) root(d, [], rest);
   }
   for (const below of isKeyId(key) ? [] : definitions.keysBelow(key)) {
@@ -502,11 +514,13 @@ export function sharedPaths(
 ): (readonly string[])[] {
   const { program } = admission.pass;
   const out = new Map<string, readonly string[]>();
-  const put = (path: readonly string[]): void => {
+  const put = (path: Steps): void => {
     program.work.charge("indexSteps");
     {
-      const text = path.length > 0 ? keptText(admission.work, path) : "";
-      if (path.length > 0 && !out.has(text)) out.set(text, path);
+      // (a record's path named by its record's text; the list returned keeps arrays: a new one copied out)
+      const text =
+        path.length === 0 ? "" : isPathSteps(path) ? path.text() : keptText(admission.work, path);
+      if (path.length > 0 && !out.has(text)) out.set(text, stepsArray(path));
     }
   };
   for (const d of list)
@@ -548,7 +562,7 @@ export function literalLanding(admission: Admission, literal: PlaceId): Key | nu
 }
 
 /** The paths admission decides (`groups`) below a key, indexed once by every prefix of each. */
-function decidedBelow(admission: Admission, asked: Key): readonly (readonly string[])[] {
+function decidedBelow(admission: Admission, asked: Key): readonly Steps[] {
   if (admission.below === null) {
     admission.below = new Map();
     for (const group of admission.groups()) {
@@ -559,9 +573,9 @@ function decidedBelow(admission: Admission, asked: Key): readonly (readonly stri
         admission.pass.program.work.charge("indexSteps");
         const prefix =
           walk === null
-            ? keptKeyAt(admission.pass.contract, group.root, path.slice(0, length))
+            ? keptKeyAt(admission.pass.contract, group.root, stepsTo(path, length))
             : walk.prefix(length);
-        const rest = keptSlice(admission.work, path, length);
+        const rest = keptStepsFrom(admission.work, path, length);
         const paths = admission.below.get(prefix);
         if (paths === undefined) admission.below.set(prefix, [rest]);
         else paths.push(rest);

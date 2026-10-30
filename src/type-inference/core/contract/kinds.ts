@@ -168,14 +168,20 @@ export function propertyOnly(step: string): boolean {
 }
 
 /** A stored or parsed collection may hold none. */
-export function emptyAt(rest: readonly string[]): Item[] {
-  return rest.at(-1) === "element" ? [EMPTY] : [];
+export function emptyAt(rest: {
+  readonly length: number;
+  at(index: number): string | undefined;
+}): Item[] {
+  return rest.length > 0 && rest.at(rest.length - 1) === "element" ? [EMPTY] : [];
 }
 
 /**
  * Host data at a path (C9; F19: a computed key's load too): unknown, and a collection there may hold none, whatever a
  * written type or a test later says of its elements (V30 §16).
  */
-export function hostAt(rest: readonly string[]): Item[] {
+export function hostAt(rest: {
+  readonly length: number;
+  at(index: number): string | undefined;
+}): Item[] {
   return [unknownItem(REASON.external), ...emptyAt(rest)];
 }

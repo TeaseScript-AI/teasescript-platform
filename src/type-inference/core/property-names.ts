@@ -5,6 +5,8 @@ import {
   keyBelowIn,
   keyIdPath,
   keyWalk,
+  someStep,
+  stepsArray,
   stepsOfId,
   type CanonicalKey,
 } from "./contract/key-ids.js";
@@ -66,7 +68,7 @@ export function propertyNames(
         source !== null &&
         !(isKeyId(source)
           ? contract.pathMembers[keyIdPath(source)] !== 0 &&
-            stepsOfId(contract, source).some((step) => dictList(step) !== undefined)
+            someStep(stepsOfId(contract, source), (step) => dictList(step) !== undefined)
           : keyPath(source).some((step) => dictList(step) !== undefined))
       ) {
         pending.push({ key: keyBelowIn(contract, source, recordPath(path)) });
@@ -112,8 +114,10 @@ export function propertyNames(
       const step = keyPath(below)[path.length];
       if (step !== undefined && step !== "element") names.add(propertyName(step));
     }
+    // (the tasks keep their paths: a cursor's steps copied out once)
+    const steps = stepsArray(path);
     for (let length = 0; length <= path.length; length += 1) {
-      const rest = path.slice(length);
+      const rest = steps.slice(length);
       const stores = contract.prefixStores(walk.prefix(length));
       // the sources' own stores below their roots
       for (const sub of contract.subSources(stores))

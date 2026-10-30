@@ -58,25 +58,26 @@ import type { Label } from "./contract/labels.js";
 import {
   canonicalKey,
   isKeyId,
+  keptKeyBelowIn,
   keyAt,
   keyBelowIn,
-  keptKeyBelowIn,
   keyDepthIn,
   keyIdAt,
-  keyLastIn,
-  keyParentIn,
   keyIdOf,
   keyIdPath,
   keyIdPlace,
+  keyLastIn,
   keyOfId,
+  keyParentIn,
   memberStepIn,
   memberStepOf,
   spanRef,
+  stepsArray,
+  stepsOfId,
+  type CanonicalKey,
   type KeyId,
   type PathFacts,
   type Rest,
-  stepsOfId,
-  type CanonicalKey,
 } from "./contract/key-ids.js";
 import { keyLane, wrapperShape, type KeyLane } from "./contract/lanes.js";
 import { newHolder } from "./contract/marks.js";
@@ -486,7 +487,7 @@ export class Contract {
     return [...this.#stopped].flatMap(([place, paths]) =>
       paths.map((path) => ({
         place,
-        path: typeof path === "number" ? stepsOfId(this, keyIdAt(place, path)) : path,
+        path: typeof path === "number" ? stepsArray(stepsOfId(this, keyIdAt(place, path))) : path,
       })),
     );
   }

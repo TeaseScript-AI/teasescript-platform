@@ -2,7 +2,14 @@ import type { PlaceId } from "../../graph.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { keptKey, keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
-import { type CanonicalKey, isKeyId, keptKeyBelowIn, keyBelowIn, keyStepsIn } from "./key-ids.js";
+import {
+  type CanonicalKey,
+  isKeyId,
+  keptKeyBelowIn,
+  keyBelowIn,
+  keyStepsIn,
+  stepsArray,
+} from "./key-ids.js";
 import { methodCategory } from "../method-categories.js";
 import { stepName } from "../program.js";
 import { holderAt, holderOfKey, newHolder } from "./marks.js";
@@ -256,7 +263,7 @@ export function* keyIdentityWork(contract: Contract, key: CanonicalKey): Identit
         chain.push({ key: at, rooted, guarded: identity.guarded || entry.guarded });
       } else if (entry !== null && entry.value !== undefined) {
         // (the lifted holder's reference keeps it as its shift, charged as kept)
-        const within = keptSteps(contract.work, entry.at ?? [], path);
+        const within = keptSteps(contract.work, entry.at ?? [], stepsArray(path));
         const source = yield* contract.needValue(entry.value);
         identity = {
           id: contract.kept(`${source.id}@${pathText(within)}`),

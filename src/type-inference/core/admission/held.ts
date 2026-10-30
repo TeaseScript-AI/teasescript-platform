@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { isKeyId, keptKeyAt, keptStepsIn } from "../contract/key-ids.js";
+import { isKeyId, keptKeyAt, keptStepsIn, stepsArray } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { keptArray, keptSlice, keptSteps, keptText } from "../budget.js";
 import { keptPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
@@ -113,9 +113,10 @@ function heldReads(
 function heldRead(admission: Admission, source: Key, at: readonly string[]): Touch | null {
   const touches = touchesOf(admission);
   // (a cursor's steps through the charged boundary, G3 stage 1)
+  // (the touches' tries take arrays, kept in their payloads: a cursor's steps copied out, `stepsArray`)
   const held = touches.sub(
     heldOf(admission, keyPlace(source)),
-    keptStepsIn(admission.pass.contract, source),
+    stepsArray(keptStepsIn(admission.pass.contract, source)),
   );
   return held === null ? null : touches.graft(held, at);
 }

@@ -1,7 +1,7 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { CarrierRole } from "../carriers.js";
 import type { Label } from "../contract/labels.js";
-import type { KeyId, PathRef } from "../contract/key-ids.js";
+import type { KeyId, PathRef, PathSteps } from "../contract/key-ids.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
@@ -439,7 +439,7 @@ export interface Structure {
 /** A candidate of a decided type: a store and the path below its destination it reaches the place at. */
 export interface Candidate {
   readonly d: Definition;
-  readonly at: readonly string[];
+  readonly at: PathSteps | readonly string[];
   /** The later stores of `d`'s alias class (`aliasKey`): checked only where `d` owes something (§8, S6-CARRIERS §4.1). */
   readonly members?: readonly Definition[];
 }

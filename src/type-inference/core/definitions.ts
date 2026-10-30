@@ -229,6 +229,29 @@ export function keptKeyBelow(work: WorkLedger, key: Key, rest: readonly string[]
   return keyBelow(key, rest);
 }
 
+/** `keyOfText`, its text charged before it is made (`keepText`). */
+export function keptKeyOfText(work: WorkLedger, place: PlaceId, text: string): Key {
+  keepText(work, String(place).length + 1 + text.length);
+  return keyOfText(place, text);
+}
+
+/** The key of a path given by its text below `key`: what `keyBelow` makes of the path's steps. */
+export function keyBelowText<K extends Key>(key: TextKey<K>, text: string): Key {
+  barOf(key);
+  if (text === "") return key;
+  return key.endsWith("|") ? `${key}${text}` : `${key}.${text}`;
+}
+
+/** `keyBelowText`, charged before it is made (`keepText`). */
+export function keptKeyBelowText<K extends Key>(
+  work: WorkLedger,
+  key: TextKey<K>,
+  text: string,
+): Key {
+  if (text !== "") keepText(work, key.length + 1 + text.length);
+  return keyBelowText(key, text);
+}
+
 /** A key's path as text (what `keyPath(key).join(".")` gives). */
 export function keyPathText<K extends Key>(key: TextKey<K>): string {
   return key.slice(barOf(key) + 1);

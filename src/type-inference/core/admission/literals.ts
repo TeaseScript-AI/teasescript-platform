@@ -12,7 +12,7 @@ import {
   pathText,
   stepText,
 } from "../budget.js";
-import { keyStepsIn } from "../contract/key-ids.js";
+import { keyStepsIn, stepsArray, type Steps } from "../contract/key-ids.js";
 import { defaultOf, typeTags, type IndexNode } from "../contract.js";
 import {
   joinedOperand,
@@ -172,13 +172,13 @@ export function literalChildren(admission: Admission, value: PlaceId, step: stri
 export function offendingAt(
   admission: Admission,
   d: Definition,
-  at: readonly string[],
+  at: Steps,
   leaf: (items: readonly Item[]) => boolean,
 ): Definition | null {
   const pending: [PlaceId, FlowNode, number][] = [[d.value!, d.node, 0]];
   while (pending.length > 0) {
     const [value, node, index] = pending.pop()!;
-    const children = admission.literalChildren(value, at[index]!);
+    const children = admission.literalChildren(value, at.at(index)!);
     if (index + 1 === at.length) {
       for (const child of children) {
         admission.pass.program.work.charge("checks");
@@ -195,7 +195,7 @@ export function offendingAt(
 export function siteAt(
   admission: Admission,
   d: Definition,
-  at: readonly string[],
+  at: Steps,
   leaf: (items: readonly Item[]) => boolean,
 ): SourceSite {
   const found = at.length > 0 && d.kind === "whole" ? admission.offendingAt(d, at, leaf) : null;
@@ -778,7 +778,10 @@ export function joinElements(
       if (stored(operand)) return target!;
       const key = contract.copiedKey(operand) ?? contract.resultKey(operand);
       // (a cursor's steps through the charged boundary, G3 stage 1)
-      return key === null ? null : { place: keyPlace(key), path: keyStepsIn(contract, key) };
+      // (a tree's target keeps an array: a cursor's steps copied out, `stepsArray`)
+      return key === null
+        ? null
+        : { place: keyPlace(key), path: stepsArray(keyStepsIn(contract, key)) };
     };
     // (the left operand that reads the place the tree is stored into, a `+=`'s or `xs = xs + …`'s: a strict written
     // destination, whose type holds only what it holds)

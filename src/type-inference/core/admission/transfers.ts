@@ -1,7 +1,14 @@
 import type { PlaceId } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { restRef, type PathRef, type Rest } from "../contract/key-ids.js";
-import { joinSteps, keep, keepText, keptParts, keptSteps, keptText } from "../budget.js";
+import {
+  restRef,
+  stepsAfter,
+  stepsFrom,
+  type PathRef,
+  type Rest,
+  type Steps,
+} from "../contract/key-ids.js";
+import { keep, keepText, keptParts, keptSteps, keptText } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import { keyPlace, sortCost, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -674,15 +681,17 @@ function maskName(mask: ReadonlySet<ItemTag> | null): string {
  * one step from its parent's (`joinedId`), never made (G3 stage 1).
  */
 function restAfter(strip: readonly string[], at: PathRef, rest: number): Rest {
-  return at.kind === "span" ? at.from(rest).after(strip) : joinSteps(strip, at.steps().slice(rest));
+  return at.kind === "span"
+    ? at.from(rest).after(strip)
+    : stepsAfter(strip, stepsFrom(at.steps(), rest));
 }
 
 /** The ids of a decided path's rests (`ids[k]` the rest from step `k`), one per distinct rest in the pass. */
-function restIds(admission: Admission, at: readonly string[]): number[] {
+function restIds(admission: Admission, at: Steps): number[] {
   const ids: number[] = [];
   ids[at.length] = 0;
   for (let index = at.length - 1; index >= 0; index -= 1) {
-    const name = keptParts(admission.work, ids[index + 1]!, at[index]!);
+    const name = keptParts(admission.work, ids[index + 1]!, at.at(index)!);
     let id = admission.restIds.get(name);
     if (id === undefined) admission.restIds.set(name, (id = admission.restIds.size + 1));
     ids[index] = id;

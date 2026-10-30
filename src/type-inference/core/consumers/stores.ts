@@ -20,6 +20,7 @@ import {
 } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { writtenOf } from "../contract.js";
+import { stepIndex, stepsArray, stepsRest, type Steps } from "../contract/key-ids.js";
 import { labelText } from "../contract/labels.js";
 import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -61,7 +62,8 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
   // (a key whose decision stopped, in this pass or before it, or a key below one: undecided, no decision runs)
   if (walk.admission.decisionStoppedAt(group)) {
     walk.decisions.push(walk.admission.decisionWork(group, 0, allowance, true));
-    walk.stoppedStores(root, walk.admission.stepsAt(group));
+    // (the stopped stores keep arrays: a cursor's steps copied out, `stepsArray`)
+    walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
     return null;
   }
   // (its work is the decision's, not a consumer read's)
@@ -76,7 +78,7 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
     walk.decisionStopped = true;
     walk.admission.stopDecision(group);
     // (a cursor's steps made once through the charged boundary, for its stores' obligations: G3 stage 1)
-    walk.stoppedStores(root, walk.admission.stepsAt(group));
+    walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
     // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4, TABLE r4.183)
     if (walk.restarted) throw new BudgetExhausted("work");
     return null;
@@ -152,7 +154,10 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
     if (decision === null) continue;
     // (a cursor's group's steps made only where a diagnostic or a check names its path: G3 stage 1)
     const { root } = group;
-    const path = (): readonly string[] => group.path ?? admission.stepsAt(group);
+    // (the sentences and checks keep arrays: a cursor's steps copied out once, `stepsArray`)
+    let made: readonly string[] | undefined;
+    const path = (): readonly string[] =>
+      (made ??= group.path ?? stepsArray(admission.stepsAt(group)));
     const { tags, nullable, decider } = decision;
     // (the label's text made where a diagnostic or a check shows it, not for every decision, TABLE r4.196)
     const label = (): string => labelText(walk.pass.contract, decision.label);
@@ -195,7 +200,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           const site = admission.namedExternalSite(d, at);
           // (an equivalent copy holds what its representative holds: none of them owes it)
           if (site === null) break;
-          const value = admission.valueAt(d, at);
+          const value = admission.valueAt(d, stepsRest(at));
           const named = value.filter(
             (item) => isExternal(item) && !admission.ownIngress(item, d, at),
           );
@@ -218,7 +223,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
       continue;
     }
     // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
-    const visit = (d: Definition, at: readonly string[]): void => {
+    const visit = (d: Definition, at: Steps): void => {
       if (d === decider && at.length === 0) return;
       walk.reading = d.node;
       // §3.3: a candidate the admitted type accepts whatever its value
@@ -234,7 +239,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           return;
         }
       }
-      const items = admission.valueAt(d, at);
+      const items = admission.valueAt(d, stepsRest(at));
       // a dead call's argument holding a kind that came through a call may lack the marks that call's binding would
       // give (F21, `called`): it stays unchecked, as every dead call's argument was before AD-3
       if (
@@ -265,7 +270,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
       // definite element none of whose kinds fits is A6's error at that element, the store rejected
       const wrong =
         written &&
-        at.includes("element") &&
+        stepIndex(at, "element") >= 0 &&
         d.kind === "whole" &&
         d !== decider &&
         !admission.cycling.has(d.uid)
@@ -327,7 +332,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
         !(
           at.length > 0 &&
           d.kind !== "const" &&
-          walk.valueRun(d.value!, d.node, at).some((item) => item.tag === "empty")
+          walk.valueRun(d.value!, d.node, stepsRest(at)).some((item) => item.tag === "empty")
         ) &&
         !items.some((item) => item.guarded === true) &&
         !items.some(fitsAny)
@@ -400,7 +405,7 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
       if (
         d.value !== undefined &&
         definitions.ingress.has(d.value) &&
-        (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
+        (at.length === 0 || (d.kind === "add" && at.length === 1 && at.at(0) === "element"))
       )
         admission.boundaryAt(d);
       // (only external data owes it, `boundaryFor`: the label shown only where the check is owed, #1483)

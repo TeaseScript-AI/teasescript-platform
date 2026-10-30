@@ -1,5 +1,5 @@
 import type { PlaceId } from "../../graph.js";
-import { keptStepsIn } from "../contract/key-ids.js";
+import { keptStepsIn, stepsArray } from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import { keptParts, keptSplit } from "../budget.js";
 import { typeTags } from "../contract.js";
@@ -62,7 +62,8 @@ export function touchCopy(
 /** A read's contribution where it stands: its source's trie at its path, contents only. */
 export function touchRead(admission: Admission, source: Key, at: readonly string[]): Touch {
   const touches = touchesOf(admission);
-  const path = keptStepsIn(admission.pass.contract, source);
+  // (the touches' tries and refs keep arrays: a cursor's steps copied out, `stepsArray`)
+  const path = stepsArray(keptStepsIn(admission.pass.contract, source));
   const held =
     touches.sub(touchOf(admission, keyPlace(source)).node, path) ??
     touches.leaf([], [touchRef(admission, keyPlace(source), path, false)]);

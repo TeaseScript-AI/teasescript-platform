@@ -42,15 +42,31 @@ export function writtenTypeSteps(): number {
   return typeSteps;
 }
 
+/** Steps read by position: an array's, or a cursor's path's as its record keeps them (`PathSteps`). */
+export interface StepRead {
+  readonly length: number;
+  at(index: number): string | undefined;
+}
+
 /** The written type at `path` from its step `from` on, a step at a time: no copy of the path's rest per step (#1194). */
 export function typeAtPath(term: TypeTerm, path: readonly string[], from = 0): TypeAt | null {
+  const at = typeAtStep(term, path, from);
+  return at === null || "term" in at ? at : { place: at.place, rest: path.slice(at.below) };
+}
+
+/** `typeAtPath` read by position: a ref's rest as the step it starts at. */
+function typeAtStep(
+  term: TypeTerm,
+  path: StepRead,
+  from: number,
+): { readonly term: TypeTerm } | { readonly place: PlaceId; readonly below: number } | null {
   let at = term;
   for (let index = from; index < path.length; index += 1) {
     typeSteps += 1;
     // an optional or union collection: its members' elements
     if (at.kind === "union") {
       const members = at.members
-        .map((member) => typeAtPath(member, path, index))
+        .map((member) => typeAtStep(member, path, index))
         .filter((member) => member !== null);
       if (members.length === 1) return members[0]!;
       const terms = members.flatMap((member) => ("term" in member ? [member.term] : []));
@@ -58,7 +74,7 @@ export function typeAtPath(term: TypeTerm, path: readonly string[], from = 0): T
         return { term: { kind: "union", members: terms } };
       return null;
     }
-    const step = path[index]!;
+    const step = path.at(index)!;
     let below: TypeTerm;
     if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && step === "element")
       below = at.element;
@@ -67,15 +83,15 @@ export function typeAtPath(term: TypeTerm, path: readonly string[], from = 0): T
       if (property === undefined) return null;
       below = property.type;
     } else return null;
-    if (below.kind === "ref") return { place: below.place, rest: path.slice(index + 1) };
+    if (below.kind === "ref") return { place: below.place, below: index + 1 };
     at = below;
   }
   return { term: at };
 }
 
 /** The term of a written type at a path, when the path stays in the written type. */
-export function termAt(term: TypeTerm, path: readonly string[]): TypeTerm | null {
-  const at = typeAtPath(term, path);
+export function termAt(term: TypeTerm, path: StepRead): TypeTerm | null {
+  const at = typeAtStep(term, path, 0);
   return at !== null && "term" in at ? at.term : null;
 }
 

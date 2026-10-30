@@ -31,6 +31,7 @@ import {
   keyOfId,
   keyPrefixIn,
   memberStepIn,
+  PathSteps,
   restSteps,
   rootId,
   spanRef,
@@ -68,6 +69,11 @@ import { sharedPaths } from "../src/type-inference/core/admission/structure.js";
  */
 
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
+
+/** Steps read by position, as a site reads a record's (`PathSteps`). */
+function read(steps: { readonly length: number; at(index: number): string | undefined }): string[] {
+  return Array.from({ length: steps.length }, (_, index) => steps.at(index)!);
+}
 
 function request(source: string) {
   const made = coreRequest([{ path: "main.tease", source }], GLOBALS);
@@ -168,7 +174,11 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
         path.length === 0 ? null : keyIdOf(contract, place, path.slice(0, -1)),
       );
       for (let from = 0; from <= path.length; from += 1) {
-        assert.deepEqual(stepsOfId(contract, id, from), path.slice(from), `${where} @${from}`);
+        assert.deepEqual(
+          read(stepsOfId(contract, id, from)),
+          path.slice(from),
+          `${where} @${from}`,
+        );
         assert.equal(memberStepIn(contract, id, from), memberStep(path, from), `${where} @${from}`);
       }
     }
@@ -505,7 +515,7 @@ test("a wrapper's own literal asked by an array converts it to its span once: as
     canonicalRest(pass.contract, own[0], ["shell", "n"]),
   );
   assert.ok(!isSteps(first.result) && !isSteps(again.result));
-  assert.deepEqual(restSteps(first.result), ["shell", "n"]);
+  assert.deepEqual(read(restSteps(first.result)), ["shell", "n"]);
   assert.ok(first.work.charged > 0);
   assert.equal(again.work.charged, 0);
   assert.equal(again.result.id(), first.result.id());
@@ -564,28 +574,29 @@ test("a member chain's key asked at each of its offsets in turn, cold, climbs it
   }
 });
 
-test("a member chain's work keeps its ratio to its text lane's within ×1.005 from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the two-size gate of the key side's member walk on a cursor", () => {
-  // (each layer wraps the one before; `dicts` every third a dict below a property, read through its `values`)
-  const chain = (n: number, dicts: boolean): string => {
-    const lines = ["let seed: integer = 1", "let root = {f: seed}"];
-    const path: string[] = [];
-    for (let i = 0; i < n; i += 1) {
-      const before = i === 0 ? "root" : `a${i - 1}`;
-      if (dicts && i % 3 === 0) {
-        lines.push(`let d${i} = dict {k: ${before}}`, `let a${i} = {q: d${i}}`);
-        path.unshift("q.values.first");
-      } else {
-        const step = dicts ? ["year", "values", "keys"][i % 3]! : "year";
-        lines.push(`let a${i} = {${step}: ${before}}`);
-        path.unshift(step);
-      }
+/** A member chain of `n` layers, each wrapping the one before: a temporal field's, or (`dicts`) every third a dict below a property, read through its `values`, among objects. */
+function memberChain(n: number, dicts: boolean): string {
+  const lines = ["let seed: integer = 1", "let root = {f: seed}"];
+  const path: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const before = i === 0 ? "root" : `a${i - 1}`;
+    if (dicts && i % 3 === 0) {
+      lines.push(`let d${i} = dict {k: ${before}}`, `let a${i} = {q: d${i}}`);
+      path.unshift("q.values.first");
+    } else {
+      const step = dicts ? ["year", "values", "keys"][i % 3]! : "year";
+      lines.push(`let a${i} = {${step}: ${before}}`);
+      path.unshift(step);
     }
-    return [...lines, `let out = a${n - 1}.${path.join(".")}.f`, "exit", ""].join("\n");
-  };
+  }
+  return [...lines, `let out = a${n - 1}.${path.join(".")}.f`, "exit", ""].join("\n");
+}
+
+test("a member chain's work keeps its ratio to its text lane's within ×1.005 from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the two-size gate of the key side's member walk on a cursor", () => {
   for (const dicts of [false, true])
     for (const mode of MODES) {
       const [at8, at16] = [8, 16].map((n) => {
-        const source = request(chain(n, dicts));
+        const source = request(memberChain(n, dicts));
         const cursor = inMode(mode, () => analyseCore(source)).budget.total;
         const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
         return cursor / text;
@@ -955,8 +966,8 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "the cursor's type and text (two numbers); two error messages; a span's name (a path's id after a dot); a replayed name's cursor and span tokens (numbers, `exportNames`)",
   ],
   "key-ids.ts slice": [
-    16,
-    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`arrayRef`, three); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
+    19,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`stepsFrom`, `stepsTo`, `stepsPrefixText`, `restFrom`, `restTo`); a record's steps' view, plain as an array's slice (`PathSteps.from`, `to`); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
   ],
   "key-ids.ts concatenation": [
     3,
@@ -990,6 +1001,73 @@ test("the cursor modules make no text but the listed ones, each bounded or charg
   assert.deepEqual(
     found,
     Object.fromEntries(Object.entries(MADE_LISTED).map(([key, [count]]) => [key, count])),
+  );
+});
+
+test("a demand name's span token is spelled by its path's record, its text made once and found again by every name holding it (Codex r11 N11-F1)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  const steps = Array.from({ length: 40 }, (_, k) => `s${k}`);
+  const path = keyIdPath(keyIdOf(contract, 5, steps));
+  assert.equal(contract.pathFacts.get(path)?.text, undefined);
+  assert.equal(compareDemandNames(contract, `cl|1|.${path}`, `cl|2|.${path}`), -1);
+  assert.equal(contract.pathFacts.get(path)?.text, steps.join("."));
+  // (another name holding the token: its path's text found, never made again from its steps)
+  const { result, work } = probeMade(contract, () =>
+    compareDemandNames(contract, `cl|3|.${path}`, `cl|2|.${path}`),
+  );
+  assert.equal(result, 1);
+  assert.equal(work.visits, 0);
+});
+
+/** The record's steps copied out (`PathSteps.toArray`) by site over `copiesOf`'s analyses: how many, and why each site needs an array. */
+const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
+  writtenSource: [
+    286,
+    "a copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
+  ],
+  stoppedKeys: [
+    20,
+    "a stopped key leaves its pass as steps (`Contract.stoppedKeys`), as no path id does",
+  ],
+  decide: [
+    10,
+    "a stopped decision's path, its stores asked once by it (`stoppedStores`), kept as an array",
+  ],
+  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
+};
+
+/** The record's steps copied out during `run`, by the function asking (the first named frame outside `key-ids.ts`). */
+function copiesOf(run: () => void): Record<string, number> {
+  const original = PathSteps.prototype.toArray;
+  const sites: Record<string, number> = {};
+  PathSteps.prototype.toArray = function (this: PathSteps) {
+    const frames = new Error().stack!.split("\n").slice(2);
+    const named = frames.find(
+      (frame) => !frame.includes("key-ids.") && /^\s*at (?!Array\.)[\w$#.]+ \(/.test(frame),
+    );
+    const site = /^\s*at (?:[\w$]+\.)?([\w$#]+) \(/.exec(named ?? "")?.[1] ?? "?";
+    sites[site] = (sites[site] ?? 0) + 1;
+    return original.call(this);
+  };
+  try {
+    run();
+  } finally {
+    PathSteps.prototype.toArray = original;
+  }
+  return sites;
+}
+
+test("a record's steps leave it as an array only at the listed sites, each a charged copy (\`toArray\`), over the wrappers and the member chains to 16 levels in every mode", () => {
+  const sources = [
+    ...[2, 4, 8, 16].flatMap((depth) => VARIANTS.map((variant) => wrapped(depth, variant))),
+    ...[8, 16].flatMap((n) => [memberChain(n, false), memberChain(n, true)]),
+  ].map(request);
+  const found = copiesOf(() => {
+    for (const source of sources) for (const mode of MODES) inMode(mode, () => analyseCore(source));
+  });
+  assert.deepEqual(
+    found,
+    Object.fromEntries(Object.entries(COPIES_LISTED).map(([site, [count]]) => [site, count])),
   );
 });
 

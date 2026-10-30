@@ -29,7 +29,7 @@ import { SHOWN } from "./kinds.js";
 import { leftOutWarning } from "./left-out.js";
 import { proveOrigin, type StoreOrigin } from "./origins.js";
 import { kindsOf } from "./names.js";
-import { keyStepsIn, type CanonicalKey } from "../contract/key-ids.js";
+import { keyStepsIn, stepsArray, type CanonicalKey } from "../contract/key-ids.js";
 
 // The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
 
@@ -376,7 +376,7 @@ function loadOrigin(
   const load = loadOf(declared?.value);
   // (the copied key's steps through the charged boundary: a wrapper family's key is a cursor)
   const copiedSteps = keyStepsIn(contract, copied);
-  const path = keptSteps(work, copiedSteps, below);
+  const path = keptSteps(work, stepsArray(copiedSteps), below);
   const mine = definitions.byKey.get(keptKey(work, holder, [])) ?? [];
   if (
     kind.kind !== "binding" ||

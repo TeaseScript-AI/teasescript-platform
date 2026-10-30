@@ -1,6 +1,6 @@
 import type { PlaceId } from "../../graph.js";
-import { joinParts, joinSteps, keptParts } from "../budget.js";
-import { keyBelowRef, restRef, type Rest } from "./key-ids.js";
+import { joinParts, keptParts } from "../budget.js";
+import { keyBelowRef, restPart, restRef, restTo, type Rest } from "./key-ids.js";
 import type { Contract } from "../contract.js";
 import { type Key } from "../definitions.js";
 import { withoutEmpty, withWriter } from "../exact-path.js";
@@ -183,11 +183,11 @@ export function groupsAt(
   contract: Contract,
   asked: Key,
   base: readonly LevelGroup[],
-  path: readonly string[],
+  path: Rest,
 ): readonly LevelGroup[] {
-  // (a prefix in its identity, as the levels' groups are named by it: G3 stage 1)
+  // (a prefix in its identity, as the levels' groups are named by it: G3 stage 1; a span by its name, never its text)
   const prefix = contract.canonicalKey(asked);
-  const memoKey = joinParts(prefix, path);
+  const memoKey = joinParts(prefix, restPart(path));
   const known = contract.levelGroups.get(memoKey);
   if (known !== undefined) return known;
   contract.keepText(memoKey.length);
@@ -199,7 +199,7 @@ export function groupsAt(
   const groups: LevelGroup[] = [];
   for (const group of path.length === 0
     ? base
-    : groupsAt(contract, prefix, base, path.slice(0, -1))) {
+    : groupsAt(contract, prefix, base, restTo(contract, path, path.length - 1))) {
     program.work.charge("structureSteps");
     const levels = levelsOf(contract, group.literal);
     // (what stands at each step above the path: entries read below it, objects lacking the next step, a
@@ -207,8 +207,9 @@ export function groupsAt(
     const above: string[] = [];
     let id = 0;
     contract.keep(group.at.length + path.length);
-    for (const step of joinSteps(group.at, path)) {
+    for (let index = 0; index < group.at.length + path.length; index += 1) {
       above.push(levels.at.get(id) ?? "");
+      const step = index < group.at.length ? group.at[index]! : path.at(index - group.at.length)!;
       id = pathBelow(contract, id, step);
     }
     const cell = program.cellOwner.get(group.literal)?.kind === "cell" ? "cell" : "";

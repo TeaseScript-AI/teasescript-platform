@@ -109,6 +109,7 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   "contract/levels.ts levelsOf spread": [2, "a copy of a set of path ids, charged by `keep`"],
   "definitions.ts keyBelow join": [2, "a helper itself"],
   "definitions.ts keyBelow step": [1, "a helper itself"],
+  "definitions.ts keyBelowText step": [1, "a helper itself"],
   "definitions.ts keyOf composite": [1, "a helper itself"],
   "definitions.ts keyOf join": [1, "a helper itself"],
   "definitions.ts keyOfText composite": [1, "a helper itself"],
@@ -274,7 +275,7 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * keeps.
  */
 const PLAIN_TWIN =
-  /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf|keyAt|keyBelowIn|keyParentIn|keyStepsIn|keyAtRef|keyBelowRef)\(/;
+  /\b(?:joinParts|pathText|keyOf|keyBelow|keyBelowText|keyPathText|keyOfText|stepText|stepsText|stepsPrefixText|joinSteps|splitPath|keyPath|prefixesOf|keyAt|keyBelowIn|keyParentIn|keyStepsIn|keyAtRef|keyBelowRef)\(/;
 
 /** A charge or a kept helper: its call before a store, naming the text, charges it (`keepText(work, key.length)`). */
 const CHARGE = /(?:\b(?:kept\w*|keepText|keep|charge)|#kept|#keepText)\(/;
@@ -284,10 +285,6 @@ const KEPT_CALLEE = /^(?:kept\w*|#kept)$/;
 
 /** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
 const STORED: Readonly<Record<string, readonly [number, string]>> = {
-  "admission/ingress.ts contributions slice": [
-    1,
-    "a store's contributions at a path, returned and read once by its caller, not kept",
-  ],
   "admission/decision.ts decide at": [
     1,
     "a candidate's path, its decision read once by the consumer and then dropped",

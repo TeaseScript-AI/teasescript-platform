@@ -1,6 +1,6 @@
 import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
 import type { Admission } from "../admission.js";
-import { joinParts, joinSteps, keepText, pathText } from "../budget.js";
+import { joinParts, joinSteps, keepText } from "../budget.js";
 import { typeTags, writtenOf } from "../contract.js";
 import { keyOf, keyPath, keyPlace, sortCost, type Definition, type Key } from "../definitions.js";
 import {
@@ -10,6 +10,10 @@ import {
   restRef,
   restSteps,
   spanRef,
+  stepsAfter,
+  stepsFrom,
+  stepsJoin,
+  stepsRest,
   type PathRef,
   type Rest,
 } from "../contract/key-ids.js";
@@ -135,10 +139,10 @@ export function* scanAt(
   own.sort((a, b) => admission.sourceOrder(a.d) - admission.sourceOrder(b.d));
   work.charge("checks", direct.length + sortCost(own.length));
   const scans: { readonly ds: readonly Definition[]; readonly at: (index: number) => Rest }[] = [
-    { ds: own.map((candidate) => candidate.d), at: (index) => own[index]!.at },
+    { ds: own.map((candidate) => candidate.d), at: (index) => stepsRest(own[index]!.at) },
   ];
-  // (a prefix's rest as its prefix reads it: an array where the path was one, a cursor's span else)
-  const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : rest.steps());
+  // (a prefix's rest as its prefix reads it: an array where the path was one, a record's steps, a cursor's span else)
+  const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : stepsRest(rest.steps()));
   for (const { key: prefix, rest } of prefixes)
     scans.push({ ds: eligibleOf(admission, prefix, restOf(rest)), at: () => restOf(rest) });
   for (const { key: prefix, rest } of prefixes)
@@ -266,7 +270,7 @@ export function* earliestDecider(
     const rest: Rest =
       at.kind === "span"
         ? at.from(length).after(stop.strip)
-        : joinSteps(stop.strip, restSteps(asked).slice(length));
+        : stepsAfter(stop.strip, stepsFrom(restSteps(asked), length));
     const term =
       stop.from === null
         ? permittedAt(stop.term!, rest)
@@ -281,8 +285,8 @@ export function* earliestDecider(
   const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
   for (let length = 0; length <= deepest; length += 1) {
     program.work.charge("checks");
-    const prefix =
-      at.kind === "span" ? at.text(length) : pathText(restSteps(asked).slice(0, length));
+    // (a span's prefix text its record's, `textOf`; an array's made plain, as before)
+    const prefix = at.text(length);
     const written = snapshots(admission, stops.written.get(prefix), false);
     // (and a call a join carries by its written result, as `joinElements` reads it: F20)
     const calls = joinedOf(admission, snapshots(admission, stops.values.get(prefix), false));
@@ -298,7 +302,10 @@ export function* earliestDecider(
             ? null
             : permittedAt(
                 result,
-                joinSteps(keyPath(key!), stop.strip, restSteps(asked).slice(length)),
+                stepsJoin(
+                  joinSteps(keyPath(key!), stop.strip),
+                  stepsFrom(restSteps(asked), length),
+                ),
               );
       }
       if (term === null) continue;
@@ -329,9 +336,7 @@ export function* earliestDecider(
   for (let length = 0; length <= Math.min(at.length, depths.values); length += 1) {
     const list = snapshots(
       admission,
-      stops.values.get(
-        at.kind === "span" ? at.text(length) : pathText(restSteps(asked).slice(0, length)),
-      ),
+      stops.values.get(at.text(length)),
       length === at.length,
       true,
     );
@@ -340,11 +345,7 @@ export function* earliestDecider(
   const literals =
     at.length > depths.literals
       ? undefined
-      : snapshots(
-          admission,
-          stops.literals.get(at.kind === "span" ? at.text(at.length) : pathText(restSteps(asked))),
-          true,
-        );
+      : snapshots(admission, stops.literals.get(at.text(at.length)), true);
   if (literals !== undefined) lists.push({ list: literals, length: at.length });
   const positions = lists.map(() => 0);
   const throughs = new Map<string, WeakMap<ViaChain, boolean>>();
@@ -376,7 +377,7 @@ export function* earliestDecider(
           next.node,
           at.kind === "span"
             ? at.from(lists[best]!.length).after(next.strip)
-            : joinSteps(next.strip, restSteps(asked).slice(lists[best]!.length)),
+            : stepsAfter(next.strip, stepsFrom(restSteps(asked), lists[best]!.length)),
         ),
       ),
     );
@@ -583,7 +584,7 @@ function through(
           level.node,
           ref.kind === "span"
             ? ref.from(level.path.length).after(level.strip)
-            : joinSteps(level.strip, restSteps(at).slice(level.path.length)),
+            : stepsAfter(level.strip, stepsFrom(restSteps(at), level.path.length)),
         ),
       ),
     );

@@ -35,8 +35,14 @@ import {
   restPart,
   restRef,
   restSteps,
+  stepsArray,
+  stepsFrom,
+  stepsJoin,
+  stepsRest,
+  stepsTo,
   type PathRef,
   type Rest,
+  type Steps,
 } from "./key-ids.js";
 import { contractOfOp } from "./operations.js";
 import { projected } from "./positions.js";
@@ -99,17 +105,17 @@ function spanMemberStep(contract: Contract, ref: PathRef, from: number): number 
 function* listsAt(
   contract: Contract,
   value: PlaceId,
-  rest: readonly string[],
+  rest: Steps,
   at: number,
   from: number,
 ): Work<readonly Item[]> {
-  const receiver = yield* through(contract, value, rest.slice(0, at), from);
+  const receiver = yield* through(contract, value, stepsRest(stepsTo(rest, at)), from);
   // F19a, r4.44: a receiver that may be a reference has the runtime's members, decided once for a whole value
   const decided = at === 0 ? yield* contract.valueReceiver(value) : receiver;
   if (heldReference(decided) || decided.some((item) => REFERENCE.has(item.tag)))
-    return yield* through(contract, value, rest, at + 1);
+    return yield* through(contract, value, stepsRest(rest), at + 1);
   return yield* members(contract, rest, at, receiver, (path, start) =>
-    through(contract, value, path, start),
+    through(contract, value, stepsRest(path), start),
   );
 }
 
@@ -120,33 +126,34 @@ function* listsAt(
  */
 export function* members(
   contract: Contract,
-  path: readonly string[],
+  path: Steps,
   at: number,
   receiver: readonly Item[],
-  read: (path: readonly string[], from: number) => Work<readonly Item[]>,
+  read: (path: Steps, from: number) => Work<readonly Item[]>,
 ): Work<readonly Item[]> {
-  const before = path.slice(0, at);
-  const after = path.slice(at + 1);
+  // (the steps after the member read by position; the path without it made only where a dict's values ask: a
+  // record's joined, `stepsJoin`)
+  const after = path.length - at - 1;
   const out: Item[] = [];
   let own = false;
-  const step = path[at]!;
+  const step = path.at(at)!;
   for (const item of withoutEmpty(receiver)) {
     const declared = declaredProperty(item.tag, step);
     if (item.tag === "dict" && dictList(step) !== undefined) {
-      if (after.length === 0) out.push(carried(makeItem("list", item.writer), [item]));
-      else if (after[0] === "element") {
+      if (after === 0) out.push(carried(makeItem("list", item.writer), [item]));
+      else if (path.at(at + 1) === "element") {
         // the list's own selection takes its own emptiness (open); a deeper selection's marker is that selection's
         if (dictList(step) === "values") {
-          const below = yield* read(joinSteps(before, after), at);
-          out.push(...(after.length === 1 ? withoutEmpty(below) : below));
-        } else if (after.length === 1)
+          const below = yield* read(stepsJoin(stepsTo(path, at), stepsFrom(path, at + 1)), at);
+          out.push(...(after === 1 ? withoutEmpty(below) : below));
+        } else if (after === 1)
           // a key is text, possible: no literal holds a derived list's element (r4.47, P3)
           out.push(carried(makeItem("string", item.writer, { cert: "pos" }), [item]));
-        if (after.length === 1) out.push(EMPTY);
+        if (after === 1) out.push(EMPTY);
       }
     } else if (declared !== undefined) {
       // a temporal field or a calendar duration's part: its declared result (V30 §35)
-      if (after.length === 0) out.push(carried(makeItem(declared, item.writer), [item]));
+      if (after === 0) out.push(carried(makeItem(declared, item.writer), [item]));
     } else if (item.tag === "object") own = true;
     else if (item.tag === "unknown") out.push(item);
   }
@@ -171,21 +178,25 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
         yield* contract.contractOf(keyAtRef(contract, binding, ref)),
       );
       // §3.2: the mark travels with the value (r4.6): none of a binding no test names
-      return !guards.untested(binding) && guards.guardedRead(value, ref.steps())
+      return !guards.untested(binding) && guards.guardedReadAt(value, ref.text(ref.length))
         ? marked(items)
         : items;
     }
     const projection = program.projOf.get(value);
     if (projection !== undefined) {
       if (projection.step === "iteration")
-        return yield* contractIteration(contract, projection.owner, ref.steps());
+        // (an iteration's and a length's walk read arrays: a span's steps copied out, `stepsArray`)
+        return yield* contractIteration(contract, projection.owner, stepsArray(ref.steps()));
       if (measuresLength(projection.step))
-        return yield* contractLength(contract, projection.owner, projection.step, ref.steps());
+        return yield* contractLength(
+          contract,
+          projection.owner,
+          projection.step,
+          stepsArray(ref.steps()),
+        );
       const elements = yield* contract.contractOfValueAt(
         projection.owner,
-        ref.kind === "span"
-          ? ref.after([stepName(projection.step)])
-          : joinSteps([stepName(projection.step)], ref.steps()),
+        ref.after([stepName(projection.step)]),
       );
       if (!selectsElement(projection.step)) return elements;
       const owners = withoutEmpty(yield* contract.contractOfValue(projection.owner));
@@ -223,11 +234,15 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
         kind: "contract",
         file: site.file,
         offset: site.start,
-        make: () => contractOfOp(contract, operation, ref.steps()),
+        // (an operation's walk reads arrays: a span's steps copied out, `stepsArray`)
+        make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
       };
       return contract.entered(value, yield demand);
     }
-    return contract.entered(value, yield* contractOfOp(contract, operation, ref.steps()));
+    return contract.entered(
+      value,
+      yield* contractOfOp(contract, operation, stepsArray(ref.steps())),
+    );
   } finally {
     contract.pass.solver.leaveRead();
   }

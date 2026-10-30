@@ -9,6 +9,7 @@ import { propertyStep } from "../program.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 import { ingressLeafOf } from "./ingress.js";
+import type { Rest } from "./key-ids.js";
 import { emptyAt, propertyOnly, REFERENCE } from "./kinds.js";
 import type {
   IdentityWork,
@@ -606,7 +607,7 @@ export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWo
 export function* loadsBelow(
   contract: Contract,
   groups: readonly OtherGroup[],
-  after: readonly string[],
+  after: Rest,
   exact: boolean,
   node: FlowNode | null = null,
 ): Work<readonly Item[]> {

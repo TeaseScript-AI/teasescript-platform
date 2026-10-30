@@ -18,7 +18,15 @@ import { gatherAt, gatherCount, selectionPiece } from "./gather.js";
 import { OPAQUE_MEMBER, unknownItem } from "./kinds.js";
 import { nodeAt, pathAt } from "./literal-index.js";
 import type { GatherSite, IndexNode, IndexSite, LiteralIndex } from "./model.js";
-import { restPart, restRef, restSteps, type Rest } from "./key-ids.js";
+import {
+  restPart,
+  restRef,
+  restSteps,
+  someStepOf,
+  stepsFrom,
+  stepsRest,
+  type Rest,
+} from "./key-ids.js";
 import { selectionOf, selectionPieces } from "./selections.js";
 
 // A literal's items at a path from its index, and its type or its cell's stores at a path.
@@ -99,7 +107,8 @@ export function* indexItems(
     // (the rest below the path, made only for an entry that stands there)
     let tail: Rest | undefined;
     const after = (): Rest =>
-      (tail ??= rest.kind === "span" ? rest.from(length) : restSteps(asked).slice(length));
+      (tail ??=
+        rest.kind === "span" ? rest.from(length) : stepsRest(stepsFrom(restSteps(asked), length)));
     if (!exact) {
       // (each kind read one by one, or past `WIDE` of them as a tree of demands, so a ring of copies through a wide
       // literal changes only the nodes above each changed read, never the whole literal, #1229)
@@ -140,7 +149,9 @@ export function* indexItems(
         index,
         path,
         step === SELECTED_VALUE,
-        restSteps(asked).slice(length + 1),
+        rest.kind === "span"
+          ? rest.from(length + 1)
+          : stepsRest(stepsFrom(restSteps(asked), length + 1)),
         node,
         exact,
         elementAbove,
@@ -179,7 +190,7 @@ export function* indexItems(
     return out.map((item) =>
       item.tag === "unknown" || item.tag === "empty" ? item : { ...item, context: "member" },
     );
-  return exact && sources > 1 && (inElement || restSteps(asked).includes("element"))
+  return exact && sources > 1 && (inElement || someStepOf(asked, (step) => step === "element"))
     ? out.map((item) =>
         item.tag === "unknown" || item.tag === "empty"
           ? item
@@ -194,7 +205,7 @@ function* selectedAt(
   index: LiteralIndex,
   path: number,
   byValue: boolean,
-  after: readonly string[],
+  after: Rest,
   node: FlowNode | null,
   exact: boolean,
   below: boolean,

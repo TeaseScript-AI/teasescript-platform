@@ -7,7 +7,7 @@ import { marked } from "../guards.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
 import { stepName } from "../program.js";
 import { ABSENT } from "./kinds.js";
-import type { CanonicalKey, Rest } from "./key-ids.js";
+import type { CanonicalKey, PathSteps, Rest } from "./key-ids.js";
 import { wrapperFacts } from "./wrapper-facts.js";
 import { indexPaths, pathBelow } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
@@ -450,8 +450,8 @@ export function depthOf(contract: Contract, holder: Holder): number {
  * holder once at the path and `ABSENT`. k references asked below k different properties are asked once each, not
  * k times.
  */
-/** Whether a `Rest` is an array of steps (`key-ids.ts`' `isSteps`, which this module may not import). */
-function isPath(rest: Rest): rest is readonly string[] {
+/** Whether a `Rest` or a record's steps are an array (`key-ids.ts`' `isSteps`, which this module may not import). */
+function isPath(rest: Rest | PathSteps): rest is readonly string[] {
   return Array.isArray(rest);
 }
 
@@ -460,8 +460,10 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
   collectMarks(contract);
   // G3 3b: a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
   if (marksNothing(contract, holder)) return false;
-  // (a span's steps made through the charged boundary: a holder that marks nothing never asks them)
-  const read = isPath(asked) ? asked : asked.steps();
+  // (a span's steps made through the charged boundary, copied out for the walk's own paths: a holder that marks nothing
+  // never asks them)
+  const steps = isPath(asked) ? asked : asked.steps();
+  const read = isPath(steps) ? steps : steps.toArray();
   const work = contract.pass.program.work;
   const tested = contract.pass.guards.testedSteps();
   const stack: {

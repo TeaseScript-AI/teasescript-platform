@@ -11,7 +11,7 @@ import {
   keptSlice,
   type BudgetLimit,
 } from "./budget.js";
-import { type CanonicalKey, restSteps } from "./contract/key-ids.js";
+import { restSteps, stepsArray, type CanonicalKey, type Rest } from "./contract/key-ids.js";
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead } from "./consumers/finishing.js";
@@ -208,7 +208,7 @@ export class Consumers {
         run: (work) => this.solve(work),
         // (after a stop admission reads as every consumer does: the finishing read, TABLE r4.126)
         read: (value, node, at) =>
-          this.finishing ? finishingRead(this, value, node, restSteps(at)) : null,
+          this.finishing ? finishingRead(this, value, node, stepsArray(restSteps(at))) : null,
       },
       rejected,
       cycling,
@@ -264,7 +264,7 @@ export class Consumers {
   }
 
   /** A value's items at a node and a path, as a consumer's demand: past its allowance, its own key's contract. */
-  public valueRun(value: PlaceId, node: FlowNode | null, rest: readonly string[]): readonly Item[] {
+  public valueRun(value: PlaceId, node: FlowNode | null, rest: Rest): readonly Item[] {
     return this.run(this.pass.values.valueItems(value, node, rest), () =>
       this.pass.contract.contractOfValueAt(value, rest),
     );

@@ -13,6 +13,9 @@ import {
   keyStepsIn,
   restSteps,
   spanRef,
+  stepsArray,
+  stepsRest,
+  stepsText,
   type CanonicalKey,
   type KeyId,
   type PathRef,
@@ -185,7 +188,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
   if (inputs === null) return null;
   const { direct, prefixes } = inputs;
   if (memberOracle !== null && !lazily)
-    compareMembers(admission, root, path ?? keyStepsIn(contract, key), prefixes);
+    compareMembers(admission, root, stepsArray(path ?? keyStepsIn(contract, key)), prefixes);
   const found = decidedOf(admission, at, inputs);
   if (found === null || found.tags === null) return null;
   const { nullable, byWritten, permitsNull, decider, transfer, published } = found;
@@ -210,7 +213,10 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
   work.charge("checks", direct.length);
   for (const candidate of direct)
     if (candidate.d.how !== "argument" || transfer || lists.singleSite(candidate.d.fn))
-      candidates.set(keptParts(admission.work, candidate.d.uid, candidate.at), candidate);
+      candidates.set(
+        keptParts(admission.work, candidate.d.uid, stepsText(candidate.at)),
+        candidate,
+      );
   if (transfer && at.depth > 0)
     for (const d of [
       ...(definitions.byKey.get(keyOf(root, [])) ?? []),
@@ -220,8 +226,9 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
         candidates.set(keptParts(admission.work, d.uid, path!), { d, at: path! });
   for (const { key: prefix, rest: ref } of prefixes) {
     const stored = contract.prefixStores(prefix);
-    // (an array's rest as before; a cursor's span, its steps made only for a store taken as a candidate)
-    const rest: Rest = ref.kind === "span" ? ref : ref.steps();
+    // (an array's rest as before, a record's steps as theirs; a cursor's span, its steps made only for a store taken as
+    // a candidate)
+    const rest: Rest = ref.kind === "span" ? ref : stepsRest(ref.steps());
     const take = (d: Definition): void => {
       // (a span's steps made through the charged boundary, only for a store taken)
       const at =
@@ -231,14 +238,17 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
             ? rest.slice(1)
             : restSteps(rest.from(1));
       const members = admission.members.get(d);
+      // (a record's steps named by their record's text, `stepsText`, and read as theirs, `stepsRest`)
+      const named = stepsText(at);
+      const viewed = stepsRest(at);
       candidates.set(
-        keptParts(admission.work, d.uid, at),
-        members === undefined || !covers(admission, d, at) ? { d, at } : { d, at, members },
+        keptParts(admission.work, d.uid, named),
+        members === undefined || !covers(admission, d, viewed) ? { d, at } : { d, at, members },
       );
       // (beside or above a literal's alias cell its members are their own candidates: their own terms stand there)
-      if (members !== undefined && !covers(admission, d, at))
+      if (members !== undefined && !covers(admission, d, viewed))
         for (const member of members)
-          candidates.set(keptParts(admission.work, member.uid, at), { d: member, at });
+          candidates.set(keptParts(admission.work, member.uid, named), { d: member, at });
     };
     const takeAll = (stores: ReadonlySet<Definition | null>): void => {
       const { wholes, adds } = takeable(admission, stores, byWritten);
@@ -274,7 +284,7 @@ export function decide(admission: Admission, asked: DecidedAt, lazily = false): 
     const representative = admission.representative.get(candidate.d);
     if (
       representative !== undefined &&
-      candidates.get(joinParts(representative.uid, candidate.at))?.members !== undefined
+      candidates.get(joinParts(representative.uid, stepsText(candidate.at)))?.members !== undefined
     )
       candidates.delete(key);
   }
@@ -486,7 +496,7 @@ function compareMembers(
   // (a prefix's whole stores' classes and, below an element step, its adds', §4.5)
   for (const { key: prefix, rest } of prefixes) {
     // (the oracle's rest made, its steps through the charged boundary for a span)
-    const below = rest.steps();
+    const below = stepsArray(rest.steps());
     for (const add of below[0] === "element" ? [false, true] : [false])
       for (const representative of wholeOf(admission, prefix, add)) {
         const members = admission.members.get(representative);
@@ -528,21 +538,22 @@ function concreteSite(
   prefixes: readonly { readonly key: Key; readonly rest: PathRef }[],
 ): SourceSite | null {
   const { program, values } = admission.pass;
-  const tried = [
-    ...direct.map(({ d, at }) => ({ d, at })),
+  // (each its path's text: a span's its record's, `textOf`; an array's made plain, as before)
+  const tried: { readonly d: Definition; readonly text: string }[] = [
+    ...direct.map(({ d, at }) => ({ d, text: stepsText(at) })),
     ...prefixes.flatMap(({ key, rest }) =>
-      wholeOf(admission, key, false).map((d) => ({ d, at: rest.steps() })),
+      wholeOf(admission, key, false).map((d) => ({ d, text: rest.text(rest.length) })),
     ),
   ].sort((a, b) => admission.sourceOrder(a.d) - admission.sourceOrder(b.d));
   program.work.charge("checks", tried.length + sortCost(tried.length));
   const first = tried[0];
-  for (const { d, at } of tried) {
+  for (const { d, text } of tried) {
     if (d.value === undefined) continue;
     const stops = stopsOf(admission, d.value, d.node);
     const here = [
-      ...(stops.written.get(pathText(at)) ?? []),
-      ...(stops.values.get(pathText(at)) ?? []),
-      ...(stops.literals.get(pathText(at)) ?? []),
+      ...(stops.written.get(text) ?? []),
+      ...(stops.values.get(text) ?? []),
+      ...(stops.literals.get(text) ?? []),
     ].sort((x, y) => compareKeys(x.key, y.key));
     program.work.charge("checks", here.length + sortCost(here.length));
     for (const stop of here)

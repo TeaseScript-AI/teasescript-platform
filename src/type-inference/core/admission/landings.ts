@@ -1,5 +1,16 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { isKeyId, keyIdPath, stepsOfId, type KeyId } from "../contract/key-ids.js";
+import {
+  isKeyId,
+  isPathSteps,
+  keptStepsJoin,
+  keyIdPath,
+  stepsFrom,
+  stepsOfId,
+  stepsPrefixText,
+  stepsText,
+  type KeyId,
+  type Steps,
+} from "../contract/key-ids.js";
 import type { Admission } from "../admission.js";
 import {
   joinParts,
@@ -47,8 +58,11 @@ function lastAtLeast(tree: readonly number[], size: number, last: number, least:
 }
 
 /** Whether `path` starts with `prefix` (or is it). */
-function isPrefix(prefix: readonly string[], path: readonly string[]): boolean {
-  return prefix.length <= path.length && prefix.every((step, index) => path[index] === step);
+function isPrefix(prefix: Steps, path: Steps): boolean {
+  if (prefix.length > path.length) return false;
+  for (let index = 0; index < prefix.length; index += 1)
+    if (path.at(index) !== prefix.at(index)) return false;
+  return true;
 }
 
 /**
@@ -135,18 +149,17 @@ export function passThroughKey(admission: Admission, place: PlaceId, key: KeyId)
   return passThrough(admission, place, stepsOfId(admission.pass.contract, key));
 }
 
-export function passThrough(
-  admission: Admission,
-  place: PlaceId,
-  path: readonly string[],
-): PlaceId {
+export function passThrough(admission: Admission, place: PlaceId, path: Steps): PlaceId {
   const forest = copyForest(admission);
   if (!forest.parent.has(place)) return place;
   const own = forest.stores.get(place);
   const lists: (Storing | undefined)[] = [];
   for (let length = 1; length <= path.length; length += 1) {
     admission.pass.program.work.charge("indexSteps");
-    const text = keptText(admission.work, path.slice(0, length));
+    // (a record's prefix text through its record, `prefixText`; an array's made and charged as before)
+    const text = isPathSteps(path)
+      ? path.prefixText(length)
+      : keptText(admission.work, path.slice(0, length));
     if (own?.has(text) === true) return place;
     lists.push(forest.storing.get(text));
   }
@@ -705,25 +718,26 @@ function landingSteps(
 }
 
 /** `landed` itself, for a place and path. */
-function landedOwn(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+function landedOwn(admission: Admission, place: PlaceId, path: Steps): boolean {
   const { seeds, owned, cycleOf, cycles, fed, wholes } = inheritance(admission);
   const work = admission.pass.program.work;
   const memo = admission.landedPaths;
   const frames: {
     readonly key: string;
-    readonly path: readonly string[];
+    readonly path: Steps;
     readonly copies: readonly InheritedCopy[];
     next: number;
   }[] = [];
   // a place and path's answer where its own landings give it, else its frame, its copies' sources asked one by one;
-  // a place that answers through its parent answers as the copy it answers through (`passThrough`)
-  const open = (place: PlaceId, steps: readonly string[]): boolean | null => {
+  // a place that answers through its parent answers as the copy it answers through (`passThrough`); a record's steps
+  // spelled by their record
+  const open = (place: PlaceId, steps: Steps): boolean | null => {
     const at = steps.length === 0 ? place : passThrough(admission, place, steps);
-    const key = keptParts(admission.work, at, steps);
+    const text = stepsText(steps);
+    const key = keptParts(admission.work, at, text);
     const known = memo.get(key);
     if (known !== undefined) return known;
     work.charge("indexSteps");
-    const text = pathText(steps);
     const whole = wholes.get(at);
     const found =
       cycleOf.has(at) && !fed.has(at) && whole === undefined
@@ -758,7 +772,7 @@ function landedOwn(admission: Admission, place: PlaceId, path: readonly string[]
     const copy = frame.copies[frame.next++]!;
     answer = open(
       copy.from,
-      keptSteps(admission.work, copy.strip, frame.path.slice(copy.path.length)),
+      keptStepsJoin(admission.work, copy.strip, stepsFrom(frame.path, copy.path.length)),
     );
   }
   return memo.get(key)!;
@@ -910,7 +924,7 @@ function copyIndex(
 function copiesAlong(
   admission: Admission,
   place: PlaceId,
-  path: readonly string[],
+  path: Steps,
   under: boolean,
 ): readonly InheritedCopy[] {
   const work = admission.pass.program.work;
@@ -932,7 +946,9 @@ function copiesAlong(
   const positions: number[] = [];
   for (let length = 0; length <= path.length; length += 1) {
     work.charge("indexSteps");
-    const text = keptText(admission.work, path.slice(0, length));
+    // (a record's prefixes spelled by their record, charged as `keptText` charges an array's)
+    const text = stepsPrefixText(path, length);
+    keepText(admission.work, text.length);
     const found =
       length < path.length ? index.at.get(text) : under ? index.under.get(text) : undefined;
     for (const position of found ?? []) {

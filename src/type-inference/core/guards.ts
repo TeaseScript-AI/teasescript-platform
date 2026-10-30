@@ -2,15 +2,16 @@ import type { Expression } from "../../ast.js";
 import { expressionChildren, unwrap } from "../../expression-children.js";
 import type { PlaceId } from "../graph.js";
 import { conditionShape } from "../narrowing-shapes.js";
-import { joinSteps, keepText, keptText } from "./budget.js";
+import { keepText, keptText, pathText } from "./budget.js";
 import {
   isCursor,
-  KeyTrie,
   keptKey,
   keptPrefixes,
+  keyBelowText,
   keyOf,
   keyPath,
   keyPlace,
+  KeyTrie,
   recordKey,
   sortCost,
   type Key,
@@ -648,6 +649,11 @@ export class GuardIndex {
    * `rest` read further (§3.2).
    */
   public guardedRead(value: PlaceId, rest: readonly string[] = []): boolean {
+    return this.guardedReadAt(value, pathText(rest));
+  }
+
+  /** `guardedRead` at a path given by its text (a cursor's span's, spelled by its record: `PathRef.text`). */
+  public guardedReadAt(value: PlaceId, restText: string): boolean {
     const program = this.program;
     const steps: string[] = [];
     let current = value;
@@ -661,7 +667,7 @@ export class GuardIndex {
     if (binding === undefined || node === undefined || node === null) return false;
     // (a binding no test names guards no read of it, at whatever path: no key made, G3 stage 1)
     if (this.untested(binding)) return false;
-    return this.narrowed(keyOf(binding, joinSteps(steps.reverse(), rest)), node);
+    return this.narrowed(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
   }
 
   /** The tested keys `q` below each key, per relative path `q` (every split of every tested key's path). */

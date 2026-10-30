@@ -8,10 +8,23 @@ import {
   type Rest,
   restRef,
   restSteps,
+  stepsArray,
+  stepsPrefixText,
+  stepsText,
+  type Steps,
 } from "./key-ids.js";
-import { keepText, keptParts, keptSteps, keptText, pathText, stepText } from "../budget.js";
+import { keepText, keptParts, keptSteps, keptText, stepText } from "../budget.js";
 import type { Contract } from "../contract.js";
-import { keptKey, keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
+import {
+  keptKey,
+  keptKeyOfText,
+  keyOf,
+  keyOfText,
+  keyPath,
+  keyPlace,
+  type Definition,
+  type Key,
+} from "../definitions.js";
 import { firstWriter, REASON } from "../items.js";
 import { copyOnly, subFirstOf } from "./identity.js";
 import { ingressLeafOf } from "./ingress.js";
@@ -280,7 +293,10 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
         yield* adding(contract, f, {
           ...(e.key !== undefined
             ? { key: keptKeyBelowIn(contract, e.key, projection) }
-            : { value: e.value!, at: keptSteps(contract.work, e.at ?? [], projection) }),
+            : {
+                value: e.value!,
+                at: keptSteps(contract.work, e.at ?? [], stepsArray(projection)),
+              }),
           ...(e.guarded ? { guarded: true } : {}),
           ingress: e.ingress,
         });
@@ -372,7 +388,10 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
         for (let length = 1; length <= path.length && !direct && !isKeyId(copied); length += 1) {
           work.charge("invSteps");
           if (
-            (definitions.byKey.get(keyOf(keyPlace(copied), path.slice(0, length))) ?? []).length > 0
+            (
+              definitions.byKey.get(keyOfText(keyPlace(copied), stepsPrefixText(path, length))) ??
+              []
+            ).length > 0
           )
             direct = true;
         }
@@ -448,15 +467,13 @@ function aliasLayer(contract: Contract, inner: PrefixStores, place: PlaceId): Su
  * The layer a projected copy of `place` at `projection` takes: the place's own live stores below the path, once, from
  * the keys below the path alone (r4.46 (3): never the place's whole key set per copy).
  */
-function projectedLayer(
-  contract: Contract,
-  place: PlaceId,
-  projection: readonly string[],
-): SubLayer | null {
-  const id = keptParts(contract.work, place, projection);
+function projectedLayer(contract: Contract, place: PlaceId, projection: Steps): SubLayer | null {
+  // (a record's steps spelled by their record)
+  const text = stepsText(projection);
+  const id = keptParts(contract.work, place, text);
   if (contract.projectedLayers.has(id)) return contract.projectedLayers.get(id)!;
   const { program, definitions, lists } = contract.pass;
-  const sub = keptKey(contract.work, place, projection);
+  const sub = keptKeyOfText(contract.work, place, text);
   const own = new Map<string, Set<Key>>();
   for (const below of definitions.keysBelow(sub)) {
     program.work.charge("invSteps");
@@ -639,7 +656,7 @@ function walkLayer(
   top: SubLayer,
   brought: ReadonlySet<Definition | null>,
   step: string,
-  rest: readonly string[],
+  rest: Steps,
   found: Map<Key, Set<Definition | null>>,
 ): boolean {
   const work = contract.pass.program.work;
@@ -656,7 +673,7 @@ function walkLayer(
       let held = false;
       for (let length = 1; length <= rest.length && !held; length += 1) {
         work.charge("invSteps");
-        held = paths.has(pathText(rest.slice(0, length)));
+        held = paths.has(stepsPrefixText(rest, length));
       }
       if (!held) continue;
       let defs = found.get(sub);
