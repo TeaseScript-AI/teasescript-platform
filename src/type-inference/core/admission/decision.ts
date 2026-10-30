@@ -150,13 +150,17 @@ function decidedAtOf(at: At): DecidedAt {
   return at.path === null ? { root: at.root, key: at.key } : { root: at.root, path: at.path };
 }
 
-/** The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`. */
-export function copiedAt(admission: Admission, key: Key): TypeTerm | null {
-  return admission.decisions.get(key)?.copied ?? null;
+/**
+ * The written type a copy decides a key by in this pass's decision of it, whole below it (`Decided.copied`), or `null`;
+ * the key in its identity, as `decide` records it (a wrapper family's its cursor, G3 stage 1).
+ */
+export function copiedAt(admission: Admission, asked: Key): TypeTerm | null {
+  return admission.decisions.get(admission.pass.contract.canonicalKey(asked))?.copied ?? null;
 }
 
 /** The kinds this pass's decision of a key decided it by, or A3 settled it by (`Decided.settled`), or `null`. */
-export function kindsAt(admission: Admission, key: Key): readonly ItemTag[] | null {
+export function kindsAt(admission: Admission, asked: Key): readonly ItemTag[] | null {
+  const key = admission.pass.contract.canonicalKey(asked);
   return (
     admission.decided.get(key) ??
     admission.decisions.get(key)?.settled?.map((item) => item.tag) ??

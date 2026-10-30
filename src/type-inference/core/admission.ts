@@ -711,12 +711,11 @@ export class Admission {
   }
 
   public copiedAt(key: Key): TypeTerm | null {
-    // (a key in its identity, as `decide` records it: a wrapper family's its cursor, G3 stage 1)
-    return copiedAt(this, this.pass.contract.canonicalKey(key));
+    return copiedAt(this, key);
   }
 
   public kindsAt(key: Key): readonly ItemTag[] | null {
-    return kindsAt(this, this.pass.contract.canonicalKey(key));
+    return kindsAt(this, key);
   }
 
   public admitted(place: PlaceId, path: readonly string[]): ItemTag[] {
