@@ -149,24 +149,32 @@ test("the corpus runner compares a publication by its parts, also against a libr
 });
 
 /**
- * A built tree's library whose oracle stops its own questions on the source `stopped`, leaving two nodes unanswered
- * (`unanswered`), or one before that count, which hashes the same parts and has none.
+ * A built tree's library whose oracle stops its own questions on the source `stopped`, leaving two nodes unanswered:
+ * counted apart from its parts' hashes (`counted`), in its joined publication's fifth element (`whole`), or a library
+ * before that count (`before`), which hashes the same parts and has none.
  */
-const stopping = (counted: boolean): string => `import { createHash } from "node:crypto";
+const stopping = (
+  form: "before" | "counted" | "whole",
+): string => `import { createHash } from "node:crypto";
 export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
-export const publicationHashes = (files) => {
+${
+  form === "whole"
+    ? `export const publication = (files) =>
+  \`["A","R",[[1,"x"]],"T"\${files[0].source === "stopped" ? ',{"unanswered":2}' : ""}]\`;`
+    : `export const publicationHashes = (files) => {
   const parts = ['"A"', '"R"', '[1,"x"]', '"T"'].map((text) => createHash("sha256").update(text).digest("hex"));
-  return ${counted} ? { parts, unanswered: files[0].source === "stopped" ? 2 : 0 } : parts;
-};
+  return ${form === "counted"} ? { parts, unanswered: files[0].source === "stopped" ? 2 : 0 } : parts;
+};`
+}
 `;
 
 test("the corpus runner counts a publication its oracle left unanswered apart, never as agreement (#1499)", () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const [before, counted] = [false, true].map((form) => {
-      const tree = join(directory, form ? "counted" : "before");
+    const [before, counted, whole] = (["before", "counted", "whole"] as const).map((form) => {
+      const tree = join(directory, form);
       mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
       writeFileSync(join(tree, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(tree, "dist", "tests", "helpers", "type-core-oracles.js"), stopping(form));
@@ -178,10 +186,12 @@ test("the corpus runner counts a publication its oracle left unanswered apart, n
       join(area, "stops.mjs"),
       'export const cases = [["stopped", "stopped"], ["answered", "answered"]];\n',
     );
-    // the same stop on both trees, and on one against a library before the count: `answered` agrees in both
+    // the same stop on both trees, and a joined publication's against a library before the count and a counted one:
+    // `answered` agrees in each
     for (const [base, head, counts] of [
       [counted!, counted!, [2, 2]],
-      [before!, counted!, [0, 2]],
+      [before!, whole!, [0, 2]],
+      [whole!, counted!, [2, 2]],
     ] as const) {
       const out = join(directory, "out.jsonl");
       const result = spawnSync(process.execPath, [runner, area, base, head, "--out", out], {

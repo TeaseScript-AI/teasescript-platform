@@ -51,7 +51,8 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * A publication's parts, each by its hash, in the whole's order (#1503), and the nodes its oracle left unanswered
  * (`unanswered`): the tree's `publicationHashes`, which hashes each part as it is made and never holds the whole, as
  * this library writes it or as a library before `unanswered` did (its parts alone), or an older library's
- * `publication` split into the same parts; `null` when the files do not parse or resolve.
+ * `publication` split into the same parts, with the count its fifth element holds where it has one; `null` when the
+ * files do not parse or resolve.
  */
 function partHashes(oracle, files, mode, globals) {
   if (typeof oracle.publicationHashes === "function") {
@@ -60,10 +61,10 @@ function partHashes(oracle, files, mode, globals) {
   }
   const whole = oracle.publication(files, mode, globals);
   if (whole === null) return null;
-  const [answers, record, occurrences, route] = JSON.parse(whole);
+  const [answers, record, occurrences, route, stopped] = JSON.parse(whole);
   return {
     parts: [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part))),
-    unanswered: 0,
+    unanswered: stopped?.unanswered ?? 0,
   };
 }
 
