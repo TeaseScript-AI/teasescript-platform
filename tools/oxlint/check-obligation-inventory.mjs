@@ -80,6 +80,14 @@ export const READS = new Map([
   ],
   ["decisionStopped", "whether a key's decision stopped at its demand allowance: a test"],
   [
+    "decisionStoppedAt",
+    "whether a decided path's decision stopped at its demand allowance (a cursor's by its key): a test",
+  ],
+  [
+    "decisionWork",
+    "a decision's work record (its path a packet's for a cursor's, G3 stage 1): research data, no obligation",
+  ],
+  [
     "expand",
     "a stored value's recipe of the store walk (its own stop, its cells and operands): syntax, read",
   ],
@@ -99,6 +107,10 @@ export const READS = new Map([
   ["retained", "the decision admission retained before a stop: a decision's answer"],
   ["siteAt", "the site of an error for a store's contribution: a site, read"],
   ["sourceOrder", "a definition's place in source order"],
+  [
+    "stepsAt",
+    "a decided path's steps (a cursor's made through the charged boundary) for a stop's stores: `stoppedStores` owes their checks",
+  ],
   [
     "stopDecision",
     "takes back what a decision stopped at its demand allowance made of its key: each read of the key owes its own check",

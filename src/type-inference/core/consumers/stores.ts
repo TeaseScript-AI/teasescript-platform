@@ -7,6 +7,7 @@ import {
   isExternal,
   isOpaque,
   requiredKind,
+  type DecidedAt,
   type Decision,
 } from "../admission.js";
 import {
@@ -52,19 +53,15 @@ const writerRank = (writer: Writer | null): number =>
  * pass's work at most doubles (TABLE r4.183). A stopped decision stands for its stores' obligations
  * (`stoppedStores`), whichever pass stopped it.
  */
-export function decide(
-  walk: Consumers,
-  root: PlaceId,
-  path: readonly string[],
-  lazily = false,
-): Decision | null {
+export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decision | null {
+  const { root } = group;
   const ledger = walk.pass.program.work;
   const before = ledger.own;
   const allowance = demandAllowanceFor(walk.pass.program.flow.nodes.length);
   // (a key whose decision stopped, in this pass or before it, or a key below one: undecided, no decision runs)
-  if (walk.admission.decisionStopped(root, path)) {
-    walk.decisions.push({ place: root, path, units: 0, allowance, stopped: true });
-    walk.stoppedStores(root, path);
+  if (walk.admission.decisionStoppedAt(group)) {
+    walk.decisions.push(walk.admission.decisionWork(group, 0, allowance, true));
+    walk.stoppedStores(root, walk.admission.stepsAt(group));
     return null;
   }
   // (its work is the decision's, not a consumer read's)
@@ -72,19 +69,22 @@ export function decide(
   walk.deciding = before + allowance;
   let stopped = false;
   try {
-    return walk.admission.decide(root, path, lazily);
+    return walk.admission.decide(group, lazily);
   } catch (error) {
     if (!(error instanceof DemandExhausted)) throw error;
     stopped = true;
     walk.decisionStopped = true;
-    walk.admission.stopDecision(root, path);
-    walk.stoppedStores(root, path);
+    walk.admission.stopDecision(group);
+    // (a cursor's steps made once through the charged boundary, for its stores' obligations: G3 stage 1)
+    walk.stoppedStores(root, walk.admission.stepsAt(group));
     // (in a pass that restarted one whose decision stopped, a second stop stops the analysis: D4, TABLE r4.183)
     if (walk.restarted) throw new BudgetExhausted("work");
     return null;
   } finally {
     walk.deciding = null;
-    walk.decisions.push({ place: root, path, units: ledger.own - before, allowance, stopped });
+    walk.decisions.push(
+      walk.admission.decisionWork(group, ledger.own - before, allowance, stopped),
+    );
   }
 }
 
@@ -145,9 +145,14 @@ function writtenGroups(
 export function admittedStores(walk: Consumers, writtenOnly = false): void {
   const { program, definitions } = walk.pass;
   const admission = walk.admission;
-  for (const { root, path } of walk.order(writtenOnly ? writtenGroups(walk) : admission.groups())) {
-    const decision = decide(walk, root, path);
+  for (const group of walk.order<DecidedAt>(
+    writtenOnly ? writtenGroups(walk) : admission.groups(),
+  )) {
+    const decision = decide(walk, group);
     if (decision === null) continue;
+    // (a cursor's group's steps made through the charged boundary: G3 stage 1)
+    const { root } = group;
+    const path = group.path ?? admission.stepsAt(group);
     const { tags, nullable, decider } = decision;
     // (the label's text made where a diagnostic or a check shows it, not for every decision, TABLE r4.196)
     const label = (): string => labelText(walk.pass.contract, decision.label);
