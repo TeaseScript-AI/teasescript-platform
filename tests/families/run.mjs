@@ -22,16 +22,20 @@ async function oracles(root) {
   return import(pathToFileURL(file).href);
 }
 
-/** What `run` returns, as text; an exception's message where it throws (both trees are held to the same). */
+/**
+ * What `run` returns, as text (the publication's own text as it is: encoding it again would double a large one); an
+ * exception's message where it throws (both trees are held to the same).
+ */
 function attempt(run) {
   try {
-    return JSON.stringify(run());
+    const value = run();
+    return typeof value === "string" ? value : JSON.stringify(value);
   } catch (error) {
     return `error: ${String(error).slice(0, 300)}`;
   }
 }
 
-const hash = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
+const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on both trees
@@ -50,15 +54,18 @@ if (process.argv[2] === "--child") {
             (oracle) => oracle.stopSet(files, mode, globals, allowance),
           ]);
       for (const [check, run] of runs) {
-        const [was, is] = [attempt(() => run(base)), attempt(() => run(head))];
-        if (is === "null") reply.parsed = false;
+        // compared by hash, so that the base's text is not held while the head runs
+        const was = hash(attempt(() => run(base)));
+        const text = attempt(() => run(head));
+        if (text === "null") reply.parsed = false;
+        const is = hash(text);
         reply.runs += 1;
         if (was !== is)
           reply.differences.push({
             mode: `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`,
             check,
-            base: hash(was),
-            head: hash(is),
+            base: was.slice(0, 16),
+            head: is.slice(0, 16),
           });
       }
     }
