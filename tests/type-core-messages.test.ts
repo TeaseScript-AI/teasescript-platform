@@ -1505,11 +1505,12 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
 /**
  * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
  * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2), and following it
- * removes the warning (Astra r1's A1). Where the object comes from a load with a default, through copies, elements and
- * list literals too, the load's default is given the property; else no property check removes the warning (#1496), so
- * the words say where the type must come from and offer no check. A type with null takes no default that removes it yet
- * (#1470). A value that is the place keeps its own check. Each followed source compiles under both checkers and no
- * longer owes the warning.
+ * removes the warning (Astra r1's A1). Where the value is proven to be a load with a default, the load as its variable's
+ * one binding's `let` value or a read of a variable so bound that nothing writes to or below, the load's default is
+ * given the property; else, a write of any form, another binding of the name, a property, element or selection around
+ * the read (Codex r4's N1 to N3), no property check removes the warning (#1496), so the words say where the type must
+ * come from and offer no check. A type with null takes no default that removes it yet (#1470). A value that is the place
+ * keeps its own check. Each followed source compiles under both checkers and no longer owes the warning.
  */
 test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
   const load = 'load("prefs", default: {volume: 5})';
@@ -1547,23 +1548,59 @@ test("a store's property below the warned value is the property its fix names, a
       `Give 'entry' a whole number (integer) in the default of 'load("cfg", default: {marker: 8})'.`,
       `let original = load("cfg", default: {marker: 8, entry: 7})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
     ],
+    // (a load the whitelist does not prove: an element, a list literal, a selection around the read; Codex r4's N1, a
+    // write by an index and a mutator through parentheses; N2, two ways from one load; N3, an object's property named
+    // like a selection; another binding of the name, a parameter; a load that is not its variable's `let`'s value)
     [
       'let loaded = load("prefs", default: [{volume: 5}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
       "loaded[0]",
-      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
-      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
+      "Give 'prefs.caption' a whole number (integer) where 'loaded[0]' gets its value.",
+      null,
     ],
     [
       `let prefs = ${load}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
       "[{volume: 5}, prefs]",
-      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
-      `let prefs = ${given}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
+      "Give 'caption' of an element of 'items' a whole number (integer) where '[{volume: 5}, prefs]' gets its value.",
+      null,
     ],
     [
       `let saved = ${load}\nlet prefs = [saved, saved].random\nprefs.caption = 2\nexit\n`,
       "[saved, saved].random",
-      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
-      `let saved = ${given}\nlet prefs = [saved, saved].random\nprefs.caption = 2\nexit\n`,
+      "Give 'prefs.caption' a whole number (integer) where '[saved, saved].random' gets its value.",
+      null,
+    ],
+    ...["loaded[0] = hostValue", "(loaded).add(hostValue)"].map(
+      (write) =>
+        [
+          `let loaded = load("prefs", default: [{volume: 5}])\n${write}\nlet items = loaded\nitems[0].caption = 2\nexit\n`,
+          "loaded",
+          "Give 'caption' of an element of 'items' a whole number (integer) where 'loaded' gets its value.",
+          null,
+        ] as const,
+    ),
+    [
+      'let loaded = load("prefs", default: {left: {volume: 5}, right: {volume: 5}})\nlet prefs = [loaded.left, loaded.right].random\nprefs.caption = 2\nexit\n',
+      "[loaded.left, loaded.right].random",
+      "Give 'prefs.caption' a whole number (integer) where '[loaded.left, loaded.right].random' gets its value.",
+      null,
+    ],
+    [
+      'let loaded = load("prefs", default: {first: {volume: 5}})\nlet prefs = loaded.first\nprefs.caption = 2\nexit\n',
+      "loaded.first",
+      "Give 'prefs.caption' a whole number (integer) where 'loaded.first' gets its value.",
+      null,
+    ],
+    [
+      `function keep {\n    let prefs = ${load}\n    say "kept"\n}\nkeep()\nfunction use(prefs) {\n    let copy = prefs\n    copy.caption = 2\n}\nuse(hostValue)\nuse({volume: 1})\nexit\n`,
+      "prefs",
+      "Give 'copy.caption' a whole number (integer) where 'prefs' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = load("saved", default: {volume: 5})\nprefs = ${load}\nprefs.caption = 2\nexit\n`,
+      load,
+      `Give 'prefs.caption' a whole number (integer) where '${load}' gets its value.`,
+      null,
     ],
     // (host data: no property check removes the warning, Astra r1's host and kept lists)
     [

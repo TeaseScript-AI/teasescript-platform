@@ -127,10 +127,6 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "messages.ts elementOf join": [1, "a collection's code in a sentence, its property names joined"],
   "messages.ts errorSentence step": [8, "a sentence's period before its fix, no path"],
-  "messages.ts loadOf spread": [
-    3,
-    "the way from a warned value back to the load it comes from, made once for a fix after the analysis, 64 steps at most",
-  ],
   "messages.ts landingOf spread": [
     1,
     "the way from a variable to a warned value, made once for a fix after the analysis and dropped",
