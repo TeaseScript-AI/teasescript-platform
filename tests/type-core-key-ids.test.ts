@@ -10,12 +10,14 @@ import {
 } from "../src/type-inference/core/budget.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import {
+  canonicalRest,
   compareDemandNames,
   compareKeyIds,
   exportKeyIds,
   exportNames,
   importKeyIds,
   importNames,
+  isSteps,
   keyIdAt,
   keyIdBelow,
   keyIdDepth,
@@ -28,6 +30,7 @@ import {
   keyIdStep,
   keyOfId,
   memberStepIn,
+  restSteps,
   rootId,
   stepsOfId,
   type KeyId,
@@ -479,6 +482,31 @@ test("a key's text and its cursor are one key to admission's indexes: the paths 
   const byCursor = sharedPaths(admission, keyIdOf(pass.contract, box, ["shell"]), []);
   assert.deepEqual(byCursor, [["n"]]);
   assert.deepEqual(sharedPaths(admission, keyOf(box, ["shell"]), []), byCursor);
+});
+
+test("a wrapper's own literal asked by an array converts it to its span once: asked again by an equal array, it charges nothing and names the same span (a member chain asks one literal and rest at every level)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const box = bindingOf(pass, "box");
+  const own = [...pass.definitions.byValue].find(([, definitions]) =>
+    definitions.some(
+      (d) =>
+        d.place === box && d.how === "initializer" && d.kind === "whole" && d.path.length === 0,
+    ),
+  );
+  assert.ok(own !== undefined);
+  const first = probeMade(pass.contract, () =>
+    canonicalRest(pass.contract, own[0], ["shell", "n"]),
+  );
+  const again = probeMade(pass.contract, () =>
+    canonicalRest(pass.contract, own[0], ["shell", "n"]),
+  );
+  assert.ok(!isSteps(first.result));
+  assert.deepEqual(restSteps(first.result), ["shell", "n"]);
+  assert.ok(first.work.charged > 0);
+  assert.equal(again.work.charged, 0);
+  assert.equal(again.result, first.result);
 });
 
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
