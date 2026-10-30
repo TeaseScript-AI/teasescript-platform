@@ -15,18 +15,20 @@ node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dis
 ```
 
 Each source runs in the four modes (source and reversed order, the sharing on and off). The runner compares what it
-publishes (`publication`) and, for a generator whose `checks` include `"stops"`, which decisions stop and when at each
-demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap, or that ends
-its analysing process (a fatal V8 error), is counted as stalled with the reason (`--out`), and the runner goes on with
-the next. The runs its process had written before the runner ended it still count; one whose outcome it was still
-writing is lost with the process, and a final reply cannot finish the source once its timeout callback has run (#1498).
-After the kill the runner waits for the process and its pipes to close, so a descendant holding its stderr delays the
-next source (no compiler or oracle code spawns one). A run that throws on either tree is an exception, never compared,
-because identical exceptions on both trees are not agreement (#1439): the runner prints it on stderr with its source,
-mode and check, writes it with each stack to `--out` and counts it apart from stalls, in a source that stalls later too
-(`tests/families-runner.test.ts`, in CI). It prints one JSON line per generator and a total (sources, unparsed, stalled,
-exceptions, modes, runs, differences), and exits 1 when any run differs or throws or any source stalls. Run large sizes
-as one capped job per area or shard on a worker.
+publishes (`publication`) part by part (`publicationParts`: the answers, the record, each occurrence's answer and the
+route, in that order), so a publication too large for one string is still compared, and a difference names its first
+differing part by that index and each tree's count of parts (#1503); and, for a generator whose `checks` include
+`"stops"`, which decisions stop and when at each demand allowance (`stopSet`). A source that takes more than `--timeout`
+seconds or `--memory` MB of heap, or that ends its analysing process (a fatal V8 error), is counted as stalled with the
+reason (`--out`), and the runner goes on with the next. The runs its process had written before the runner ended it
+still count; one whose outcome it was still writing is lost with the process, and a final reply cannot finish the source
+once its timeout callback has run (#1498). After the kill the runner waits for the process and its pipes to close, so a
+descendant holding its stderr delays the next source (no compiler or oracle code spawns one). A run that throws on
+either tree is an exception, never compared, because identical exceptions on both trees are not agreement (#1439): the
+runner prints it on stderr with its source, mode and check, writes it with each stack to `--out` and counts it apart
+from stalls, in a source that stalls later too (`tests/families-runner.test.ts`, in CI). It prints one JSON line per
+generator and a total (sources, unparsed, stalled, exceptions, modes, runs, differences), and exits 1 when any run
+differs or throws or any source stalls. Run large sizes as one capped job per area or shard on a worker.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never

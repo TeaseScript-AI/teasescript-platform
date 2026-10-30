@@ -14,7 +14,8 @@ const library = `export const MODES = [false, true].flatMap((reversed) =>
 export function publication(files) {
   if (files[0].source.includes("throw"))
     throw new TypeError("Cannot read properties of undefined (reading 'map')");
-  return "published";
+  // (the four elements a publication's whole text has, as a library before \`publicationParts\` writes it)
+  return '["published","",[],""]';
 }
 `;
 
