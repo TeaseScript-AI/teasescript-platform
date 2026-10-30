@@ -322,7 +322,7 @@ type Walked =
       written: number;
     };
 
-/** The tags of the objects outside `jsonText`'s data: a primitive's wrapper (`Object(1)`), which no plan holds. */
+/** The tags of the objects outside `jsonText`'s data, a primitive's wrapper (`Object(1)`), which no plan holds. */
 const WRAPPERS = new Set([
   "[object Number]",
   "[object String]",
@@ -337,10 +337,11 @@ const WRAPPERS = new Set([
  */
 function writing(value: unknown, key: string): { readonly text: string } | Walked | null {
   let current = value;
-  // (`toJSON` first, as `JSON.stringify` calls it)
-  if (typeof current === "object" && current !== null && "toJSON" in current) {
-    const { toJSON } = current;
-    if (typeof toJSON === "function") current = toJSON.call(current, key);
+  // (`toJSON` first, read and called as `JSON.stringify` reads and calls it, on an object or a function)
+  if ((typeof current === "object" && current !== null) || typeof current === "function") {
+    // EVIDENCE: invariant: any object's property may be read, and `toJSON` is called only where it is a function.
+    const toJSON = (current as { readonly toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") current = Function.prototype.call.call(toJSON, current, key);
   }
   if (current === null) return { text: "null" };
   switch (typeof current) {
@@ -373,7 +374,8 @@ function writing(value: unknown, key: string): { readonly text: string } | Walke
  * (their own enumerable string keys, and their `toJSON`), arrays, strings, numbers, booleans and `null`, a member
  * without text (`undefined`, a function, a symbol) left out of an object or `null` in an array. The same text, with an
  * explicit stack, so a plan nested deeper than its recursion reaches (a 4,096-wide fan-out's, #1503) still has one; a
- * cycle or a BigInt throws as it does, and a primitive's wrapper or a raw JSON value, which no plan holds, throws.
+ * cycle or a BigInt throws as it does, and a primitive's wrapper (known by its tag) or a raw JSON value, which no plan
+ * holds, throws.
  *
  * @public (the desktop corpus's kits read it from a built tree, not by an import)
  */
