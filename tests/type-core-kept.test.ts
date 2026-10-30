@@ -274,7 +274,7 @@ function constructions(file: string, source: string): Map<string, string[]> {
  * keeps.
  */
 const PLAIN_TWIN =
-  /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf)\(/;
+  /\b(?:joinParts|pathText|keyOf|keyBelow|keyPathText|keyOfText|stepText|joinSteps|splitPath|keyPath|prefixesOf|keyAt|keyBelowIn|keyParentIn|keyStepsIn|keyAtRef|keyBelowRef)\(/;
 
 /** A charge or a kept helper: its call before a store, naming the text, charges it (`keepText(work, key.length)`). */
 const CHARGE = /(?:\b(?:kept\w*|keepText|keep|charge)|#kept|#keepText)\(/;

@@ -110,18 +110,22 @@ function componentDifferences(
   name: string,
   request: CoreAnalysisRequest,
 ): { readonly components: number; readonly differing: readonly string[] } {
-  const solved: (readonly SolvedMember[])[] = [];
-  withSolverSeam({ onComponent: (members) => solved.push(members) }, () =>
+  const solved: {
+    readonly members: readonly SolvedMember[];
+    readonly replay: { readonly names: readonly string[]; readonly packet: unknown } | null;
+  }[] = [];
+  withSolverSeam({ onComponent: (members, replay) => solved.push({ members, replay }) }, () =>
     compactAnalysis(request),
   );
   const differing: string[] = [];
-  for (const members of solved) {
-    const keys = members.map((member) => member.key);
+  for (const { members, replay } of solved) {
+    // (a cursor's name replayed through its component's packet, never by its ids: #1422 B1)
+    const keys = replay?.names ?? members.map((member) => member.key);
     const expected = members.map((member) => answer(member.items));
     for (const entry of keys)
       for (const reverseWorklist of [false, true]) {
         const got = withSolverSeam({ reverseWorklist }, () =>
-          solveDemands(request, [entry, ...keys]).slice(1),
+          solveDemands(request, [entry, ...keys], replay?.packet).slice(1),
         ).map(answer);
         keys.forEach((key, index) => {
           if (got[index] !== expected[index])

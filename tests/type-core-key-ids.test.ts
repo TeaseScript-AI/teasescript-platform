@@ -10,9 +10,12 @@ import {
 } from "../src/type-inference/core/budget.js";
 import { Contract } from "../src/type-inference/core/contract.js";
 import {
+  compareDemandNames,
   compareKeyIds,
   exportKeyIds,
+  exportNames,
   importKeyIds,
+  importNames,
   keyIdAt,
   keyIdBelow,
   keyIdDepth,
@@ -33,11 +36,13 @@ import {
 import {
   keyLane,
   withKeyRecords,
+  withTextKeys,
   wrapperShape,
   type KeyRecord,
 } from "../src/type-inference/core/contract/lanes.js";
 import type { WrapperHop } from "../src/type-inference/core/contract/model.js";
 import { keyOf } from "../src/type-inference/core/definitions.js";
+import { CoreProgram } from "../src/type-inference/core/program.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import { memberStep } from "../src/type-inference/core/method-categories.js";
 import type { Demand, Work } from "../src/type-inference/core/solver.js";
@@ -45,14 +50,14 @@ import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { probeMade } from "./helpers/type-core-made.js";
 import { narrowingPass } from "./helpers/type-core-narrowing.js";
-import { inMode, MODES } from "./helpers/type-core-oracles.js";
+import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 
 /*
- * G3 stage 1, PR 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
- * (`contract/lanes.ts`), exercised directly; no answer reads them yet. A cursor names one key of its pass whichever
- * way it is made, orders as its key's text, survives the pass's stops and forgets, and crosses passes only as a packet;
- * a family's lane is frozen at its first question, by the binding's wrapper shape alone; what the conversions walk and
- * make grows with what they charge (`helpers/type-core-made.ts`).
+ * G3 stage 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
+ * (`contract/lanes.ts`), exercised directly and through the decided paths that carry them (PR 3). A cursor names one
+ * key of its pass whichever way it is made, orders as its key's text, survives the pass's stops and forgets, and
+ * crosses passes only as a packet; a family's lane is frozen at its first question, by the binding's wrapper shape
+ * alone; what the conversions walk and make grows with what they charge (`helpers/type-core-made.ts`).
  */
 
 const GLOBALS = ["hostValue", "hostOther", "hostInit"];
@@ -170,6 +175,12 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
           expected,
           `${texts[a]} ? ${texts[b]}`,
         );
+        // (and in demands' names, as the solver orders a component's members: #1398)
+        assert.equal(
+          compareDemandNames(contract, joinParts("c", inOrder[a]!), joinParts("c", inOrder[b]!)),
+          expected,
+          `c|${texts[a]} ? c|${texts[b]}`,
+        );
       }
     ids.push(inOrder);
   }
@@ -217,6 +228,18 @@ test("#1422 B1: a replayed demand's key comes through a packet from the pass tha
     assert.notEqual(raw, key);
     assert.notDeepEqual(tags(solveDemands(source, [joinParts("c", raw)])[0]!), intended);
   }
+  // the same through a replayed component's names, their cursors by the names' packet (the solver's replay seam)
+  const exported = exportNames(old.contract, [joinParts("c", ids[0]!), joinParts("c", ids[1]!)])!;
+  const sent: unknown = JSON.parse(JSON.stringify(exported.packet));
+  assert.deepEqual(
+    importNames(fresh.contract, exported.names, sent),
+    ids.map((id) => joinParts("c", keyOfId(old.contract, id))),
+  );
+  for (const [index, name] of exported.names.entries())
+    assert.deepEqual(
+      tags(solveDemands(source, [name], sent)[0]!),
+      tags(old.solver.run(old.contract.contractOf(keyOfId(old.contract, ids[index]!)))),
+    );
 });
 
 test("a cursor outlives its pass's stops and forgets, its family's lane too, while a stop vetoes the wrapper live and forgets a reader that read the cursor's demand finished (#1405)", () => {
@@ -465,9 +488,18 @@ test("a family's lane is the binding's whichever read asks; a question while its
       assert.equal(keyLane(pass.contract, box, "shell"), "cursor");
       assert.equal(keyLane(pass.contract, box, null), "text");
     });
+    // (the family's own records: G3 stage 1's keys born while its shape is found ask their own families' lanes, a
+    // host global's here, text by the program's facts alone)
     assert.deepEqual(
-      records.map((record) => `${record.kind} ${record.hit}`),
+      records
+        .filter((record) => record.binding === box)
+        .map((record) => `${record.kind} ${record.hit}`),
       ["shape false", "lane false", "lane true"],
+    );
+    assert.ok(
+      records
+        .filter((record) => record.binding !== box)
+        .every((record) => record.kind === "lane" && record.facts && record.lane === "text"),
     );
     // a read of a host global: its ingress vetoes the wrapper live, and its binding has no shape
     const host = pass.program.places.find((place) =>
@@ -514,6 +546,38 @@ test("a family's lane is the binding's whichever read asks; a question while its
     const pass = narrowingPass(request(wrapped(3, "store-before")));
     assert.equal(keyLane(pass.contract, bindingOf(pass, "a1"), "q"), "text");
     assert.equal(keyLane(pass.contract, bindingOf(pass, "a0"), "q"), "cursor");
+  }
+});
+
+test("a pass freezes its read families' lanes first (`selectLanes`); a family first asked while the marks are built (a wrapper's read inside a literal) keeps the fallback: text for the pass, never promoted, its answers the text lane's", () => {
+  // (`a0.q` read alone, `b0.r` inside a literal; selected in either order, the marks built in the first shape)
+  const reads = ["let x = a0.q.f", "let xs = [b0.r.f]"];
+  for (const order of [reads, [...reads].reverse()]) {
+    const source = request(
+      `let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nlet b0 = {r: root}\n${order.join("\n")}\nexit\n`,
+    );
+    const places = new CoreProgram(source).places.filter(({ kind }) => kind.kind === "binding");
+    const bindings = places.map(({ id }) => id);
+    const [a0, b0] = ["a0", "b0"].map((label) => places.find((place) => place.label === label)!.id);
+    for (const mode of MODES) {
+      const { result, records } = withKeyRecords(() => inMode(mode, () => analyseCore(source)));
+      const lanes = records.filter((record) => record.kind === "lane");
+      const inLiteral = lanes.filter((record) => record.binding === b0 && record.step === "r");
+      const alone = lanes.filter((record) => record.binding === a0 && record.step === "q");
+      const where = `${order[0]} first, ${mode.reversed ? "reversed" : "source"}, ${mode.unshared ? "unshared" : "shared"}`;
+      assert.ok(inLiteral[0]?.building === true, where);
+      assert.ok(
+        inLiteral.slice(1).every((record) => record.hit && record.lane === "text"),
+        where,
+      );
+      assert.ok(alone.length > 0 && alone.every((record) => record.lane === "cursor"), where);
+      const text = withTextKeys(() => inMode(mode, () => analyseCore(source)));
+      assert.equal(
+        publishedAnswers(result, bindings, source).text,
+        publishedAnswers(text, bindings, source).text,
+        where,
+      );
+    }
   }
 });
 
@@ -695,15 +759,26 @@ const MADE_FORMS: readonly (readonly [string, RegExp])[] = [
 
 /** The ones there are, by file and form, and why each is bounded or charged. */
 const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
-  "key-ids.ts template": [4, "the cursor's type and text (two numbers); two error messages"],
+  "key-ids.ts template": [
+    7,
+    "the cursor's type and text (two numbers); two error messages; a span's name (a path's id after a dot); a replayed name's cursor and span tokens (numbers, `exportNames`)",
+  ],
   "key-ids.ts slice": [
-    5,
-    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`)",
+    15,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`arrayRef`, three); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
+  ],
+  "key-ids.ts concatenation": [
+    3,
+    "a demand name with its cursors' texts, charged and kept once per name (`compareDemandNames`); a component's names for a replay and back (`exportNames`, `importNames`, the solver's test seam)",
   ],
   "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
   "lanes.ts joinParts": [
     2,
     "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",
+  ],
+  "lanes.ts slice": [
+    1,
+    "a recorded question's stack frames, under `withKeyRecords`' sites alone (evidence, `producer`)",
   ],
 };
 
@@ -725,4 +800,29 @@ test("the cursor modules make no text but the listed ones, each bounded or charg
     found,
     Object.fromEntries(Object.entries(MADE_LISTED).map(([key, [count]]) => [key, count])),
   );
+});
+
+test("the early selector alone (\`withTextKeys\`, criterion 3's seam): every family's keys their text, its shapes still found, its answers the cursors'", () => {
+  const source = request(wrapped(4, "every-depth"));
+  const bindings = new CoreProgram(source).places
+    .filter(({ kind }) => kind.kind === "binding")
+    .map(({ id }) => id);
+  const cursors = publishedAnswers(analyseCore(source), bindings, source).text;
+  const { result, records } = withKeyRecords(() => withTextKeys(() => analyseCore(source)));
+  assert.equal(publishedAnswers(result, bindings, source).text, cursors);
+  assert.ok(records.some((record) => record.kind === "shape" && record.outcome === "wrapper"));
+  assert.ok(records.every((record) => record.kind !== "lane" || record.lane === "text"));
+});
+
+test("a wrapper's own cell copying a written binding lands below its place's own key (A4): its cursor's path is decided, and the plan checks it, as the text lane does (the corpus's `null/direct` cases)", () => {
+  const files = [
+    {
+      path: "main.tease",
+      source:
+        "let typed:null=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
+    },
+  ];
+  const { result, records } = withKeyRecords(() => publishedRoute(files, GLOBALS));
+  assert.ok(records.some((record) => record.kind === "lane" && record.lane === "cursor"));
+  assert.equal(result.text, withTextKeys(() => publishedRoute(files, GLOBALS)).text);
 });
