@@ -75,12 +75,12 @@ test("the corpus runner fails four identical exceptions instead of counting them
 });
 
 /**
- * A built tree's library that publishes as one whole (`whole`) or only by parts, where joining them throws: the source
- * `same` publishes the same on both, `changed` changes the second occurrence on the parts tree, `longer` adds one.
+ * A built tree's library that publishes as one whole (`whole`) or only by its parts' hashes, where the whole throws:
+ * the source `same` publishes the same on both, `changed` changes the second occurrence on the parts tree, `longer`
+ * adds one.
  */
-const publishing = (
-  whole: boolean,
-): string => `export const MODES = [false, true].flatMap((reversed) =>
+const publishing = (whole: boolean): string => `import { createHash } from "node:crypto";
+export const MODES = [false, true].flatMap((reversed) =>
   [false, true].map((unshared) => ({ reversed, unshared })),
 );
 const occurrences = (source) =>
@@ -96,12 +96,10 @@ export function publication(files) {
 ${
   whole
     ? ""
-    : `export const publicationParts = (files) => ({
-  answers: '"A"',
-  record: '"R"',
-  occurrences: occurrences(files[0].source).map((occurrence) => JSON.stringify(occurrence)),
-  route: '"T"',
-});`
+    : `export const publicationHashes = (files) =>
+  ['"A"', '"R"', ...occurrences(files[0].source).map((occurrence) => JSON.stringify(occurrence)), '"T"'].map(
+    (text) => createHash("sha256").update(text).digest("hex"),
+  );`
 }
 `;
 

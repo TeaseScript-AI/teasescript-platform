@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import type { Diagnostic } from "../../src/diagnostics.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
@@ -205,30 +207,36 @@ function itemText(item: Item): string {
 
 /**
  * Every occurrence's answer (each item by `itemText`, its items in `order`), route, place and obligations, with its
- * element's and its properties' answers where it holds a collection or an object.
+ * element's and its properties' answers where it holds a collection or an object: one at a time, as asked.
  */
-export function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
+function* occurrenceAnswers(
+  answers: Answers,
+  order: (items: string[]) => string[],
+): Generator<unknown> {
   const items = (list: readonly Item[]): string[] => order(list.map(itemText));
-  return answers.graph.nodes.flatMap((node) => {
+  for (const node of answers.graph.nodes) {
     const at = answers.at(node);
-    if (at === null) return [];
+    if (at === null) continue;
     const tags = new Set(at.items.map((item) => item.tag));
-    return [
-      [
-        node.id,
-        at.route,
-        at.place,
-        items(at.items),
-        at.obligations,
-        tags.has("list") || tags.has("set") || tags.has("dict")
-          ? items(answers.project(node, "element"))
-          : null,
-        tags.has("object")
-          ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
-          : null,
-      ],
+    yield [
+      node.id,
+      at.route,
+      at.place,
+      items(at.items),
+      at.obligations,
+      tags.has("list") || tags.has("set") || tags.has("dict")
+        ? items(answers.project(node, "element"))
+        : null,
+      tags.has("object")
+        ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
+        : null,
     ];
-  });
+  }
+}
+
+/** Every occurrence's answer (`occurrenceAnswers`), all of them. */
+export function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
+  return [...occurrenceAnswers(answers, order)];
 }
 
 /**
@@ -460,17 +468,22 @@ export interface PublicationParts {
 }
 
 /**
- * What `files` publish in `mode`, part by part (`publication` joins them): a publication too large for one string is
- * still compared, each part on its own (#1503). Every question the finished analysis is asked spends its allowance and
- * stops there (`asked`), as the backend's do. `null` when the files do not parse or resolve.
- *
- * @public (the generator corpus's runner reads it from a built tree, not by an import)
+ * A publication's elements as JSON texts, each occurrence's text mapped by `each` as it is made, so that a caller who
+ * keeps less than the text never holds them all. Every question the finished analysis is asked spends its allowance and
+ * stops there (`asked`, which makes the occurrences again on the stopped answers), as the backend's do. `null` when the
+ * files do not parse or resolve.
  */
-export function publicationParts(
+function publishedElements<Occurrence>(
   files: readonly SourceFile[],
   mode: Mode,
   globals: readonly string[],
-): PublicationParts | null {
+  each: (text: string) => Occurrence,
+): {
+  readonly answers: string;
+  readonly record: string;
+  readonly occurrences: readonly Occurrence[];
+  readonly route: string;
+} | null {
   const request = coreRequest(files, globals);
   if (request === null) return null;
   const bindings = new CoreProgram(request).places
@@ -484,11 +497,52 @@ export function publicationParts(
       answers: JSON.stringify(published.text),
       record: JSON.stringify(published.record),
       occurrences: asked(answers, (answers) =>
-        occurrences(answers, (items) => items).map((occurrence) => JSON.stringify(occurrence)),
+        Array.from(
+          occurrenceAnswers(answers, (items) => items),
+          (occurrence) => each(JSON.stringify(occurrence)),
+        ),
       ),
       route: JSON.stringify(route.text),
     };
   });
+}
+
+/**
+ * What `files` publish in `mode`, part by part (`publication` joins them): a publication too large for one string is
+ * still had, each part on its own (#1503). `null` when the files do not parse or resolve.
+ */
+export function publicationParts(
+  files: readonly SourceFile[],
+  mode: Mode,
+  globals: readonly string[],
+): PublicationParts | null {
+  return publishedElements(files, mode, globals, (text) => text);
+}
+
+/** A text's sha256, in hexadecimal. */
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/**
+ * What `files` publish in `mode` (`publicationParts`), each part by its sha256 in the whole's order, an occurrence's
+ * hashed as it is made: no more than one occurrence's text is held, so a publication of any size is compared part by
+ * part (#1503). `null` when the files do not parse or resolve.
+ *
+ * @public (the generator corpus's runner reads it from a built tree, not by an import)
+ */
+export function publicationHashes(
+  files: readonly SourceFile[],
+  mode: Mode,
+  globals: readonly string[],
+): readonly string[] | null {
+  const elements = publishedElements(files, mode, globals, sha256);
+  return elements === null
+    ? null
+    : [
+        sha256(elements.answers),
+        sha256(elements.record),
+        ...elements.occurrences,
+        sha256(elements.route),
+      ];
 }
 
 /**

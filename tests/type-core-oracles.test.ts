@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { analyseCore, type Answers } from "../src/type-inference/core/answers.js";
@@ -14,6 +15,7 @@ import {
   MODES,
   occurrences,
   publication,
+  publicationHashes,
   publicationParts,
   publishedAnswers,
   publishedRoute,
@@ -88,7 +90,7 @@ const SMALL = [
   "let v = hostValue\nlet w = {p: v}\nsay w.p\nexit\n",
 ];
 
-test("a finished analysis's questions past its allowance stop there in each projection, never escaping it (#1503)", () => {
+test("each projection's questions past a finished analysis's allowance stop there, never escaping (#1503)", () => {
   const files = main(SMALL[0]!);
   const request = coreRequest(files, GLOBALS);
   assert.ok(request !== null);
@@ -139,8 +141,18 @@ test("a publication is its parts joined, byte for byte as the whole was written 
       });
       assert.equal(publication(files, mode, GLOBALS), whole);
     }
+    // (the runner's form: each part's hash, the same texts)
+    const parts = publicationParts(files, MODES[0]!, GLOBALS);
+    assert.ok(parts !== null);
+    assert.deepEqual(
+      publicationHashes(files, MODES[0]!, GLOBALS),
+      [parts.answers, parts.record, ...parts.occurrences, parts.route].map((text) =>
+        createHash("sha256").update(text).digest("hex"),
+      ),
+    );
   }
   assert.equal(publicationParts(main("let = 1\n"), MODES[0]!, GLOBALS), null);
+  assert.equal(publicationHashes(main("let = 1\n"), MODES[0]!, GLOBALS), null);
   assert.equal(publication(main("let = 1\n"), MODES[0]!, GLOBALS), null);
 });
 

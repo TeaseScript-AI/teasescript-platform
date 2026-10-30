@@ -46,21 +46,17 @@ function attempt(run) {
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 /**
- * A publication's parts, each by its hash, in the whole's order (#1503): the tree's `publicationParts`, or an older
- * library's `publication` split into the same parts; `null` when the files do not parse or resolve. Where a tree gives
- * parts its whole text is never built, so a publication too large for one string is still compared.
+ * A publication's parts, each by its hash, in the whole's order (#1503): the tree's `publicationHashes`, which hashes
+ * each part as it is made and never holds the whole, or an older library's `publication` split into the same parts;
+ * `null` when the files do not parse or resolve.
  */
-function publicationHashes(oracle, files, mode, globals) {
-  if (typeof oracle.publicationParts !== "function") {
-    const whole = oracle.publication(files, mode, globals);
-    if (whole === null) return null;
-    const [answers, record, occurrences, route] = JSON.parse(whole);
-    return [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part)));
-  }
-  const parts = oracle.publicationParts(files, mode, globals);
-  return parts === null
-    ? null
-    : [parts.answers, parts.record, ...parts.occurrences, parts.route].map(hash);
+function partHashes(oracle, files, mode, globals) {
+  if (typeof oracle.publicationHashes === "function")
+    return oracle.publicationHashes(files, mode, globals);
+  const whole = oracle.publication(files, mode, globals);
+  if (whole === null) return null;
+  const [answers, record, occurrences, route] = JSON.parse(whole);
+  return [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part)));
 }
 
 /** A run's result by its hash, with a publication's part hashes (`parts`), and whether the files did not parse. */
@@ -100,7 +96,7 @@ if (process.argv[2] === "--child") {
       const label = `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`;
       const runs = [];
       if (checks.includes("publication"))
-        runs.push(["publication", (oracle) => publicationHashes(oracle, files, mode, globals)]);
+        runs.push(["publication", (oracle) => partHashes(oracle, files, mode, globals)]);
       if (checks.includes("stops"))
         for (const allowance of allowances)
           runs.push([
