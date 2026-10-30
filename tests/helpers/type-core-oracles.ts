@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import type { Diagnostic } from "../../src/diagnostics.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
@@ -205,39 +207,49 @@ function itemText(item: Item): string {
 
 /**
  * Every occurrence's answer (each item by `itemText`, its items in `order`), route, place and obligations, with its
- * element's and its properties' answers where it holds a collection or an object.
+ * element's and its properties' answers where it holds a collection or an object: one at a time, as asked.
  */
-function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
+function* occurrenceAnswers(
+  answers: Answers,
+  order: (items: string[]) => string[],
+): Generator<unknown> {
   const items = (list: readonly Item[]): string[] => order(list.map(itemText));
-  return answers.graph.nodes.flatMap((node) => {
+  for (const node of answers.graph.nodes) {
     const at = answers.at(node);
-    if (at === null) return [];
+    if (at === null) continue;
     const tags = new Set(at.items.map((item) => item.tag));
-    return [
-      [
-        node.id,
-        at.route,
-        at.place,
-        items(at.items),
-        at.obligations,
-        tags.has("list") || tags.has("set") || tags.has("dict")
-          ? items(answers.project(node, "element"))
-          : null,
-        tags.has("object")
-          ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
-          : null,
-      ],
+    yield [
+      node.id,
+      at.route,
+      at.place,
+      items(at.items),
+      at.obligations,
+      tags.has("list") || tags.has("set") || tags.has("dict")
+        ? items(answers.project(node, "element"))
+        : null,
+      tags.has("object")
+        ? [...answers.properties(node)].map(([name, answer]) => [name, items(answer)])
+        : null,
     ];
-  });
+  }
+}
+
+/** Every occurrence's answer (`occurrenceAnswers`), all of them. */
+export function occurrences(answers: Answers, order: (items: string[]) => string[]): unknown[] {
+  return [...occurrenceAnswers(answers, order)];
 }
 
 /**
  * What a program publishes with two orders set aside (TABLE r4.185, G5's stops whose own entries merge into one): the
  * order of the items in an answer and of the kinds in a decided admitted type. Every binding's admitted type and decider
  * site at its root, its element and each known property two levels down; every occurrence's answer (`occurrences`, its
- * items sorted).
+ * items sorted). Its questions spend the analysis's allowance and stop there (`asked`).
  */
 export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
+  return asked(answers, (answers) => upToOrder(answers, bindings));
+}
+
+function upToOrder(answers: Answers, bindings: readonly PlaceId[]): string {
   const admitted = (place: PlaceId, path: readonly string[]): AdmittedType => {
     const type = answers.place(place, path).admitted;
     return type.by === "decided"
@@ -264,9 +276,14 @@ export function publishedUpToOrder(answers: Answers, bindings: readonly PlaceId[
 
 /**
  * A program's outcome, diagnostics and checks, and every expression occurrence's answer (its offset, route, place,
- * obligations and items whole, each with its ingress leaves), in their order.
+ * obligations and items whole, each with its ingress leaves), in their order. Its questions spend the analysis's
+ * allowance and stop there (`asked`).
  */
 export function everyAnswer(answers: Answers): string {
+  return asked(answers, allAnswers);
+}
+
+function allAnswers(answers: Answers): string {
   const occurrences = answers.graph.nodes.flatMap((node) => {
     const at = node.kind === "expression" ? answers.at(node) : null;
     if (at === null) return [];
@@ -282,9 +299,14 @@ export function everyAnswer(answers: Answers): string {
 
 /**
  * Every occurrence's items with their writers and their ingress leaves sorted (#1196: each ingress names its own leaf,
- * whatever order the leaves are found in), one line per node.
+ * whatever order the leaves are found in), one line per node. Its questions spend the analysis's allowance and stop
+ * there (`asked`).
  */
 export function ingressAnswers(answers: Answers): string {
+  return asked(answers, ingressLines);
+}
+
+function ingressLines(answers: Answers): string {
   const itemText = ({ ingress, writer, ...rest }: Item): string =>
     JSON.stringify({
       ...rest,
@@ -299,6 +321,124 @@ export function ingressAnswers(answers: Answers): string {
     .join("\n");
 }
 
+/** An array or an object `jsonText` walks: an array by index to its length on entry, an object by its own keys. */
+type Walked =
+  | { readonly array: readonly unknown[]; readonly length: number; next: number; written: number }
+  | {
+      readonly object: Readonly<Record<string, unknown>>;
+      readonly keys: Iterator<string>;
+      written: number;
+    };
+
+/** The tags of the objects outside `jsonText`'s data, a primitive's wrapper (`Object(1)`), which no plan holds. */
+const WRAPPERS = new Set([
+  "[object Number]",
+  "[object String]",
+  "[object Boolean]",
+  "[object BigInt]",
+]);
+
+/**
+ * How `JSON.stringify` writes `value` as the member `key`: its text, no text (`null`: an object leaves the member out,
+ * an array writes `null`), or a walk of its members. A BigInt throws, as `JSON.stringify` does without a
+ * `BigInt.prototype.toJSON`; a primitive's wrapper or a raw JSON value throws, outside the data `jsonText` writes.
+ */
+function writing(value: unknown, key: string): { readonly text: string } | Walked | null {
+  let current = value;
+  // (`toJSON` first, read and called as `JSON.stringify` reads and calls it, on an object or a function)
+  if ((typeof current === "object" && current !== null) || typeof current === "function") {
+    // EVIDENCE: invariant: any object's property may be read, and `toJSON` is called only where it is a function.
+    const toJSON = (current as { readonly toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") current = Function.prototype.call.call(toJSON, current, key);
+  }
+  if (current === null) return { text: "null" };
+  switch (typeof current) {
+    case "boolean":
+      return { text: String(current) };
+    case "string":
+      return { text: JSON.stringify(current) };
+    case "number":
+      return { text: Number.isFinite(current) ? String(current) : "null" };
+    case "bigint":
+      throw new TypeError("Do not know how to serialize a BigInt");
+    case "object": {
+      if (Array.isArray(current))
+        return { array: current, length: current.length, next: 0, written: 0 };
+      if (WRAPPERS.has(Object.prototype.toString.call(current)))
+        throw new TypeError("jsonText writes plan data, not a primitive's wrapper object.");
+      if ("isRawJSON" in JSON && typeof JSON.isRawJSON === "function" && JSON.isRawJSON(current))
+        throw new TypeError("jsonText writes plan data, not a raw JSON value.");
+      // EVIDENCE: invariant: JSON.stringify reads a non-array object by its own enumerable string keys, as this does.
+      const object = current as Readonly<Record<string, unknown>>;
+      return { object, keys: Object.keys(object)[Symbol.iterator](), written: 0 };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * `JSON.stringify(value)` without its recursion, for the data a plan and its diagnostics hold: objects of any class
+ * (their own enumerable string keys, and their `toJSON`), arrays, strings, numbers, booleans and `null`, a member
+ * without text (`undefined`, a function, a symbol) left out of an object or `null` in an array. The same text, with an
+ * explicit stack, so a plan nested deeper than its recursion reaches (a 4,096-wide fan-out's, #1503) still has one; a
+ * cycle or a BigInt throws as it does, and a primitive's wrapper (known by its tag) or a raw JSON value, which no plan
+ * holds, throws.
+ *
+ * @public (the desktop corpus's kits read it from a built tree, not by an import)
+ */
+export function jsonText(value: unknown): string | undefined {
+  const top = writing(value, "");
+  if (top === null) return undefined;
+  if ("text" in top) return top.text;
+  const text: string[] = [];
+  const open = new Set<unknown>();
+  const stack: Walked[] = [];
+  const enter = (walked: Walked): void => {
+    const container = "array" in walked ? walked.array : walked.object;
+    if (open.has(container)) throw new TypeError("Converting circular structure to JSON");
+    open.add(container);
+    text.push("array" in walked ? "[" : "{");
+    stack.push(walked);
+  };
+  enter(top);
+  for (let frame = stack.at(-1); frame !== undefined; frame = stack.at(-1)) {
+    let key: string;
+    let member: unknown;
+    if ("array" in frame) {
+      if (frame.next === frame.length) {
+        text.push("]");
+        open.delete(frame.array);
+        stack.pop();
+        continue;
+      }
+      key = String(frame.next);
+      member = frame.array[frame.next];
+      frame.next += 1;
+    } else {
+      const next = frame.keys.next();
+      if (next.done === true) {
+        text.push("}");
+        open.delete(frame.object);
+        stack.pop();
+        continue;
+      }
+      key = next.value;
+      member = frame.object[key];
+    }
+    const own = writing(member, key);
+    // (an object leaves out a member without text, an array writes `null` for it)
+    if (own === null && !("array" in frame)) continue;
+    if (frame.written > 0) text.push(",");
+    frame.written += 1;
+    if (!("array" in frame)) text.push(JSON.stringify(key), ":");
+    if (own === null) text.push("null");
+    else if ("text" in own) text.push(own.text);
+    else enter(own);
+  }
+  return text.join("");
+}
+
 /** The candidate route's part: its plan and diagnostics of `files`, or the construct it rejects them at (`text`). */
 export function publishedRoute(
   files: readonly SourceFile[],
@@ -306,25 +446,44 @@ export function publishedRoute(
 ): { readonly plan: InstructionPlan | null | "outside"; readonly text: string } {
   try {
     const { plan, diagnostics } = compileProjectWithBackend(files, { globals }, CORE_BACKEND);
-    return { plan, text: JSON.stringify({ plan, diagnostics }) };
+    // (a plan may nest deeper than `JSON.stringify` can follow: `jsonText`)
+    const text = jsonText({ plan, diagnostics });
+    if (text === undefined) throw new Error("A route's plan and diagnostics have no JSON text.");
+    return { plan, text };
   } catch (error) {
     if (!(error instanceof CandidateOutsideSlice)) throw error;
     return { plan: "outside", text: JSON.stringify({ outside: error.what }) };
   }
 }
 
+/** A publication's parts (`publicationParts`), each the JSON text of its element of the whole, in the whole's order. */
+export interface PublicationParts {
+  /** `publishedAnswers`'s text and record. */
+  readonly answers: string;
+  readonly record: string;
+  /** Every occurrence's answer, one part each, in their order. */
+  readonly occurrences: readonly string[];
+  /** The candidate route's plan or rejection. */
+  readonly route: string;
+}
+
 /**
- * What `files` publish in `mode`, exactly (the G3 and #1405 evidence's publication): the answers (`publishedAnswers`'s
- * text and record), every occurrence's answer in its order, and the candidate route's plan or rejection; `null` when
- * the files do not parse or resolve. A corpus generator's base and head are compared by it.
- *
- * @public (the generator corpus's runner reads it from a built tree, not by an import)
+ * A publication's elements as JSON texts, each occurrence's text mapped by `each` as it is made, so that a caller who
+ * keeps less than the text never holds them all. Every question the finished analysis is asked spends its allowance and
+ * stops there (`asked`, which makes the occurrences again on the stopped answers), as the backend's do. `null` when the
+ * files do not parse or resolve.
  */
-export function publication(
+function publishedElements<Occurrence>(
   files: readonly SourceFile[],
   mode: Mode,
   globals: readonly string[],
-): string | null {
+  each: (text: string) => Occurrence,
+): {
+  readonly answers: string;
+  readonly record: string;
+  readonly occurrences: readonly Occurrence[];
+  readonly route: string;
+} | null {
   const request = coreRequest(files, globals);
   if (request === null) return null;
   const bindings = new CoreProgram(request).places
@@ -334,13 +493,74 @@ export function publication(
     const answers = analyseCore(request);
     const published = publishedAnswers(answers, bindings, request);
     const route = publishedRoute(files, globals);
-    return JSON.stringify([
-      published.text,
-      published.record,
-      occurrences(answers, (items) => items),
-      route.text,
-    ]);
+    return {
+      answers: JSON.stringify(published.text),
+      record: JSON.stringify(published.record),
+      occurrences: asked(answers, (answers) =>
+        Array.from(
+          occurrenceAnswers(answers, (items) => items),
+          (occurrence) => each(JSON.stringify(occurrence)),
+        ),
+      ),
+      route: JSON.stringify(route.text),
+    };
   });
+}
+
+/**
+ * What `files` publish in `mode`, part by part (`publication` joins them): a publication too large for one string is
+ * still had, each part on its own (#1503). `null` when the files do not parse or resolve.
+ */
+export function publicationParts(
+  files: readonly SourceFile[],
+  mode: Mode,
+  globals: readonly string[],
+): PublicationParts | null {
+  return publishedElements(files, mode, globals, (text) => text);
+}
+
+/** A text's sha256, in hexadecimal. */
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/**
+ * What `files` publish in `mode` (`publicationParts`), each part by its sha256 in the whole's order, an occurrence's
+ * hashed as it is made: no more than one occurrence's text is held, so a publication of any size is compared part by
+ * part (#1503). `null` when the files do not parse or resolve.
+ *
+ * @public (the generator corpus's runner reads it from a built tree, not by an import)
+ */
+export function publicationHashes(
+  files: readonly SourceFile[],
+  mode: Mode,
+  globals: readonly string[],
+): readonly string[] | null {
+  const elements = publishedElements(files, mode, globals, sha256);
+  return elements === null
+    ? null
+    : [
+        sha256(elements.answers),
+        sha256(elements.record),
+        ...elements.occurrences,
+        sha256(elements.route),
+      ];
+}
+
+/**
+ * What `files` publish in `mode`, exactly (the G3 and #1405 evidence's publication): the answers (`publishedAnswers`'s
+ * text and record), every occurrence's answer in its order, and the candidate route's plan or rejection, as one JSON
+ * array (`publicationParts` joined); `null` when the files do not parse or resolve.
+ *
+ * @public (the generator corpus's runner reads it from a built tree, not by an import)
+ */
+export function publication(
+  files: readonly SourceFile[],
+  mode: Mode,
+  globals: readonly string[],
+): string | null {
+  const parts = publicationParts(files, mode, globals);
+  return parts === null
+    ? null
+    : `[${parts.answers},${parts.record},[${parts.occurrences.join(",")}],${parts.route}]`;
 }
 
 /** Which admission decisions an analysis stops, and when; its restarts and how it ended. */

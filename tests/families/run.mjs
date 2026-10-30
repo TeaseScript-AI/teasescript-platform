@@ -2,14 +2,14 @@
 //   [--timeout 60] [--memory 2048] [--out differences.jsonl]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
-// compares what the sources publish (`publication`) and, for a generator whose `checks` include "stops", which
-// decisions stop and when (`stopSet`) at each demand allowance. Each tree's own oracle library
-// (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a child process: a source that takes longer than
-// `--timeout` seconds, more than `--memory` MB of heap, or that ends the process (a fatal V8 error) is counted as
-// stalled, with the reason, and the next source runs in a fresh process. A run that throws on either tree is an
-// exception, never compared (#1439): printed to stderr with its source, mode and check, and kept with its stack in
-// `--out`, as is a difference, also where the source stalls later. Prints one JSON line per generator and a total:
-// sources, unparsed, stalled, exceptions, modes, runs, differences.
+// compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
+// #1503) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each demand
+// allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
+// child process: a source that takes longer than `--timeout` seconds, more than `--memory` MB of heap, or that ends the
+// process (a fatal V8 error) is counted as stalled, with the reason, and the next source runs in a fresh process. A run
+// that throws on either tree is an exception, never compared (#1439): printed to stderr with its source, mode and
+// check, and kept with its stack in `--out`, as is a difference, also where the source stalls later. Prints one JSON
+// line per generator and a total: sources, unparsed, stalled, exceptions, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -45,6 +45,35 @@ function attempt(run) {
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 
+/**
+ * A publication's parts, each by its hash, in the whole's order (#1503): the tree's `publicationHashes`, which hashes
+ * each part as it is made and never holds the whole, or an older library's `publication` split into the same parts;
+ * `null` when the files do not parse or resolve.
+ */
+function partHashes(oracle, files, mode, globals) {
+  if (typeof oracle.publicationHashes === "function")
+    return oracle.publicationHashes(files, mode, globals);
+  const whole = oracle.publication(files, mode, globals);
+  if (whole === null) return null;
+  const [answers, record, occurrences, route] = JSON.parse(whole);
+  return [answers, record, ...occurrences, route].map((part) => hash(JSON.stringify(part)));
+}
+
+/** A run's result by its hash, with a publication's part hashes (`parts`), and whether the files did not parse. */
+const digest = (value) => ({
+  hash: hash(textOf(value)),
+  parts: Array.isArray(value) ? value : null,
+  unparsed: value === null,
+});
+
+/** Where two publications' parts first differ: the part's index in the whole's order and each one's count of parts. */
+function firstPart(was, is) {
+  if (was === null || is === null) return {};
+  let part = 0;
+  while (part < was.length && part < is.length && was[part] === is[part]) part += 1;
+  return { part, parts: [was.length, is.length] };
+}
+
 if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on both trees
   const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
@@ -67,7 +96,7 @@ if (process.argv[2] === "--child") {
       const label = `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`;
       const runs = [];
       if (checks.includes("publication"))
-        runs.push(["publication", (oracle) => oracle.publication(files, mode, globals)]);
+        runs.push(["publication", (oracle) => partHashes(oracle, files, mode, globals)]);
       if (checks.includes("stops"))
         for (const allowance of allowances)
           runs.push([
@@ -76,15 +105,18 @@ if (process.argv[2] === "--child") {
           ]);
       for (const [check, run] of runs) {
         // compared by hash, so that the base's text is not held while the head runs
-        const was = attempt(() => hash(textOf(run(base))));
-        const text = attempt(() => textOf(run(head)));
-        if (text.value === "null") parsed = false;
-        const is = "value" in text ? hash(text.value) : undefined;
+        const was = attempt(() => digest(run(base)));
+        const is = attempt(() => digest(run(head)));
+        if (is.value?.unparsed) parsed = false;
         const outcome = { mode: label, check };
-        if ("thrown" in was || "thrown" in text)
-          outcome.thrown = { base: was.thrown, head: text.thrown };
-        else if (was.value !== is)
-          outcome.difference = { base: was.value.slice(0, 16), head: is.slice(0, 16) };
+        if ("thrown" in was || "thrown" in is)
+          outcome.thrown = { base: was.thrown, head: is.thrown };
+        else if (was.value.hash !== is.value.hash)
+          outcome.difference = {
+            base: was.value.hash.slice(0, 16),
+            head: is.value.hash.slice(0, 16),
+            ...firstPart(was.value.parts, is.value.parts),
+          };
         await sent({ run: outcome });
       }
     }
