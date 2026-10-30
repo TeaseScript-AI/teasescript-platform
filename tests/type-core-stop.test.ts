@@ -2051,7 +2051,8 @@ test("the named exception for #1216 stands at its counted stops", () => {
 /**
  * #1432, #1415 (S3 §5; S8's mark-ownership rule; TABLE r4.113): after a settled program stop, a read the finishing walk
  * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
- * check (a mark carrying the unstopped obligation) and the store's boundary forms. The generated family's anchors
+ * check (a mark carrying the unstopped obligation) and the store's boundary forms: through a dictionary's values
+ * list (#1452), and where an unrestricted written type stands, whose store owes no other boundary (#1450). The anchors
  * (`heldFamily`: each holder at depth 1, read by a repeat count and by an interpolation) at every twelfth stop of each
  * settled phase and its last, forward with the sharing and reversed without it; the whole family runs outside CI.
  */

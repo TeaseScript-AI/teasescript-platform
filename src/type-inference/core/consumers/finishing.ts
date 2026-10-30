@@ -3,7 +3,7 @@ import { concrete, isExternal } from "../admission.js";
 import { expand, partOf } from "../admission/walk.js";
 import type { Expansion, Part } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
-import { joinSteps, keptParts, keptSlice, keptSteps } from "../budget.js";
+import { joinSteps, keptParts, keptSlice, keptSteps, type WorkLedger } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
 import { keptPath, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
@@ -19,7 +19,7 @@ import {
   type Item,
   type ItemTag,
 } from "../items.js";
-import { conversionCategory } from "../method-categories.js";
+import { conversionCategory, dictList } from "../method-categories.js";
 import { stepName } from "../program.js";
 import type { Work } from "../solver.js";
 import { stands } from "./fresh.js";
@@ -209,7 +209,7 @@ function laterSources(
   rest: readonly string[],
   requirement: boolean,
 ): readonly Item[] {
-  const { contract } = walk.pass;
+  const { contract, program } = walk.pass;
   // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
   const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
     const items = walk.run(work());
@@ -226,14 +226,25 @@ function laterSources(
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
   // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
-  if (held !== null)
-    return requirement ? required(withoutEmpty(held).map((item) => item.tag)) : held;
+  // (a domain that admits every kind, one whose nearest written prefix does, directly, through copies or a dictionary's
+  // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
+  // restricted one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
+  if (held !== null) {
+    if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
+    return held.some((item) => item.tag === "unknown" && item.reasons === 0)
+      ? [...held, ...heldIngress(walk, value, rest)]
+      : held;
+  }
   // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
   // decision or a copy's only where admission settled
-  const written = typedTags === null ? writtenRead(walk, value) : null;
-  const term = written === null ? null : termAt(written, rest);
+  const read = typedTags === null ? writtenRead(walk, value) : null;
+  const written = read === null ? null : termAt(read, rest);
   const retained =
-    term !== null ? typeTags(term) : walk.settled ? (retainedRead(walk, value, rest) ?? []) : [];
+    written !== null
+      ? writtenTags(program.work, written)
+      : walk.settled
+        ? (retainedRead(walk, value, rest) ?? [])
+        : [];
   // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
   // together
   const tags =
@@ -241,8 +252,13 @@ function laterSources(
   // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
   if (requirement) return required(tags);
   // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
-  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415)
-  const host = typedTags === null && term === null ? heldIngress(walk, value, rest) : [];
+  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does a written domain whose
+  // nearest written prefix admits every kind, above)
+  const prefix = read === null ? null : prefixAt(program.work, read, rest);
+  const host =
+    typedTags === null && (prefix === null || openness(program.work, prefix).open)
+      ? heldIngress(walk, value, rest)
+      : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
   const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos" })), ...host];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
@@ -264,6 +280,12 @@ interface CopyTask {
 }
 
 /**
+ * What stands at a frontier's path beside its own content, each followed as a copy: a copy task, or, at a `values` step,
+ * the frontier one step above, a dictionary whose `values` list's element is its own (#1452).
+ */
+type Standing = CopyTask | { readonly values: HostFrontier };
+
+/**
  * What stands at a path of a place by its own stores' structure, made once from its owner path's by one step (as the
  * syntax decision's frontier is, `cheapFrontier`): the literal cells of the values there by the step that enters them
  * (admission's store walk, `expand`), the node of the place's stored paths there, the copies standing there, and the
@@ -276,7 +298,7 @@ interface HostFrontier {
   readonly node: StoreNode | null;
   /** Its place and path where the place has a decision that stopped, else `null`. */
   readonly at: { readonly place: PlaceId; readonly path: readonly string[] } | null;
-  readonly copies: CopyTask[];
+  readonly copies: Standing[];
   host: IngressNode | undefined;
   /** Its owner path's frontier and the step below it, whose copies stand here one step below; `null` at a root. */
   readonly owner: { readonly frontier: HostFrontier; readonly step: string } | null;
@@ -290,7 +312,7 @@ interface HostFrontiers {
   readonly places: Map<PlaceId, StoreNode>;
   readonly roots: Map<PlaceId, HostFrontier>;
   readonly reads: Map<PlaceId, HostFrontier>;
-  readonly copied: Map<CopyTask, HostFrontier>;
+  readonly copied: Map<Standing, HostFrontier>;
   /** The host data each place's component of the place-level copy graph reaches (`placeIngress`), `null` for none. */
   readonly unions: Map<PlaceId, IngressNode | null>;
 }
@@ -433,10 +455,10 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
   const { program } = walk.pass;
   for (let task = values.pop(); task !== undefined; task = values.pop()) {
     program.work.charge("checks");
-    if (task.stop?.list === "values") {
+    if (task.stop !== null && copies(program.work, task.stop)) {
       const host = hostIngress(walk, task.value);
       if (host !== null) at.host = program.scope.ingress.union(at.host, host[0]?.ingress);
-      else at.copies.push({ value: task.value, strip: task.stop.strip });
+      else at.copies.push({ value: task.value, strip: task.strip });
     }
     const { cells, operands } = partsOf(walk, task);
     for (const part of operands) {
@@ -445,6 +467,18 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
     }
     for (const [step, parts] of cells) addCells(walk, at, step, parts);
   }
+}
+
+/**
+ * Whether a value standing in a store walk is a copy the frontier follows: a read of another value (`values`), or a copy
+ * of a written place where the nearest written prefix of its path admits every kind at or below it, so it holds the host
+ * data its stores hold there (#1450); a restricted one holds its kinds, its stores' boundaries checking them.
+ */
+function copies(work: WorkLedger, stop: NonNullable<Expansion["stop"]>): boolean {
+  if (stop.list === "values") return true;
+  if (stop.list !== "written" || stop.term === null) return false;
+  const at = prefixAt(work, stop.term, stop.strip);
+  return at !== null && openness(work, at).below;
 }
 
 /** Adds cells a step enters to a frontier's, each charged once. */
@@ -502,10 +536,12 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
       }
       for (const task of list.copies) {
         program.work.charge("checks");
-        at.copies.push({
-          value: task.value,
-          strip: keptSteps(program.work, task.strip, ["element"]),
-        });
+        // (the values entered there stand as copy tasks alone)
+        if ("value" in task)
+          at.copies.push({
+            value: task.value,
+            strip: keptSteps(program.work, task.strip, ["element"]),
+          });
       }
       at.host = program.scope.ingress.union(at.host, element.host);
     }
@@ -536,7 +572,10 @@ function locate(walk: Consumers, place: PlaceId, path: readonly string[]): HostF
 
 /**
  * A frontier's own content one step below, made once: its cells and its stored paths there, the copies standing there
- * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186).
+ * and the host data standing at it; the stop alone below a decision of its place that stopped (r4.186). At a `values`
+ * step, which reads a dictionary's values list where its receiver is one and an object's own property where it is an
+ * object, both: its own content and the frontier above it, standing there as a copy whose element is the
+ * dictionary's (#1452). A dictionary's `keys` list holds text no store's host data reaches (TABLE r4.47).
  */
 function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontier {
   const { program } = walk.pass;
@@ -557,6 +596,10 @@ function stepOwn(walk: Consumers, from: HostFrontier, step: string): HostFrontie
     step,
   });
   from.steps.set(step, at);
+  if (dictList(step) === "values") {
+    program.work.charge("checks");
+    at.copies.push({ values: from });
+  }
   const cells: Expansion[] = [];
   for (const part of from.cells.get(step) ?? []) {
     program.work.charge("checks");
@@ -628,8 +671,9 @@ function readFrontier(walk: Consumers, value: PlaceId): HostFrontier {
   return found;
 }
 
-/** A copy task's frontier: its read's, at its strip; made once. */
-function copyFrontier(walk: Consumers, task: CopyTask): HostFrontier {
+/** A copy task's frontier: its read's, at its strip; made once. A dictionary standing at its `values` list: its own. */
+function copyFrontier(walk: Consumers, task: Standing): HostFrontier {
+  if ("values" in task) return task.values;
   const { copied } = frontiersOf(walk);
   let found = copied.get(task);
   if (found === undefined) {
@@ -781,7 +825,7 @@ function placeEdges(
       const values = [expand(walk.admission, d.value!, d.node, [])];
       for (let task = values.pop(); task !== undefined; task = values.pop()) {
         program.work.charge("checks");
-        if (task.stop?.list === "values") {
+        if (task.stop !== null && copies(program.work, task.stop)) {
           const ingress = hostIngress(walk, task.value);
           if (ingress !== null) host = program.scope.ingress.union(host, ingress[0]?.ingress);
           else {
@@ -1142,4 +1186,114 @@ function writtenRead(walk: Consumers, value: PlaceId): TypeTerm | null {
     walk.writtenReads.set(next, term);
   }
   return term ?? null;
+}
+
+/** The part below a written part that admits every kind (`permittedAt`'s): every kind fits it too. */
+const OPEN_PART: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
+
+/** A written type node's openness (#1450): whether it admits every kind, and whether it does at or anywhere below it. */
+interface Openness {
+  readonly open: boolean;
+  readonly below: boolean;
+}
+
+const opennessByTerm = new WeakMap<TypeTerm, Openness>();
+
+/** A written type node's parts one level down: a collection's element, an object's properties, a union's members. */
+function partsOfTerm(term: TypeTerm): readonly TypeTerm[] {
+  if (term.kind === "list" || term.kind === "set" || term.kind === "dict") return [term.element];
+  if (term.kind === "object") return term.properties?.map((property) => property.type) ?? [];
+  return term.kind === "union" ? term.members : [];
+}
+
+/**
+ * A written type node's openness, made once per node from its parts' (Codex r2's B2 on #1487): `open` is admission's
+ * `unrestricted` (`typeTags`' `unknown`: a part the core leaves open; a union's where one of its members is), `below` also
+ * where any part is, or an `object`'s properties are unwritten. An explicit stack, parts first; each node charged once.
+ */
+function openness(work: WorkLedger, term: TypeTerm): Openness {
+  const known = opennessByTerm.get(term);
+  if (known !== undefined) return known;
+  const pending = [term];
+  while (pending.length > 0) {
+    const at = pending.at(-1)!;
+    if (opennessByTerm.has(at)) {
+      pending.pop();
+      continue;
+    }
+    const parts = partsOfTerm(at);
+    const unmade = parts.filter((part) => !opennessByTerm.has(part));
+    if (unmade.length > 0) {
+      for (const part of unmade) pending.push(part);
+      continue;
+    }
+    pending.pop();
+    work.charge("checks", 1 + parts.length);
+    const below = parts.map((part) => opennessByTerm.get(part)!);
+    // (a scalar restricts to its kind; a collection or an object restricts at its own level)
+    const open =
+      at.kind === "union"
+        ? below.some((part) => part.open)
+        : !["atom", "list", "set", "dict", "object"].includes(at.kind);
+    opennessByTerm.set(at, {
+      open,
+      below:
+        open ||
+        (at.kind === "object" && at.properties === null) ||
+        below.some((part) => part.below),
+    });
+  }
+  return opennessByTerm.get(term)!;
+}
+
+const prefixSteps = new WeakMap<TypeTerm, Map<string, TypeTerm | null>>();
+
+/**
+ * The nearest written prefix of a path (#1450): the written type's part at the path, or, below a part that admits every
+ * kind (an unwritten element, an `object`'s properties, a union member's), the open part, as admission's `permittedAt`
+ * reads it; `null` where the written type does not reach the path. Each step once per node, from the memoized openness.
+ */
+function prefixAt(work: WorkLedger, term: TypeTerm, path: readonly string[]): TypeTerm | null {
+  let at: TypeTerm | null = term;
+  for (const step of path) {
+    if (at === null || openness(work, at).open) return at;
+    at = prefixStep(work, at, step);
+  }
+  return at;
+}
+
+function prefixStep(work: WorkLedger, term: TypeTerm, step: string): TypeTerm | null {
+  let steps = prefixSteps.get(term);
+  if (steps === undefined) prefixSteps.set(term, (steps = new Map()));
+  const known = steps.get(step);
+  if (known !== undefined || steps.has(step)) return known ?? null;
+  work.charge("checks");
+  let below: TypeTerm | null;
+  if (openness(work, term).open || (term.kind === "object" && term.properties === null))
+    below = OPEN_PART;
+  else if (term.kind === "union") {
+    const parts = term.members.flatMap((member) => prefixStep(work, member, step) ?? []);
+    below = parts.some((part) => openness(work, part).open)
+      ? OPEN_PART
+      : parts.length === 0
+        ? null
+        : parts.length === 1
+          ? parts[0]!
+          : { kind: "union", members: parts };
+  } else below = termAt(term, [step]);
+  steps.set(step, below);
+  return below;
+}
+
+const tagsByTerm = new WeakMap<TypeTerm, readonly ItemTag[]>();
+
+/** A written type's kinds (`typeTags`), made and charged once per type a read answers by. */
+function writtenTags(work: WorkLedger, term: TypeTerm): readonly ItemTag[] {
+  let tags = tagsByTerm.get(term);
+  if (tags === undefined) {
+    tags = typeTags(term);
+    work.charge("checks", tags.length);
+    tagsByTerm.set(term, tags);
+  }
+  return tags;
 }
