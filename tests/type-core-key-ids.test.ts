@@ -550,26 +550,37 @@ test("a member chain's key asked at each of its offsets in turn, cold, climbs it
   }
 });
 
-test("a member chain's work keeps its ratio to its text lane's from 8 to 16 levels in every mode: the key side's member walk on a cursor adds no term that grows with the chain", () => {
-  const chain = (n: number): string => {
+test("a member chain's work keeps its ratio to its text lane's from 8 to 16 levels in every mode, a temporal field's chain and one of dicts and objects mixed: the key side's member walk on a cursor adds no term that grows with the chain", () => {
+  // (each layer wraps the one before; `dicts` every third a dict below a property, read through its `values`)
+  const chain = (n: number, dicts: boolean): string => {
     const lines = ["let seed: integer = 1", "let root = {f: seed}"];
-    for (let i = 0; i < n; i += 1)
-      lines.push(`let a${i} = {year: ${i === 0 ? "root" : `a${i - 1}`}}`);
-    const steps = Array.from({ length: n }, () => "year").join(".");
-    return [...lines, `let out = a${n - 1}.${steps}.f`, "exit", ""].join("\n");
+    const path: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const before = i === 0 ? "root" : `a${i - 1}`;
+      if (dicts && i % 3 === 0) {
+        lines.push(`let d${i} = dict {k: ${before}}`, `let a${i} = {q: d${i}}`);
+        path.unshift("q.values.first");
+      } else {
+        const step = dicts ? ["year", "values", "keys"][i % 3]! : "year";
+        lines.push(`let a${i} = {${step}: ${before}}`);
+        path.unshift(step);
+      }
+    }
+    return [...lines, `let out = a${n - 1}.${path.join(".")}.f`, "exit", ""].join("\n");
   };
-  for (const mode of MODES) {
-    const [at8, at16] = [8, 16].map((n) => {
-      const source = request(chain(n));
-      const cursor = inMode(mode, () => analyseCore(source)).budget.total;
-      const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
-      return cursor / text;
-    });
-    assert.ok(
-      at16! <= at8!,
-      `${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
-    );
-  }
+  for (const dicts of [false, true])
+    for (const mode of MODES) {
+      const [at8, at16] = [8, 16].map((n) => {
+        const source = request(chain(n, dicts));
+        const cursor = inMode(mode, () => analyseCore(source)).budget.total;
+        const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
+        return cursor / text;
+      });
+      assert.ok(
+        at16! <= at8!,
+        `${dicts ? "dicts" : "year"} ${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
+      );
+    }
 });
 
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
