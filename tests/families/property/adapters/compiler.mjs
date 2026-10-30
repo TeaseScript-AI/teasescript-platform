@@ -59,8 +59,7 @@ export async function loadCompiler(root) {
     "runGlobals",
     "validateInstructionPlan",
   ])
-    if (typeof api[key] !== "function")
-      throw new Error(`Unsupported compiler adapter API: ${key}`);
+    if (typeof api[key] !== "function") throw new Error(`Unsupported compiler adapter API: ${key}`);
   return api;
 }
 export function configured(api, mode, policy, call) {
@@ -92,16 +91,11 @@ export function scopeOf(api, request, answer, c) {
   const place = p.places.find(
     (x) => x.kind.kind === "binding" && x.kind.name === c.destination.binding,
   );
-  if (!place)
-    throw new Error(
-      `Destination missing from compiler graph: ${c.destination.binding}`,
-    );
+  if (!place) throw new Error(`Destination missing from compiler graph: ${c.destination.binding}`);
   const path = c.destination.path.map((x) =>
     typeof x === "string" ? x : api.propertyStep(x.property),
   );
-  const decisions = answer.budget.decisions.filter(
-    (d) => d.place === place.id && d.stopped,
-  );
+  const decisions = answer.budget.decisions.filter((d) => d.place === place.id && d.stopped);
   const stopped = decisions.map((d) => d.path);
   const relation = stopped.some((x) => prefix(x, path))
     ? "at-or-below"
@@ -126,9 +120,7 @@ export function scopeOf(api, request, answer, c) {
     stops: stopped,
     target: [
       place.label,
-      ...c.destination.path.map((x) =>
-        typeof x === "string" ? x : x.property,
-      ),
+      ...c.destination.path.map((x) => (typeof x === "string" ? x : x.property)),
     ].join("."),
   };
 }
@@ -158,11 +150,7 @@ export function judgeRuns(api, plan, c, { full = true } = {}) {
     const r = api.runGlobals(plan, globals);
     executions++;
     const said = r.said.map((x) => x.text);
-    check(
-      hash(globals) === before,
-      "input-unchanged",
-      "The caller globals changed",
-    );
+    check(hash(globals) === before, "input-unchanged", "The caller globals changed");
     if (input.allowed) {
       check(
         r.status === "halted" && r.failure === null,
@@ -180,22 +168,14 @@ export function judgeRuns(api, plan, c, { full = true } = {}) {
         "forbidden-input-rejected",
         JSON.stringify({ input: input.value, result: r }),
       );
-      check(
-        r.failure === `TSR058@${c.site.start}:${c.site.end}`,
-        "fault-site",
-        String(r.failure),
-      );
+      check(r.failure === `TSR058@${c.site.start}:${c.site.end}`, "fault-site", String(r.failure));
       check(
         JSON.stringify(said) === JSON.stringify(["BEFORE"]),
         "effect-prefix",
         JSON.stringify(said),
       );
     }
-    outcomes.push({
-      allowed: input.allowed,
-      inputHash: hash(input.value),
-      ...r,
-    });
+    outcomes.push({ allowed: input.allowed, inputHash: hash(input.value), ...r });
   }
   return { failures, assertions, executions, outcomes };
 }
@@ -203,12 +183,8 @@ export function observe(api, config, { keepPlan = false } = {}) {
   const started = performance.now(),
     cpu = process.cpuUsage();
   const { case: c, mode, policy } = config;
-  const request = api.coreRequest(
-    [{ path: "main.tease", source: c.source }],
-    c.globals,
-  );
-  if (!request)
-    throw new Error(`Generated source does not parse/resolve: ${c.id}`);
+  const request = api.coreRequest([{ path: "main.tease", source: c.source }], c.globals);
+  if (!request) throw new Error(`Generated source does not parse/resolve: ${c.id}`);
   const a0 = performance.now();
   const answer = configured(api, mode, policy, () => api.analyseCore(request));
   const analysisMs = performance.now() - a0;
@@ -242,11 +218,7 @@ export function observe(api, config, { keepPlan = false } = {}) {
   let compiled;
   try {
     compiled = configured(api, mode, policy, () =>
-      api.compileSourceWithBackend(
-        c.source,
-        { globals: c.globals },
-        api.CORE_BACKEND,
-      ),
+      api.compileSourceWithBackend(c.source, { globals: c.globals }, api.CORE_BACKEND),
     );
   } catch (error) {
     if (error instanceof api.CandidateOutsideSlice)
@@ -272,11 +244,7 @@ export function observe(api, config, { keepPlan = false } = {}) {
     assertions++;
     if (!ok) failures.push({ property, detail });
   };
-  check(
-    compiled.plan !== null,
-    "fitting-source-compiles",
-    JSON.stringify(compiled.diagnostics),
-  );
+  check(compiled.plan !== null, "fitting-source-compiles", JSON.stringify(compiled.diagnostics));
   if (!compiled.plan)
     return {
       ...metadata,
@@ -287,8 +255,7 @@ export function observe(api, config, { keepPlan = false } = {}) {
       metrics: { analysisMs, compileMs, totalMs: performance.now() - started },
     };
   const valid = api.validateInstructionPlan(compiled.plan);
-  if (!valid.valid)
-    throw new Error(`Compiler emitted invalid plan: ${JSON.stringify(valid)}`);
+  if (!valid.valid) throw new Error(`Compiler emitted invalid plan: ${JSON.stringify(valid)}`);
   const store = storeInstruction(compiled.plan, c);
   const actualType = typeSignature(store?.typeCheck?.type);
   if (!scope.reason) {
@@ -305,9 +272,7 @@ export function observe(api, config, { keepPlan = false } = {}) {
       );
   }
   const r0 = performance.now();
-  const observed = judgeRuns(api, compiled.plan, c, {
-    full: scope.reason === null,
-  });
+  const observed = judgeRuns(api, compiled.plan, c, { full: scope.reason === null });
   failures.push(...observed.failures);
   assertions += observed.assertions;
   const used = process.cpuUsage(cpu);

@@ -59,12 +59,7 @@ export function render(d, seed = 1442) {
     "",
   ].join("\n");
   const start = source.indexOf("hostValue");
-  const spec = {
-    leaf: d.leaf,
-    depth: d.depth,
-    nullable: d.nullable,
-    carrier: d.carrier,
-  };
+  const spec = { leaf: d.leaf, depth: d.depth, nullable: d.nullable, carrier: d.carrier };
   return {
     id: `s8-${hash(spec).slice(0, 16)}`,
     family: "s8-stores",
@@ -101,11 +96,8 @@ export function smaller(c, seed) {
   const candidates = [];
   const d = c.dimensions;
   if (d.carrier === "chain") candidates.push({ ...d, carrier: "copy" });
-  if (["field", "index"].includes(d.carrier))
-    candidates.push({ ...d, carrier: "copy" });
+  if (["field", "index"].includes(d.carrier)) candidates.push({ ...d, carrier: "copy" });
   if (d.nullable !== "none") candidates.push({ ...d, nullable: "none" });
   if (d.depth > 1) candidates.push({ ...d, depth: d.depth - 1 });
-  return candidates
-    .map((x) => render(x, seed))
-    .filter((x) => x.source.length < c.source.length);
+  return candidates.map((x) => render(x, seed)).filter((x) => x.source.length < c.source.length);
 }

@@ -4,12 +4,8 @@ import { compare } from "../lib/compare.mjs";
 import { writeJson } from "../lib/json.mjs";
 try {
   const [base, head, out] = process.argv.slice(2);
-  if (!out)
-    throw new Error(
-      "Usage: node bin/compare.mjs BASE.jsonl HEAD.jsonl OUT.json",
-    );
-  const read = (p) =>
-    readFileSync(p, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+  if (!out) throw new Error("Usage: node bin/compare.mjs BASE.jsonl HEAD.jsonl OUT.json");
+  const read = (p) => readFileSync(p, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
   const result = compare(read(base), read(head));
   writeJson(out, result);
   console.log(

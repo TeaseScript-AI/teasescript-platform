@@ -1,15 +1,13 @@
 /** Independent, bounded value model. No compiler matcher or external evidence is imported. */
 export function fits(type, value) {
-  if (type.kind === "optional")
-    return value === null || fits(type.value, value);
+  if (type.kind === "optional") return value === null || fits(type.value, value);
   if (type.kind === "list")
     return (
       value?.kind === "list" &&
       Array.isArray(value.items) &&
       value.items.every((v) => fits(type.element, v))
     );
-  if (type.kind === "integer")
-    return typeof value === "number" && Number.isSafeInteger(value);
+  if (type.kind === "integer") return typeof value === "number" && Number.isSafeInteger(value);
   if (type.kind === "string") return typeof value === "string";
   if (type.kind === "boolean") return typeof value === "boolean";
   throw new Error(`Unsupported model type ${type.kind}`);
@@ -22,20 +20,14 @@ export function typeText(type) {
 }
 export function expectedPlanType(type) {
   if (type.kind === "optional")
-    return {
-      kind: "union",
-      members: [expectedPlanType(type.value), { kind: "null" }],
-    };
-  if (type.kind === "list")
-    return { kind: "list", element: expectedPlanType(type.element) };
+    return { kind: "union", members: [expectedPlanType(type.value), { kind: "null" }] };
+  if (type.kind === "list") return { kind: "list", element: expectedPlanType(type.element) };
   return { kind: type.kind };
 }
 export function typeSignature(type) {
   if (type === null || type === undefined) return "any";
-  if (type.kind === "union")
-    return type.members.map(typeSignature).sort().join("|");
-  if (type.kind === "optional")
-    return [typeSignature(type.value), "null"].sort().join("|");
+  if (type.kind === "union") return type.members.map(typeSignature).sort().join("|");
+  if (type.kind === "optional") return [typeSignature(type.value), "null"].sort().join("|");
   if (type.kind === "list") return `list<${typeSignature(type.element)}>`;
   return type.kind;
 }
@@ -43,9 +35,7 @@ export function literal(value) {
   if (value?.kind === "list") return `[${value.items.map(literal).join(", ")}]`;
   if (value === null || ["string", "boolean", "number"].includes(typeof value))
     return JSON.stringify(value);
-  throw new Error(
-    "Only scalar/list source literals belong to this pilot family",
-  );
+  throw new Error("Only scalar/list source literals belong to this pilot family");
 }
 export const list = (items) => ({ kind: "list", items });
 export function makeType({ leaf, depth, nullable }) {
@@ -56,11 +46,7 @@ export function makeType({ leaf, depth, nullable }) {
 }
 export function witnesses(type, seed = 1442) {
   const goodLeaf = (kind) =>
-    kind === "integer"
-      ? 1 + (seed % 17)
-      : kind === "string"
-        ? `text-${seed % 17}`
-        : true;
+    kind === "integer" ? 1 + (seed % 17) : kind === "string" ? `text-${seed % 17}` : true;
   const good = (t) =>
     t.kind === "optional"
       ? good(t.value)
@@ -83,7 +69,7 @@ export function witnesses(type, seed = 1442) {
     }
   };
   descend(type, (v) => v);
-  return [
-    ...new Map(values.map((value) => [JSON.stringify(value), value])).values(),
-  ].map((value) => ({ value, allowed: fits(type, value) }));
+  return [...new Map(values.map((value) => [JSON.stringify(value), value])).values()].map(
+    (value) => ({ value, allowed: fits(type, value) }),
+  );
 }

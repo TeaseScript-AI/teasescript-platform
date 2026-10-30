@@ -5,8 +5,7 @@ import { readJson, writeJson } from "../lib/json.mjs";
 import { mergeShards } from "../lib/merge.mjs";
 try {
   const [out, ...dirs] = process.argv.slice(2);
-  if (!out || !dirs.length)
-    throw new Error("Usage: node bin/merge.mjs NEW_OUTPUT SHARD_DIR...");
+  if (!out || !dirs.length) throw new Error("Usage: node bin/merge.mjs NEW_OUTPUT SHARD_DIR...");
   const result = mergeShards(
     dirs.map((dir) => ({
       plan: readJson(join(dir, "plan.json")),

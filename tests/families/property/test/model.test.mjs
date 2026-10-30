@@ -1,13 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  makeType,
-  fits,
-  witnesses,
-  list,
-  typeSignature,
-  expectedPlanType,
-} from "../lib/model.mjs";
+import { makeType, fits, witnesses, list, typeSignature, expectedPlanType } from "../lib/model.mjs";
 import { generate, render } from "../families/s8-stores.mjs";
 import { makePlan, validatePlan, configurations } from "../lib/plan.mjs";
 import { hash } from "../lib/json.mjs";
@@ -57,9 +50,7 @@ test("seed changes data without changing semantic axes", () => {
 test("shards are disjoint and exhaustive", () => {
   const plan = makePlan("quick"),
     all = configurations(plan),
-    parts = [0, 1, 2].flatMap((index) =>
-      configurations(plan, { index, total: 3 }),
-    );
+    parts = [0, 1, 2].flatMap((index) => configurations(plan, { index, total: 3 }));
   assert.equal(new Set(parts.map((x) => x.id)).size, all.length);
   assert.deepEqual(parts.map((x) => x.id).sort(), all.map((x) => x.id).sort());
 });
@@ -71,11 +62,9 @@ test("tampered expectation and rehashed plan are rejected", () => {
   assert.throws(() => validatePlan(p));
 });
 for (const profile of ["typo", ""])
-  test(`reject unknown profile ${profile}`, () =>
-    assert.throws(() => makePlan(profile)));
+  test(`reject unknown profile ${profile}`, () => assert.throws(() => makePlan(profile)));
 for (const seed of [-1, 1.5, NaN, 2 ** 33])
-  test(`reject invalid seed ${seed}`, () =>
-    assert.throws(() => makePlan("quick", seed)));
+  test(`reject invalid seed ${seed}`, () => assert.throws(() => makePlan("quick", seed)));
 test("reject invalid shard", () =>
   assert.throws(() => configurations(makePlan(), { index: 2, total: 2 })));
 test("independent integer predicate rejects decimals and unsafe integers", () => {

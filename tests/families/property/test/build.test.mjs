@@ -11,9 +11,7 @@ function built(visit) {
   try {
     mkdirSync(join(dir, "dist"));
     writeFileSync(join(dir, "dist/x.js"), "export const value = 1;");
-    writeJson(join(dir, "package.json"), {
-      engines: { node: process.versions.node },
-    });
+    writeJson(join(dir, "package.json"), { engines: { node: process.versions.node } });
     writeJson(join(dir, "pilot-build.json"), {
       schemaVersion: 1,
       commit: "a".repeat(40),
@@ -43,15 +41,10 @@ test("runtime mismatch requires explicit compatibility opt-in", () =>
   built((dir) => {
     writeJson(join(dir, "package.json"), { engines: { node: "0.0.0" } });
     assert.throws(() => verifyBuild(dir), /Compiler needs/);
-    assert.equal(
-      verifyBuild(dir, true).acceptanceEnvironment,
-      "compatibility-only",
-    );
+    assert.equal(verifyBuild(dir, true).acceptanceEnvironment, "compatibility-only");
   }));
 test("manifest dimensions agree with executable family", () => {
-  const m = readJson(
-    new URL("../families/s8-stores.manifest.json", import.meta.url),
-  );
+  const m = readJson(new URL("../families/s8-stores.manifest.json", import.meta.url));
   assert.deepEqual(m.dimensions, dimensions);
   assert.deepEqual(m.interactions, interactionGroups);
   assert.equal(m.externalHoldouts.imported, false);

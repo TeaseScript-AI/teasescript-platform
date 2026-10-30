@@ -12,12 +12,8 @@ const priorities = [
 ];
 export function failureIdentity(result) {
   if (result.status !== "FAIL") return null;
-  const property = priorities.find((p) =>
-    result.failures.some((f) => f.property === p),
-  );
-  return property
-    ? `${property}:${result.scope.relation}:${result.scope.phase}`
-    : null;
+  const property = priorities.find((p) => result.failures.some((f) => f.property === p));
+  return property ? `${property}:${result.scope.relation}:${result.scope.phase}` : null;
 }
 /** Bounded semantic reduction, not a claim of a globally minimal program. */
 export function shrink(api, config, { seed = 1442, maxAttempts = 12 } = {}) {
@@ -25,9 +21,7 @@ export function shrink(api, config, { seed = 1442, maxAttempts = 12 } = {}) {
   const original = observe(api, config),
     identity = failureIdentity(original);
   if (!identity)
-    throw new Error(
-      "Shrinking requires a reproducible scoped FAIL, never ERROR/UNSUPPORTED",
-    );
+    throw new Error("Shrinking requires a reproducible scoped FAIL, never ERROR/UNSUPPORTED");
   let best = config,
     attempts = 0;
   const trace = [];
@@ -40,10 +34,7 @@ export function shrink(api, config, { seed = 1442, maxAttempts = 12 } = {}) {
       attempts++;
       const candidate = {
         ...best,
-        id: hash({ case: c.id, mode: best.mode, policy: best.policy }).slice(
-          0,
-          24,
-        ),
+        id: hash({ case: c.id, mode: best.mode, policy: best.policy }).slice(0, 24),
         case: c,
       };
       const result = observe(api, candidate),

@@ -5,10 +5,7 @@ import { fileURLToPath } from "node:url";
 export class ProcessClient {
   constructor(
     build,
-    {
-      timeoutMs = 15000,
-      worker = fileURLToPath(new URL("./worker.mjs", import.meta.url)),
-    } = {},
+    { timeoutMs = 15000, worker = fileURLToPath(new URL("./worker.mjs", import.meta.url)) } = {},
   ) {
     this.build = build;
     this.timeoutMs = timeoutMs;
@@ -43,11 +40,7 @@ export class ProcessClient {
       });
       const timer = setTimeout(() => {
         this.stop();
-        reject(
-          Object.assign(new Error("Adapter startup timed out"), {
-            name: "StartupTimeout",
-          }),
-        );
+        reject(Object.assign(new Error("Adapter startup timed out"), { name: "StartupTimeout" }));
       }, timeoutMs);
       child.on("error", (error) => {
         clearTimeout(timer);
@@ -73,17 +66,8 @@ export class ProcessClient {
           if (pending.child !== child) return;
           this.waiting = null;
           clearTimeout(pending.timer);
-          if (
-            message.id !== pending.config.id ||
-            message.result?.id !== pending.config.id
-          )
-            pending.resolve(
-              this.errorRow(
-                pending.config,
-                "ERROR",
-                "IPC result identity mismatch",
-              ),
-            );
+          if (message.id !== pending.config.id || message.result?.id !== pending.config.id)
+            pending.resolve(this.errorRow(pending.config, "ERROR", "IPC result identity mismatch"));
           else pending.resolve(message.result);
         }
       });
@@ -124,11 +108,7 @@ export class ProcessClient {
     remainingMs -= performance.now() - start;
     if (remainingMs <= 0) {
       this.stop();
-      return this.errorRow(
-        config,
-        "TIMEOUT",
-        "Campaign budget exhausted during adapter startup",
-      );
+      return this.errorRow(config, "TIMEOUT", "Campaign budget exhausted during adapter startup");
     }
     return new Promise((resolve) => {
       const timer = setTimeout(

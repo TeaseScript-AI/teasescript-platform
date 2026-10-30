@@ -27,8 +27,7 @@ test("corpus export contains every selected source and no imports", () => {
   const code = corpusModule(plan);
   assert.equal(/\bimport\b/.test(code), false);
   const value = vm.runInNewContext(
-    code.replaceAll("export const ", "const ") +
-      "\nJSON.stringify({cases,globals,checks})",
+    code.replaceAll("export const ", "const ") + "\nJSON.stringify({cases,globals,checks})",
   );
   const exported = JSON.parse(value);
   assert.deepEqual(
@@ -52,10 +51,7 @@ test("shard merge rejects missing, duplicate, wrong plan and different provenanc
   duplicate[1] = duplicate[0];
   assert.throws(() => mergeShards(duplicate), /Duplicate/);
   const foreign = parts();
-  foreign[1].metadata = {
-    ...foreign[1].metadata,
-    provenance: { commit: "other" },
-  };
+  foreign[1].metadata = { ...foreign[1].metadata, provenance: { commit: "other" } };
   assert.throws(() => mergeShards(foreign), /provenance/);
   const wrong = parts();
   wrong[1].metadata = { ...wrong[1].metadata, planHash: "wrong" };
@@ -76,9 +72,7 @@ test("CLI rejects flags from the wrong command and unknown families", () => {
     ["run", "--profile", "focused"],
     ["plan", "--family", "unknown", "--out", "x"],
   ]) {
-    const r = spawnSync(process.execPath, ["bin/pilot.mjs", ...args], {
-      encoding: "utf8",
-    });
+    const r = spawnSync(process.execPath, ["bin/pilot.mjs", ...args], { encoding: "utf8" });
     assert.equal(r.status, 2);
     assert.match(r.stderr, /Unknown/);
   }

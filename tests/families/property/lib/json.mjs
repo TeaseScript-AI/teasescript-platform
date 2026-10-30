@@ -20,12 +20,7 @@ export function writeJson(path, value) {
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
   renameSync(temporary, path);
 }
-export function requireInteger(
-  value,
-  name,
-  min = 0,
-  max = Number.MAX_SAFE_INTEGER,
-) {
+export function requireInteger(value, name, min = 0, max = Number.MAX_SAFE_INTEGER) {
   if (!Number.isSafeInteger(value) || value < min || value > max)
     throw new Error(`Invalid ${name}: ${value}`);
   return value;

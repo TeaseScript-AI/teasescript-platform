@@ -37,17 +37,13 @@ try {
     if (!options.out) throw new Error("--out is required");
     if (options.family && options.family !== "s8-stores")
       throw new Error(`Unknown family: ${options.family}`);
-    const plan = makePlan(
-      options.profile ?? "quick",
-      Number(options.seed ?? 1442),
-    );
+    const plan = makePlan(options.profile ?? "quick", Number(options.seed ?? 1442));
     writeJson(resolve(options.out), plan);
     console.log(
       JSON.stringify({
         planHash: plan.planHash,
         sources: plan.cases.length,
-        configurations:
-          plan.cases.length * plan.modes.length * plan.policies.length,
+        configurations: plan.cases.length * plan.modes.length * plan.policies.length,
         coverage: plan.coverage,
       }),
     );
@@ -61,9 +57,7 @@ try {
       shard = { index: +match[1], total: +match[2] };
     }
     const integer = (name, fallback) =>
-      options[name] === undefined
-        ? fallback
-        : requireInteger(Number(options[name]), name, 1);
+      options[name] === undefined ? fallback : requireInteger(Number(options[name]), name, 1);
     const summary = await runCampaign(
       readJson(options.plan),
       resolve(options.build),

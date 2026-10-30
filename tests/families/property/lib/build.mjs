@@ -9,8 +9,7 @@ export function directoryHash(root) {
         r = rel ? `${rel}/${name}` : name,
         st = lstatSync(path);
       if (st.isDirectory()) walk(path, r);
-      else if (st.isSymbolicLink())
-        entries.push([r, "link", readlinkSync(path)]);
+      else if (st.isSymbolicLink()) entries.push([r, "link", readlinkSync(path)]);
       else entries.push([r, hash(readFileSync(path).toString("base64"))]);
     }
   }
@@ -28,8 +27,7 @@ export function verifyBuild(root, allowMismatch = false) {
     throw new Error("Invalid compiler build identity");
   if (directoryHash(join(root, "dist")) !== stamp.distHash)
     throw new Error("Compiled tree differs from its build seal");
-  const required = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
-    .engines.node;
+  const required = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).engines.node;
   const matches = process.versions.node === required;
   if (!matches && !allowMismatch)
     throw new Error(
@@ -40,8 +38,6 @@ export function verifyBuild(root, allowMismatch = false) {
     executionNode: process.versions.node,
     requiredNode: required,
     runtimeMatches: matches,
-    acceptanceEnvironment: matches
-      ? "runtime-matches-unmeasured-desktop"
-      : "compatibility-only",
+    acceptanceEnvironment: matches ? "runtime-matches-unmeasured-desktop" : "compatibility-only",
   };
 }

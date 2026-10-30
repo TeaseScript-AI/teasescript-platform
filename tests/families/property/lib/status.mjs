@@ -11,12 +11,10 @@ export const STATUSES = [
 export function summarize(rows, expected = rows.length) {
   const counts = Object.fromEntries(STATUSES.map((k) => [k, 0]));
   for (const row of rows) {
-    if (!(row.status in counts))
-      throw new Error(`Unknown status ${row.status}`);
+    if (!(row.status in counts)) throw new Error(`Unknown status ${row.status}`);
     counts[row.status]++;
   }
-  if (rows.length !== expected)
-    throw new Error(`Missing result rows: ${rows.length}/${expected}`);
+  if (rows.length !== expected) throw new Error(`Missing result rows: ${rows.length}/${expected}`);
   const checksComplete = counts.PASS + counts.FAIL === expected;
   const verdict = counts.FAIL
     ? "FAIL"

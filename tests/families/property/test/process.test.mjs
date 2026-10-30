@@ -47,10 +47,7 @@ test("cancellation is explicit", async () => {
 
 test("adapter startup consumes the same bounded deadline", async () => {
   const startup = fileURLToPath(new URL("./startup-hang.mjs", import.meta.url));
-  const client = new ProcessClient("/unused", {
-    worker: startup,
-    timeoutMs: 3000,
-  });
+  const client = new ProcessClient("/unused", { worker: startup, timeoutMs: 3000 });
   try {
     assert.equal((await client.run(config("ok"), 30)).status, "TIMEOUT");
   } finally {

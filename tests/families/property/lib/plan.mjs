@@ -5,12 +5,7 @@ export function makePlan(profile = "quick", seed = 1442) {
   if (!profiles[profile]) throw new Error(`Unknown profile: ${profile}`);
   requireInteger(seed, "seed", 0, 0xffffffff);
   const p = profiles[profile],
-    { selected, coverage } = select(
-      generate(seed),
-      interactionGroups,
-      p.sources,
-      seed,
-    );
+    { selected, coverage } = select(generate(seed), interactionGroups, p.sources, seed);
   const body = {
     schemaVersion: 1,
     family: "s8-stores",
@@ -25,22 +20,15 @@ export function makePlan(profile = "quick", seed = 1442) {
   return { ...body, planHash: hash(body) };
 }
 export function validatePlan(plan) {
-  if (
-    plan.schemaVersion !== 1 ||
-    plan.family !== "s8-stores" ||
-    !profiles[plan.profile]
-  )
+  if (plan.schemaVersion !== 1 || plan.family !== "s8-stores" || !profiles[plan.profile])
     throw new Error("Unsupported plan schema/family/profile");
   const { planHash, ...body } = plan;
   if (hash(body) !== planHash) throw new Error("Plan digest mismatch");
   const expected = makePlan(plan.profile, plan.seed);
   if (hash(expected) !== hash(plan))
-    throw new Error(
-      "Plan does not match the frozen generator/profile; regenerate explicitly",
-    );
+    throw new Error("Plan does not match the frozen generator/profile; regenerate explicitly");
   for (const c of plan.cases)
-    if (hash(render(c.dimensions, plan.seed)) !== hash(c))
-      throw new Error(`Invalid case ${c.id}`);
+    if (hash(render(c.dimensions, plan.seed)) !== hash(c)) throw new Error(`Invalid case ${c.id}`);
   return plan;
 }
 export function configurations(plan, shard = { index: 0, total: 1 }) {

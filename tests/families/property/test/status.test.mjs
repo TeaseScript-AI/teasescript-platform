@@ -8,8 +8,7 @@ for (const status of STATUSES)
     assert.equal(result.verdict === "PASS", status === "PASS");
     assert.equal(exitCode(result) === 0, status === "PASS");
   });
-test("zero rows are incomplete", () =>
-  assert.equal(summarize([]).verdict, "INCOMPLETE"));
+test("zero rows are incomplete", () => assert.equal(summarize([]).verdict, "INCOMPLETE"));
 test("identical exceptions are not evidence of agreement", () => {
   const rows = [{ id: "a", status: "ERROR", reason: "same TypeError" }];
   const r = compare(rows, rows);
@@ -50,20 +49,8 @@ test("same row ID with different source or oracle inputs is never compared", () 
   assert.throws(
     () =>
       compare(
-        [
-          {
-            id: "a",
-            status: "PASS",
-            outcomes: [{ inputHash: "x", allowed: true }],
-          },
-        ],
-        [
-          {
-            id: "a",
-            status: "PASS",
-            outcomes: [{ inputHash: "y", allowed: true }],
-          },
-        ],
+        [{ id: "a", status: "PASS", outcomes: [{ inputHash: "x", allowed: true }] }],
+        [{ id: "a", status: "PASS", outcomes: [{ inputHash: "y", allowed: true }] }],
       ),
     /expectations/,
   );

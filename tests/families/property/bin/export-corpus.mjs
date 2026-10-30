@@ -5,9 +5,7 @@ import { corpusModule } from "../lib/export.mjs";
 try {
   const [plan, out, ...extra] = process.argv.slice(2);
   if (!plan || !out || extra.length)
-    throw new Error(
-      "Usage: node bin/export-corpus.mjs PLAN.json NEW_MODULE.mjs",
-    );
+    throw new Error("Usage: node bin/export-corpus.mjs PLAN.json NEW_MODULE.mjs");
   writeFileSync(out, corpusModule(readJson(plan)), { flag: "wx" });
   console.log(JSON.stringify({ exported: out, comparisonOnly: true }));
 } catch (error) {

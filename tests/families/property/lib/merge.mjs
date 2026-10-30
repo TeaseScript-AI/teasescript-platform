@@ -10,30 +10,23 @@ export function mergeShards(parts) {
     shards = new Set();
   for (const part of parts) {
     validatePlan(part.plan);
-    if (
-      part.plan.planHash !== plan.planHash ||
-      part.metadata.planHash !== plan.planHash
-    )
+    if (part.plan.planHash !== plan.planHash || part.metadata.planHash !== plan.planHash)
       throw new Error("Shards have different plans");
     if (hash(part.metadata.provenance) !== hash(baseline.provenance))
       throw new Error("Shards have different compiler provenance");
-    if (part.metadata.shard.total !== baseline.shard.total)
-      throw new Error("Shard totals differ");
+    if (part.metadata.shard.total !== baseline.shard.total) throw new Error("Shard totals differ");
     const shard = part.metadata.shard;
     if (shards.has(shard.index)) throw new Error("Duplicate shard");
     shards.add(shard.index);
     const configs = configurations(plan, shard),
       ids = new Set(configs.map((c) => c.id));
-    if (part.rows.length !== configs.length)
-      throw new Error("Shard has missing rows");
+    if (part.rows.length !== configs.length) throw new Error("Shard has missing rows");
     for (const row of part.rows) {
-      if (!ids.delete(row.id) || rows.has(row.id))
-        throw new Error("Unexpected or duplicate row");
+      if (!ids.delete(row.id) || rows.has(row.id)) throw new Error("Unexpected or duplicate row");
       rows.set(row.id, row);
     }
   }
-  if (shards.size !== baseline.shard.total)
-    throw new Error("Not all shards supplied");
+  if (shards.size !== baseline.shard.total) throw new Error("Not all shards supplied");
   const ordered = configurations(plan).map((c) => {
     const row = rows.get(c.id);
     if (!row) throw new Error("Incomplete campaign");
@@ -50,8 +43,7 @@ export function mergeShards(parts) {
       resultsHash: hash(ordered),
       shards: parts.length,
       elapsedMs: parts.reduce((s, p) => s + p.summary.elapsedMs, 0),
-      elapsedInterpretation:
-        "Sum of shard campaign times; NOT parallel wall time or queue time",
+      elapsedInterpretation: "Sum of shard campaign times; NOT parallel wall time or queue time",
       scopeNote:
         "Excluded and unscoped configurations remain incomplete; merging never turns them into PASS.",
     },

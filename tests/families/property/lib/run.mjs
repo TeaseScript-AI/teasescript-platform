@@ -15,9 +15,7 @@ export async function runCampaign(plan, build, out, options = {}) {
   const configs = configurations(plan, options.shard),
     budget = options.deadlineMs ?? plan.deadlineMs;
   const started = performance.now();
-  const client = new ProcessClient(build, {
-    timeoutMs: options.caseTimeoutMs ?? 15000,
-  });
+  const client = new ProcessClient(build, { timeoutMs: options.caseTimeoutMs ?? 15000 });
   mkdirSync(out, { recursive: false });
   writeJson(join(out, "plan.json"), plan);
   const jsonl = join(out, "results.jsonl"),
@@ -56,11 +54,7 @@ export async function runCampaign(plan, build, out, options = {}) {
     for (const config of configs) {
       const remaining = budget - (performance.now() - started);
       let row;
-      if (
-        cancelled ||
-        remaining <= 0 ||
-        failures >= (options.stopAfterFailures ?? Infinity)
-      )
+      if (cancelled || remaining <= 0 || failures >= (options.stopAfterFailures ?? Infinity))
         row = client.errorRow(
           config,
           "NOT_RUN",
@@ -86,10 +80,7 @@ export async function runCampaign(plan, build, out, options = {}) {
         row = client.errorRow(config, "ERROR", "Malformed worker result");
       if (row.status === "FAIL") failures++;
       rows.push(row);
-      appendFileSync(
-        jsonl,
-        `${JSON.stringify({ schemaVersion: 1, ...row })}\n`,
-      );
+      appendFileSync(jsonl, `${JSON.stringify({ schemaVersion: 1, ...row })}\n`);
     }
   } finally {
     client.stop();

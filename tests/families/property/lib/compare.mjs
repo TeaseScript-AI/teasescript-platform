@@ -4,8 +4,7 @@ import { summarize } from "./status.mjs";
 export function compare(base, head) {
   const b = new Map(base.map((r) => [r.id, r])),
     h = new Map(head.map((r) => [r.id, r]));
-  if (b.size !== base.length || h.size !== head.length)
-    throw new Error("Duplicate row identities");
+  if (b.size !== base.length || h.size !== head.length) throw new Error("Duplicate row identities");
   if (b.size !== h.size || [...b.keys()].some((id) => !h.has(id)))
     throw new Error("Campaign configurations differ");
   const fixed = [],
@@ -18,9 +17,7 @@ export function compare(base, head) {
       hash({ source: x.sourceHash, mode: x.mode, policy: x.policy }) !==
       hash({ source: y.sourceHash, mode: y.mode, policy: y.policy })
     )
-      throw new Error(
-        "Configuration identity collision across sources or settings",
-      );
+      throw new Error("Configuration identity collision across sources or settings");
     if (
       x.outcomes &&
       y.outcomes &&
@@ -28,10 +25,7 @@ export function compare(base, head) {
         hash(y.outcomes.map((o) => [o.inputHash, o.allowed]))
     )
       throw new Error("Compared input values or expectations differ");
-    if (
-      !["PASS", "FAIL"].includes(x.status) ||
-      !["PASS", "FAIL"].includes(y.status)
-    ) {
+    if (!["PASS", "FAIL"].includes(x.status) || !["PASS", "FAIL"].includes(y.status)) {
       incomparable.push(id);
       continue;
     }

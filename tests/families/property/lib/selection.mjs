@@ -68,10 +68,7 @@ export const profiles = {
     modes,
     policies: [
       { kind: "none" },
-      ...[1, 16, 32, 64, 128, 256, 512].map((units) => ({
-        kind: "demand",
-        units,
-      })),
+      ...[1, 16, 32, 64, 128, 256, 512].map((units) => ({ kind: "demand", units })),
       { kind: "program", units: 1 },
     ],
     deadlineMs: 900000,
@@ -81,10 +78,9 @@ export const profiles = {
     modes,
     policies: [
       { kind: "none" },
-      ...[
-        1, 2, 8, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 512,
-        1024,
-      ].map((units) => ({ kind: "demand", units })),
+      ...[1, 2, 8, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 512, 1024].map(
+        (units) => ({ kind: "demand", units }),
+      ),
       ...[1, 64, 256, 1024].map((units) => ({ kind: "program", units })),
     ],
     deadlineMs: 1800000,

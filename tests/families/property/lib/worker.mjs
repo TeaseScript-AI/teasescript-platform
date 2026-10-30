@@ -35,11 +35,7 @@ if (api)
           status: "ERROR",
           executions: 0,
           assertions: 0,
-          error: {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          },
+          error: { name: error.name, message: error.message, stack: error.stack },
         },
       });
     }
