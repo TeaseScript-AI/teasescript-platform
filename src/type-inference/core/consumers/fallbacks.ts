@@ -3,7 +3,7 @@ import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission
 import { joinParts, joinSteps, keepText, keptText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { typeTags } from "../contract.js";
-import { keyPath, keyPlace, type Key } from "../definitions.js";
+import { keyPlace, type Key } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import { STOPPED, type Item, type ItemTag } from "../items.js";
@@ -250,7 +250,7 @@ function defaultSource(
   key: Key,
   at: FlowNode,
 ): { readonly key: Key; readonly at: FlowNode } | null {
-  const { program, lists, guards } = walk.pass;
+  const { program, guards } = walk.pass;
   // a loop along the copies, each step memoised with the chain's answer
   const visited: string[] = [];
   let found: { readonly key: Key; readonly at: FlowNode } | null = null;
@@ -271,17 +271,19 @@ function defaultSource(
       program.work.charge("checks");
       const place = program.place(keyPlace(step.key)).kind;
       if (guards.narrowed(step.key, step.at)) found = null;
-      else if (place.kind === "parameter" && keyPath(step.key).length === 0)
+      else if (place.kind === "parameter" && walk.pass.contract.keyDepth(step.key) === 0)
         found = place.written === null ? step : null;
       else {
-        const reaching = lists.reachingDef(step.key, step.at);
+        // (a key in its identity, a wrapper's family's its cursor: its definitions and events through the contract,
+        // no text made, G3 stage 1)
+        const reaching = walk.pass.contract.reachingDef(step.key, step.at);
         const copy =
           reaching !== null &&
           reaching.def.kind === "whole" &&
           reaching.def.value !== undefined &&
           reaching.def.how !== "argument" &&
           reaching.def.how !== "parameter default" &&
-          lists.eventBetween(step.key, reaching.def.node, step.at) === null;
+          walk.pass.contract.eventBetween(step.key, reaching.def.node, step.at) === null;
         // the copy's value at the rest of the path, through its literal's fields
         let value: PlaceId | undefined = copy ? reaching.def.value : undefined;
         for (const part of copy ? reaching.rest : []) {
