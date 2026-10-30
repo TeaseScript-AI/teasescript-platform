@@ -52,25 +52,25 @@ async function step(name, command, args, watch) {
   child.stderr.on("data", (chunk) => (stderr = (stderr + chunk).slice(-8000)));
   let offset = 0;
   let tail = "";
-  const poll =
-    watch === undefined
-      ? null
-      : setInterval(() => {
-          if (firstMatchMs !== null || !existsSync(watch.file)) return;
-          const size = statSync(watch.file).size;
-          if (size <= offset) return;
-          const chunk = Buffer.alloc(size - offset);
-          const fd = openSync(watch.file, "r");
-          readSync(fd, chunk, 0, chunk.length, offset);
-          closeSync(fd);
-          offset = size;
-          const text = tail + chunk.toString("utf8");
-          if (watch.text === undefined || text.includes(watch.text))
-            firstMatchMs = performance.now() - started;
-          tail = text.slice(-(watch.text?.length ?? 0));
-        }, 50);
+  const sample = () => {
+    if (firstMatchMs !== null || !existsSync(watch.file)) return;
+    const size = statSync(watch.file).size;
+    if (size <= offset) return;
+    const chunk = Buffer.alloc(size - offset);
+    const fd = openSync(watch.file, "r");
+    readSync(fd, chunk, 0, chunk.length, offset);
+    closeSync(fd);
+    offset = size;
+    const text = tail + chunk.toString("utf8");
+    if (watch.text === undefined || text.includes(watch.text))
+      firstMatchMs = performance.now() - started;
+    tail = text.slice(-(watch.text?.length ?? 0));
+  };
+  const poll = watch === undefined ? null : setInterval(sample, 50);
   const code = await new Promise((done) => child.on("close", (exit) => done(exit)));
   clearInterval(poll);
+  // (what the step wrote in its last 50 ms is still read: its time is then the step's end, at most 50 ms late)
+  if (watch !== undefined) sample();
   const record = { step: name, exit: code, wallMs: performance.now() - started };
   if (watch !== undefined) record.firstMatchMs = firstMatchMs;
   if (timed && existsSync(timing)) {
