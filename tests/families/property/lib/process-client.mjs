@@ -13,6 +13,8 @@ export class ProcessClient {
     this.child = null;
     this.waiting = null;
     this.stderr = "";
+    /** Each adapter start's time to readiness, in ms: the first loads the build, later ones follow a timeout. */
+    this.startups = [];
   }
   stop() {
     if (!this.child) return;
@@ -28,6 +30,7 @@ export class ProcessClient {
   async start(timeoutMs = this.timeoutMs) {
     if (this.child?.connected) return;
     this.stderr = "";
+    const started = performance.now();
     await new Promise((resolve, reject) => {
       const child = fork(this.worker, [this.build], {
         execArgv: [],
@@ -57,6 +60,7 @@ export class ProcessClient {
       child.on("message", (message) => {
         if (message?.kind === "ready") {
           clearTimeout(timer);
+          this.startups.push(performance.now() - started);
           resolve();
         } else if (message?.kind === "startup-error") {
           clearTimeout(timer);

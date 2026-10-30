@@ -21,7 +21,8 @@ export async function runCampaign(plan, build, out, options = {}) {
   const jsonl = join(out, "results.jsonl"),
     rows = [];
   let cancelled = false,
-    failures = 0;
+    failures = 0,
+    firstFailureMs = null;
   const interrupt = () => {
     cancelled = true;
     client.cancel();
@@ -78,7 +79,7 @@ export async function runCampaign(plan, build, out, options = {}) {
         hash(row.policy) !== hash(config.policy)
       )
         row = client.errorRow(config, "ERROR", "Malformed worker result");
-      if (row.status === "FAIL") failures++;
+      if (row.status === "FAIL" && failures++ === 0) firstFailureMs = performance.now() - started;
       rows.push(row);
       appendFileSync(jsonl, `${JSON.stringify({ schemaVersion: 1, ...row })}\n`);
     }
@@ -96,6 +97,8 @@ export async function runCampaign(plan, build, out, options = {}) {
     preflightMs,
     commandWallMs: performance.now() - commandStarted,
     firstFailureId: rows.find((r) => r.status === "FAIL")?.id ?? null,
+    firstFailureMs,
+    adapterStartupsMs: client.startups,
     provenance,
     resultsHash: hash(rows),
     scopeNote:
