@@ -293,6 +293,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     "a decision's prefixes, returned and read once by the decision, not kept",
   ],
   "admission/ingress.ts ownLeaves memoKey": [1, "a definition's id and a flag"],
+  "contract/labels.ts labelPlainText text": [
+    1,
+    "a plain label's text in a test's record (`withLabelRecords`), never kept by an analysis",
+  ],
   "property-names.ts propertyNames at": [
     1,
     "a properties query's walk, its tasks ending with the query (S9b's, TABLE r4.78 (3))",
