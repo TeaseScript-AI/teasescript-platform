@@ -1,7 +1,9 @@
 // #1165's Codex r5 review: its loss, default and settled-sibling cases, run by its own stops.mjs, compare-fresh.mjs and
 // settled-only.mjs in the builder's rerun (desktop:~/work/evidence/1165/dbefff11c5dff5590c1b00b2dd0680824bf32e75/
 // generators/tools/c-r5/, desktop:~/work/evidence/1165/c4866420d9bf0dc376ae373aebee812815e5912c/generators/jobs/
-// reviewers.sh). The case files are the review's own, beside its drivers; no other recorded run holds them.
+// reviewers.sh). The case files are the review's own, beside its drivers; no other recorded run holds them. Its
+// `B2-nullable-record` (`let base: {n: integer}? = hostValue`) does not parse (TSP021) and is dropped: the loss run
+// marked it invalid and compare-fresh.mjs deletes it.
 export const cases = [
   ["B1-scalar", 'let n = 1\nn = "wrong"\nsay "AFTER"\nexit\n'],
   ["B1-list", 'let n = [1]\nn = ["wrong"]\nsay "AFTER"\nexit\n'],
@@ -12,10 +14,6 @@ export const cases = [
   [
     "B2-nullable-list",
     'let base: integer[]? = hostValue\nlet copy = base\nsay copy.length\nsay "AFTER"\nexit\n',
-  ],
-  [
-    "B2-nullable-record",
-    'let base: {n: integer}? = hostValue\nlet copy = base\nsay copy.n\nsay "AFTER"\nexit\n',
   ],
   [
     "B3-missing",
@@ -113,4 +111,10 @@ export const recorded = {
   ],
   sources: 26,
   sha256: "046348a6c82d56f9a44cb4394f9b54add70d9c181036c4f936509ecb3394e69c",
+  dropped: [
+    [
+      "46ca2be973d22085da11cd25edd1a7212bd6d29983d40349da7aa5d7c76db59f",
+      "a nullable record annotation, which does not parse (TSP021): the loss run marked it invalid and compare-fresh.mjs deletes it",
+    ],
+  ],
 };
