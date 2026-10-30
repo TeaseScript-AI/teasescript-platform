@@ -1,6 +1,5 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import { concrete, isExternal } from "../admission.js";
-import { unrestricted } from "../admission/permitted.js";
 import { expand, partOf } from "../admission/walk.js";
 import type { Expansion, Part } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
@@ -227,9 +226,9 @@ function laterSources(
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
   // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
-  // (a domain that admits every kind, an unrestricted written type's, directly, through copies or a dictionary's values
-  // list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a restricted
-  // one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
+  // (a domain that admits every kind, one whose nearest written prefix does, directly, through copies or a dictionary's
+  // values list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a
+  // restricted one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
   if (held !== null) {
     if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
     return held.some((item) => item.tag === "unknown" && item.reasons === 0)
@@ -242,7 +241,7 @@ function laterSources(
   const written = read === null ? null : termAt(read, rest);
   const retained =
     written !== null
-      ? writtenKinds(program.work, written).tags
+      ? writtenTags(program.work, written)
       : walk.settled
         ? (retainedRead(walk, value, rest) ?? [])
         : [];
@@ -253,10 +252,11 @@ function laterSources(
   // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
   if (requirement) return required(tags);
   // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
-  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does an unrestricted
-  // written type, above)
+  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does a written domain whose
+  // nearest written prefix admits every kind, above)
+  const prefix = read === null ? null : prefixAt(program.work, read, rest);
   const host =
-    typedTags === null && (written === null || writtenKinds(program.work, written).open)
+    typedTags === null && (prefix === null || openness(program.work, prefix).open)
       ? heldIngress(walk, value, rest)
       : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
@@ -471,14 +471,14 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
 
 /**
  * Whether a value standing in a store walk is a copy the frontier follows: a read of another value (`values`), or a copy
- * of a written place whose written type admits every kind at its path or below it, so it holds the host data its stores
- * hold there (#1450); a restricted one holds its kinds, its stores' boundaries checking them.
+ * of a written place where the nearest written prefix of its path admits every kind at or below it, so it holds the host
+ * data its stores hold there (#1450); a restricted one holds its kinds, its stores' boundaries checking them.
  */
 function copies(work: WorkLedger, stop: NonNullable<Expansion["stop"]>): boolean {
   if (stop.list === "values") return true;
   if (stop.list !== "written" || stop.term === null) return false;
-  const at = termAt(stop.term, stop.strip);
-  return at !== null && writtenKinds(work, at).openBelow;
+  const at = prefixAt(work, stop.term, stop.strip);
+  return at !== null && openness(work, at).below;
 }
 
 /** Adds cells a step enters to a frontier's, each charged once. */
@@ -1188,39 +1188,112 @@ function writtenRead(walk: Consumers, value: PlaceId): TypeTerm | null {
   return term ?? null;
 }
 
-/**
- * A written type's kinds (`typeTags`), whether it admits every kind (`unrestricted`: a domain that holds the host data its
- * key's stores hold, #1450), and whether it does at its path or below it; made and charged once per type, so a read of
- * a wide type costs one look-up (Codex r1's B2 on #1487).
- */
-interface WrittenKinds {
-  readonly tags: readonly ItemTag[];
+/** The part below a written part that admits every kind (`permittedAt`'s): every kind fits it too. */
+const OPEN_PART: TypeTerm = { kind: "dynamic", why: "unwritten parts" };
+
+/** A written type node's openness (#1450): whether it admits every kind, and whether it does at or anywhere below it. */
+interface Openness {
   readonly open: boolean;
-  readonly openBelow: boolean;
+  readonly below: boolean;
 }
 
-const kindsByTerm = new WeakMap<TypeTerm, WrittenKinds>();
+const opennessByTerm = new WeakMap<TypeTerm, Openness>();
 
-function writtenKinds(work: WorkLedger, term: TypeTerm): WrittenKinds {
-  let found = kindsByTerm.get(term);
-  if (found === undefined) {
-    const tags = typeTags(term);
-    work.charge("checks", tags.length + 1);
-    const open = unrestricted(term);
-    const below =
-      term.kind === "list" || term.kind === "set" || term.kind === "dict"
-        ? [term.element]
-        : term.kind === "object"
-          ? (term.properties?.map((property) => property.type) ?? null)
-          : term.kind === "union"
-            ? term.members
-            : [];
-    found = {
-      tags,
+/** A written type node's parts one level down: a collection's element, an object's properties, a union's members. */
+function partsOfTerm(term: TypeTerm): readonly TypeTerm[] {
+  if (term.kind === "list" || term.kind === "set" || term.kind === "dict") return [term.element];
+  if (term.kind === "object") return term.properties?.map((property) => property.type) ?? [];
+  return term.kind === "union" ? term.members : [];
+}
+
+/**
+ * A written type node's openness, made once per node from its parts' (Codex r2's B2 on #1487): `open` is admission's
+ * `unrestricted` (`typeTags`' `unknown`: a part the core leaves open; a union's where one of its members is), `below` also
+ * where any part is, or an `object`'s properties are unwritten. An explicit stack, parts first; each node charged once.
+ */
+function openness(work: WorkLedger, term: TypeTerm): Openness {
+  const known = opennessByTerm.get(term);
+  if (known !== undefined) return known;
+  const pending = [term];
+  while (pending.length > 0) {
+    const at = pending.at(-1)!;
+    if (opennessByTerm.has(at)) {
+      pending.pop();
+      continue;
+    }
+    const parts = partsOfTerm(at);
+    const unmade = parts.filter((part) => !opennessByTerm.has(part));
+    if (unmade.length > 0) {
+      for (const part of unmade) pending.push(part);
+      continue;
+    }
+    pending.pop();
+    work.charge("checks", 1 + parts.length);
+    const below = parts.map((part) => opennessByTerm.get(part)!);
+    // (a scalar restricts to its kind; a collection or an object restricts at its own level)
+    const open =
+      at.kind === "union"
+        ? below.some((part) => part.open)
+        : !["atom", "list", "set", "dict", "object"].includes(at.kind);
+    opennessByTerm.set(at, {
       open,
-      openBelow: open || below === null || below.some((each) => writtenKinds(work, each).openBelow),
-    };
-    kindsByTerm.set(term, found);
+      below:
+        open ||
+        (at.kind === "object" && at.properties === null) ||
+        below.some((part) => part.below),
+    });
   }
-  return found;
+  return opennessByTerm.get(term)!;
+}
+
+const prefixSteps = new WeakMap<TypeTerm, Map<string, TypeTerm | null>>();
+
+/**
+ * The nearest written prefix of a path (#1450): the written type's part at the path, or, below a part that admits every
+ * kind (an unwritten element, an `object`'s properties, a union member's), the open part, as admission's `permittedAt`
+ * reads it; `null` where the written type does not reach the path. Each step once per node, from the memoized openness.
+ */
+function prefixAt(work: WorkLedger, term: TypeTerm, path: readonly string[]): TypeTerm | null {
+  let at: TypeTerm | null = term;
+  for (const step of path) {
+    if (at === null || openness(work, at).open) return at;
+    at = prefixStep(work, at, step);
+  }
+  return at;
+}
+
+function prefixStep(work: WorkLedger, term: TypeTerm, step: string): TypeTerm | null {
+  let steps = prefixSteps.get(term);
+  if (steps === undefined) prefixSteps.set(term, (steps = new Map()));
+  const known = steps.get(step);
+  if (known !== undefined || steps.has(step)) return known ?? null;
+  work.charge("checks");
+  let below: TypeTerm | null;
+  if (openness(work, term).open || (term.kind === "object" && term.properties === null))
+    below = OPEN_PART;
+  else if (term.kind === "union") {
+    const parts = term.members.flatMap((member) => prefixStep(work, member, step) ?? []);
+    below = parts.some((part) => openness(work, part).open)
+      ? OPEN_PART
+      : parts.length === 0
+        ? null
+        : parts.length === 1
+          ? parts[0]!
+          : { kind: "union", members: parts };
+  } else below = termAt(term, [step]);
+  steps.set(step, below);
+  return below;
+}
+
+const tagsByTerm = new WeakMap<TypeTerm, readonly ItemTag[]>();
+
+/** A written type's kinds (`typeTags`), made and charged once per type a read answers by. */
+function writtenTags(work: WorkLedger, term: TypeTerm): readonly ItemTag[] {
+  let tags = tagsByTerm.get(term);
+  if (tags === undefined) {
+    tags = typeTags(term);
+    work.charge("checks", tags.length);
+    tagsByTerm.set(term, tags);
+  }
+  return tags;
 }

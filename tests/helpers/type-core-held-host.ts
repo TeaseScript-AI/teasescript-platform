@@ -24,13 +24,13 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
  * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner
  * reviewer's seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property
  * (#1452), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing
- * read's other sources (a typed parse, a written type, an unrestricted written type and its dictionary's values list:
- * #1450). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count, an arithmetic
- * operand, a fallback's left in requirement mode, a written store); the stores around the read (none, a replacement
- * before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance that stops a decision,
- * `heldDemands`). Each case runs with independent host globals whose values its own predicate sorts (`needs` and the
- * holder's literal), never the checker's, and is judged at every settled stop in four modes (`heldProblems`). CI runs
- * anchors of it; the whole family is a worker run outside CI.
+ * read's other sources (a typed parse, a written type, an unrestricted written type, its dictionary's values list and a
+ * copy projecting below it: #1450). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat
+ * count, an arithmetic operand, a fallback's left in requirement mode, a written store); the stores around the read
+ * (none, a replacement before it, one after it); and the stop's kind (a program stop alone, or with a demand allowance
+ * that stops a decision, `heldDemands`). Each case runs with independent host globals whose values its own predicate
+ * sorts (`needs` and the holder's literal), never the checker's, and is judged at every settled stop in four modes
+ * (`heldProblems`). CI runs anchors of it; the whole family is a worker run outside CI.
  */
 
 /** A holder at a depth: the lines that store the host data, the read's text, and what its literal requires of the data. */
@@ -220,6 +220,24 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
       `let xs: dict${"[]".repeat(depth - 1)} = ${nest(depth - 1, "dict {a: hostValue, b: 4}", (text) => `[${text}]`)}`,
     ],
     read: `xs${"[0]".repeat(depth - 1)}.values[0]`,
+    integer: false,
+  }),
+  // (a copy projecting below an unrestricted written part, its nearest written prefix admitting every kind, and the
+  // object twin: Codex r2's N1 on #1487)
+  writtenListBelow: (depth) => ({
+    lines: [
+      `let xs: list = [${nest(depth, "hostValue", (text, i) => `{f${i}: ${text}}`)}]`,
+      `let ys = xs[0]${fields(depth)}`,
+    ],
+    read: "ys",
+    integer: false,
+  }),
+  writtenObjectBelow: (depth) => ({
+    lines: [
+      `let root: object = ${nest(depth, "[hostValue, 4]", (text, i) => `{f${i}: ${text}}`)}`,
+      `let ys = root${fields(depth)}`,
+    ],
+    read: "ys[0]",
     integer: false,
   }),
   // (a dictionary's values list, read through a copy, whose element is the dictionary's, #1452; and an object's own
