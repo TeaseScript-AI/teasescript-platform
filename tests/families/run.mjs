@@ -159,14 +159,22 @@ if (process.argv[2] === "--child") {
       child?.kill("SIGKILL");
       process.kill(process.pid, signal);
     });
-  /** One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). */
+  /**
+   * One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). At
+   * the deadline the process ends and the runs it had written are read before it closes: a source whose timeout
+   * callback has run stalls, with them.
+   */
   const analysed = (message) =>
     new Promise((resolve) => {
       // a child that ended between sources (its channel closed) is replaced, not given the next source
       if (child?.connected !== true) child = fresh();
       const current = child;
       const runs = [];
-      const onMessage = (reply) => ("run" in reply ? runs.push(reply.run) : settle(reply));
+      let expired = false;
+      const onMessage = (reply) => {
+        if ("run" in reply) runs.push(reply.run);
+        else if (!expired) settle(reply);
+      };
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
       // after `close`, the process's error output is complete
       const onClose = (code, signal) => {
@@ -182,9 +190,13 @@ if (process.argv[2] === "--child") {
           child = null;
           current.kill("SIGKILL");
         }
-        resolve({ ...result, runs });
+        resolve({ ...(expired ? { stalled: "timeout" } : result), runs });
       };
-      const timer = setTimeout(() => settle({ stalled: "timeout" }), timeout);
+      // (the process's `close` then settles the source, after the frames it had written)
+      const timer = setTimeout(() => {
+        expired = true;
+        current.kill("SIGKILL");
+      }, timeout);
       current.on("message", onMessage).on("error", onError).on("close", onClose);
       current.send(message);
     });
