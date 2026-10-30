@@ -453,6 +453,19 @@ test("a key's text and its cursor read one stop: after a stop both forms are sto
   for (const key of below) assert.equal(read(key), stopped, String(key));
 });
 
+test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
+  const source = request(
+    "let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nfunction small {\n  return a0.q.f\n}\nlet out = small()\nexit\n",
+  );
+  const routes = (): string => {
+    const answers = analyseCore(source);
+    return JSON.stringify(answers.graph.nodes.map((node) => answers.at(node)?.route ?? null));
+  };
+  const { result, records } = withKeyRecords(routes);
+  assert.ok(records.some((record) => record.kind === "lane" && record.lane === "cursor"));
+  assert.equal(result, withTextKeys(routes));
+});
+
 test("a binding's wrapper shape is found once per pass whoever asks first, and each family's lane is frozen by it alone, whatever the analysis stops, rejects or finishes afresh, in every mode (TABLE r4.196)", () => {
   const problems: string[] = [];
   const seen = { cursor: 0, text: 0, vetoed: 0, passes: 0, building: 0 };
