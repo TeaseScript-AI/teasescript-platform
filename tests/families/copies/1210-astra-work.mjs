@@ -33,6 +33,9 @@ export const cases = [...QUICK, ...SCALE].flatMap(([k, f]) =>
   Object.keys(forms).map((name) => [`own-${name}/${k}/${f}`, source(name, k, f)]),
 );
 
+// the globals the recorded run passed
+export const globals = ["hostValue"];
+
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
   "commands": [
