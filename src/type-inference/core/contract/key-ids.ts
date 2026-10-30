@@ -153,11 +153,12 @@ function keyBelowWith(
   // (the key in its identity first: a wrapper family's text below its place's own key is its cursor)
   const key = canonicalKey(contract, asked);
   if (rest.length === 0) return key;
-  let id: KeyId | null = isKeyId(key) ? key : null;
-  if (id === null && key.endsWith("|") && keyLane(contract, keyPlace(key), rest[0]!) === "cursor")
-    id = rootId(keyPlace(key));
-  if (id === null)
+  if (
+    !isKeyId(key) &&
+    !(key.endsWith("|") && keyLane(contract, keyPlace(key), rest[0]!) === "cursor")
+  )
     return canonicalText(kept ? keptKeyBelow(contract.work, key, rest) : keyBelow(key, rest));
+  let id = isKeyId(key) ? key : rootId(keyPlace(key));
   for (const step of rest) id = keyIdBelow(contract, id, step);
   return id;
 }

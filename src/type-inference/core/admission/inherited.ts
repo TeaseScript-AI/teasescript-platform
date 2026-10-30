@@ -143,7 +143,7 @@ function resolveInherited(admission: Admission, asked: Key): TypeTerm | null {
     const scan = (next: CanonicalKey): Waiting => {
       const place = keyPlace(next);
       const cursor = isKeyId(next) ? next : null;
-      const path = cursor === null ? keyPath(next) : null;
+      const path = isKeyId(next) ? null : keyPath(next);
       // (a text path's id made only past its first step's wrapper check, as before G3 stage 1)
       const id = (): number => (cursor !== null ? keyIdPath(cursor) : contract.pathIdOf(path!));
       const first = cursor !== null ? keyIdFirst(contract, cursor) : (path![0] ?? null);

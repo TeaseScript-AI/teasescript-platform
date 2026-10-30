@@ -22,11 +22,10 @@ import {
   type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
-import { type CanonicalKey, isSteps, type Rest, spanRef } from "./contract/key-ids.js";
+import { type CanonicalKey, isSteps, keyStepsIn, type Rest, spanRef } from "./contract/key-ids.js";
 import {
   keptKey,
   keyOf,
-  keyPath,
   keyPlace,
   type Definition,
   type ForLoopFacts,
@@ -158,7 +157,7 @@ export class Values {
     }
     if (program.isHost(keyPlace(key))) {
       route("contract");
-      return { items: hostAt(keyPath(key)), def: null, guardable: false };
+      return { items: hostAt(keyStepsIn(this.pass.contract, key)), def: null, guardable: false };
     }
     if (yield* contract.refReceiver(key)) {
       route("contract");

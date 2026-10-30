@@ -33,6 +33,14 @@ import { siteKey, type CoreProgram } from "./program.js";
  */
 export type Key = string;
 
+/**
+ * A key the text helpers read (`barOf`): any text, never one whose type admits a cursor (`place#id`,
+ * `contract/key-ids.ts`), so the compiler names a reader that passes a key in its identity (`CanonicalKey`) unnarrowed.
+ */
+export type TextKey<K extends Key> = [Extract<K, `${number}#${number}`>] extends [never]
+  ? K
+  : never;
+
 export function keyOf(place: PlaceId, path: readonly string[]): Key {
   return `${place}|${path.join(".")}`;
 }
@@ -55,7 +63,7 @@ export function keyPlace(key: Key): PlaceId {
   return Number(key.slice(0, bar < 0 ? key.indexOf("#") : bar));
 }
 
-export function keyPath(key: Key): string[] {
+export function keyPath<K extends Key>(key: TextKey<K>): string[] {
   const steps = key.slice(barOf(key) + 1);
   return steps === "" ? [] : steps.split(".");
 }
@@ -194,7 +202,7 @@ export function keptKey(work: WorkLedger, place: PlaceId, path: readonly string[
 }
 
 /** The number of steps of a key's path (`keyPath(key).length`), made nothing. */
-export function keyDepth(key: Key): number {
+export function keyDepth<K extends Key>(key: TextKey<K>): number {
   const bar = barOf(key);
   if (bar === key.length - 1) return 0;
   let depth = 1;
@@ -203,13 +211,13 @@ export function keyDepth(key: Key): number {
 }
 
 /** `keyPath`, its steps charged by the key's text before they are made (`keepText`). */
-export function keptPath(work: WorkLedger, key: Key): string[] {
+export function keptPath<K extends Key>(work: WorkLedger, key: TextKey<K>): string[] {
   keepText(work, key.length);
   return keyPath(key);
 }
 
 /** The key `rest` below `key` (what `keyOf(keyPlace(key), [...keyPath(key), ...rest])` gives). */
-export function keyBelow(key: Key, rest: readonly string[]): Key {
+export function keyBelow<K extends Key>(key: TextKey<K>, rest: readonly string[]): Key {
   barOf(key);
   if (rest.length === 0) return key;
   return key.endsWith("|") ? `${key}${rest.join(".")}` : `${key}.${rest.join(".")}`;
@@ -222,12 +230,12 @@ export function keptKeyBelow(work: WorkLedger, key: Key, rest: readonly string[]
 }
 
 /** A key's path as text (what `keyPath(key).join(".")` gives). */
-export function keyPathText(key: Key): string {
+export function keyPathText<K extends Key>(key: TextKey<K>): string {
   return key.slice(barOf(key) + 1);
 }
 
 /** `keyPathText`, charged before it is made (`keepText`). */
-export function keptPathText(work: WorkLedger, key: Key): string {
+export function keptPathText<K extends Key>(work: WorkLedger, key: TextKey<K>): string {
   keepText(work, key.length);
   return keyPathText(key);
 }
@@ -241,7 +249,7 @@ export function keyOfText(place: PlaceId, text: string): Key {
  * The key one step above `key`, its last step and the dot before it gone (`place|` above a first step), its text charged
  * before it is made; `null` at a place's own key.
  */
-export function keptParent(work: WorkLedger, key: Key): Key | null {
+export function keptParent<K extends Key>(work: WorkLedger, key: TextKey<K>): Key | null {
   const bar = barOf(key);
   if (bar === key.length - 1) return null;
   const dot = key.lastIndexOf(".");
