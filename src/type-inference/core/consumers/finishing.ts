@@ -226,14 +226,27 @@ function laterSources(
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
   // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
-  if (held !== null)
-    return requirement ? required(withoutEmpty(held).map((item) => item.tag)) : held;
+  // (the written type at the read, by its syntax in any finishing pass: an unrestricted one admits every kind, so its
+  // domain, its contract or the type itself, holds the host data its key's stores hold, as an admitted or a syntax
+  // domain does below, #1450; a restricted one holds its kinds, its stores' boundaries checking them)
+  const term = (): TypeTerm | null => {
+    const written = writtenRead(walk, value);
+    return written === null ? null : termAt(written, rest);
+  };
+  const open = (at: TypeTerm | null): boolean => at !== null && typeTags(at).includes("unknown");
+  if (held !== null) {
+    if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
+    return open(term()) ? [...held, ...heldIngress(walk, value, rest)] : held;
+  }
   // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
   // decision or a copy's only where admission settled
-  const written = typedTags === null ? writtenRead(walk, value) : null;
-  const term = written === null ? null : termAt(written, rest);
+  const written = typedTags === null ? term() : null;
   const retained =
-    term !== null ? typeTags(term) : walk.settled ? (retainedRead(walk, value, rest) ?? []) : [];
+    written !== null
+      ? typeTags(written)
+      : walk.settled
+        ? (retainedRead(walk, value, rest) ?? [])
+        : [];
   // else, at a settled stop, the stores' syntax (source 4, TABLE r4.100, r4.135): every store's syntax decides the key
   // together
   const tags =
@@ -241,8 +254,10 @@ function laterSources(
   // (a requirement follows from the concrete kinds alone, as unstopped, where external data decides none)
   if (requirement) return required(tags);
   // (an admitted or a syntax domain holds the host data its key's stores hold there, as the unstopped read does: its
-  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415)
-  const host = typedTags === null && term === null ? heldIngress(walk, value, rest) : [];
+  // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does an unrestricted
+  // written type, above)
+  const host =
+    typedTags === null && (written === null || open(written)) ? heldIngress(walk, value, rest) : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
   const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos" })), ...host];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)

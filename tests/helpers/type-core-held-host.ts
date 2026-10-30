@@ -24,7 +24,8 @@ import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracl
  * store, a parameter, a parameter's default, a loop variable, a function's result, an add, an `addAll` (and the owner
  * reviewer's seven `addAll` texts), a dictionary's values list through a copy and an object's own `values` property
  * (#1452), the copy graph's topology (a ring, two places copying each other, a ring with a tail), and the finishing
- * read's other sources (a typed parse, a written type). The other axes are its depth; the consumer (an interpolation, a `say`, a repeat count, an arithmetic operand, a fallback's left in
+ * read's other sources (a typed parse, a written type, an unrestricted written type: #1450). The other axes are its
+ * depth; the consumer (an interpolation, a `say`, a repeat count, an arithmetic operand, a fallback's left in
  * requirement mode, a written store); the stores around the read (none, a replacement before it, one after it); and the
  * stop's kind (a program stop alone, or with a demand allowance that stops a decision, `heldDemands`). Each case runs
  * with independent host globals whose values its own predicate sorts (`needs` and the holder's literal), never the
@@ -203,6 +204,15 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     ],
     read: `xs${"[0]".repeat(depth)}`,
     integer: true,
+  }),
+  // (an unrestricted written element, which admits every kind: its read holds the host data, and its store owes no
+  // boundary by the literal beside it, #1450)
+  writtenList: (depth) => ({
+    lines: [
+      `let xs: list${"[]".repeat(depth - 1)} = ${nest(depth - 1, "[hostValue, 4]", (text) => `[${text}]`)}`,
+    ],
+    read: `xs${"[0]".repeat(depth)}`,
+    integer: false,
   }),
   // (a dictionary's values list, read through a copy, whose element is the dictionary's, #1452; and an object's own
   // `values` property beside it)

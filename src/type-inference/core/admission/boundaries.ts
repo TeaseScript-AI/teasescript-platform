@@ -216,11 +216,13 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
     // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
     // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need,
     // TABLE r4.126; never below a decision that stopped at its demand allowance, which decides nothing in the unstopped
-    // analysis either, so a settled stop keeps its boundaries: Astra r1's B2 on #1437)
+    // analysis either, so a settled stop keeps its boundaries: Astra r1's B2 on #1437; nor where a written type stands,
+    // which decides the destination after a stop too, an unrestricted one admitting no kind as every kind fits, #1450)
     const destination = admission.destPath(d);
     if (
       tags.length === 0 &&
       admission.pass.program.work.stopped !== null &&
+      !writtenStands(admission, d.place, path) &&
       d.value !== undefined &&
       path.length >= destination.length &&
       !admission.decisionStopped(d.place, path)
@@ -245,6 +247,12 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
   return tags.length > 0 && items.some((item) => item.tag === "null") ? [...tags, "null"] : tags;
 }
 
+/** Whether a written type stands at a place's path (an unrestricted one too, whose admitted type names no kind). */
+function writtenStands(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+  const type = writtenOf(admission.pass.program.place(place).kind);
+  return type !== null && termAt(type, path) !== null;
+}
+
 /**
  * C9, S6-CARRIERS §3.3, once every place is decided, from the landing index: one boundary per ingress store, at the
  * record level a whole record is stored at (the longest common prefix of its non-own ingress stops' boundary paths,
@@ -256,10 +264,8 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
  */
 export function publish(admission: Admission, written = false): void {
   const { definitions, lists, program } = admission.pass;
-  const writtenAt = (d: Definition): boolean => {
-    const type = writtenOf(program.place(d.place).kind);
-    return type !== null && termAt(type, admission.destPath(d)) !== null;
-  };
+  const writtenAt = (d: Definition): boolean =>
+    writtenStands(admission, d.place, admission.destPath(d));
   // (`written`: only those stores' stops, so no walk of the rest after a stop; the index where it was made)
   const index = landingIndex(admission, written ? writtenAt : undefined);
   const stores = new Set(definitions.storeDefs);
