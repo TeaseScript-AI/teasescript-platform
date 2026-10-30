@@ -73,9 +73,10 @@ one is not rejected at the store before it, the plan's check at the store is not
 changes, or a store above a stop lacks its one owned mark. Which stop a store meets is read from the compiler's own
 decisions. Besides PASS and FAIL a row is UNSUPPORTED (the candidate route rejects the source), OUT_OF_SCOPE (a stop at
 or above the store's own path, #1440, or a store into an inferred place before admission settled, #1252: only its
-fitting runs and the host's input are judged), ERROR, TIMEOUT, CANCELLED or NOT_RUN; a campaign with any row but PASS
-and FAIL is INCOMPLETE, never green. `s8-stores.mjs` is the family's sources as a module of this corpus, which
-`check.mjs` checks and `run.mjs property` compares; the behavioural verdict stays the tool's. Its runs are not in CI.
+fitting runs and the host's input are judged), ERROR, TIMEOUT, CANCELLED or NOT_RUN. Any non-PASS row prevents a green
+campaign: FAIL takes precedence, then ERROR for ERROR/TIMEOUT/CANCELLED, otherwise INCOMPLETE for exclusions or
+NOT_RUN. `s8-stores.mjs` is the family's sources as a module of this corpus, which `check.mjs` checks and
+`run.mjs property` compares; the behavioural verdict stays the tool's. Its runs are not in CI.
 
 A pair of commits, from the repository root on a worker, as one capped job:
 
