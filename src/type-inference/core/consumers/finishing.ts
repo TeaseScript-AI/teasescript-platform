@@ -293,9 +293,8 @@ interface TrieNode {
 }
 
 /**
- * Each step's holders below a component of the copy graph, a persistent hash array mapped trie by the step's number: a
- * component's trie is its reached components' with its members' own steps added, sharing every node it does not change,
- * so a chain of copies costs one path per link, not a map per copy.
+ * Each step's holders below a component of the copy graph, a persistent hash array mapped trie by the step's number,
+ * sharing every node it does not change (`Below`'s lineage says which trie it extends and by what).
  */
 interface StepTrie {
   readonly size: number;
@@ -309,9 +308,17 @@ interface StepTrie {
  * host data standing at it and so at every path below it (`inherited`), and its step at each step, made once
  * (`stepped`). Where a stop tracks it (a member's place has a stopped decision), each member has its own, without its
  * own steps, and its copies inside the component are `tracked`.
+ *
+ * Its lineage: the reached summary its `holders` extend (`base`), and the entries it adds to them (`delta`), so that
+ * `holders` is `base`'s with `delta` added, and a lineage root's `holders` its `delta`; `depth` and the jumps up the
+ * lineage (`up`: its base, its base's base's ..., by powers of two) find the lowest summary two lineages share.
  */
 interface Below {
   readonly holders: StepTrie;
+  readonly base: Below | null;
+  readonly delta: StepTrie;
+  readonly depth: number;
+  readonly up: readonly Below[];
   readonly tracked: Holders | undefined;
   readonly inherited: IngressNode | undefined;
   readonly stopped: boolean;
@@ -699,17 +706,23 @@ function joinHolders(a: Holders | undefined, b: Holders | undefined): Holders | 
   return b === undefined || a === b ? a : { union: [a, b] };
 }
 
-/** The frontiers a group of holders names, each once, charged per group met. */
+/** The frontiers a group of holders names, each group met once by identity, charged per group. */
 function holdersOf(walk: Consumers, holders: Holders | undefined): HostFrontier[] {
   const out: HostFrontier[] = [];
   const seen = new Set<Holders>();
-  const pending = holders === undefined ? [] : [holders];
+  const pending: Holders[] = [];
+  const meet = (group: Holders): void => {
+    if (seen.has(group)) return;
+    seen.add(group);
+    pending.push(group);
+  };
+  if (holders !== undefined) meet(holders);
   for (let at = pending.pop(); at !== undefined; at = pending.pop()) {
     walk.pass.program.work.charge("checks");
-    if (seen.has(at)) continue;
-    seen.add(at);
-    if ("union" in at) pending.push(at.union[1], at.union[0]);
-    else out.push(at);
+    if ("union" in at) {
+      meet(at.union[1]);
+      meet(at.union[0]);
+    } else out.push(at);
   }
   return out;
 }
@@ -769,14 +782,15 @@ function trieWith(
   return { node: { bitmap: node.bitmap, entries }, added: deeper.added };
 }
 
-/** Two tries as one: the smaller's leaves added to the larger, charged per entry met. */
+/** Two tries as one: the smaller's leaves added to the larger, charged per node and entry met. */
 function trieUnion(walk: Consumers, a: StepTrie, b: StepTrie): StepTrie {
   if (a === b || b.root === null) return a;
   if (a.root === null) return b;
   const [large, small] = a.size >= b.size ? [a, b] : [b, a];
   let { size, root } = large;
   const pending: TrieNode[] = [small.root!];
-  for (let node = pending.pop(); node !== undefined; node = pending.pop())
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    walk.pass.program.work.charge("checks");
     for (const entry of node.entries) {
       walk.pass.program.work.charge("checks");
       if (!("id" in entry)) {
@@ -787,6 +801,7 @@ function trieUnion(walk: Consumers, a: StepTrie, b: StepTrie): StepTrie {
       root = added.node;
       if (added.added) size += 1;
     }
+  }
   return { size, root };
 }
 
@@ -803,11 +818,119 @@ function withOwnSteps(walk: Consumers, trie: StepTrie, member: HostFrontier): St
   return { size, root };
 }
 
-/** What a component's members reach (`belowOf`): the holders, the tracked copies and the host data, gathered. */
+/** What a component's members reach (`belowOf`): the reached untracked summaries, the tracked copies and the host data. */
 interface Reached {
-  holders: StepTrie;
+  readonly reached: Set<Below>;
   tracked: Holders | undefined;
   inherited: IngressNode | undefined;
+}
+
+/** The fields of a summary its holders and lineage make (`combine`). */
+type Lineage = Pick<Below, "holders" | "base" | "delta" | "depth" | "up">;
+
+/** Test-only: the check of each summary's lineage-merged holders (`withHolderCheck`). */
+interface HolderCheck {
+  readonly naive: boolean;
+  readonly mismatches: string[];
+  summaries: number;
+}
+
+/** The running holder check, or `null`. */
+let holderCheck: HolderCheck | null = null;
+
+/**
+ * Test-only: runs `callback` with every summary's lineage-merged holders compared with the naive union of its members'
+ * own entries and its reached summaries' holders, step by step, each difference recorded, and the summaries counted;
+ * with `naive`, the naive union is the summary's holders instead (the lineage's oracle, `tests/type-core-stop.test.ts`).
+ */
+export function withHolderCheck<T>(
+  naive: boolean,
+  callback: () => T,
+): { readonly result: T; readonly mismatches: readonly string[]; readonly summaries: number } {
+  if (holderCheck !== null) throw new Error("The holders are already checked.");
+  const check: HolderCheck = { naive, mismatches: [], summaries: 0 };
+  holderCheck = check;
+  try {
+    const result = callback();
+    return { result, mismatches: check.mismatches, summaries: check.summaries };
+  } finally {
+    holderCheck = null;
+  }
+}
+
+/** A trie's holders by step number, each step's holders as a set (`withHolderCheck`). */
+function trieEntries(walk: Consumers, trie: StepTrie): Map<number, Set<HostFrontier>> {
+  const out = new Map<number, Set<HostFrontier>>();
+  const pending = trie.root === null ? [] : [trie.root];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop())
+    for (const entry of node.entries)
+      if ("id" in entry) out.set(entry.id, new Set(holdersOf(walk, entry.holders)));
+      else pending.push(entry);
+  return out;
+}
+
+/** A summary's lineage checked against the naive union of what it combines (`withHolderCheck`), or used instead. */
+function checked(
+  walk: Consumers,
+  lineage: Lineage,
+  reached: ReadonlySet<Below>,
+  own: StepTrie,
+): Lineage {
+  if (holderCheck === null) return lineage;
+  holderCheck.summaries += 1;
+  let naive = own;
+  for (const below of reached) naive = trieUnion(walk, naive, below.holders);
+  const [merged, union] = [trieEntries(walk, lineage.holders), trieEntries(walk, naive)];
+  for (const id of new Set([...merged.keys(), ...union.keys()])) {
+    const [a, b] = [merged.get(id) ?? new Set(), union.get(id) ?? new Set()];
+    if (a.size !== b.size || [...a].some((holder) => !b.has(holder)))
+      holderCheck.mismatches.push(`step ${id}: ${a.size} merged, ${b.size} in the union`);
+  }
+  return holderCheck.naive ? { ...lineage, holders: naive } : lineage;
+}
+
+/**
+ * Whether summary `x` is `of` or an ancestor of it in their lineage (its `holders` then within `of`'s): `of` lifted to
+ * `x`'s depth by its jumps, charged per hop.
+ */
+function lineageHolds(walk: Consumers, x: Below, of: Below): boolean {
+  if (x.depth > of.depth) return false;
+  let at = of;
+  for (let gap = of.depth - x.depth, level = 0; gap > 0; gap >>= 1, level += 1) {
+    walk.pass.program.work.charge("checks");
+    if ((gap & 1) !== 0) at = at.up[level]!;
+  }
+  return at === x;
+}
+
+/**
+ * A summary's holders from its members' own entries and the distinct summaries it reaches, by lineage: none reached, its
+ * own entries; else the largest reached is its base, and from every other reached summary only the entries its lineage
+ * adds above the lowest summary it shares with the base, so a base many branches share is never enumerated again (a
+ * summary sharing none is added whole, smaller into larger). Charged per lineage hop and per trie entry and level.
+ */
+function combine(walk: Consumers, reached: ReadonlySet<Below>, own: StepTrie): Lineage {
+  const { program } = walk.pass;
+  let base: Below | null = null;
+  for (const below of reached) {
+    program.work.charge("checks");
+    if (base === null || below.holders.size > base.holders.size) base = below;
+  }
+  if (base === null) return { holders: own, base: null, delta: own, depth: 0, up: [] };
+  let delta = own;
+  for (const below of reached) {
+    if (below === base) continue;
+    for (let at: Below | null = below; at !== null && !lineageHolds(walk, at, base); at = at.base) {
+      program.work.charge("checks");
+      delta = trieUnion(walk, delta, at.delta);
+    }
+  }
+  const up: Below[] = [base];
+  for (let level = 0; up[level]!.up[level] !== undefined; level += 1) {
+    program.work.charge("checks");
+    up.push(up[level]!.up[level]!);
+  }
+  return { holders: trieUnion(walk, base.holders, delta), base, delta, depth: base.depth + 1, up };
 }
 
 /**
@@ -874,7 +997,7 @@ function belowOf(walk: Consumers, start: HostFrontier): Below {
         const below = doneOf(copy)!;
         if (below.stopped) into.tracked = joinHolders(into.tracked, copy);
         else {
-          into.holders = trieUnion(walk, into.holders, below.holders);
+          into.reached.add(below);
           into.tracked = joinHolders(into.tracked, below.tracked);
           into.inherited = ingress.union(into.inherited, below.inherited);
         }
@@ -886,14 +1009,21 @@ function belowOf(walk: Consumers, start: HostFrontier): Below {
       if (keep) frontiers.below.set(member, below);
     };
     if (!stopped) {
-      const into: Reached = { holders: EMPTY_TRIE, tracked: undefined, inherited: undefined };
+      const into: Reached = { reached: new Set(), tracked: undefined, inherited: undefined };
+      let own = EMPTY_TRIE;
       for (const member of members) {
         program.work.charge("checks");
         reach(member, into);
-        into.holders = withOwnSteps(walk, into.holders, member);
+        own = withOwnSteps(walk, own, member);
         into.inherited = ingress.union(into.inherited, member.host);
       }
-      const below: Below = { ...into, stopped, stepped: new Map() };
+      const below: Below = {
+        ...checked(walk, combine(walk, into.reached, own), into.reached, own),
+        tracked: into.tracked,
+        inherited: into.inherited,
+        stopped,
+        stepped: new Map(),
+      };
       for (const member of members) {
         program.work.charge("checks");
         record(member, below);
@@ -901,9 +1031,15 @@ function belowOf(walk: Consumers, start: HostFrontier): Below {
     } else
       for (const member of members) {
         program.work.charge("checks");
-        const into: Reached = { holders: EMPTY_TRIE, tracked: undefined, inherited: member.host };
+        const into: Reached = { reached: new Set(), tracked: undefined, inherited: member.host };
         reach(member, into);
-        record(member, { ...into, stopped, stepped: new Map() });
+        record(member, {
+          ...checked(walk, combine(walk, into.reached, EMPTY_TRIE), into.reached, EMPTY_TRIE),
+          tracked: into.tracked,
+          inherited: into.inherited,
+          stopped,
+          stepped: new Map(),
+        });
       }
   }
   return doneOf(start)!;
