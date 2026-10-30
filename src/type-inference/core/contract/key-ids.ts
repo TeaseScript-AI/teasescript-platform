@@ -387,8 +387,12 @@ export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest):
     (each) => each.how === "initializer" && each.kind === "whole" && each.path.length === 0,
   );
   if (d === undefined || keyLane(contract, d.place, steps.at(0)!) !== "cursor") return rest;
-  // (a record's steps their own path's span: the cursor's path is the path they spell)
-  if (isPathSteps(steps)) return spanRef(contract, steps.path);
+  // (a record's steps their own path's span: the cursor's path is the path they spell, kept by its key's text as an
+  // array's is, for the keys asked by text)
+  if (isPathSteps(steps)) {
+    textCursor(contract, keyOfText(d.place, steps.text()), () => keyIdAt(d.place, steps.path));
+    return spanRef(contract, steps.path);
+  }
   // (a member chain asks one literal and rest again at every level: its key's text found, never converted again)
   const key = keyOf(d.place, steps);
   return spanRef(
@@ -663,7 +667,7 @@ function textOf(contract: Contract, path: number): string {
     return facts.text;
   }
   // (a path's text made here alone: no text builder takes a record's steps, `PathSteps`)
-  const text = pathText(rawSteps.get(stepsOfId(contract, keyIdAt(0, path)))!);
+  const text = pathText(ownSteps(stepsOfId(contract, keyIdAt(0, path))));
   contract.keepText(text.length);
   facts.text = text;
   return text;
@@ -755,7 +759,7 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
   if (from > 0 && facts.steps !== undefined) {
     // (a suffix of a path whose steps are kept: from them, once per offset)
     convert(contract, 1, 0, 1);
-    steps = kept(contract, path, from, rawSteps.get(facts.steps)!.slice(from));
+    steps = kept(contract, path, from, ownSteps(facts.steps).slice(from));
   } else {
     // (the span's nodes and the one it ends at, an empty span's endpoint too)
     convert(contract, depth - from + 1, 0, 1);
@@ -770,45 +774,76 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
   return steps;
 }
 
-/** Each `PathSteps`' steps, read by this module alone: no other module can spell them. */
+/** Each `PathSteps`' steps, read by this module alone: no other module can spell them; a view's those it views. */
 const rawSteps = new WeakMap<PathSteps, readonly string[]>();
+
+/** Where a view starts in the steps it views (`PathSteps`, set by its class alone). */
+let offsetOf: (steps: PathSteps) => number;
+
+/** Steps' own steps as an array, for this module's makers: a view's sliced from those it views. */
+function ownSteps(steps: PathSteps): readonly string[] {
+  const raw = rawSteps.get(steps)!;
+  const start = offsetOf(steps);
+  return start === 0 && steps.length === raw.length ? raw : raw.slice(start, start + steps.length);
+}
 
 /**
  * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
- * record (`text`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its reason
- * (`tests/type-core-key-ids.test.ts`).
- * Its views (`from`, `to`) and joins (`stepsJoin`, `stepsAfter`) hold the steps a slice or a join of an array held,
- * made as plainly; the id of the path they spell is found only where it is asked (`path`), through the record's kept
- * ids. No text builder takes one, so a path's text is made by its record alone.
+ * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
+ * reason (`tests/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
+ * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
+ * by its offset and length (an entry), so the same view made again finds both free, as a span view's own id is. Its
+ * joins (`stepsJoin`, `stepsAfter`) hold the steps a join of arrays held, made as plainly, their path the arena's join
+ * where asked. No text builder takes one, so a path's text is made by its record alone.
  */
 export class PathSteps {
+  static {
+    offsetOf = (steps) => steps.#offset;
+  }
   readonly #contract: Contract;
   readonly length: number;
   #id: number | undefined;
   readonly #find: () => number;
+  #text: string | undefined;
   /** The steps it is a view of (none: its own), and where in them it starts. */
   #of: PathSteps | null = null;
-  #offset = 0;
-  /** Its views' paths by offset and length, each found once and kept: a view asked again finds its path free. */
-  #views: Map<number, number> | undefined;
-  constructor(contract: Contract, steps: readonly string[], id: number | (() => number)) {
+  readonly #offset: number;
+  /** Its views' paths and texts by offset and length, each found once and kept: a view made again finds them free. */
+  #views: Map<number, { readonly id: number; text?: string }> | undefined;
+  /** Its own entry there, a view's. */
+  #entry: { readonly id: number; text?: string } | undefined;
+  constructor(
+    contract: Contract,
+    steps: readonly string[],
+    id: number | (() => number),
+    offset = 0,
+    length = steps.length,
+  ) {
     this.#contract = contract;
-    this.length = steps.length;
+    this.#offset = offset;
+    this.length = length;
     if (typeof id === "number") this.#id = id;
     this.#find = typeof id === "number" ? () => id : id;
     rawSteps.set(this, steps);
   }
   /** The step at `index`, none past its length. */
   at(index: number): string | undefined {
-    return index >= 0 && index < this.length ? rawSteps.get(this)![index] : undefined;
+    return index >= 0 && index < this.length
+      ? rawSteps.get(this)![this.#offset + index]
+      : undefined;
   }
   /** The id of the path it spells, found once (`spanId`, `prefixId`, `joinedId`). */
   get path(): number {
     return (this.#id ??= this.#find());
   }
-  /** Its text, through the record (`textOf`). */
+  /** Its text, through the record (`textOf`), found once. */
   text(): string {
-    return textOf(this.#contract, this.path);
+    if (this.#text !== undefined) return this.#text;
+    const path = this.path;
+    const entry = this.#entry;
+    this.#text = entry?.text ?? textOf(this.#contract, path);
+    if (entry !== undefined) entry.text = this.#text;
+    return this.#text;
   }
   /** The text of its first `length` steps, through the record (`textOf` of its prefix's path). */
   prefixText(length: number): string {
@@ -822,28 +857,33 @@ export class PathSteps {
   to(count: number): PathSteps {
     return count >= this.length ? this : this.#view(this.#offset, count);
   }
-  /** A view of the steps it is one of, `length` from `offset`: its path the span (`spanId`) and prefix (`prefixId`) of theirs where asked. */
+  /**
+   * A view of the steps it is one of, `length` from `offset`, read in place: its path the span (`spanId`) and prefix
+   * (`prefixId`) of theirs, found where asked and kept on them (an entry).
+   */
   #view(offset: number, length: number): PathSteps {
     const of = this.#of ?? this;
     const contract = this.#contract;
     const key = offset * (of.length + 1) + length;
-    const view = new PathSteps(contract, rawSteps.get(of)!.slice(offset, offset + length), () => {
-      const known = of.#views?.get(key);
-      if (known !== undefined) return known;
-      const from = offset === 0 ? of.path : spanId(contract, of.path, offset);
-      const id = offset + length === of.length ? from : prefixId(contract, from, length);
-      (of.#views ??= new Map()).set(key, id);
-      contract.keep(1);
-      return id;
-    });
+    const find = (): number => {
+      let entry = of.#views?.get(key);
+      if (entry === undefined) {
+        const from = offset === 0 ? of.path : spanId(contract, of.path, offset);
+        entry = { id: offset + length === of.length ? from : prefixId(contract, from, length) };
+        (of.#views ??= new Map()).set(key, entry);
+        contract.keep(1);
+      }
+      view.#entry = entry;
+      return entry.id;
+    };
+    const view = new PathSteps(contract, rawSteps.get(of)!, find, offset, length);
     view.#of = of;
-    view.#offset = offset;
     return view;
   }
   /** Its steps followed by `then`'s: their path the arena's join (`joinedId`) where asked. */
   followedBy(then: Steps): PathSteps {
     if (then.length === 0) return this;
-    const made = joinSteps(rawSteps.get(this)!, isPathSteps(then) ? rawSteps.get(then)! : then);
+    const made = joinSteps(ownSteps(this), isPathSteps(then) ? ownSteps(then) : then);
     return new PathSteps(this.#contract, made, () =>
       joinedId(this.#contract, this.path, idOf(this.#contract, then)),
     );
@@ -851,7 +891,7 @@ export class PathSteps {
   /** `strip`'s steps followed by its own: their path the arena's join (`joinedId`) where asked. */
   after(strip: readonly string[]): PathSteps {
     if (strip.length === 0) return this;
-    return new PathSteps(this.#contract, joinSteps(strip, rawSteps.get(this)!), () =>
+    return new PathSteps(this.#contract, joinSteps(strip, ownSteps(this)), () =>
       joinedId(this.#contract, idOf(this.#contract, strip), this.path),
     );
   }
@@ -862,7 +902,7 @@ export class PathSteps {
   /** A copy as an array, for a site that keeps or hands on one: charged as a kept array. */
   toArray(): readonly string[] {
     convert(this.#contract, 1, 0, 0);
-    return keptArray(this.#contract.work, [...rawSteps.get(this)!]);
+    return keptArray(this.#contract.work, [...ownSteps(this)]);
   }
 }
 
@@ -934,7 +974,7 @@ export function stepsJoin(first: Steps, then: Steps): Steps {
 export function keptStepsFrom(work: WorkLedger, steps: Steps, from: number): Steps {
   if (!isPathSteps(steps)) return keptSlice(work, steps, from);
   const view = steps.from(from);
-  keptArray(work, rawSteps.get(view)!);
+  keptArray(work, ownSteps(view));
   return view;
 }
 
@@ -942,7 +982,7 @@ export function keptStepsFrom(work: WorkLedger, steps: Steps, from: number): Ste
 export function keptStepsJoin(work: WorkLedger, first: Steps, then: Steps): Steps {
   if (!isPathSteps(first) && !isPathSteps(then)) return keptSteps(work, first, then);
   const joined = stepsJoin(first, then);
-  if (isPathSteps(joined)) keptArray(work, rawSteps.get(joined)!);
+  if (isPathSteps(joined)) keptArray(work, ownSteps(joined));
   return joined;
 }
 

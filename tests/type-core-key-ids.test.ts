@@ -1026,11 +1026,11 @@ const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "a copy's strip: the copied key's steps joined into the store walk's strip (`Expansion.strip`), an array its expansions keep and name",
   ],
   stoppedKeys: [
-    20,
+    12,
     "a stopped key leaves its pass as steps (`Contract.stoppedKeys`), as no path id does",
   ],
   decide: [
-    10,
+    6,
     "a stopped decision's path, its stores asked once by it (`stoppedStores`), kept as an array",
   ],
   touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],

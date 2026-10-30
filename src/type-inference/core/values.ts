@@ -20,14 +20,12 @@ import {
   WIDE,
   withOwnSelection,
   type ChoicePart,
-  type Contract,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
 import {
   type CanonicalKey,
   isPathSteps,
   isSteps,
-  keyAt,
   keyStepsIn,
   type Rest,
   someStep,
@@ -44,6 +42,7 @@ import {
 import {
   keptKey,
   keyOf,
+  keyOfText,
   keyPlace,
   type Definition,
   type ForLoopFacts,
@@ -128,9 +127,9 @@ export function narrowingKey(g: Narrowing): string {
   return joinParts("gv", g.node.id, g.input.id, g.form.kind, g.elements);
 }
 
-/** The key of `place` at `rest`: a record's steps in their family's identity (`keyAt`), never spelled; an array's text. */
-function keyOfSteps(contract: Contract, place: PlaceId, rest: Steps): Key {
-  return isPathSteps(rest) ? keyAt(contract, place, rest) : keyOf(place, rest);
+/** The key of `place` at `rest`: a record's steps spelled by their record (`PathSteps.text`), an array's as before. */
+function keyOfSteps(place: PlaceId, rest: Steps): Key {
+  return isPathSteps(rest) ? keyOfText(place, rest.text()) : keyOf(place, rest);
 }
 
 export class Values {
@@ -849,10 +848,7 @@ export class Values {
       if (binding !== undefined)
         return contract.entered(
           value,
-          yield* this.keyItems(
-            keyOfSteps(contract, binding, rest),
-            program.occNode.get(value) ?? node,
-          ),
+          yield* this.keyItems(keyOfSteps(binding, rest), program.occNode.get(value) ?? node),
         );
       const projection = program.projOf.get(value);
       if (projection !== undefined) {
@@ -884,7 +880,7 @@ export class Values {
         const call = program.opOf.get(value);
         if (call?.kind === "call")
           return yield* this.keyItems(
-            keyOfSteps(contract, program.functionOf(call.fn).result, rest),
+            keyOfSteps(program.functionOf(call.fn).result, rest),
             program.callOutOf.get(value) ?? node,
           );
       }
@@ -894,7 +890,7 @@ export class Values {
       if (program.hasOf.has(value) || program.cellOwner.has(value))
         return yield* this.#literalItems(value, rest, node);
       if (program.isHost(value)) return hostAt(rest);
-      return yield* this.keyItems(keyOfSteps(contract, value, rest), node);
+      return yield* this.keyItems(keyOfSteps(value, rest), node);
     } finally {
       this.pass.solver.leaveRead();
     }
