@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { compileProject } from "../src/compiler.js";
 import { jsonFieldMismatch, jsonKindMismatch } from "../src/runtime/values/value-types.js";
 import { analyseCore } from "../src/type-inference/core/answers.js";
 import { checkedResult, reportedDiagnostics } from "../src/type-inference/core/consumer.js";
@@ -1499,4 +1500,177 @@ test("S9b's sentences read word for word as the sentence review settled them (#1
       differing.push(`${name}:\n  ${got.join("\n  ")}`);
   }
   assert.deepEqual(differing, []);
+});
+
+/**
+ * #1468 (ADR 0021 rule 1.4, `docs/DIAGNOSTICS.md` "Messages"): where a store types a property below the warned value,
+ * the fix names that property, in words with no value of its own (the lead's ruling after Codex r2), and following it
+ * removes the warning (Astra r1's A1). Where the checker's definitions prove the value a load with a default, the load
+ * as its variable's declaration's value or a copy of a variable whose key holds only that declaration and the keys below
+ * it on the way none, the load's default is given the property; else, a write in any spelling, another binding of the
+ * name, a selection or a join around the read (Codex r4's N1 to N3, r5's), no property check removes the warning
+ * (#1496), so the words say where the type must come from and offer no check. A type with null takes no default that removes it yet (#1470). A value that is the place
+ * keeps its own check. Each followed source compiles under both checkers and no longer owes the warning.
+ */
+test("a store's property below the warned value is the property its fix names, and following it removes the warning (#1468)", () => {
+  const load = 'load("prefs", default: {volume: 5})';
+  const given = 'load("prefs", default: {volume: 5, caption: 7})';
+  const guarded = (body: string) =>
+    `if original.entry is integer {\n${body.replace(/^/gm, "    ").trimEnd()}\n}\nexit\n`;
+  const cases: readonly (readonly [
+    source: string,
+    value: string,
+    fix: string,
+    followed: string | null,
+  ])[] = [
+    [
+      `let prefs = ${load}\nprefs.caption = 2\nexit\n`,
+      load,
+      `Give 'caption' a whole number (integer) in the default of '${load}'.`,
+      `let prefs = ${given}\nprefs.caption = 2\nexit\n`,
+    ],
+    [
+      'let prefs = load("prefs", default: {inner: {volume: 5}})\nprefs.inner.caption = "on"\nexit\n',
+      'load("prefs", default: {inner: {volume: 5}})',
+      `Give 'inner.caption' text (string) in the default of 'load("prefs", default: {inner: {volume: 5}})'.`,
+      'let prefs = load("prefs", default: {inner: {volume: 5, caption: "off"}})\nprefs.inner.caption = "on"\nexit\n',
+    ],
+    [
+      'let loaded = load("prefs", default: [{volume: 5}])\nloaded[0].caption = 2\nexit\n',
+      'load("prefs", default: [{volume: 5}])',
+      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nloaded[0].caption = 2\nexit\n',
+    ],
+    // (Astra r1's copy, its property already checked)
+    [
+      `let original = load("cfg", default: {marker: 8})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
+      "original",
+      `Give 'entry' a whole number (integer) in the default of 'load("cfg", default: {marker: 8})'.`,
+      `let original = load("cfg", default: {marker: 8, entry: 7})\n${guarded('let box = original\nbox.entry = 4\nsay "done"')}`,
+    ],
+    [
+      'let loaded = load("prefs", default: [{volume: 5}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
+      "loaded[0]",
+      `Give 'caption' of an element of 'loaded' a whole number (integer) in the default of 'load("prefs", default: [{volume: 5}])'.`,
+      'let loaded = load("prefs", default: [{volume: 5, caption: 7}])\nlet prefs = loaded[0]\nprefs.caption = 2\nexit\n',
+    ],
+    // (a load the checker's definitions do not prove: a list literal, a selection around the read; Codex r4's N1 and
+    // r5's, a write by an index, a mutator through a parenthesized receiver and callee; N2, two ways from one load; N3,
+    // an object's property named like a selection; another binding of the name, a parameter; a second load of the
+    // variable; a load that is not its variable's declaration's value)
+    [
+      `let prefs = ${load}\nlet items = [{volume: 5}, prefs]\nitems[1].caption = 2\nexit\n`,
+      "[{volume: 5}, prefs]",
+      "Give 'caption' of an element of 'items' a whole number (integer) where '[{volume: 5}, prefs]' gets its value.",
+      null,
+    ],
+    [
+      `let saved = ${load}\nlet prefs = [saved, saved].random\nprefs.caption = 2\nexit\n`,
+      "[saved, saved].random",
+      "Give 'prefs.caption' a whole number (integer) where '[saved, saved].random' gets its value.",
+      null,
+    ],
+    ...["loaded[0] = hostValue", "(loaded).add(hostValue)", "(loaded.add)(hostValue)"].map(
+      (write) =>
+        [
+          `let loaded = load("prefs", default: [{volume: 5}])\n${write}\nlet items = loaded\nitems[0].caption = 2\nexit\n`,
+          "loaded",
+          "Give 'caption' of an element of 'items' a whole number (integer) where 'loaded' gets its value.",
+          null,
+        ] as const,
+    ),
+    [
+      'let loaded = load("prefs", default: {left: {volume: 5}, right: {volume: 5}})\nlet prefs = [loaded.left, loaded.right].random\nprefs.caption = 2\nexit\n',
+      "[loaded.left, loaded.right].random",
+      "Give 'prefs.caption' a whole number (integer) where '[loaded.left, loaded.right].random' gets its value.",
+      null,
+    ],
+    [
+      'let loaded = load("prefs", default: {first: {volume: 5}})\nlet prefs = loaded.first\nprefs.caption = 2\nexit\n',
+      "loaded.first",
+      "Give 'prefs.caption' a whole number (integer) where 'loaded.first' gets its value.",
+      null,
+    ],
+    [
+      `function keep {\n    let prefs = ${load}\n    say "kept"\n}\nkeep()\nfunction use(prefs) {\n    let copy = prefs\n    copy.caption = 2\n}\nuse(hostValue)\nuse({volume: 1})\nexit\n`,
+      "prefs",
+      "Give 'copy.caption' a whole number (integer) where 'prefs' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = ${load}\nprefs = load("other", default: {volume: 5})\nlet copy = prefs\ncopy.caption = 2\nexit\n`,
+      "prefs",
+      "Give 'copy.caption' a whole number (integer) where 'prefs' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = load("saved", default: {volume: 5})\nprefs = ${load}\nprefs.caption = 2\nexit\n`,
+      load,
+      `Give 'prefs.caption' a whole number (integer) where '${load}' gets its value.`,
+      null,
+    ],
+    // (host data: no property check removes the warning, Astra r1's host and kept lists)
+    [
+      "let items = [{volume: 5}, hostValue]\nitems[1].caption = 2\nexit\n",
+      "hostValue",
+      "Give 'caption' of an element of 'items' a whole number (integer) where 'hostValue' gets its value.",
+      null,
+    ],
+    [
+      'if hostValue is object and hostValue.entry is integer {\n    let boxes = [{marker: 8}, hostValue]\n    boxes[1].entry = 4\n    say "done"\n}\nexit\n',
+      "hostValue",
+      "Give 'entry' of an element of 'boxes' a whole number (integer) where 'hostValue' gets its value.",
+      null,
+    ],
+    [
+      'let kept = [hostValue]\nif kept[0].entry is integer {\n    let box = kept\n    box[0].entry = 4\n    say "done"\n}\nexit\n',
+      "kept",
+      "Give 'entry' of an element of 'box' a whole number (integer) where 'kept' gets its value.",
+      null,
+    ],
+    [
+      `let prefs = ${load}\nprefs.caption = [null, 2].random\nexit\n`,
+      load,
+      `Give 'prefs.caption' a whole number (integer) or null where '${load}' gets its value.`,
+      null,
+    ],
+    [
+      "let prefs = hostValue otherwise {volume: 5}\nprefs.caption = 2\nexit\n",
+      "hostValue",
+      "Give 'prefs.caption' a whole number (integer) where 'hostValue' gets its value.",
+      null,
+    ],
+    [
+      "let o = {caption: hostValue}\no.caption = 2\nexit\n",
+      "hostValue",
+      "Check that 'hostValue' is a whole number (integer) first.",
+      "if hostValue is integer {\n    let o = {caption: hostValue}\n    o.caption = 2\n}\nexit\n",
+    ],
+  ];
+  const errors = (source: string) =>
+    compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] }).diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "error",
+    );
+  for (const [source, value, fix, followed] of cases) {
+    const warned = reported(main(source)).filter(
+      ({ code, site, message }) =>
+        code === "TSV041" && site === value && !/holds (objects|an object)/.test(message),
+    );
+    assert.equal(warned.length, 1, `${source}: ${JSON.stringify(warned)}`);
+    const { message } = warned[0]!;
+    assert.ok(message.endsWith(` ${STOPS} ${fix}`), `${source}: ${message}`);
+    const place = message.slice(0, message.indexOf(" holds "));
+    if (followed === null) {
+      assert.ok(!/check/i.test(fix), `${source}: no check is offered`);
+      continue;
+    }
+    assert.deepEqual(errors(followed), [], followed);
+    assert.deepEqual(
+      reported(main(followed)).filter(
+        ({ code, message: other }) => code === "TSV041" && other.startsWith(`${place} holds `),
+      ),
+      [],
+      followed,
+    );
+  }
 });
