@@ -1,6 +1,6 @@
 import type { PlaceId, SourceSite } from "../../graph.js";
 import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
-import { joinParts, joinSteps, keepText, stepText } from "../budget.js";
+import { joinParts, joinSteps, keepText, keptText } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { typeTags } from "../contract.js";
 import { keyPath, keyPlace, type Key } from "../definitions.js";
@@ -37,15 +37,15 @@ export function fallbackFits(
   // nested list, set and dict literals by their elements, one depth after another; the target: the fallback's own
   // key path at the depth, a dict's value its `entry` (§10.5)
   const { contract, program } = walk.pass;
-  let label = keyLabel(walk, value);
+  // the label by its steps: the fallback's own, then one per depth below it
+  const label = [keyLabel(walk, value)];
   for (
     let rest: readonly string[] = [];
-    fallbackFitsAt(walk, c, node, directAt, value, rest, written, label);
+    fallbackFitsAt(walk, c, node, directAt, value, rest, written, labelAt(walk, label));
     rest = joinSteps(rest, ["element"])
   ) {
     program.work.charge("checks");
-    label = stepText(
-      label,
+    label.push(
       elementStep(
         withoutEmpty(walk.run(contract.contractOfValueAt(value, rest))).map((item) => item.tag),
       ),
@@ -53,7 +53,16 @@ export function fallbackFits(
   }
 }
 
-/** C10 at one path of the fallback: whether its elements are checked too. */
+/**
+ * The fallback's label at the depth its steps reach, made and charged once where a check or warning there first names
+ * it: a label stepped at every depth made the labels of k nested `otherwise` k² code units, uncharged (#1433).
+ */
+function labelAt(walk: Consumers, label: readonly string[]): () => string {
+  let made: string | undefined;
+  return () => (made ??= label.length === 1 ? label[0]! : keptText(walk.pass.program.work, label));
+}
+
+/** C10 at one path of the fallback, its label there made by `label`: whether its elements are checked too. */
 function fallbackFitsAt(
   walk: Consumers,
   c: ValueConstraint,
@@ -62,7 +71,7 @@ function fallbackFitsAt(
   value: PlaceId,
   rest: readonly string[],
   written: boolean,
-  label: string,
+  label: () => string,
 ): boolean {
   const { program, contract, definitions } = walk.pass;
   const site = program.places[value]?.site;
@@ -92,7 +101,7 @@ function fallbackFitsAt(
       storeWarning(
         walk,
         site,
-        label,
+        label(),
         STOPPED[0]!,
         ["unknown"],
         { rule: "fallback", fallback: c.kind === "fallback", type: ["unknown"], root },
@@ -105,9 +114,9 @@ function fallbackFitsAt(
         obligation(
           "copy-type",
           site,
-          label,
+          label(),
           ["unknown"],
-          `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label}`,
+          `check ${c.kind === "fallback" ? "the fallback" : "the default"} ${label()}`,
         ),
       );
     return false;
@@ -156,10 +165,10 @@ function fallbackFitsAt(
   const unknowns = fallback.filter((item) => isOpaque(item) || isExternal(item));
   if (unknowns.length > 0 && !(union !== null && union.has("unknown"))) {
     for (const { item } of offendingKinds(unknowns))
-      storeWarning(walk, site, label, item, against, rule, fitting);
+      storeWarning(walk, site, label(), item, against, rule, fitting);
     walk.admission.boundariesAt(
       fallback,
-      obligation("copy-type", site, label, against.map(requiredKind), `check ${what} ${label}`),
+      obligation("copy-type", site, label(), against.map(requiredKind), `check ${what} ${label()}`),
     );
   }
   if (off.length === 0) {
@@ -189,7 +198,7 @@ function fallbackFitsAt(
     );
   else
     for (const { item } of offendingKinds(off))
-      storeWarning(walk, site, label, item, against, rule, fitting);
+      storeWarning(walk, site, label(), item, against, rule, fitting);
   return false;
 }
 
