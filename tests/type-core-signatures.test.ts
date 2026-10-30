@@ -730,8 +730,9 @@ test("record-valued nested choices compose no record: below their literal analog
  * The work of `join`'s and `sort`'s element checks does not grow with the list's width: over a list literal of k
  * elements (whose own check of one type, A8, is the literal's), the checks they add are the same at 64 and 128; and
  * `toJson`'s walk of an object k deep reads each level once, each level's path one step longer than the one above it
- * and charged as it is made: the read chain through nested literals, TABLE r4.83 (2)'s gated known limit (12,436 /
- * 41,682 units at k = 64, 128, 3.412 per doubling of the source), the depth no real script reaches.
+ * and charged as it is made: the read chain through nested literals, TABLE r4.83 (2)'s gated known limit, with each
+ * level's property names, whose kept paths the search charges since #1493 (13,685 / 49,747 units at k = 64, 128, 3.700
+ * per doubling of the source; 12,437 / 41,683 and 3.412 before), the depth no real script reaches.
  */
 test("join's and sort's element checks take the same work at any width, and toJson's deep walk is the read chain's known product", () => {
   const spent = (source: string) => {
@@ -749,7 +750,7 @@ test("join's and sort's element checks take the same work at any width, and toJs
   const [small, large] = [deep(64), deep(128)];
   assert.equal(large.exhausted, null);
   const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
-  assert.ok((2 * (large.total / small.total)) / scale <= 3.42);
+  assert.ok((2 * (large.total / small.total)) / scale <= 3.71);
 });
 
 /**

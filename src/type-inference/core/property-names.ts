@@ -14,6 +14,7 @@ import { keptArray, keptParts, keptSlice, keptSteps } from "./budget.js";
 import { carried, type Dispatch } from "./carriers.js";
 import { heldReference, type IndexNode } from "./contract.js";
 import { keyPath, recordPath } from "./definitions.js";
+import { REASON } from "./items.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
@@ -29,8 +30,8 @@ export type PropertyNamesTask =
  * its literals and of the values its collections' adds insert have at its path. One worklist of sources, each once: a value read further at a path is followed
  * through its projections and the operations that pass a value on (the value side's transfers) to a copied key, a
  * call's result key or a literal; a key to its prefixes' stores and their sources' own stores; a literal to the
- * reads and calls standing at its path or above it. A key's copied sources are followed only where its answer holds an
- * object (#1493). Each task it schedules and each prefix it visits is charged, and every key, path and identity it
+ * reads and calls standing at its path or above it. A key's copied sources are followed only where its answer may hold
+ * an object, one the stop left undecided included (#1493). Each task it schedules and each prefix it visits is charged, and every key, path and identity it
  * keeps, through the kept helpers.
  */
 export function propertyNames(
@@ -119,10 +120,16 @@ export function propertyNames(
       const step = keyPath(below)[path.length];
       if (step !== undefined && step !== "element") names.add(propertyName(step));
     }
-    // (#1493: a key whose completed answer holds no object has no object a source copies into it to name properties of,
-    // an unproved or stopped answer none proved: its own stores above name all it has. A feedback copy `w = r.z` stops
-    // here, where its path would otherwise grow by a step each turn)
-    if (!run(contract.contractOf(key)).some((item) => item.tag === "object")) continue;
+    // (#1493: a key whose answer proves it holds no object has no object a source copies into it to name properties of:
+    // its own stores above name all it has. A feedback copy `w = r.z` stops here, where its path would otherwise grow by
+    // a step each turn. A key a stop left undecided, a typed parse's nested path, proves nothing: its sources name its
+    // properties as before, so a stop keeps the check the unstopped analysis makes, TABLE r4.100)
+    if (
+      !run(contract.contractOf(key)).some(
+        (item) => item.tag === "object" || (item.reasons & REASON.budget) !== 0,
+      )
+    )
+      continue;
     // (the tasks keep their paths: a cursor's steps copied out once)
     const steps = stepsArray(path);
     for (let length = 0; length <= path.length; length += 1) {
