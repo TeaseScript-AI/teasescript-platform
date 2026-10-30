@@ -22,16 +22,16 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
-      "node \"$review_root/scale.mjs\" \"$review_root/$variant-d93-review\" \"$order\" \"$review_root/out/scale-$variant-$order.jsonl\"",
-      "R/astra-m4-i1188-design-recheck-r3-evidence/last-queue.sh:16"
+      'node "$review_root/scale.mjs" "$review_root/$variant-d93-review" "$order" "$review_root/out/scale-$variant-$order.jsonl"',
+      "R/astra-m4-i1188-design-recheck-r3-evidence/last-queue.sh:16",
     ],
     [
-      "node \"$review_root/scale.mjs\" \"$review_root/$variant-d93-review\" \"$order\" \"$review_root/out/scale128-$variant-$order.jsonl\" 128",
-      "R/astra-m4-i1188-design-recheck-r3-evidence/scale128-queue.sh:10"
-    ]
+      'node "$review_root/scale.mjs" "$review_root/$variant-d93-review" "$order" "$review_root/out/scale128-$variant-$order.jsonl" 128',
+      "R/astra-m4-i1188-design-recheck-r3-evidence/scale128-queue.sh:10",
+    ],
   ],
-  "sources": 4,
-  "sha256": "db9bd25e01ca630287325adee6bc09259998dc449e2cfd17c94c4642501e4051"
+  sources: 4,
+  sha256: "db9bd25e01ca630287325adee6bc09259998dc449e2cfd17c94c4642501e4051",
 };

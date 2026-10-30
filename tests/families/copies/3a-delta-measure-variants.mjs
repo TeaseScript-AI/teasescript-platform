@@ -13,24 +13,24 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
-      "sx-heavy \"$N\" measure-variants.mjs \"$D\" literal-distinct 250",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167"
+      'sx-heavy "$N" measure-variants.mjs "$D" literal-distinct 250',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167",
     ],
     [
-      "sx-heavy \"$N\" measure-variants.mjs \"$D\" literal-distinct 500",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167"
+      'sx-heavy "$N" measure-variants.mjs "$D" literal-distinct 500',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167",
     ],
     [
-      "sx-heavy \"$N\" measure-variants.mjs \"$D\" literal-distinct 1000",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167"
+      'sx-heavy "$N" measure-variants.mjs "$D" literal-distinct 1000',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167",
     ],
     [
-      "sx-heavy \"$N\" measure-variants.mjs \"$D\" literal-distinct 2000",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167"
-    ]
+      'sx-heavy "$N" measure-variants.mjs "$D" literal-distinct 2000',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:167",
+    ],
   ],
-  "sources": 4,
-  "sha256": "3511c3a2efca7ca3046bb0d910255d4ef1931eb3430bd7696ef35682913cf488"
+  sources: 4,
+  sha256: "3511c3a2efca7ca3046bb0d910255d4ef1931eb3430bd7696ef35682913cf488",
 };

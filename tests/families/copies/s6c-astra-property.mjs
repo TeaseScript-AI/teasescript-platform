@@ -12,16 +12,16 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "node property.mjs mutants/spread-property original 30000",
-      "R/astra-m4-s6c-review-evidence/property-original.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/property-original.jsonl:1",
     ],
     [
       "node property.mjs wt host 30000",
-      "R/astra-m4-s6c-review-evidence/property-host-clean.jsonl:1"
-    ]
+      "R/astra-m4-s6c-review-evidence/property-host-clean.jsonl:1",
+    ],
   ],
-  "sources": 2,
-  "sha256": "d001a714b023be2f4eaad8cf82e50e1511bc2f927f09af3de27e16e860c1d667"
+  sources: 2,
+  sha256: "d001a714b023be2f4eaad8cf82e50e1511bc2f927f09af3de27e16e860c1d667",
 };

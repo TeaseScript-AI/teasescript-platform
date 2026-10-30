@@ -16,36 +16,36 @@ export const globals = [];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
-      "sx-heavy \"$N\" grouped-measure.mjs \"$D\" 100",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169"
+      'sx-heavy "$N" grouped-measure.mjs "$D" 100',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169",
     ],
     [
-      "sx-heavy \"$N\" grouped-measure.mjs \"$D\" 250",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169"
+      'sx-heavy "$N" grouped-measure.mjs "$D" 250',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169",
     ],
     [
-      "sx-heavy \"$N\" grouped-measure.mjs \"$D\" 500",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169"
+      'sx-heavy "$N" grouped-measure.mjs "$D" 500',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169",
     ],
     [
-      "sx-heavy \"$N\" grouped-measure.mjs \"$D\" 1000",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169"
+      'sx-heavy "$N" grouped-measure.mjs "$D" 1000',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:169",
     ],
     [
-      "sx-heavy \"$N\" grouped-single-read.mjs \"$D\" 250",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171"
+      'sx-heavy "$N" grouped-single-read.mjs "$D" 250',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171",
     ],
     [
-      "sx-heavy \"$N\" grouped-single-read.mjs \"$D\" 500",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171"
+      'sx-heavy "$N" grouped-single-read.mjs "$D" 500',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171",
     ],
     [
-      "sx-heavy \"$N\" grouped-single-read.mjs \"$D\" 1000",
-      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171"
-    ]
+      'sx-heavy "$N" grouped-single-read.mjs "$D" 1000',
+      "R/pr-3a-delta-check-3-sol-files/report-draft.md:171",
+    ],
   ],
-  "sources": 4,
-  "sha256": "868cd0f12d2531f34ea35213fb44c65aa9e2ed31458f7ee81f89c6ce64557671"
+  sources: 4,
+  sha256: "868cd0f12d2531f34ea35213fb44c65aa9e2ed31458f7ee81f89c6ce64557671",
 };

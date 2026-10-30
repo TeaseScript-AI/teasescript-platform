@@ -70,40 +70,40 @@ export const globals = ["hostValue", "hostOther"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "node --import=./count-hook.mjs counts.mjs . head written --quick",
-      "R/astra-m4-i1203-review/commands.md:30"
+      "R/astra-m4-i1203-review/commands.md:30",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . base varied --quick",
-      "R/astra-m4-i1203-review/commands.md:31"
+      "R/astra-m4-i1203-review/commands.md:31",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . head classify --quick",
-      "R/astra-m4-i1203-review/commands.md:32"
+      "R/astra-m4-i1203-review/commands.md:32",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . head varied",
-      "R/astra-m4-i1203-review/commands.md:33"
+      "R/astra-m4-i1203-review/commands.md:33",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . base varied",
-      "R/astra-m4-i1203-review/commands.md:34"
+      "R/astra-m4-i1203-review/commands.md:34",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . head written",
-      "R/astra-m4-i1203-review/commands.md:35"
+      "R/astra-m4-i1203-review/commands.md:35",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . base written",
-      "R/astra-m4-i1203-review/commands.md:36"
+      "R/astra-m4-i1203-review/commands.md:36",
     ],
     [
       "node --import=./count-hook.mjs counts.mjs . head classify",
-      "R/astra-m4-i1203-review/commands.md:37"
-    ]
+      "R/astra-m4-i1203-review/commands.md:37",
+    ],
   ],
-  "sources": 90,
-  "sha256": "727b90ce3f2e3f28c351394d0f332bf3c1632122c599c7db6958537964069cff"
+  sources: 90,
+  sha256: "727b90ce3f2e3f28c351394d0f332bf3c1632122c599c7db6958537964069cff",
 };

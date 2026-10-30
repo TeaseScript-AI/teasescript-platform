@@ -49,7 +49,10 @@ export const cases = (() => {
       for (const [consumer, cons] of CONS) {
         const pre = [decl, ...(fns ? [set(fns)] : []), ...(setup ? [set(setup)] : [])];
         const post = situation === "helper-after" ? ["halve()"] : [];
-        add(`consumer/${consumer}/${form}/${situation}`, [...pre, ...cons(read), ...post, "exit"].join("\n"));
+        add(
+          `consumer/${consumer}/${form}/${situation}`,
+          [...pre, ...cons(read), ...post, "exit"].join("\n"),
+        );
         add(
           `consumer-twin/${consumer}/${form}/${situation}`,
           [...pre, `let operand = ${read}`, ...cons("operand"), ...post, "exit"].join("\n"),
@@ -61,7 +64,10 @@ export const cases = (() => {
   add("core/property-repeat-whole", 'let state = {n: 2}\nrepeat state.n { say "Tick" }\nexit');
   add("core/property-index", "let state = {n: 1.5}\nlet xs = [1, 2]\nlet v = xs[state.n]\nexit");
   add("core/property-store-index", "let state = {n: 0.5}\nlet xs = [1, 2]\nxs[state.n] = 3\nexit");
-  add("core/property-removeAt", "let state = {n: 1.5}\nlet xs = [1, 2]\nxs.removeAt(state.n)\nexit");
+  add(
+    "core/property-removeAt",
+    "let state = {n: 1.5}\nlet xs = [1, 2]\nxs.removeAt(state.n)\nexit",
+  );
   add("core/element-repeat", 'let xs = [1.5]\nrepeat xs.first { say "Tick" }\nexit');
   add("core/element-index-repeat", 'let xs = [1.5]\nrepeat xs[0] { say "Tick" }\nexit');
   add("core/element-index-whole", 'let xs = [2]\nrepeat xs[0] { say "Tick" }\nexit');
@@ -71,8 +77,14 @@ export const cases = (() => {
     "core/handler-property",
     'let state = {n: 2}\nshowPermanentButton "b" { state.n = 0.5 }\nwait 1 s\nrepeat state.n { say "Tick" }\nexit',
   );
-  add("core/conditional-element", 'let xs = [2]\nif hostFlag { xs.add(0.5) }\nrepeat xs.last { say "Tick" }\nexit');
-  add("core/read-before-widening", 'let state = {n: 2}\nrepeat state.n { say "Tick" }\nstate.n = 0.5\nexit');
+  add(
+    "core/conditional-element",
+    'let xs = [2]\nif hostFlag { xs.add(0.5) }\nrepeat xs.last { say "Tick" }\nexit',
+  );
+  add(
+    "core/read-before-widening",
+    'let state = {n: 2}\nrepeat state.n { say "Tick" }\nstate.n = 0.5\nexit',
+  );
   add("core/external-property", 'let state = {n: hostValue}\nrepeat state.n { say "Tick" }\nexit');
   add(
     "core/dispatched-property",
@@ -86,12 +98,12 @@ export const globals = ["hostValue", "hostFlag", "hostText", "hostList", "hostDi
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "python3 -I tools/make-consumers.py spike10/cases-consumers10.jsonl",
-      "R/3a-newcore/checkpoint-9/spike10/README.md:425"
-    ]
+      "R/3a-newcore/checkpoint-9/spike10/README.md:425",
+    ],
   ],
-  "sources": 447,
-  "sha256": "f05c3f96dcb1583a7248d8df4d6bf0b7833acebc0a9e4ed306cbf464cd1d6c74"
+  sources: 447,
+  sha256: "f05c3f96dcb1583a7248d8df4d6bf0b7833acebc0a9e4ed306cbf464cd1d6c74",
 };

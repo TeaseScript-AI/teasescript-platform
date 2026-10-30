@@ -1,60 +1,222 @@
 // #1253's review (Astra): its runtime shapes, nine fallback and type families at 4, 16, 32 and 64, loaded or not
 // (R/astra-m4-i1253-review-evidence/shapes.mjs).
 export const cases = [
-  ["lists/16/false", "let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["lists/16/true", "let parcel: object = load(\"cache\", default:{xs:[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]],bad:0})\nsay \"complete\"\nexit\n"],
-  ["lists/32/false", "let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["lists/32/true", "let parcel: object = load(\"cache\", default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0})\nsay \"complete\"\nexit\n"],
-  ["lists/64/false", "let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["lists/64/true", "let parcel: object = load(\"cache\", default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0})\nsay \"complete\"\nexit\n"],
-  ["mixed/16/false", "let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["mixed/16/true", "let parcel: object = load(\"cache\", default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}],bad:0})\nsay \"complete\"\nexit\n"],
-  ["mixed/32/false", "let parcel: object = fromJson(hostValue, default:{xs:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]},bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["mixed/32/true", "let parcel: object = load(\"cache\", default:{xs:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]},bad:0})\nsay \"complete\"\nexit\n"],
-  ["mixed/64/false", "let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["mixed/64/true", "let parcel: object = load(\"cache\", default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}],bad:0})\nsay \"complete\"\nexit\n"],
-  ["chain/16/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["chain/16/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["chain/32/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["chain/32/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["chain/64/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["chain/64/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["optional/16/false", "let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["optional/16/true", "let parcel: object? = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["optional/32/false", "let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["optional/32/true", "let parcel: object? = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["optional/64/false", "let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["optional/64/true", "let parcel: object? = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay \"complete\"\nexit\n"],
-  ["every/16/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["every/16/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay \"complete\"\nexit\n"],
-  ["every/32/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["every/32/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay \"complete\"\nexit\n"],
-  ["every/64/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["every/64/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay \"complete\"\nexit\n"],
-  ["wide/16/false", "let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["wide/16/true", "let parcel: object = load(\"cache\", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0}})\nsay \"complete\"\nexit\n"],
-  ["wide/32/false", "let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["wide/32/true", "let parcel: object = load(\"cache\", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0}})\nsay \"complete\"\nexit\n"],
-  ["wide/64/false", "let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0},p32:{nums:[0],bad:0},p33:{nums:[0],bad:0},p34:{nums:[0],bad:0},p35:{nums:[0],bad:0},p36:{nums:[0],bad:0},p37:{nums:[0],bad:0},p38:{nums:[0],bad:0},p39:{nums:[0],bad:0},p40:{nums:[0],bad:0},p41:{nums:[0],bad:0},p42:{nums:[0],bad:0},p43:{nums:[0],bad:0},p44:{nums:[0],bad:0},p45:{nums:[0],bad:0},p46:{nums:[0],bad:0},p47:{nums:[0],bad:0},p48:{nums:[0],bad:0},p49:{nums:[0],bad:0},p50:{nums:[0],bad:0},p51:{nums:[0],bad:0},p52:{nums:[0],bad:0},p53:{nums:[0],bad:0},p54:{nums:[0],bad:0},p55:{nums:[0],bad:0},p56:{nums:[0],bad:0},p57:{nums:[0],bad:0},p58:{nums:[0],bad:0},p59:{nums:[0],bad:0},p60:{nums:[0],bad:0},p61:{nums:[0],bad:0},p62:{nums:[0],bad:0},p63:{nums:[0],bad:0}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["wide/64/true", "let parcel: object = load(\"cache\", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0},p32:{nums:[0],bad:0},p33:{nums:[0],bad:0},p34:{nums:[0],bad:0},p35:{nums:[0],bad:0},p36:{nums:[0],bad:0},p37:{nums:[0],bad:0},p38:{nums:[0],bad:0},p39:{nums:[0],bad:0},p40:{nums:[0],bad:0},p41:{nums:[0],bad:0},p42:{nums:[0],bad:0},p43:{nums:[0],bad:0},p44:{nums:[0],bad:0},p45:{nums:[0],bad:0},p46:{nums:[0],bad:0},p47:{nums:[0],bad:0},p48:{nums:[0],bad:0},p49:{nums:[0],bad:0},p50:{nums:[0],bad:0},p51:{nums:[0],bad:0},p52:{nums:[0],bad:0},p53:{nums:[0],bad:0},p54:{nums:[0],bad:0},p55:{nums:[0],bad:0},p56:{nums:[0],bad:0},p57:{nums:[0],bad:0},p58:{nums:[0],bad:0},p59:{nums:[0],bad:0},p60:{nums:[0],bad:0},p61:{nums:[0],bad:0},p62:{nums:[0],bad:0},p63:{nums:[0],bad:0}})\nsay \"complete\"\nexit\n"],
-  ["any/16/false", "let parcel: object = fromJson(hostValue, default:{open:null,bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["any/16/true", "let parcel: object = load(\"cache\", default:{open:null,bad:0})\nsay \"complete\"\nexit\n"],
-  ["nullable-list/16/false", "let parcel: object = fromJson(hostValue, default:{xs:[null,[0]],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["nullable-list/16/true", "let parcel: object = load(\"cache\", default:{xs:[null,[0]],bad:0})\nsay \"complete\"\nexit\n"],
-  ["object-list/16/false", "let parcel: object[] = fromJson(hostValue, default:[{score:0}], files:false)\nsay \"complete\"\nexit\n"],
-  ["object-list/16/true", "let parcel: object[] = load(\"cache\", default:[{score:0}])\nsay \"complete\"\nexit\n"],
-  ["lists/4/false", "let parcel: object = fromJson(hostValue, default:{xs:[[[[{n:0}]]]],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["lists/4/true", "let parcel: object = load(\"cache\", default:{xs:[[[[{n:0}]]]],bad:0})\nsay \"complete\"\nexit\n"],
-  ["mixed/4/false", "let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{score:0}]}}],bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["mixed/4/true", "let parcel: object = load(\"cache\", default:{xs:[{next:{next:[{score:0}]}}],bad:0})\nsay \"complete\"\nexit\n"],
-  ["chain/4/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{score:0}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["chain/4/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{score:0}}}}})\nsay \"complete\"\nexit\n"],
-  ["optional/4/false", "let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{score:0}}}}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["optional/4/true", "let parcel: object? = load(\"cache\", default:{next:{next:{next:{next:{score:0}}}}})\nsay \"complete\"\nexit\n"],
-  ["every/4/false", "let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay \"complete\"\nexit\n"],
-  ["every/4/true", "let parcel: object = load(\"cache\", default:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0})\nsay \"complete\"\nexit\n"],
-  ["wide/4/false", "let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0}}, files:false)\nsay \"complete\"\nexit\n"],
-  ["wide/4/true", "let parcel: object = load(\"cache\", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0}})\nsay \"complete\"\nexit\n"],
+  [
+    "lists/16/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/16/true",
+    'let parcel: object = load("cache", default:{xs:[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/32/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/32/true",
+    'let parcel: object = load("cache", default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/64/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/64/true",
+    'let parcel: object = load("cache", default:{xs:[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[{n:0}]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/16/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/16/true",
+    'let parcel: object = load("cache", default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/32/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]},bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/32/true",
+    'let parcel: object = load("cache", default:{xs:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]},bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/64/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/64/true",
+    'let parcel: object = load("cache", default:{xs:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{next:{next:[{score:0}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}]}}],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/16/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/16/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/32/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/32/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/64/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/64/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/16/false",
+    'let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/16/true",
+    'let parcel: object? = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/32/false",
+    'let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/32/true",
+    'let parcel: object? = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/64/false",
+    'let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/64/true",
+    'let parcel: object? = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/16/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/16/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/32/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/32/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/64/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/64/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0},bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/16/false",
+    'let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/16/true",
+    'let parcel: object = load("cache", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/32/false",
+    'let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/32/true",
+    'let parcel: object = load("cache", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/64/false",
+    'let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0},p32:{nums:[0],bad:0},p33:{nums:[0],bad:0},p34:{nums:[0],bad:0},p35:{nums:[0],bad:0},p36:{nums:[0],bad:0},p37:{nums:[0],bad:0},p38:{nums:[0],bad:0},p39:{nums:[0],bad:0},p40:{nums:[0],bad:0},p41:{nums:[0],bad:0},p42:{nums:[0],bad:0},p43:{nums:[0],bad:0},p44:{nums:[0],bad:0},p45:{nums:[0],bad:0},p46:{nums:[0],bad:0},p47:{nums:[0],bad:0},p48:{nums:[0],bad:0},p49:{nums:[0],bad:0},p50:{nums:[0],bad:0},p51:{nums:[0],bad:0},p52:{nums:[0],bad:0},p53:{nums:[0],bad:0},p54:{nums:[0],bad:0},p55:{nums:[0],bad:0},p56:{nums:[0],bad:0},p57:{nums:[0],bad:0},p58:{nums:[0],bad:0},p59:{nums:[0],bad:0},p60:{nums:[0],bad:0},p61:{nums:[0],bad:0},p62:{nums:[0],bad:0},p63:{nums:[0],bad:0}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/64/true",
+    'let parcel: object = load("cache", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0},p4:{nums:[0],bad:0},p5:{nums:[0],bad:0},p6:{nums:[0],bad:0},p7:{nums:[0],bad:0},p8:{nums:[0],bad:0},p9:{nums:[0],bad:0},p10:{nums:[0],bad:0},p11:{nums:[0],bad:0},p12:{nums:[0],bad:0},p13:{nums:[0],bad:0},p14:{nums:[0],bad:0},p15:{nums:[0],bad:0},p16:{nums:[0],bad:0},p17:{nums:[0],bad:0},p18:{nums:[0],bad:0},p19:{nums:[0],bad:0},p20:{nums:[0],bad:0},p21:{nums:[0],bad:0},p22:{nums:[0],bad:0},p23:{nums:[0],bad:0},p24:{nums:[0],bad:0},p25:{nums:[0],bad:0},p26:{nums:[0],bad:0},p27:{nums:[0],bad:0},p28:{nums:[0],bad:0},p29:{nums:[0],bad:0},p30:{nums:[0],bad:0},p31:{nums:[0],bad:0},p32:{nums:[0],bad:0},p33:{nums:[0],bad:0},p34:{nums:[0],bad:0},p35:{nums:[0],bad:0},p36:{nums:[0],bad:0},p37:{nums:[0],bad:0},p38:{nums:[0],bad:0},p39:{nums:[0],bad:0},p40:{nums:[0],bad:0},p41:{nums:[0],bad:0},p42:{nums:[0],bad:0},p43:{nums:[0],bad:0},p44:{nums:[0],bad:0},p45:{nums:[0],bad:0},p46:{nums:[0],bad:0},p47:{nums:[0],bad:0},p48:{nums:[0],bad:0},p49:{nums:[0],bad:0},p50:{nums:[0],bad:0},p51:{nums:[0],bad:0},p52:{nums:[0],bad:0},p53:{nums:[0],bad:0},p54:{nums:[0],bad:0},p55:{nums:[0],bad:0},p56:{nums:[0],bad:0},p57:{nums:[0],bad:0},p58:{nums:[0],bad:0},p59:{nums:[0],bad:0},p60:{nums:[0],bad:0},p61:{nums:[0],bad:0},p62:{nums:[0],bad:0},p63:{nums:[0],bad:0}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "any/16/false",
+    'let parcel: object = fromJson(hostValue, default:{open:null,bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "any/16/true",
+    'let parcel: object = load("cache", default:{open:null,bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "nullable-list/16/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[null,[0]],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "nullable-list/16/true",
+    'let parcel: object = load("cache", default:{xs:[null,[0]],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "object-list/16/false",
+    'let parcel: object[] = fromJson(hostValue, default:[{score:0}], files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "object-list/16/true",
+    'let parcel: object[] = load("cache", default:[{score:0}])\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/4/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[[[[{n:0}]]]],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "lists/4/true",
+    'let parcel: object = load("cache", default:{xs:[[[[{n:0}]]]],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/4/false",
+    'let parcel: object = fromJson(hostValue, default:{xs:[{next:{next:[{score:0}]}}],bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "mixed/4/true",
+    'let parcel: object = load("cache", default:{xs:[{next:{next:[{score:0}]}}],bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/4/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{score:0}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "chain/4/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{score:0}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/4/false",
+    'let parcel: object? = fromJson(hostValue, default:{next:{next:{next:{next:{score:0}}}}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "optional/4/true",
+    'let parcel: object? = load("cache", default:{next:{next:{next:{next:{score:0}}}}})\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/4/false",
+    'let parcel: object = fromJson(hostValue, default:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "every/4/true",
+    'let parcel: object = load("cache", default:{next:{next:{next:{next:{score:0},bad:0},bad:0},bad:0},bad:0})\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/4/false",
+    'let parcel: object = fromJson(hostValue, default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0}}, files:false)\nsay "complete"\nexit\n',
+  ],
+  [
+    "wide/4/true",
+    'let parcel: object = load("cache", default:{p0:{nums:[0],bad:0},p1:{nums:[0],bad:0},p2:{nums:[0],bad:0},p3:{nums:[0],bad:0}})\nsay "complete"\nexit\n',
+  ],
 ];
 
 // the globals the recorded run passed
@@ -62,20 +224,20 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
-      "SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-own-$family-$n --priority 2 --dir \"$root\" -- timeout 180m bash \"$root/run-job.sh\" own-$family-$n node shapes.mjs \"$root\" \"$family\" \"$n\"",
-      "R/astra-m4-i1253-review-evidence/queue-series.sh:6"
+      'SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-own-$family-$n --priority 2 --dir "$root" -- timeout 180m bash "$root/run-job.sh" own-$family-$n node shapes.mjs "$root" "$family" "$n"',
+      "R/astra-m4-i1253-review-evidence/queue-series.sh:6",
     ],
     [
-      "SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-rebased-$family --priority 2 --dir \"$root\" -- timeout 180m bash \"$root/run-job.sh\" rebased-$family node shapes.mjs \"$root/recheck\" \"$family\" 4",
-      "R/astra-m4-i1253-review-evidence/queue-recheck.sh:11"
+      'SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-rebased-$family --priority 2 --dir "$root" -- timeout 180m bash "$root/run-job.sh" rebased-$family node shapes.mjs "$root/recheck" "$family" 4',
+      "R/astra-m4-i1253-review-evidence/queue-recheck.sh:11",
     ],
     [
-      "SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-own-$family-4 --priority 2 --dir \"$root\" -- timeout 180m bash \"$root/run-job.sh\" own-$family-4 node shapes.mjs \"$root\" \"$family\" 4",
-      "R/astra-m4-i1253-review-evidence/queue-own-quick.sh:5"
-    ]
+      'SX_HEAVY_MEM=2G SX_HEAVY_SWAP=0 sx-queue add --name astra-i1253-own-$family-4 --priority 2 --dir "$root" -- timeout 180m bash "$root/run-job.sh" own-$family-4 node shapes.mjs "$root" "$family" 4',
+      "R/astra-m4-i1253-review-evidence/queue-own-quick.sh:5",
+    ],
   ],
-  "sources": 54,
-  "sha256": "81c0675a12633f21c27c452db5edb37a933bcac5c5b79307e61eb89607c92393"
+  sources: 54,
+  sha256: "81c0675a12633f21c27c452db5edb37a933bcac5c5b79307e61eb89607c92393",
 };

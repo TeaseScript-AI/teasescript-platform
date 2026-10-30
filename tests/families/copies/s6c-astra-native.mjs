@@ -39,40 +39,46 @@ const SPREADS = {
     `let result: integer = askChoice {text: "outer", value: (max(${many(size, "1", ", ")}))}\nexit`,
 };
 const review = (source) =>
-  source.replaceAll('"A"', '"Review"').replaceAll("text: 1", "text: 2").replace(/\broot\b/g, "recordRoot");
-export const cases = Object.entries(SPREADS).map(([name, spread]) => [`${name}/30000`, review(spread(30000))]);
+  source
+    .replaceAll('"A"', '"Review"')
+    .replaceAll("text: 1", "text: 2")
+    .replace(/\broot\b/g, "recordRoot");
+export const cases = Object.entries(SPREADS).map(([name, spread]) => [
+  `${name}/30000`,
+  review(spread(30000)),
+]);
 
 // the globals the recorded run passed
 export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "node native.mjs wt guards 30000",
-      "R/astra-m4-s6c-review-evidence/native-guards-clean.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/native-guards-clean.jsonl:1",
     ],
     [
       "node native.mjs wt solver 30000",
-      "R/astra-m4-s6c-review-evidence/native-solver-clean.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/native-solver-clean.jsonl:1",
     ],
     [
       "node native.mjs wt records 30000",
-      "R/astra-m4-s6c-review-evidence/native-records-clean.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/native-records-clean.jsonl:1",
     ],
     [
       "node native.mjs wt property 30000",
-      "R/astra-m4-s6c-review-evidence/native-property-clean.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/native-property-clean.jsonl:1",
     ],
     [
       "node native.mjs wt choiceClass 30000",
-      "R/astra-m4-s6c-review-evidence/native-choiceClass-clean.jsonl:1"
+      "R/astra-m4-s6c-review-evidence/native-choiceClass-clean.jsonl:1",
     ],
     [
       "node native.mjs wt operationClass 30000",
-      "R/astra-m4-s6c-review-evidence/native-operationClass-clean.jsonl:1"
-    ]
+      "R/astra-m4-s6c-review-evidence/native-operationClass-clean.jsonl:1",
+    ],
   ],
-  "sources": 6,
-  "sha256": "646203a298cb52bde850af4c870d2940a1ea4c182a538fd1e84e989c357df2b7"
+  sources: 6,
+  sha256: "646203a298cb52bde850af4c870d2940a1ea4c182a538fd1e84e989c357df2b7",
 };

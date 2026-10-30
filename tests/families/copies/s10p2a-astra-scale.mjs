@@ -10,7 +10,9 @@ function source(k) {
   lines.push("}");
   for (let i = 0; i < k; i++) lines.push("if not bypass { resetAll() }");
   for (let i = 0; i < k; i++)
-    lines.push(`switch subject${i} { case 12.0 { repeat subject${i} {} } default { repeat subject${i} {} } }`);
+    lines.push(
+      `switch subject${i} { case 12.0 { repeat subject${i} {} } default { repeat subject${i} {} } }`,
+    );
   lines.push("exit");
   return lines.join("\n") + "\n";
 }
@@ -23,12 +25,12 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "scale-series / 4G / 900 / node <root>/scale-series.mjs",
-      "R/astra-m4-s10p2a-review/commands.txt:25"
-    ]
+      "R/astra-m4-s10p2a-review/commands.txt:25",
+    ],
   ],
-  "sources": 5,
-  "sha256": "0e2ea718fbfd1ce195d8e49a40c1e9cc60e3c3679a553b17b793eb95653a2ea7"
+  sources: 5,
+  sha256: "0e2ea718fbfd1ce195d8e49a40c1e9cc60e3c3679a553b17b793eb95653a2ea7",
 };

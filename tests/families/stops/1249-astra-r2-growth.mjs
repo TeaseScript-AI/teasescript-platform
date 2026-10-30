@@ -4,10 +4,14 @@
 // run by its `run.mjs`.
 function pre(k) {
   let typed = "";
-  for (let i = 0; i < k; i++) typed += `let w${i}: integer = ${i}\nlet alias${i} = w${i}\nlet copied${i} = alias${i}\n`;
+  for (let i = 0; i < k; i++)
+    typed += `let w${i}: integer = ${i}\nlet alias${i} = w${i}\nlet copied${i} = alias${i}\n`;
   typed += 'let badValue: string = "text"\n';
   const fields = Array.from({ length: k }, (_, i) => `f${i}: copied${i}`).join(", ");
-  const other = Array.from({ length: k }, (_, i) => `f${i}: ` + (i === 0 ? "badValue" : `copied${i}`)).join(", ");
+  const other = Array.from(
+    { length: k },
+    (_, i) => `f${i}: ` + (i === 0 ? "badValue" : `copied${i}`),
+  ).join(", ");
   return typed + `let good={outer:{inner:{${fields}}}}\nlet bad={outer:{inner:{${other}}}}\n`;
 }
 function shape(name, reverse) {
@@ -37,16 +41,13 @@ export const globals = ["hostValue", "hostInit", "hostOther"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
+    ["python3 make-growth.py", "R/astra-m4-i1249-review-r2-evidence/REPRODUCE.md:23"],
     [
-      "python3 make-growth.py",
-      "R/astra-m4-i1249-review-r2-evidence/REPRODUCE.md:23"
+      'node run.mjs "$review_tree" growth.json growth-new.jsonl (and growth-quick.json)',
+      "R/astra-m4-i1249-review-r2-evidence/REPRODUCE.md:28",
     ],
-    [
-      "node run.mjs \"$review_tree\" growth.json growth-new.jsonl (and growth-quick.json)",
-      "R/astra-m4-i1249-review-r2-evidence/REPRODUCE.md:28"
-    ]
   ],
-  "sources": 20,
-  "sha256": "4f6a84db3b0d329a6f317fe5b0e8937ecbc9cea7e2498b894d2b8a84c1f1939f"
+  sources: 20,
+  sha256: "4f6a84db3b0d329a6f317fe5b0e8937ecbc9cea7e2498b894d2b8a84c1f1939f",
 };

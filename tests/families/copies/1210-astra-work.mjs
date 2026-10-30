@@ -38,16 +38,16 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
-      "node work.mjs \"$PWD\" head quick # also base",
-      "R/astra-m4-i1210-review-evidence/astra-m4-i1210-review.md:80"
+      'node work.mjs "$PWD" head quick # also base',
+      "R/astra-m4-i1210-review-evidence/astra-m4-i1210-review.md:80",
     ],
     [
-      "node work.mjs \"$PWD\" head scale # also base",
-      "R/astra-m4-i1210-review-evidence/astra-m4-i1210-review.md:81"
-    ]
+      'node work.mjs "$PWD" head scale # also base',
+      "R/astra-m4-i1210-review-evidence/astra-m4-i1210-review.md:81",
+    ],
   ],
-  "sources": 63,
-  "sha256": "02cddf738e298fcecc9f8d975730b5f8233bc4edd33feae2f7f44c2088a1a014"
+  sources: 63,
+  sha256: "02cddf738e298fcecc9f8d975730b5f8233bc4edd33feae2f7f44c2088a1a014",
 };

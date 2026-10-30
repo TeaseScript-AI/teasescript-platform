@@ -23,7 +23,10 @@ const family = (name) => (k) => {
   return body + "\nexit\n";
 };
 export const shapes = Object.fromEntries(
-  ["numeric-wave", "copy-ring", "copy-break", "switch-location"].map((name) => [name, family(name)]),
+  ["numeric-wave", "copy-ring", "copy-break", "switch-location"].map((name) => [
+    name,
+    family(name),
+  ]),
 );
 
 export const sizes = [64, 128, 256, 512, 1024];
@@ -33,12 +36,12 @@ export const globals = ["hostValue"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "node evidence/r1-scaling.mjs <root> head|base <family> <k> <0|1> (numeric-wave, copy-ring, copy-break, switch-location; k 64 to 1,024)",
-      "R/astra-m4-s10p2b-review-r2/queue-checks.sh:280-319"
-    ]
+      "R/astra-m4-s10p2b-review-r2/queue-checks.sh:280-319",
+    ],
   ],
-  "sources": 20,
-  "sha256": "54949d6ddd8ebd2c2c0c456c601c0f044b6de7dadaa90f55bcb471279122922a"
+  sources: 20,
+  sha256: "54949d6ddd8ebd2c2c0c456c601c0f044b6de7dadaa90f55bcb471279122922a",
 };

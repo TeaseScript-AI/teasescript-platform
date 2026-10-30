@@ -8,7 +8,8 @@
 function pythonRandom(seed) {
   const mt = new Uint32Array(624);
   mt[0] = 19650218;
-  for (let i = 1; i < 624; i++) mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
+  for (let i = 1; i < 624; i++)
+    mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
   let i = 1;
   for (let k = 624; k > 0; k--) {
     mt[i] = ((mt[i] ^ Math.imul(mt[i - 1] ^ (mt[i - 1] >>> 30), 1664525)) + seed) >>> 0;
@@ -78,7 +79,8 @@ function program(R, seed, i) {
     if (r < 0.9) return `rec.${R.choice(fields)} + ${R.choice(["1", "0.5"])}`;
     return `${R.choice(lists)}.length`;
   };
-  const lit = () => "{" + fields.map((f) => `${f}: ${R.choice(["0", "1", "1.5", "null"])}`).join(", ") + "}";
+  const lit = () =>
+    "{" + fields.map((f) => `${f}: ${R.choice(["0", "1", "1.5", "null"])}`).join(", ") + "}";
   const read = () => {
     reads += 1;
     const n = reads;
@@ -105,7 +107,12 @@ function program(R, seed, i) {
     if (r < 0.14) return [`${l}.add(${R.random() < 0.7 ? num() : scal()})`];
     if (r < 0.18) return [`${l}.clear()`];
     if (r < 0.21) return [`${l}.removeAt(0)`];
-    if (r < 0.25) return [`${l} = [${range(R.randint(0, 2)).map(() => scal()).join(", ")}]`];
+    if (r < 0.25)
+      return [
+        `${l} = [${range(R.randint(0, 2))
+          .map(() => scal())
+          .join(", ")}]`,
+      ];
     if (r < 0.38) return [`rec.${f} ${R.choice(["=", "+=", "+=", "-="])} ${num()}`];
     if (r < 0.44 && presets.length > 0) return [`rec = ${R.choice(presets)}`];
     if (r < 0.47) return [`rec = ${lit()}`];
@@ -116,20 +123,27 @@ function program(R, seed, i) {
     }
     if (r < 0.78 && depth < 2) {
       const body = stmt(owner, depth + 1);
-      if (R.random() < 0.4) return ["if hostFlag {", ...body, "} else {", ...stmt(owner, depth + 1), "}"];
+      if (R.random() < 0.4)
+        return ["if hostFlag {", ...body, "} else {", ...stmt(owner, depth + 1), "}"];
       return ["if hostFlag {", ...body, "}"];
     }
-    if (r < 0.83 && depth < 2) return [`repeat ${R.choice(["1", "2", "3"])} {`, ...stmt(owner, depth + 1), "}"];
+    if (r < 0.83 && depth < 2)
+      return [`repeat ${R.choice(["1", "2", "3"])} {`, ...stmt(owner, depth + 1), "}"];
     if (r < 0.95) return read();
     return ['say "line"'];
   };
   const decl = R.choice(["global", "let"]);
   const lines = [`${decl} rec = ${lit()}`];
   for (const l of lists)
-    lines.push(`${decl} ${l} = [${range(R.randint(0, 2)).map(() => R.choice(["0", "1", "1.5", "null"])).join(", ")}]`);
+    lines.push(
+      `${decl} ${l} = [${range(R.randint(0, 2))
+        .map(() => R.choice(["0", "1", "1.5", "null"]))
+        .join(", ")}]`,
+    );
   for (const p of presets) {
     lines.push(`${decl} ${p} = rec`);
-    if (R.random() < 0.7) lines.push(`${p}.${R.choice(fields)} = ${R.choice(["1", "2", "0.5", "null"])}`);
+    if (R.random() < 0.7)
+      lines.push(`${p}.${R.choice(fields)} = ${R.choice(["1", "2", "0.5", "null"])}`);
   }
   for (const h of fns) {
     lines.push(`function ${h} {`);
@@ -141,9 +155,11 @@ function program(R, seed, i) {
     const r = R.random();
     if (r < 0.4) body.push(`${R.choice(fns)}()`);
     else if (r < 0.52) body.push("if hostFlag {", `${R.choice(fns)}()`, "}");
-    else if (r < 0.6) body.push(`showPermanentButton "b${body.length}" {`, `${R.choice(fns)}()`, "}", "wait 1 s");
+    else if (r < 0.6)
+      body.push(`showPermanentButton "b${body.length}" {`, `${R.choice(fns)}()`, "}", "wait 1 s");
     else if (r < 0.66) body.push("repeat 2 {", `${R.choice(fns)}()`, "}");
-    else if (r < 0.78) body.push(...stmt("main", 1)); // a store, a reset or a call in main
+    else if (r < 0.78)
+      body.push(...stmt("main", 1)); // a store, a reset or a call in main
     else body.push(...read());
   }
   body.push(...read(), ...read());
@@ -160,24 +176,24 @@ export const globals = ["hostValue", "hostFlag", "hostText", "hostList", "hostDi
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "python3 -I tools/gen-aggregate.py diff/agg-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike10/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike10/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-aggregate.py diff/agg-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-aggregate.py diff/agg-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-aggregate.py diff/agg-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30"
-    ]
+      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30",
+    ],
   ],
-  "sources": 300,
-  "sha256": "d4841f44ff68deedd0deae1d7b81e0811f286883e91b4dee7379f4b7c8bc432f"
+  sources: 300,
+  sha256: "d4841f44ff68deedd0deae1d7b81e0811f286883e91b4dee7379f4b7c8bc432f",
 };

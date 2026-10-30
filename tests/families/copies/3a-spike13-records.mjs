@@ -8,7 +8,8 @@
 function pythonRandom(seed) {
   const mt = new Uint32Array(624);
   mt[0] = 19650218;
-  for (let i = 1; i < 624; i++) mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
+  for (let i = 1; i < 624; i++)
+    mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
   let i = 1;
   for (let k = 624; k > 0; k--) {
     mt[i] = ((mt[i] ^ Math.imul(mt[i - 1] ^ (mt[i - 1] >>> 30), 1664525)) + seed) >>> 0;
@@ -100,11 +101,13 @@ function program(R) {
   }
   if (R.random() < 0.5) {
     fns.push("function resetAll {");
-    for (const f of fields) if (R.random() < 0.8) fns.push(`state.${f} = ${R.choice(["0", "1", "null"])}`);
+    for (const f of fields)
+      if (R.random() < 0.8) fns.push(`state.${f} = ${R.choice(["0", "1", "null"])}`);
     fns.push("}");
   }
   const hasReset = fns.includes("function resetAll {");
-  if (R.random() < 0.4) fns.push("function playAll {", ...range(nch).map((c) => `chapter${c}()`), "}");
+  if (R.random() < 0.4)
+    fns.push("function playAll {", ...range(nch).map((c) => `chapter${c}()`), "}");
   const hasPlay = fns.includes("function playAll {");
   for (let n = R.randint(4, 10); n > 0; n--) {
     const r = R.random();
@@ -114,7 +117,11 @@ function program(R) {
     else if (r < 0.55 && hasReset) body.push("resetAll()");
     else if (r < 0.6 && hasPlay) body.push("playAll()");
     else if (r < 0.67)
-      body.push("repeat 2 {", R.choice([rep(R.randrange(P)), own(), `chapter${R.randrange(nch)}()`]), "}");
+      body.push(
+        "repeat 2 {",
+        R.choice([rep(R.randrange(P)), own(), `chapter${R.randrange(nch)}()`]),
+        "}",
+      );
     else if (r < 0.72) body.push("if hostFlag {", own(), "}");
     else if (r < 0.76)
       body.push(
@@ -139,20 +146,20 @@ export const globals = ["hostValue", "hostFlag", "hostText", "hostList", "hostDi
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "python3 -I tools/gen-records.py diff/rec-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-records.py diff/rec-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-records.py diff/rec-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30"
-    ]
+      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30",
+    ],
   ],
-  "sources": 300,
-  "sha256": "9064c435eabfbcd22a92bfd569ce111e81c6f56689ac86d47826fda968ef7dde"
+  sources: 300,
+  sha256: "9064c435eabfbcd22a92bfd569ce111e81c6f56689ac86d47826fda968ef7dde",
 };

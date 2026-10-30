@@ -8,7 +8,8 @@
 function pythonRandom(seed) {
   const mt = new Uint32Array(624);
   mt[0] = 19650218;
-  for (let i = 1; i < 624; i++) mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
+  for (let i = 1; i < 624; i++)
+    mt[i] = (Math.imul(1812433253, mt[i - 1] ^ (mt[i - 1] >>> 30)) + i) >>> 0;
   let i = 1;
   for (let k = 624; k > 0; k--) {
     mt[i] = ((mt[i] ^ Math.imul(mt[i - 1] ^ (mt[i - 1] >>> 30), 1664525)) + seed) >>> 0;
@@ -67,7 +68,13 @@ function program(R, seed, i) {
   const decl = R.choice(["global", "let", "record"]);
   let L;
   if (decl === "record")
-    L = [`${R.choice(["global", "let"])} st = {` + range(k).map((j) => `v${j}: ${start()}`).join(", ") + "}"];
+    L = [
+      `${R.choice(["global", "let"])} st = {` +
+        range(k)
+          .map((j) => `v${j}: ${start()}`)
+          .join(", ") +
+        "}",
+    ];
   else L = range(k).map((j) => `${decl} s${j} = ${start()}`);
   for (const j of range(k)) {
     const body = R.choice([
@@ -90,7 +97,8 @@ function program(R, seed, i) {
     }
     L.push("}");
   }
-  if (R.random() < 0.4) L.push("function bonus {", `set${R.randrange(k)}(${R.choice(["1", "2.5"])})`, "}");
+  if (R.random() < 0.4)
+    L.push("function bonus {", `set${R.randrange(k)}(${R.choice(["1", "2.5"])})`, "}");
   const hasBonus = L.includes("function bonus {");
   let reads = 0;
   const read = () => {
@@ -107,9 +115,11 @@ function program(R, seed, i) {
     L.push(`function scene${sc} {`, `say "scene ${sc}"`);
     for (let n = R.randint(1, 4); n > 0; n--) {
       const r = R.random();
-      if (r < 0.45) L.push(`${R.choice(hubs)}("s${R.randrange(k)}", ${R.choice(["1", "2", "0.5"])})`);
+      if (r < 0.45)
+        L.push(`${R.choice(hubs)}("s${R.randrange(k)}", ${R.choice(["1", "2", "0.5"])})`);
       else if (r < 0.6) L.push(`set${R.randrange(k)}(${R.choice(["1", "2", "0.5"])})`);
-      else if (r < 0.7) L.push("if hostFlag {", `set${R.randrange(k)}(${R.choice(["1", "0.5"])})`, "}");
+      else if (r < 0.7)
+        L.push("if hostFlag {", `set${R.randrange(k)}(${R.choice(["1", "0.5"])})`, "}");
       else if (r < 0.78 && hasBonus) L.push("bonus()");
       else if (r < 0.86) L.push("if hostFlag {", `${R.choice(hubs)}("s${R.randrange(k)}", 1)`, "}");
       else L.push(...read());
@@ -120,7 +130,8 @@ function program(R, seed, i) {
   if (R.random() < 0.35) {
     // a block that stores stats directly (a reset button, a timer)
     body.push(R.choice(['showPermanentButton "Reset" {', 'showPermanentButton "Bonus" {']));
-    for (const j of range(k)) if (R.random() < 0.6) body.push(`s${j} = ${R.choice(["0", "1", "2.5", "null"])}`);
+    for (const j of range(k))
+      if (R.random() < 0.6) body.push(`s${j} = ${R.choice(["0", "1", "2.5", "null"])}`);
     body.push("}");
     if (R.random() < 0.5) body.push("wait 1 s");
   }
@@ -129,7 +140,8 @@ function program(R, seed, i) {
     if (R.random() < 0.2) body.push(...read());
     if (R.random() < 0.1) body.push("if hostFlag {", `scene${R.randrange(S)}()`, "}");
     if (R.random() < 0.12)
-      for (const j of range(k)) if (R.random() < 0.7) body.push(`s${j} = ${R.choice(["0", "1", "2.5", "null"])}`); // a reset in main
+      for (const j of range(k))
+        if (R.random() < 0.7) body.push(`s${j} = ${R.choice(["0", "1", "2.5", "null"])}`); // a reset in main
   }
   for (let n = R.randint(1, k); n > 0; n--) body.push(...read());
   let source = [...L, ...body, "exit"].join("\n");
@@ -151,28 +163,28 @@ export const globals = ["hostValue", "hostFlag", "hostText", "hostList", "hostDi
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
+  commands: [
     [
       "python3 -I tools/gen-dispatch.py diff/disp-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike9/tools/checks.sh:16"
+      "R/3a-newcore/checkpoint-9/spike9/tools/checks.sh:16",
     ],
     [
       "python3 -I tools/gen-dispatch.py diff/disp-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike10/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike10/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-dispatch.py diff/disp-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike11/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-dispatch.py diff/disp-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21"
+      "R/3a-newcore/checkpoint-9/spike12/tools/checks.sh:21",
     ],
     [
       "python3 -I tools/gen-dispatch.py diff/disp-1.jsonl 300 1",
-      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30"
-    ]
+      "R/3a-newcore/checkpoint-9/spike13/tools/checks.sh:30",
+    ],
   ],
-  "sources": 300,
-  "sha256": "4455c5e04a329a5e2f7baaec0a577ef4adbfc3cffc4cf227f9bd19a514054918"
+  sources: 300,
+  sha256: "4455c5e04a329a5e2f7baaec0a577ef4adbfc3cffc4cf227f9bd19a514054918",
 };

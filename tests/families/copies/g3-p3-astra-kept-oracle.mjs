@@ -1,174 +1,678 @@
 // G3 part 3's review (Astra): the kept-set oracle's programs, `cases.mjs`'s 132 with the wrapper depths it appends, and
 // the `MORE=1` run's rejected depths (R/astra-m4-g3-p3-review-evidence/kept-oracle.mjs and cases.mjs).
 export const cases = [
-  ["default-1", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-2", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-3", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-4", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-5", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-6", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-7", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-8", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-9", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-10", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-11", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-12", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-13", "let leaf: integer = 3\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-14", "let leaf: integer = 3\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-15", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-16", "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-17", "let leaf: integer = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-18", "let leaf: integer = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-19", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-20", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-21", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-22", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-23", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-24", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-25", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-26", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-27", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-28", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-29", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-30", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-31", "let leaf: integer? = null\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-32", "let leaf: integer? = null\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-33", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-34", "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-35", "let leaf: integer? = null\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-36", "let leaf: integer? = null\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-37", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-38", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-39", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-40", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-41", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-42", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-43", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-44", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-45", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-46", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-47", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-48", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-49", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-50", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-51", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-52", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-53", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-54", "let leaf: integer | string = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-55", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-56", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-57", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-58", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-59", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-60", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-61", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-62", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-63", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-64", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-65", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-66", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-67", "let leaf = hostValue\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-68", "let leaf = hostValue\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-69", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-70", "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-71", "let leaf = hostValue\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-72", "let leaf = hostValue\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-73", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-74", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-75", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-76", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-77", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-78", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-79", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-80", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-81", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-82", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-83", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-84", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-85", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-86", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-87", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-88", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-89", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-90", "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-91", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-92", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-93", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-94", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n"],
-  ["default-95", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-96", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-97", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-98", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-99", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-100", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-101", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-102", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-103", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-104", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n"],
-  ["default-105", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-106", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton \"change\" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n"],
-  ["default-107", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n"],
-  ["default-108", "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n"],
-  ["default-109", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree = {a:{b:{c:2}}}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-110", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-111", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree = {a:{b:{c:2}}} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-112", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton \"change\" { tree = {a:{b:{c:2}}} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-113", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a = {b:{c:2}}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-114", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-115", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a = {b:{c:2}} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-116", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton \"change\" { tree.a = {b:{c:2}} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-117", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a.b = {c:2}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-118", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a.b is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-119", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a.b = {c:2} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-120", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton \"change\" { tree.a.b = {c:2} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-121", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a.b.c = 2\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-122", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a.b.c is integer {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-123", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a.b.c = 2 }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-124", "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton \"change\" { tree.a.b.c = 2 }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n"],
-  ["default-125", "let root = {cell: 3}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet answer = upper.right.left.cell\nsay answer\nexit\n"],
-  ["default-126", "let root = {cell: 3}\nlet lower = {left: root}\nlet upper: object = {right: lower}\nlet answer = upper.right.left.cell\nsay answer\nexit\n"],
-  ["default-127", "let a = [load(\"one\", default: {v: 1}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-128", "let a = [load(\"one\", default: {v: \"text\"}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-129", "let a = [load(\"one\", default: {v: hostValue}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-130", "let a = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet b = [load(\"one\", default: {v: 1}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-131", "let a = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet b = [load(\"one\", default: {v: \"text\"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-132", "let a = [fromJson(hostOther, default: {v: \"other\"}), {v: 2}]\nlet b = [load(\"one\", default: {v: hostValue}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n"],
-  ["default-133", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-134", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-135", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-136", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-137", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-138", "let seedA={v:1}\nlet seedB={v:\"wrong\"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-139", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-140", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-141", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-142", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-143", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-144", "let seedA={q:{v:1}}\nlet seedB={q:{v:\"wrong\"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-145", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-146", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-147", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-148", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-149", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-150", "let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:\"wrong\"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-151", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-152", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-153", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-154", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-155", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["default-156", "let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:\"wrong\"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: \"changed\"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n"],
-  ["more-1", "let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:\"different\"}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-2", "let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:\"different\"}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
-  ["more-3", "let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:\"different\"}]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-4", "let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:\"different\"}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
-  ["more-5", "let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:\"different\"}}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-6", "let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:\"different\"}}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
-  ["more-7", "let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:\"different\"}}]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-8", "let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:\"different\"}}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
-  ["more-9", "let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:{q:\"different\"}}}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-10", "let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:{q:\"different\"}}}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
-  ["more-11", "let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:{q:\"different\"}}}]\nlet target=origin\ntarget=rejected.first\nexit\n"],
-  ["more-12", "let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:{q:\"different\"}}}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n"],
+  [
+    "default-1",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-2",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-3",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-4",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-5",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-6",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-7",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-8",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-9",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-10",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-11",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-12",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-13",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-14",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-15",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-16",
+    'let leaf: integer = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-17",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-18",
+    "let leaf: integer = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-19",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-20",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-21",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-22",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-23",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-24",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-25",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-26",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-27",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-28",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-29",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-30",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-31",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-32",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-33",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-34",
+    'let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-35",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-36",
+    "let leaf: integer? = null\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-37",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-38",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-39",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-40",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-41",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-42",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-43",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-44",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-45",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-46",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-47",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-48",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-49",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-50",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-51",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-52",
+    'let leaf: integer | string = 3\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-53",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-54",
+    "let leaf: integer | string = 3\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-55",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-56",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-57",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-58",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-59",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-60",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-61",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-62",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-63",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-64",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-65",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-66",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-67",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-68",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-69",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-70",
+    'let leaf = hostValue\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-71",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-72",
+    "let leaf = hostValue\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-73",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-74",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-75",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-76",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-77",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-78",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-79",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-80",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-81",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-82",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-83",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-84",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-85",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-86",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-87",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-88",
+    'let leaf: integer[] = [3]\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-89",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-90",
+    "let leaf: integer[] = [3]\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-91",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-92",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet other = upper\nlet side = upper.right\nsay side\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-93",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = [upper, upper][0]\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-94",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet selected = upper otherwise {right: lower}\nlet result = selected.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-95",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nleaf = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-96",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = {cell: hostOther}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-97",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nroot.cell = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-98",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nupper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-99",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-100",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.left = 3\nlower.left = root\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-101",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif upper.right is object {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-102",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nif root.cell is integer {\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-103",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nif hostOther {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-104",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nrepeat 2 {\nlet lower = {left: root}\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\nroot.cell = hostOther\n}\nexit\n",
+  ],
+  [
+    "default-105",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nfunction touch { root.cell = hostOther }\nlet before = upper.right.left.cell\ntouch()\nlet result = upper.right.left.cell\nsay result\nexit\n",
+  ],
+  [
+    "default-106",
+    'let leaf = dict {one: 3}\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nshowPermanentButton "change" { lower.left = {cell: hostOther} }\nwait 1 s\nlet result = upper.right.left.cell\nsay result\nexit\n',
+  ],
+  [
+    "default-107",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\nexit\n",
+  ],
+  [
+    "default-108",
+    "let leaf = dict {one: 3}\nlet root = {cell: leaf}\nfunction take(lower = {left: root}) {\nlet upper = {right: lower}\nlet result = upper.right.left.cell\nsay result\n}\ntake()\ntake({left: root})\nexit\n",
+  ],
+  [
+    "default-109",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree = {a:{b:{c:2}}}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-110",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-111",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree = {a:{b:{c:2}}} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-112",
+    'let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton "change" { tree = {a:{b:{c:2}}} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n',
+  ],
+  [
+    "default-113",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a = {b:{c:2}}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-114",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-115",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a = {b:{c:2}} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-116",
+    'let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton "change" { tree.a = {b:{c:2}} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n',
+  ],
+  [
+    "default-117",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a.b = {c:2}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-118",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a.b is object {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-119",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a.b = {c:2} }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-120",
+    'let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton "change" { tree.a.b = {c:2} }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n',
+  ],
+  [
+    "default-121",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\ntree.a.b.c = 2\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-122",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nif tree.a.b.c is integer {\nlet after = alias.q.a.b.c\nsay after\n}\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-123",
+    "let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nfunction change { tree.a.b.c = 2 }\nchange()\nlet after = alias.q.a.b.c\nsay after\nexit\n",
+  ],
+  [
+    "default-124",
+    'let tree = {a:{b:{c:1}}}\nlet alias = {q: tree}\nlet before = alias.q.a.b.c\nshowPermanentButton "change" { tree.a.b.c = 2 }\nwait 1 s\nlet after = alias.q.a.b.c\nsay after\nexit\n',
+  ],
+  [
+    "default-125",
+    "let root = {cell: 3}\nlet lower = {left: root}\nlet upper = {right: lower}\nlet answer = upper.right.left.cell\nsay answer\nexit\n",
+  ],
+  [
+    "default-126",
+    "let root = {cell: 3}\nlet lower = {left: root}\nlet upper: object = {right: lower}\nlet answer = upper.right.left.cell\nsay answer\nexit\n",
+  ],
+  [
+    "default-127",
+    'let a = [load("one", default: {v: 1}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-128",
+    'let a = [load("one", default: {v: "text"}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-129",
+    'let a = [load("one", default: {v: hostValue}), {v: 2}]\nlet b = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-130",
+    'let a = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet b = [load("one", default: {v: 1}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-131",
+    'let a = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet b = [load("one", default: {v: "text"}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-132",
+    'let a = [fromJson(hostOther, default: {v: "other"}), {v: 2}]\nlet b = [load("one", default: {v: hostValue}), {v: 2}]\nlet box = {one: a, two: b}\nlet copied = box\nsay copied\nexit\n',
+  ],
+  [
+    "default-133",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-134",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-135",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-136",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-137",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-138",
+    'let seedA={v:1}\nlet seedB={v:"wrong"}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-139",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-140",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-141",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-142",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-143",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-144",
+    'let seedA={q:{v:1}}\nlet seedB={q:{v:"wrong"}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-145",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-146",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-147",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-148",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-149",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-150",
+    'let seedA={q:{q:{v:1}}}\nlet seedB={q:{q:{v:"wrong"}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-151",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-152",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-153",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[left, right]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-154",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-155",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nleft.payload = {v: 2}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "default-156",
+    'let seedA={q:{q:{q:{v:1}}}}\nlet seedB={q:{q:{q:{v:"wrong"}}}}\nlet left={payload:seedA}\nlet right={payload:seedB}\nright.payload = {v: "changed"}\nlet both=[right, left]\nlet copy=both\nsay copy\nexit\n',
+  ],
+  [
+    "more-1",
+    'let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:"different"}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-2",
+    'let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:"different"}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-3",
+    'let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:"different"}]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-4",
+    'let seed: integer=7\nlet source={q:seed}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:"different"}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-5",
+    'let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:"different"}}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-6",
+    'let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:"different"}}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-7",
+    'let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:"different"}}]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-8",
+    'let seed: integer=7\nlet source={q:{q:seed}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:"different"}}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-9",
+    'let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:{q:"different"}}}, origin]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-10",
+    'let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[{q:{q:{q:"different"}}}, origin]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-11",
+    'let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:{q:"different"}}}]\nlet target=origin\ntarget=rejected.first\nexit\n',
+  ],
+  [
+    "more-12",
+    'let seed: integer=7\nlet source={q:{q:{q:seed}}}\nlet wrapper={root:source}\nlet origin=wrapper.root\nlet rejected=[origin, {q:{q:{q:"different"}}}]\nlet target=origin\ntarget=4\ntarget=rejected.first\nexit\n',
+  ],
 ];
 
 // the globals the recorded run passed
@@ -176,16 +680,10 @@ export const globals = ["hostValue", "hostOther", "hostInit"];
 
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
-  "commands": [
-    [
-      "node kept-oracle.mjs kept.json",
-      "R/astra-m4-g3-p3-review-evidence/README.md:17"
-    ],
-    [
-      "MORE=1 node kept-oracle.mjs kept-more.json",
-      "R/astra-m4-g3-p3-review-evidence/README.md:18"
-    ]
+  commands: [
+    ["node kept-oracle.mjs kept.json", "R/astra-m4-g3-p3-review-evidence/README.md:17"],
+    ["MORE=1 node kept-oracle.mjs kept-more.json", "R/astra-m4-g3-p3-review-evidence/README.md:18"],
   ],
-  "sources": 168,
-  "sha256": "8f542e9e9d9f57dca2ace7c78ed1752cb8db4b1c580560964a5504f25378ef7b"
+  sources: 168,
+  sha256: "8f542e9e9d9f57dca2ace7c78ed1752cb8db4b1c580560964a5504f25378ef7b",
 };
