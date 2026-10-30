@@ -298,16 +298,16 @@ interface HostFrontiers {
 const hostFrontiers = new WeakMap<Consumers, HostFrontiers>();
 
 /**
- * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`, each met once per copy standing at
- * a frontier's path, again where it was met before) a read's host data is followed before the read answers its place's
- * component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
+ * How deep in copies (`FRONTIER_DEPTH`) and how many copies met (`FRONTIER_COPIES`: each copy standing at a frontier's
+ * path, each time it is met, and each single copy a frontier is followed through, `sameOf`) a read's host data is followed
+ * before the read answers its place's component's (TABLE r4.208): each read's walk is then bounded by a constant, so the finishing reads' work stays linear
  * in the program by construction, whatever the copy graph's shape. Where the walk is cut, the read answers the host
  * data its place's component of the place-level copy graph reaches (`placeIngress`): every path, so a superset, never a
- * dropped check. Measured on #1445's head over the stop corpus (172 sources), the repository's scripts (19) and the held
- * family (438), at sampled settled stops in two orders: of 12,176 finishing reads, 11,816 hold their host data at their
- * own path (copy depth 0), 292 one copy deep, 35 two, and 33 four or more (the family's rings); no read meets more than
- * two frontiers within two copies. At 2 and 8, 33 reads are cut, each answering the same writers its exact walk names,
- * so the cut adds no mark, warning, runtime check or boundary there.
+ * dropped check. Measured with this walk over the stop corpus (170 sources), the repository's scripts (19) and the held
+ * family (480), at sampled settled stops in two orders: of 9,933 finishing reads, 9,722 end at their own frontier (depth
+ * 0), 179 one copy deep and 32 two; no read meets more than 7 copies (2,096 none, 4,304 one, 2,162 two, 694 three, 677
+ * four to seven). At 2 and 8, 15 reads are cut (the family's rings), each naming the same writers as its exact walk, so
+ * the cut adds no mark, warning, runtime check or boundary there.
  */
 export const FRONTIER_DEPTH = 2;
 export const FRONTIER_COPIES = 8;
@@ -701,12 +701,18 @@ function sameOf(
     }
     chain.push(at);
     if (++budget.met > frontierBound.copies) {
-      for (const each of chain) each.same = next;
+      for (const each of chain) {
+        walk.pass.program.work.charge("checks");
+        each.same = next;
+      }
       return null;
     }
     at = next;
   }
-  for (const each of chain) each.same = at;
+  for (const each of chain) {
+    walk.pass.program.work.charge("checks");
+    each.same = at;
+  }
   return at;
 }
 
@@ -771,6 +777,7 @@ function placeEdges(
     program.work.charge("checks");
     nodes.push(...node.children.values());
     for (const { d } of node.stores) {
+      program.work.charge("checks");
       const values = [expand(walk.admission, d.value!, d.node, [])];
       for (let task = values.pop(); task !== undefined; task = values.pop()) {
         program.work.charge("checks");
@@ -843,8 +850,12 @@ function placeIngress(walk: Consumers, start: PlaceId): IngressNode | undefined 
         if (member === frame.place) break;
       }
       let host = frame.host;
-      for (const member of members) host = ingress.union(host, pendingHost.get(member));
       for (const member of members) {
+        program.work.charge("checks");
+        host = ingress.union(host, pendingHost.get(member));
+      }
+      for (const member of members) {
+        program.work.charge("checks");
         unions.set(member, host ?? null);
         pendingHost.delete(member);
       }
