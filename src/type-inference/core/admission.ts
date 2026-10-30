@@ -772,7 +772,7 @@ export class Admission {
     boundaryAt(this, d);
   }
 
-  public boundaryFor(item: Item, here: Obligation | null): void {
+  public boundaryFor(item: Item, here: Obligation | (() => Obligation) | null): void {
     boundaryFor(this, item, here);
   }
 

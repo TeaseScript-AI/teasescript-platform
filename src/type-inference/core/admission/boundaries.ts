@@ -116,14 +116,21 @@ function boundaryAtRead(admission: Admission, value: PlaceId): void {
 /**
  * C9: an external item a consumer meets brings the boundary check of each ingress store it came in by, whichever
  * consumer asks first; host data that no ingress store brought is checked at the consumer (`here`) against `unknown`
- * (r4.10: the kinds the consumer needs are its own obligation).
+ * (r4.10: the kinds the consumer needs are its own obligation). A consumer may pass `here` as its recipe, made only once
+ * the check is owed here, so a declined boundary shows no label (#1483: a shown label is charged, #1475).
  */
-export function boundaryFor(admission: Admission, item: Item, here: Obligation | null): void {
+export function boundaryFor(
+  admission: Admission,
+  item: Item,
+  owed: Obligation | (() => Obligation) | null,
+): void {
   if (!isExternal(item)) return;
   // the landing index: an ingress's store's boundary, its own read's check, or the consumer's check (r4.10)
   const unreached = item.ingress !== undefined && resolve(admission, item.ingress);
   if (item.ingress !== undefined && item.loose !== true && !unreached) return;
-  if (here === null) return;
+  if (owed === null) return;
+  // (the key needs the target's text: made here, for a check this consumer owes unless one is kept there already)
+  const here = typeof owed === "function" ? owed() : owed;
   const at = keptParts(admission.work, here.target, `${here.site.file}:${here.site.start}`);
   if (admission.hostSeen.has(at)) return;
   admission.hostSeen.add(at);
