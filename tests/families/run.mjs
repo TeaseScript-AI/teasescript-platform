@@ -8,8 +8,8 @@
 // `--timeout` seconds, more than `--memory` MB of heap, or that ends the process (a fatal V8 error) is counted as
 // stalled, with the reason, and the next source runs in a fresh process. A run that throws on either tree is an
 // exception, never compared (#1439): printed to stderr with its source, mode and check, and kept with its stack in
-// `--out`. Prints one JSON line per generator and a total: sources, unparsed, stalled, exceptions, modes, runs,
-// differences.
+// `--out`, as is a difference, also where the source stalls later. Prints one JSON line per generator and a total:
+// sources, unparsed, stalled, exceptions, modes, runs, differences.
 import { fork } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -49,9 +49,12 @@ if (process.argv[2] === "--child") {
   // the child: each source's runs in the four modes on both trees
   const { baseRoot, headRoot, allowances } = JSON.parse(process.argv[3]);
   const [base, head] = await Promise.all([oracles(baseRoot), oracles(headRoot)]);
-  /** One source's runs in the four modes on both trees. */
+  /**
+   * One source's runs in the four modes on both trees, each run's outcome sent as it ends (`run`: a difference or an
+   * exception), so that a later stall in the same source keeps it.
+   */
   const compared = ({ files, checks, globals }) => {
-    const reply = { runs: 0, parsed: true, differences: [], exceptions: [] };
+    let parsed = true;
     for (const mode of head.MODES) {
       const label = `${mode.reversed ? "rev" : "src"}-${mode.unshared ? "off" : "on"}`;
       const runs = [];
@@ -67,25 +70,17 @@ if (process.argv[2] === "--child") {
         // compared by hash, so that the base's text is not held while the head runs
         const was = attempt(() => hash(textOf(run(base))));
         const text = attempt(() => textOf(run(head)));
-        if (text.value === "null") reply.parsed = false;
+        if (text.value === "null") parsed = false;
         const is = "value" in text ? hash(text.value) : undefined;
-        reply.runs += 1;
+        const outcome = { mode: label, check };
         if ("thrown" in was || "thrown" in text)
-          reply.exceptions.push({
-            mode: label,
-            check,
-            thrown: { base: was.thrown, head: text.thrown },
-          });
+          outcome.thrown = { base: was.thrown, head: text.thrown };
         else if (was.value !== is)
-          reply.differences.push({
-            mode: label,
-            check,
-            base: was.value.slice(0, 16),
-            head: is.slice(0, 16),
-          });
+          outcome.difference = { base: was.value.slice(0, 16), head: is.slice(0, 16) };
+        process.send({ run: outcome });
       }
     }
-    return reply;
+    return { parsed };
   };
   // an exception outside the runs (the runner's own, or a library without `MODES`) is the source's exception, not a
   // stall: the process that ends with it would say only its exit code
@@ -156,13 +151,14 @@ if (process.argv[2] === "--child") {
       child?.kill("SIGKILL");
       process.kill(process.pid, signal);
     });
-  /** One source's reply, or why it stalled (`timeout`, or how the process ended). */
+  /** One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). */
   const analysed = (message) =>
     new Promise((resolve) => {
       // a child that ended between sources (its channel closed) is replaced, not given the next source
       if (child?.connected !== true) child = fresh();
       const current = child;
-      const onMessage = (reply) => settle(reply);
+      const runs = [];
+      const onMessage = (reply) => ("run" in reply ? runs.push(reply.run) : settle(reply));
       const onError = (error) => settle({ stalled: String(error).slice(0, 200) });
       // after `close`, the process's error output is complete
       const onClose = (code, signal) => {
@@ -178,7 +174,7 @@ if (process.argv[2] === "--child") {
           child = null;
           current.kill("SIGKILL");
         }
-        resolve(result);
+        resolve({ ...result, runs });
       };
       const timer = setTimeout(() => settle({ stalled: "timeout" }), timeout);
       current.on("message", onMessage).on("error", onError).on("close", onClose);
@@ -202,36 +198,24 @@ if (process.argv[2] === "--child") {
     for (const source of sources) {
       row.sources += 1;
       const reply = await analysed({ files: source.files, checks, globals: source.globals });
+      const inputs = { files: source.files, globals: source.globals };
+      // the runs that ended count, those of a source that stalls or throws after them included
+      row.runs += reply.runs.length;
+      for (const { thrown: exception, difference, ...run } of reply.runs)
+        if (exception !== undefined) {
+          row.exceptions += 1;
+          thrown({ generator: name, source: source.name, ...run, thrown: exception }, source);
+        } else if (difference !== undefined) {
+          row.differences += 1;
+          record({ generator: name, source: source.name, ...run, ...difference, ...inputs });
+        }
       if ("stalled" in reply) {
         row.stalled += 1;
-        record({
-          generator: name,
-          source: source.name,
-          stalled: reply.stalled,
-          files: source.files,
-          globals: source.globals,
-        });
-        continue;
-      }
-      if ("thrown" in reply) {
+        record({ generator: name, source: source.name, stalled: reply.stalled, ...inputs });
+      } else if ("thrown" in reply) {
         row.exceptions += 1;
         thrown({ generator: name, source: source.name, thrown: reply.thrown }, source);
-        continue;
-      }
-      row.runs += reply.runs;
-      row.exceptions += reply.exceptions.length;
-      for (const exception of reply.exceptions)
-        thrown({ generator: name, source: source.name, ...exception }, source);
-      if (!reply.parsed) row.unparsed += 1;
-      row.differences += reply.differences.length;
-      for (const difference of reply.differences)
-        record({
-          generator: name,
-          source: source.name,
-          ...difference,
-          files: source.files,
-          globals: source.globals,
-        });
+      } else if (!reply.parsed) row.unparsed += 1;
     }
     console.log(JSON.stringify(row));
     total.generators += 1;
