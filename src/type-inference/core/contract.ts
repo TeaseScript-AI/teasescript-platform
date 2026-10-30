@@ -508,7 +508,9 @@ export class Contract {
   }
 
   /** `stopped` for a key in its identity: a cursor's asked as itself, its stopped prefixes found in the arena. */
-  public keyStopped(key: Key): boolean {
+  public keyStopped(asked: Key): boolean {
+    // (a key in its identity: a wrapper family's text read as its cursor, so its stop and its asker are the cursor's)
+    const key = this.canonicalKey(asked);
     const place = keyPlace(key);
     this.#asked(place, () => key);
     if (!this.anyStopped || !this.#stopped.has(place)) return false;
@@ -851,7 +853,8 @@ export class Contract {
   }
 
   /** A key's identity inside the identity layer: computed first where it is not known (a cycle's is its stop). */
-  public *needKey(key: Key): Generator<() => IdentityWork, Identity, void> {
+  public *needKey(asked: Key): Generator<() => IdentityWork, Identity, void> {
+    const key = this.canonicalKey(asked);
     if (!this.keys.has(key)) yield () => keyIdentityWork(this, key);
     return this.keys.get(key)!;
   }
@@ -875,7 +878,8 @@ export class Contract {
     return { id, key: null, guarded: false, holder: this.holders.get(id) ?? newHolder(this, id) };
   }
 
-  public *needPrefix(prefix: Key): Generator<() => IdentityWork, PrefixStores, void> {
+  public *needPrefix(asked: Key): Generator<() => IdentityWork, PrefixStores, void> {
+    const prefix = this.canonicalKey(asked);
     if (!this.prefix.has(prefix)) yield () => prefixWork(this, prefix);
     return this.prefix.get(prefix)!;
   }

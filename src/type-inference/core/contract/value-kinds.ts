@@ -28,6 +28,7 @@ import {
   unknownItem,
 } from "./kinds.js";
 import {
+  canonicalRest,
   keyAtRef,
   keyIdAt,
   memberStepIn,
@@ -210,12 +211,14 @@ function* valueAt(contract: Contract, value: PlaceId, rest: Rest): Work<readonly
     // level's literal once, its answer composed from the level inside's, never again per level above (#1426)
     if (program.hasOf.has(value) || program.cellOwner.has(value)) {
       const site = program.places[value]?.site ?? null;
+      // (the rest in its identity: a wrapper's own literal asked by an array, at its cursor's span, G3 stage 1)
+      const at = canonicalRest(contract, value, rest);
       const demand: Demand = {
-        key: joinParts("cl", value, restPart(rest)),
+        key: joinParts("cl", value, restPart(at)),
         kind: "contract",
         file: site?.file ?? -1,
         offset: site?.start ?? -1,
-        make: () => contract.contractOfLiteral(value, rest),
+        make: () => contract.contractOfLiteral(value, at),
       };
       return yield demand;
     }

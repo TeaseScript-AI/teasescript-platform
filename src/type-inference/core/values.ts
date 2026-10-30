@@ -120,7 +120,9 @@ export class Values {
   public constructor(readonly pass: CorePass) {}
 
   /** A read of `key` at `node` (§3); `before`: a definition at `node` itself does not count. */
-  public *keyItems(key: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
+  public *keyItems(asked: Key, node: FlowNode | null, before = false): Work<readonly Item[]> {
+    // (a key in its identity: a wrapper family's text read as its cursor, whose stop it then meets, G3 stage 1)
+    const key = this.pass.contract.canonicalKey(asked);
     const read = yield* this.#keyRead(key, node, before);
     // §3.2: under a test of its variable a read's kinds are possible and marked, and no consumer errs on them
     return read.guardable && this.pass.guards.narrowed(key, node!)
@@ -368,8 +370,9 @@ export class Values {
    */
   public valueRoute(value: PlaceId, node: FlowNode | null, rest: readonly string[]): ReadRoute {
     const { program, contract } = this.pass;
+    // (a key in its identity, as `#keyRead` records it: a wrapper family's text read as its cursor, G3 stage 1)
     const recorded = (key: Key, at: FlowNode | null): ReadRoute =>
-      this.#routes.get(joinParts(key, at?.id ?? "-", 0)) ?? "exact";
+      this.#routes.get(joinParts(contract.canonicalKey(key), at?.id ?? "-", 0)) ?? "exact";
     let path = rest;
     let at = node;
     for (let projection = program.projOf.get(value); projection !== undefined;) {

@@ -242,6 +242,19 @@ export function canonicalKey(contract: Contract, key: Key): Key {
 }
 
 /**
+ * A literal's rest in its identity (the `cl|` demand's name): an array asked of a wrapper family's own declaration
+ * literal is its cursor's span, made once and charged; any other rest, a span among them, stands as asked.
+ */
+export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest): Rest {
+  if (!isSteps(rest) || rest.length === 0) return rest;
+  const d = (contract.pass.definitions.byValue.get(literal) ?? []).find(
+    (each) => each.how === "initializer" && each.kind === "whole" && each.path.length === 0,
+  );
+  if (d === undefined || keyLane(contract, d.place, rest[0]!) !== "cursor") return rest;
+  return spanRef(contract, keyIdPath(keyIdOf(contract, d.place, rest)));
+}
+
+/**
  * The id of the path of `path`'s steps from its step `from` on (a span's own path: `q.r.s` from 1 is `r.s`), found down
  * from the nearest of its ancestors whose span from `from` is known, each one step below its parent's (`pathAt`), its
  * visit and entry charged and kept: so the spans of one offset of k nested paths cost k steps, never k² (G3 stage 1).

@@ -8,7 +8,15 @@ import { selectsElement } from "../method-categories.js";
 import { Position, positions, UNPOSITIONED } from "../positions.js";
 import { stepName } from "../program.js";
 import type { Proof, ProofDemand, Proven, Work } from "../solver.js";
-import { isKeyId, keyDepthIn, keyIdFirst, keyIdPath, keyLastIn, keyParentIn } from "./key-ids.js";
+import {
+  canonicalKey,
+  isKeyId,
+  keyDepthIn,
+  keyIdFirst,
+  keyIdPath,
+  keyLastIn,
+  keyParentIn,
+} from "./key-ids.js";
 import { heldReference, holdsBelow, propertyOnly } from "./kinds.js";
 import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
@@ -54,9 +62,11 @@ export function projected(
  */
 export function positioned(
   contract: Contract,
-  key: Key,
+  asked: Key,
   path: readonly string[] | null,
 ): ProofDemand<Proof> {
+  // (a key in its identity: a wrapper family's text read as its cursor, whose arena then gives its steps)
+  const key = canonicalKey(contract, asked);
   const site = contract.pass.program.places[keyPlace(key)]?.site ?? null;
   return {
     key: joinParts("cp", key),

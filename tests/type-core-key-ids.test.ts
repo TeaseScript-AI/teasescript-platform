@@ -41,7 +41,7 @@ import {
   type KeyRecord,
 } from "../src/type-inference/core/contract/lanes.js";
 import type { WrapperHop } from "../src/type-inference/core/contract/model.js";
-import { keyOf } from "../src/type-inference/core/definitions.js";
+import { keyOf, type Key } from "../src/type-inference/core/definitions.js";
 import { CoreProgram } from "../src/type-inference/core/program.js";
 import { REASON, type Item } from "../src/type-inference/core/items.js";
 import { memberStep } from "../src/type-inference/core/method-categories.js";
@@ -49,7 +49,7 @@ import type { Demand, Work } from "../src/type-inference/core/solver.js";
 import type { PlaceId } from "../src/type-inference/graph.js";
 import { coreRequest } from "./helpers/type-core-analysis.js";
 import { probeMade } from "./helpers/type-core-made.js";
-import { narrowingPass } from "./helpers/type-core-narrowing.js";
+import { narrowingPass, nodeAt } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
 
 /*
@@ -423,6 +423,35 @@ function laneProblems(records: readonly KeyRecord[]): string[] {
   }
   return problems;
 }
+
+test("a key's text and its cursor read one stop: after a stop both forms are stopped and read the stop, a completed read of either is forgotten, and a key below the stopped prefix is stopped (Codex r1 F1)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const { contract, solver, values } = pass;
+  const box = bindingOf(pass, "box");
+  assert.equal(keyLane(contract, box, "shell"), "cursor");
+  const node = nodeAt(pass, text.indexOf("box.shell.n"));
+  const forms = (path: readonly string[]): Key[] => [
+    keyOf(box, path),
+    keyIdOf(contract, box, path),
+  ];
+  const read = (key: Key): string =>
+    JSON.stringify(solver.run(values.keyItems(key, node)).map((item) => [item.tag, item.reasons]));
+  const contractRead = (key: Key): string =>
+    JSON.stringify(solver.run(contract.contractOf(key)).map((item) => [item.tag, item.reasons]));
+  const [leaf, below] = [forms(["shell"]), forms(["shell", "n"])];
+  // (before the stop: both forms read alike, each read completed)
+  for (const key of below) assert.equal(read(key), JSON.stringify([["integer", 0]]));
+  for (const key of [...leaf, ...below]) contractRead(key);
+  contract.stop(box, ["shell"]);
+  const stopped = JSON.stringify([["unknown", REASON.budget]]);
+  for (const key of [...leaf, ...below]) {
+    assert.equal(contract.keyStopped(key), true, String(key));
+    assert.equal(contractRead(key), stopped, String(key));
+  }
+  for (const key of below) assert.equal(read(key), stopped, String(key));
+});
 
 test("a binding's wrapper shape is found once per pass whoever asks first, and each family's lane is frozen by it alone, whatever the analysis stops, rejects or finishes afresh, in every mode (TABLE r4.196)", () => {
   const problems: string[] = [];
