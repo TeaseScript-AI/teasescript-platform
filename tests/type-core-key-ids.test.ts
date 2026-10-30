@@ -538,6 +538,28 @@ test("a member chain's key asked again at an offset charges its one unit: its fi
   }
 });
 
+test("a member chain's work keeps its ratio to its text lane's from 8 to 16 levels in every mode: the key side's member walk on a cursor adds no term that grows with the chain", () => {
+  const chain = (n: number): string => {
+    const lines = ["let seed: integer = 1", "let root = {f: seed}"];
+    for (let i = 0; i < n; i += 1)
+      lines.push(`let a${i} = {year: ${i === 0 ? "root" : `a${i - 1}`}}`);
+    const steps = Array.from({ length: n }, () => "year").join(".");
+    return [...lines, `let out = a${n - 1}.${steps}.f`, "exit", ""].join("\n");
+  };
+  for (const mode of MODES) {
+    const [at8, at16] = [8, 16].map((n) => {
+      const source = request(chain(n));
+      const cursor = inMode(mode, () => analyseCore(source)).budget.total;
+      const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
+      return cursor / text;
+    });
+    assert.ok(
+      at16! <= at8!,
+      `${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
+    );
+  }
+});
+
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
   const source = request(
     "let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nfunction small {\n  return a0.q.f\n}\nlet out = small()\nexit\n",
