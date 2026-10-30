@@ -48,10 +48,17 @@ function markerPattern(markers: readonly string[]): RegExp {
   const alternation = markers
     .map((marker) => marker.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`))
     .join("|");
-  return new RegExp(
-    String.raw`(?:^|[^\p{L}\p{N}_])(?:${alternation})\s*:\s*(?:\*\s*)*[\p{L}\p{N}]`,
-    "u",
-  );
+  return new RegExp(String.raw`(?:^|[^\p{L}\p{N}_])(?:${alternation})\s*:`, "u");
+}
+
+const lastLetterOrDigit = /[\p{L}\p{N}](?=[^\p{L}\p{N}]*$)/u;
+
+// A letter or digit after the colon makes an explanation: it may start with code or a quote, and an empty or
+// punctuation-only one such as `...` is rejected. A marker has one exactly when it ends before the comment's last letter
+// or digit, so one search of the text before that finds it, without scanning after every marker.
+function hasExplanation(text: string, pattern: RegExp): boolean {
+  const last = lastLetterOrDigit.exec(text);
+  return last !== null && pattern.test(text.slice(0, last.index));
 }
 
 function hasEvidenceImmediatelyBefore(
@@ -65,7 +72,7 @@ function hasEvidenceImmediatelyBefore(
       (comment) =>
         comment.end <= owner.start &&
         sourceCode.text.slice(comment.end, owner.start).trim().length === 0 &&
-        pattern.test(comment.value),
+        hasExplanation(comment.value, pattern),
     );
 }
 
