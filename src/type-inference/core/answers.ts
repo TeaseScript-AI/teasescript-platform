@@ -1428,7 +1428,8 @@ class CoreAnswers implements Answers {
   }
 
   public placeProperties(id: PlaceId, path: readonly string[] = []): ReadonlySet<string> {
-    return this.#propertyNames({ key: keyOf(id, path) });
+    // (the key in its identity, as the property search names its tasks: G3 stage 1)
+    return this.#propertyNames({ key: this.#pass.contract.keyAt(id, path) });
   }
 
   public valueAt(node: FlowNode, path: readonly string[]): ValueAnswer {

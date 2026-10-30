@@ -2,8 +2,7 @@ import type { PlaceId, SourceSite } from "../../graph.js";
 import type { Admission } from "../admission.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
-import { isKeyId, keptKeyAt, keyAt } from "../contract/key-ids.js";
-import type { Key } from "../definitions.js";
+import { type CanonicalKey, isKeyId, keptKeyAt, keyAt } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
 import type { ItemTag } from "../items.js";
 import { drive, openAbove } from "./inherited.js";
@@ -97,7 +96,7 @@ function retainedSource(
   path: readonly string[],
 ): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
   const { program } = admission.pass;
-  const seen = new Set<Key>();
+  const seen = new Set<CanonicalKey>();
   const pending: {
     readonly place: PlaceId;
     readonly path: readonly string[];

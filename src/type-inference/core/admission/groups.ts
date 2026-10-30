@@ -12,15 +12,17 @@ import {
 } from "../budget.js";
 import { writtenOf } from "../contract.js";
 import {
+  canonicalKey,
+  type CanonicalKey,
   isKeyId,
   keptKeyAt,
   keptParentIn,
+  type KeyId,
   keyIdAt,
   keyIdBelow,
   keyIdOf,
   keyIdPath,
   rootId,
-  type KeyId,
 } from "../contract/key-ids.js";
 import { keyLane } from "../contract/lanes.js";
 import {
@@ -82,7 +84,10 @@ export function groups(admission: Admission): readonly DecidedAt[] {
   if (admission.groupList !== null) return admission.groupList;
   const { program, definitions, contract } = admission.pass;
   const work = program.work;
-  const tracked = new Set<Key>([...definitions.byKey.keys(), ...definitions.candidates.keys()]);
+  // (each key in its identity: a definition's key is its family's text, G3 stage 1)
+  const tracked = new Set<CanonicalKey>();
+  for (const key of [...definitions.byKey.keys(), ...definitions.candidates.keys()])
+    tracked.add(canonicalKey(contract, key));
   const chains = new Map<PlaceId, ChainLink>();
   for (const c of program.constraints)
     if (c.kind === "project") {
@@ -93,9 +98,9 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       }
       const target = program.targetRoot(c.into);
       if (!program.cellOwner.has(target.root) && !program.hasOf.has(target.root))
-        tracked.add(keptKey(admission.work, target.root, target.path));
+        tracked.add(keptKeyAt(contract, target.root, target.path));
     }
-  for (const [, binding] of program.occurrenceOf) tracked.add(keptKey(admission.work, binding, []));
+  for (const [, binding] of program.occurrenceOf) tracked.add(keptKeyAt(contract, binding, []));
   const reaching = admission.stores();
   const stores = new Map<Key, number>();
   for (const d of reaching)
@@ -191,9 +196,9 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     }
   // (each key's prefixes, walked up a step at a time to one whose own are in already: each prefix made once, so a
   // literal nested k deep makes its k keys' prefixes in k steps, not k² made again per key, TABLE r4.100 (2))
-  const closed = new Set<Key>();
+  const closed = new Set<CanonicalKey>();
   for (const key of [...tracked])
-    for (let at: Key | null = key; at !== null && !closed.has(at);) {
+    for (let at: CanonicalKey | null = key; at !== null && !closed.has(at);) {
       closed.add(at);
       at = keptParentIn(contract, at);
       if (at === null) break;
