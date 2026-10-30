@@ -49,6 +49,7 @@ import {
 } from "../../text-operations.js";
 import { hasIdentity, VALUE_KIND_NAMES, VALUE_KINDS } from "../../value-kinds.js";
 import { fits } from "./admission.js";
+import { originOf } from "./consumers/origins.js";
 import { REFERENCE } from "./contract.js";
 import { propertyName } from "./program.js";
 import type { ContextWord, ItemTag } from "./items.js";
@@ -2666,7 +2667,7 @@ function checkFix(
 /**
  * #1468: the fix of a store's place below the warned value, a property of what the value holds (ADR 0021 rule 1.4), in
  * words by construction, with no form and no value of its own (the lead's ruling after Codex r2). Where the checker's
- * definitions prove the value a load with a default (the rule's `origin`, `loadOrigin`), that load's default given the
+ * definitions prove the value a load with a default (`originOf`, `loadOrigin`), that load's default given the
  * property by its way from the load, of the place's type, which its reader then takes where the stored property misfits
  * or is missing; anything else
  * gives no check that discharges the warning (a property's check does not reach a copy of the whole object, Astra r1's
@@ -2699,7 +2700,7 @@ function propertyFix(
     return otherwise;
   const below = rule.steps.slice(above.length);
   if (!below.some((step) => "property" in step)) return null;
-  const found = rule.origin;
+  const found = originOf(rule);
   // (a type with null takes no default that discharges yet: a value of its other type narrows what the place takes,
   // and a default's `null` does not yet prove the property, #1470)
   if (found === undefined || rule.type.includes("null")) return otherwise;

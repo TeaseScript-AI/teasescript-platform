@@ -21,13 +21,13 @@ import {
   type Obligation,
   type ObligationKind,
   type RequiredKind,
-  type StoreOrigin,
   type StoreRoot,
   type StoreStep,
 } from "../result.js";
 import { siteOf } from "./diagnostics.js";
 import { SHOWN } from "./kinds.js";
 import { leftOutWarning } from "./left-out.js";
+import { proveOrigin, type StoreOrigin } from "./origins.js";
 import { kindsOf } from "./names.js";
 
 // The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
@@ -275,8 +275,9 @@ export function storeWarning(
   fits: readonly Item[],
 ): boolean {
   const origin = rule.rule === "store" ? loadOrigin(walk, site, rule) : undefined;
-  const proved: DiagnosticRule =
-    rule.rule === "store" && origin !== undefined ? { ...rule, origin } : rule;
+  // (the proof beside the published rule, never in it: this warning's own rule, of the same fields, keys it)
+  const proved = origin === undefined ? rule : { ...rule };
+  if (origin !== undefined) proveOrigin(proved, origin);
   return warning(
     walk,
     "written-target",
@@ -303,7 +304,7 @@ export function storeWarning(
  * (`definitions.byKey`, a loop's adds: no store, add or removal in any spelling the checker models). Each step's receiver
  * on that way is what the analysis answers there: objects only below a property, lists or sets below an element, dicts
  * below a dict's value; never by a step's name. With the way from the load and the variable holding it; `undefined`
- * where anything is unproved.
+ * where anything is unproved. Kept beside the warning's rule (`proveOrigin`), never published.
  */
 function loadOrigin(
   walk: Consumers,
