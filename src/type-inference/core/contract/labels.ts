@@ -49,14 +49,26 @@ export function labelBelow(parent: Label, step: string): Label {
  */
 export function labelText(contract: Contract, label: Label): string {
   if (recorded === null) return shown(contract, label);
+  const { records, sites } = recorded;
   const before = mark(contract.work);
   const made = label.text === null;
-  const text = shown(contract, label);
   const pass = passOf(contract);
   // (the frames above the caller: where a consumer's closure shows the label, the call that publishes it)
-  const site = recorded.sites ? (new Error().stack ?? "").split("\n").slice(2, 4).join(" <") : null;
-  recorded.records.push({ kind: "text", pass, text, made, site, ...since(contract.work, before) });
-  return text;
+  const site = sites ? (new Error().stack ?? "").split("\n").slice(2, 4).join(" <") : null;
+  let text: string | null = null;
+  try {
+    return (text = shown(contract, label));
+  } finally {
+    // (a showing the allowance stops is recorded too, with what it charged and no text)
+    records.push({
+      kind: "text",
+      pass,
+      text,
+      made: made && text !== null,
+      site,
+      ...since(contract.work, before),
+    });
+  }
 }
 
 function shown(contract: Contract, label: Label): string {
@@ -100,16 +112,16 @@ function partsOf(label: Label): string[] {
 
 /**
  * What `withLabelRecords` hears: a recipe asked (`made` where new), and a text shown in a pass, numbered in the order the
- * recording first met it (`made` where its text was made there, not found), with the units it charged by counter,
- * against the allowance or apart from it (after a stop, `apart`); a plain text (`labelPlainText`) with no pass, charging
- * nothing.
+ * recording first met it (`made` where its text was made there, not found; `null` where the allowance stopped the
+ * showing), with the units it charged by counter, against the allowance or apart from it (after a stop, `apart`); a
+ * plain text (`labelPlainText`) with no pass, charging nothing.
  */
 export type LabelRecord =
   | { readonly kind: "recipe"; readonly made: boolean }
   | {
       readonly kind: "text";
       readonly pass: number | null;
-      readonly text: string;
+      readonly text: string | null;
       readonly made: boolean;
       /** With `sites`, the calls that showed it, else `null`. */
       readonly site: string | null;

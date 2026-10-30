@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore, type CorePass } from "../src/type-inference/core/answers.js";
-import type { WorkCounter } from "../src/type-inference/core/budget.js";
+import {
+  BudgetExhausted,
+  withTestAllowance,
+  type WorkCounter,
+} from "../src/type-inference/core/budget.js";
 import {
   labelBelow,
   labelPlainText,
@@ -39,18 +43,20 @@ function bindingOf(pass: CorePass, label: string): PlaceId {
   return found.id;
 }
 
-/** The units `run` charges by counter, against the allowance and apart alike. */
-function charged(pass: CorePass, run: () => void): Partial<Record<WorkCounter, number>> {
+type Units = Partial<Record<WorkCounter, number>>;
+
+/** The units `run` charges by counter: those counted against the allowance and those apart from it. */
+function charged(pass: CorePass, run: () => void): { counted: Units; apart: Units } {
   const { work } = pass.program;
   const before = [work.counts(), work.apartCounts()];
   run();
-  const out: Partial<Record<WorkCounter, number>> = {};
+  const [counted, apart]: Units[] = [{}, {}];
   for (const [index, now] of [work.counts(), work.apartCounts()].entries())
     for (const [counter, units] of now) {
       const spent = units - (before[index]!.get(counter) ?? 0);
-      if (spent !== 0) out[counter] = (out[counter] ?? 0) + spent;
+      if (spent !== 0) [counted, apart][index]![counter] = spent;
     }
-  return out;
+  return { counted: counted!, apart: apart! };
 }
 
 /** `keepText`'s units for a text of `length` code units (`SHORT` free, then a unit per eight). */
@@ -74,7 +80,7 @@ test("a label is a recipe made once one step from its parent's; its text is made
   const { records } = withLabelRecords(() =>
     assert.deepEqual(
       charged(pass, () => assert.equal(labelText(contract, deep), text)),
-      { invSteps: recipes.length, literalUnits: 1 + kept(text.length) },
+      { counted: { invSteps: recipes.length, literalUnits: 1 + kept(text.length) }, apart: {} },
     ),
   );
   // (the one text it made: no prefix's)
@@ -84,24 +90,51 @@ test("a label is a recipe made once one step from its parent's; its text is made
   );
   assert.deepEqual(
     charged(pass, () => assert.equal(labelText(contract, deep), text)),
-    { invSteps: 1 },
+    { counted: { invSteps: 1 }, apart: {} },
   );
   const below = labelBelow(deep, "z");
   assert.deepEqual(
     charged(pass, () => assert.equal(labelText(contract, below), `${text}.z`)),
-    { invSteps: 2, literalUnits: 1 + kept(text.length + 2) },
+    { counted: { invSteps: 2, literalUnits: 1 + kept(text.length + 2) }, apart: {} },
   );
   // a plain text, for a caller that charges what it keeps: nothing charged, nothing kept, so it is made again if shown
   const middle = recipes[9]!;
   const middleText = text.split(".").slice(0, 10).join(".");
   assert.deepEqual(
     charged(pass, () => assert.equal(labelPlainText(middle), middleText)),
-    {},
+    { counted: {}, apart: {} },
   );
   assert.deepEqual(
     charged(pass, () => assert.equal(labelText(contract, middle), middleText)),
-    { invSteps: 10, literalUnits: 1 + kept(middleText.length) },
+    { counted: { invSteps: 10, literalUnits: 1 + kept(middleText.length) }, apart: {} },
   );
+  // after a stop a showing is finishing work, apart from the allowance
+  pass.program.work.stop("work");
+  assert.deepEqual(
+    charged(pass, () => assert.equal(labelText(contract, deep), text)),
+    { counted: {}, apart: { invSteps: 1 } },
+  );
+});
+
+test("a showing the allowance stops is recorded with what it charged and no text, and leaves its recipe without one", () => {
+  const made = request("let x = 1\nexit\n");
+  const pass = withTestAllowance(100_000, () => narrowingPass(made));
+  const { contract } = pass;
+  let deep = labelRoot(contract, bindingOf(pass, "x"));
+  for (let depth = 0; depth < 8; depth += 1) deep = labelBelow(deep, "q");
+  // (one unit left: the showing's visits pass the allowance)
+  const { work } = pass.program;
+  work.charge("checks", work.allowance - work.total - 1);
+  const { records } = withLabelRecords(() =>
+    assert.throws(() => labelText(contract, deep), BudgetExhausted),
+  );
+  assert.deepEqual(
+    records.map((record) =>
+      record.kind === "text" ? [record.text, record.made, record.counters, record.apart] : null,
+    ),
+    [[null, false, { invSteps: 9 }, {}]],
+  );
+  assert.equal(deep.text, null);
 });
 
 const nest = (n: number, leaf: string): string => {
@@ -192,7 +225,7 @@ test("the recipes a decision makes grow with its path, not with its prefixes' te
     const recipes = records.filter((record) => record.kind === "recipe" && record.made).length;
     const made = records
       .filter((record) => record.kind === "text" && record.made)
-      .map((record) => (record.kind === "text" ? record.text.length : 0));
+      .map((record) => (record.kind === "text" ? (record.text?.length ?? 0) : 0));
     return { n, recipes, made };
   });
   for (const { n, recipes, made } of counts) {
