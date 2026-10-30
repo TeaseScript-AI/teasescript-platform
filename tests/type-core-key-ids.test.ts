@@ -51,6 +51,8 @@ import { coreRequest } from "./helpers/type-core-analysis.js";
 import { probeMade } from "./helpers/type-core-made.js";
 import { narrowingPass, nodeAt } from "./helpers/type-core-narrowing.js";
 import { inMode, MODES, publishedAnswers, publishedRoute } from "./helpers/type-core-oracles.js";
+import { Admission } from "../src/type-inference/core/admission.js";
+import { sharedPaths } from "../src/type-inference/core/admission/structure.js";
 
 /*
  * G3 stage 1 (TABLE r4.196): the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
@@ -460,6 +462,23 @@ test("a key's text and its cursor read one stop: after a stop both forms are sto
   assert.equal(keyLane(other.contract, otherBox, "shell"), "cursor");
   other.contract.stopKey(keyOf(otherBox, ["shell"]));
   assert.equal(other.contract.keyStopped(keyIdOf(other.contract, otherBox, ["shell", "n"])), true);
+});
+
+test("a key's text and its cursor are one key to admission's indexes: the paths decided below a wrapper's prefix are the same asked by either (Codex r3 R3-F1)", () => {
+  const text =
+    "let seed: integer=1\nlet leaf={n:seed}\nlet box={shell:leaf}\nlet out=box.shell.n\nexit\n";
+  const pass = narrowingPass(request(text));
+  const box = bindingOf(pass, "box");
+  assert.equal(keyLane(pass.contract, box, "shell"), "cursor");
+  const admission = new Admission(
+    pass,
+    { run: (work) => pass.solver.run(work) },
+    new Map(),
+    new Set(),
+  );
+  const byCursor = sharedPaths(admission, keyIdOf(pass.contract, box, ["shell"]), []);
+  assert.deepEqual(byCursor, [["n"]]);
+  assert.deepEqual(sharedPaths(admission, keyOf(box, ["shell"]), []), byCursor);
 });
 
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
