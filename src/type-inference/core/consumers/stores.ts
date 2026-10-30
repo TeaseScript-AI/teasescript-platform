@@ -198,19 +198,17 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
           for (const { item } of offendingKinds(named))
             storeWarning(walk, site, label(), item, against, rule(), value.filter(fitting));
           // C9: the named data's own ingress keeps its boundary, as at a decided store
-          for (const item of named) {
-            const text = label();
-            admission.boundaryFor(
-              item,
-              obligation(
+          for (const item of named)
+            admission.boundaryFor(item, () => {
+              const text = label();
+              return obligation(
                 "copy-type",
                 site,
                 text,
                 against.map(requiredKind),
                 `validate ${text} against ${against.join("|")}`,
-              ),
-            );
-          }
+              );
+            });
         }
       continue;
     }
@@ -400,20 +398,20 @@ export function admittedStores(walk: Consumers, writtenOnly = false): void {
         (at.length === 0 || (d.kind === "add" && at.length === 1 && at[0] === "element"))
       )
         admission.boundaryAt(d);
-      // (only external data owes it, `boundaryFor`: the label shown for it alone)
+      // (only external data owes it, `boundaryFor`: the label shown only where the check is owed, #1483)
       for (const item of items)
         if (isExternal(item)) {
-          const text = label();
-          admission.boundaryFor(
-            item,
-            obligation(
+          const cell = admission.cellSited(d.site, item, d);
+          admission.boundaryFor(item, () => {
+            const text = label();
+            return obligation(
               "copy-type",
-              admission.cellSited(d.site, item, d),
+              cell,
               text,
               tags.map(requiredKind),
               `validate ${text} against ${tags.join("|")}`,
-            ),
-          );
+            );
+          });
         }
       // a null beside external data owes its null-check, unless the destination's admitted type holds null; a possible
       // null into a non-nullable type a null-check, a definite one an error
