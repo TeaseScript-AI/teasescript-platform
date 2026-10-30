@@ -167,6 +167,8 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
   and the standalone witnesses of #1261's Sol reviews r1 to r5 (308, `sol-m4-i1188-held-nodes-r1-evidence`), reach the
   corpus only through later runs that read them. Their texts survive (the #1188 sets' copies under `1463/retained/`),
   but no record names the run that wrote them or the globals it passed, so no module stands for them.
+- Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls and publication exceptions
+  separately; neither establishes agreement.
 
 ## The oracle library's next step
 
