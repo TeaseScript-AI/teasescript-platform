@@ -1,9 +1,10 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import { concrete, isExternal } from "../admission.js";
+import { unrestricted } from "../admission/permitted.js";
 import { expand, partOf } from "../admission/walk.js";
 import type { Expansion, Part } from "../admission/model.js";
 import type { CorePass } from "../answers.js";
-import { joinSteps, keptParts, keptSlice, keptSteps } from "../budget.js";
+import { joinSteps, keptParts, keptSlice, keptSteps, type WorkLedger } from "../budget.js";
 import type { Consumers } from "../consumers.js";
 import { defaultOf, termAt, typedDefault, typeTags, unknownItem, writtenOf } from "../contract.js";
 import { keptPath, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
@@ -209,7 +210,7 @@ function laterSources(
   rest: readonly string[],
   requirement: boolean,
 ): readonly Item[] {
-  const { contract } = walk.pass;
+  const { contract, program } = walk.pass;
   // (a read chain past the read depth is unsettled here as anywhere after a stop: the next source asked)
   const settled = (work: () => Work<readonly Item[]>): readonly Item[] | null => {
     const items = walk.run(work());
@@ -226,24 +227,22 @@ function laterSources(
     typed === null ? null : [...new Set(withoutEmpty(typed).map((item) => item.tag))];
   // from here on a domain, what the key may hold over all its stores (S3 §5 revision 16): its finished contract
   const held = typedTags === null ? settled(() => contract.contractOfValueAt(value, rest)) : null;
-  // (the written type at the read, by its syntax in any finishing pass: an unrestricted one admits every kind, so its
-  // domain, its contract or the type itself, holds the host data its key's stores hold, as an admitted or a syntax
-  // domain does below, #1450; a restricted one holds its kinds, its stores' boundaries checking them)
-  const term = (): TypeTerm | null => {
-    const written = writtenRead(walk, value);
-    return written === null ? null : termAt(written, rest);
-  };
-  const open = (at: TypeTerm | null): boolean => at !== null && typeTags(at).includes("unknown");
+  // (a domain that admits every kind, an unrestricted written type's, directly, through copies or a dictionary's values
+  // list, holds the host data its key's stores hold, as an admitted or a syntax domain does below, #1450; a restricted
+  // one holds its kinds, its stores' boundaries checking them): a contract by its plain `unknown`
   if (held !== null) {
     if (requirement) return required(withoutEmpty(held).map((item) => item.tag));
-    return open(term()) ? [...held, ...heldIngress(walk, value, rest)] : held;
+    return held.some((item) => item.tag === "unknown" && item.reasons === 0)
+      ? [...held, ...heldIngress(walk, value, rest)]
+      : held;
   }
   // the admitted type as admission retained it (revision 14): a written type by its syntax in any finishing pass; a
   // decision or a copy's only where admission settled
-  const written = typedTags === null ? term() : null;
+  const read = typedTags === null ? writtenRead(walk, value) : null;
+  const written = read === null ? null : termAt(read, rest);
   const retained =
     written !== null
-      ? typeTags(written)
+      ? writtenKinds(program.work, written).tags
       : walk.settled
         ? (retainedRead(walk, value, rest) ?? [])
         : [];
@@ -257,7 +256,9 @@ function laterSources(
   // consumer owes its check for that data, and its boundaries form from it, #1432, #1415; so does an unrestricted
   // written type, above)
   const host =
-    typedTags === null && (written === null || open(written)) ? heldIngress(walk, value, rest) : [];
+    typedTags === null && (written === null || writtenKinds(program.work, written).open)
+      ? heldIngress(walk, value, rest)
+      : [];
   if (tags.length === 0 || tags.includes("unknown")) return [...STOPPED, ...host];
   const items = [...tags.map((tag) => makeItem(tag, null, { cert: "pos" })), ...host];
   // (read as the value for a fixed need, a domain says nothing of emptiness: its collection may be empty, C6)
@@ -454,10 +455,10 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
   const { program } = walk.pass;
   for (let task = values.pop(); task !== undefined; task = values.pop()) {
     program.work.charge("checks");
-    if (task.stop?.list === "values") {
+    if (task.stop !== null && copies(program.work, task.stop)) {
       const host = hostIngress(walk, task.value);
       if (host !== null) at.host = program.scope.ingress.union(at.host, host[0]?.ingress);
-      else at.copies.push({ value: task.value, strip: task.stop.strip });
+      else at.copies.push({ value: task.value, strip: task.strip });
     }
     const { cells, operands } = partsOf(walk, task);
     for (const part of operands) {
@@ -466,6 +467,18 @@ function enterValues(walk: Consumers, at: HostFrontier, values: Expansion[]): vo
     }
     for (const [step, parts] of cells) addCells(walk, at, step, parts);
   }
+}
+
+/**
+ * Whether a value standing in a store walk is a copy the frontier follows: a read of another value (`values`), or a copy
+ * of a written place whose written type admits every kind at its path or below it, so it holds the host data its stores
+ * hold there (#1450); a restricted one holds its kinds, its stores' boundaries checking them.
+ */
+function copies(work: WorkLedger, stop: NonNullable<Expansion["stop"]>): boolean {
+  if (stop.list === "values") return true;
+  if (stop.list !== "written" || stop.term === null) return false;
+  const at = termAt(stop.term, stop.strip);
+  return at !== null && writtenKinds(work, at).openBelow;
 }
 
 /** Adds cells a step enters to a frontier's, each charged once. */
@@ -812,7 +825,7 @@ function placeEdges(
       const values = [expand(walk.admission, d.value!, d.node, [])];
       for (let task = values.pop(); task !== undefined; task = values.pop()) {
         program.work.charge("checks");
-        if (task.stop?.list === "values") {
+        if (task.stop !== null && copies(program.work, task.stop)) {
           const ingress = hostIngress(walk, task.value);
           if (ingress !== null) host = program.scope.ingress.union(host, ingress[0]?.ingress);
           else {
@@ -1173,4 +1186,41 @@ function writtenRead(walk: Consumers, value: PlaceId): TypeTerm | null {
     walk.writtenReads.set(next, term);
   }
   return term ?? null;
+}
+
+/**
+ * A written type's kinds (`typeTags`), whether it admits every kind (`unrestricted`: a domain that holds the host data its
+ * key's stores hold, #1450), and whether it does at its path or below it; made and charged once per type, so a read of
+ * a wide type costs one look-up (Codex r1's B2 on #1487).
+ */
+interface WrittenKinds {
+  readonly tags: readonly ItemTag[];
+  readonly open: boolean;
+  readonly openBelow: boolean;
+}
+
+const kindsByTerm = new WeakMap<TypeTerm, WrittenKinds>();
+
+function writtenKinds(work: WorkLedger, term: TypeTerm): WrittenKinds {
+  let found = kindsByTerm.get(term);
+  if (found === undefined) {
+    const tags = typeTags(term);
+    work.charge("checks", tags.length + 1);
+    const open = unrestricted(term);
+    const below =
+      term.kind === "list" || term.kind === "set" || term.kind === "dict"
+        ? [term.element]
+        : term.kind === "object"
+          ? (term.properties?.map((property) => property.type) ?? null)
+          : term.kind === "union"
+            ? term.members
+            : [];
+    found = {
+      tags,
+      open,
+      openBelow: open || below === null || below.some((each) => writtenKinds(work, each).openBelow),
+    };
+    kindsByTerm.set(term, found);
+  }
+  return found;
 }
