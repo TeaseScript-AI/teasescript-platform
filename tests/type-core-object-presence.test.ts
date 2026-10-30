@@ -393,3 +393,117 @@ test("a load's or parse's default proves a property only where its reader fills 
     }
   assert.deepEqual(wrong, []);
 });
+
+const object = (properties: Readonly<Record<string, SerializableRuntimeValue>>) => ({
+  kind: "object" as const,
+  properties: Object.entries(properties).map(([name, value]) => ({ name, value })),
+});
+
+/**
+ * #1459 (V30 §25, ADR 0021 1.8): a stored object keeps every property it holds, also one its default lacks, so a read or
+ * store of such a property owes its member warning and check, never an error, wherever the object is. Each source runs
+ * in each mode's plan with the script's storage holding the property, which the read gives unchanged, and without it.
+ */
+const STORED_EXTRA: readonly (readonly [
+  name: string,
+  declare: string,
+  receiver: string,
+  wrap: (stored: SerializableRuntimeValue) => SerializableRuntimeValue,
+])[] = [
+  ["a stored root object", 'let seed = load("seed", default: {n: 1})', "seed", (stored) => stored],
+  [
+    "an object nested in a stored object",
+    'let seed = load("seed", default: {inner: {n: 1}})',
+    "seed.inner",
+    (stored) => object({ inner: stored }),
+  ],
+  [
+    "a stored list's element",
+    'let seed = load("seed", default: [{n: 1}])',
+    "seed[0]",
+    (stored) => ({ kind: "list", items: [stored] }),
+  ],
+  [
+    "an element of a stored object's list",
+    'let seed = load("seed", default: {items: [{n: 1}]})',
+    "seed.items[0]",
+    (stored) => object({ items: { kind: "list", items: [stored] } }),
+  ],
+];
+
+test("a stored object's property its default lacks owes its member warning and check, never an error (#1459)", () => {
+  const wrong: string[] = [];
+  for (const [name, declare, receiver, wrap] of STORED_EXTRA)
+    for (const use of ["read", "store"] as const) {
+      const access = `${receiver}.m`;
+      const source =
+        `${declare}\nsay "BEFORE"\n` +
+        (use === "read"
+          ? `let observed = ${access}\nsay observed\n`
+          : `${access} = 2\nsay "STORED"\n`) +
+        'say "AFTER"\nexit\n';
+      const start = source.indexOf(access);
+      const c = { name: `${name}, a ${use}`, source, start, end: start + access.length };
+      const [first, ...others] = MODES.map((mode: Mode) => inMode(mode, () => decision(c)));
+      if (others.some((other) => other.record !== first!.record))
+        wrong.push(`${c.name}: the modes differ`);
+      const { outcome, diagnostics, checks } = first!;
+      if (
+        outcome === "compile-error" ||
+        !isDeepStrictEqual(diagnostics, [["warning-runtime-check", "member-read", "null-check"]]) ||
+        !isDeepStrictEqual(checks, ["null-check"])
+      )
+        wrong.push(`${c.name}: ${outcome} ${JSON.stringify({ diagnostics, checks })}`);
+      const sentence =
+        `'${receiver}' may not have property 'm'${use === "store" ? " that can be set" : ""} here. If it does ` +
+        `not, the Tease stops with an error at this line. '${receiver}' comes from outside the script, so its type ` +
+        "is known only when the script runs.";
+      for (const mode of MODES) {
+        const { plan, text } = inMode(mode, () =>
+          publishedRoute([{ path: "main.tease", source }], ["hostValue"]),
+        );
+        if (plan === null || plan === "outside") {
+          wrong.push(`${c.name}, ${JSON.stringify(mode)}: not planned`);
+          continue;
+        }
+        // EVIDENCE: invariant: the text `publishedRoute` gives is the JSON of the compiler's plan and diagnostics.
+        const route = JSON.parse(text) as {
+          diagnostics: { code: string; message: string; span: { start: { offset: number } } }[];
+        };
+        const messages = route.diagnostics.flatMap((d) =>
+          d.code === "TSV043" && d.span.start.offset === c.start ? [d.message] : [],
+        );
+        if (!isDeepStrictEqual(messages, [sentence]))
+          wrong.push(`${c.name}, ${JSON.stringify(mode)}: ${JSON.stringify(messages)}`);
+        for (const [stored, expected] of [
+          [
+            object({ n: 1, m: 9 }),
+            { failure: null, said: ["BEFORE", use === "read" ? "9" : "STORED", "AFTER"] },
+          ],
+          [object({ n: 1 }), { failure: `TSR017@${c.start}:${c.end}`, said: ["BEFORE"] }],
+        ] as const) {
+          const result = runGlobals(plan, { hostValue: 0 }, [
+            { key: "seed", value: wrap(structuredClone(stored)) },
+          ]);
+          const said = result.said.map(({ text: shown }) => shown);
+          if (!isDeepStrictEqual({ failure: result.failure, said }, expected))
+            wrong.push(
+              `${c.name}, ${JSON.stringify(mode)}: ${result.failure} ${JSON.stringify(said)}`,
+            );
+        }
+      }
+    }
+  // JSON's reader leaves a key its default lacks out (no written `object` keeps it), so no parsed object has it
+  const json = "let seed = fromJson(hostText, default: {n: 1})\nsay seed.m\nexit\n";
+  const at = json.indexOf("seed.m");
+  const parsed = decision({ name: "JSON", source: json, start: at, end: at + 6 }, ["hostText"]);
+  if (!isDeepStrictEqual(parsed.diagnostics, [["compile-error", "member-read", null]]))
+    wrong.push(`a parsed object's property its default lacks: ${JSON.stringify(parsed)}`);
+  // the reader fills a property the default lists, its `null` too: no presence check where the object lacks it
+  const listed = 'let seed = load("seed", default: {n: null})\nsay seed.n\nexit\n';
+  const read = listed.indexOf("seed.n");
+  const filled = decision({ name: "listed", source: listed, start: read, end: read + 6 });
+  if (filled.diagnostics.length > 0 || filled.checks.length > 0)
+    wrong.push(`a listed property with a null default: ${JSON.stringify(filled)}`);
+  assert.deepEqual(wrong, []);
+});
