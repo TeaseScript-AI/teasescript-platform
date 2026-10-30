@@ -450,7 +450,8 @@ test("a linked record list stops at the allowance with its count checked when it
  *
  * - the copy graph's topologies (`topologySources`): a chain of copies, a ring, a fan-out, a fan-in of branches read
  *   through one root (Codex r4's B2), a stack of diamonds, a shared base with branch deltas read at every field, nested
- *   cycles, two-way copies, and a chain whose links each store their own property;
+ *   cycles, two-way copies, a chain whose links each store their own property, and readers each holding two unrelated
+ *   objects, an object and a chain's tip, or a chain's root and tip in either order (Codex r5's B1 and T1);
  * - k replacements of one place with objects of k distinct properties, each read after its store (Astra r1's B1);
  * - the same through copies of k places, plainly and through a selection (Codex r3's B1).
  *
@@ -481,13 +482,15 @@ test("a settled stop finishes the host data of every copy-graph topology in line
       `${rows(k, (i) => `let c${i} = {f${i}: hostValue}`)}\nlet root = [c0, c0][0]\n${rows(k, (i) => `${i === 0 ? "" : `root = [c${i}, c${i}][0]\n`}repeat root.f${i} {}`)}\nexit`,
   };
   // (a shared base read at every field grows as k², and the diamonds' admission grows faster on `main` already: their
-  // sizes are smaller)
+  // sizes are smaller; a lineage's depth gap shows its jumps' cost from k = 32)
   const sizes = (shape: string): readonly [number, number] =>
     shape === "shared-deltas"
       ? [4, 8]
       : shape === "diamond" || shape === "nested-cycles"
         ? [8, 16]
-        : [16, 32];
+        : shape === "tie-tip-first"
+          ? [32, 64]
+          : [16, 32];
   for (const [shape, make] of Object.entries(shapes))
     for (const reversed of [false, true]) {
       const measured = (k: number) => {

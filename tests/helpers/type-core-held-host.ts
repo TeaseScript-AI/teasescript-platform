@@ -572,7 +572,11 @@ const fields0 = (k: number, value: (i: number) => string): string =>
  * The copy graph's topologies at size k, each read after a settled stop through the host-data completion (#1445): a
  * chain of copies, a ring, a fan-out of copies of one base, a fan-in of branches (one base, each branch changing its own
  * property, all read through one root: Codex r4's B2), a stack of diamonds, a shared base with branch deltas read at every
- * field, nested cycles, two-way copies, and a chain whose links each store their own property.
+ * field, nested cycles, two-way copies, and a chain whose links each store their own property. Codex r5's B1 and T1: k
+ * readers each holding the same two unrelated objects (`unshared-readers`), or one object and the tip of a chain whose
+ * links store their own property (`unshared-chain-readers`), and k readers each holding a chain's root and its tip, root
+ * first (`tie-root-first`: equal holders, the ancestor met first) or tip first (`tie-tip-first`: the lineage's depth
+ * gap).
  */
 export function topologySources(k: number): { readonly name: string; readonly source: string }[] {
   const shapes: Record<string, string[]> = {
@@ -627,6 +631,31 @@ export function topologySources(k: number): { readonly name: string; readonly so
       ...lines(k - 1, (i) => `let c${i + 1} = c${i}\nc${i + 1}.f${i + 1} = hostValue`),
       ...lines(k, (j) => `repeat c${k - 1}.f${j} {}`),
     ],
+    "unshared-readers": [
+      `let a = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+      `let b = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
+      ...lines(k, (i) => `let r${i} = a\nr${i} = b\nrepeat r${i}.f${i} {}`),
+    ],
+    "unshared-chain-readers": [
+      `let a = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+      `let b = ${fields0(k, (i) => (i === 0 ? "hostOther" : "1"))}`,
+      ...lines(k, (i) => `let b${i} = ${i > 0 ? `b${i - 1}` : "b"}\nb${i}.f${i} = hostOther`),
+      ...lines(k, (i) => `let r${i} = a\nr${i} = b${k - 1}\nrepeat r${i}.f${i} {}`),
+    ],
+    ...Object.fromEntries(
+      [true, false].map((rootFirst) => [
+        rootFirst ? "tie-root-first" : "tie-tip-first",
+        [
+          `let c0 = ${fields0(k, (i) => (i === 0 ? "hostValue" : "1"))}`,
+          ...lines(k, (i) => `let c${i + 1} = c${i}\nc${i + 1}.f${i} = hostValue`),
+          ...lines(
+            k,
+            (i) =>
+              `let r${i} = ${rootFirst ? "c0" : `c${k}`}\nr${i} = ${rootFirst ? `c${k}` : "c0"}\nrepeat r${i}.f${i} {}`,
+          ),
+        ],
+      ]),
+    ),
   };
   return Object.entries(shapes).map(([name, rows]) => ({
     name,
@@ -637,13 +666,15 @@ export function topologySources(k: number): { readonly name: string; readonly so
 /**
  * A random copy graph, by a seeded generator: `places` objects of `fields` properties, some holding host data, then
  * `statements` stores at random, each a copy of another place, a copy through a selection, a property store of host
- * data, or a read of a property by a count.
+ * data, or a read of a property by a count; then each place read, and `readers` new places each holding two places at
+ * random and read (Codex r5's readers of unrelated lineages; none leaves the graph as it was).
  */
 export function randomCopyGraph(
   seed: number,
   places: number,
   fields: number,
   statements: number,
+  readers = 0,
 ): string {
   let state = seed >>> 0;
   const next = (n: number): number => {
@@ -671,5 +702,9 @@ export function randomCopyGraph(
     }
   }
   rows.push(...lines(places, (i) => `repeat p${i}.f${next(fields)} {}`));
+  for (let r = 0; r < readers; r += 1) {
+    const [i, j, f] = [next(places), next(places), next(fields)];
+    rows.push(`let q${r} = p${i}\nq${r} = p${j}\nrepeat q${r}.f${f} {}`);
+  }
   return `${rows.join("\n")}\nexit\n`;
 }

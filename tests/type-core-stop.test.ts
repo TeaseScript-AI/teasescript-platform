@@ -2074,17 +2074,18 @@ test("a settled stop keeps the checks of the host data a place's stores hold (#1
  * #1445: after a settled stop, each copy-graph component's holders, merged along its lineage (a base extended by
  * deltas, shared across branches), equal the naive union of its members' own entries and its reached summaries' holders
  * at every step (`withHolderCheck`). With the naive union used instead, the analysis is the same: its checks, its
- * diagnostics and its marks, the stopped decisions' (r4.186) among them. The nine topologies at k = 4 and four random
- * copy graphs, forward with sharing and reversed without, at the first settled stop, the last, and halfway between,
- * without a demand cap and under the largest that stops a decision (`heldDemands`). The same check runs at scale, in all
- * four modes, on the workers.
+ * diagnostics and its marks, the stopped decisions' (r4.186) among them. The topologies at k = 4 and six random copy
+ * graphs (two with readers of two places), forward with sharing and reversed without, at the first settled stop, the
+ * last, and halfway between, without a demand cap and under the largest that stops a decision (`heldDemands`). The same
+ * check runs at scale, in all four modes, on the workers.
  */
 test("after a settled stop a component's lineage-merged holders equal their naive union (#1445)", () => {
   const sources = [
     ...topologySources(4),
-    ...[1, 2, 3, 4].map((seed) => ({
+    ...[1, 2, 3, 4, 5, 6].map((seed) => ({
       name: `random ${seed}`,
-      source: randomCopyGraph(seed, 6, 4, 18),
+      // (seeds 5 and 6 with four readers of two places each, Codex r5's B1)
+      source: randomCopyGraph(seed, 6, 4, 18, seed > 4 ? 4 : 0),
     })),
   ];
   const answered = (answers: Answers) => ({
