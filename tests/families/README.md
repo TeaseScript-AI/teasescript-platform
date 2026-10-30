@@ -87,13 +87,13 @@ node tests/families/property/bin/prepost.mjs <repository> <pre> <post> <new fold
 It builds both commits from the repository's objects with its `node_modules` (`bin/prepare-build.mjs`), runs the
 profile on each (`bin/pilot.mjs plan` and `run`), compares the rows (`bin/compare.mjs`) and, where both trees hold the
 oracle library, runs `run.mjs property` on the same builds; `--library` adds the library from that commit to a tree
-before #1427. It writes `report.json` and `report.md` and exits 0 when the family tells the pair apart (failures on the
-first, none on the second, no row without a verdict or an exclusion), 1 when it does not, 2 on an error. `quick` runs
-12 sources in two modes at four allowances, `focused` (the default) all 90 in eight modes at nine, `deep` at 23. On
-the desktop worker (Node 26.13, shared with other jobs; #1477) a build took 3–5 s, a campaign 2–3 s (`quick`), 52–57 s
-(`focused`) or 109–124 s (`deep`) per build, the runner over the same sources 10–12 s, a whole job at most 1.8 GB:
-`quick` suits a builder's loop in the stops area, `focused` the run before a review round there, `deep` a change to
-where or how the budget stops.
+before #1427. It writes `report.json` and `report.md` and exits 0 when the family tells the pair apart (at least one
+failure on the first, each run to PASS on the second, no failure on the second, and no ERROR, TIMEOUT, CANCELLED or
+NOT_RUN row on either), 1 when it does not, 2 on an error. `quick` runs 12 sources in two modes at four allowances,
+`focused` (the default) all 90 in eight modes at nine, `deep` at 23. On the desktop worker (Node 26.13, shared with
+other jobs; #1477) a build took 3–5 s, a campaign 2–3 s (`quick`), 52–57 s (`focused`) or 109–124 s (`deep`) per
+build, the runner over the same sources 10–12 s, a whole job at most 1.8 GB: `quick` suits a builder's loop in the
+stops area, `focused` the run before a review round there, `deep` a change to where or how the budget stops.
 `bin/canaries.mjs <build> <out>` checks that 12 mutants of clean plans fail; `bin/shrink.mjs`, `bin/merge.mjs` (shards)
 and `bin/metrics.mjs` print their usage. The tool's own tests: `node --test tests/families/property/test/`.
 
