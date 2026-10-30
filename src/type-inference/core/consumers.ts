@@ -539,7 +539,7 @@ export class Consumers {
 
   readonly names = new Map<CanonicalKey | PlaceId, readonly string[]>();
 
-  readonly shown = new Map<Key | PlaceId, string | null>();
+  readonly shown = new Map<CanonicalKey | PlaceId, string | null>();
 
   directSites: Map<string, SourceSite> | null = null;
 
