@@ -310,15 +310,16 @@ interface StepTrie {
  * own steps, and its copies inside the component are `tracked`.
  *
  * Its lineage: the reached summary its `holders` extend (`base`), and the entries it adds to them (`delta`), so that
- * `holders` is `base`'s with `delta` added, and a lineage root's `holders` its `delta`; `depth` and the jumps up the
- * lineage (`up`: its base, its base's base's ..., by powers of two) find the lowest summary two lineages share.
+ * `holders` is `base`'s with `delta` added, and a lineage root's `holders` its `delta`; `depth` and one jump up the
+ * lineage (`jump`, skew-binary: a lineage root's is `null`, standing for itself) find the lowest summary two lineages
+ * share in a number of hops logarithmic in the depth.
  */
 interface Below {
   readonly holders: StepTrie;
   readonly base: Below | null;
   readonly delta: StepTrie;
   readonly depth: number;
-  readonly up: readonly Below[];
+  readonly jump: Below | null;
   readonly tracked: Holders | undefined;
   readonly inherited: IngressNode | undefined;
   readonly stopped: boolean;
@@ -826,7 +827,7 @@ interface Reached {
 }
 
 /** The fields of a summary its holders and lineage make (`combine`). */
-type Lineage = Pick<Below, "holders" | "base" | "delta" | "depth" | "up">;
+type Lineage = Pick<Below, "holders" | "base" | "delta" | "depth" | "jump">;
 
 /** Test-only: the check of each summary's lineage-merged holders (`withHolderCheck`). */
 interface HolderCheck {
@@ -889,16 +890,19 @@ function checked(
   return holderCheck.naive ? { ...lineage, holders: naive } : lineage;
 }
 
+/** A summary's jump up its lineage, a lineage root's being itself. */
+const jumpOf = (below: Below): Below => below.jump ?? below;
+
 /**
  * Whether summary `x` is `of` or an ancestor of it in their lineage (its `holders` then within `of`'s): `of` lifted to
- * `x`'s depth by its jumps, charged per hop.
+ * `x`'s depth by its jumps where they do not pass it, else by its base, charged per hop.
  */
 function lineageHolds(walk: Consumers, x: Below, of: Below): boolean {
-  if (x.depth > of.depth) return false;
   let at = of;
-  for (let gap = of.depth - x.depth, level = 0; gap > 0; gap >>= 1, level += 1) {
+  while (at.depth > x.depth) {
     walk.pass.program.work.charge("checks");
-    if ((gap & 1) !== 0) at = at.up[level]!;
+    const jump = jumpOf(at);
+    at = jump.depth < x.depth ? at.base! : jump;
   }
   return at === x;
 }
@@ -916,7 +920,7 @@ function combine(walk: Consumers, reached: ReadonlySet<Below>, own: StepTrie): L
     program.work.charge("checks");
     if (base === null || below.holders.size > base.holders.size) base = below;
   }
-  if (base === null) return { holders: own, base: null, delta: own, depth: 0, up: [] };
+  if (base === null) return { holders: own, base: null, delta: own, depth: 0, jump: null };
   let delta = own;
   for (const below of reached) {
     if (below === base) continue;
@@ -925,12 +929,16 @@ function combine(walk: Consumers, reached: ReadonlySet<Below>, own: StepTrie): L
       delta = trieUnion(walk, delta, at.delta);
     }
   }
-  const up: Below[] = [base];
-  for (let level = 0; up[level]!.up[level] !== undefined; level += 1) {
-    program.work.charge("checks");
-    up.push(up[level]!.up[level]!);
-  }
-  return { holders: trieUnion(walk, base.holders, delta), base, delta, depth: base.depth + 1, up };
+  // (the skew-binary jump: two equal spans above the base make one, else the base itself)
+  const [over, further] = [jumpOf(base), jumpOf(jumpOf(base))];
+  const jump = base.depth - over.depth === over.depth - further.depth ? further : base;
+  return {
+    holders: trieUnion(walk, base.holders, delta),
+    base,
+    delta,
+    depth: base.depth + 1,
+    jump,
+  };
 }
 
 /**
