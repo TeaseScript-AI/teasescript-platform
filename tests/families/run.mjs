@@ -161,8 +161,8 @@ if (process.argv[2] === "--child") {
     });
   /**
    * One source's reply, or why it stalled (`timeout`, or how the process ended), with the runs that ended (`runs`). At
-   * the deadline the process ends and the runs it had written are read before it closes: a source whose reply has not
-   * arrived by its deadline stalls, with them.
+   * the deadline the process ends and the runs it had written are read before it closes: a source whose timeout
+   * callback has run stalls, with them.
    */
   const analysed = (message) =>
     new Promise((resolve) => {
