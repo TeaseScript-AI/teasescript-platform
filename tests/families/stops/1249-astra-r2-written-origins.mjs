@@ -1,6 +1,6 @@
 // written origins and guarded-disjoint companions; #1249, astra-m4-i1249-review-r2-evidence, archived Python/shell
 // evidence (R/astra-m4-i1249-review-r2-evidence/make-cases.py; R/astra-m4-i1249-review-r2-evidence/make-disjoint.py).
-export const cases = (() => {
+const generated = (() => {
   let a,
     at,
     b,
@@ -213,6 +213,43 @@ c=${s}
     ]);
   return originals.concat(disjoint);
 })();
+// the growth-quick job's inputs (run.mjs growth-quick.json, jobs/done/…-astra1293r2-growth-quick.job:4)
+const captured = [
+  [
+    "run.mjs:6a56357df396",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3}}}\nlet xs=[good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, bad.outer.inner]\nsay xs[0].f0\nexit\n',
+  ],
+  [
+    "run.mjs:3cd333de93b5",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3}}}\nlet xs=[bad.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner]\nsay xs[0].f0\nexit\n',
+  ],
+  [
+    "run.mjs:6f234b4fb91d",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3}}}\nlet c0={slot:good.outer.inner}\nc0.slot=bad.outer.inner\nsay c0.slot.f0\nlet c1={slot:good.outer.inner}\nc1.slot=bad.outer.inner\nsay c1.slot.f0\nlet c2={slot:good.outer.inner}\nc2.slot=bad.outer.inner\nsay c2.slot.f0\nlet c3={slot:good.outer.inner}\nc3.slot=bad.outer.inner\nsay c3.slot.f0\nexit\n',
+  ],
+  [
+    "run.mjs:6de0e9d8a9f9",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3}}}\nlet c0={slot:bad.outer.inner}\nc0.slot=good.outer.inner\nsay c0.slot.f0\nlet c1={slot:bad.outer.inner}\nc1.slot=good.outer.inner\nsay c1.slot.f0\nlet c2={slot:bad.outer.inner}\nc2.slot=good.outer.inner\nsay c2.slot.f0\nlet c3={slot:bad.outer.inner}\nc3.slot=good.outer.inner\nsay c3.slot.f0\nexit\n',
+  ],
+  [
+    "run.mjs:8bf0d858564b",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet w4: integer = 4\nlet alias4 = w4\nlet copied4 = alias4\nlet w5: integer = 5\nlet alias5 = w5\nlet copied5 = alias5\nlet w6: integer = 6\nlet alias6 = w6\nlet copied6 = alias6\nlet w7: integer = 7\nlet alias7 = w7\nlet copied7 = alias7\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet xs=[good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, bad.outer.inner]\nsay xs[0].f0\nexit\n',
+  ],
+  [
+    "run.mjs:d6d8715ddeb2",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet w4: integer = 4\nlet alias4 = w4\nlet copied4 = alias4\nlet w5: integer = 5\nlet alias5 = w5\nlet copied5 = alias5\nlet w6: integer = 6\nlet alias6 = w6\nlet copied6 = alias6\nlet w7: integer = 7\nlet alias7 = w7\nlet copied7 = alias7\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet xs=[bad.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner, good.outer.inner]\nsay xs[0].f0\nexit\n',
+  ],
+  [
+    "run.mjs:4c3b623d2c9b",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet w4: integer = 4\nlet alias4 = w4\nlet copied4 = alias4\nlet w5: integer = 5\nlet alias5 = w5\nlet copied5 = alias5\nlet w6: integer = 6\nlet alias6 = w6\nlet copied6 = alias6\nlet w7: integer = 7\nlet alias7 = w7\nlet copied7 = alias7\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet c0={slot:good.outer.inner}\nc0.slot=bad.outer.inner\nsay c0.slot.f0\nlet c1={slot:good.outer.inner}\nc1.slot=bad.outer.inner\nsay c1.slot.f0\nlet c2={slot:good.outer.inner}\nc2.slot=bad.outer.inner\nsay c2.slot.f0\nlet c3={slot:good.outer.inner}\nc3.slot=bad.outer.inner\nsay c3.slot.f0\nlet c4={slot:good.outer.inner}\nc4.slot=bad.outer.inner\nsay c4.slot.f0\nlet c5={slot:good.outer.inner}\nc5.slot=bad.outer.inner\nsay c5.slot.f0\nlet c6={slot:good.outer.inner}\nc6.slot=bad.outer.inner\nsay c6.slot.f0\nlet c7={slot:good.outer.inner}\nc7.slot=bad.outer.inner\nsay c7.slot.f0\nexit\n',
+  ],
+  [
+    "run.mjs:f5065bedb050",
+    'let w0: integer = 0\nlet alias0 = w0\nlet copied0 = alias0\nlet w1: integer = 1\nlet alias1 = w1\nlet copied1 = alias1\nlet w2: integer = 2\nlet alias2 = w2\nlet copied2 = alias2\nlet w3: integer = 3\nlet alias3 = w3\nlet copied3 = alias3\nlet w4: integer = 4\nlet alias4 = w4\nlet copied4 = alias4\nlet w5: integer = 5\nlet alias5 = w5\nlet copied5 = alias5\nlet w6: integer = 6\nlet alias6 = w6\nlet copied6 = alias6\nlet w7: integer = 7\nlet alias7 = w7\nlet copied7 = alias7\nlet badValue: string = "text"\nlet good={outer:{inner:{f0: copied0, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet bad={outer:{inner:{f0: badValue, f1: copied1, f2: copied2, f3: copied3, f4: copied4, f5: copied5, f6: copied6, f7: copied7}}}\nlet c0={slot:bad.outer.inner}\nc0.slot=good.outer.inner\nsay c0.slot.f0\nlet c1={slot:bad.outer.inner}\nc1.slot=good.outer.inner\nsay c1.slot.f0\nlet c2={slot:bad.outer.inner}\nc2.slot=good.outer.inner\nsay c2.slot.f0\nlet c3={slot:bad.outer.inner}\nc3.slot=good.outer.inner\nsay c3.slot.f0\nlet c4={slot:bad.outer.inner}\nc4.slot=good.outer.inner\nsay c4.slot.f0\nlet c5={slot:bad.outer.inner}\nc5.slot=good.outer.inner\nsay c5.slot.f0\nlet c6={slot:bad.outer.inner}\nc6.slot=good.outer.inner\nsay c6.slot.f0\nlet c7={slot:bad.outer.inner}\nc7.slot=good.outer.inner\nsay c7.slot.f0\nexit\n',
+  ],
+];
+export const cases = [...generated, ...captured];
+
 export const checks = ["publication", "stops"];
 
 // the globals the recorded run passed
@@ -226,6 +263,6 @@ export const recorded = {
       "R/astra-m4-i1249-review-r2-evidence/REPRODUCE.md, jobs/done/",
     ],
   ],
-  sources: 159,
-  sha256: "cee1415f332807b35864d701003282dc43f37db248e3d308d5b04bcc46b6668c",
+  sources: 167,
+  sha256: "5106a2d42922101d848bc5558a4d83ec382e76b2f6afe59c1ec2f7c2ce7dd2b3",
 };

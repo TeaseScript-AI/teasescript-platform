@@ -27,7 +27,11 @@ export const cases = (() => {
       `let typed: integer | string = 1\nlet xs = [${a}, ${b}]\nexit`,
     ]);
   }
-  return shapes.map(([name, source]) => [name, source]);
+  // each shape twice: the probe's run (api.mjs: hostValue and hostOther) and the base build's own request (hostValue)
+  return shapes.flatMap(([name, source]) => [
+    [name, source],
+    [`${name}/probe`, source, ["hostValue", "hostOther"]],
+  ]);
 })();
 export const checks = ["publication", "stops"];
 
@@ -37,6 +41,6 @@ export const globals = ["hostValue"];
 /** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
 export const recorded = {
   commands: [["node worker/deep.mjs", "R/astra-m4-s8c-review-r2-evidence/worker/run-deep.sh:3"]],
-  sources: 6,
-  sha256: "bb89f27b62051deb12f312014170c593069a5877d89d094f75c2e77027940134",
+  sources: 12,
+  sha256: "76eac9bcf8fb806fcd44ba46c3172160c94775b7e2a195247185252999c89e7a",
 };
