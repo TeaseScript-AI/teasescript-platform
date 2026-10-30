@@ -73,7 +73,7 @@ import {
   memberStepOf,
   spanRef,
   type KeyId,
-  type PathRef,
+  type PathFacts,
   type Rest,
   stepsOfId,
   type CanonicalKey,
@@ -266,23 +266,15 @@ export class Contract {
   readonly pathMembers: number[] = [0];
   readonly pathProperties: boolean[] = [true];
   /**
-   * G3 stage 1's spans (`key-ids.ts`): per offset, each path's steps from that offset on as a path of its own (`spanId`),
-   * and per path, a path's steps followed by another's (`joinedId`), each found from its parent's and kept.
+   * G3 stage 1: per path of the arena, what the cursors derive from it, each made once and kept (`PathFacts`,
+   * `factsOf`); per text of a family whose lane is cursors, its cursor (`textCursor`).
    */
-  readonly spanIds = new Map<number, Map<number, number>>();
-  /** Per wrapper's own literal and array rest, by its legacy demand name's text, its span (`canonicalRest`). */
-  readonly literalSpans = new Map<string, PathRef>();
+  readonly pathFacts = new Map<number, PathFacts>();
+  readonly textCursors = new Map<Key, KeyId>();
   /** Per demand name holding a cursor, the logical name it orders as (`compareDemandNames`). */
   readonly logicalNames = new Map<string, string>();
-  readonly prefixIds = new Map<number, Map<number, number>>();
-  readonly joinedIds = new Map<number, Map<number, number>>();
-  /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
+  /** What the key cursors' conversions made, by place and path (`keyOfId`). */
   readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
-  readonly pathStepLists = new Map<number, readonly string[]>();
-  /** Per text of a family whose lane is cursors, its cursor (`canonicalKey`), converted once and kept. */
-  readonly textIds = new Map<Key, KeyId>();
-  /** Per path, its prefixes' ids by length (`keyPrefixIn`, `keyWalk`), made once and kept. */
-  readonly pathPrefixLists = new Map<number, readonly number[]>();
   /** Per place, its own label's recipe, the root of its labels' recipes (`labels.ts`). */
   readonly labelRoots = new Map<PlaceId, Label>();
   readonly signatures = new Map<PlaceId, string>();

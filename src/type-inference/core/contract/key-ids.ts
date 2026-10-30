@@ -206,14 +206,35 @@ export function keyPrefixIn(contract: Contract, asked: Key, length: number): Can
 }
 
 /**
+ * What the cursors derive from one path of the arena (G3 stage 1), each made at its first question by its charged maker,
+ * its entry kept, and found again by the path's id (`factsOf`), never derived twice: its steps and its suffixes' by
+ * offset (`stepsOfId`), its prefixes' ids by length (`prefixesOf`), its spans' ids by offset (`spanId`), and its
+ * joins' ids by the joined path (`joinedId`, the path the base).
+ */
+export interface PathFacts {
+  steps?: readonly string[];
+  suffixes?: Map<number, readonly string[]>;
+  prefixes?: readonly number[];
+  spans?: Map<number, number>;
+  joined?: Map<number, number>;
+}
+
+/** A path's facts, the one place they are kept: made empty at its first question, its fields filled by their makers. */
+function factsOf(contract: Contract, path: number): PathFacts {
+  let facts = contract.pathFacts.get(path);
+  if (facts === undefined) contract.pathFacts.set(path, (facts = {}));
+  return facts;
+}
+
+/**
  * A path's prefixes' ids by length (0 its root), climbed once per path and kept, each later question a visit charged:
  * so a question at each of a path's lengths climbs it once, as `stepsOfId` makes its steps once.
  */
 function prefixesOf(contract: Contract, path: number): readonly number[] {
-  const known = contract.pathPrefixLists.get(path);
-  if (known !== undefined) {
+  const facts = factsOf(contract, path);
+  if (facts.prefixes !== undefined) {
     convert(contract, 1, 0, 0);
-    return known;
+    return facts.prefixes;
   }
   const depth = contract.pathDepths[path]!;
   convert(contract, depth + 1, 0, 1);
@@ -224,7 +245,7 @@ function prefixesOf(contract: Contract, path: number): readonly number[] {
   }
   prefixes.reverse();
   keptArray(contract.work, prefixes);
-  contract.pathPrefixLists.set(path, prefixes);
+  facts.prefixes = prefixes;
   return prefixes;
 }
 
@@ -305,20 +326,27 @@ export function canonicalKey(contract: Contract, key: Key): CanonicalKey {
   const dot = key.indexOf(".", bar + 1);
   const first = key.slice(bar + 1, dot < 0 ? key.length : dot);
   if (keyLane(contract, Number(key.slice(0, bar)), first) !== "cursor") return canonicalText(key);
-  // (a text asked again, as a consumer's reads ask theirs at each question, is found by its text: converted once)
-  let id = contract.textIds.get(key);
+  return textCursor(contract, key, () => keyIdOfText(contract, key));
+}
+
+/**
+ * A text of a family whose lane is cursors as its cursor, converted at its first question by `convert`, charged, and
+ * kept by its text: a text asked again, as a consumer's reads ask theirs at each question, is found, never converted.
+ */
+function textCursor(contract: Contract, text: Key, convertIt: () => KeyId): KeyId {
+  let id = contract.textCursors.get(text);
   if (id === undefined) {
-    id = keyIdOfText(contract, key);
-    contract.keepText(key.length);
-    contract.textIds.set(key, id);
+    id = convertIt();
+    contract.keepText(text.length);
+    contract.textCursors.set(text, id);
   }
   return id;
 }
 
 /**
  * A literal's rest in its identity (the `cl|` demand's name): an array asked of a wrapper family's own declaration
- * literal is its cursor's span, made once per literal and rest, charged and kept, and found again by the text the
- * legacy lane names its demand by; any other rest, a span among them, stands as asked.
+ * literal is its cursor's span, its family's key converted once and kept by its text (`textCursor`); any other rest, a
+ * span among them, stands as asked.
  */
 export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest): Rest {
   // (an array or a view of one: a span stands as asked)
@@ -328,15 +356,12 @@ export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest):
     (each) => each.how === "initializer" && each.kind === "whole" && each.path.length === 0,
   );
   if (d === undefined || keyLane(contract, d.place, steps[0]!) !== "cursor") return rest;
-  // (a member chain asks one literal and rest again at every level: converted at every ask, it grows by the chain)
-  const asked = joinParts(literal, steps);
-  let span = contract.literalSpans.get(asked);
-  if (span === undefined) {
-    span = spanRef(contract, keyIdPath(keyIdOf(contract, d.place, steps)));
-    contract.keepText(asked.length);
-    contract.literalSpans.set(asked, span);
-  }
-  return span;
+  // (a member chain asks one literal and rest again at every level: its key's text found, never converted again)
+  const key = keyOf(d.place, steps);
+  return spanRef(
+    contract,
+    keyIdPath(textCursor(contract, key, () => keyIdOf(contract, d.place, steps))),
+  );
 }
 
 /**
@@ -347,48 +372,33 @@ export function canonicalRest(contract: Contract, literal: PlaceId, rest: Rest):
 function spanId(contract: Contract, path: number, from: number): number {
   if (from === 0) return path;
   const { pathDepths: depths, pathParents: parents, pathLastSteps: steps } = contract;
-  let byPath = contract.spanIds.get(from);
-  if (byPath === undefined) contract.spanIds.set(from, (byPath = new Map()));
+  const known = (node: number): number | undefined =>
+    contract.pathFacts.get(node)?.spans?.get(from);
   const way: number[] = [];
   let at = path;
-  for (; depths[at]! > from && !byPath.has(at); at = parents[at]!) way.push(at);
-  let id = depths[at]! <= from ? 0 : byPath.get(at)!;
+  for (; depths[at]! > from && known(at) === undefined; at = parents[at]!) way.push(at);
+  let id = depths[at]! <= from ? 0 : known(at)!;
   convert(contract, way.length + 1, 0, way.length);
   for (let index = way.length - 1; index >= 0; index -= 1) {
     id = pathAt(contract, id, steps[way[index]!]!);
-    byPath.set(way[index]!, id);
+    (factsOf(contract, way[index]!).spans ??= new Map()).set(from, id);
   }
   return id;
 }
 
-/**
- * The id of the prefix of `path` of `length` steps (`length` at most its depth), found from the nearest of its
- * ancestors whose prefix of that length is known, kept and charged as `spanId`'s: so the prefixes of one length of k
- * nested paths cost k steps, never k².
- */
+/** The id of the prefix of `path` of `length` steps (`length` at most its depth): from its path's prefixes (`prefixesOf`). */
 export function prefixId(contract: Contract, path: number, length: number): number {
-  const { pathDepths: depths, pathParents: parents } = contract;
-  if (depths[path]! <= length) return path;
-  let byPath = contract.prefixIds.get(length);
-  if (byPath === undefined) contract.prefixIds.set(length, (byPath = new Map()));
-  const way: number[] = [];
-  let at = path;
-  for (; depths[at]! > length && !byPath.has(at); at = parents[at]!) way.push(at);
-  const id = depths[at]! === length ? at : byPath.get(at)!;
-  convert(contract, way.length + 1, 0, way.length);
-  for (const node of way) byPath.set(node, id);
-  return id;
+  return contract.pathDepths[path]! <= length ? path : prefixesOf(contract, path)[length]!;
 }
 
 /**
  * The id of the path of `base`'s steps followed by `rest`'s (`joinSteps` of the two), found down from the nearest of
- * `rest`'s ancestors whose join with `base` is known, one step each, charged and kept as `spanId`'s.
+ * `rest`'s ancestors whose join with `base` is known (`base`'s facts), one step each, charged and kept as `spanId`'s.
  */
 function joinedId(contract: Contract, base: number, rest: number): number {
   if (base === 0) return rest;
   const { pathParents: parents, pathLastSteps: steps } = contract;
-  let byRest = contract.joinedIds.get(base);
-  if (byRest === undefined) contract.joinedIds.set(base, (byRest = new Map()));
+  const byRest = (factsOf(contract, base).joined ??= new Map());
   const way: number[] = [];
   let at = rest;
   for (; at !== 0 && !byRest.has(at); at = parents[at]!) way.push(at);
@@ -537,29 +547,31 @@ export function arrayRef(contract: Contract, steps: readonly string[]): PathRef 
 /** The span of the arena's path `path` from its step `from` on, as a `PathRef`. */
 export function spanRef(contract: Contract, path: number, from = 0): PathRef {
   const length = contract.pathDepths[path]! - from;
+  // (its own path's id, found once per view: `spanId`)
+  let own: number | undefined;
+  const ownId = (): number => (own ??= spanId(contract, path, from));
   const ref: PathRef = {
     kind: "span",
     length,
-    at: (index) => contract.pathFirstSteps[spanId(contract, path, from + index)]!,
+    // (a step its span's first: the span's id kept per offset in its path's facts, shared by the paths below it)
+    at: (index) =>
+      contract.pathFirstSteps[index === 0 ? ownId() : spanId(contract, path, from + index)]!,
     from: (more) => (more === 0 ? ref : spanRef(contract, path, from + more)),
-    to: (count) =>
-      count >= length
-        ? ref
-        : spanRef(contract, prefixId(contract, spanId(contract, path, from), count)),
+    to: (count) => (count >= length ? ref : spanRef(contract, prefixId(contract, ownId(), count))),
     steps: () => stepsOfId(contract, keyIdAt(0, path), from),
     text: (count) => {
       const parts: string[] = [];
       for (let index = 0; index < count; index += 1) parts.push(ref.at(index));
       return pathText(parts);
     },
-    id: () => spanId(contract, path, from),
-    name: () => `.${spanId(contract, path, from)}`,
+    id: ownId,
+    name: () => `.${ownId()}`,
     after: (strip) => {
       if (strip.length === 0) return ref;
       convert(contract, strip.length, 0, 0);
       let base = 0;
       for (const step of strip) base = pathAt(contract, base, step);
-      return spanRef(contract, joinedId(contract, base, spanId(contract, path, from)));
+      return spanRef(contract, joinedId(contract, base, ownId()));
     },
     part: () => ref.name(),
     // (one step at a time, as far as the reader goes)
@@ -637,27 +649,37 @@ export function keyOfId(contract: Contract, id: KeyId): Key {
 }
 
 /**
- * The steps of a cursor's path from its step `from` on (a span: `from` 0 the whole path), made and charged; the whole
- * path's made once per path and kept, a span's from it where it is made, else by a walk of the span alone.
+ * The steps of a cursor's path from its step `from` on (a span: `from` 0 the whole path), made and charged once per
+ * path and offset and kept in the path's facts: a suffix from the path's kept steps where they are, else by a walk of
+ * the span alone.
  */
 export function stepsOfId(contract: Contract, id: KeyId, from = 0): readonly string[] {
   const path = keyIdPath(id);
   const depth = contract.pathDepths[path]!;
   if (!Number.isInteger(from) || from < 0 || from > depth)
     throw new RangeError(`A path of ${depth} steps has no step ${from}.`);
-  const whole = contract.pathStepLists.get(path);
-  if (whole !== undefined) {
+  const facts = factsOf(contract, path);
+  const known = from === 0 ? facts.steps : facts.suffixes?.get(from);
+  if (known !== undefined) {
     convert(contract, 1, 0, 0);
-    return from === 0 ? whole : keptArray(contract.work, whole.slice(from));
+    return known;
   }
-  // (the span's nodes and the one it ends at, an empty span's endpoint too)
-  convert(contract, depth - from + 1, 0, from === 0 ? 1 : 0);
-  const steps: string[] = [];
-  for (let at = path; contract.pathDepths[at]! > from; at = contract.pathParents[at]!)
-    steps.push(contract.pathLastSteps[at]!);
-  steps.reverse();
-  keptArray(contract.work, steps);
-  if (from === 0) contract.pathStepLists.set(path, steps);
+  let steps: readonly string[];
+  if (from > 0 && facts.steps !== undefined) {
+    // (a suffix of a path whose steps are kept: from them, once per offset)
+    convert(contract, 1, 0, 1);
+    steps = keptArray(contract.work, facts.steps.slice(from));
+  } else {
+    // (the span's nodes and the one it ends at, an empty span's endpoint too)
+    convert(contract, depth - from + 1, 0, 1);
+    const made: string[] = [];
+    for (let at = path; contract.pathDepths[at]! > from; at = contract.pathParents[at]!)
+      made.push(contract.pathLastSteps[at]!);
+    made.reverse();
+    steps = keptArray(contract.work, made);
+  }
+  if (from === 0) facts.steps = steps;
+  else (facts.suffixes ??= new Map()).set(from, steps);
   return steps;
 }
 

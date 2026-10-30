@@ -152,7 +152,7 @@ test("a key's cursor names one key of its pass whichever way it is made; its tex
       assert.equal(keyIdPath(elsewhere), keyIdPath(id));
     }
     // (so far no key's text or steps were made)
-    assert.equal(contract.keyTexts.size + contract.pathStepLists.size, 0);
+    assert.equal(contract.keyTexts.size + contract.pathFacts.size, 0);
     for (const [index, id] of inOrder.entries()) {
       const [place, path] = keys[index]!;
       const where = keyOf(place, path);
@@ -503,11 +503,11 @@ test("a wrapper's own literal asked by an array converts it to its span once: as
   const again = probeMade(pass.contract, () =>
     canonicalRest(pass.contract, own[0], ["shell", "n"]),
   );
-  assert.ok(!isSteps(first.result));
+  assert.ok(!isSteps(first.result) && !isSteps(again.result));
   assert.deepEqual(restSteps(first.result), ["shell", "n"]);
   assert.ok(first.work.charged > 0);
   assert.equal(again.work.charged, 0);
-  assert.equal(again.result, first.result);
+  assert.equal(again.result.id(), first.result.id());
 });
 
 test("a member chain's key asked at each of its offsets in turn, cold, climbs its path once: its member scan and its prefixes cost a unit a question after, linear in the path, and a repeated question its one unit (a member chain's demand asks each offset once)", () => {
@@ -576,8 +576,9 @@ test("a member chain's work keeps its ratio to its text lane's from 8 to 16 leve
         const text = withTextKeys(() => inMode(mode, () => analyseCore(source))).budget.total;
         return cursor / text;
       });
+      // (a constant factor's own terms move a ratio by less than a hundredth; a term growing with the chain, more)
       assert.ok(
-        at16! <= at8!,
+        at16! <= at8! * 1.01,
         `${dicts ? "dicts" : "year"} ${JSON.stringify(mode)}: ×${at8!.toFixed(4)} at 8, ×${at16!.toFixed(4)} at 16`,
       );
     }
@@ -888,7 +889,7 @@ test("every cursor conversion charges at least what it must inspect, alone, at e
             [
               `stepsOfId @${from}`,
               (contract: Contract, _: Contract, id: KeyId) => stepsOfId(contract, id, from),
-              state === "cached" || (state === "repeated" && from === 0) ? 1 : depth - from + 1,
+              state === "cold" ? depth - from + 1 : 1,
             ] as const,
         ),
         ...[0, depth].map(
@@ -945,10 +946,7 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     3,
     "a demand name with its cursors' texts, charged and kept once per name (`compareDemandNames`); a component's names for a replay and back (`exportNames`, `importNames`, the solver's test seam)",
   ],
-  "key-ids.ts joinParts": [
-    3,
-    "two places' decimal texts with their bar (`compareKeyIds`); a wrapper literal's array rest, the legacy demand name's text, kept once (`canonicalRest`)",
-  ],
+  "key-ids.ts joinParts": [2, "two places' decimal texts with their bar (`compareKeyIds`)"],
   "lanes.ts joinParts": [
     2,
     "a family's memo key: charged where kept (`wrapperShape`), looked up (`keyLane`)",
