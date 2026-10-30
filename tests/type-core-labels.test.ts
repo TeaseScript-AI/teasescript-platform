@@ -145,6 +145,11 @@ const CASES: readonly (readonly [string, string, readonly string[]])[] = [
     [],
   ],
   [
+    "a rejection cycle's store, decided again in each pass (A6)",
+    "let written:integer | string=83\nlet annotated={v:written,tag:1}\nlet inside={v:false,tag:false}\ninside=annotated\nlet outer=inside\nouter={v:83,tag:false}\nlet result=[inside,outer]\nexit\n",
+    ["outer.v", "result.element.v"],
+  ],
+  [
     "a store a handler changes later, its data checked nowhere: nothing shown",
     `let n = 1\nlet box = ${nest(3, "{v: 0}")}\nbox.${along(3)}.v = n\nshowPermanentButton "x" { n = 1.5 }\nlet copy: integer = box.${along(3)}.v\nexit\n`,
     [],
