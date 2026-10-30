@@ -18,8 +18,11 @@ Each source runs in the four modes (source and reversed order, the sharing on an
 publishes (`publication`) and, for a generator whose `checks` include `"stops"`, which decisions stop and when at each
 demand allowance (`stopSet`). A source that takes more than `--timeout` seconds or `--memory` MB of heap, or that ends
 its analysing process (a fatal V8 error), is counted as stalled with the reason (`--out`), and the runner goes on with
-the next. It prints one JSON line per generator and a total (sources, unparsed, stalled, modes, runs, differences), and
-exits 1 when any run differs or any source stalls. Run large sizes as one capped job per area or shard on a worker.
+the next. A run that throws on either tree is an exception, never compared, because identical exceptions on both trees
+are not agreement (#1439): the runner prints it on stderr with its source, mode and check, writes it with each stack to
+`--out` and counts it apart from stalls (`tests/families-runner.test.ts`, in CI). It prints one JSON line per generator
+and a total (sources, unparsed, stalled, exceptions, modes, runs, differences), and exits 1 when any run differs or
+throws or any source stalls. Run large sizes as one capped job per area or shard on a worker.
 
 A mutant is a head tree with one file changed. Its verdict counts only beside proof that the change was applied: the
 mutated file's hash in the head tree, which differs from the base's. Without that proof the result is NOT_RUN, never
@@ -136,7 +139,9 @@ from `main` `2960937a1` (#1446): `copies/astra-1423/` (`publication.mjs`, `route
 `consumers/astra-1437/` (Astra's `seam-stops.mjs`, the spot publications and the proof scripts),
 `consumers/owner-s9b/` and `stops/astra-1434/`; `consumers/sol-1437-r5/`, `-r6/` and `-r7/` read `stopIdentity` from
 there too. Each folder's `PORTED-1446.md` names the ported files; each original stays beside its port as
-`<file>.pre-1446`. The `sol-1437` kits still name their review's folders: retarget those as their READMEs say.
+`<file>.pre-1446`. Their `publication.mjs`, like the master's in `tooling/g3-probe/`, fails on an exception since #1439,
+the #1446 port beside it as `publication.mjs.pre-1439`. The `sol-1437` kits still name their review's folders: retarget
+those as their READMEs say.
 
 Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, one README per area):
 
