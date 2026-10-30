@@ -1,0 +1,475 @@
+// #1249's review r1 (Astra): its typed cases and minimal witnesses, as `typed.json` and `minimal.json` hold them, run
+// by `detail.mjs` (R/astra-m4-i1249-review-evidence/).
+export const cases = [
+  [
+    "typed/left/False/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/left/False/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[a,b]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/left/False/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[a,b]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/left/False/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/left/False/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/left/False/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:a,b:b}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/left/False/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/left/False/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=a\nxs=b\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/left/False/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=a\nxs=b\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/left/False/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/left/False/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[b,a]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/left/False/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=[b,a]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/left/False/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/left/False/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/left/False/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=dict{a:b,b:a}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/left/False/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/left/False/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=b\nxs=a\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/left/False/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:"bad"}\nlet xs=b\nxs=a\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/left/True/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/left/True/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[a,b]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[a,b]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/left/True/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/left/True/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:a,b:b}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/left/True/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/left/True/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=a\nxs=b\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=a\nxs=b\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/left/True/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/left/True/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[b,a]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=[b,a]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/left/True/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/left/True/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=dict{a:b,b:a}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/left/True/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/left/True/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=b\nxs=a\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/left/True/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:"bad"}}\nlet xs=b\nxs=a\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/False/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/right/False/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[a,b]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/right/False/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[a,b]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/right/False/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/right/False/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/right/False/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/right/False/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/right/False/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=a\nxs=b\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/right/False/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=a\nxs=b\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/right/False/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/right/False/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[b,a]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/right/False/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=[b,a]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/right/False/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/right/False/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/right/False/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/right/False/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/right/False/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=b\nxs=a\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/right/False/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:1}\nlet b={tone:s}\nlet xs=b\nxs=a\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/right/True/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/right/True/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/True/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/right/True/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/True/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/right/True/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/True/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/right/True/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/True/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/right/True/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/right/True/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/right/True/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/right/True/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:1}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/False/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/both/False/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[a,b]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/both/False/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[a,b]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/both/False/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/both/False/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/both/False/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:a,b:b}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/both/False/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/both/False/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=a\nxs=b\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/both/False/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=a\nxs=b\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/both/False/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/both/False/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[b,a]\nsay xs[0].tone\nexit\n',
+  ],
+  [
+    "typed/both/False/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=[b,a]\nxs[0].tone=1\nexit\n',
+  ],
+  [
+    "typed/both/False/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/both/False/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone\nexit\n',
+  ],
+  [
+    "typed/both/False/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=dict{a:b,b:a}\nxs["a"].tone=1\nexit\n',
+  ],
+  [
+    "typed/both/False/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/both/False/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=b\nxs=a\nsay xs.tone\nexit\n',
+  ],
+  [
+    "typed/both/False/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:n}\nlet b={tone:s}\nlet xs=b\nxs=a\nxs.tone=1\nexit\n',
+  ],
+  [
+    "typed/both/True/False/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nexit\n',
+  ],
+  [
+    "typed/both/True/False/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/False/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[a,b]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/True/False/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nexit\n',
+  ],
+  [
+    "typed/both/True/False/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/False/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:a,b:b}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/True/False/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nexit\n',
+  ],
+  [
+    "typed/both/True/False/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/False/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=a\nxs=b\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/True/True/list/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nexit\n',
+  ],
+  [
+    "typed/both/True/True/list/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nsay xs[0].tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/True/list/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=[b,a]\nxs[0].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/True/True/dict/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nexit\n',
+  ],
+  [
+    "typed/both/True/True/dict/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nsay xs["a"].tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/True/dict/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=dict{a:b,b:a}\nxs["a"].tone.inner=1\nexit\n',
+  ],
+  [
+    "typed/both/True/True/store/none",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nexit\n',
+  ],
+  [
+    "typed/both/True/True/store/read",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nsay xs.tone.inner\nexit\n',
+  ],
+  [
+    "typed/both/True/True/store/write",
+    'let n:integer=1\nlet s:string="bad"\nlet a={tone:{inner:n}}\nlet b={tone:{inner:s}}\nlet xs=b\nxs=a\nxs.tone.inner=1\nexit\n',
+  ],
+  [
+    "list-unread",
+    'let n: integer = 1\nlet a = {n: n}\nlet b = {n: "text"}\nlet xs = [a, b]\nexit\n',
+  ],
+  [
+    "list-read",
+    'let n: integer = 1\nlet a = {n: n}\nlet b = {n: "text"}\nlet xs = [a, b]\nsay xs[0].n\nexit\n',
+  ],
+  [
+    "list-store",
+    'let n: integer = 1\nlet a = {n: n}\nlet b = {n: "text"}\nlet xs = [a, b]\nxs[0].n = 1\nexit\n',
+  ],
+  [
+    "place-unread",
+    'let s: string = "text"\nlet a = {n: 1}\nlet b = {n: s}\nlet copy = a\ncopy = b\nexit\n',
+  ],
+  [
+    "place-read",
+    'let s: string = "text"\nlet a = {n: 1}\nlet b = {n: s}\nlet copy = a\ncopy = b\nsay copy.n\nexit\n',
+  ],
+];
+
+// the globals the recorded run passed
+export const globals = ["hostValue"];
+
+/** The evidence run this generator reproduces, checked by `tests/families/check.mjs`. */
+export const recorded = {
+  commands: [
+    [
+      'node detail.mjs "$review_tree" typed.json out/typed-new.jsonl',
+      "R/astra-m4-i1249-review-evidence/REPRODUCE.md:20, R/astra-m4-i1249-review-evidence/jobs.json#~/queue/done/5-20261028213104479642384-astra1293-typed-head.job:4, R/astra-m4-i1249-review-evidence/jobs.json#~/queue/done/5-20261028213104486077326-astra1293-typed-base.job:4",
+    ],
+    [
+      'node detail.mjs "$review_tree" minimal.json out/minimal-new.jsonl',
+      "R/astra-m4-i1249-review-evidence/REPRODUCE.md:21, R/astra-m4-i1249-review-evidence/jobs.json#~/queue/done/5-20261028213329128514919-astra1293-minimal-head.job:4, R/astra-m4-i1249-review-evidence/jobs.json#~/queue/done/5-20261028213329134925756-astra1293-minimal-base.job:4",
+    ],
+  ],
+  sources: 113,
+  sha256: "8eaf6ca654639b3a820991afa728c493f534ceb528a69cb8cffda4a58fe9fedc",
+};
