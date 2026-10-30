@@ -490,18 +490,22 @@ function enterStores(walk: Consumers, at: HostFrontier): void {
     const value = [expand(walk.admission, d.value!, d.node, [])];
     if (!elements) enterValues(walk, at, value);
     else {
-      // (the list's elements: its own at its element step, and its copies' one step below)
+      // (each element whole: what the list's value holds at its element step, the copies standing there, and the copies
+      // of the lists it copies at their element, so an element enters with its stored descendants)
       const list = frontier(null, undefined, null, null);
       enterValues(walk, list, value);
       const element = stepOwn(walk, list, "element");
       for (const [step, parts] of element.cells) addCells(walk, at, step, parts);
-      for (const task of [...element.copies, ...list.copies]) {
+      for (const task of element.copies) {
         program.work.charge("checks");
-        at.copies.push(
-          element.copies.includes(task)
-            ? task
-            : { value: task.value, strip: keptSteps(program.work, task.strip, ["element"]) },
-        );
+        at.copies.push(task);
+      }
+      for (const task of list.copies) {
+        program.work.charge("checks");
+        at.copies.push({
+          value: task.value,
+          strip: keptSteps(program.work, task.strip, ["element"]),
+        });
       }
       at.host = program.scope.ingress.union(at.host, element.host);
     }
@@ -638,12 +642,14 @@ function copyFrontier(walk: Consumers, task: CopyTask): HostFrontier {
 
 /**
  * Visits the copies standing at a frontier's path, each by its frontier there: its own, then its owner path's one step
- * below, and so on to its place's root, until `visit` answers `false`. Each copy met is charged, with its steps.
+ * below, and so on to its place's root, until `visit` answers `false`. Each level and each copy met is charged, with its
+ * steps.
  */
 function eachCopy(walk: Consumers, at: HostFrontier, visit: (copy: HostFrontier) => boolean): void {
   const { program } = walk.pass;
   const below: string[] = [];
   for (let level: HostFrontier | null = at; level !== null;) {
+    program.work.charge("checks");
     for (const task of level.copies) {
       program.work.charge("checks");
       let copied = copyFrontier(walk, task);
