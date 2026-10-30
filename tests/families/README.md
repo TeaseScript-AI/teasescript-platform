@@ -59,10 +59,11 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`)
-  and other runs' case files (the 3a budget check's), judged by where each input came from: a case file its own review
-  wrote stays, and a program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal
-  to another row. The module's first comment names what its run also read.
+  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`),
+  the programs of its own test files (a review's gate runs of them, whose inputs those tests hold) and other runs' case
+  files (the 3a budget check's), judged by where each input came from: a case file its own review wrote stays, and a
+  program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal to another row. The
+  module's first comment names what its run also read.
 
 ## A property family
 
@@ -172,6 +173,10 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
   `joins/1272-astra-r2-pair-focused`).
 - Three of #1210's review `work.mjs` commands (`astra-m4-i1210-review-evidence/comment-0.md:87`–`88`, `comment-1.md:82`)
   ran an earlier `work.mjs` no archive keeps; `copies/1210-astra-work.mjs` holds the runs of the kept one.
+- #1293's review r3 (`desktop:~/work/evidence/1293/7d6c5fb2f/review-r3/`): its first `matrix.mjs` run used a version
+  of the driver it then overwrote, whose source and arguments no archive keeps; its focused gate's cells run ended out of
+  memory before saving which inputs it reached, and its candidate suite's inputs depend on answers no log keeps. The
+  matrix's second run is `rings/1293-r3-matrix-cases`; the gates' inputs are the repository's tests' own.
 - Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls and publication exceptions
   separately; neither establishes agreement.
 
