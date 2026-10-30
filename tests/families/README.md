@@ -59,9 +59,10 @@ A module reproduces what its run passed to the compiler, at the run's arguments,
   experimental syntax), and with one whose origin meant a parse or name error;
 - without the data a driver read but its review did not write: the repository's type-core fixture
   (`tests/fixtures/type-core/cells.jsonl`, whose sources the recorded fixture runs share unchanged), its exported work
-  families (`tests/helpers/type-core-families.ts`) and other runs' case files (the 3a budget check's), judged by where
-  each input came from: a case file its own review wrote stays, and a program the driver derived from a fixture row
-  (a pasted fix) stays, even one equal to another row. The module's first comment names what its run also read.
+  families (`tests/helpers/type-core-families.ts`), its paste family (`pasteCases` in `tests/helpers/type-core-paste.ts`)
+  and other runs' case files (the 3a budget check's), judged by where each input came from: a case file its own review
+  wrote stays, and a program the driver derived from a fixture row or a paste case (a pasted fix) stays, even one equal
+  to another row. The module's first comment names what its run also read.
 
 ## A property family
 
@@ -122,6 +123,8 @@ Data, indexed here and not imported: run each from its own folder on the desktop
   natural-budget family (`review-family.mjs` over `review-cases.json` and `opaque-cases.json`), every-allowance stops
   (`stops.mjs`), checkpoint restores (`checkpoints.mjs`) and the builder spot check (`spot.mjs`). Head `3f0bcb1bd`,
   base `2960937a1`; `SHA256SUMS` sha256 `a42f4ef4…`. Its family and checkpoints run on `main` `2960937a1`.
+- `desktop:~/work/evidence/1463/retained/`: copies of the generators, case files and records that modules cite from
+  agents' scratch folders on the main LXC (`/tmp/agent-work/...`, under the same paths), with `SHA256SUMS`.
 - `desktop:~/work/evidence/corpus/tooling/`: one master copy of each kit that briefs hand out, the split kit (`split/`,
   with `cycles.cjs`) and the #1423 probe kit (`g3-probe/`, with `queue-final.sh`). Its `README.md` says what each
   master fixes.
@@ -157,6 +160,15 @@ Known problems in the desktop corpus (`desktop:~/work/evidence/corpus/<area>/`, 
   runs cannot be reproduced and no module stands for them: `repro-ring.mjs`, `repro-many-fed.mjs` and
   `r3-product-head.mjs` (the report archive's `astra-m4-i1249-review-r2-evidence/builder/tools/run.sh:4`–`6`), and
   `probe/famsum.mjs` (`astra-m4-i1249-review-evidence/design-r5.md:797`).
+- #1310's first paste family run on `c1` (`1310/4a11b0553…/run/outc1/paste-*`, `tools/c1-check.sh:13`: 6,507 cases,
+  495 forms) ran on an uncommitted state of the paste helper, which no archive keeps, so its forms cannot be pasted
+  again: `messages/1310-paste-family.mjs` holds the PR's thirteen other runs.
+- #1188's case sets `rel-cases` (450 programs), `contain-cases` (36), `dead-cell-cases` (4) and `dead-reach-cases` (80),
+  and the standalone witnesses of #1261's Sol reviews r1 to r5 (308, `sol-m4-i1188-held-nodes-r1-evidence`), reach the
+  corpus only through later runs that read them. Their texts survive (the #1188 sets' copies under `1463/retained/`),
+  but no record names the run that wrote them or the globals it passed, so no module stands for them.
+- Some recorded large inputs exceed the default timeout on unchanged trees. Report stalls and publication exceptions
+  separately; neither establishes agreement.
 
 ## The oracle library's next step
 

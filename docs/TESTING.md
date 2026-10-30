@@ -134,8 +134,7 @@ decisions stop and when. A test that needs another projection adds it there inst
 `tests/families/` holds the generators that reviewers and builders used as evidence, each module the sources of one
 recorded evidence run, with their runner and module contract (`tests/families/README.md`). Their runs are outside CI:
 before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
-counts. CI runs only `npm run test:families`, which checks in under a second that every module still reproduces its
-recorded run.
+counts. CI runs only `npm run test:families`, which checks that every module still reproduces its recorded run.
 
 ## Test layers
 
