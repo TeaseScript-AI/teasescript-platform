@@ -15,6 +15,7 @@ import {
   keyBelowIn,
   keyDepthIn,
   keyParentIn,
+  keyPrefixIn,
   keyStepsIn,
   keyWalk,
   restPart,
@@ -127,11 +128,17 @@ function* contractOfMade(contract: Contract, key: Key): Work<readonly Item[]> {
 
 /** `keyThrough` at the step `at`, the first of the key's path from its `from` on that a built-in value answers. */
 export function* keyListsAt(contract: Contract, key: Key, at: number): Work<readonly Item[]> {
-  const walk = keyWalk(contract, key);
-  const receiver = yield* contract.receiverKinds(walk.prefix(at));
+  // (one prefix, found once per length, and the key read again as it is: a member chain reads each key at each of its
+  // steps, so neither its prefixes are climbed nor the key rebuilt per step)
+  const prefix = keyPrefixIn(contract, key, at);
+  const receiver = yield* contract.receiverKinds(prefix);
   if (heldReference(receiver)) return yield* keyContract(contract, key);
-  return yield* members(contract, walk.path, at, receiver, (along, start) =>
-    contract.keyThrough(keyBelowIn(contract, walk.prefix(at), along.slice(at)), start),
+  const path = keyStepsIn(contract, key);
+  return yield* members(contract, path, at, receiver, (along, start) =>
+    contract.keyThrough(
+      along === path ? key : keyBelowIn(contract, prefix, along.slice(at)),
+      start,
+    ),
   );
 }
 

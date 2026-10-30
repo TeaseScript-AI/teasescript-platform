@@ -274,6 +274,8 @@ export class Contract {
   /** Per demand name holding a cursor, the logical name it orders as (`compareDemandNames`). */
   readonly logicalNames = new Map<string, string>();
   readonly prefixIds = new Map<number, Map<number, number>>();
+  /** Per offset, each member step's path's first member step below that offset (`memberStepIn`). */
+  readonly firstMembers = new Map<number, Map<number, number>>();
   readonly joinedIds = new Map<number, Map<number, number>>();
   /** What the key cursors' conversions made, by place and path (`keyOfId`), and by path (`stepsOfId`). */
   readonly keyTexts = new Map<PlaceId, Map<number, Key>>();

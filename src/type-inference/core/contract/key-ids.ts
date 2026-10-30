@@ -191,6 +191,19 @@ function parentWith(contract: Contract, asked: Key, kept: boolean): CanonicalKey
     : parent;
 }
 
+/**
+ * A key's prefix of `length` steps in its identity, for a question that reads one prefix: a cursor's ancestor of that
+ * depth found once per length and kept (`prefixId`), never its whole path climbed per question; a place's own key its
+ * text; a text's as the legacy sites made it.
+ */
+export function keyPrefixIn(contract: Contract, asked: Key, length: number): CanonicalKey {
+  const key = canonicalKey(contract, asked);
+  const place = keyPlace(key);
+  if (length === 0) return canonicalText(keyOf(place, []));
+  if (!isKeyId(key)) return canonicalText(keyOf(place, keyPath(key).slice(0, length)));
+  return keyIdAt(place, prefixId(contract, keyIdPath(key), length));
+}
+
 /** A key's number of steps, made nothing: a cursor's the arena's, a text's counted (`keyDepth`). */
 export function keyDepthIn(contract: Contract, key: Key): number {
   return isKeyId(key) ? keyIdDepth(contract, key) : keyDepth(key);
@@ -629,19 +642,28 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): readonly str
 
 /**
  * The first step of a cursor's path from its step `from` on that a built-in value answers by itself (`memberStep`), by
- * its index in the path, or -1: from the nearest such step at or above the cursor (`pathMembers`), climbing only the
- * member steps below `from`, each charged.
+ * its index in the path, or -1: none where the nearest such step at or above the cursor (`pathMembers`) is not below
+ * `from`; else the shallowest one below `from`, found by climbing only the member steps not yet known for that offset,
+ * each charged and kept (`firstMembers`): so a member chain asked at every offset costs each member step once per
+ * offset, never once per question.
  */
 export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
-  let found = -1;
+  const { pathDepths: depths, pathParents: parents, pathMembers: members } = contract;
   convert(contract, 1, 0, 0);
-  for (
-    let at = contract.pathMembers[keyIdPath(id)]!;
-    at !== 0 && contract.pathDepths[at]! > from;
-    at = contract.pathMembers[contract.pathParents[at]!]!
-  ) {
-    convert(contract, 1, 0, 0);
-    found = contract.pathDepths[at]! - 1;
+  const nearest = members[keyIdPath(id)]!;
+  if (nearest === 0 || depths[nearest]! <= from) return -1;
+  let byMember = contract.firstMembers.get(from);
+  if (byMember === undefined) contract.firstMembers.set(from, (byMember = new Map()));
+  const way: number[] = [];
+  let at = nearest;
+  for (; at !== 0 && depths[at]! > from && !byMember.has(at); at = members[parents[at]!]!)
+    way.push(at);
+  let found = at !== 0 && depths[at]! > from ? byMember.get(at)! : -1;
+  convert(contract, way.length, 0, way.length);
+  // (down from the shallowest member climbed: the first below `from` is each deeper one's too)
+  for (let index = way.length - 1; index >= 0; index -= 1) {
+    if (found < 0) found = depths[way[index]!]! - 1;
+    byMember.set(way[index]!, found);
   }
   return found;
 }

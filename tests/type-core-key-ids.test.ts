@@ -29,6 +29,7 @@ import {
   keyIdPlace,
   keyIdStep,
   keyOfId,
+  keyPrefixIn,
   memberStepIn,
   restSteps,
   rootId,
@@ -509,6 +510,34 @@ test("a wrapper's own literal asked by an array converts it to its span once: as
   assert.equal(again.result, first.result);
 });
 
+test("a member chain's key asked again at an offset charges its one unit: its first member step below the offset and its prefix of a length are each climbed once, a deeper key's only below the known (a member chain reads each key at each of its steps)", () => {
+  const { contract } = narrowingPass(request("let x = 1\nexit\n"));
+  const id = keyIdOf(
+    contract,
+    5,
+    Array.from({ length: 16 }, () => "year"),
+  );
+  const deeper = keyIdBelow(contract, id, "year");
+  const asks = [
+    ["memberStepIn", (key: KeyId) => memberStepIn(contract, key, 3), 3],
+    [
+      "keyPrefixIn",
+      (key: KeyId) => keyPrefixIn(contract, key, 3),
+      keyIdOf(contract, 5, ["year", "year", "year"]),
+    ],
+  ] as const;
+  for (const [name, ask, answer] of asks) {
+    const first = probeMade(contract, () => ask(id));
+    const again = probeMade(contract, () => ask(id));
+    const below = probeMade(contract, () => ask(deeper));
+    assert.equal(first.result, answer, name);
+    assert.equal(again.result, answer, name);
+    assert.equal(below.result, answer, name);
+    assert.equal(again.work.charged, 1, name);
+    assert.ok(below.work.charged < first.work.charged / 4, name);
+  }
+});
+
 test("a wrapper's read inside a callable takes the route its text lane takes: the routes a read records are read back in its key's identity", () => {
   const source = request(
     "let seed: integer = 1\nlet root = {f: seed}\nlet a0 = {q: root}\nfunction small {\n  return a0.q.f\n}\nlet out = small()\nexit\n",
@@ -862,8 +891,8 @@ const MADE_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     "the cursor's type and text (two numbers); two error messages; a span's name (a path's id after a dot); a replayed name's cursor and span tokens (numbers, `exportNames`)",
   ],
   "key-ids.ts slice": [
-    15,
-    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`arrayRef`, three); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
+    16,
+    "a cursor's place and path; a key text's step to look up and its place, its scan charged (`keyIdOfText`); a kept path's span, kept (`keptArray`); a text key's parent and prefixes as the legacy sites made them (`keyParentIn`, `keyWalk`, `keyPrefixIn`); a text key's first step and place, to ask its lane (`canonicalKey`, one step); an array's views as the legacy sites made them (`arrayRef`, three); a demand name's span and cursor tokens read back as numbers (`compareDemandNames`, `exportNames`, `importNames`)",
   ],
   "key-ids.ts concatenation": [
     3,
