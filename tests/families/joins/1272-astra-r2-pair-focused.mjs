@@ -1,5 +1,5 @@
-// #1272's review r2 (Astra): the focused pairs `pair.mjs` ran (R/astra-m4-i1272-review-r2/focused/*.tease). The
-// spot copies and probe files it read unchanged are earlier runs'.
+// #1272's review r2 (Astra): the focused pairs its `focused.sh` ran through `pair.mjs`
+// (R/astra-m4-i1272-review-r2/focused/*.tease). Its runs over its builder's probe files are in no archive (README).
 export const cases = [
   [
     "inferred-call-left-fit-left-inline.tease",
@@ -48,70 +48,6 @@ export const recorded = {
     [
       'node pair.mjs "$tree" focused/*.tease > "focused-$tree.txt" || exit $?',
       "R/astra-m4-i1272-review-r2/focused.sh:4",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r3-misc" --dir $W/r3 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r3 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r3 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/2eba4965c443bbf3a4b945560fd315d7cf736ae4/tools/queue-r3.sh:28",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r2-misc" --dir $W/head -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/head \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; cd $W && for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/head > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/2eba4965c443bbf3a4b945560fd315d7cf736ae4/tools/queue.sh:25",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r3-misc" --dir $W/r3 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r3 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r3 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r3.sh:28",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r4-misc" --dir $W/r4 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r4 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r4 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r4.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r5-misc" --dir $W/r5 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r5 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r5 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r5.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r6-misc" --dir $W/r6 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r6 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r6 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r6.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r7-misc" --dir $W/r7 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r7 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r7 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r7.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r9-misc" --dir $W/r9 -- bash -c "export PATH=/home/peter/opt/node-24.18/bin:\\$PATH; cd $W/probe && timeout 30m node $T/pair.mjs $W/r9 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r9 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue-r9.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r2-misc" --dir $W/head -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/head \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; cd $W && for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/head > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/9a9b4382435f5eec49fd995ce5b171b7c2c012d8/tools/queue.sh:25",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r3-misc" --dir $W/r3 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r3 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r3 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r3.sh:28",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r4-misc" --dir $W/r4 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r4 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r4 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r4.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r5-misc" --dir $W/r5 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r5 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r5 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r5.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r6-misc" --dir $W/r6 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r6 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r6 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r6.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r7-misc" --dir $W/r7 -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/r7 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r7 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r7.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r9-misc" --dir $W/r9 -- bash -c "export PATH=/home/peter/opt/node-24.18/bin:\\$PATH; cd $W/probe && timeout 30m node $T/pair.mjs $W/r9 \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/r9 > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue-r9.sh:27",
-    ],
-    [
-      'SX_HEAVY_MEM=4G sx-queue add --name "i1272r2-misc" --dir $W/head -- bash -c "cd $W/probe && timeout 30m node $T/pair.mjs $W/head \\$(cat $W/probe-paths.txt) > $O/probes.txt 2> $O/probes.err; cd $W && for t in paste extended2 call-union; do (cd $O && timeout 30m node $T/\\$t.mjs $W/head > $O/\\$t.out 2> $O/\\$t.err); done; echo done >> $O/probes.err"',
-      "desktop:~/work/evidence/1310/64105f339108dec9005bad103b2f942e5bcadeb2/tools/queue.sh:25",
     ],
   ],
   sources: 12,
